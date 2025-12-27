@@ -16,17 +16,50 @@ class HardwareDetector:
 
     # Known LoRa module USB vendor/product IDs
     KNOWN_USB_MODULES = {
-        '1a86:7523': 'CH340 USB-Serial (Common LoRa module)',
-        '10c4:ea60': 'CP2102 USB-Serial (Silicon Labs)',
-        '0403:6001': 'FT232 USB-Serial (FTDI)',
+        '1a86:7523': {
+            'name': 'CH340/CH341 USB-Serial',
+            'common_devices': ['MeshToad', 'MeshTadpole', 'Generic CH340 LoRa'],
+            'meshtastic_compatible': True,
+            'power_requirement': '900mA (peak)',
+            'notes': 'Common in MtnMesh devices'
+        },
+        '1a86:55d4': {
+            'name': 'CH341 USB-Serial (alternate)',
+            'common_devices': ['MeshToad v2'],
+            'meshtastic_compatible': True,
+            'power_requirement': '900mA (peak)',
+            'notes': 'MeshToad variant'
+        },
+        '10c4:ea60': {
+            'name': 'CP2102 USB-Serial',
+            'common_devices': ['Various LoRa modules'],
+            'meshtastic_compatible': True,
+            'power_requirement': 'Standard USB',
+            'notes': 'Silicon Labs chipset'
+        },
+        '0403:6001': {
+            'name': 'FT232 USB-Serial',
+            'common_devices': ['FTDI-based LoRa modules'],
+            'meshtastic_compatible': True,
+            'power_requirement': 'Standard USB',
+            'notes': 'FTDI chipset'
+        },
+        '1209:0000': {
+            'name': 'MeshStick',
+            'common_devices': ['MeshStick'],
+            'meshtastic_compatible': True,
+            'power_requirement': 'Standard USB',
+            'notes': 'Official Meshtastic USB device'
+        }
     }
 
     # Known SPI LoRa HATs
     KNOWN_SPI_HATS = [
-        'MeshAdv-Pi',
+        'MeshAdv-Pi v1.1',
         'Adafruit RFM9x',
         'Elecrow LoRa RFM95',
         'Waveshare SX126X',
+        'PiTx LoRa',
     ]
 
     def __init__(self):
@@ -52,14 +85,27 @@ class HardwareDetector:
             usb_devices = []
 
             for line in result['stdout'].split('\n'):
-                for vendor_product, description in self.KNOWN_USB_MODULES.items():
+                for vendor_product, device_info in self.KNOWN_USB_MODULES.items():
                     vendor, product = vendor_product.split(':')
                     if vendor.lower() in line.lower() and product.lower() in line.lower():
-                        usb_devices.append({
+                        # Detected a known device
+                        device_entry = {
                             'type': 'USB LoRa Module',
-                            'description': description,
-                            'device': line.strip()
-                        })
+                            'chipset': device_info['name'],
+                            'possible_devices': ', '.join(device_info['common_devices']),
+                            'meshtastic_compatible': device_info['meshtastic_compatible'],
+                            'power_requirement': device_info['power_requirement'],
+                            'notes': device_info['notes'],
+                            'usb_id': vendor_product,
+                            'raw': line.strip()
+                        }
+
+                        # Check if it's likely a MeshToad
+                        if '1a86:7523' in vendor_product or '1a86:55d4' in vendor_product:
+                            device_entry['likely_meshtoad'] = True
+                            device_entry['recommended_config'] = 'MediumFast preset recommended for MtnMesh compatibility'
+
+                        usb_devices.append(device_entry)
 
             if usb_devices:
                 self.detected_hardware['usb_modules'] = usb_devices

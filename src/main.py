@@ -138,6 +138,93 @@ def configure_device():
     """Configure meshtastic device"""
     console.print("\n[bold cyan]Device Configuration[/bold cyan]\n")
 
+    while True:
+        console.print("\n[cyan]Configuration Options:[/cyan]")
+        console.print("1. Complete Radio Setup (Modem Preset + Channel Slot)")
+        console.print("2. LoRa Settings (Region, Preset)")
+        console.print("3. Channel Configuration")
+        console.print("4. Module Configuration (MQTT, Serial, etc.)")
+        console.print("5. Device Settings (Name, WiFi, etc.)")
+        console.print("6. Hardware Detection")
+        console.print("7. Back to Main Menu")
+
+        choice = Prompt.ask("\nSelect configuration option", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
+
+        if choice == "1":
+            configure_radio_complete()
+        elif choice == "2":
+            configure_lora()
+        elif choice == "3":
+            configure_channels()
+        elif choice == "4":
+            configure_modules()
+        elif choice == "5":
+            configure_device_settings()
+        elif choice == "6":
+            detect_hardware()
+        elif choice == "7":
+            break
+
+
+def configure_radio_complete():
+    """Complete radio configuration with modem preset and channel slot"""
+    console.print("\n[bold cyan]Complete Radio Configuration[/bold cyan]\n")
+
+    from config.radio import RadioConfigurator
+
+    radio_config = RadioConfigurator()
+    config = radio_config.configure_radio_settings()
+
+    # Ask to save
+    if Confirm.ask("\nSave configuration to /etc/meshtasticd/config.yaml?", default=True):
+        radio_config.save_configuration_yaml(config)
+
+    console.print("\n[green]Radio configuration complete![/green]")
+
+
+def configure_lora():
+    """Configure LoRa settings"""
+    console.print("\n[bold cyan]LoRa Configuration[/bold cyan]\n")
+
+    from config.lora import LoRaConfigurator
+
+    lora_config = LoRaConfigurator()
+
+    # Region
+    region = lora_config.configure_region()
+
+    # Modem preset
+    if Confirm.ask("\nConfigure modem preset?", default=True):
+        preset_config = lora_config.configure_modem_preset()
+        console.print("\n[green]LoRa settings configured![/green]")
+
+
+def configure_channels():
+    """Configure channels"""
+    console.print("\n[bold cyan]Channel Configuration[/bold cyan]\n")
+
+    from config.lora import LoRaConfigurator
+
+    lora_config = LoRaConfigurator()
+    channels = lora_config.configure_channels()
+
+    console.print("\n[green]Channels configured![/green]")
+
+
+def configure_modules():
+    """Configure Meshtastic modules"""
+    console.print("\n[bold cyan]Module Configuration[/bold cyan]\n")
+
+    from config.modules import ModuleConfigurator
+
+    module_config = ModuleConfigurator()
+    config = module_config.interactive_module_config()
+
+    console.print("\n[green]Module configuration complete![/green]")
+
+
+def configure_device_settings():
+    """Configure device settings"""
     configurator = DeviceConfigurator()
     configurator.interactive_configure()
 
