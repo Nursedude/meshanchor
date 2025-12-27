@@ -1,0 +1,13 @@
+# Core dependencies
+meshtastic>=2.5.0
+click>=8.0.0
+rich>=13.0.0
+pyyaml>=6.0
+requests>=2.31.0
+
+# System utilities
+psutil>=5.9.0
+distro>=1.8.0
+
+# Configuration
+python-dotenv>=1.0.0
