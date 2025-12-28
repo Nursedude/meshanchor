@@ -72,7 +72,7 @@ Choose your preferred installation method:
 
 ### 🚀 Quick Install (Recommended)
 
-**One-liner installation** - Downloads and installs everything automatically:
+**One-liner installation** - Downloads, installs, and launches the interactive installer automatically:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo bash
@@ -80,17 +80,26 @@ curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU
 
 This will:
 - Update package lists (`apt-get update`)
+- Prompt for optional system upgrade (you can respond with y/n)
 - Install all required dependencies
 - Clone the repository to `/opt/meshtasticd-installer`
 - Install Python dependencies
 - Create the `meshtasticd-installer` command
+- **Automatically launch the interactive installer**
 
-**To include system upgrade (recommended for fresh installs):**
+**Installation Options:**
+
+Skip the interactive prompts and automatically upgrade system packages:
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
 ```
 
-After installation, run:
+Skip the system upgrade entirely (faster installation):
+```bash
+curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo SKIP_UPGRADE=yes bash
+```
+
+**To run the installer later manually:**
 ```bash
 sudo meshtasticd-installer
 ```

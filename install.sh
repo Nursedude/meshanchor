@@ -1,7 +1,22 @@
 #!/bin/bash
 #
-# Meshtasticd Interactive Installer - CLI Quick Install
-# One-liner: curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo bash
+# Meshtasticd Interactive Installer - One-Liner Quick Install
+#
+# Downloads, installs, and launches the interactive installer automatically.
+#
+# Usage:
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo bash
+#
+# Options:
+#   UPGRADE_SYSTEM=yes  - Automatically upgrade all system packages
+#   SKIP_UPGRADE=yes    - Skip the system upgrade prompt entirely
+#
+# Examples:
+#   # Install with system upgrade
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
+#
+#   # Install without upgrade prompt
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_IU/main/install.sh | sudo SKIP_UPGRADE=yes bash
 #
 
 set -e
@@ -46,24 +61,28 @@ echo -e "${GREEN}  ✓ Package lists updated${NC}"
 
 # Optional: Upgrade system packages
 # Check if running interactively or if UPGRADE_SYSTEM is set
-if [[ -t 0 ]] && [[ -z "${SKIP_UPGRADE}" ]]; then
-    echo -e "${CYAN}[3/6] System upgrade (optional)...${NC}"
-    echo -e "${YELLOW}  This will upgrade all system packages and may take several minutes.${NC}"
-    read -p "  Would you like to upgrade system packages now? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        apt-get upgrade -y
-        echo -e "${GREEN}  ✓ System upgraded${NC}"
-    else
-        echo -e "${YELLOW}  ⊘ System upgrade skipped${NC}"
-    fi
-elif [[ "${UPGRADE_SYSTEM}" == "yes" ]]; then
-    echo -e "${CYAN}[3/6] Upgrading system packages...${NC}"
+echo -e "${CYAN}[3/6] System upgrade (optional)...${NC}"
+if [[ "${UPGRADE_SYSTEM}" == "yes" ]]; then
+    echo -e "${YELLOW}  Upgrading all system packages (this may take several minutes)...${NC}"
     apt-get upgrade -y
     echo -e "${GREEN}  ✓ System upgraded${NC}"
+elif [[ "${SKIP_UPGRADE}" == "yes" ]]; then
+    echo -e "${YELLOW}  ⊘ Skipped (SKIP_UPGRADE=yes)${NC}"
 else
-    echo -e "${CYAN}[3/6] System upgrade...${NC}"
-    echo -e "${YELLOW}  ⊘ Skipped (set UPGRADE_SYSTEM=yes to enable)${NC}"
+    # Try to read from TTY if available for interactive prompt
+    if [[ -c /dev/tty ]]; then
+        echo -e "${YELLOW}  This will upgrade all system packages and may take several minutes.${NC}"
+        read -p "  Would you like to upgrade system packages now? [y/N] " -n 1 -r < /dev/tty
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            apt-get upgrade -y
+            echo -e "${GREEN}  ✓ System upgraded${NC}"
+        else
+            echo -e "${YELLOW}  ⊘ System upgrade skipped${NC}"
+        fi
+    else
+        echo -e "${YELLOW}  ⊘ Skipped (non-interactive mode - use UPGRADE_SYSTEM=yes to enable)${NC}"
+    fi
 fi
 
 # Install system dependencies
@@ -114,8 +133,20 @@ echo "  1. Run interactively:  ${GREEN}sudo meshtasticd-installer${NC}"
 echo "  2. Install meshtasticd: ${GREEN}sudo meshtasticd-installer --install stable${NC}"
 echo "  3. Configure device:    ${GREEN}sudo meshtasticd-installer --configure${NC}"
 echo ""
-echo -e "${CYAN}Would you like to start the installer now? [Y/n]${NC}"
-read -r response
-if [[ "$response" =~ ^([yY][eE][sS]|[yY]|"")$ ]]; then
-    exec /usr/local/bin/meshtasticd-installer
+echo -e "${CYAN}Would you like to start the interactive installer now? [Y/n]${NC}"
+
+# Try to read from TTY if available for interactive prompt
+if [[ -c /dev/tty ]]; then
+    read -r response < /dev/tty
+    if [[ "$response" =~ ^([nN][oO]|[nN])$ ]]; then
+        echo ""
+        echo -e "${YELLOW}Installation complete. Run 'sudo meshtasticd-installer' when ready.${NC}"
+        exit 0
+    fi
 fi
+
+# Launch installer (default action)
+echo ""
+echo -e "${GREEN}Starting interactive installer...${NC}"
+echo ""
+exec /usr/local/bin/meshtasticd-installer
