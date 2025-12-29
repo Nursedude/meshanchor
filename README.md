@@ -2,6 +2,16 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS.
 
+**Version 2.0.0** | [Changelog](#version-history)
+
+## What's New in v2.0.0
+
+- **Quick Status Dashboard** - Real-time monitoring of service, system health, and network status
+- **Interactive Channel Presets** - Pre-configured channel setups for common use cases
+- **Automatic Update Notifications** - Get notified when new versions are available
+- **Configuration Templates** - Ready-to-use templates for Emergency/SAR, Urban, MtnMesh, and Repeater setups
+- **Version Control** - Track installer version history and changes
+
 ## Features
 
 ### Installation & Management
@@ -10,6 +20,37 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 - **OS Detection**: Automatic detection of 32-bit/64-bit Raspberry Pi OS
 - **Dependency Management**: Automatically fix deprecated dependencies
 - **Error Handling**: Comprehensive debugging and troubleshooting tools
+- **Automatic Update Notifications**: Get notified when updates are available
+
+### Quick Status Dashboard
+Real-time monitoring at a glance:
+- **Service Status**: Running/stopped state with uptime information
+- **System Health**: CPU temperature, memory usage, disk space
+- **Network Status**: IP address, internet connectivity
+- **Configuration Status**: Active config file and template
+- **Quick Actions**: Refresh, view logs, restart service, check updates
+
+### Channel Presets (New in v2.0)
+Pre-configured channel setups for common use cases:
+- **Default Meshtastic** - Standard LongFast configuration
+- **MtnMesh Community** - MediumFast with slot 20
+- **Emergency/SAR** - Maximum range for emergency operations
+- **Urban High-Density** - ShortFast for city networks
+- **Private Group** - Custom encrypted channels
+- **Multi-Channel** - Multiple channels for organizations
+- **Long Range** - Maximum distance configuration
+- **Repeater/Router** - Infrastructure node setup
+
+### Configuration Templates
+Ready-to-use hardware and use-case templates:
+- MeshAdv-Mini (SX1262/SX1268 HAT)
+- MeshAdv-Mini 400MHz variant
+- Waveshare SX1262
+- Adafruit RFM9x
+- **MtnMesh Community** (New)
+- **Emergency/SAR** (New)
+- **Urban High-Speed** (New)
+- **Repeater Node** (New)
 
 ### Hardware Support
 - **Hardware Detection**: Auto-detect USB and SPI LoRa modules
@@ -18,7 +59,7 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 
 ### Radio Configuration
 - **Modem Presets**: All official Meshtastic presets
-  - **MediumFast** ⭐ (MtnMesh community standard, Oct 2025)
+  - **MediumFast** (MtnMesh community standard, Oct 2025)
   - LongFast (Default Meshtastic)
   - ShortFast, MediumSlow, LongModerate, etc.
 - **Channel Slot Configuration**: Interactive slot selection (e.g., slot 20 for LongFast)
@@ -52,7 +93,7 @@ Interactive configuration for all Meshtastic modules:
 - Raspberry Pi Zero 2W, 3, 4, Pi 400, Pi 5
 
 ### USB LoRa Modules
-- **MeshToad** (CH341, 1W, 900mA peak) ⭐ MtnMesh device
+- **MeshToad** (CH341, 1W, 900mA peak) - MtnMesh device
 - **MeshTadpole** (CH341 variant)
 - **MeshStick** (Official Meshtastic device)
 - CH340/CH341-based modules
@@ -71,7 +112,7 @@ Interactive configuration for all Meshtastic modules:
 
 Choose your preferred installation method:
 
-### 🚀 Quick Install (Recommended)
+### Quick Install (Recommended)
 
 **One-liner installation** - Downloads, installs, and launches the interactive installer automatically:
 
@@ -107,7 +148,7 @@ sudo meshtasticd-installer
 
 ---
 
-### 🌐 Web-Based Installer
+### Web-Based Installer
 
 **Perfect for beginners** - Install through your browser:
 
@@ -130,7 +171,7 @@ The web interface provides:
 
 ---
 
-### 🐳 Docker Installation
+### Docker Installation
 
 **For containerized deployments**:
 
@@ -154,7 +195,7 @@ docker run -d -p 8080:8080 --privileged -v /dev:/dev meshtasticd-installer web
 
 ---
 
-### 📦 Manual Installation
+### Manual Installation
 
 **For advanced users who want full control**:
 
@@ -195,11 +236,72 @@ sudo python3 src/main.py --update
 # Configure device
 sudo python3 src/main.py --configure
 
+# Show status dashboard
+sudo python3 src/main.py --dashboard
+
+# Show version information
+sudo python3 src/main.py --version
+
 # Check system and dependencies
 sudo python3 src/main.py --check
 
 # Debug mode
 sudo python3 src/main.py --debug
+```
+
+## Main Menu Overview
+
+```
+Main Menu:
+1. Quick Status Dashboard     <- NEW: Real-time system monitoring
+2. Install meshtasticd
+3. Update meshtasticd
+4. Configure device
+5. Channel Presets            <- NEW: Pre-configured channel setups
+6. Configuration Templates    <- NEW: Ready-to-use config files
+7. Check dependencies
+8. Hardware detection
+9. Debug & troubleshooting
+0. Exit
+```
+
+## Quick Start Examples
+
+### View Status Dashboard
+```bash
+sudo python3 src/main.py
+# Select option 1 (Quick Status Dashboard)
+```
+
+### Apply Channel Preset
+```bash
+sudo python3 src/main.py
+# Select option 5 (Channel Presets)
+# Choose a preset (e.g., MtnMesh Community)
+```
+
+### Apply Configuration Template
+```bash
+sudo python3 src/main.py
+# Select option 6 (Configuration Templates)
+# Choose a template (e.g., Emergency/SAR)
+```
+
+### Complete Radio Setup (Recommended)
+```bash
+sudo python3 src/main.py
+# Select option 4 (Configure device)
+# Select option 1 (Complete Radio Setup)
+# Choose MediumFast preset
+# Use slot 20 for compatibility with MtnMesh community
+```
+
+### Configure MQTT Bridge
+```bash
+sudo python3 src/main.py
+# Select option 4 (Configure device)
+# Select option 5 (Module Configuration)
+# Select option 1 (MQTT Module)
 ```
 
 ## Requirements
@@ -213,31 +315,76 @@ sudo python3 src/main.py --debug
 ```
 Meshtasticd_interactive_IU/
 ├── src/
-│   ├── main.py                 # Main entry point
+│   ├── main.py                    # Main entry point
+│   ├── __version__.py             # Version control (NEW)
+│   ├── dashboard.py               # Quick Status Dashboard (NEW)
 │   ├── installer/
 │   │   ├── __init__.py
-│   │   ├── meshtasticd.py     # Meshtasticd installation logic
-│   │   ├── dependencies.py     # Dependency management
-│   │   └── version.py          # Version management
+│   │   ├── meshtasticd.py        # Meshtasticd installation logic
+│   │   ├── dependencies.py        # Dependency management
+│   │   ├── version.py             # Version management
+│   │   └── update_notifier.py     # Update notifications (NEW)
 │   ├── config/
 │   │   ├── __init__.py
-│   │   ├── lora.py            # LoRa configuration
-│   │   ├── device.py          # Device configuration
-│   │   └── hardware.py        # Hardware detection
+│   │   ├── lora.py               # LoRa configuration
+│   │   ├── radio.py              # Radio configuration
+│   │   ├── device.py             # Device configuration
+│   │   ├── hardware.py           # Hardware detection
+│   │   ├── modules.py            # Module configuration
+│   │   ├── spi_hats.py           # SPI HAT configuration
+│   │   └── channel_presets.py    # Channel presets (NEW)
 │   └── utils/
 │       ├── __init__.py
-│       ├── system.py          # System utilities
-│       ├── logger.py          # Logging and debugging
-│       └── cli.py             # CLI interface
+│       ├── system.py             # System utilities
+│       ├── logger.py             # Logging and debugging
+│       └── cli.py                # CLI interface
+├── templates/
+│   ├── config.yaml               # Main config template
+│   └── available.d/
+│       ├── meshadv-mini.yaml     # MeshAdv-Mini template
+│       ├── meshadv-mini-400mhz.yaml
+│       ├── waveshare-sx1262.yaml
+│       ├── adafruit-rfm9x.yaml
+│       ├── mtnmesh-community.yaml # MtnMesh template (NEW)
+│       ├── emergency-sar.yaml     # Emergency/SAR template (NEW)
+│       ├── urban-highspeed.yaml   # Urban template (NEW)
+│       └── repeater-node.yaml     # Repeater template (NEW)
 ├── scripts/
-│   ├── install_armhf.sh       # 32-bit installation script
-│   ├── install_arm64.sh       # 64-bit installation script
-│   └── setup_permissions.sh   # GPIO/SPI permissions setup
+│   ├── install_armhf.sh          # 32-bit installation script
+│   ├── install_arm64.sh          # 64-bit installation script
+│   └── setup_permissions.sh      # GPIO/SPI permissions setup
 ├── tests/
 ├── docs/
 ├── requirements.txt
 └── README.md
 ```
+
+## Version History
+
+### v2.0.0 (2025-12-29)
+- Added Quick Status Dashboard
+- Added Interactive Channel Configuration with presets
+- Added Automatic Update Notifications
+- Added Configuration Templates for common setups
+- Improved UI with better navigation and help
+- Added version control system
+- New templates: Emergency/SAR, Urban, MtnMesh, Repeater
+
+### v1.2.0 (2025-12-15)
+- Added device configuration support
+- Added SPI HAT configuration (MeshAdv-Mini)
+- Improved hardware detection
+
+### v1.1.0 (2025-12-01)
+- Added modem preset configuration
+- Added channel slot configuration
+- Added module configuration
+
+### v1.0.0 (2025-11-15)
+- Initial release
+- Basic installation support
+- LoRa configuration
+- Hardware detection
 
 ## License
 
@@ -264,27 +411,3 @@ Contributions welcome! Please open an issue or PR.
 
 ### Other Tools
 - [Meshtasticd Configuration Tool](https://github.com/chrismyers2000/Meshtasticd-Configuration-Tool) by Chris Myers
-
-## Quick Start Examples
-
-### Complete Radio Setup (Recommended)
-```bash
-sudo python3 src/main.py
-# Select option 3 (Configure device)
-# Select option 1 (Complete Radio Setup)
-# Choose MediumFast preset
-# Use slot 20 for compatibility with MtnMesh community
-```
-
-### Install with Beta Version
-```bash
-sudo python3 src/main.py --install beta
-```
-
-### Configure MQTT Bridge
-```bash
-sudo python3 src/main.py
-# Select option 3 (Configure device)
-# Select option 4 (Module Configuration)
-# Select option 1 (MQTT Module)
-```

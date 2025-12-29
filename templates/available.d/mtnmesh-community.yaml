@@ -1,0 +1,45 @@
+# MtnMesh Community Configuration Template
+# MtnMesh community standard settings (October 2025)
+# https://github.com/Nursedude/Meshtasticd_interactive_IU
+#
+# Use case: Mountain mesh networks, rural deployments, community networks
+# Features: Balanced range and speed, slot 20 standard
+
+Lora:
+  # GPIO Configuration (adjust for your hardware)
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+
+  # SX126x specific options
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+  # Radio Parameters - Medium Fast preset (MtnMesh standard)
+  # Bandwidth: 250 kHz
+  Bandwidth: 250
+
+  # Spreading Factor: 10
+  SpreadFactor: 10
+
+  # Coding Rate: 4/8
+  CodingRate: 8
+
+  # Standard transmit power
+  TXpower: 22
+
+  # Standard hop limit
+  HopLimit: 3
+
+  # MtnMesh uses slot 20
+  ChannelNum: 20
+
+Webserver:
+  Port: 443
+
+# MtnMesh channel configuration
+Channels:
+  - name: "MtnMesh"
+    psk: "AQ=="
+    role: "PRIMARY"

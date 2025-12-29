@@ -1,0 +1,62 @@
+# Emergency / Search and Rescue Configuration Template
+# Optimized for maximum range in emergency situations
+# https://github.com/Nursedude/Meshtasticd_interactive_IU
+#
+# Use case: SAR operations, emergency communications, disaster response
+# Features: Maximum range, extended hop limit, high power
+
+Lora:
+  # GPIO Configuration (adjust for your hardware)
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+
+  # SX126x specific options
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+  # Radio Parameters - Long Slow preset for maximum range
+  # Bandwidth: 125 kHz (narrower = longer range)
+  Bandwidth: 125
+
+  # Spreading Factor: 12 (maximum = longest range but slowest)
+  SpreadFactor: 12
+
+  # Coding Rate: 4/8 (maximum error correction)
+  CodingRate: 8
+
+  # Maximum transmit power for emergency situations
+  TXpower: 30
+
+  # Extended hop limit for wide-area coverage
+  HopLimit: 7
+
+  # Use default channel slot
+  ChannelNum: 0
+
+# GPS - Essential for SAR operations
+GPS:
+  SerialPath: /dev/ttyS0
+  GPSEnableGpio: 4
+
+# Optional I2C for temperature/environment sensors
+I2C:
+  I2CDevice: /dev/i2c-1
+
+Webserver:
+  Port: 443
+
+# Logging enabled for operation records
+Logging:
+  LogLevel: info
+  LogFile: /var/log/meshtasticd.log
+
+# Channels for SAR operations
+Channels:
+  - name: "Emergency"
+    psk: "AQ=="
+    role: "PRIMARY"
+  - name: "SAR-Ops"
+    psk: "AQ=="
+    role: "SECONDARY"

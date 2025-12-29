@@ -2,6 +2,14 @@
 """
 Meshtasticd Interactive Installer & Manager
 Main entry point for the application
+
+Version: 2.0.0
+Features:
+- Quick Status Dashboard
+- Interactive Channel Configuration with Presets
+- Automatic Update Notifications
+- Configuration Templates for Common Setups
+- Version Control
 """
 
 import os
@@ -19,13 +27,14 @@ from utils.system import check_root, get_system_info
 from utils.logger import setup_logger, log
 from installer.meshtasticd import MeshtasticdInstaller
 from config.device import DeviceConfigurator
+from __version__ import __version__, get_full_version
 
 console = Console()
 
-BANNER = """
+BANNER = f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║   Meshtasticd Interactive Installer & Manager             ║
-║   For Raspberry Pi OS                                     ║
+║   For Raspberry Pi OS                          v{__version__}   ║
 ╚═══════════════════════════════════════════════════════════╝
 """
 
@@ -53,6 +62,28 @@ def show_system_info():
     console.print()
 
 
+def check_for_updates_on_startup():
+    """Check for updates on startup and show notification if available"""
+    try:
+        from installer.update_notifier import UpdateNotifier
+        notifier = UpdateNotifier()
+        notifier.startup_update_check()
+    except Exception:
+        # Don't let update check failures interrupt startup
+        pass
+
+
+def show_quick_status():
+    """Show quick status line in menu"""
+    try:
+        from dashboard import StatusDashboard
+        dashboard = StatusDashboard()
+        status_line = dashboard.get_quick_status_line()
+        console.print(f"\n[dim]Status:[/dim] {status_line}")
+    except Exception:
+        pass
+
+
 def interactive_menu():
     """Show interactive menu and handle user choices"""
     show_banner()
@@ -63,35 +94,151 @@ def interactive_menu():
         console.print("Please run with: [cyan]sudo python3 src/main.py[/cyan]")
         sys.exit(1)
 
+    # Check for updates on startup
+    check_for_updates_on_startup()
+
     show_system_info()
 
     while True:
-        console.print("\n[bold cyan]Main Menu:[/bold cyan]")
-        console.print("1. Install meshtasticd")
-        console.print("2. Update meshtasticd")
-        console.print("3. Configure device")
-        console.print("4. Check dependencies")
-        console.print("5. Hardware detection")
-        console.print("6. Debug & troubleshooting")
-        console.print("7. Exit")
+        # Show quick status
+        show_quick_status()
 
-        choice = Prompt.ask("\nSelect an option", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
+        console.print("\n[bold cyan]Main Menu:[/bold cyan]")
+        console.print("1. [green]Quick Status Dashboard[/green]")
+        console.print("2. Install meshtasticd")
+        console.print("3. Update meshtasticd")
+        console.print("4. Configure device")
+        console.print("5. [yellow]Channel Presets[/yellow]")
+        console.print("6. Configuration Templates")
+        console.print("7. Check dependencies")
+        console.print("8. Hardware detection")
+        console.print("9. Debug & troubleshooting")
+        console.print("0. Exit")
+
+        choice = Prompt.ask("\nSelect an option", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], default="1")
 
         if choice == "1":
-            install_meshtasticd()
+            show_dashboard()
         elif choice == "2":
-            update_meshtasticd()
+            install_meshtasticd()
         elif choice == "3":
-            configure_device()
+            update_meshtasticd()
         elif choice == "4":
-            check_dependencies()
+            configure_device()
         elif choice == "5":
-            detect_hardware()
+            configure_channel_presets()
         elif choice == "6":
-            debug_menu()
+            manage_templates()
         elif choice == "7":
+            check_dependencies()
+        elif choice == "8":
+            detect_hardware()
+        elif choice == "9":
+            debug_menu()
+        elif choice == "0":
             console.print("\n[green]Goodbye![/green]")
             sys.exit(0)
+
+
+def show_dashboard():
+    """Show the quick status dashboard"""
+    from dashboard import StatusDashboard
+    dashboard = StatusDashboard()
+    dashboard.interactive_dashboard()
+
+
+def configure_channel_presets():
+    """Configure channels using presets"""
+    console.print("\n[bold cyan]Channel Configuration with Presets[/bold cyan]\n")
+
+    from config.channel_presets import ChannelPresetManager
+
+    preset_manager = ChannelPresetManager()
+    config = preset_manager.select_preset()
+
+    if config:
+        if Confirm.ask("\nApply this configuration?", default=True):
+            preset_manager.apply_preset_to_config(config)
+            console.print("\n[green]Channel configuration applied![/green]")
+    else:
+        console.print("\n[yellow]Configuration cancelled[/yellow]")
+
+
+def manage_templates():
+    """Manage configuration templates"""
+    console.print("\n[bold cyan]Configuration Templates[/bold cyan]\n")
+
+    console.print("[cyan]Available Templates:[/cyan]")
+    console.print("1. MeshAdv-Mini (SX1262/SX1268 HAT)")
+    console.print("2. MeshAdv-Mini 400MHz variant")
+    console.print("3. Waveshare SX1262")
+    console.print("4. Adafruit RFM9x")
+    console.print("5. [yellow]MtnMesh Community[/yellow]")
+    console.print("6. [yellow]Emergency/SAR[/yellow]")
+    console.print("7. [yellow]Urban High-Speed[/yellow]")
+    console.print("8. [yellow]Repeater Node[/yellow]")
+    console.print("9. Back to Main Menu")
+
+    choice = Prompt.ask("\nSelect template", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"], default="9")
+
+    template_map = {
+        "1": "meshadv-mini.yaml",
+        "2": "meshadv-mini-400mhz.yaml",
+        "3": "waveshare-sx1262.yaml",
+        "4": "adafruit-rfm9x.yaml",
+        "5": "mtnmesh-community.yaml",
+        "6": "emergency-sar.yaml",
+        "7": "urban-highspeed.yaml",
+        "8": "repeater-node.yaml"
+    }
+
+    if choice in template_map:
+        apply_template(template_map[choice])
+
+
+def apply_template(template_name):
+    """Apply a configuration template"""
+    import shutil
+    from pathlib import Path
+
+    src_dir = Path(__file__).parent.parent / 'templates' / 'available.d'
+    template_path = src_dir / template_name
+    dest_path = Path('/etc/meshtasticd/config.yaml')
+
+    if not template_path.exists():
+        console.print(f"[red]Template not found: {template_name}[/red]")
+        return
+
+    # Show template content
+    console.print(f"\n[cyan]Template: {template_name}[/cyan]")
+    console.print("[dim]Preview:[/dim]\n")
+
+    with open(template_path, 'r') as f:
+        content = f.read()
+        # Show first 30 lines
+        lines = content.split('\n')[:30]
+        for line in lines:
+            console.print(f"[dim]{line}[/dim]")
+        if len(content.split('\n')) > 30:
+            console.print("[dim]...[/dim]")
+
+    if Confirm.ask(f"\nApply template to {dest_path}?", default=True):
+        try:
+            # Backup existing config
+            if dest_path.exists():
+                backup_path = dest_path.with_suffix('.yaml.bak')
+                shutil.copy2(dest_path, backup_path)
+                console.print(f"[dim]Backed up existing config to {backup_path}[/dim]")
+
+            shutil.copy2(template_path, dest_path)
+            console.print(f"[green]Template applied successfully![/green]")
+
+            if Confirm.ask("\nRestart meshtasticd service?", default=True):
+                os.system("systemctl restart meshtasticd")
+                console.print("[green]Service restarted![/green]")
+
+        except Exception as e:
+            console.print(f"[red]Failed to apply template: {e}[/red]")
 
 
 def install_meshtasticd():
@@ -123,6 +270,25 @@ def update_meshtasticd():
     """Update meshtasticd"""
     console.print("\n[bold cyan]Updating meshtasticd[/bold cyan]\n")
 
+    # First check for available updates
+    from installer.update_notifier import UpdateNotifier
+    notifier = UpdateNotifier()
+
+    update_info = notifier.check_for_updates(force=True)
+
+    if update_info:
+        if update_info.get('update_available'):
+            console.print(f"[green]Update available![/green]")
+            console.print(f"  Current: {update_info['current']}")
+            console.print(f"  Latest:  {update_info['latest']}")
+
+            if not Confirm.ask("\nProceed with update?", default=True):
+                return
+        else:
+            console.print(f"[green]You're running the latest version ({update_info.get('current', 'Unknown')})[/green]")
+            if not Confirm.ask("\nReinstall anyway?", default=False):
+                return
+
     installer = MeshtasticdInstaller()
 
     with console.status("[bold green]Updating..."):
@@ -143,13 +309,14 @@ def configure_device():
         console.print("1. Complete Radio Setup (Modem Preset + Channel Slot)")
         console.print("2. LoRa Settings (Region, Preset)")
         console.print("3. Channel Configuration")
-        console.print("4. Module Configuration (MQTT, Serial, etc.)")
-        console.print("5. Device Settings (Name, WiFi, etc.)")
-        console.print("6. Hardware Detection")
-        console.print("7. SPI HAT Configuration (MeshAdv-Mini, etc.)")
-        console.print("8. Back to Main Menu")
+        console.print("4. [yellow]Channel Presets[/yellow] (New!)")
+        console.print("5. Module Configuration (MQTT, Serial, etc.)")
+        console.print("6. Device Settings (Name, WiFi, etc.)")
+        console.print("7. Hardware Detection")
+        console.print("8. SPI HAT Configuration (MeshAdv-Mini, etc.)")
+        console.print("9. Back to Main Menu")
 
-        choice = Prompt.ask("\nSelect configuration option", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="1")
+        choice = Prompt.ask("\nSelect configuration option", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"], default="1")
 
         if choice == "1":
             configure_radio_complete()
@@ -158,14 +325,16 @@ def configure_device():
         elif choice == "3":
             configure_channels()
         elif choice == "4":
-            configure_modules()
+            configure_channel_presets()
         elif choice == "5":
-            configure_device_settings()
+            configure_modules()
         elif choice == "6":
-            detect_hardware()
+            configure_device_settings()
         elif choice == "7":
-            configure_spi_hat()
+            detect_hardware()
         elif choice == "8":
+            configure_spi_hat()
+        elif choice == "9":
             break
 
 
@@ -301,9 +470,12 @@ def debug_menu():
     console.print("1. View logs")
     console.print("2. Test meshtasticd service")
     console.print("3. Check permissions")
-    console.print("4. Back to main menu")
+    console.print("4. [yellow]Check for updates[/yellow]")
+    console.print("5. [yellow]Version history[/yellow]")
+    console.print("6. [yellow]Show version info[/yellow]")
+    console.print("7. Back to main menu")
 
-    choice = Prompt.ask("\nSelect an option", choices=["1", "2", "3", "4"], default="4")
+    choice = Prompt.ask("\nSelect an option", choices=["1", "2", "3", "4", "5", "6", "7"], default="7")
 
     if choice == "1":
         view_logs()
@@ -311,6 +483,12 @@ def debug_menu():
         test_service()
     elif choice == "3":
         check_permissions()
+    elif choice == "4":
+        check_updates_manual()
+    elif choice == "5":
+        show_version_history()
+    elif choice == "6":
+        show_version_info()
 
 
 def view_logs():
@@ -338,17 +516,61 @@ def check_permissions():
     manager.check_permissions()
 
 
+def check_updates_manual():
+    """Manually check for updates"""
+    console.print("\n[cyan]Checking for updates...[/cyan]\n")
+
+    from installer.update_notifier import UpdateNotifier
+    notifier = UpdateNotifier()
+
+    update_info = notifier.check_for_updates(force=True)
+
+    if update_info:
+        if update_info.get('update_available'):
+            notifier.show_update_notification(update_info)
+        else:
+            console.print(f"[green]You're running the latest version ({update_info.get('current', 'Unknown')})[/green]")
+    else:
+        console.print("[yellow]Could not check for updates[/yellow]")
+
+
+def show_version_history():
+    """Show version history"""
+    from installer.update_notifier import UpdateNotifier
+    notifier = UpdateNotifier()
+    notifier.get_version_history()
+
+
+def show_version_info():
+    """Show version information"""
+    from __version__ import show_version_history, get_full_version
+    console.print(f"\n[bold cyan]Installer Version: {get_full_version()}[/bold cyan]\n")
+    show_version_history()
+
+
 @click.command()
 @click.option('--install', type=click.Choice(['stable', 'beta']), help='Install meshtasticd')
 @click.option('--update', is_flag=True, help='Update meshtasticd')
 @click.option('--configure', is_flag=True, help='Configure device')
 @click.option('--check', is_flag=True, help='Check dependencies')
+@click.option('--dashboard', is_flag=True, help='Show status dashboard')
+@click.option('--version', is_flag=True, help='Show version information')
 @click.option('--debug', is_flag=True, help='Enable debug logging')
-def main(install, update, configure, check, debug):
+def main(install, update, configure, check, dashboard, version, debug):
     """Meshtasticd Interactive Installer & Manager"""
 
     # Setup logging
     setup_logger(debug=debug)
+
+    # Show version and exit
+    if version:
+        console.print(f"Meshtasticd Interactive Installer v{get_full_version()}")
+        return
+
+    # Show dashboard
+    if dashboard:
+        show_dashboard()
+        return
 
     # If no arguments, show interactive menu
     if not any([install, update, configure, check]):
