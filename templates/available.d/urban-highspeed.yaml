@@ -1,0 +1,45 @@
+# Urban High-Speed Configuration Template
+# Optimized for dense urban environments with fast message delivery
+# https://github.com/Nursedude/Meshtasticd_interactive_IU
+#
+# Use case: City networks, dense node clusters, rapid messaging
+# Features: Fast data rate, reduced congestion, low latency
+
+Lora:
+  # GPIO Configuration (adjust for your hardware)
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+
+  # SX126x specific options
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+  # Radio Parameters - Short Fast preset
+  # Bandwidth: 250 kHz (wider = faster)
+  Bandwidth: 250
+
+  # Spreading Factor: 7 (minimum = fastest but shortest range)
+  SpreadFactor: 7
+
+  # Coding Rate: 4/8
+  CodingRate: 8
+
+  # Moderate power for urban environment (less interference)
+  TXpower: 20
+
+  # Lower hop limit to reduce network congestion
+  HopLimit: 3
+
+  # Default channel slot
+  ChannelNum: 0
+
+Webserver:
+  Port: 443
+
+# Channels
+Channels:
+  - name: "Urban"
+    psk: "AQ=="
+    role: "PRIMARY"

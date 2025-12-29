@@ -1,0 +1,62 @@
+# Repeater/Router Node Configuration Template
+# Optimized for dedicated infrastructure repeater nodes
+# https://github.com/Nursedude/Meshtasticd_interactive_IU
+#
+# Use case: Fixed infrastructure nodes, hilltop repeaters, relay stations
+# Features: High power, extended hop limit, router mode
+
+Lora:
+  # GPIO Configuration (adjust for your hardware)
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+
+  # SX126x specific options
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+  # Radio Parameters - Long Fast preset for good range
+  # Bandwidth: 250 kHz
+  Bandwidth: 250
+
+  # Spreading Factor: 11
+  SpreadFactor: 11
+
+  # Coding Rate: 4/8
+  CodingRate: 8
+
+  # Maximum power for repeater coverage
+  TXpower: 30
+
+  # Maximum hop limit for infrastructure nodes
+  HopLimit: 7
+
+  # Default channel slot
+  ChannelNum: 0
+
+# Device role configuration
+Device:
+  # Set as router/repeater
+  Role: ROUTER
+
+GPS:
+  SerialPath: /dev/ttyS0
+  GPSEnableGpio: 4
+
+I2C:
+  I2CDevice: /dev/i2c-1
+
+Webserver:
+  Port: 443
+
+# Logging for infrastructure monitoring
+Logging:
+  LogLevel: info
+  LogFile: /var/log/meshtasticd.log
+
+# Channels
+Channels:
+  - name: "LongFast"
+    psk: "AQ=="
+    role: "PRIMARY"
