@@ -55,13 +55,13 @@ if [[ ! -f /etc/os-release ]]; then
 fi
 
 # System update
-echo -e "${CYAN}[2/6] Updating package lists...${NC}"
+echo -e "${CYAN}[2/7] Updating package lists...${NC}"
 apt-get update -qq
 echo -e "${GREEN}  ✓ Package lists updated${NC}"
 
 # Optional: Upgrade system packages
 # Check if running interactively or if UPGRADE_SYSTEM is set
-echo -e "${CYAN}[3/6] System upgrade (optional)...${NC}"
+echo -e "${CYAN}[3/7] System upgrade (optional)...${NC}"
 if [[ "${UPGRADE_SYSTEM}" == "yes" ]]; then
     echo -e "${YELLOW}  Upgrading all system packages (this may take several minutes)...${NC}"
     apt-get upgrade -y
@@ -86,13 +86,13 @@ else
 fi
 
 # Install system dependencies
-echo -e "${CYAN}[4/6] Installing required dependencies...${NC}"
+echo -e "${CYAN}[4/7] Installing required dependencies...${NC}"
 apt-get install -y -qq python3 python3-pip python3-venv git wget curl &>/dev/null
 echo -e "${GREEN}  ✓ Required dependencies installed${NC}"
 
 # Clone or update repository
 INSTALL_DIR="/opt/meshtasticd-installer"
-echo -e "${CYAN}[5/6] Setting up installer...${NC}"
+echo -e "${CYAN}[5/7] Setting up installer...${NC}"
 
 if [[ -d "$INSTALL_DIR" ]]; then
     echo "  Updating existing installation..."
@@ -107,13 +107,13 @@ fi
 echo -e "${GREEN}  ✓ Repository ready${NC}"
 
 # Install Python dependencies
-echo -e "${CYAN}[6/6] Installing Python dependencies...${NC}"
+echo -e "${CYAN}[6/7] Installing Python dependencies...${NC}"
 python3 -m pip install -q --upgrade pip
 python3 -m pip install -q -r requirements.txt
 echo -e "${GREEN}  ✓ Python dependencies installed${NC}"
 
 # Create symlink for easy access
-echo -e "${CYAN}[6/6] Creating system command...${NC}"
+echo -e "${CYAN}[7/7] Creating system command...${NC}"
 cat > /usr/local/bin/meshtasticd-installer << 'EOF'
 #!/bin/bash
 cd /opt/meshtasticd-installer
