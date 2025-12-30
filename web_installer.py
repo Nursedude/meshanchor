@@ -326,7 +326,8 @@ class InstallerHandler(BaseHTTPRequestHandler):
                     logger.debug(f"Starting installation script: {script_path}")
                     subprocess.Popen(['bash', script_path],
                                    stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
+                                   stderr=subprocess.DEVNULL,
+                                   start_new_session=True)
                     result = {'success': True, 'message': 'Installation started'}
                     logger.info("Installation started successfully")
                 else:
