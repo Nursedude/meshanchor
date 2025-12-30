@@ -2,15 +2,25 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 2.0.2** | [Changelog](#version-history)
+**Version 3.0.0** | [Changelog](#version-history)
 
-## What's New in v2.0.2
+## What's New in v3.0.0
 
-- **Enhanced Raspberry Pi Compatibility** - Perfect emoji fallback for all terminal types
-- **Improved Hardware Detection** - Auto-detects all Meshtastic Linux native compatible devices
-- **Better OS Detection** - Accurate board model detection from device tree
-- **SSH-Friendly** - Automatically uses ASCII mode in SSH sessions
-- **Terminal Compatibility** - Works flawlessly on console, SSH, and basic terminals
+- **GTK4 Graphical Interface** - Modern desktop UI with libadwaita design
+- **Textual TUI** - Full-featured terminal UI for SSH/headless access (Raspberry Pi Connect friendly)
+- **Config File Manager** - Select YAML from `/etc/meshtasticd/available.d`, edit with nano
+- **Service Management** - Start/stop/restart with live log viewing
+- **Meshtastic CLI Integration** - Run CLI commands from the UI
+- **Reboot Persistence** - Installer auto-restarts after system reboot
+- **Three UI Options** - Choose GTK4, Textual TUI, or Rich CLI based on your setup
+
+## UI Options
+
+| Interface | Command | Best For |
+|-----------|---------|----------|
+| **GTK4 GUI** | `sudo python3 src/main_gtk.py` | Pi with display, Raspberry Pi Connect desktop |
+| **Textual TUI** | `sudo python3 src/main_tui.py` | SSH, headless, Raspberry Pi Connect terminal |
+| **Rich CLI** | `sudo python3 src/main.py` | Fallback, minimal environments |
 
 ## Features
 
@@ -31,6 +41,19 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 - **daily** - Cutting-edge daily builds from `network:Meshtastic:daily`
 - **alpha** - Experimental alpha builds from `network:Meshtastic:alpha`
 
+### Config File Manager (New in v3.0)
+- **Browse available.d** - View all YAML configs from meshtasticd package
+- **Activate configs** - Copy to config.d with one click
+- **Edit with nano** - Direct editing in terminal (always returns to app)
+- **Apply changes** - Automatic daemon-reload and service restart
+- **Preview files** - See config content before activating
+
+### Service Management (New in v2.2)
+- **Start/Stop/Restart** - Control meshtasticd service
+- **Live Logs** - View and follow journalctl output
+- **Boot Control** - Enable/disable service on startup
+- **Daemon Reload** - Reload systemd after config changes
+
 ### Quick Status Dashboard
 Real-time monitoring at a glance:
 - **Service Status**: Running/stopped state with uptime information
@@ -39,7 +62,7 @@ Real-time monitoring at a glance:
 - **Configuration Status**: Active config file and template
 - **Quick Actions**: Refresh, view logs, restart service, check updates
 
-### Channel Presets (New in v2.0)
+### Channel Presets
 Pre-configured channel setups for common use cases:
 - **Default Meshtastic** - Standard LongFast configuration
 - **MtnMesh Community** - MediumFast with slot 20
@@ -56,10 +79,10 @@ Ready-to-use hardware and use-case templates:
 - MeshAdv-Mini 400MHz variant
 - Waveshare SX1262
 - Adafruit RFM9x
-- **MtnMesh Community** (New)
-- **Emergency/SAR** (New)
-- **Urban High-Speed** (New)
-- **Repeater Node** (New)
+- **MtnMesh Community**
+- **Emergency/SAR**
+- **Urban High-Speed**
+- **Repeater Node**
 
 ### Hardware Support
 - **Hardware Detection**: Auto-detect USB and SPI LoRa modules
@@ -99,6 +122,7 @@ Interactive configuration for all Meshtastic modules:
 - **Terminal Compatibility**: Works perfectly on:
   - Direct console (HDMI/serial)
   - SSH sessions (automatic ASCII mode)
+  - Raspberry Pi Connect (desktop or terminal)
   - Screen/tmux
   - Any terminal emulator
 
@@ -174,6 +198,20 @@ sudo meshtasticd-installer
 
 ---
 
+### UI-Specific Dependencies
+
+**For GTK4 Graphical Interface:**
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1
+```
+
+**For Textual TUI:**
+```bash
+pip install textual
+```
+
+---
+
 ### Web-Based Installer
 
 **Perfect for beginners** - Install through your browser:
@@ -239,18 +277,23 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Run installer
-sudo ./venv/bin/python src/main.py
-
-# Alternative: Install system-wide (not recommended on modern systems)
-# sudo python3 -m pip install -r requirements.txt --break-system-packages
-# sudo python3 src/main.py
+# 4. Run installer (choose one)
+sudo ./venv/bin/python src/main_gtk.py   # GTK4 GUI (with display)
+sudo ./venv/bin/python src/main_tui.py   # Textual TUI (SSH/headless)
+sudo ./venv/bin/python src/main.py       # Rich CLI (fallback)
 ```
 
 ## Usage
 
-### Interactive Mode
+### Interactive Mode (Choose Your UI)
 ```bash
+# GTK4 Graphical Interface (requires display)
+sudo python3 src/main_gtk.py
+
+# Textual TUI (works over SSH, Raspberry Pi Connect)
+sudo python3 src/main_tui.py
+
+# Rich CLI (original interface)
 sudo python3 src/main.py
 ```
 
@@ -283,17 +326,32 @@ sudo python3 src/main.py --debug
 
 ## Main Menu Overview
 
+### GTK4 / Textual TUI
+```
+Sidebar Navigation:
+- Dashboard          <- Real-time system monitoring
+- Service Management <- Start/stop/restart/logs
+- Install / Update   <- Install meshtasticd
+- Config File Manager <- Select YAML, edit with nano
+- Meshtastic CLI     <- Run CLI commands
+- Hardware Detection <- Detect SPI/I2C devices
+```
+
+### Rich CLI (main.py)
 ```
 Main Menu:
-1. Quick Status Dashboard     <- NEW: Real-time system monitoring
-2. Install meshtasticd
-3. Update meshtasticd
-4. Configure device
-5. Channel Presets            <- NEW: Pre-configured channel setups
-6. Configuration Templates    <- NEW: Ready-to-use config files
-7. Check dependencies
-8. Hardware detection
-9. Debug & troubleshooting
+1. Quick Status Dashboard
+2. Service Management
+3. Install meshtasticd
+4. Update meshtasticd
+5. Configure device
+6. Channel Presets
+7. Configuration Templates
+8. Config File Manager
+c. Meshtastic CLI Commands
+9. Check dependencies
+h. Hardware detection
+d. Debug & troubleshooting
 0. Exit
 ```
 
@@ -301,39 +359,31 @@ Main Menu:
 
 ### View Status Dashboard
 ```bash
-sudo python3 src/main.py
-# Select option 1 (Quick Status Dashboard)
+sudo python3 src/main_tui.py
+# Dashboard tab shows service status, version, config, hardware
+```
+
+### Manage Config Files
+```bash
+sudo python3 src/main_tui.py
+# Go to Config tab
+# Select a YAML from available.d
+# Click Activate, then Edit with nano
+# Click Apply & Restart Service
+```
+
+### Run Meshtastic CLI Commands
+```bash
+sudo python3 src/main_tui.py
+# Go to CLI tab
+# Click --info, --nodes, or enter custom command
 ```
 
 ### Apply Channel Preset
 ```bash
 sudo python3 src/main.py
-# Select option 5 (Channel Presets)
+# Select option 6 (Channel Presets)
 # Choose a preset (e.g., MtnMesh Community)
-```
-
-### Apply Configuration Template
-```bash
-sudo python3 src/main.py
-# Select option 6 (Configuration Templates)
-# Choose a template (e.g., Emergency/SAR)
-```
-
-### Complete Radio Setup (Recommended)
-```bash
-sudo python3 src/main.py
-# Select option 4 (Configure device)
-# Select option 1 (Complete Radio Setup)
-# Choose MediumFast preset
-# Use slot 20 for compatibility with MtnMesh community
-```
-
-### Configure MQTT Bridge
-```bash
-sudo python3 src/main.py
-# Select option 4 (Configure device)
-# Select option 5 (Module Configuration)
-# Select option 1 (MQTT Module)
 ```
 
 ## Requirements
@@ -342,71 +392,120 @@ sudo python3 src/main.py
 - Root/sudo access (for GPIO, SPI, and system package management)
 - Internet connection (for downloading packages)
 
+### Optional Dependencies
+- **GTK4 + libadwaita** - For graphical interface
+- **Textual** - For terminal UI
+- **nano** - For config file editing
+
 ## Project Structure
 
 ```
 Meshtasticd_interactive_UI/
 ├── src/
-│   ├── main.py                    # Main entry point
-│   ├── __version__.py             # Version control (NEW)
-│   ├── dashboard.py               # Quick Status Dashboard (NEW)
+│   ├── main.py                    # Rich CLI entry point
+│   ├── main_gtk.py                # GTK4 GUI entry point (NEW)
+│   ├── main_tui.py                # Textual TUI entry point (NEW)
+│   ├── __version__.py             # Version control
+│   ├── dashboard.py               # Quick Status Dashboard
+│   ├── gtk_ui/                    # GTK4 interface (NEW)
+│   │   ├── app.py                 # Main GTK4 application
+│   │   └── panels/                # UI panels
+│   │       ├── dashboard.py       # Dashboard panel
+│   │       ├── service.py         # Service management
+│   │       ├── config.py          # Config file manager
+│   │       ├── cli.py             # Meshtastic CLI
+│   │       ├── install.py         # Install/update
+│   │       └── hardware.py        # Hardware detection
+│   ├── tui/                       # Textual TUI (NEW)
+│   │   └── app.py                 # Textual application
 │   ├── installer/
-│   │   ├── __init__.py
-│   │   ├── meshtasticd.py        # Meshtasticd installation logic
+│   │   ├── meshtasticd.py         # Meshtasticd installation logic
 │   │   ├── dependencies.py        # Dependency management
 │   │   ├── version.py             # Version management
-│   │   └── update_notifier.py     # Update notifications (NEW)
+│   │   └── update_notifier.py     # Update notifications
 │   ├── config/
-│   │   ├── __init__.py
-│   │   ├── lora.py               # LoRa configuration
-│   │   ├── radio.py              # Radio configuration
-│   │   ├── device.py             # Device configuration
-│   │   ├── hardware.py           # Hardware detection
-│   │   ├── modules.py            # Module configuration
-│   │   ├── spi_hats.py           # SPI HAT configuration
-│   │   └── channel_presets.py    # Channel presets (NEW)
+│   │   ├── config_file_manager.py # YAML selector + nano (NEW)
+│   │   ├── lora.py                # LoRa configuration
+│   │   ├── radio.py               # Radio configuration
+│   │   ├── device.py              # Device configuration
+│   │   ├── hardware.py            # Hardware detection
+│   │   ├── modules.py             # Module configuration
+│   │   ├── spi_hats.py            # SPI HAT configuration
+│   │   ├── yaml_editor.py         # YAML editor
+│   │   └── channel_presets.py     # Channel presets
+│   ├── services/                  # Service management (NEW)
+│   │   └── service_manager.py     # Systemd controls
+│   ├── cli/                       # Meshtastic CLI wrapper (NEW)
+│   │   └── meshtastic_cli.py      # CLI commands
 │   └── utils/
-│       ├── __init__.py
-│       ├── system.py             # System utilities
-│       ├── emoji.py              # Emoji/ASCII fallback (NEW v2.0.1)
-│       ├── logger.py             # Logging and debugging
-│       └── cli.py                # CLI interface
+│       ├── system.py              # System utilities
+│       ├── emoji.py               # Emoji/ASCII fallback
+│       ├── logger.py              # Logging and debugging
+│       ├── env_config.py          # Environment configuration
+│       └── cli.py                 # CLI interface
 ├── templates/
-│   ├── config.yaml               # Main config template
-│   └── available.d/
-│       ├── meshadv-mini.yaml     # MeshAdv-Mini template
-│       ├── meshadv-mini-400mhz.yaml
-│       ├── waveshare-sx1262.yaml
-│       ├── adafruit-rfm9x.yaml
-│       ├── mtnmesh-community.yaml # MtnMesh template (NEW)
-│       ├── emergency-sar.yaml     # Emergency/SAR template (NEW)
-│       ├── urban-highspeed.yaml   # Urban template (NEW)
-│       └── repeater-node.yaml     # Repeater template (NEW)
+│   ├── config.yaml                # Main config template
+│   └── available.d/               # Hardware templates
 ├── scripts/
-│   ├── install_armhf.sh          # 32-bit installation script
-│   ├── install_arm64.sh          # 64-bit installation script
-│   └── setup_permissions.sh      # GPIO/SPI permissions setup
-├── tests/
-├── docs/
+│   ├── install_armhf.sh           # 32-bit installation script
+│   ├── install_arm64.sh           # 64-bit installation script
+│   └── setup_permissions.sh       # GPIO/SPI permissions setup
 ├── requirements.txt
 └── README.md
 ```
 
 ## Version History
 
+### v3.0.0 (2025-12-30)
+- **NEW: GTK4 graphical interface** - Modern libadwaita design with dashboard
+- **NEW: Textual TUI** - Full-featured terminal UI for SSH/headless access
+- **Config File Manager** - Select YAML from available.d, edit with nano
+- **Service Management panel** - Start/stop/restart with live logs
+- **Meshtastic CLI panel** - Integrated CLI commands
+- **Hardware Detection panel** - Detect SPI/I2C devices
+- **Reboot Persistence** - Installer auto-restarts after reboot
+- **Three UI options** - GTK4 (display), Textual TUI (SSH), Rich CLI (fallback)
+- **Auto-detect display** - Suggests appropriate UI based on environment
+
+### v2.3.0 (2025-12-30)
+- Added Config File Manager - select YAML from /etc/meshtasticd/available.d
+- Uses official meshtasticd package yaml files
+- Integrated nano editor for direct config file editing
+- Copy selected config to config.d for activation
+- Auto daemon-reload and service restart after config changes
+
+### v2.2.0 (2025-12-30)
+- Added Service Management menu (start/stop/restart/status/logs)
+- Added Meshtastic CLI commands menu with full CLI integration
+- Enhanced config.yaml editor with all hardware sections
+- Added LoRa module presets (MeshAdv-Mini, Waveshare, Ebyte E22, etc.)
+- Service management: view logs by time, follow logs, boot control
+
+### v2.1.2 (2025-12-30)
+- Added interactive config.yaml editor
+- Simplified emoji detection - uses stdout UTF-8 encoding
+- All menus now have Back option to return to previous menu
+
+### v2.1.1 (2025-12-30)
+- Fixed version comparison for non-standard versions
+- Improved emoji detection for Raspberry Pi local console
+- Updated config.yaml template with complete configuration
+- Added reboot prompt after SPI/I2C changes
+
+### v2.1.0 (2025-12-30)
+- Fixed packaging 25.0 conflict - use pipx for meshtastic CLI isolation
+- Added pipx support for isolated meshtastic CLI installation
+- Added .env configuration file support
+
 ### v2.0.2 (2025-12-30)
-- **Enhanced Raspberry Pi OS compatibility** - Default to ASCII on Raspberry Pi OS
-- **Improved emoji detection** - Automatic SSH session detection for emoji fallback
-- **Better OS and board detection** - Reads exact model from device tree
-- **Meshtastic Linux native compatibility check** - Detects compatible boards
-- **Complete emoji mapping** - Comprehensive ASCII fallbacks for all terminals
-- **Terminal auto-detection** - Works perfectly on console, SSH, screen, tmux
+- Enhanced Raspberry Pi OS compatibility - Default to ASCII on Raspberry Pi OS
+- Improved emoji detection - Automatic SSH session detection
+- Better OS and board detection - Reads exact model from device tree
 
 ### v2.0.1 (2025-12-30)
-- **Fixed Python externally-managed-environment error** - PEP 668 compliance
-- **Virtual environment support** - Isolated Python dependencies
-- **Emoji fallback system** - ASCII alternatives for terminals without UTF-8
-- **Better terminal detection** - Improved support for SSH and basic terminals
+- Fixed Python externally-managed-environment error - PEP 668 compliance
+- Virtual environment support - Isolated Python dependencies
+- Emoji fallback system - ASCII alternatives for terminals without UTF-8
 
 ### v2.0.0 (2025-12-29)
 - Added Quick Status Dashboard
