@@ -1,12 +1,11 @@
 # MeshAdv-Pi-Hat Configuration Template
-# 1W High-Power LoRa/GPS Raspberry Pi HAT with SX1262/SX1268
+# 1W High-Power LoRa/GPS Raspberry Pi HAT with SX1262 for US 915MHz
 # https://github.com/chrismyers2000/MeshAdv-Pi-Hat
 #
-# Hardware Options:
-#   - SX1262 (E22-900M30S/33S): 915MHz ISM (902-928 MHz) - 1W - US, ANZ, JP, KR, TW
-#   - SX1268 (E22-400M30S/33S): 433MHz ISM (410-510 MHz) - 1W - EU_433, CN
+# Hardware: SX1262 (E22-900M30S/33S)
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
 # Power Output: +30dBm (1W) standard, +33dBm (2W) on 33S variants
-# Features: High-power LoRa, GPS (ATGM336H), PPS, I2C/Qwiic
+# Features: High-power LoRa, GPS (ATGM336H), PPS, I2C/Qwiic, UART
 # Compatible: Raspberry Pi 2/3/4/5, Zero, Zero W, Zero 2 W, Pi 400
 #
 # ⚠️ IMPORTANT: Requires adequate power supply (5V 3A minimum recommended)

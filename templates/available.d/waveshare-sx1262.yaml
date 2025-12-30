@@ -1,21 +1,69 @@
 # Waveshare SX1262 LoRa HAT Configuration Template
 # https://www.waveshare.com/wiki/SX1262_868M_LoRa_HAT
+#
+# Hardware: SX1262
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Compatible: Raspberry Pi 2/3/4/5, Zero, Zero W, Zero 2 W
 
 Lora:
-  # SPI Chip Select - GPIO 21
+  # === GPIO Configuration (Waveshare SX1262 Standard) ===
+  # SPI Chip Select - GPIO 21 (Pin 40)
   CS: 21
 
-  # Interrupt Request (DIO1) - GPIO 16
+  # Interrupt Request (DIO1) - GPIO 16 (Pin 36)
   IRQ: 16
 
-  # Busy signal - GPIO 20
+  # Busy signal - GPIO 20 (Pin 38)
   Busy: 20
 
-  # Reset pin - GPIO 18
+  # Reset pin - GPIO 18 (Pin 12)
   Reset: 18
 
-  # Use DIO2 as RF switch control
+  # === Radio Options ===
+  # Use DIO2 as RF switch control (required for SX1262)
   DIO2_AS_RF_SWITCH: true
 
+  # Enable DIO3 TCXO voltage control (if applicable)
+  # DIO3_TCXO_VOLTAGE: true
+
+  # === Radio Parameters ===
+  # Uncomment and adjust these for custom modem presets:
+
+  # Bandwidth in kHz (125, 250, 500)
+  # Higher = faster but shorter range
+  # Bandwidth: 250
+
+  # Spreading Factor (7-12)
+  # Lower = faster but shorter range, Higher = slower but longer range
+  # SpreadFactor: 11
+
+  # Coding Rate (5-8 for 4/5 to 4/8)
+  # Higher = more error correction but slower
+  # CodingRate: 8
+
+  # Transmit Power in dBm (check your hardware specs)
+  # TXpower: 22
+
+  # Hop Limit (0-7)
+  # Number of times a message can be retransmitted
+  # HopLimit: 3
+
+  # Channel Slot (0-104 for US region)
+  # Different slots help avoid interference
+  # ChannelNum: 20
+
 Webserver:
+  # Web interface port (443 for HTTPS, 80 for HTTP)
   Port: 443
+
+# === Common Presets ===
+# Uncomment the preset you want to use:
+#
+# LongFast (default):
+#   Bandwidth: 250, SpreadFactor: 11, CodingRate: 8, TXpower: 22
+#
+# MediumFast (MtnMesh standard):
+#   Bandwidth: 250, SpreadFactor: 10, CodingRate: 8, TXpower: 22
+#
+# ShortFast (urban/dense areas):
+#   Bandwidth: 250, SpreadFactor: 7, CodingRate: 8, TXpower: 20

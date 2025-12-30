@@ -3,11 +3,10 @@
 # https://github.com/chrismyers2000/MeshAdv-Mini
 #
 # Hardware: SX1262 (E22-900M22S)
-# Frequency: 915MHz ISM band (902-928 MHz) - US, ANZ, JP, KR, TW
-# Features: +22dBm LoRa, GPS (ATGM336H), TMP102 Temp Sensor, PWM Fan
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Power Output: +22dBm
+# Features: GPS (ATGM336H), TMP102 Temp Sensor, PWM Fan, I2C/Qwiic
 # Compatible: Raspberry Pi 2/3/4/5, Zero, Zero W, Zero 2 W
-#
-# Note: For EU 433MHz (SX1268), use meshadv-mini-400mhz.yaml template
 
 Lora:
   # === GPIO Configuration (MeshAdv-Mini Standard) ===
