@@ -415,5 +415,9 @@ Contributions welcome! Please open an issue or PR.
 - [MeshToad Device Info](https://mtnme.sh/devices/MeshToad/)
 - [Configuration Best Practices](https://mtnme.sh/config/)
 
+### Hardware
+- [MeshAdv-Pi-Hat](https://github.com/chrismyers2000/MeshAdv-Pi-Hat) - 1W High-Power LoRa/GPS Pi HAT by Chris Myers
+- [FemtoFox](https://github.com/femtofox) - Linux-based Meshtastic node with Foxbuntu OS ([Getting Started](https://github.com/femtofox/femtofox/wiki/Getting-Started))
+
 ### Other Tools
 - [Meshtasticd Configuration Tool](https://github.com/chrismyers2000/Meshtasticd-Configuration-Tool) by Chris Myers
