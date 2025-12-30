@@ -1,11 +1,56 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "2.1.2"
-__version_info__ = (2, 1, 2)
+__version__ = "3.0.0"
+__version_info__ = (3, 0, 0)
 __release_date__ = "2025-12-30"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.0.0",
+        "date": "2025-12-30",
+        "changes": [
+            "NEW: GTK4 graphical interface for systems with display",
+            "NEW: Textual TUI for SSH/headless access (Raspberry Pi Connect friendly)",
+            "GTK4 UI: Modern libadwaita design with dashboard, service, config panels",
+            "Textual TUI: Full-featured terminal UI with mouse support",
+            "Config File Manager: Select YAML from available.d, edit with nano",
+            "Service Management: Start/stop/restart with live logs",
+            "Meshtastic CLI: Integrated CLI commands panel",
+            "Hardware Detection: Detect SPI/I2C devices",
+            "Reboot Persistence: Installer auto-restarts after reboot",
+            "Three UI options: GTK4 (display), Textual TUI (SSH), Rich CLI (fallback)",
+            "Auto-detect display availability and suggest appropriate UI"
+        ]
+    },
+    {
+        "version": "2.3.0",
+        "date": "2025-12-30",
+        "changes": [
+            "Added Config File Manager - select YAML from /etc/meshtasticd/available.d",
+            "Uses official meshtasticd package yaml files (lora-*, display-*, etc.)",
+            "Integrated nano editor for direct config file editing",
+            "Copy selected config to config.d for activation",
+            "Auto daemon-reload and service restart after config changes",
+            "View/deactivate active configurations",
+            "Create basic config.yaml if not exists",
+            "Full integration with meshtasticd package structure"
+        ]
+    },
+    {
+        "version": "2.2.0",
+        "date": "2025-12-30",
+        "changes": [
+            "Added Service Management menu (start/stop/restart/status/logs)",
+            "Added Meshtastic CLI commands menu with full CLI integration",
+            "Enhanced config.yaml editor with all hardware sections",
+            "Added LoRa module presets (MeshAdv-Mini, Waveshare, Ebyte E22, etc.)",
+            "Added Touchscreen, Input, HostMetrics configuration",
+            "All submenus now have Back (0) and Main Menu (m) navigation",
+            "Added connection configuration for CLI (localhost, serial, BLE)",
+            "Service management: view logs by time, follow logs, boot control"
+        ]
+    },
     {
         "version": "2.1.2",
         "date": "2025-12-30",
