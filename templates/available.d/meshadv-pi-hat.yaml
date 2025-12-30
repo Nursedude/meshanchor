@@ -2,62 +2,124 @@
 # 1W High-Power LoRa/GPS Raspberry Pi HAT with SX1262/SX1268
 # https://github.com/chrismyers2000/MeshAdv-Pi-Hat
 #
-# Hardware: SX1262 (E22-900M30S/33S) or SX1268 (E22-400M30S/33S)
-# Features: +33dBm (1W) LoRa, GPS (ATGM336H), PPS, I2C/Qwiic
+# Hardware Options:
+#   - SX1262 (E22-900M30S/33S): 915MHz ISM (902-928 MHz) - 1W - US, ANZ, JP, KR, TW
+#   - SX1268 (E22-400M30S/33S): 433MHz ISM (410-510 MHz) - 1W - EU_433, CN
+# Power Output: +30dBm (1W) standard, +33dBm (2W) on 33S variants
+# Features: High-power LoRa, GPS (ATGM336H), PPS, I2C/Qwiic
 # Compatible: Raspberry Pi 2/3/4/5, Zero, Zero W, Zero 2 W, Pi 400
+#
+# ⚠️ IMPORTANT: Requires adequate power supply (5V 3A minimum recommended)
 
 Lora:
-  # SPI Chip Select (NSS) - GPIO 21
+  # === GPIO Configuration (MeshAdv-Pi-Hat Standard) ===
+  # SPI Chip Select (NSS) - GPIO 21 (Pin 40)
   CS: 21
 
-  # Interrupt Request (DIO1) - GPIO 16
+  # Interrupt Request (DIO1) - GPIO 16 (Pin 36)
   IRQ: 16
 
-  # Busy signal - GPIO 20
+  # Busy signal - GPIO 20 (Pin 38)
   Busy: 20
 
-  # Reset pin - GPIO 18
+  # Reset pin - GPIO 18 (Pin 12)
   Reset: 18
 
-  # RX Enable - GPIO 12
+  # RX Enable - GPIO 12 (Pin 32)
   RXen: 12
 
-  # TX Enable - GPIO 13
+  # TX Enable - GPIO 13 (Pin 33)
   TXen: 13
 
+  # === Radio Options ===
   # Use DIO2 as RF switch control (required for SX1262/SX1268)
   DIO2_AS_RF_SWITCH: true
 
-  # Enable DIO3 TCXO voltage control
+  # Enable DIO3 TCXO voltage control (required for temperature stability)
   DIO3_TCXO_VOLTAGE: true
 
-  # SPI bus configuration
-  # SPISpeed: 2000000
+  # === Radio Parameters ===
+  # Uncomment and adjust these for custom modem presets:
 
-  # Optional: Set transmit power (default: 30 dBm, max: 33 dBm for 33S variants)
+  # Bandwidth in kHz (125, 250, 500)
+  # Higher = faster but shorter range
+  # Bandwidth: 250
+
+  # Spreading Factor (7-12)
+  # Lower = faster but shorter range, Higher = slower but longer range
+  # SpreadFactor: 11
+
+  # Coding Rate (5-8 for 4/5 to 4/8)
+  # Higher = more error correction but slower
+  # CodingRate: 8
+
+  # Transmit Power in dBm (0-33 for MeshAdv-Pi-Hat)
+  # Standard: 30 dBm (1W), Max: 33 dBm (2W) on 33S variants
+  # ⚠️ Higher power = more range but significantly more power consumption
   # TXpower: 30
+
+  # Hop Limit (0-7)
+  # Number of times a message can be retransmitted
+  # Consider lower values for high-power nodes to reduce network load
+  # HopLimit: 3
+
+  # Channel Slot (0-104 for most regions)
+  # Different slots help avoid interference
+  # ChannelNum: 20
+
+  # === SPI Configuration ===
+  # SPI bus speed (optional, default is usually fine)
+  # SPISpeed: 2000000
 
 GPS:
   # GPS module: ATGM336H (GPS/BeiDou capable)
-  # Use /dev/ttyS0 for Pi 3/4/5, /dev/ttyAMA0 for older Pi
+  # Serial port options:
+  #   - /dev/ttyS0 for Pi 3/4/5 (hardware UART)
+  #   - /dev/ttyAMA0 for older Pi or if ttyS0 doesn't work
+  # UART pins: TX=14 (Pin 8), RX=15 (Pin 10)
   SerialPath: /dev/ttyS0
 
-  # PPS (Pulse Per Second) available on GPIO 23 for precise timekeeping
+  # PPS (Pulse Per Second) - GPIO 23 (Pin 16)
+  # Provides precise timekeeping for applications requiring accurate time
+  # Uncomment to enable PPS:
+  # PPSGpio: 23
+
+  # GPS Power Configuration
+  # Jumper J3 selects 3.3V or 5V to GPS module
+  # Most GPS modules work best with 3.3V
 
 I2C:
-  # I2C bus for sensors and expansion
+  # I2C bus for sensors and Qwiic/STEMMA expansion
+  # I2C pins: SDA=2 (Pin 3), SCL=3 (Pin 5)
   I2CDevice: /dev/i2c-1
 
 Webserver:
+  # Web interface port (443 for HTTPS, 80 for HTTP)
   Port: 443
 
-# Optional: Logging configuration
+# === Optional: Logging Configuration ===
+# Uncomment to set custom log level
 # Logging:
-#   LogLevel: info
+#   LogLevel: info  # Options: debug, info, warn, error
 
-# NOTES:
-# - This is a high-power 1W LoRa HAT (33dBm max on select variants)
-# - Ensure adequate power supply (recommended 5V 3A minimum)
-# - Supports both 900MHz (SX1262) and 400MHz (SX1268) bands
-# - GPS uses UART pins 14/15
-# - Jumper J3 selects 3.3v or 5v to GPS module
+# === Common Presets for High-Power Node ===
+# Uncomment the preset you want to use:
+#
+# LongFast (default, recommended for high-power):
+#   Bandwidth: 250, SpreadFactor: 11, CodingRate: 8, TXpower: 30
+#
+# MediumFast (MtnMesh standard):
+#   Bandwidth: 250, SpreadFactor: 10, CodingRate: 8, TXpower: 30
+#
+# ShortFast (not recommended for high-power nodes):
+#   Bandwidth: 250, SpreadFactor: 7, CodingRate: 8, TXpower: 20
+#
+# LongSlow (maximum range):
+#   Bandwidth: 125, SpreadFactor: 12, CodingRate: 8, TXpower: 33
+
+# === Power Consumption Notes ===
+# This HAT draws significantly more power than standard HATs:
+# - RX mode: ~150mA
+# - TX @ 30dBm (1W): ~800-1000mA
+# - TX @ 33dBm (2W): ~1200-1500mA
+# Use a quality 5V 3A+ power supply for reliable operation

@@ -1,0 +1,133 @@
+# FemtoFox Configuration Template
+# Linux-based Meshtastic Node with Foxbuntu OS
+# https://github.com/femtofox
+# Getting Started: https://github.com/femtofox/femtofox/wiki/Getting-Started
+#
+# Hardware: FemtoFox / FemtoFox Pro single-board computer
+# Features: Pre-configured Linux node, USB-C (Pro), BBS applications
+# Software: Foxbuntu OS with Meshing Around, TheCommsChannel BBS
+#
+# Use Case: Ready-to-deploy mesh node, BBS hosting, community networks
+
+Lora:
+  # === GPIO Configuration ===
+  # Adjust these based on your specific FemtoFox hardware variant
+  # Check your board documentation for exact GPIO mapping
+
+  # SPI Chip Select - adjust for your board
+  CS: 8
+
+  # Interrupt Request (DIO1) - adjust for your board
+  IRQ: 16
+
+  # Busy signal - adjust for your board
+  Busy: 20
+
+  # Reset pin - adjust for your board
+  Reset: 24
+
+  # === Radio Options ===
+  # Most FemtoFox boards use SX1262 or similar
+  # Enable these for SX126x chips
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+  # === Radio Parameters ===
+  # FemtoFox works great with community standard settings
+  # Uncomment and adjust these for custom modem presets:
+
+  # Bandwidth in kHz (125, 250, 500)
+  # Recommended: 250 for balanced performance
+  # Bandwidth: 250
+
+  # Spreading Factor (7-12)
+  # Recommended: 10 or 11 for community networks
+  # SpreadFactor: 11
+
+  # Coding Rate (5-8 for 4/5 to 4/8)
+  # Recommended: 8 for good error correction
+  # CodingRate: 8
+
+  # Transmit Power in dBm (check your hardware specs)
+  # Typical range: 20-22 dBm
+  # TXpower: 22
+
+  # Hop Limit (0-7)
+  # Recommended: 3 for most networks
+  # HopLimit: 3
+
+  # Channel Slot
+  # Use slot 20 for MtnMesh compatibility
+  # ChannelNum: 20
+
+  # === SPI Configuration ===
+  # SPISpeed: 2000000
+
+GPS:
+  # GPS configuration (if your FemtoFox has GPS module)
+  # Check your board documentation for GPS serial port
+  # Common options: /dev/ttyS0, /dev/ttyUSB0, /dev/ttyACM0
+  # SerialPath: /dev/ttyS0
+
+  # GPS enable pin (if applicable)
+  # GPSEnableGpio: 4
+
+I2C:
+  # I2C bus for sensors and expansion modules
+  I2CDevice: /dev/i2c-1
+
+Webserver:
+  # Web interface port
+  # FemtoFox comes with pre-configured web apps
+  Port: 443
+
+# === Optional: MQTT Configuration ===
+# Uncomment to enable MQTT for connecting to mesh networks
+# MQTT:
+#   Enabled: true
+#   Server: mqtt.meshtastic.org
+#   Port: 1883
+#   Username: meshdev
+#   Topic: msh/US/
+
+# === Optional: Logging Configuration ===
+# Logging:
+#   LogLevel: info  # Options: debug, info, warn, error
+
+# === Recommended Presets for FemtoFox ===
+#
+# MediumFast (recommended for community networks):
+#   Bandwidth: 250, SpreadFactor: 10, CodingRate: 8, TXpower: 22
+#   This is the MtnMesh community standard
+#
+# LongFast (for extended range):
+#   Bandwidth: 250, SpreadFactor: 11, CodingRate: 8, TXpower: 22
+#   Better range, slightly slower
+#
+# ShortFast (for dense urban areas):
+#   Bandwidth: 250, SpreadFactor: 7, CodingRate: 8, TXpower: 20
+#   Fastest data rate, shorter range
+
+# === FemtoFox-Specific Features ===
+# Foxbuntu OS comes pre-installed with:
+# - Meshing Around: Auto-responder and BBS system
+# - TheCommsChannel BBS: Community messaging system
+# - Meshtastic Client: Web-based mesh interface
+#
+# Optional Hardware Modules:
+# - Real-time clock (RTC) for accurate timekeeping
+# - WiFi adapter for network connectivity
+# - Additional sensors via I2C/GPIO
+
+# === Network Integration ===
+# For BBS hosting or community networks:
+# 1. Use MediumFast preset for compatibility
+# 2. Set channel slot to 20 (MtnMesh standard)
+# 3. Configure appropriate hop limit (3-4)
+# 4. Enable MQTT if connecting to internet gateway
+#
+# For standalone mesh node:
+# 1. Use LongFast for maximum range
+# 2. Configure GPS if available
+# 3. Keep hop limit moderate (3)
+# 4. Consider power consumption vs range needs
