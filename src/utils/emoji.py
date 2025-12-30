@@ -15,18 +15,29 @@ class EmojiHelper:
         # Check environment variables
         term = os.environ.get('TERM', '').lower()
         lang = os.environ.get('LANG', '').lower()
+        ssh_connection = os.environ.get('SSH_CONNECTION', '')
+        ssh_tty = os.environ.get('SSH_TTY', '')
 
-        # Disable emojis if:
-        # 1. Running in basic terminals (linux, screen, tmux without proper UTF-8)
-        # 2. LANG doesn't include UTF-8
-        # 3. SSH without proper locale
-        # 4. Explicitly disabled via env var
-
+        # Disable emojis if explicitly requested
         if os.environ.get('DISABLE_EMOJI', '').lower() in ('1', 'true', 'yes'):
             return False
 
-        # Basic terminals that may not render emojis well
-        basic_terms = ['linux', 'dumb', 'unknown', 'cons25']
+        # Disable emojis if running over SSH (common on Raspberry Pi)
+        if ssh_connection or ssh_tty:
+            return False
+
+        # Check if running on Raspberry Pi OS
+        try:
+            with open('/etc/os-release', 'r') as f:
+                os_release = f.read().lower()
+                if 'raspbian' in os_release or 'raspberry' in os_release:
+                    # Default to ASCII on Raspberry Pi OS
+                    return False
+        except:
+            pass
+
+        # Basic terminals that don't render emojis well
+        basic_terms = ['linux', 'dumb', 'unknown', 'cons25', 'vt100', 'vt220', 'screen']
         if any(t in term for t in basic_terms):
             return False
 
@@ -34,8 +45,13 @@ class EmojiHelper:
         if 'utf' not in lang and 'utf' not in term:
             return False
 
-        # Default to enabled for modern terminals
-        return True
+        # Only enable for known good terminals
+        good_terms = ['xterm-256color', 'alacritty', 'kitty', 'iterm', 'konsole', 'gnome']
+        if any(t in term for t in good_terms) and 'utf' in lang:
+            return True
+
+        # Default to disabled for safety (especially on embedded systems)
+        return False
 
     # Emoji mappings with ASCII fallbacks
     EMOJI_MAP = {
@@ -51,7 +67,7 @@ class EmojiHelper:
         '⬆️': '[UP]',       # Update/Upgrade
         '⚙️': '[CFG]',      # Configuration
         '📻': '[RADIO]',    # Radio/Channel
-        '📋': '[TMPL]',     # Template/List
+        '📋': '[LIST]',     # Template/List
         '🔍': '[FIND]',     # Search/Check
         '🔌': '[HW]',       # Hardware
         '🐛': '[DEBUG]',    # Debug
@@ -62,29 +78,40 @@ class EmojiHelper:
         '✓': '[OK]',        # Success
         '✗': '[X]',         # Fail
         '⚠': '[!]',         # Warning
+        '⚠️': '[!]',        # Warning (alternate)
 
         # Hardware
-        '🔧': '[TOOL]',     # Tools/Config
+        '🔧': '[CFG]',      # Tools/Config
         '🎛️': '[CTRL]',     # Controls
         '🌡️': '[TEMP]',     # Temperature
         '💾': '[MEM]',      # Memory/Storage
+        '💿': '[DISK]',     # Disk
 
         # Network
         '🏔️': '[MTN]',      # Mountain (MtnMesh)
         '🚨': '[SOS]',      # Emergency
         '🏙️': '[CITY]',     # Urban
         '📢': '[BCST]',     # Broadcast
+        '🌍': '[NET]',      # World/Network
+        '🔗': '[LINK]',     # Link/Connection
 
         # Actions
         '⬅️': '[<-]',       # Back
         '➡️': '[->]',       # Forward
-        '🔄': '[SYNC]',     # Sync/Refresh
+        '🔄': '[RFRSH]',    # Sync/Refresh
+        '🔁': '[RSTRT]',    # Restart
         '🔐': '[LOCK]',     # Security
         '📜': '[LOG]',      # Logs
         '📝': '[EDIT]',     # Edit
         '⚡': '[FAST]',     # Fast/Quick
         '👋': '[BYE]',      # Goodbye
         'ℹ️': '[i]',        # Information
+        '⏰': '[TIME]',     # Time/Clock
+        '⏱️': '[TIME]',     # Timer
+        '📂': '[DIR]',      # Directory
+        '📄': '[FILE]',     # File
+        '🎉': '[NEW]',      # Celebration/New
+        '✨': '[STAR]',     # Sparkle/Star
     }
 
     def get(self, emoji, fallback=None):
