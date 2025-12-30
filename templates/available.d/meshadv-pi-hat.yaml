@@ -1,0 +1,63 @@
+# MeshAdv-Pi-Hat Configuration Template
+# 1W High-Power LoRa/GPS Raspberry Pi HAT with SX1262/SX1268
+# https://github.com/chrismyers2000/MeshAdv-Pi-Hat
+#
+# Hardware: SX1262 (E22-900M30S/33S) or SX1268 (E22-400M30S/33S)
+# Features: +33dBm (1W) LoRa, GPS (ATGM336H), PPS, I2C/Qwiic
+# Compatible: Raspberry Pi 2/3/4/5, Zero, Zero W, Zero 2 W, Pi 400
+
+Lora:
+  # SPI Chip Select (NSS) - GPIO 21
+  CS: 21
+
+  # Interrupt Request (DIO1) - GPIO 16
+  IRQ: 16
+
+  # Busy signal - GPIO 20
+  Busy: 20
+
+  # Reset pin - GPIO 18
+  Reset: 18
+
+  # RX Enable - GPIO 12
+  RXen: 12
+
+  # TX Enable - GPIO 13
+  TXen: 13
+
+  # Use DIO2 as RF switch control (required for SX1262/SX1268)
+  DIO2_AS_RF_SWITCH: true
+
+  # Enable DIO3 TCXO voltage control
+  DIO3_TCXO_VOLTAGE: true
+
+  # SPI bus configuration
+  # SPISpeed: 2000000
+
+  # Optional: Set transmit power (default: 30 dBm, max: 33 dBm for 33S variants)
+  # TXpower: 30
+
+GPS:
+  # GPS module: ATGM336H (GPS/BeiDou capable)
+  # Use /dev/ttyS0 for Pi 3/4/5, /dev/ttyAMA0 for older Pi
+  SerialPath: /dev/ttyS0
+
+  # PPS (Pulse Per Second) available on GPIO 23 for precise timekeeping
+
+I2C:
+  # I2C bus for sensors and expansion
+  I2CDevice: /dev/i2c-1
+
+Webserver:
+  Port: 443
+
+# Optional: Logging configuration
+# Logging:
+#   LogLevel: info
+
+# NOTES:
+# - This is a high-power 1W LoRa HAT (33dBm max on select variants)
+# - Ensure adequate power supply (recommended 5V 3A minimum)
+# - Supports both 900MHz (SX1262) and 400MHz (SX1268) bands
+# - GPS uses UART pins 14/15
+# - Jumper J3 selects 3.3v or 5v to GPS module

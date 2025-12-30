@@ -111,6 +111,46 @@ class HardwareDetector:
             },
             'notes': 'Standard MeshAdv Pi HAT'
         },
+        'MeshAdv-Pi-Hat': {
+            'name': 'MeshAdv-Pi-Hat',
+            'manufacturer': 'chrismyers2000',
+            'description': '1W High-Power LoRa/GPS Raspberry Pi HAT with SX1262/SX1268',
+            'radio_module': 'SX1262',  # or SX1268 for 400MHz version
+            'power_output': '+33dBm (1W)',
+            'features': ['GPS', 'High Power', 'I2C/Qwiic', 'PPS'],
+            'compatible_boards': ['Pi 2', 'Pi 3', 'Pi 4', 'Pi 5', 'Pi Zero', 'Zero W', 'Zero 2 W', 'Pi 400'],
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 21,     # SPI Chip Select (NSS)
+                'IRQ': 16,    # Interrupt Request (DIO1)
+                'Busy': 20,   # Busy signal
+                'Reset': 18,  # Reset pin
+                'RXen': 12,   # RX Enable
+                'TXen': 13,   # TX Enable
+            },
+            'spi_config': {
+                'MOSI': 10,   # GPIO 10, Pin 19
+                'MISO': 9,    # GPIO 9, Pin 21
+                'CLK': 11,    # GPIO 11, Pin 23
+            },
+            'gps_config': {
+                'module': 'ATGM336H',
+                'serial_path': '/dev/ttyS0',
+                'serial_path_alt': '/dev/ttyAMA0',
+                'uart_tx': 14,
+                'uart_rx': 15,
+                'pps_gpio': 23,
+            },
+            'i2c_config': {
+                'SDA': 2,     # GPIO 2, Pin 3 (I2C1)
+                'SCL': 3,     # GPIO 3, Pin 5 (I2C1)
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+                'DIO3_TCXO_VOLTAGE': True,
+            },
+            'notes': 'High-power 1W LoRa HAT, supports E22-900M30S/33S (900MHz) and E22-400M30S/33S (400MHz)'
+        },
         'Adafruit RFM9x': {
             'name': 'Adafruit RFM9x',
             'manufacturer': 'Adafruit',
