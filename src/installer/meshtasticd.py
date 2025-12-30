@@ -289,7 +289,7 @@ class MeshtasticdInstaller:
 
         if script_path.exists():
             os.chmod(script_path, 0o755)
-            result = run_command(f'bash {script_path}', shell=True)
+            result = run_command(['bash', str(script_path)])
             log_command('setup_permissions.sh', result)
             return result['success']
 
