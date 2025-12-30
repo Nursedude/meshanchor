@@ -345,7 +345,8 @@ def main():
         local_ip = s.getsockname()[0]
         s.close()
         print(f"   http://{local_ip}:{port}")
-    except:
+    except (OSError, socket.error):
+        # Network unavailable or connection failed - skip showing local IP
         pass
 
     print()
