@@ -1,11 +1,23 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "2.0.0"
-__version_info__ = (2, 0, 0)
-__release_date__ = "2025-12-29"
+__version__ = "2.0.1"
+__version_info__ = (2, 0, 1)
+__release_date__ = "2025-12-30"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "2.0.1",
+        "date": "2025-12-30",
+        "changes": [
+            "Fixed Python externally-managed-environment error",
+            "Added virtual environment support for dependencies",
+            "Enhanced Raspberry Pi OS compatibility",
+            "Added emoji fallback system for terminals without UTF-8 support",
+            "Improved terminal detection and ASCII alternatives",
+            "Better support for SSH and basic terminals"
+        ]
+    },
     {
         "version": "2.0.0",
         "date": "2025-12-29",
