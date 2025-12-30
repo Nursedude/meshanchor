@@ -1,0 +1,601 @@
+"""
+GTK4 Application for Meshtasticd Interactive Installer
+Main application entry point and window management
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, GLib, Gio
+import sys
+import os
+import subprocess
+import threading
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from __version__ import __version__, get_full_version
+
+
+class MeshtasticdApp(Adw.Application):
+    """Main GTK4 Application"""
+
+    def __init__(self):
+        super().__init__(
+            application_id='org.meshtastic.installer',
+            flags=Gio.ApplicationFlags.FLAGS_NONE
+        )
+        self.window = None
+        self.connect('activate', self.on_activate)
+
+    def on_activate(self, app):
+        """Called when application is activated"""
+        if not self.window:
+            self.window = MeshtasticdWindow(application=app)
+        self.window.present()
+
+
+class MeshtasticdWindow(Adw.ApplicationWindow):
+    """Main application window"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.set_title(f"Meshtasticd Manager v{__version__}")
+        self.set_default_size(900, 700)
+
+        # Track subprocess for nano/terminal operations
+        self.external_process = None
+
+        # Create the main layout
+        self._build_ui()
+
+        # Check if we're resuming after reboot
+        self._check_resume_state()
+
+    def _build_ui(self):
+        """Build the main UI layout"""
+        # Main vertical box
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_content(main_box)
+
+        # Header bar with title and menu
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label=f"Meshtasticd Manager v{__version__}"))
+
+        # Menu button
+        menu_button = Gtk.MenuButton()
+        menu_button.set_icon_name("open-menu-symbolic")
+        menu = Gio.Menu()
+        menu.append("About", "app.about")
+        menu.append("Quit", "app.quit")
+        menu_button.set_menu_model(menu)
+        header.pack_end(menu_button)
+
+        main_box.append(header)
+
+        # Create actions
+        self._create_actions()
+
+        # Status bar at top
+        self.status_bar = self._create_status_bar()
+        main_box.append(self.status_bar)
+
+        # Main content area with navigation
+        content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        content_box.set_vexpand(True)
+        main_box.append(content_box)
+
+        # Left sidebar navigation
+        sidebar = self._create_sidebar()
+        content_box.append(sidebar)
+
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        content_box.append(separator)
+
+        # Main content stack
+        self.content_stack = Gtk.Stack()
+        self.content_stack.set_hexpand(True)
+        self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        content_box.append(self.content_stack)
+
+        # Add content pages
+        self._add_dashboard_page()
+        self._add_service_page()
+        self._add_install_page()
+        self._add_config_page()
+        self._add_cli_page()
+        self._add_hardware_page()
+
+        # Bottom status bar
+        self.bottom_status = self._create_bottom_status()
+        main_box.append(self.bottom_status)
+
+        # Start status update timer
+        GLib.timeout_add_seconds(5, self._update_status)
+        self._update_status()
+
+    def _create_actions(self):
+        """Create application actions"""
+        app = self.get_application()
+
+        # About action
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self._on_about)
+        app.add_action(about_action)
+
+        # Quit action
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *_: app.quit())
+        app.add_action(quit_action)
+
+    def _on_about(self, action, param):
+        """Show about dialog"""
+        dialog = Adw.AboutWindow(
+            transient_for=self,
+            application_name="Meshtasticd Manager",
+            application_icon="network-wireless",
+            version=get_full_version(),
+            developer_name="Meshtastic Community",
+            license_type=Gtk.License.GPL_3_0,
+            website="https://meshtastic.org",
+            issue_url="https://github.com/Nursedude/Meshtasticd_interactive_UI/issues",
+            developers=["Nursedude", "Contributors"]
+        )
+        dialog.present()
+
+    def _create_status_bar(self):
+        """Create the top status bar"""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(5)
+        box.set_margin_bottom(5)
+        box.add_css_class("status-bar")
+
+        # Service status indicator
+        self.service_status_icon = Gtk.Image.new_from_icon_name("emblem-default")
+        box.append(self.service_status_icon)
+
+        self.service_status_label = Gtk.Label(label="Service: Checking...")
+        box.append(self.service_status_label)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        box.append(spacer)
+
+        # Node count
+        self.node_count_label = Gtk.Label(label="Nodes: --")
+        box.append(self.node_count_label)
+
+        # Separator
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        # Uptime
+        self.uptime_label = Gtk.Label(label="Uptime: --")
+        box.append(self.uptime_label)
+
+        return box
+
+    def _create_sidebar(self):
+        """Create the navigation sidebar"""
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_size_request(200, -1)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        listbox.add_css_class("navigation-sidebar")
+        listbox.connect("row-selected", self._on_nav_selected)
+        scrolled.set_child(listbox)
+
+        # Navigation items
+        nav_items = [
+            ("dashboard", "Dashboard", "utilities-system-monitor-symbolic"),
+            ("service", "Service Management", "system-run-symbolic"),
+            ("install", "Install / Update", "system-software-install-symbolic"),
+            ("config", "Config File Manager", "document-edit-symbolic"),
+            ("cli", "Meshtastic CLI", "utilities-terminal-symbolic"),
+            ("hardware", "Hardware Detection", "drive-harddisk-symbolic"),
+        ]
+
+        for name, label, icon in nav_items:
+            row = Gtk.ListBoxRow()
+            row.set_name(name)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            box.set_margin_start(10)
+            box.set_margin_end(10)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+
+            img = Gtk.Image.new_from_icon_name(icon)
+            box.append(img)
+
+            lbl = Gtk.Label(label=label)
+            lbl.set_xalign(0)
+            box.append(lbl)
+
+            row.set_child(box)
+            listbox.append(row)
+
+        # Select first item
+        listbox.select_row(listbox.get_row_at_index(0))
+
+        return scrolled
+
+    def _on_nav_selected(self, listbox, row):
+        """Handle navigation selection"""
+        if row:
+            page_name = row.get_name()
+            self.content_stack.set_visible_child_name(page_name)
+
+    def _add_dashboard_page(self):
+        """Add the dashboard page"""
+        from .panels.dashboard import DashboardPanel
+        panel = DashboardPanel(self)
+        self.content_stack.add_named(panel, "dashboard")
+        self.dashboard_panel = panel
+
+    def _add_service_page(self):
+        """Add the service management page"""
+        from .panels.service import ServicePanel
+        panel = ServicePanel(self)
+        self.content_stack.add_named(panel, "service")
+        self.service_panel = panel
+
+    def _add_install_page(self):
+        """Add the install/update page"""
+        from .panels.install import InstallPanel
+        panel = InstallPanel(self)
+        self.content_stack.add_named(panel, "install")
+        self.install_panel = panel
+
+    def _add_config_page(self):
+        """Add the config file manager page"""
+        from .panels.config import ConfigPanel
+        panel = ConfigPanel(self)
+        self.content_stack.add_named(panel, "config")
+        self.config_panel = panel
+
+    def _add_cli_page(self):
+        """Add the meshtastic CLI page"""
+        from .panels.cli import CLIPanel
+        panel = CLIPanel(self)
+        self.content_stack.add_named(panel, "cli")
+        self.cli_panel = panel
+
+    def _add_hardware_page(self):
+        """Add the hardware detection page"""
+        from .panels.hardware import HardwarePanel
+        panel = HardwarePanel(self)
+        self.content_stack.add_named(panel, "hardware")
+        self.hardware_panel = panel
+
+    def _create_bottom_status(self):
+        """Create bottom status bar"""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(5)
+        box.set_margin_bottom(5)
+
+        self.bottom_message = Gtk.Label(label="Ready")
+        self.bottom_message.set_xalign(0)
+        self.bottom_message.set_hexpand(True)
+        box.append(self.bottom_message)
+
+        return box
+
+    def set_status_message(self, message):
+        """Set the bottom status message"""
+        self.bottom_message.set_label(message)
+
+    def _update_status(self):
+        """Update status bar information"""
+        # Run in thread to avoid blocking UI
+        thread = threading.Thread(target=self._update_status_thread)
+        thread.daemon = True
+        thread.start()
+        return True  # Continue timer
+
+    def _update_status_thread(self):
+        """Thread for updating status"""
+        try:
+            # Check service status
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'meshtasticd'],
+                capture_output=True, text=True
+            )
+            is_active = result.stdout.strip() == 'active'
+
+            # Get uptime if active
+            uptime = "--"
+            if is_active:
+                result = subprocess.run(
+                    ['systemctl', 'show', 'meshtasticd', '--property=ActiveEnterTimestamp'],
+                    capture_output=True, text=True
+                )
+                if 'ActiveEnterTimestamp=' in result.stdout:
+                    timestamp = result.stdout.split('=')[1].strip()
+                    if timestamp:
+                        uptime = self._calculate_uptime(timestamp)
+
+            # Update UI in main thread
+            GLib.idle_add(self._update_status_ui, is_active, uptime)
+
+        except Exception as e:
+            GLib.idle_add(self._update_status_ui, False, "--")
+
+    def _update_status_ui(self, is_active, uptime):
+        """Update status UI elements (must run in main thread)"""
+        if is_active:
+            self.service_status_icon.set_from_icon_name("emblem-default")
+            self.service_status_label.set_label("Service: Running")
+            self.service_status_label.remove_css_class("error")
+            self.service_status_label.add_css_class("success")
+        else:
+            self.service_status_icon.set_from_icon_name("dialog-error")
+            self.service_status_label.set_label("Service: Stopped")
+            self.service_status_label.remove_css_class("success")
+            self.service_status_label.add_css_class("error")
+
+        self.uptime_label.set_label(f"Uptime: {uptime}")
+        return False
+
+    def _calculate_uptime(self, timestamp):
+        """Calculate uptime from timestamp"""
+        try:
+            from datetime import datetime
+            # Parse systemd timestamp format
+            start = datetime.strptime(timestamp[:19], '%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            delta = now - start
+
+            hours = int(delta.total_seconds() // 3600)
+            minutes = int((delta.total_seconds() % 3600) // 60)
+
+            if hours > 24:
+                days = hours // 24
+                hours = hours % 24
+                return f"{days}d {hours}h"
+            elif hours > 0:
+                return f"{hours}h {minutes}m"
+            else:
+                return f"{minutes}m"
+        except:
+            return "--"
+
+    def open_terminal_editor(self, file_path, callback=None):
+        """
+        Open a file in nano editor in a terminal window.
+        This ensures the user can always return to the installer.
+
+        Args:
+            file_path: Path to file to edit
+            callback: Optional callback when editor closes
+        """
+        def run_editor():
+            try:
+                # Try different terminal emulators
+                terminals = [
+                    ['x-terminal-emulator', '-e'],
+                    ['gnome-terminal', '--'],
+                    ['xfce4-terminal', '-e'],
+                    ['lxterminal', '-e'],
+                    ['xterm', '-e'],
+                ]
+
+                for term_cmd in terminals:
+                    try:
+                        # Build command - nano with the file
+                        cmd = term_cmd + ['nano', str(file_path)]
+
+                        # Run and wait for completion
+                        self.external_process = subprocess.Popen(cmd)
+                        self.external_process.wait()
+                        self.external_process = None
+
+                        # Call callback in main thread
+                        if callback:
+                            GLib.idle_add(callback)
+                        return
+
+                    except FileNotFoundError:
+                        continue
+
+                # No terminal found - show error in main thread
+                GLib.idle_add(
+                    self._show_error_dialog,
+                    "No Terminal Found",
+                    "Could not find a terminal emulator. Please install one of:\n"
+                    "gnome-terminal, xfce4-terminal, lxterminal, or xterm"
+                )
+
+            except Exception as e:
+                GLib.idle_add(
+                    self._show_error_dialog,
+                    "Editor Error",
+                    f"Failed to open editor: {e}"
+                )
+
+        # Run in thread to not block UI
+        thread = threading.Thread(target=run_editor)
+        thread.daemon = True
+        thread.start()
+
+    def run_command_with_output(self, command, callback=None):
+        """
+        Run a command and capture output for display.
+
+        Args:
+            command: Command list to run
+            callback: Callback with (success, stdout, stderr)
+        """
+        def run_cmd():
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if callback:
+                    GLib.idle_add(callback, result.returncode == 0, result.stdout, result.stderr)
+            except subprocess.TimeoutExpired:
+                if callback:
+                    GLib.idle_add(callback, False, "", "Command timed out")
+            except Exception as e:
+                if callback:
+                    GLib.idle_add(callback, False, "", str(e))
+
+        thread = threading.Thread(target=run_cmd)
+        thread.daemon = True
+        thread.start()
+
+    def _show_error_dialog(self, title, message):
+        """Show an error dialog"""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=title,
+            body=message
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
+
+    def show_info_dialog(self, title, message):
+        """Show an info dialog"""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=title,
+            body=message
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
+
+    def show_confirm_dialog(self, title, message, callback):
+        """Show a confirmation dialog"""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=title,
+            body=message
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("confirm", "Confirm")
+        dialog.set_response_appearance("confirm", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", lambda d, r: callback(r == "confirm"))
+        dialog.present()
+
+    def request_reboot(self, reason):
+        """
+        Request a system reboot with persistence.
+        Sets up autostart so installer returns after reboot.
+        """
+        def do_reboot(confirmed):
+            if confirmed:
+                # Save resume state
+                self._save_resume_state(reason)
+
+                # Enable autostart
+                self._enable_autostart()
+
+                # Schedule reboot
+                self.set_status_message("Rebooting in 5 seconds...")
+                GLib.timeout_add_seconds(5, self._perform_reboot)
+
+        self.show_confirm_dialog(
+            "Reboot Required",
+            f"{reason}\n\nThe system needs to reboot. The installer will automatically "
+            "restart after reboot.\n\nReboot now?",
+            do_reboot
+        )
+
+    def _perform_reboot(self):
+        """Perform the actual reboot"""
+        try:
+            subprocess.run(['systemctl', 'reboot'], check=True)
+        except Exception as e:
+            self._show_error_dialog("Reboot Failed", str(e))
+        return False
+
+    def _save_resume_state(self, reason):
+        """Save state for resume after reboot"""
+        state_file = Path.home() / '.meshtasticd-installer-resume'
+        try:
+            state_file.write_text(f"reason={reason}\npage=config\n")
+        except Exception as e:
+            print(f"Failed to save resume state: {e}")
+
+    def _check_resume_state(self):
+        """Check if we're resuming after reboot"""
+        state_file = Path.home() / '.meshtasticd-installer-resume'
+        if state_file.exists():
+            try:
+                content = state_file.read_text()
+                state_file.unlink()  # Remove the state file
+
+                # Parse state
+                state = {}
+                for line in content.strip().split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        state[key] = value
+
+                # Show resume message
+                reason = state.get('reason', 'Unknown')
+                self.show_info_dialog(
+                    "Welcome Back",
+                    f"System rebooted successfully.\n\nReason: {reason}\n\n"
+                    "You can now continue with configuration."
+                )
+
+                # Navigate to the appropriate page
+                page = state.get('page', 'dashboard')
+                self.content_stack.set_visible_child_name(page)
+
+            except Exception as e:
+                print(f"Failed to read resume state: {e}")
+
+    def _enable_autostart(self):
+        """Enable autostart for the installer after reboot"""
+        autostart_dir = Path.home() / '.config' / 'autostart'
+        autostart_dir.mkdir(parents=True, exist_ok=True)
+
+        desktop_entry = f"""[Desktop Entry]
+Type=Application
+Name=Meshtasticd Manager
+Exec=sudo python3 {Path(__file__).parent.parent}/main_gtk.py
+Terminal=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
+Comment=Resume Meshtasticd Manager after reboot
+"""
+
+        desktop_file = autostart_dir / 'meshtasticd-manager.desktop'
+        try:
+            desktop_file.write_text(desktop_entry)
+        except Exception as e:
+            print(f"Failed to create autostart entry: {e}")
+
+    def _disable_autostart(self):
+        """Disable autostart"""
+        desktop_file = Path.home() / '.config' / 'autostart' / 'meshtasticd-manager.desktop'
+        try:
+            if desktop_file.exists():
+                desktop_file.unlink()
+        except Exception as e:
+            print(f"Failed to remove autostart entry: {e}")
+
+
+def main():
+    """Main entry point for GTK4 application"""
+    app = MeshtasticdApp()
+    return app.run(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
