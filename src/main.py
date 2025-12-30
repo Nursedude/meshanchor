@@ -136,7 +136,7 @@ def interactive_menu():
         console.print(f"  [bold]5[/bold]. {em.get('⚙️')}  Configure device")
         console.print(f"  [bold]6[/bold]. {em.get('📻')} [yellow]Channel Presets[/yellow] [dim](Quick Setup)[/dim]")
         console.print(f"  [bold]7[/bold]. {em.get('📋')} Configuration Templates")
-        console.print(f"  [bold]8[/bold]. {em.get('📝')} [green]Edit config.yaml[/green] [dim](Detailed)[/dim]")
+        console.print(f"  [bold]8[/bold]. {em.get('📁')} [green]Config File Manager[/green] [dim](Select YAML + nano)[/dim]")
 
         # Meshtastic CLI Section
         console.print("\n[dim cyan]── Meshtastic CLI ──[/dim cyan]")
@@ -168,7 +168,7 @@ def interactive_menu():
         elif choice == "7":
             manage_templates()
         elif choice == "8":
-            edit_config_yaml()
+            config_file_manager_menu()
         elif choice == "c":
             meshtastic_cli_menu()
         elif choice == "9":
@@ -253,6 +253,14 @@ def meshtastic_cli_menu():
 
     cli = MeshtasticCLI()
     cli.interactive_menu()
+
+
+def config_file_manager_menu():
+    """Config file manager - select yaml from available.d, edit with nano"""
+    from config.config_file_manager import ConfigFileManager
+
+    manager = ConfigFileManager()
+    manager.interactive_menu()
 
 
 def configure_channel_presets():

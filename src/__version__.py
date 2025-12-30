@@ -1,11 +1,25 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "2.2.0"
-__version_info__ = (2, 2, 0)
+__version__ = "2.3.0"
+__version_info__ = (2, 3, 0)
 __release_date__ = "2025-12-30"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "2.3.0",
+        "date": "2025-12-30",
+        "changes": [
+            "Added Config File Manager - select YAML from /etc/meshtasticd/available.d",
+            "Uses official meshtasticd package yaml files (lora-*, display-*, etc.)",
+            "Integrated nano editor for direct config file editing",
+            "Copy selected config to config.d for activation",
+            "Auto daemon-reload and service restart after config changes",
+            "View/deactivate active configurations",
+            "Create basic config.yaml if not exists",
+            "Full integration with meshtasticd package structure"
+        ]
+    },
     {
         "version": "2.2.0",
         "date": "2025-12-30",
