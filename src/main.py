@@ -248,12 +248,25 @@ def install_meshtasticd():
     """Install meshtasticd"""
     console.print("\n[bold cyan]Installing meshtasticd[/bold cyan]\n")
 
+    # Display version information
+    console.print("[cyan]Available versions:[/cyan]")
+    console.print("  [green]stable/beta[/green] - Latest stable releases (recommended)")
+    console.print("  [yellow]daily[/yellow]      - Cutting-edge daily builds")
+    console.print("  [yellow]alpha[/yellow]      - Experimental alpha builds")
+    console.print()
+
     # Ask for version preference
     version_type = Prompt.ask(
         "Select version",
-        choices=["stable", "beta"],
+        choices=["stable", "beta", "daily", "alpha"],
         default="stable"
     )
+
+    if version_type in ["daily", "alpha"]:
+        console.print(f"\n[yellow]⚠ Warning: {version_type} builds may be unstable[/yellow]")
+        if not Confirm.ask(f"Continue with {version_type} version?", default=False):
+            console.print("[yellow]Installation cancelled[/yellow]")
+            return
 
     installer = MeshtasticdInstaller()
 

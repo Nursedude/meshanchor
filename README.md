@@ -16,11 +16,17 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 
 ### Installation & Management
 - **Interactive Installation**: Guided setup for meshtasticd daemon
-- **Version Management**: Install/update stable or beta versions
+- **Version Management**: Install/update stable, beta, daily, or alpha builds
+- **Official Repositories**: Uses OpenSUSE Build Service for latest builds
 - **OS Detection**: Automatic detection of 32-bit/64-bit Raspberry Pi OS
 - **Dependency Management**: Automatically fix deprecated dependencies
 - **Error Handling**: Comprehensive debugging and troubleshooting tools
 - **Automatic Update Notifications**: Get notified when updates are available
+
+#### Available Build Channels
+- **stable/beta** - Latest stable releases from `network:Meshtastic:beta` (recommended)
+- **daily** - Cutting-edge daily builds from `network:Meshtastic:daily`
+- **alpha** - Experimental alpha builds from `network:Meshtastic:alpha`
 
 ### Quick Status Dashboard
 Real-time monitoring at a glance:

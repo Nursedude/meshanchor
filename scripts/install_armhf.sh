@@ -1,5 +1,6 @@
 #!/bin/bash
 # Meshtasticd installation script for 32-bit Raspberry Pi OS (armhf)
+# Uses official OpenSUSE Build Service repositories
 
 set -e
 
@@ -14,11 +15,23 @@ echo "========================================="
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Error: This script must be run as root${NC}"
+    exit 1
+fi
+
+# Detect Raspbian/Debian version
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_VERSION="${VERSION_ID}"
+    OS_NAME="${ID}"
+    echo -e "${CYAN}Detected: ${NAME} ${VERSION}${NC}"
+else
+    echo -e "${RED}Cannot detect OS version${NC}"
     exit 1
 fi
 
@@ -35,27 +48,60 @@ apt-get install -y \
     python3-pip \
     git
 
-# Add Meshtastic repository key
-echo -e "\n${GREEN}Adding Meshtastic repository...${NC}"
-curl -fsSL https://apt.meshtastic.org/meshtastic.gpg | gpg --dearmor -o /usr/share/keyrings/meshtastic-archive-keyring.gpg
+# Determine repository based on version type
+# Official repositories: https://download.opensuse.org/repositories/network:/Meshtastic:/
+case "$VERSION_TYPE" in
+    stable|beta)
+        REPO_CHANNEL="beta"
+        echo -e "\n${GREEN}Using beta repository (latest stable releases)${NC}"
+        ;;
+    daily)
+        REPO_CHANNEL="daily"
+        echo -e "\n${YELLOW}Using daily repository (cutting-edge builds)${NC}"
+        ;;
+    alpha)
+        REPO_CHANNEL="alpha"
+        echo -e "\n${YELLOW}Using alpha repository (experimental builds)${NC}"
+        ;;
+    *)
+        echo -e "${YELLOW}Unknown version type '$VERSION_TYPE', defaulting to beta${NC}"
+        REPO_CHANNEL="beta"
+        ;;
+esac
 
-# Add repository for Raspbian
-echo "deb [arch=armhf signed-by=/usr/share/keyrings/meshtastic-archive-keyring.gpg] https://apt.meshtastic.org raspbian-bookworm main" > /etc/apt/sources.list.d/meshtastic.list
+# Map OS version to repository version
+if [ "$OS_NAME" = "raspbian" ]; then
+    REPO_OS="Raspbian_${OS_VERSION}"
+else
+    REPO_OS="Debian_${OS_VERSION}"
+fi
+
+# Remove old Meshtastic repository files if they exist
+echo -e "\n${CYAN}Cleaning up old repository configurations...${NC}"
+rm -f /etc/apt/sources.list.d/meshtastic.list
+rm -f /etc/apt/sources.list.d/network:Meshtastic:*.list
+rm -f /usr/share/keyrings/meshtastic-archive-keyring.gpg
+rm -f /etc/apt/trusted.gpg.d/network_Meshtastic_*.gpg
+
+# Add official Meshtastic repository from OpenSUSE Build Service
+echo -e "\n${GREEN}Adding official Meshtastic ${REPO_CHANNEL} repository...${NC}"
+REPO_URL="http://download.opensuse.org/repositories/network:/Meshtastic:/${REPO_CHANNEL}/${REPO_OS}/"
+echo -e "${CYAN}Repository: ${REPO_URL}${NC}"
+
+echo "deb ${REPO_URL} /" | tee /etc/apt/sources.list.d/network:Meshtastic:${REPO_CHANNEL}.list
+
+# Add repository key
+echo -e "\n${GREEN}Adding repository signing key...${NC}"
+KEY_URL="https://download.opensuse.org/repositories/network:/Meshtastic:/${REPO_CHANNEL}/${REPO_OS}/Release.key"
+curl -fsSL "${KEY_URL}" | gpg --dearmor | tee /etc/apt/trusted.gpg.d/network_Meshtastic_${REPO_CHANNEL}.gpg > /dev/null
 
 # Update package lists
 echo -e "\n${GREEN}Updating package lists...${NC}"
 apt-get update
 
 # Install meshtasticd
-if [ "$VERSION_TYPE" = "beta" ]; then
-    echo -e "\n${GREEN}Installing meshtasticd (beta)...${NC}"
-    # For beta, we might need to specify a version or use a different repository
-    # This is a placeholder - adjust based on actual beta installation method
-    apt-get install -y meshtasticd
-else
-    echo -e "\n${GREEN}Installing meshtasticd (stable)...${NC}"
-    apt-get install -y meshtasticd
-fi
+echo -e "\n${GREEN}Installing meshtasticd from official repository...${NC}"
+apt-get install -y meshtasticd
 
 # Install Python meshtastic library
 echo -e "\n${GREEN}Installing meshtastic Python library...${NC}"
@@ -63,18 +109,36 @@ pip3 install --upgrade meshtastic
 
 # Enable SPI and I2C
 echo -e "\n${GREEN}Enabling SPI and I2C...${NC}"
-if ! grep -q "^dtparam=spi=on" /boot/config.txt; then
-    echo "dtparam=spi=on" >> /boot/config.txt
+CONFIG_FILE="/boot/config.txt"
+if [ -f "/boot/firmware/config.txt" ]; then
+    CONFIG_FILE="/boot/firmware/config.txt"
 fi
 
-if ! grep -q "^dtparam=i2c_arm=on" /boot/config.txt; then
-    echo "dtparam=i2c_arm=on" >> /boot/config.txt
+if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
+    echo "dtparam=spi=on" >> "$CONFIG_FILE"
+    echo -e "${GREEN}✓ SPI enabled in ${CONFIG_FILE}${NC}"
+else
+    echo -e "${CYAN}SPI already enabled${NC}"
+fi
+
+if ! grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE"; then
+    echo "dtparam=i2c_arm=on" >> "$CONFIG_FILE"
+    echo -e "${GREEN}✓ I2C enabled in ${CONFIG_FILE}${NC}"
+else
+    echo -e "${CYAN}I2C already enabled${NC}"
 fi
 
 # Load SPI module
+echo -e "\n${GREEN}Loading SPI kernel module...${NC}"
 modprobe spi_bcm2835 || true
 
-echo -e "\n${GREEN}Installation completed!${NC}"
+# Show installed version
+INSTALLED_VERSION=$(dpkg -l | grep meshtasticd | awk '{print $3}')
+echo -e "\n${GREEN}=========================================${NC}"
+echo -e "${GREEN}Installation completed successfully!${NC}"
+echo -e "${GREEN}=========================================${NC}"
+echo -e "${CYAN}Installed version: ${INSTALLED_VERSION}${NC}"
+echo -e "${CYAN}Repository: network:Meshtastic:${REPO_CHANNEL}${NC}"
 echo -e "${YELLOW}Note: A reboot may be required for SPI/I2C changes to take effect${NC}"
 
 exit 0
