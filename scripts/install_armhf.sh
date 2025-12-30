@@ -105,7 +105,7 @@ apt-get install -y meshtasticd
 
 # Install Python meshtastic library
 echo -e "\n${GREEN}Installing meshtastic Python library...${NC}"
-pip3 install --upgrade meshtastic
+python3 -m pip install --upgrade meshtastic --break-system-packages
 
 # Enable SPI and I2C
 echo -e "\n${GREEN}Enabling SPI and I2C...${NC}"

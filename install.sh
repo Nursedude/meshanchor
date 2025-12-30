@@ -108,8 +108,15 @@ echo -e "${GREEN}  ✓ Repository ready${NC}"
 
 # Install Python dependencies
 echo -e "${CYAN}[6/7] Installing Python dependencies...${NC}"
-python3 -m pip install -q --upgrade pip
-python3 -m pip install -q -r requirements.txt
+# Create virtual environment if it doesn't exist
+if [[ ! -d "$INSTALL_DIR/venv" ]]; then
+    echo "  Creating virtual environment..."
+    python3 -m venv "$INSTALL_DIR/venv"
+fi
+# Install dependencies in virtual environment
+echo "  Installing packages in virtual environment..."
+"$INSTALL_DIR/venv/bin/pip" install -q --upgrade pip
+"$INSTALL_DIR/venv/bin/pip" install -q -r requirements.txt
 echo -e "${GREEN}  ✓ Python dependencies installed${NC}"
 
 # Create symlink for easy access
@@ -117,7 +124,7 @@ echo -e "${CYAN}[7/7] Creating system command...${NC}"
 cat > /usr/local/bin/meshtasticd-installer << 'EOF'
 #!/bin/bash
 cd /opt/meshtasticd-installer
-exec sudo python3 src/main.py "$@"
+exec sudo /opt/meshtasticd-installer/venv/bin/python src/main.py "$@"
 EOF
 chmod +x /usr/local/bin/meshtasticd-installer
 echo -e "${GREEN}  ✓ Command 'meshtasticd-installer' created${NC}"
