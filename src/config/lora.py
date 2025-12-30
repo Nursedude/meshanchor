@@ -198,52 +198,249 @@ class LoRaConfigurator:
         return region
 
     def configure_advanced(self):
-        """Configure advanced LoRa parameters"""
-        console.print("\n[bold cyan]Advanced LoRa Configuration[/bold cyan]\n")
+        """Configure advanced LoRa parameters - Full Interactive Mode"""
+        console.print("\n[bold cyan]═══ Advanced LoRa Configuration Wizard ═══[/bold cyan]\n")
+        console.print("[bold yellow]⚠️  ADVANCED MODE - Full Manual Configuration[/bold yellow]")
+        console.print("[dim]Reference: https://meshtastic.org/docs/configuration/radio/lora/[/dim]\n")
 
-        console.print("[yellow]Warning:[/yellow] Changing these settings can affect network compatibility")
-        console.print("Only modify if you know what you're doing!\n")
+        console.print("This wizard allows you to configure ALL LoRa parameters manually.")
+        console.print("[yellow]Warning:[/yellow] Incorrect settings can prevent network communication!")
+        console.print("For most users, we recommend using preset-based templates instead.\n")
 
-        if not Confirm.ask("Continue with advanced configuration?", default=False):
+        if not Confirm.ask("Continue with advanced manual configuration?", default=False):
+            console.print("[cyan]Tip: Use preset templates for easier configuration[/cyan]")
             return None
 
         config = {}
 
-        # Bandwidth
-        console.print("\n[cyan]Bandwidth (kHz):[/cyan]")
-        console.print("Higher bandwidth = faster data rate, but shorter range")
-        bandwidth = Prompt.ask("Select bandwidth", choices=[str(b) for b in self.BANDWIDTHS], default="125")
-        config['bandwidth'] = int(bandwidth)
+        # Step 1: Region Configuration
+        console.print("\n[bold]Step 1/8: Region Configuration[/bold]")
+        console.print("[yellow]REQUIRED - Device will not transmit without region set[/yellow]")
+        config['region'] = 'US'  # Force US region as per requirements
+        console.print(f"[green]✓ Region: US (915MHz ISM band)[/green]")
 
-        # Spreading Factor
-        console.print("\n[cyan]Spreading Factor:[/cyan]")
-        console.print("Higher SF = longer range, but slower data rate")
-        sf = Prompt.ask("Select spreading factor", choices=[str(s) for s in self.SPREADING_FACTORS], default="7")
-        config['spreading_factor'] = int(sf)
+        # Step 2: Modem Configuration Method
+        console.print("\n[bold]Step 2/8: Modem Configuration Method[/bold]")
+        console.print("1. Use Modem Preset (recommended - pre-defined settings)")
+        console.print("2. Manual Configuration (advanced - configure each parameter)")
 
-        # Coding Rate
-        console.print("\n[cyan]Coding Rate (4/x):[/cyan]")
-        console.print("Higher CR = more error correction, but more overhead")
-        cr = Prompt.ask("Select coding rate", choices=[str(c) for c in self.CODING_RATES], default="5")
-        config['coding_rate'] = int(cr)
+        method = Prompt.ask("\nSelect configuration method", choices=["1", "2"], default="1")
 
-        # Transmit Power
-        console.print("\n[cyan]Transmit Power (dBm):[/cyan]")
-        console.print("Higher power = longer range, but more battery consumption")
-        power = Prompt.ask("Enter transmit power (0-30)", default="20")
+        if method == "1":
+            config['use_preset'] = True
+            console.print("\n[cyan]Available Modem Presets:[/cyan]")
+            console.print("1. LONG_FAST     - 250kHz BW, SF11 (~5-10km, ~1kbps) [DEFAULT]")
+            console.print("2. MEDIUM_FAST   - 250kHz BW, SF10 (~3-7km, ~1.5kbps) [MtnMesh Standard]")
+            console.print("3. SHORT_FAST    - 250kHz BW, SF7  (<1km, ~5kbps) [Urban/Dense]")
+            console.print("4. LONG_SLOW     - 125kHz BW, SF12 (10-30km, ~0.3kbps) [Maximum Range]")
+            console.print("5. VERY_LONG_SLOW - 125kHz BW, SF12 (15-40km) [Emergency/SAR]")
+
+            preset_choice = Prompt.ask("\nSelect preset", choices=["1", "2", "3", "4", "5"], default="1")
+            preset_map = {"1": "LONG_FAST", "2": "MEDIUM_FAST", "3": "SHORT_FAST",
+                         "4": "LONG_SLOW", "5": "VERY_LONG_SLOW"}
+            config['modem_preset'] = preset_map[preset_choice]
+            console.print(f"[green]✓ Using preset: {config['modem_preset']}[/green]")
+        else:
+            config['use_preset'] = False
+
+            # Manual bandwidth configuration
+            console.print("\n[bold cyan]Bandwidth Configuration:[/bold cyan]")
+            console.print("Bandwidth affects both speed and range:")
+            console.print("  125 kHz: Longest range, slowest speed")
+            console.print("  250 kHz: Good balance (recommended)")
+            console.print("  500 kHz: Shortest range, fastest speed")
+            console.print("[dim]Each doubling ~3dB less link budget[/dim]")
+            bandwidth = Prompt.ask("\nSelect bandwidth (kHz)", choices=["125", "250", "500"], default="250")
+            config['bandwidth'] = int(bandwidth)
+
+            # Manual spreading factor configuration
+            console.print("\n[bold cyan]Spreading Factor Configuration:[/bold cyan]")
+            console.print("Spreading Factor affects range and speed:")
+            console.print("  SF7:  Fastest, shortest range (<500m urban)")
+            console.print("  SF10: Balanced (3-7km) [MtnMesh standard]")
+            console.print("  SF11: Good range (5-10km) [Default]")
+            console.print("  SF12: Maximum range (10-30km), slowest")
+            console.print("[dim]Each step up +2.5dB link budget[/dim]")
+            sf = Prompt.ask("\nSelect spreading factor",
+                          choices=["7", "8", "9", "10", "11", "12"], default="11")
+            config['spreading_factor'] = int(sf)
+
+            # Manual coding rate configuration
+            console.print("\n[bold cyan]Coding Rate Configuration:[/bold cyan]")
+            console.print("Coding Rate (4/x) affects error correction:")
+            console.print("  4/5: Least overhead, fastest")
+            console.print("  4/8: Most overhead, most reliable (recommended)")
+            console.print("[dim]Higher values = better error correction[/dim]")
+            cr = Prompt.ask("\nSelect coding rate", choices=["5", "6", "7", "8"], default="8")
+            config['coding_rate'] = int(cr)
+
+        # Step 3: Transmit Power
+        console.print("\n[bold]Step 3/8: Transmit Power[/bold]")
+        console.print("TX Power affects range and battery life:")
+        console.print("  Standard modules: 0-22 dBm (max 158mW)")
+        console.print("  MeshAdv-Mini: 0-22 dBm (max 158mW)")
+        console.print("  MeshAdv-Pi-Hat: 0-30 dBm (max 1W), up to 33dBm on 33S variants")
+        console.print("[dim]Higher power = more range but more battery drain[/dim]")
+        power = Prompt.ask("\nEnter transmit power (dBm)", default="22")
         try:
             power_val = int(power)
-            if 0 <= power_val <= 30:
+            if 0 <= power_val <= 33:
                 config['tx_power'] = power_val
+                console.print(f"[green]✓ TX Power: {power_val} dBm[/green]")
             else:
-                console.print("[yellow]Using default: 20 dBm[/yellow]")
-                config['tx_power'] = 20
+                console.print("[yellow]Value out of range. Using default: 22 dBm[/yellow]")
+                config['tx_power'] = 22
         except ValueError:
-            console.print("[yellow]Using default: 20 dBm[/yellow]")
-            config['tx_power'] = 20
+            console.print("[yellow]Invalid input. Using default: 22 dBm[/yellow]")
+            config['tx_power'] = 22
 
-        # Display summary
-        self._display_config_summary(config)
+        # Step 4: Hop Limit
+        console.print("\n[bold]Step 4/8: Hop Limit[/bold]")
+        console.print("Maximum times a message can be retransmitted:")
+        console.print("  0: No retransmission (direct only)")
+        console.print("  3: Standard for most networks (recommended)")
+        console.print("  7: Maximum for wide-area or emergency networks")
+        console.print("[dim]Higher values increase network traffic[/dim]")
+        hop = Prompt.ask("\nEnter hop limit", choices=["0", "1", "2", "3", "4", "5", "6", "7"], default="3")
+        config['hop_limit'] = int(hop)
+        console.print(f"[green]✓ Hop Limit: {hop}[/green]")
+
+        # Step 5: Channel Number/Slot
+        console.print("\n[bold]Step 5/8: Channel Number (Frequency Slot)[/bold]")
+        console.print("Different slots use different frequencies to avoid interference:")
+        console.print("  Slot 0: Default/general use")
+        console.print("  Slot 20: MtnMesh community standard")
+        console.print("  Slots 1-7: Custom channels")
+        console.print("  US Region: 0-104 channels available")
+        console.print("[yellow]⚠️  Must match across all nodes in your mesh![/yellow]")
+        channel = Prompt.ask("\nEnter channel number", default="20")
+        try:
+            channel_val = int(channel)
+            if 0 <= channel_val <= 104:
+                config['channel_slot'] = channel_val
+                console.print(f"[green]✓ Channel: {channel_val}[/green]")
+            else:
+                console.print("[yellow]Using default: 20[/yellow]")
+                config['channel_slot'] = 20
+        except ValueError:
+            console.print("[yellow]Using default: 20[/yellow]")
+            config['channel_slot'] = 20
+
+        # Step 6: Advanced Features (Optional)
+        console.print("\n[bold]Step 6/8: Advanced Features (Optional)[/bold]")
+        if Confirm.ask("Configure advanced features (SPI speed, frequency offset, etc.)?", default=False):
+            # SPI Speed
+            console.print("\n[cyan]SPI Bus Speed:[/cyan]")
+            console.print("Typically 2000000 Hz (2 MHz). Only change if experiencing issues.")
+            spi = Prompt.ask("Enter SPI speed (Hz)", default="2000000")
+            try:
+                config['spi_speed'] = int(spi)
+            except ValueError:
+                config['spi_speed'] = 2000000
+
+            # Frequency Offset
+            console.print("\n[cyan]Frequency Offset:[/cyan]")
+            console.print("Fine-tune center frequency. Usually 0.")
+            freq_offset = Prompt.ask("Enter frequency offset (Hz)", default="0")
+            try:
+                config['frequency_offset'] = int(freq_offset)
+            except ValueError:
+                config['frequency_offset'] = 0
+
+            # RX Boosted Gain (if applicable)
+            console.print("\n[cyan]RX Boosted Gain (SX126x only):[/cyan]")
+            console.print("Improves receiver sensitivity but increases power draw.")
+            if Confirm.ask("Enable RX boosted gain?", default=False):
+                config['rx_boosted_gain'] = True
+
+        # Step 7: Device Role
+        console.print("\n[bold]Step 7/8: Device Role[/bold]")
+        console.print("1. CLIENT - Normal node with sleep cycles (mobile/portable)")
+        console.print("2. ROUTER - Always-on infrastructure node (repeaters)")
+        role_choice = Prompt.ask("Select device role", choices=["1", "2"], default="1")
+        config['device_role'] = "CLIENT" if role_choice == "1" else "ROUTER"
+        console.print(f"[green]✓ Device Role: {config['device_role']}[/green]")
+
+        # Step 8: Configuration Summary
+        console.print("\n[bold]Step 8/8: Configuration Summary[/bold]")
+        self._display_advanced_config_summary(config)
+
+        # Save option
+        if Confirm.ask("\nSave this configuration?", default=True):
+            console.print("\n[green]✓ Configuration ready to apply[/green]")
+            console.print("[cyan]Tip: This configuration will be saved to /etc/meshtasticd/config.yaml[/cyan]")
+            console.print("[dim]For manual editing, see: templates/available.d/advanced-lora-manual.yaml[/dim]")
+            return config
+        else:
+            console.print("[yellow]Configuration not saved[/yellow]")
+            return None
+
+    def _display_advanced_config_summary(self, config):
+        """Display comprehensive configuration summary"""
+        from rich.panel import Panel
+
+        console.print("\n")
+        console.print(Panel.fit(
+            "[bold green]Configuration Summary[/bold green]",
+            border_style="green"
+        ))
+
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Parameter", style="cyan", width=25)
+        table.add_column("Value", style="green", width=30)
+        table.add_column("Description", style="dim", width=35)
+
+        # Region
+        table.add_row("Region", config.get('region', 'US'), "915MHz ISM band")
+
+        # Modem settings
+        if config.get('use_preset'):
+            table.add_row("Modem Preset", config.get('modem_preset', 'LONG_FAST'), "Pre-defined modem settings")
+        else:
+            table.add_row("Bandwidth", f"{config.get('bandwidth', 250)} kHz", "Spectrum width")
+            table.add_row("Spreading Factor", str(config.get('spreading_factor', 11)), "Signal spreading")
+            table.add_row("Coding Rate", f"4/{config.get('coding_rate', 8)}", "Error correction")
+
+        # Power and network
+        table.add_row("TX Power", f"{config.get('tx_power', 22)} dBm", "Transmit power")
+        table.add_row("Hop Limit", str(config.get('hop_limit', 3)), "Max retransmissions")
+        table.add_row("Channel Slot", str(config.get('channel_slot', 20)), "Frequency slot")
+        table.add_row("Device Role", config.get('device_role', 'CLIENT'), "Operating mode")
+
+        # Advanced features
+        if 'spi_speed' in config:
+            table.add_row("SPI Speed", f"{config['spi_speed']} Hz", "SPI bus speed")
+        if 'frequency_offset' in config:
+            table.add_row("Freq Offset", f"{config['frequency_offset']} Hz", "Center frequency adjust")
+        if config.get('rx_boosted_gain'):
+            table.add_row("RX Boost", "Enabled", "Enhanced sensitivity")
+
+        console.print(table)
+
+        # Compatibility warning
+        console.print("\n[bold yellow]⚠️  Compatibility Requirements:[/bold yellow]")
+        console.print("For devices to communicate, they MUST have identical:")
+        console.print("  • Region (US)")
+        console.print("  • Modem settings (preset OR bandwidth/SF/CR)")
+        console.print("  • Channel number")
+        console.print("  • Encryption key (PSK)")
+
+        # Estimated range
+        if not config.get('use_preset'):
+            bw = config.get('bandwidth', 250)
+            sf = config.get('spreading_factor', 11)
+            if bw == 125 and sf == 12:
+                range_est = "15-40km (Maximum)"
+            elif bw == 250 and sf >= 11:
+                range_est = "5-15km (Very Long)"
+            elif bw == 250 and sf == 10:
+                range_est = "3-10km (Long)"
+            elif bw == 250 and sf <= 9:
+                range_est = "1-5km (Medium)"
+            else:
+                range_est = "Variable"
+            console.print(f"\n[cyan]Estimated Range: {range_est}[/cyan]")
+            console.print("[dim](Actual range depends on terrain, antenna, and obstacles)[/dim]")
 
         return config
 

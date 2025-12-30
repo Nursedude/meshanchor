@@ -1,38 +1,56 @@
 # Emergency / Search and Rescue Configuration Template
-# Optimized for maximum range in emergency situations
+# Optimized for maximum range in emergency situations - US 915MHz
 # https://github.com/Nursedude/Meshtasticd_interactive_UI
 #
-# Use case: SAR operations, emergency communications, disaster response
-# Features: Maximum range, extended hop limit, high power
+# Use Case: SAR operations, emergency communications, disaster response
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Preset: LongSlow (Maximum Range)
+# Features: Maximum range, extended hop limit, high power, GPS enabled
 
 Lora:
-  # GPIO Configuration (adjust for your hardware)
+  # === GPIO Configuration ===
+  # Adjust these for your specific hardware
+  # Common defaults shown (MeshAdv-Mini/similar boards)
+
+  # SPI Chip Select - GPIO 8 (Pin 24)
   CS: 8
+
+  # Interrupt Request (DIO1) - GPIO 16 (Pin 36)
   IRQ: 16
+
+  # Busy signal - GPIO 20 (Pin 38)
   Busy: 20
+
+  # Reset pin - GPIO 24 (Pin 18)
   Reset: 24
 
-  # SX126x specific options
+  # === Radio Options ===
+  # SX126x specific options (required for most modern LoRa modules)
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
 
-  # Radio Parameters - Long Slow preset for maximum range
-  # Bandwidth: 125 kHz (narrower = longer range)
+  # === Emergency/SAR Radio Settings ===
+  # Radio Parameters - LongSlow preset for MAXIMUM RANGE
+
+  # Bandwidth: 125 kHz (narrowest = longest range, slower data)
   Bandwidth: 125
 
-  # Spreading Factor: 12 (maximum = longest range but slowest)
+  # Spreading Factor: 12 (maximum = longest range but slowest speed)
+  # Can achieve 15-30km range in ideal conditions
   SpreadFactor: 12
 
-  # Coding Rate: 4/8 (maximum error correction)
+  # Coding Rate: 4/8 (maximum error correction for reliability)
   CodingRate: 8
 
-  # Maximum transmit power for emergency situations
+  # Maximum transmit power: 30 dBm (1W for emergency situations)
+  # Use high-power hardware (MeshAdv-Pi-Hat) for 30+ dBm
   TXpower: 30
 
-  # Extended hop limit for wide-area coverage
+  # Extended hop limit: 7 (maximum for wide-area coverage)
+  # Allows messages to traverse large search areas
   HopLimit: 7
 
-  # Use default channel slot
+  # Emergency channel slot: 0 (standard emergency channel)
   ChannelNum: 0
 
 # GPS - Essential for SAR operations

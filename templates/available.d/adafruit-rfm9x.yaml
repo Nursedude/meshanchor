@@ -1,15 +1,60 @@
 # Adafruit RFM9x LoRa Radio Bonnet Configuration Template
 # https://www.adafruit.com/product/4074
+#
+# Hardware: RFM95/96/97/98 (SX1276/77/78/79)
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Power Output: +20dBm (typical)
+# Compatible: Raspberry Pi with 40-pin header
 
 Lora:
-  # SPI Chip Select - GPIO 7 (CE1)
+  # === GPIO Configuration (Adafruit RFM9x Standard) ===
+  # SPI Chip Select - GPIO 7 (CE1, Pin 26)
   CS: 7
 
-  # Interrupt Request - GPIO 25
+  # Interrupt Request - GPIO 25 (Pin 22)
   IRQ: 25
 
-  # Reset pin - GPIO 17
+  # Reset pin - GPIO 17 (Pin 11)
   Reset: 17
 
+  # === Radio Parameters ===
+  # Uncomment and adjust these for custom modem presets:
+
+  # Bandwidth in kHz (125, 250, 500)
+  # Higher = faster but shorter range
+  # Bandwidth: 250
+
+  # Spreading Factor (7-12)
+  # Lower = faster but shorter range, Higher = slower but longer range
+  # SpreadFactor: 11
+
+  # Coding Rate (5-8 for 4/5 to 4/8)
+  # Higher = more error correction but slower
+  # CodingRate: 8
+
+  # Transmit Power in dBm (0-20 for RFM9x)
+  # TXpower: 20
+
+  # Hop Limit (0-7)
+  # Number of times a message can be retransmitted
+  # HopLimit: 3
+
+  # Channel Slot (0-104 for US region)
+  # Different slots help avoid interference
+  # ChannelNum: 20
+
 Webserver:
+  # Web interface port (443 for HTTPS, 80 for HTTP)
   Port: 443
+
+# === Common Presets ===
+# Uncomment the preset you want to use:
+#
+# LongFast (default):
+#   Bandwidth: 250, SpreadFactor: 11, CodingRate: 8, TXpower: 20
+#
+# MediumFast (MtnMesh standard):
+#   Bandwidth: 250, SpreadFactor: 10, CodingRate: 8, TXpower: 20
+#
+# ShortFast (urban/dense areas):
+#   Bandwidth: 250, SpreadFactor: 7, CodingRate: 8, TXpower: 17

@@ -1,45 +1,71 @@
 # Urban High-Speed Configuration Template
-# Optimized for dense urban environments with fast message delivery
+# Optimized for dense urban environments with fast message delivery - US 915MHz
 # https://github.com/Nursedude/Meshtasticd_interactive_UI
 #
-# Use case: City networks, dense node clusters, rapid messaging
+# Use Case: City networks, dense node clusters, rapid messaging
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Preset: ShortFast
 # Features: Fast data rate, reduced congestion, low latency
 
 Lora:
-  # GPIO Configuration (adjust for your hardware)
+  # === GPIO Configuration ===
+  # Adjust these for your specific hardware
+  # Common defaults shown (MeshAdv-Mini/similar boards)
+
+  # SPI Chip Select - GPIO 8 (Pin 24)
   CS: 8
+
+  # Interrupt Request (DIO1) - GPIO 16 (Pin 36)
   IRQ: 16
+
+  # Busy signal - GPIO 20 (Pin 38)
   Busy: 20
+
+  # Reset pin - GPIO 24 (Pin 18)
   Reset: 24
 
-  # SX126x specific options
+  # === Radio Options ===
+  # SX126x specific options (required for most modern LoRa modules)
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
 
-  # Radio Parameters - Short Fast preset
-  # Bandwidth: 250 kHz (wider = faster)
+  # === Urban High-Speed Settings ===
+  # Radio Parameters - ShortFast preset
+
+  # Bandwidth: 250 kHz (wider = faster data rate)
   Bandwidth: 250
 
   # Spreading Factor: 7 (minimum = fastest but shortest range)
+  # Perfect for dense urban areas with many nearby nodes
   SpreadFactor: 7
 
-  # Coding Rate: 4/8
+  # Coding Rate: 4/8 (maximum error correction)
   CodingRate: 8
 
-  # Moderate power for urban environment (less interference)
+  # Moderate power: 20 dBm (reduces interference in dense areas)
   TXpower: 20
 
-  # Lower hop limit to reduce network congestion
+  # Lower hop limit: 3 (reduces network congestion in dense urban mesh)
   HopLimit: 3
 
-  # Default channel slot
+  # Default channel slot: 0
+  # Can use different slots to separate urban networks
   ChannelNum: 0
 
 Webserver:
+  # Web interface port (443 for HTTPS, 80 for HTTP)
   Port: 443
 
-# Channels
+# === Urban Network Channel ===
+# Default public channel for urban mesh
 Channels:
   - name: "Urban"
-    psk: "AQ=="
+    psk: "AQ=="  # Public/default encryption key
     role: "PRIMARY"
+
+# === Urban Deployment Notes ===
+# - ShortFast is optimized for <1km range with fast message delivery
+# - Ideal for cities with many nodes within line of sight
+# - Lower power (20dBm) reduces interference with other nodes
+# - Lower hop limit (3) prevents message flooding in dense networks
+# - Consider using unique channel slots for different neighborhoods

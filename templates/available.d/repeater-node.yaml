@@ -1,62 +1,105 @@
 # Repeater/Router Node Configuration Template
-# Optimized for dedicated infrastructure repeater nodes
+# Optimized for dedicated infrastructure repeater nodes - US 915MHz
 # https://github.com/Nursedude/Meshtasticd_interactive_UI
 #
-# Use case: Fixed infrastructure nodes, hilltop repeaters, relay stations
-# Features: High power, extended hop limit, router mode
+# Use Case: Fixed infrastructure nodes, hilltop repeaters, relay stations
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Preset: LongFast (Good Range)
+# Features: High power, extended hop limit, router mode, GPS enabled
 
 Lora:
-  # GPIO Configuration (adjust for your hardware)
+  # === GPIO Configuration ===
+  # Adjust these for your specific hardware
+  # Common defaults shown (MeshAdv-Mini/similar boards)
+
+  # SPI Chip Select - GPIO 8 (Pin 24)
   CS: 8
+
+  # Interrupt Request (DIO1) - GPIO 16 (Pin 36)
   IRQ: 16
+
+  # Busy signal - GPIO 20 (Pin 38)
   Busy: 20
+
+  # Reset pin - GPIO 24 (Pin 18)
   Reset: 24
 
-  # SX126x specific options
+  # === Radio Options ===
+  # SX126x specific options (required for most modern LoRa modules)
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
 
-  # Radio Parameters - Long Fast preset for good range
-  # Bandwidth: 250 kHz
+  # === Repeater/Router Radio Settings ===
+  # Radio Parameters - LongFast preset for good range and reliability
+
+  # Bandwidth: 250 kHz (good balance for repeaters)
   Bandwidth: 250
 
-  # Spreading Factor: 11
+  # Spreading Factor: 11 (good range without being too slow)
   SpreadFactor: 11
 
-  # Coding Rate: 4/8
+  # Coding Rate: 4/8 (maximum error correction for reliability)
   CodingRate: 8
 
-  # Maximum power for repeater coverage
+  # Maximum power: 30 dBm (1W for infrastructure coverage)
+  # Use high-power hardware (MeshAdv-Pi-Hat) for 30 dBm
   TXpower: 30
 
-  # Maximum hop limit for infrastructure nodes
+  # Maximum hop limit: 7 (infrastructure nodes relay many messages)
   HopLimit: 7
 
-  # Default channel slot
+  # Default channel slot: 0
+  # Consider using slot 20 for MtnMesh compatibility
   ChannelNum: 0
 
-# Device role configuration
+# === Device Configuration ===
+# Set device role as ROUTER for dedicated repeater functionality
 Device:
-  # Set as router/repeater
+  # Router role: Always stays awake, relays all messages
   Role: ROUTER
 
 GPS:
+  # GPS recommended for fixed repeater location tracking
+  # Serial port: /dev/ttyS0 for Pi 3/4/5
   SerialPath: /dev/ttyS0
+
+  # GPS enable pin - GPIO 4 (Pin 7)
   GPSEnableGpio: 4
 
 I2C:
+  # I2C bus for optional sensors (temperature monitoring, etc.)
   I2CDevice: /dev/i2c-1
 
 Webserver:
+  # Web interface port (443 for HTTPS, 80 for HTTP)
   Port: 443
 
-# Logging for infrastructure monitoring
+# === Logging Configuration ===
+# Enable logging for infrastructure monitoring and diagnostics
 Logging:
   LogLevel: info
   LogFile: /var/log/meshtasticd.log
 
-# Channels
+# === Repeater Channel Configuration ===
 Channels:
   - name: "LongFast"
-    psk: "AQ=="
+    psk: "AQ=="  # Public/default encryption key
     role: "PRIMARY"
+
+# === Repeater Deployment Notes ===
+# Infrastructure Repeater Best Practices:
+# - Use high-gain antenna (5-9 dBi) at elevated location
+# - Ensure reliable power supply (solar + battery or AC power)
+# - Enable GPS for location tracking and diagnostics
+# - Use weather-resistant enclosure for outdoor deployment
+# - Monitor logs regularly for network health
+# - Consider using MeshAdv-Pi-Hat for 1W (30dBm) output power
+#
+# Router vs Client Mode:
+# - ROUTER: Always awake, relays all messages, best for infrastructure
+# - CLIENT: Normal mode with sleep cycles, for mobile/portable nodes
+#
+# Channel Compatibility:
+# - Ensure your repeater uses the same preset as your mesh network
+# - For MtnMesh networks, use slot 20 with MediumFast preset
+# - For general networks, LongFast on slot 0 is common

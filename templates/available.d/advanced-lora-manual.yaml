@@ -1,0 +1,345 @@
+# Advanced LoRa Manual Configuration Template
+# Complete reference for all Meshtastic LoRa configuration parameters - US 915MHz
+# Reference: https://meshtastic.org/docs/configuration/radio/lora/
+# https://github.com/Nursedude/Meshtasticd_interactive_UI
+#
+# ⚠️  ADVANCED USERS ONLY - Manual configuration of all LoRa parameters
+# For most users, we recommend using preset-based templates instead
+#
+# Frequency: 915MHz ISM band (902-928 MHz) - US Region
+# Compatible: All Meshtastic-compatible hardware
+
+Lora:
+  # ===================================================================
+  # HARDWARE GPIO CONFIGURATION
+  # ===================================================================
+  # Adjust these based on your specific hardware
+  # See hardware-specific templates for correct values
+
+  # SPI Chip Select (required)
+  CS: 8
+
+  # Interrupt Request / DIO1 (required)
+  IRQ: 16
+
+  # Busy signal (required for SX126x)
+  Busy: 20
+
+  # Reset pin (required)
+  Reset: 24
+
+  # RX Enable (optional, hardware-dependent)
+  # RXen: 12
+
+  # TX Enable (optional, hardware-dependent)
+  # TXen: 13
+
+  # ===================================================================
+  # RADIO CHIP OPTIONS
+  # ===================================================================
+
+  # Use DIO2 as RF switch control (required for SX1262/SX1268)
+  DIO2_AS_RF_SWITCH: true
+
+  # Enable DIO3 TCXO voltage control (required for temperature stability)
+  DIO3_TCXO_VOLTAGE: true
+
+  # PA Fan Disabled (set to true to disable cooling fan if present)
+  # PAFanDisabled: false
+
+  # SX126x RX Boosted Gain (improves receiver sensitivity, increases power draw)
+  # SX126xRxBoostedGain: false
+
+  # ===================================================================
+  # REGION CONFIGURATION (REQUIRED)
+  # ===================================================================
+  # Must be set for device to transmit
+  # Valid for US: US
+  # Other regions: UNSET (default), ANZ, AS, AU, CN, EU_433, EU_868, IN,
+  #                JP, KR, MY_433, MY_919, NZ_865, RU, SG_923, TH, TW, UA_433, UA_868
+
+  # Region: US (915MHz ISM band for United States)
+  Region: US
+
+  # ===================================================================
+  # MODEM PRESET OR CUSTOM SETTINGS
+  # ===================================================================
+  # Option 1: Use a Modem Preset (recommended for most users)
+  # Valid presets: LONG_FAST (default), LONG_SLOW, MEDIUM_FAST, MEDIUM_SLOW,
+  #                SHORT_FAST, SHORT_SLOW, VERY_LONG_SLOW
+  #
+  # Preset characteristics:
+  # LONG_FAST: 250kHz BW, SF11, ~5-10km range, ~1kbps (default, good balance)
+  # MEDIUM_FAST: 250kHz BW, SF10, ~3-7km range, ~1.5kbps (MtnMesh standard)
+  # SHORT_FAST: 250kHz BW, SF7, <1km range, ~5kbps (urban/dense areas)
+  # LONG_SLOW: 125kHz BW, SF12, 10-30km range, ~0.3kbps (maximum range)
+  #
+  # To use preset, uncomment this line:
+  # ModemPreset: LONG_FAST
+
+  # Option 2: Custom Modem Configuration
+  # If you want full manual control, set UsePreset to false and configure
+  # Bandwidth, SpreadFactor, and CodingRate manually
+  #
+  # UsePreset: false
+
+  # ===================================================================
+  # MANUAL MODEM PARAMETERS
+  # ===================================================================
+  # Only used if UsePreset is false or ModemPreset is not set
+
+  # Bandwidth in kHz (125, 250, 500)
+  # Lower bandwidth = longer range but slower data rate
+  # Each doubling of bandwidth is ~3dB less link budget
+  # Recommended: 250 kHz (good balance)
+  Bandwidth: 250
+
+  # Spreading Factor (7-12)
+  # Higher SF = longer range but slower data rate
+  # Each step up adds ~2.5dB extra link budget
+  # SF7: Fastest, shortest range (~200-500m urban)
+  # SF11: Good balance (~5-10km)
+  # SF12: Maximum range (~10-30km), slowest
+  # Recommended: 11 (LongFast) or 10 (MediumFast)
+  SpreadFactor: 11
+
+  # Coding Rate (5, 6, 7, 8 for 4/5, 4/6, 4/7, 4/8)
+  # Higher = more error correction but slower
+  # 4/5: Least overhead, fastest
+  # 4/8: Most overhead, most reliable (recommended)
+  CodingRate: 8
+
+  # ===================================================================
+  # TRANSMIT POWER CONFIGURATION
+  # ===================================================================
+
+  # TX Power in dBm (0-30, hardware-dependent)
+  # Check your hardware specifications:
+  # - Standard modules: 0-22 dBm (max 158mW)
+  # - MeshAdv-Mini: 0-22 dBm (max 158mW)
+  # - MeshAdv-Pi-Hat: 0-30 dBm (max 1W), up to 33dBm on 33S variants
+  # - Adafruit RFM9x: 0-20 dBm (max 100mW)
+  #
+  # Higher power = more range but more battery drain
+  # Typical: 20-22 dBm, High-power: 30 dBm
+  TXpower: 22
+
+  # TX Enabled (set to false to disable transmission entirely)
+  # TXEnabled: true
+
+  # ===================================================================
+  # CHANNEL CONFIGURATION
+  # ===================================================================
+
+  # Channel Number / Slot (0-104 for US region)
+  # Different slots use different frequencies to avoid interference
+  # Common slots:
+  #   Slot 0: Default/general use
+  #   Slot 20: MtnMesh community standard
+  #   Slots 1-7: Custom channels
+  # Must match across all nodes in your mesh!
+  ChannelNum: 20
+
+  # Frequency Offset in Hz (advanced, usually 0)
+  # Fine-tune center frequency, typically not needed
+  # FrequencyOffset: 0
+
+  # Override Frequency in Hz (advanced)
+  # Manually set exact frequency instead of using channel slot
+  # Only use if you know what you're doing!
+  # OverrideFrequency: 0
+
+  # ===================================================================
+  # NETWORK/ROUTING CONFIGURATION
+  # ===================================================================
+
+  # Hop Limit (0-7)
+  # Maximum number of times a message can be retransmitted
+  # 0: No retransmission (direct only)
+  # 3: Standard for most networks (recommended)
+  # 7: Maximum for wide-area coverage or emergency/SAR
+  # Higher values increase network traffic
+  HopLimit: 3
+
+  # Ignore Incoming Array (advanced)
+  # List of node IDs to ignore messages from
+  # Format: comma-separated list of node IDs
+  # IgnoreIncoming: []
+
+  # ===================================================================
+  # ADVANCED/SPECIAL USE OPTIONS
+  # ===================================================================
+
+  # Override Duty Cycle Limit (EU ONLY - not applicable to US)
+  # EU regions have 10% hourly duty cycle limitation
+  # Setting to true disables this check (ILLEGAL in EU!)
+  # OverrideDutyCycle: false
+
+  # SPI Speed in Hz (advanced, hardware-dependent)
+  # Adjust if experiencing SPI communication issues
+  # Typical: 2000000 (2 MHz)
+  # SPISpeed: 2000000
+
+# ===================================================================
+# GPS CONFIGURATION
+# ===================================================================
+GPS:
+  # GPS Serial Port
+  # Common options: /dev/ttyS0 (Pi 3/4/5), /dev/ttyAMA0 (older Pi)
+  SerialPath: /dev/ttyS0
+
+  # GPS Enable GPIO (if hardware-controlled)
+  GPSEnableGpio: 4
+
+  # PPS (Pulse Per Second) GPIO for precise timing (optional)
+  # PPSGpio: 17
+
+  # GPS Baud Rate (typically 9600)
+  # BaudRate: 9600
+
+# ===================================================================
+# I2C CONFIGURATION
+# ===================================================================
+I2C:
+  # I2C Device for sensors and peripherals
+  I2CDevice: /dev/i2c-1
+
+# ===================================================================
+# DEVICE CONFIGURATION
+# ===================================================================
+Device:
+  # Device Role
+  # CLIENT: Normal node with sleep cycles (default, mobile/portable)
+  # ROUTER: Always-on infrastructure node (repeaters, fixed stations)
+  # ROUTER_CLIENT: Hybrid mode
+  # Role: CLIENT
+
+  # Node Info Broadcast Interval (seconds)
+  # How often to broadcast node presence
+  # Default: 900 (15 minutes)
+  # NodeInfoBroadcastSecs: 900
+
+# ===================================================================
+# WEB SERVER CONFIGURATION
+# ===================================================================
+Webserver:
+  # Web Interface Port
+  # 443: HTTPS (recommended)
+  # 80: HTTP
+  # 8080: Alternative HTTP
+  Port: 443
+
+# ===================================================================
+# LOGGING CONFIGURATION
+# ===================================================================
+Logging:
+  # Log Level: debug, info, warn, error
+  LogLevel: info
+
+  # Log File Path
+  # LogFile: /var/log/meshtasticd.log
+
+# ===================================================================
+# CHANNEL/ENCRYPTION CONFIGURATION
+# ===================================================================
+Channels:
+  # Primary Channel Configuration
+  - name: "LongFast"
+
+    # Pre-Shared Key (PSK) for encryption
+    # "AQ==" = Default/public (no real encryption)
+    # Generate random PSK for private networks
+    psk: "AQ=="
+
+    # Channel Role
+    # PRIMARY: Main communication channel
+    # SECONDARY: Additional channels
+    role: "PRIMARY"
+
+  # Additional Secondary Channels (optional)
+  # - name: "Secondary"
+  #   psk: "AQ=="
+  #   role: "SECONDARY"
+
+# ===================================================================
+# COMPATIBILITY REQUIREMENTS
+# ===================================================================
+# For devices to communicate, they MUST have identical settings for:
+# ✓ Region (e.g., US)
+# ✓ Modem Preset OR identical Bandwidth/SpreadFactor/CodingRate
+# ✓ Channel Number (slot)
+# ✓ PSK (encryption key)
+#
+# Settings that can differ:
+# - TX Power (different nodes can use different power levels)
+# - Hop Limit (but affects message propagation)
+# - GPIO pins (hardware-specific)
+# - Device Role (mix of routers and clients is fine)
+
+# ===================================================================
+# MODEM PRESET REFERENCE TABLE
+# ===================================================================
+# Preset        | BW    | SF | CR  | Range     | Speed    | Use Case
+# --------------|-------|----|----|-----------|----------|------------------
+# SHORT_FAST    | 250   | 7  | 8  | <1km      | ~5kbps   | Urban/dense
+# SHORT_SLOW    | 250   | 8  | 8  | ~1-2km    | ~3kbps   | Urban
+# MEDIUM_FAST   | 250   | 10 | 8  | ~3-7km    | ~1.5kbps | Community std
+# MEDIUM_SLOW   | 250   | 11 | 8  | ~5-10km   | ~1kbps   | Balanced
+# LONG_FAST     | 250   | 11 | 8  | ~5-10km   | ~1kbps   | Default
+# LONG_SLOW     | 125   | 11 | 8  | ~10-15km  | ~0.5kbps | Extended range
+# VERY_LONG_SLOW| 125   | 12 | 8  | ~15-30km  | ~0.3kbps | Maximum range
+
+# ===================================================================
+# LINK BUDGET CALCULATIONS
+# ===================================================================
+# Each configuration change affects link budget (signal strength):
+# - Bandwidth 250→125 kHz: +3dB (double the range potential)
+# - Bandwidth 250→500 kHz: -3dB (half the range)
+# - Each SF step up: +2.5dB (~40% more range)
+# - TX Power +3dB: ~40% more range (doubles power)
+# - Coding Rate has minimal link budget impact
+#
+# Example: 20dBm with SF11/250kHz provides ~5-10km range
+# Switching to SF12/125kHz: +2.5dB (SF) +3dB (BW) = +5.5dB total
+# Result: ~15-30km range (roughly double)
+
+# ===================================================================
+# TROUBLESHOOTING
+# ===================================================================
+# Common Issues:
+#
+# 1. No transmission:
+#    - Check Region is set (not UNSET)
+#    - Verify TXEnabled is true
+#    - Check hardware GPIO configuration
+#
+# 2. Can't communicate with other nodes:
+#    - Verify identical Region settings
+#    - Confirm matching Modem Preset or custom settings
+#    - Check Channel Number matches
+#    - Verify PSK encryption key matches
+#
+# 3. Poor range:
+#    - Increase TX Power (within hardware limits)
+#    - Use higher Spreading Factor (SF11 or SF12)
+#    - Reduce Bandwidth to 125kHz
+#    - Check antenna connection and type
+#    - Ensure line of sight or minimal obstacles
+#
+# 4. Slow message delivery:
+#    - Lower Spreading Factor (SF7-10)
+#    - Increase Bandwidth to 250kHz or 500kHz
+#    - Reduce Hop Limit to minimize relay delays
+#
+# 5. Network congestion:
+#    - Use lower Hop Limit (2-3 instead of 7)
+#    - Consider faster preset (MEDIUM_FAST or SHORT_FAST)
+#    - Use different Channel Number to separate networks
+
+# ===================================================================
+# REFERENCES
+# ===================================================================
+# Official Documentation: https://meshtastic.org/docs/configuration/radio/lora/
+# Radio Settings Overview: https://meshtastic.org/docs/overview/radio-settings/
+# Range Tests: https://meshtastic.org/docs/overview/range-tests/
+# GitHub Repository: https://github.com/Nursedude/Meshtasticd_interactive_UI
