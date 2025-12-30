@@ -68,9 +68,10 @@ def check_for_updates_on_startup():
         from installer.update_notifier import UpdateNotifier
         notifier = UpdateNotifier()
         notifier.startup_update_check()
-    except Exception:
+    except Exception as e:
         # Don't let update check failures interrupt startup
-        pass
+        from utils.logger import log_exception
+        log_exception(e, "Update check on startup failed")
 
 
 def show_quick_status():
@@ -80,8 +81,10 @@ def show_quick_status():
         dashboard = StatusDashboard()
         status_line = dashboard.get_quick_status_line()
         console.print(f"\n[dim]Status:[/dim] {status_line}")
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.logger import get_logger
+        logger = get_logger()
+        logger.debug(f"Could not display quick status: {e}")
 
 
 def interactive_menu():

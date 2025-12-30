@@ -270,8 +270,10 @@ class HardwareDetector:
                         content = f.read()
                         if 'dtparam=spi=on' in content:
                             return True
-                except Exception:
-                    pass
+                except Exception as e:
+                    from utils.logger import get_logger
+                    logger = get_logger()
+                    logger.debug(f"Could not read config file {config_file}: {e}")
 
         return False
 
@@ -305,7 +307,9 @@ class HardwareDetector:
                 model = f.read().strip('\x00').strip()
                 self.detected_hardware['raspberry_pi_model'] = model
         except FileNotFoundError:
-            pass
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.debug("Device tree model file not found - not running on Raspberry Pi?")
 
         # Also get CPU info
         try:
@@ -319,7 +323,9 @@ class HardwareDetector:
                     elif 'Revision' in line:
                         self.detected_hardware['cpu_revision'] = line.split(':')[1].strip()
         except FileNotFoundError:
-            pass
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.debug("CPU info file not found")
 
     def get_recommended_configuration(self):
         """Get recommended configuration based on detected hardware"""

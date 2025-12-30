@@ -10,9 +10,21 @@ import os
 import sys
 import subprocess
 import json
+import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 import threading
+
+# Set up logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/meshtasticd-web-installer.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('web_installer')
 
 # Check root
 if os.geteuid() != 0:
@@ -275,11 +287,14 @@ sudo bash install.sh
 
 class InstallerHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        """Suppress default logging"""
-        pass
+        """Log HTTP requests using our logger"""
+        logger.debug("%s - - [%s] %s" % (self.address_string(),
+                                          self.log_date_time_string(),
+                                          format % args))
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        logger.debug(f"GET request: {parsed.path}")
 
         if parsed.path == '/':
             self.send_response(200)
@@ -302,19 +317,24 @@ class InstallerHandler(BaseHTTPRequestHandler):
         elif parsed.path.startswith('/api/install'):
             params = parse_qs(parsed.query)
             version = params.get('version', ['stable'])[0]
+            logger.info(f"Installation requested via web interface (version: {version})")
 
             try:
                 # Run installation in background
                 script_path = os.path.join(os.path.dirname(__file__), 'install.sh')
                 if os.path.exists(script_path):
+                    logger.debug(f"Starting installation script: {script_path}")
                     subprocess.Popen(['bash', script_path],
                                    stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL)
                     result = {'success': True, 'message': 'Installation started'}
+                    logger.info("Installation started successfully")
                 else:
+                    logger.error(f"Installation script not found: {script_path}")
                     result = {'success': False, 'error': 'install.sh not found'}
 
             except Exception as e:
+                logger.exception(f"Installation failed: {e}")
                 result = {'success': False, 'error': str(e)}
 
             self.send_response(200)
@@ -328,6 +348,7 @@ def main():
     host = '0.0.0.0'
     port = 8080
 
+    logger.info(f"Starting web installer on {host}:{port}")
     server = HTTPServer((host, port), InstallerHandler)
 
     print("╔═══════════════════════════════════════════════════════════╗")
@@ -345,9 +366,10 @@ def main():
         local_ip = s.getsockname()[0]
         s.close()
         print(f"   http://{local_ip}:{port}")
-    except (OSError, socket.error):
+        logger.debug(f"Local IP address: {local_ip}")
+    except (OSError, socket.error) as e:
         # Network unavailable or connection failed - skip showing local IP
-        pass
+        logger.debug(f"Could not determine local IP address: {e}")
 
     print()
     print("📱 Open this URL in your browser to start installation")
@@ -355,8 +377,10 @@ def main():
     print()
 
     try:
+        logger.info("Web installer server started, serving requests")
         server.serve_forever()
     except KeyboardInterrupt:
+        logger.info("Server stopped by user (Ctrl+C)")
         print("\n\n✓ Server stopped")
         sys.exit(0)
 

@@ -30,8 +30,10 @@ class UpdateNotifier:
             if self.cache_file.exists():
                 with open(self.cache_file, 'r') as f:
                     return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.debug(f"Could not load update cache: {e}")
         return {}
 
     def _save_cache(self, data):
@@ -40,8 +42,10 @@ class UpdateNotifier:
         try:
             with open(self.cache_file, 'w') as f:
                 json.dump(data, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.warning(f"Could not save update cache: {e}")
 
     def should_check_updates(self):
         """Determine if we should check for updates"""
@@ -55,7 +59,10 @@ class UpdateNotifier:
             last_check_time = datetime.fromisoformat(last_check)
             time_since_check = datetime.now() - last_check_time
             return time_since_check > timedelta(hours=self.check_interval_hours)
-        except Exception:
+        except Exception as e:
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.debug(f"Error parsing last check time, will check for updates: {e}")
             return True
 
     def check_for_updates(self, force=False):
@@ -116,9 +123,11 @@ Run 'Update meshtasticd' from the main menu to upgrade."""
             if update_info and update_info.get('update_available'):
                 self.show_update_notification(update_info)
                 return True
-        except Exception:
+        except Exception as e:
             # Don't let update check failures interrupt startup
-            pass
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.debug(f"Startup update check failed: {e}")
         return False
 
     def get_update_status_line(self):
@@ -140,7 +149,10 @@ Run 'Update meshtasticd' from the main menu to upgrade."""
             if self.cache_file.exists():
                 self.cache_file.unlink()
             return True
-        except Exception:
+        except Exception as e:
+            from utils.logger import get_logger
+            logger = get_logger()
+            logger.warning(f"Could not clear update cache: {e}")
             return False
 
     def configure_notifications(self):

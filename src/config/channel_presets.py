@@ -442,8 +442,10 @@ class ChannelPresetManager:
                 try:
                     with open(preset_file, 'r') as f:
                         presets[preset_file.stem] = yaml.safe_load(f)
-                except Exception:
-                    pass
+                except Exception as e:
+                    from utils.logger import get_logger
+                    logger = get_logger()
+                    logger.warning(f"Could not load preset file {preset_file}: {e}")
         return presets
 
     def load_saved_preset(self):
