@@ -1,11 +1,27 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.0.1"
-__version_info__ = (3, 0, 1)
-__release_date__ = "2025-12-30"
+__version__ = "3.0.2"
+__version_info__ = (3, 0, 2)
+__release_date__ = "2025-12-31"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.0.2",
+        "date": "2025-12-31",
+        "changes": [
+            "NEW: Enhanced channel configuration with full settings",
+            "NEW: PSK options - Generate 256-bit, 128-bit, default, none, or custom",
+            "NEW: MQTT uplink/downlink settings per channel",
+            "NEW: Auto-install meshtastic CLI via pipx when needed",
+            "NEW: Modem presets now apply directly to device",
+            "FIX: Channel configuration saves to device via meshtastic CLI",
+            "FIX: Meshtastic CLI PATH auto-added after pipx install",
+            "FIX: Existing channels detected from device before config",
+            "IMPROVED: Role selection (PRIMARY/SECONDARY/DISABLED) per channel",
+            "IMPROVED: Channel summary table shows MQTT status"
+        ]
+    },
     {
         "version": "3.0.1",
         "date": "2025-12-30",

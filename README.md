@@ -2,15 +2,22 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.0.1** | [Changelog](#version-history)
+**Version 3.0.2** | [Changelog](#version-history)
+
+## What's New in v3.0.2
+
+- **Enhanced Channel Configuration** - Full interactive setup with Role, PSK, and MQTT settings
+- **PSK Key Generation** - Generate secure 256-bit or 128-bit encryption keys
+- **MQTT Channel Settings** - Configure uplink/downlink per channel
+- **Auto-Install Meshtastic CLI** - Automatically installs via pipx when needed
+- **Device Configuration Saves** - All settings apply directly to your LoRa device
+- **Existing Channel Detection** - Reads current config from device before editing
 
 ## What's New in v3.0.1
 
 - **Launcher Wizard** - Interactive wizard to select your preferred interface
 - **Fixed Log Following** - Logs now update properly in GTK4 and TUI
 - **Improved Navigation** - All menus have Back (0) and Main Menu (m) options
-- **Better Shortcuts** - Logical keyboard shortcuts (q=quit, ?=help)
-- **RPi Compatibility** - Proper pip install with --break-system-packages
 
 ## What's New in v3.0.0
 
@@ -386,6 +393,15 @@ Meshtasticd_interactive_UI/
 ```
 
 ## Version History
+
+### v3.0.2 (2025-12-31)
+- **Enhanced Channel Configuration** - Full interactive setup with Role, PSK, and MQTT
+- **PSK Key Generation** - Generate secure 256-bit or 128-bit encryption keys
+- **MQTT Channel Settings** - Configure uplink/downlink per channel
+- **Auto-Install Meshtastic CLI** - Automatically installs via pipx when needed
+- **Device Configuration Saves** - All settings apply directly to LoRa device
+- **Existing Channel Detection** - Reads current config from device before editing
+- **Modem Presets Apply** - Selected presets now save to device
 
 ### v3.0.1 (2025-12-30)
 - **Launcher Wizard** - Interactive wizard to select your preferred interface
