@@ -749,15 +749,28 @@ class LoRaConfigurator:
         """Ensure meshtastic CLI is installed, offer to install if not"""
         import subprocess
         import shutil
+        import os
 
+        # First check if already in PATH
         if shutil.which('meshtastic'):
+            return True
+
+        # Check common install locations and add to PATH if found
+        home = os.path.expanduser('~')
+        pipx_bin = os.path.join(home, '.local', 'bin')
+        meshtastic_path = os.path.join(pipx_bin, 'meshtastic')
+
+        if os.path.exists(meshtastic_path):
+            # Add to PATH for this session
+            os.environ['PATH'] = f"{pipx_bin}:{os.environ.get('PATH', '')}"
+            console.print(f"[dim]Added {pipx_bin} to PATH[/dim]")
             return True
 
         console.print("\n[yellow]Meshtastic CLI is required to save configuration to device.[/yellow]")
         console.print("[dim]The CLI communicates with meshtasticd to configure the LoRa radio.[/dim]\n")
 
         if Confirm.ask("[cyan]Install meshtastic CLI now?[/cyan]", default=True):
-            console.print("\n[dim]Installing meshtastic CLI via pipx...[/dim]")
+            console.print("\n[cyan]Installing meshtastic CLI via pipx...[/cyan]")
 
             # Check if pipx is available
             if not shutil.which('pipx'):
@@ -770,8 +783,7 @@ class LoRaConfigurator:
                     if result.returncode != 0:
                         console.print(f"[red]Failed to install pipx: {result.stderr}[/red]")
                         return False
-                    # Ensure pipx path
-                    subprocess.run(['pipx', 'ensurepath'], capture_output=True, timeout=30)
+                    console.print("[green]pipx installed[/green]")
                 except Exception as e:
                     console.print(f"[red]Error installing pipx: {e}[/red]")
                     return False
@@ -785,14 +797,17 @@ class LoRaConfigurator:
                 )
                 if result.returncode == 0:
                     console.print("[green]Meshtastic CLI installed successfully![/green]")
-                    # Check if it's now available
-                    if shutil.which('meshtastic'):
+
+                    # Add pipx bin to PATH for this session
+                    os.environ['PATH'] = f"{pipx_bin}:{os.environ.get('PATH', '')}"
+                    console.print(f"[dim]Added {pipx_bin} to PATH[/dim]")
+
+                    # Verify it works
+                    if shutil.which('meshtastic') or os.path.exists(meshtastic_path):
                         return True
                     else:
-                        # Try adding to path
-                        console.print("[yellow]CLI installed but not in PATH. Try restarting terminal.[/yellow]")
-                        console.print("[dim]Or run: export PATH=\"$PATH:$HOME/.local/bin\"[/dim]")
-                        return False
+                        console.print("[yellow]Installation complete but CLI not found. Retrying...[/yellow]")
+                        return os.path.exists(meshtastic_path)
                 else:
                     console.print(f"[red]Failed to install: {result.stderr}[/red]")
                     return False
@@ -811,47 +826,77 @@ class LoRaConfigurator:
         """Apply channel configuration to device via meshtastic CLI"""
         import subprocess
         import shutil
+        import os
 
         # Ensure meshtastic CLI is available
         if not self._ensure_meshtastic_cli():
             return False
+
+        # Get meshtastic path (may be in ~/.local/bin)
+        home = os.path.expanduser('~')
+        meshtastic_cmd = shutil.which('meshtastic') or os.path.join(home, '.local', 'bin', 'meshtastic')
 
         console.print("\n[cyan]Applying channel configuration to device...[/cyan]\n")
 
         success = True
         for channel in channels:
             idx = channel.get('index', 0)
-            name = channel.get('name', 'Default')
+            name = channel.get('name', '')
             psk = channel.get('psk', 'AQ==')
+            role = channel.get('role', 'SECONDARY')
+            uplink = channel.get('uplink_enabled', False)
+            downlink = channel.get('downlink_enabled', False)
 
-            console.print(f"[dim]Configuring channel {idx}: {name}...[/dim]")
+            console.print(f"[dim]Configuring channel {idx}...[/dim]")
 
             try:
-                # Set channel name
-                result = subprocess.run(
-                    ['meshtastic', '--host', 'localhost',
-                     '--ch-index', str(idx), '--ch-set', 'name', name],
-                    capture_output=True, text=True, timeout=30
-                )
-
-                if result.returncode != 0:
-                    console.print(f"[yellow]Warning: {result.stderr or 'Failed to set name'}[/yellow]")
-                    success = False
-                else:
-                    console.print(f"[green]  Channel {idx} name set to '{name}'[/green]")
-
-                # Set PSK if not default
-                if psk and psk != 'AQ==':
+                # Set channel name if provided
+                if name:
                     result = subprocess.run(
-                        ['meshtastic', '--host', 'localhost',
-                         '--ch-index', str(idx), '--ch-set', 'psk', psk],
+                        [meshtastic_cmd, '--host', 'localhost',
+                         '--ch-index', str(idx), '--ch-set', 'name', name],
                         capture_output=True, text=True, timeout=30
                     )
-                    if result.returncode != 0:
-                        console.print(f"[yellow]Warning: Could not set PSK[/yellow]")
-                        success = False
+                    if result.returncode == 0:
+                        console.print(f"[green]  Name: {name}[/green]")
                     else:
-                        console.print(f"[green]  Channel {idx} PSK configured[/green]")
+                        console.print(f"[yellow]  Warning: Could not set name[/yellow]")
+                        success = False
+
+                # Set PSK
+                if psk:
+                    psk_value = psk if psk else "none"
+                    result = subprocess.run(
+                        [meshtastic_cmd, '--host', 'localhost',
+                         '--ch-index', str(idx), '--ch-set', 'psk', psk_value],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode == 0:
+                        psk_display = "default" if psk == "AQ==" else "custom" if psk else "none"
+                        console.print(f"[green]  PSK: {psk_display}[/green]")
+                    else:
+                        console.print(f"[yellow]  Warning: Could not set PSK[/yellow]")
+                        success = False
+
+                # Set uplink enabled
+                if uplink:
+                    result = subprocess.run(
+                        [meshtastic_cmd, '--host', 'localhost',
+                         '--ch-index', str(idx), '--ch-set', 'uplink_enabled', 'true'],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode == 0:
+                        console.print(f"[green]  MQTT Uplink: enabled[/green]")
+
+                # Set downlink enabled
+                if downlink:
+                    result = subprocess.run(
+                        [meshtastic_cmd, '--host', 'localhost',
+                         '--ch-index', str(idx), '--ch-set', 'downlink_enabled', 'true'],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode == 0:
+                        console.print(f"[green]  MQTT Downlink: enabled[/green]")
 
             except subprocess.TimeoutExpired:
                 console.print(f"[red]Timeout configuring channel {idx}[/red]")
@@ -977,35 +1022,114 @@ class LoRaConfigurator:
         return channels
 
     def _configure_single_channel(self, slot, role_type):
-        """Configure a single channel with back option"""
-        console.print(f"\n[bold cyan]Configure {role_type} Channel (Slot {slot})[/bold cyan]\n")
-        console.print("[dim]Enter values or press Enter for defaults. Type 'back' to cancel.[/dim]\n")
+        """Configure a single channel with full settings"""
+        import secrets
+        import base64
+
+        console.print(f"\n[bold cyan]═══ Configure {role_type} Channel (Slot {slot}) ═══[/bold cyan]\n")
 
         channel = {'index': slot}
 
-        name = Prompt.ask("Channel name", default="LongFast" if slot == 0 else f"Channel{slot}")
-        if name.lower() == 'back':
-            return None
-        channel['name'] = name
-
-        psk = Prompt.ask("Pre-shared key (base64, or 'default')", default="AQ==")
-        if psk.lower() == 'back':
-            return None
-        channel['psk'] = psk if psk.lower() != 'default' else "AQ=="
+        # --- ROLE SELECTION ---
+        console.print("[bold]1. Channel Role[/bold]")
+        console.print("[dim]Device telemetry is sent over PRIMARY. Only one PRIMARY allowed.[/dim]\n")
 
         if slot == 0:
-            channel['role'] = "PRIMARY"
+            console.print("  [bold]1[/bold]. PRIMARY [green](default for slot 0)[/green]")
+            console.print("  [bold]2[/bold]. SECONDARY")
+            console.print("  [bold]3[/bold]. DISABLED")
+            console.print("\n  [bold]0[/bold]. Back")
+            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2", "3"], default="1")
         else:
-            console.print("\n[cyan]Channel role:[/cyan]")
-            console.print("1. Secondary (receives messages)")
-            console.print("2. Disabled")
-            role_choice = Prompt.ask("Select role", choices=["1", "2", "back"], default="1")
-            if role_choice == "back":
-                return None
-            channel['role'] = "SECONDARY" if role_choice == "1" else "DISABLED"
+            console.print("  [bold]1[/bold]. SECONDARY [green](default)[/green]")
+            console.print("  [bold]2[/bold]. DISABLED")
+            console.print("\n  [bold]0[/bold]. Back")
+            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2"], default="1")
 
-        console.print(f"\n[green]Channel {slot} configured: {channel['name']} ({channel['role']})[/green]")
-        return channel
+        if role_choice == "0":
+            return None
+
+        if slot == 0:
+            role_map = {"1": "PRIMARY", "2": "SECONDARY", "3": "DISABLED"}
+        else:
+            role_map = {"1": "SECONDARY", "2": "DISABLED"}
+        channel['role'] = role_map.get(role_choice, "SECONDARY")
+
+        # --- CHANNEL NAME ---
+        console.print("\n[bold]2. Channel Name[/bold]")
+        console.print("[dim]A unique name for the channel (<12 bytes, leave blank for default)[/dim]\n")
+
+        default_name = "LongFast" if slot == 0 else ""
+        name = Prompt.ask("Channel name", default=default_name)
+        if name.lower() == 'back':
+            return None
+        channel['name'] = name if name else ""
+
+        # --- PRE-SHARED KEY (PSK) ---
+        console.print("\n[bold]3. Pre-Shared Key (Encryption)[/bold]")
+        console.print("[dim]Supported PSK lengths: 256-bit, 128-bit, 8-bit, Empty (no encryption)[/dim]\n")
+
+        console.print("  [bold]1[/bold]. Default (AQ== / 8-bit simple key)")
+        console.print("  [bold]2[/bold]. Generate Random 256-bit key [green](most secure)[/green]")
+        console.print("  [bold]3[/bold]. Generate Random 128-bit key")
+        console.print("  [bold]4[/bold]. No encryption (empty PSK)")
+        console.print("  [bold]5[/bold]. Enter custom PSK (base64)")
+        console.print("\n  [bold]0[/bold]. Back")
+
+        psk_choice = Prompt.ask("\n[cyan]Select PSK option[/cyan]", choices=["0", "1", "2", "3", "4", "5"], default="1")
+
+        if psk_choice == "0":
+            return None
+        elif psk_choice == "1":
+            channel['psk'] = "AQ=="  # Default 8-bit key
+            console.print("[dim]Using default PSK (AQ==)[/dim]")
+        elif psk_choice == "2":
+            # Generate 256-bit (32 bytes) random key
+            random_bytes = secrets.token_bytes(32)
+            channel['psk'] = base64.b64encode(random_bytes).decode('utf-8')
+            console.print(f"[green]Generated 256-bit PSK:[/green] {channel['psk']}")
+            console.print("[yellow]Save this key! You'll need it for other devices.[/yellow]")
+        elif psk_choice == "3":
+            # Generate 128-bit (16 bytes) random key
+            random_bytes = secrets.token_bytes(16)
+            channel['psk'] = base64.b64encode(random_bytes).decode('utf-8')
+            console.print(f"[green]Generated 128-bit PSK:[/green] {channel['psk']}")
+            console.print("[yellow]Save this key! You'll need it for other devices.[/yellow]")
+        elif psk_choice == "4":
+            channel['psk'] = ""  # Empty = no encryption
+            console.print("[yellow]Warning: No encryption - messages will be visible to anyone[/yellow]")
+        elif psk_choice == "5":
+            custom_psk = Prompt.ask("Enter PSK (base64)")
+            if custom_psk.lower() == 'back':
+                return None
+            channel['psk'] = custom_psk
+
+        # --- MQTT SETTINGS (Optional) ---
+        console.print("\n[bold]4. MQTT Settings (Optional)[/bold]")
+        console.print("[dim]Enable uplink/downlink for MQTT gateway integration[/dim]\n")
+
+        if Confirm.ask("Configure MQTT settings?", default=False):
+            channel['uplink_enabled'] = Confirm.ask("  Enable Uplink (send to MQTT)?", default=False)
+            channel['downlink_enabled'] = Confirm.ask("  Enable Downlink (receive from MQTT)?", default=False)
+        else:
+            channel['uplink_enabled'] = False
+            channel['downlink_enabled'] = False
+
+        # --- SUMMARY ---
+        console.print("\n[bold cyan]Channel Configuration Summary:[/bold cyan]")
+        console.print(f"  Slot: {slot}")
+        console.print(f"  Role: [{'green' if channel['role'] == 'PRIMARY' else 'yellow'}]{channel['role']}[/]")
+        console.print(f"  Name: {channel['name'] or '(default)'}")
+        psk_display = channel['psk'][:20] + "..." if len(channel['psk']) > 20 else channel['psk']
+        console.print(f"  PSK:  {psk_display or '(none)'}")
+        if channel.get('uplink_enabled') or channel.get('downlink_enabled'):
+            console.print(f"  MQTT: Uplink={channel['uplink_enabled']}, Downlink={channel['downlink_enabled']}")
+
+        if Confirm.ask("\n[cyan]Accept this configuration?[/cyan]", default=True):
+            console.print(f"\n[green]Channel {slot} configured successfully![/green]")
+            return channel
+        else:
+            return None
 
     def _show_channel_summary(self, channels):
         """Display channel configuration summary"""
@@ -1015,17 +1139,24 @@ class LoRaConfigurator:
 
         table = Table(title="Channel Summary", show_header=True, header_style="bold magenta")
         table.add_column("Slot", style="cyan", width=6)
-        table.add_column("Name", style="green", width=20)
+        table.add_column("Name", style="green", width=16)
         table.add_column("Role", style="yellow", width=12)
-        table.add_column("PSK", style="dim", width=20)
+        table.add_column("PSK", style="dim", width=16)
+        table.add_column("MQTT", style="blue", width=12)
 
         for idx, ch in enumerate(channels):
             slot = ch.get('index', idx)
             role = ch.get('role', 'SECONDARY')
+            # MQTT info
+            mqtt_info = ""
+            if ch.get('uplink_enabled') or ch.get('downlink_enabled'):
+                up = "Up" if ch.get('uplink_enabled') else ""
+                down = "Down" if ch.get('downlink_enabled') else ""
+                mqtt_info = f"{up}/{down}".strip("/")
             psk = ch.get('psk', 'default')
             # Truncate PSK for display
             psk_display = psk[:15] + "..." if len(psk) > 15 else psk
-            table.add_row(str(slot), ch.get('name', 'Unnamed'), role, psk_display)
+            table.add_row(str(slot), ch.get('name', 'Unnamed'), role, psk_display, mqtt_info or "-")
 
         console.print("\n")
         console.print(table)
