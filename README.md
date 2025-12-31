@@ -10,6 +10,8 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 - **Consistent Navigation** - `m` = Main Menu everywhere, `0` = Back
 - **Better Emoji Support** - Improved detection for SSH and Raspberry Pi terminals
 - **Region Selection Fix** - Now includes back/menu navigation options
+- **Launcher Saves Preference** - Save your preferred UI and auto-launch next time
+  - Use `--wizard` flag to force wizard and change preference
 
 ## What's New in v3.0.2
 

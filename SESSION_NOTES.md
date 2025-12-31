@@ -29,6 +29,14 @@
    - Modern terminals (256color, xterm) get emojis
    - Still respects ENABLE_EMOJI/DISABLE_EMOJI env vars
 
+4. **Launcher Saves UI Preference** (`src/launcher.py`)
+   - Saves to ~/.config/meshtasticd-installer/preferences.json
+   - Auto-launches saved preference (with dependency check)
+   - Press 's' to save preference, 'c' to clear
+   - Use `--wizard` flag to force wizard and reset
+   - Shows [saved] marker on saved preference in menu
+   - Updated version display to v3.0.3
+
 ### ✅ COMPLETED Previously (v3.0.2)
 
 1. **Modem Presets Updated** - SHORT_TURBO added, Fastest→Slowest order
@@ -41,7 +49,7 @@
 
 ### ⏳ STILL PENDING
 
-1. **UI Selection Not Working** - "Same look every time" - investigate launcher
+1. ~~**UI Selection Not Working**~~ - ✅ FIXED: Launcher now saves preference
 2. **Add Uninstaller Option** - Create uninstall functionality
 3. **Progress Indicators** - Show progress during installs/updates
 4. **Device Configuration Wizard** - May need more back options
