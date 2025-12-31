@@ -4,13 +4,25 @@ Meshtasticd Manager - Launcher Wizard
 
 This wizard helps users select the appropriate interface for their setup.
 It detects the environment and recommends the best option.
+User preferences are saved for future launches.
 """
 
 import os
 import sys
 import shutil
 import subprocess
+import json
 from pathlib import Path
+
+# Import version
+try:
+    from __version__ import __version__
+except ImportError:
+    __version__ = "3.0.3"
+
+# Config file location
+CONFIG_DIR = Path.home() / '.config' / 'meshtasticd-installer'
+CONFIG_FILE = CONFIG_DIR / 'preferences.json'
 
 
 # Colors for terminal output
@@ -24,11 +36,32 @@ class Colors:
     NC = '\033[0m'  # No Color
 
 
+def load_preferences():
+    """Load saved user preferences"""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def save_preferences(prefs):
+    """Save user preferences"""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(prefs, f, indent=2)
+    except IOError:
+        pass
+
+
 def print_banner():
     """Print the welcome banner"""
     print(f"""{Colors.CYAN}
 ╔═══════════════════════════════════════════════════════════════╗
-║     Meshtasticd Interactive Manager - v3.0.0                  ║
+║     Meshtasticd Interactive Manager - v{__version__:<21}║
 ║     For Raspberry Pi OS & Linux                               ║
 ╠═══════════════════════════════════════════════════════════════╣
 ║     Choose your interface to get started                      ║
@@ -116,9 +149,14 @@ def get_recommendation(env):
         return '3'  # Rich CLI
 
 
-def print_menu(env, recommended):
+def print_menu(env, recommended, saved_pref=None):
     """Print the interface selection menu"""
     print(f"{Colors.BOLD}Select Interface:{Colors.NC}\n")
+
+    # Show saved preference if any
+    if saved_pref:
+        pref_names = {'1': 'GTK4 GUI', '2': 'Textual TUI', '3': 'Rich CLI'}
+        print(f"  {Colors.DIM}Saved preference: {pref_names.get(saved_pref, saved_pref)}{Colors.NC}\n")
 
     # Option 1: GTK4 GUI
     gtk_status = ""
@@ -130,7 +168,8 @@ def print_menu(env, recommended):
         gtk_status = f" {Colors.YELLOW}(may not work over SSH){Colors.NC}"
 
     rec1 = f" {Colors.GREEN}← Recommended{Colors.NC}" if recommended == '1' else ""
-    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.CYAN}GTK4 Graphical Interface{Colors.NC}{gtk_status}{rec1}")
+    saved1 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '1' else ""
+    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.CYAN}GTK4 Graphical Interface{Colors.NC}{gtk_status}{rec1}{saved1}")
     print(f"     {Colors.DIM}Modern desktop UI with libadwaita design{Colors.NC}")
     print(f"     {Colors.DIM}Best for: Pi with monitor, VNC, Raspberry Pi Connect desktop{Colors.NC}")
     print()
@@ -141,14 +180,16 @@ def print_menu(env, recommended):
         tui_status = f" {Colors.YELLOW}(requires installation){Colors.NC}"
 
     rec2 = f" {Colors.GREEN}← Recommended{Colors.NC}" if recommended == '2' else ""
-    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.CYAN}Textual TUI (Terminal Interface){Colors.NC}{tui_status}{rec2}")
+    saved2 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '2' else ""
+    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.CYAN}Textual TUI (Terminal Interface){Colors.NC}{tui_status}{rec2}{saved2}")
     print(f"     {Colors.DIM}Full-featured terminal UI with mouse support{Colors.NC}")
     print(f"     {Colors.DIM}Best for: SSH, headless, Raspberry Pi Connect terminal{Colors.NC}")
     print()
 
     # Option 3: Rich CLI
     rec3 = f" {Colors.GREEN}← Recommended{Colors.NC}" if recommended == '3' else ""
-    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.CYAN}Rich CLI (Original Interface){Colors.NC}{rec3}")
+    saved3 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '3' else ""
+    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.CYAN}Rich CLI (Original Interface){Colors.NC}{rec3}{saved3}")
     print(f"     {Colors.DIM}Text-based menu interface{Colors.NC}")
     print(f"     {Colors.DIM}Best for: Basic terminals, fallback, minimal environments{Colors.NC}")
     print()
@@ -156,6 +197,12 @@ def print_menu(env, recommended):
     # Install options
     print(f"  {Colors.BOLD}i{Colors.NC}. {Colors.YELLOW}Install missing dependencies{Colors.NC}")
     print(f"     {Colors.DIM}Install GTK4 or Textual if needed{Colors.NC}")
+    print()
+
+    # Preference options
+    if saved_pref:
+        print(f"  {Colors.BOLD}c{Colors.NC}. {Colors.DIM}Clear saved preference{Colors.NC}")
+    print(f"  {Colors.BOLD}s{Colors.NC}. {Colors.DIM}Save preference after selecting{Colors.NC}")
     print()
 
     print(f"  {Colors.BOLD}q{Colors.NC}. {Colors.DIM}Quit{Colors.NC}")
@@ -243,6 +290,37 @@ def main():
         print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
         sys.exit(1)
 
+    # Load saved preferences
+    prefs = load_preferences()
+    saved_interface = prefs.get('interface')
+    auto_launch = prefs.get('auto_launch', False)
+    save_next = False
+
+    # Auto-launch saved preference if set
+    if auto_launch and saved_interface in ['1', '2', '3']:
+        env = detect_environment()
+        # Verify dependencies are still available
+        can_launch = True
+        if saved_interface == '1' and not (env['has_display'] and env['has_gtk']):
+            can_launch = False
+        if saved_interface == '2' and not env['has_textual']:
+            can_launch = False
+
+        if can_launch:
+            print(f"{Colors.GREEN}Auto-launching saved preference...{Colors.NC}")
+            print(f"{Colors.DIM}(Run with --wizard to change preference){Colors.NC}")
+            import time
+            time.sleep(1)
+            launch_interface(saved_interface)
+        else:
+            print(f"{Colors.YELLOW}Saved interface not available, showing wizard...{Colors.NC}")
+
+    # Check for --wizard flag to force wizard
+    if '--wizard' in sys.argv:
+        prefs['auto_launch'] = False
+        save_preferences(prefs)
+        auto_launch = False
+
     while True:
         # Clear screen
         os.system('clear' if os.name == 'posix' else 'cls')
@@ -257,19 +335,37 @@ def main():
         # Get recommendation
         recommended = get_recommendation(env)
 
+        # Default to saved preference if available
+        default_choice = saved_interface if saved_interface else recommended
+
         # Print menu
-        print_menu(env, recommended)
+        print_menu(env, recommended, saved_interface)
 
         # Get user choice
         try:
-            choice = input(f"{Colors.CYAN}Select option [{recommended}]: {Colors.NC}").strip() or recommended
+            choice = input(f"{Colors.CYAN}Select option [{default_choice}]: {Colors.NC}").strip() or default_choice
         except (KeyboardInterrupt, EOFError):
-            print(f"\n\n{Colors.YELLOW}Goodbye!{Colors.NC}")
+            print(f"\n\n{Colors.YELLOW}A Hui Hou!{Colors.NC}")
             sys.exit(0)
 
         if choice.lower() == 'q':
-            print(f"\n{Colors.YELLOW}Goodbye!{Colors.NC}")
+            print(f"\n{Colors.YELLOW}A Hui Hou!{Colors.NC}")
             sys.exit(0)
+
+        elif choice.lower() == 'c':
+            # Clear saved preference
+            prefs.pop('interface', None)
+            prefs.pop('auto_launch', None)
+            save_preferences(prefs)
+            saved_interface = None
+            print(f"\n{Colors.GREEN}Preference cleared!{Colors.NC}")
+            input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
+
+        elif choice.lower() == 's':
+            # Enable save mode for next selection
+            save_next = True
+            print(f"\n{Colors.CYAN}Select an interface to save as your default...{Colors.NC}")
+            input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
 
         elif choice == 'i':
             install_dependencies()
@@ -310,6 +406,22 @@ def main():
                     print(f"{Colors.RED}Failed to install Textual{Colors.NC}")
                     input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
                     continue
+
+            # Save preference if requested
+            if save_next:
+                prefs['interface'] = choice
+                try:
+                    confirm = input(f"\n{Colors.CYAN}Auto-launch this interface next time? [Y/n]: {Colors.NC}").strip().lower()
+                    prefs['auto_launch'] = confirm in ['', 'y', 'yes']
+                except (KeyboardInterrupt, EOFError):
+                    prefs['auto_launch'] = False
+
+                save_preferences(prefs)
+                pref_names = {'1': 'GTK4 GUI', '2': 'Textual TUI', '3': 'Rich CLI'}
+                print(f"{Colors.GREEN}Saved {pref_names.get(choice)} as default!{Colors.NC}")
+                if prefs['auto_launch']:
+                    print(f"{Colors.DIM}Use --wizard flag to change preference{Colors.NC}")
+                save_next = False
 
             # Launch the interface
             launch_interface(choice)
