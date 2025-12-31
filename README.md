@@ -15,18 +15,20 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 ## What's New in v3.0.0
 
 - **GTK4 Graphical Interface** - Modern desktop UI with libadwaita design
-- **Textual TUI** - Full-featured terminal UI for SSH/headless access
-- **Config File Manager** - Select YAML from `/etc/meshtasticd/available.d`
+- **Textual TUI** - Full-featured terminal UI for SSH/headless access (Raspberry Pi Connect friendly)
+- **Config File Manager** - Select YAML from `/etc/meshtasticd/available.d`, edit with nano
 - **Service Management** - Start/stop/restart with live log viewing
-- **Three UI Options** - Choose GTK4, Textual TUI, or Rich CLI
+- **Meshtastic CLI Integration** - Run CLI commands from the UI
+- **Reboot Persistence** - Installer auto-restarts after system reboot
+- **Three UI Options** - Choose GTK4, Textual TUI, or Rich CLI based on your setup
 
 ## UI Options
 
 | Interface | Command | Best For |
 |-----------|---------|----------|
 | **Wizard** | `sudo meshtasticd-installer` | Auto-detect and select best interface |
-| **GTK4 GUI** | `sudo python3 src/main_gtk.py` | Pi with display, VNC, desktop |
-| **Textual TUI** | `sudo python3 src/main_tui.py` | SSH, headless, Raspberry Pi Connect |
+| **GTK4 GUI** | `sudo python3 src/main_gtk.py` | Pi with display, VNC, Raspberry Pi Connect desktop |
+| **Textual TUI** | `sudo python3 src/main_tui.py` | SSH, headless, Raspberry Pi Connect terminal |
 | **Rich CLI** | `sudo meshtasticd-cli` | Fallback, minimal environments |
 
 ## Features
@@ -41,7 +43,6 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 - **Dependency Management**: Automatically fix deprecated dependencies
 - **Error Handling**: Comprehensive debugging and troubleshooting tools
 - **Automatic Update Notifications**: Get notified when updates are available
-- **Terminal Compatibility**: Works on all terminals with automatic emoji/ASCII fallback
 
 #### Available Build Channels
 - **stable/beta** - Latest stable releases from `network:Meshtastic:beta` (recommended)
@@ -76,14 +77,12 @@ Pre-configured channel setups for common use cases:
 - **Emergency/SAR** - Maximum range for emergency operations
 - **Urban High-Density** - ShortFast for city networks
 - **Private Group** - Custom encrypted channels
-- **Multi-Channel** - Multiple channels for organizations
 - **Long Range** - Maximum distance configuration
 - **Repeater/Router** - Infrastructure node setup
 
 ### Configuration Templates
 Ready-to-use hardware and use-case templates:
 - MeshAdv-Mini (SX1262/SX1268 HAT)
-- MeshAdv-Mini 400MHz variant
 - Waveshare SX1262
 - Adafruit RFM9x
 - **MtnMesh Community**
@@ -97,33 +96,14 @@ Ready-to-use hardware and use-case templates:
 - **Power Warnings**: Alerts for high-power modules (900mA+ devices)
 
 ### Radio Configuration
-- **Modem Presets**: All official Meshtastic presets
-  - **MediumFast** (MtnMesh community standard, Oct 2025)
-  - LongFast (Default Meshtastic)
-  - ShortFast, MediumSlow, LongModerate, etc.
-- **Channel Slot Configuration**: Interactive slot selection (e.g., slot 20 for LongFast)
+- **Modem Presets**: All official Meshtastic presets (ShortTurbo, ShortFast, MediumFast, LongFast, etc.)
+- **Channel Slot Configuration**: Interactive slot selection
 - **Region Selection**: All supported regulatory regions
 - **TX Power Configuration**: 0-30 dBm with device-specific recommendations
-- **Hop Limit Settings**: Network size optimization
-
-### Module Configuration
-Interactive configuration for all Meshtastic modules:
-- **MQTT** - Bridge mesh to internet
-- **Serial** - Serial communication
-- **External Notification** - LED/buzzer control
-- **Store & Forward** - Message caching
-- **Range Test** - Network testing
-- **Telemetry** - Device/environment monitoring
-- **Canned Messages** - Quick message templates
-- **Audio** - Voice communication
-- **Remote Hardware** - GPIO control
-- **Neighbor Info** - Network topology
-- **Detection Sensor** - GPIO sensors
 
 ## Supported Platforms
 
-- **Raspberry Pi OS** (32-bit armhf)
-- **Raspberry Pi OS** (64-bit arm64)
+- **Raspberry Pi OS** (32-bit armhf, 64-bit arm64)
 - **Raspbian** Bookworm and newer
 - **Debian-based** Linux distributions on ARM/x86_64
 - **Terminal Compatibility**: Works perfectly on:
@@ -136,74 +116,21 @@ Interactive configuration for all Meshtastic modules:
 ## Supported Hardware
 
 ### Raspberry Pi Models
-- **Raspberry Pi 5** (Latest model with full support)
-- **Raspberry Pi 4** (All memory variants)
-- **Raspberry Pi 3** (B, B+, A+)
-- **Raspberry Pi 2**
-- **Raspberry Pi Zero 2 W** (Recommended for portable nodes)
-- **Raspberry Pi Zero W**
-- **Raspberry Pi Zero**
-- **Raspberry Pi 400** (Desktop all-in-one)
+- Raspberry Pi 5, 4, 3, 2, Zero 2 W, Zero W, Zero, 400
 
 ### USB LoRa Modules
-- **MeshToad** (CH341, 1W, 900mA peak) - MtnMesh device
-- **MeshTadpole** (CH341 variant)
-- **MeshStick** (Official Meshtastic device)
-- CH340/CH341-based modules
-- CP2102-based modules (Silicon Labs)
-- FT232-based modules (FTDI)
+- MeshToad, MeshTadpole, MeshStick, CH340/CH341, CP2102, FT232
 
 ### SPI LoRa HATs
-- **MeshAdv-Mini** (SX1262/SX1268, +22dBm, GPS, Temp sensor, PWM fan)
-- **MeshAdv-Pi-Hat** (1W High Power, SX1262/SX1268, +33dBm, GPS)
-- **MeshAdv-Pi v1.1** (Standard HAT)
-- **Waveshare SX126X** (SX1262)
-- **Adafruit RFM9x** (SX1276)
-- **Elecrow LoRa RFM95** (SX1276)
-- **PiTx LoRa** (SX1276)
-
-All HATs include complete GPIO pin configurations and hardware-specific settings.
+- MeshAdv-Mini, MeshAdv-Pi-Hat, Waveshare SX126X, Adafruit RFM9x
 
 ## Installation
 
-Choose your preferred installation method:
-
 ### Quick Install (Recommended)
-
-**One-liner installation** - Downloads, installs, and launches the interactive installer automatically:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_UI/main/install.sh | sudo bash
 ```
-
-This will:
-- Update package lists (`apt-get update`)
-- Prompt for optional system upgrade (you can respond with y/n)
-- Install all required dependencies
-- Clone the repository to `/opt/meshtasticd-installer`
-- **Create Python virtual environment** (fixes PEP 668 externally-managed-environment errors)
-- Install Python dependencies in isolated venv
-- Create the `meshtasticd-installer` command
-- **Automatically launch the interactive installer**
-
-**Installation Options:**
-
-Skip the interactive prompts and automatically upgrade system packages:
-```bash
-curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_UI/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
-```
-
-Skip the system upgrade entirely (faster installation):
-```bash
-curl -sSL https://raw.githubusercontent.com/Nursedude/Meshtasticd_interactive_UI/main/install.sh | sudo SKIP_UPGRADE=yes bash
-```
-
-**To run the installer later manually:**
-```bash
-sudo meshtasticd-installer
-```
-
----
 
 ### UI-Specific Dependencies
 
@@ -215,6 +142,11 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.
 **For Textual TUI:**
 ```bash
 pip install textual
+```
+
+**To run the installer later manually:**
+```bash
+sudo meshtasticd-installer
 ```
 
 ---
@@ -268,23 +200,14 @@ docker run -d -p 8080:8080 --privileged -v /dev:/dev meshtasticd-installer web
 
 ### Manual Installation
 
-**For advanced users who want full control**:
-
 ```bash
-# 1. Install system dependencies
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv git
-
-# 2. Clone repository
 git clone https://github.com/Nursedude/Meshtasticd_interactive_UI.git
 cd Meshtasticd_interactive_UI
-
-# 3. Create virtual environment and install dependencies (Recommended)
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Run installer (choose one)
+# Choose your UI:
 sudo ./venv/bin/python src/main_gtk.py   # GTK4 GUI (with display)
 sudo ./venv/bin/python src/main_tui.py   # Textual TUI (SSH/headless)
 sudo ./venv/bin/python src/main.py       # Rich CLI (fallback)
@@ -359,7 +282,7 @@ c. Meshtastic CLI Commands
 9. Check dependencies
 h. Hardware detection
 d. Debug & troubleshooting
-0. Exit
+q. Exit
 ```
 
 ## Quick Start Examples
@@ -410,11 +333,12 @@ sudo python3 src/main.py
 Meshtasticd_interactive_UI/
 ├── src/
 │   ├── main.py                    # Rich CLI entry point
-│   ├── main_gtk.py                # GTK4 GUI entry point (NEW)
-│   ├── main_tui.py                # Textual TUI entry point (NEW)
+│   ├── main_gtk.py                # GTK4 GUI entry point
+│   ├── main_tui.py                # Textual TUI entry point
+│   ├── launcher.py                # Interface wizard (NEW in v3.0.1)
 │   ├── __version__.py             # Version control
 │   ├── dashboard.py               # Quick Status Dashboard
-│   ├── gtk_ui/                    # GTK4 interface (NEW)
+│   ├── gtk_ui/                    # GTK4 interface
 │   │   ├── app.py                 # Main GTK4 application
 │   │   └── panels/                # UI panels
 │   │       ├── dashboard.py       # Dashboard panel
@@ -423,7 +347,7 @@ Meshtasticd_interactive_UI/
 │   │       ├── cli.py             # Meshtastic CLI
 │   │       ├── install.py         # Install/update
 │   │       └── hardware.py        # Hardware detection
-│   ├── tui/                       # Textual TUI (NEW)
+│   ├── tui/                       # Textual TUI
 │   │   └── app.py                 # Textual application
 │   ├── installer/
 │   │   ├── meshtasticd.py         # Meshtasticd installation logic
@@ -431,7 +355,7 @@ Meshtasticd_interactive_UI/
 │   │   ├── version.py             # Version management
 │   │   └── update_notifier.py     # Update notifications
 │   ├── config/
-│   │   ├── config_file_manager.py # YAML selector + nano (NEW)
+│   │   ├── config_file_manager.py # YAML selector + nano
 │   │   ├── lora.py                # LoRa configuration
 │   │   ├── radio.py               # Radio configuration
 │   │   ├── device.py              # Device configuration
@@ -440,9 +364,9 @@ Meshtasticd_interactive_UI/
 │   │   ├── spi_hats.py            # SPI HAT configuration
 │   │   ├── yaml_editor.py         # YAML editor
 │   │   └── channel_presets.py     # Channel presets
-│   ├── services/                  # Service management (NEW)
+│   ├── services/                  # Service management
 │   │   └── service_manager.py     # Systemd controls
-│   ├── cli/                       # Meshtastic CLI wrapper (NEW)
+│   ├── cli/                       # Meshtastic CLI wrapper
 │   │   └── meshtastic_cli.py      # CLI commands
 │   └── utils/
 │       ├── system.py              # System utilities
@@ -462,6 +386,13 @@ Meshtasticd_interactive_UI/
 ```
 
 ## Version History
+
+### v3.0.1 (2025-12-30)
+- **Launcher Wizard** - Interactive wizard to select your preferred interface
+- **Fixed Log Following** - Logs now update properly in GTK4 and TUI
+- **Improved Navigation** - All menus have Back (0) and Main Menu (m) options
+- **Better Shortcuts** - Logical keyboard shortcuts (q=quit, ?=help)
+- **RPi Compatibility** - Proper pip install with --break-system-packages
 
 ### v3.0.0 (2025-12-30)
 - **NEW: GTK4 graphical interface** - Modern libadwaita design with dashboard
@@ -514,57 +445,15 @@ Meshtasticd_interactive_UI/
 - Virtual environment support - Isolated Python dependencies
 - Emoji fallback system - ASCII alternatives for terminals without UTF-8
 
-### v2.0.0 (2025-12-29)
-- Added Quick Status Dashboard
-- Added Interactive Channel Configuration with presets
-- Added Automatic Update Notifications
-- Added Configuration Templates for common setups
-- Improved UI with better navigation and help
-- Added version control system
-- New templates: Emergency/SAR, Urban, MtnMesh, Repeater
-
-### v1.2.0 (2025-12-15)
-- Added device configuration support
-- Added SPI HAT configuration (MeshAdv-Mini)
-- Improved hardware detection
-
-### v1.1.0 (2025-12-01)
-- Added modem preset configuration
-- Added channel slot configuration
-- Added module configuration
-
-### v1.0.0 (2025-11-15)
-- Initial release
-- Basic installation support
-- LoRa configuration
-- Hardware detection
+### v1.x
+- Initial release with basic installation and configuration
 
 ## License
 
-GPL-3.0 (inherited from meshtastic/python)
-
-## Contributing
-
-Contributions welcome! Please open an issue or PR.
+GPL-3.0
 
 ## Community Resources
 
-### Official Meshtastic
 - [Meshtastic Documentation](https://meshtastic.org/docs/)
-- [Meshtastic Python Library](https://github.com/meshtastic/python)
-- [Linux Native Hardware Guide](https://meshtastic.org/docs/hardware/devices/linux-native-hardware/)
-- [LoRa Configuration](https://meshtastic.org/docs/configuration/radio/lora/)
-- [Module Configuration](https://meshtastic.org/docs/configuration/module/)
-
-### MtnMesh Community (Mountain Mesh)
-- [MtnMe.sh](https://mtnme.sh/) - Community guides and resources
-- [MediumFast Migration Guide](https://mtnme.sh/mediumfast/)
-- [MeshToad Device Info](https://mtnme.sh/devices/MeshToad/)
-- [Configuration Best Practices](https://mtnme.sh/config/)
-
-### Hardware
-- [MeshAdv-Pi-Hat](https://github.com/chrismyers2000/MeshAdv-Pi-Hat) - 1W High-Power LoRa/GPS Pi HAT by Chris Myers
-- [FemtoFox](https://github.com/femtofox) - Linux-based Meshtastic node with Foxbuntu OS ([Getting Started](https://github.com/femtofox/femtofox/wiki/Getting-Started))
-
-### Other Tools
-- [Meshtasticd Configuration Tool](https://github.com/chrismyers2000/Meshtasticd-Configuration-Tool) by Chris Myers
+- [MtnMesh Community](https://mtnme.sh/)
+- [MeshAdv-Pi-Hat](https://github.com/chrismyers2000/MeshAdv-Pi-Hat)
