@@ -652,49 +652,179 @@ class LoRaConfigurator:
                 return config
             # If user says no, loop continues to show menu again
 
+    def _get_existing_channels(self):
+        """Get existing channel configuration from device via meshtastic CLI"""
+        import subprocess
+        import shutil
+
+        if not shutil.which('meshtastic'):
+            return None
+
+        try:
+            # Get channel info for slots 0-7
+            channels = []
+            result = subprocess.run(
+                ['meshtastic', '--host', 'localhost', '--info'],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode == 0 and result.stdout:
+                # Parse channel info from output
+                lines = result.stdout.split('\n')
+                in_channels = False
+                current_channel = None
+
+                for line in lines:
+                    if 'Channels:' in line or 'Channel' in line:
+                        in_channels = True
+
+                    if in_channels:
+                        # Look for channel entries like "  0: LongFast"
+                        if line.strip().startswith(('0:', '1:', '2:', '3:', '4:', '5:', '6:', '7:')):
+                            parts = line.strip().split(':', 1)
+                            if len(parts) >= 2:
+                                idx = int(parts[0].strip())
+                                name = parts[1].strip().split()[0] if parts[1].strip() else 'Unknown'
+                                role = 'PRIMARY' if idx == 0 else 'SECONDARY'
+                                if 'DISABLED' in line.upper():
+                                    role = 'DISABLED'
+                                channels.append({
+                                    'index': idx,
+                                    'name': name,
+                                    'role': role,
+                                    'psk': 'AQ=='  # Default, can't read actual PSK
+                                })
+
+                return channels if channels else None
+            return None
+        except Exception as e:
+            console.print(f"[dim]Could not read existing channels: {e}[/dim]")
+            return None
+
+    def _apply_channel_config(self, channels):
+        """Apply channel configuration to device via meshtastic CLI"""
+        import subprocess
+        import shutil
+
+        if not shutil.which('meshtastic'):
+            console.print("[red]Meshtastic CLI not found. Cannot apply configuration.[/red]")
+            console.print("[cyan]Install with: pipx install 'meshtastic[cli]'[/cyan]")
+            console.print("[yellow]Or use: meshtastic --host localhost --ch-set ... via terminal[/yellow]")
+            return False
+
+        console.print("\n[cyan]Applying channel configuration...[/cyan]\n")
+
+        success = True
+        for channel in channels:
+            idx = channel.get('index', 0)
+            name = channel.get('name', 'Default')
+            psk = channel.get('psk', 'AQ==')
+
+            console.print(f"[dim]Configuring channel {idx}: {name}...[/dim]")
+
+            try:
+                # Set channel name
+                result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost',
+                     '--ch-index', str(idx), '--ch-set', 'name', name],
+                    capture_output=True, text=True, timeout=30
+                )
+
+                if result.returncode != 0:
+                    console.print(f"[yellow]Warning: {result.stderr or 'Failed to set name'}[/yellow]")
+                    success = False
+                else:
+                    console.print(f"[green]  Channel {idx} name set to '{name}'[/green]")
+
+                # Set PSK if not default
+                if psk and psk != 'AQ==':
+                    result = subprocess.run(
+                        ['meshtastic', '--host', 'localhost',
+                         '--ch-index', str(idx), '--ch-set', 'psk', psk],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode != 0:
+                        console.print(f"[yellow]Warning: Could not set PSK[/yellow]")
+                        success = False
+                    else:
+                        console.print(f"[green]  Channel {idx} PSK configured[/green]")
+
+            except subprocess.TimeoutExpired:
+                console.print(f"[red]Timeout configuring channel {idx}[/red]")
+                success = False
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                success = False
+
+        if success:
+            console.print("\n[bold green]Channel configuration applied successfully![/bold green]")
+        else:
+            console.print("\n[yellow]Some settings may not have been applied. Check device.[/yellow]")
+
+        return success
+
     def configure_channels(self):
         """Configure channel settings with interactive menu"""
-        channels = []
+        # First, try to get existing channels from device
+        console.print("\n[dim]Checking existing channel configuration...[/dim]")
+        existing_channels = self._get_existing_channels()
+
+        if existing_channels:
+            channels = existing_channels.copy()
+            console.print("[green]Found existing channel configuration on device[/green]")
+        else:
+            channels = []
+            console.print("[yellow]No existing channels found or could not read device[/yellow]")
 
         while True:
             console.print("\n[bold cyan]═══════════════ Channel Configuration ═══════════════[/bold cyan]\n")
 
-            # Show current channels if any
+            # Show current channels
             if channels:
-                console.print("[dim]Current configured channels:[/dim]")
-                for idx, ch in enumerate(channels):
+                console.print("[dim]Current channels (from device):[/dim]")
+                for ch in channels:
+                    idx = ch.get('index', 0)
                     role = ch.get('role', 'SECONDARY')
-                    console.print(f"  Channel {idx}: {ch.get('name', 'Unnamed')} ({role})")
+                    role_color = 'green' if role == 'PRIMARY' else 'yellow' if role == 'SECONDARY' else 'dim'
+                    console.print(f"  [{role_color}]Channel {idx}[/{role_color}]: {ch.get('name', 'Unnamed')} ({role})")
                 console.print()
+            else:
+                console.print("[dim]No channels configured yet[/dim]\n")
 
             console.print("[dim cyan]── Actions ──[/dim cyan]")
             console.print("  [bold]1[/bold]. Configure Primary Channel (0)")
-            console.print("  [bold]2[/bold]. Add/Edit Secondary Channel")
+            console.print("  [bold]2[/bold]. Add/Edit Secondary Channel (1-7)")
             console.print("  [bold]3[/bold]. View Channel Summary")
-            console.print("  [bold]4[/bold]. Clear All Channels")
-            console.print("  [bold]5[/bold]. Done - Save Configuration")
-            console.print("\n  [bold]0[/bold]. Back")
+            console.print("  [bold]4[/bold]. Refresh from Device")
+            console.print("  [bold]5[/bold]. Apply & Save to Device")
+            console.print("\n  [bold]0[/bold]. Back (discard changes)")
             console.print("  [bold]m[/bold]. Main Menu")
+            console.print("\n[dim]Tip: Use meshtastic CLI or http://client.meshtastic.org for full config[/dim]")
 
             choice = Prompt.ask("\n[cyan]Select option[/cyan]",
                               choices=["0", "1", "2", "3", "4", "5", "m"], default="0")
 
             if choice == "0":
-                return channels if channels else None
+                if channels and Confirm.ask("[yellow]Discard unsaved changes?[/yellow]", default=True):
+                    return None
+                elif not channels:
+                    return None
             elif choice == "m":
                 return None  # Signal to return to main menu
             elif choice == "1":
                 primary = self._configure_single_channel(0, "Primary")
                 if primary:
                     # Replace or add primary channel
-                    if channels:
-                        channels[0] = primary
-                    else:
-                        channels.append(primary)
+                    found = False
+                    for i, ch in enumerate(channels):
+                        if ch.get('index', i) == 0:
+                            channels[i] = primary
+                            found = True
+                            break
+                    if not found:
+                        primary['index'] = 0
+                        channels.insert(0, primary)
             elif choice == "2":
-                if not channels:
-                    console.print("[yellow]Please configure the primary channel first[/yellow]")
-                    continue
                 # Ask which channel slot
                 slot = Prompt.ask("Channel slot (1-7)", default="1")
                 try:
@@ -720,16 +850,25 @@ class LoRaConfigurator:
                 self._show_channel_summary(channels)
                 Prompt.ask("\n[dim]Press Enter to continue[/dim]")
             elif choice == "4":
-                if Confirm.ask("[yellow]Clear all channel configuration?[/yellow]", default=False):
-                    channels = []
-                    console.print("[green]Channels cleared[/green]")
+                console.print("[dim]Refreshing from device...[/dim]")
+                existing_channels = self._get_existing_channels()
+                if existing_channels:
+                    channels = existing_channels.copy()
+                    console.print("[green]Refreshed channel configuration[/green]")
+                else:
+                    console.print("[yellow]Could not read channels from device[/yellow]")
             elif choice == "5":
                 if channels:
                     self._show_channel_summary(channels)
-                    if Confirm.ask("\n[cyan]Save this configuration?[/cyan]", default=True):
-                        return channels
+                    if Confirm.ask("\n[cyan]Apply this configuration to device?[/cyan]", default=True):
+                        if self._apply_channel_config(channels):
+                            Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+                            return channels
+                        else:
+                            console.print("[yellow]Configuration may not be complete. Review and retry.[/yellow]")
+                            Prompt.ask("\n[dim]Press Enter to continue[/dim]")
                 else:
-                    console.print("[yellow]No channels configured[/yellow]")
+                    console.print("[yellow]No channels to save[/yellow]")
 
         return channels
 

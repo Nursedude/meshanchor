@@ -138,8 +138,29 @@ class ServiceManager:
             cmd = ['journalctl', '-u', self.SERVICE_NAME, '-b', '-n', str(lines)]
             if follow:
                 cmd.append('-f')
-                console.print("[dim]Press Ctrl+C to stop following logs[/dim]\n")
-                subprocess.run(cmd)
+                console.print("[bold yellow]═══ Live Log View ═══[/bold yellow]")
+                console.print("[bold]Press Ctrl+C (or Ctrl+Z) to stop and return to menu[/bold]")
+                console.print("[dim]If Ctrl+C doesn't work, try pressing 'q' or closing terminal[/dim]\n")
+                console.print("─" * 60 + "\n")
+
+                # Use Popen for better control
+                import signal
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+                try:
+                    for line in process.stdout:
+                        console.print(line.rstrip())
+                except KeyboardInterrupt:
+                    pass
+                finally:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+
+                console.print("\n" + "─" * 60)
+                console.print("[green]Log following stopped[/green]")
             else:
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.stdout:
@@ -148,7 +169,7 @@ class ServiceManager:
                 else:
                     console.print("[yellow]No logs available[/yellow]")
         except KeyboardInterrupt:
-            console.print("\n[dim]Log following stopped[/dim]")
+            console.print("\n[green]Log following stopped[/green]")
         except Exception as e:
             console.print(f"[red]Error viewing logs: {e}[/red]")
 
