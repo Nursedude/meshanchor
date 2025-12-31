@@ -147,11 +147,12 @@ def interactive_menu():
         console.print(f"  [bold]9[/bold]. {em.get('🔍')} Check dependencies")
         console.print(f"  [bold]h[/bold]. {em.get('🔌')} Hardware detection")
         console.print(f"  [bold]d[/bold]. {em.get('🐛')} Debug & troubleshooting")
+        console.print(f"  [bold]u[/bold]. {em.get('🗑️', '[DEL]')} [red]Uninstall[/red]")
 
         console.print(f"\n  [bold]q[/bold]. {em.get('🚪')} Exit")
         console.print(f"  [bold]?[/bold]. {em.get('❓')} Help")
 
-        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "h", "d", "?"], default="1")
+        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "h", "d", "u", "?"], default="1")
 
         if choice == "1":
             show_dashboard()
@@ -177,11 +178,31 @@ def interactive_menu():
             detect_hardware()
         elif choice == "d":
             debug_menu()
+        elif choice == "u":
+            uninstall_menu()
         elif choice == "?":
             show_help()
         elif choice == "q":
             console.print(f"\n[green]{em.get('🤙')} A Hui Hou! Happy meshing![/green]")
             sys.exit(0)
+
+
+def uninstall_menu():
+    """Show uninstall menu"""
+    console.print("\n[bold red]═══════════════ Uninstall ═══════════════[/bold red]\n")
+
+    console.print("[yellow]Warning: This will remove meshtasticd and related components.[/yellow]")
+    console.print("[dim]You can choose which components to remove.[/dim]\n")
+
+    if not Confirm.ask("[red]Are you sure you want to proceed with uninstall?[/red]", default=False):
+        console.print("\n[green]Uninstall cancelled.[/green]")
+        return
+
+    from installer.uninstaller import MeshtasticdUninstaller
+    uninstaller = MeshtasticdUninstaller()
+    uninstaller.uninstall(interactive=True)
+
+    Prompt.ask("\n[dim]Press Enter to return to menu[/dim]")
 
 
 def show_dashboard():
