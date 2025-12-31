@@ -662,10 +662,11 @@ def debug_menu():
 
     console.print("\n[dim cyan]── Configuration ──[/dim cyan]")
     console.print(f"  [bold]8[/bold]. {em.get('⚙️')}  [yellow]Show environment config[/yellow]")
+    console.print(f"  [bold]9[/bold]. {em.get('🎨', '[EMJ]')}  [yellow]Emoji support status[/yellow]")
 
     console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to main menu")
 
-    choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"], default="0")
+    choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], default="0")
 
     if choice == "1":
         view_logs()
@@ -683,6 +684,16 @@ def debug_menu():
         show_version_info()
     elif choice == "8":
         show_environment_config()
+    elif choice == "9":
+        check_emoji_support()
+
+
+def check_emoji_support():
+    """Check and display emoji support status"""
+    from utils import emoji as emoji_utils
+
+    emoji_utils.setup_emoji_support(console)
+    Prompt.ask("\n[dim]Press Enter to return[/dim]")
 
 
 def show_environment_config():

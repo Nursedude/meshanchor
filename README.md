@@ -2,7 +2,14 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.0.4** | [Changelog](#version-history)
+**Version 3.0.5** | [Changelog](#version-history)
+
+## What's New in v3.0.5
+
+- **Emoji Font Detection** - Now checks if `fonts-noto-color-emoji` is installed
+- **Emoji Diagnostic** - Debug menu option 9 shows emoji support status
+- **RPi Emoji Fix** - Proper instructions for enabling emojis on Raspberry Pi
+- To enable emojis: `sudo apt install fonts-noto-color-emoji && fc-cache -f`
 
 ## What's New in v3.0.4
 
@@ -12,7 +19,6 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
   - Use `--wizard` flag to force wizard and change preference
 - **Edit Existing Channels** - Select a channel and modify with pre-filled values
 - **Consistent Navigation** - `m` = Main Menu everywhere, `0` = Back
-- **Better Emoji Support** - Improved detection for SSH and RPi terminals
 
 ## What's New in v3.0.2
 

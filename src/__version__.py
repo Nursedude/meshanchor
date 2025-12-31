@@ -1,11 +1,22 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.0.4"
-__version_info__ = (3, 0, 4)
+__version__ = "3.0.5"
+__version_info__ = (3, 0, 5)
 __release_date__ = "2025-12-31"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.0.5",
+        "date": "2025-12-31",
+        "changes": [
+            "IMPROVED: Emoji detection now checks for installed fonts (fonts-noto-color-emoji)",
+            "NEW: Emoji status diagnostic in Debug menu (option 9)",
+            "NEW: Detailed instructions for enabling emojis on Raspberry Pi",
+            "FIX: Emojis only enabled when proper fonts are installed",
+            "FIX: SSH sessions properly detect font availability"
+        ]
+    },
     {
         "version": "3.0.4",
         "date": "2025-12-31",

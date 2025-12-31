@@ -1,7 +1,95 @@
 """Emoji utility with fallback support for Raspberry Pi OS terminals"""
 
 import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
+
+
+def _check_emoji_fonts_installed():
+    """Check if emoji fonts are installed on the system"""
+    # Check for common emoji font packages
+    emoji_fonts = [
+        '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',
+        '/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf',
+        '/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf',
+        '/usr/share/fonts/noto-color-emoji/NotoColorEmoji.ttf',
+    ]
+
+    for font in emoji_fonts:
+        if Path(font).exists():
+            return True
+
+    # Also check via fc-list if fontconfig is available
+    try:
+        result = subprocess.run(
+            ['fc-list', ':family', 'emoji'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+
+        # Check for Noto Color Emoji specifically
+        result = subprocess.run(
+            ['fc-list', ':family=Noto Color Emoji'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
+    return False
+
+
+def _is_raspberry_pi():
+    """Check if running on Raspberry Pi"""
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            return 'raspberry pi' in f.read().lower()
+    except (FileNotFoundError, IOError):
+        pass
+
+    # Alternative check
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            cpuinfo = f.read().lower()
+            return 'raspberry' in cpuinfo or 'bcm' in cpuinfo
+    except (FileNotFoundError, IOError):
+        pass
+
+    return False
+
+
+def install_emoji_fonts():
+    """Install emoji fonts on Debian/Raspberry Pi OS
+
+    Returns:
+        bool: True if fonts were installed successfully
+    """
+    if not shutil.which('apt-get'):
+        return False
+
+    try:
+        # Update package list and install fonts
+        subprocess.run(
+            ['apt-get', 'update', '-qq'],
+            capture_output=True, timeout=60
+        )
+        result = subprocess.run(
+            ['apt-get', 'install', '-y', 'fonts-noto-color-emoji'],
+            capture_output=True, timeout=120
+        )
+
+        if result.returncode == 0:
+            # Refresh font cache
+            subprocess.run(['fc-cache', '-f', '-v'], capture_output=True, timeout=60)
+            return True
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
+    return False
 
 
 class EmojiHelper:
@@ -13,9 +101,14 @@ class EmojiHelper:
     def _detect_emoji_support(self):
         """Detect if terminal supports emoji
 
-        Emojis are ENABLED by default for better visual experience.
-        Use DISABLE_EMOJI=true to force ASCII mode.
-        Use ENABLE_EMOJI=true to force emoji mode.
+        Emojis are ENABLED if:
+        1. ENABLE_EMOJI=true is set, OR
+        2. Terminal supports UTF-8 AND emoji fonts are installed
+
+        Emojis are DISABLED if:
+        1. DISABLE_EMOJI=true is set, OR
+        2. Terminal is dumb/vt100, OR
+        3. No emoji fonts are installed on RPi
         """
         # Allow explicit disable if requested
         if os.environ.get('DISABLE_EMOJI', '').lower() in ('1', 'true', 'yes'):
@@ -30,40 +123,38 @@ class EmojiHelper:
         if term in ('dumb', 'vt100', 'vt220', ''):
             return False
 
-        # Check stdout encoding - if it supports UTF-8, enable emojis
+        # Check if we have UTF-8 support
+        has_utf8 = False
         try:
             encoding = getattr(sys.stdout, 'encoding', None)
             if encoding and 'utf' in encoding.lower():
-                # Check locale for additional confirmation
-                lang = os.environ.get('LANG', '').lower()
-                lc_all = os.environ.get('LC_ALL', '').lower()
-                lc_ctype = os.environ.get('LC_CTYPE', '').lower()
-
-                # If any locale setting indicates UTF-8, enable emojis
-                if any('utf' in loc for loc in [lang, lc_all, lc_ctype] if loc):
-                    return True
-
-                # Modern terminals (xterm-256color, screen-256color, etc.) usually support emoji
-                if '256color' in term or 'xterm' in term or 'screen' in term:
-                    return True
-
-                # If stdout is UTF-8 but no explicit locale, still try emojis
-                return True
+                has_utf8 = True
         except Exception:
             pass
 
-        # For SSH: Check if it's a modern terminal that supports UTF-8
-        if os.environ.get('SSH_CONNECTION'):
-            # Check if the SSH session has a proper terminal
-            term = os.environ.get('TERM', '').lower()
-            if term and term not in ('dumb', 'vt100', 'vt220'):
-                # Check locale
-                lang = os.environ.get('LANG', '').lower()
-                if 'utf' in lang:
-                    return True
+        if not has_utf8:
+            # Check locale
+            lang = os.environ.get('LANG', '').lower()
+            lc_all = os.environ.get('LC_ALL', '').lower()
+            lc_ctype = os.environ.get('LC_CTYPE', '').lower()
+            if any('utf' in loc for loc in [lang, lc_all, lc_ctype] if loc):
+                has_utf8 = True
+
+        if not has_utf8:
             return False
 
-        # Enable by default for all other cases
+        # On Raspberry Pi, check if emoji fonts are actually installed
+        if _is_raspberry_pi():
+            if not _check_emoji_fonts_installed():
+                return False
+
+        # For SSH sessions, be more conservative
+        if os.environ.get('SSH_CONNECTION'):
+            # Only enable if fonts are installed and locale is UTF-8
+            if not _check_emoji_fonts_installed():
+                return False
+
+        # Enable for modern terminals with UTF-8 support
         return True
 
     # Emoji mappings with ASCII fallbacks
@@ -125,6 +216,8 @@ class EmojiHelper:
         '📄': '[FILE]',     # File
         '🎉': '[NEW]',      # Celebration/New
         '✨': '[STAR]',     # Sparkle/Star
+        '🎨': '[EMJ]',      # Emoji/Color
+        '🗑️': '[DEL]',      # Delete/Trash
     }
 
     def get(self, emoji, fallback=None):
@@ -201,3 +294,65 @@ def status_warning():
 def status_info():
     """Info status indicator"""
     return get('🔵', '[i]')
+
+
+def check_emoji_status():
+    """Get detailed emoji support status
+
+    Returns:
+        dict: Status information about emoji support
+    """
+    return {
+        'enabled': _emoji.is_enabled(),
+        'fonts_installed': _check_emoji_fonts_installed(),
+        'is_raspberry_pi': _is_raspberry_pi(),
+        'term': os.environ.get('TERM', ''),
+        'lang': os.environ.get('LANG', ''),
+        'encoding': getattr(sys.stdout, 'encoding', 'unknown'),
+        'ssh_session': bool(os.environ.get('SSH_CONNECTION')),
+    }
+
+
+def setup_emoji_support(console=None):
+    """Interactive setup for emoji support on Raspberry Pi
+
+    Args:
+        console: Optional Rich console for output
+
+    Returns:
+        bool: True if emojis are now enabled
+    """
+    if console is None:
+        from rich.console import Console
+        console = Console()
+
+    status = check_emoji_status()
+
+    console.print("\n[bold cyan]Emoji Support Status[/bold cyan]")
+    console.print(f"  Enabled: {'[green]Yes[/green]' if status['enabled'] else '[red]No[/red]'}")
+    console.print(f"  Fonts installed: {'[green]Yes[/green]' if status['fonts_installed'] else '[yellow]No[/yellow]'}")
+    console.print(f"  Raspberry Pi: {'Yes' if status['is_raspberry_pi'] else 'No'}")
+    console.print(f"  Terminal: {status['term']}")
+    console.print(f"  Encoding: {status['encoding']}")
+    console.print(f"  SSH session: {'Yes' if status['ssh_session'] else 'No'}")
+
+    if status['enabled']:
+        console.print("\n[green]Emojis are working![/green] 🎉 ✨ 🟢")
+        return True
+
+    if not status['fonts_installed']:
+        console.print("\n[yellow]Emoji fonts are not installed.[/yellow]")
+        console.print("To enable emojis, run:")
+        console.print("[cyan]  sudo apt install fonts-noto-color-emoji && fc-cache -f[/cyan]")
+        console.print("\nOr set [cyan]ENABLE_EMOJI=true[/cyan] to force enable.")
+    else:
+        console.print("\n[yellow]Fonts are installed but emojis are disabled.[/yellow]")
+        console.print("Try setting: [cyan]export ENABLE_EMOJI=true[/cyan]")
+
+    return False
+
+
+def reinitialize():
+    """Re-detect emoji support (call after installing fonts)"""
+    global _emoji
+    _emoji = EmojiHelper()
