@@ -649,8 +649,52 @@ class LoRaConfigurator:
             console.print(table)
 
             if Confirm.ask("\nUse this preset?", default=True):
+                # Apply the preset to the device
+                if Confirm.ask("[cyan]Apply this preset to the device now?[/cyan]", default=True):
+                    if self._apply_modem_preset(preset_key):
+                        console.print("[green]Preset applied to device![/green]")
+                    else:
+                        console.print("[yellow]Could not apply preset. You may need to apply manually.[/yellow]")
                 return config
             # If user says no, loop continues to show menu again
+
+    def _apply_modem_preset(self, preset_key):
+        """Apply modem preset to device via meshtastic CLI"""
+        import subprocess
+        import shutil
+
+        # Ensure meshtastic CLI is available
+        if not self._ensure_meshtastic_cli():
+            return False
+
+        console.print(f"\n[dim]Applying modem preset {preset_key} to device...[/dim]")
+
+        try:
+            # Use meshtastic CLI to set the modem preset
+            result = subprocess.run(
+                ['meshtastic', '--host', 'localhost', '--set', 'lora.modem_preset', preset_key],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode == 0:
+                console.print(f"[green]Modem preset set to {preset_key}[/green]")
+                return True
+            else:
+                console.print(f"[yellow]Warning: {result.stderr or 'Could not set preset'}[/yellow]")
+                # Try alternative command format
+                result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost', '--ch-set', 'modem_config', preset_key, '--ch-index', '0'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    return True
+                return False
+        except subprocess.TimeoutExpired:
+            console.print("[red]Timeout applying preset[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return False
 
     def _get_existing_channels(self):
         """Get existing channel configuration from device via meshtastic CLI"""
@@ -701,18 +745,78 @@ class LoRaConfigurator:
             console.print(f"[dim]Could not read existing channels: {e}[/dim]")
             return None
 
+    def _ensure_meshtastic_cli(self):
+        """Ensure meshtastic CLI is installed, offer to install if not"""
+        import subprocess
+        import shutil
+
+        if shutil.which('meshtastic'):
+            return True
+
+        console.print("\n[yellow]Meshtastic CLI is required to save configuration to device.[/yellow]")
+        console.print("[dim]The CLI communicates with meshtasticd to configure the LoRa radio.[/dim]\n")
+
+        if Confirm.ask("[cyan]Install meshtastic CLI now?[/cyan]", default=True):
+            console.print("\n[dim]Installing meshtastic CLI via pipx...[/dim]")
+
+            # Check if pipx is available
+            if not shutil.which('pipx'):
+                console.print("[dim]Installing pipx first...[/dim]")
+                try:
+                    result = subprocess.run(
+                        ['sudo', 'apt', 'install', '-y', 'pipx'],
+                        capture_output=True, text=True, timeout=120
+                    )
+                    if result.returncode != 0:
+                        console.print(f"[red]Failed to install pipx: {result.stderr}[/red]")
+                        return False
+                    # Ensure pipx path
+                    subprocess.run(['pipx', 'ensurepath'], capture_output=True, timeout=30)
+                except Exception as e:
+                    console.print(f"[red]Error installing pipx: {e}[/red]")
+                    return False
+
+            # Install meshtastic CLI
+            try:
+                console.print("[dim]Running: pipx install 'meshtastic[cli]'[/dim]")
+                result = subprocess.run(
+                    ['pipx', 'install', 'meshtastic[cli]'],
+                    capture_output=True, text=True, timeout=300
+                )
+                if result.returncode == 0:
+                    console.print("[green]Meshtastic CLI installed successfully![/green]")
+                    # Check if it's now available
+                    if shutil.which('meshtastic'):
+                        return True
+                    else:
+                        # Try adding to path
+                        console.print("[yellow]CLI installed but not in PATH. Try restarting terminal.[/yellow]")
+                        console.print("[dim]Or run: export PATH=\"$PATH:$HOME/.local/bin\"[/dim]")
+                        return False
+                else:
+                    console.print(f"[red]Failed to install: {result.stderr}[/red]")
+                    return False
+            except subprocess.TimeoutExpired:
+                console.print("[red]Installation timed out[/red]")
+                return False
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                return False
+        else:
+            console.print("\n[yellow]Cannot save configuration without meshtastic CLI.[/yellow]")
+            console.print("[dim]Install manually: pipx install 'meshtastic[cli]'[/dim]")
+            return False
+
     def _apply_channel_config(self, channels):
         """Apply channel configuration to device via meshtastic CLI"""
         import subprocess
         import shutil
 
-        if not shutil.which('meshtastic'):
-            console.print("[red]Meshtastic CLI not found. Cannot apply configuration.[/red]")
-            console.print("[cyan]Install with: pipx install 'meshtastic[cli]'[/cyan]")
-            console.print("[yellow]Or use: meshtastic --host localhost --ch-set ... via terminal[/yellow]")
+        # Ensure meshtastic CLI is available
+        if not self._ensure_meshtastic_cli():
             return False
 
-        console.print("\n[cyan]Applying channel configuration...[/cyan]\n")
+        console.print("\n[cyan]Applying channel configuration to device...[/cyan]\n")
 
         success = True
         for channel in channels:
