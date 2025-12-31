@@ -39,6 +39,18 @@
    - Updated project structure with launcher.py
    - Kept all installation options (Web, Docker, Manual)
 
+7. **Channel Configuration Now Saves!** (`src/config/lora.py`)
+   - Reads existing channels from device via `meshtastic --info`
+   - "Apply & Save to Device" runs `meshtastic --ch-set` commands
+   - "Refresh from Device" re-reads current configuration
+   - No longer requires primary channel if one already exists
+   - Added tip about using meshtastic CLI or http://client.meshtastic.org
+
+8. **Live Log Exit Fixed** (`src/services/service_manager.py`)
+   - Clearer exit instructions (Ctrl+C/Ctrl+Z)
+   - Uses Popen instead of run() for better interrupt handling
+   - Properly terminates process on exit
+
 ### ⏳ STILL PENDING (For Wednesday)
 
 1. **Add back options to ALL menus** - Many submenus still missing
@@ -47,9 +59,9 @@
    - Template manager
    - Check all Prompt.ask() calls
 
-2. ~~**Remove MeshAdv-Mini 400MHz variant**~~ - ✅ DONE (removed from README.md templates list)
+2. ~~**Remove MeshAdv-Mini 400MHz variant**~~ - ✅ DONE
 
-3. **Service Management Live Logs** - User reports logs not updating, can't quit
+3. ~~**Service Management Live Logs**~~ - ✅ FIXED (clearer exit, Popen)
 
 4. **UI Selection Not Working** - "Same look every time" - investigate launcher
 
@@ -156,13 +168,13 @@ sudo python3 src/main.py        # Rich CLI
 claude/review-meshtasticd-installer-52ENu
 
 # Last commits (as of 2025-12-31)
+c849a73 fix: Channel config now detects existing channels and saves to device
+6e13f8f docs: Update session notes - PR #37 pushed and ready
 a03358f docs: Update session notes with merge conflict resolution
 908f4a1 fix: Resolve merge conflict in README.md
 740bdf3 v3.0.2: Fix modem presets, add SHORT_TURBO, update goodbye message
-28e1852 docs: Add session notes for development continuity
-cf43bd4 v3.0.1: Add launcher wizard, fix logging, improve navigation
 
-# PR Status: ✅ PUSHED & READY FOR MERGE - All conflicts resolved
+# PR Status: ✅ PUSHED & READY FOR MERGE - Channel config + live log fixes
 ```
 
 ---
