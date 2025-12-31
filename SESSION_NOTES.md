@@ -33,6 +33,12 @@
    - GTK4: Fixed journalctl --since format, auto-scroll
    - TUI: Added start/stop toggle
 
+6. **README.md Merge Conflict Resolved**
+   - Combined v3.0.1 and v3.0.0 changes from both branches
+   - Removed MeshAdv-Mini 400MHz variant from templates list
+   - Updated project structure with launcher.py
+   - Kept all installation options (Web, Docker, Manual)
+
 ### ⏳ STILL PENDING (For Wednesday)
 
 1. **Add back options to ALL menus** - Many submenus still missing
@@ -41,7 +47,7 @@
    - Template manager
    - Check all Prompt.ask() calls
 
-2. **Remove MeshAdv-Mini 400MHz variant** - Find and remove this option
+2. ~~**Remove MeshAdv-Mini 400MHz variant**~~ - ✅ DONE (removed from README.md templates list)
 
 3. **Service Management Live Logs** - User reports logs not updating, can't quit
 
@@ -149,13 +155,13 @@ sudo python3 src/main.py        # Rich CLI
 # Current branch
 claude/review-meshtasticd-installer-52ENu
 
-# Last commits
+# Last commits (as of 2025-12-31)
+908f4a1 fix: Resolve merge conflict in README.md
+740bdf3 v3.0.2: Fix modem presets, add SHORT_TURBO, update goodbye message
 28e1852 docs: Add session notes for development continuity
 cf43bd4 v3.0.1: Add launcher wizard, fix logging, improve navigation
 
-# Uncommitted changes (as of session end):
-# - Modem presets update (SHORT_TURBO, order)
-# - Goodbye message change
+# PR Status: Ready for review - README.md conflict resolved
 ```
 
 ---
