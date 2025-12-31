@@ -195,15 +195,21 @@ class LoRaConfigurator:
 
     def configure_region(self):
         """Configure LoRa region"""
-        console.print("\n[bold cyan]LoRa Region Configuration[/bold cyan]\n")
+        console.print("\n[bold cyan]═══════════════ LoRa Region Configuration ═══════════════[/bold cyan]\n")
 
         self.show_regions()
 
         console.print("\n[yellow]Important:[/yellow] Select the region appropriate for your location.")
         console.print("Using the wrong region may be illegal and can cause interference.")
 
-        region_codes = list(self.REGIONS.keys())
+        console.print("\n  [bold]0[/bold]. Back")
+        console.print("  [bold]m[/bold]. Main Menu")
+
+        region_codes = list(self.REGIONS.keys()) + ["0", "m"]
         region = Prompt.ask("\nSelect region", choices=region_codes, default="US")
+
+        if region == "0" or region == "m":
+            return None
 
         console.print(f"\n[green]Region set to: {self.REGIONS[region]['name']} ({self.REGIONS[region]['frequency']})[/green]")
 
@@ -961,16 +967,17 @@ class LoRaConfigurator:
 
             console.print("[dim cyan]── Actions ──[/dim cyan]")
             console.print("  [bold]1[/bold]. Configure Primary Channel (0)")
-            console.print("  [bold]2[/bold]. Add/Edit Secondary Channel (1-7)")
-            console.print("  [bold]3[/bold]. View Channel Summary")
-            console.print("  [bold]4[/bold]. Refresh from Device")
-            console.print("  [bold]5[/bold]. Apply & Save to Device")
+            console.print("  [bold]2[/bold]. Add Secondary Channel (1-7)")
+            console.print("  [bold]3[/bold]. Edit Existing Channel")
+            console.print("  [bold]4[/bold]. View Channel Summary")
+            console.print("  [bold]5[/bold]. Refresh from Device")
+            console.print("  [bold]6[/bold]. Apply & Save to Device")
             console.print("\n  [bold]0[/bold]. Back (discard changes)")
             console.print("  [bold]m[/bold]. Main Menu")
             console.print("\n[dim]Tip: Use meshtastic CLI or http://client.meshtastic.org for full config[/dim]")
 
             choice = Prompt.ask("\n[cyan]Select option[/cyan]",
-                              choices=["0", "1", "2", "3", "4", "5", "m"], default="0")
+                              choices=["0", "1", "2", "3", "4", "5", "6", "m"], default="0")
 
             if choice == "0":
                 if channels and Confirm.ask("[yellow]Discard unsaved changes?[/yellow]", default=True):
@@ -980,7 +987,13 @@ class LoRaConfigurator:
             elif choice == "m":
                 return None  # Signal to return to main menu
             elif choice == "1":
-                primary = self._configure_single_channel(0, "Primary")
+                # Find existing primary channel for editing
+                existing_primary = None
+                for ch in channels:
+                    if ch.get('index', 0) == 0:
+                        existing_primary = ch
+                        break
+                primary = self._configure_single_channel(0, "Primary", existing=existing_primary)
                 if primary:
                     # Replace or add primary channel
                     found = False
@@ -993,8 +1006,8 @@ class LoRaConfigurator:
                         primary['index'] = 0
                         channels.insert(0, primary)
             elif choice == "2":
-                # Ask which channel slot
-                slot = Prompt.ask("Channel slot (1-7)", default="1")
+                # Ask which channel slot for new channel
+                slot = Prompt.ask("New channel slot (1-7)", default="1")
                 try:
                     slot_num = int(slot)
                     if 1 <= slot_num <= 7:
@@ -1015,9 +1028,41 @@ class LoRaConfigurator:
                 except ValueError:
                     console.print("[red]Invalid input. Enter a number 1-7.[/red]")
             elif choice == "3":
+                # Edit existing channel
+                if not channels:
+                    console.print("[yellow]No channels to edit. Add a channel first.[/yellow]")
+                else:
+                    console.print("\n[bold]Select channel to edit:[/bold]")
+                    for ch in channels:
+                        idx = ch.get('index', 0)
+                        console.print(f"  [bold]{idx}[/bold]. Channel {idx}: {ch.get('name', 'Unnamed')} ({ch.get('role', 'SECONDARY')})")
+                    console.print("\n  [bold]0[/bold]. Cancel")
+
+                    slot = Prompt.ask("\n[cyan]Channel slot[/cyan]", default="0")
+                    if slot != "0":
+                        try:
+                            slot_num = int(slot)
+                            existing_ch = None
+                            for ch in channels:
+                                if ch.get('index', 0) == slot_num:
+                                    existing_ch = ch
+                                    break
+                            if existing_ch:
+                                role_type = "Primary" if slot_num == 0 else "Secondary"
+                                edited = self._configure_single_channel(slot_num, role_type, existing=existing_ch)
+                                if edited:
+                                    for i, ch in enumerate(channels):
+                                        if ch.get('index', i) == slot_num:
+                                            channels[i] = edited
+                                            break
+                            else:
+                                console.print(f"[yellow]Channel {slot_num} not found[/yellow]")
+                        except ValueError:
+                            console.print("[red]Invalid input[/red]")
+            elif choice == "4":
                 self._show_channel_summary(channels)
                 Prompt.ask("\n[dim]Press Enter to continue[/dim]")
-            elif choice == "4":
+            elif choice == "5":
                 console.print("[dim]Refreshing from device...[/dim]")
                 existing_channels = self._get_existing_channels()
                 if existing_channels:
@@ -1025,7 +1070,7 @@ class LoRaConfigurator:
                     console.print("[green]Refreshed channel configuration[/green]")
                 else:
                     console.print("[yellow]Could not read channels from device[/yellow]")
-            elif choice == "5":
+            elif choice == "6":
                 if channels:
                     self._show_channel_summary(channels)
                     if Confirm.ask("\n[cyan]Apply this configuration to device?[/cyan]", default=True):
@@ -1040,12 +1085,23 @@ class LoRaConfigurator:
 
         return channels
 
-    def _configure_single_channel(self, slot, role_type):
-        """Configure a single channel with full settings"""
+    def _configure_single_channel(self, slot, role_type, existing=None):
+        """Configure a single channel with full settings
+
+        Args:
+            slot: Channel slot number (0-7)
+            role_type: Display name ("Primary" or "Secondary")
+            existing: Optional existing channel dict to pre-fill values
+        """
         import secrets
         import base64
 
-        console.print(f"\n[bold cyan]═══ Configure {role_type} Channel (Slot {slot}) ═══[/bold cyan]\n")
+        editing = existing is not None
+        action = "Edit" if editing else "Configure"
+        console.print(f"\n[bold cyan]═══ {action} {role_type} Channel (Slot {slot}) ═══[/bold cyan]\n")
+
+        if editing:
+            console.print("[dim]Current values shown in [brackets]. Press Enter to keep.[/dim]\n")
 
         channel = {'index': slot}
 
@@ -1053,19 +1109,26 @@ class LoRaConfigurator:
         console.print("[bold]1. Channel Role[/bold]")
         console.print("[dim]Device telemetry is sent over PRIMARY. Only one PRIMARY allowed.[/dim]\n")
 
-        if slot == 0:
-            console.print("  [bold]1[/bold]. PRIMARY [green](default for slot 0)[/green]")
-            console.print("  [bold]2[/bold]. SECONDARY")
-            console.print("  [bold]3[/bold]. DISABLED")
-            console.print("\n  [bold]0[/bold]. Back")
-            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2", "3"], default="1")
-        else:
-            console.print("  [bold]1[/bold]. SECONDARY [green](default)[/green]")
-            console.print("  [bold]2[/bold]. DISABLED")
-            console.print("\n  [bold]0[/bold]. Back")
-            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2"], default="1")
+        # Determine current role for default
+        current_role = existing.get('role', 'PRIMARY' if slot == 0 else 'SECONDARY') if existing else None
 
-        if role_choice == "0":
+        if slot == 0:
+            default_role = "1" if current_role in (None, "PRIMARY") else ("2" if current_role == "SECONDARY" else "3")
+            console.print(f"  [bold]1[/bold]. PRIMARY {'[current]' if current_role == 'PRIMARY' else ''}")
+            console.print(f"  [bold]2[/bold]. SECONDARY {'[current]' if current_role == 'SECONDARY' else ''}")
+            console.print(f"  [bold]3[/bold]. DISABLED {'[current]' if current_role == 'DISABLED' else ''}")
+            console.print("\n  [bold]0[/bold]. Back")
+            console.print("  [bold]m[/bold]. Main Menu")
+            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2", "3", "m"], default=default_role)
+        else:
+            default_role = "1" if current_role in (None, "SECONDARY") else "2"
+            console.print(f"  [bold]1[/bold]. SECONDARY {'[current]' if current_role == 'SECONDARY' else ''}")
+            console.print(f"  [bold]2[/bold]. DISABLED {'[current]' if current_role == 'DISABLED' else ''}")
+            console.print("\n  [bold]0[/bold]. Back")
+            console.print("  [bold]m[/bold]. Main Menu")
+            role_choice = Prompt.ask("\n[cyan]Select role[/cyan]", choices=["0", "1", "2", "m"], default=default_role)
+
+        if role_choice == "0" or role_choice == "m":
             return None
 
         if slot == 0:
@@ -1078,7 +1141,10 @@ class LoRaConfigurator:
         console.print("\n[bold]2. Channel Name[/bold]")
         console.print("[dim]A unique name for the channel (<12 bytes, leave blank for default)[/dim]\n")
 
-        default_name = "LongFast" if slot == 0 else ""
+        current_name = existing.get('name', '') if existing else ''
+        default_name = current_name if current_name else ("LongFast" if slot == 0 else "")
+        if current_name:
+            console.print(f"[dim]Current: {current_name}[/dim]")
         name = Prompt.ask("Channel name", default=default_name)
         if name.lower() == 'back':
             return None
@@ -1088,16 +1154,28 @@ class LoRaConfigurator:
         console.print("\n[bold]3. Pre-Shared Key (Encryption)[/bold]")
         console.print("[dim]Supported PSK lengths: 256-bit, 128-bit, 8-bit, Empty (no encryption)[/dim]\n")
 
-        console.print("  [bold]1[/bold]. Default (AQ== / 8-bit simple key)")
+        current_psk = existing.get('psk', 'AQ==') if existing else 'AQ=='
+        if current_psk and current_psk != 'AQ==':
+            console.print(f"[dim]Current PSK: custom key ({len(current_psk)} chars)[/dim]")
+        elif current_psk == 'AQ==':
+            console.print("[dim]Current PSK: default (AQ==)[/dim]")
+
+        console.print("\n  [bold]1[/bold]. Default (AQ== / 8-bit simple key)")
         console.print("  [bold]2[/bold]. Generate Random 256-bit key [green](most secure)[/green]")
         console.print("  [bold]3[/bold]. Generate Random 128-bit key")
         console.print("  [bold]4[/bold]. No encryption (empty PSK)")
         console.print("  [bold]5[/bold]. Enter custom PSK (base64)")
+        console.print("  [bold]6[/bold]. Keep current PSK" if editing else "")
         console.print("\n  [bold]0[/bold]. Back")
+        console.print("  [bold]m[/bold]. Main Menu")
 
-        psk_choice = Prompt.ask("\n[cyan]Select PSK option[/cyan]", choices=["0", "1", "2", "3", "4", "5"], default="1")
+        psk_choices = ["0", "1", "2", "3", "4", "5", "m"]
+        if editing:
+            psk_choices.append("6")
+        default_psk = "6" if editing else "1"
+        psk_choice = Prompt.ask("\n[cyan]Select PSK option[/cyan]", choices=psk_choices, default=default_psk)
 
-        if psk_choice == "0":
+        if psk_choice == "0" or psk_choice == "m":
             return None
         elif psk_choice == "1":
             channel['psk'] = "AQ=="  # Default 8-bit key
@@ -1122,34 +1200,51 @@ class LoRaConfigurator:
             if custom_psk.lower() == 'back':
                 return None
             channel['psk'] = custom_psk
+        elif psk_choice == "6" and editing:
+            channel['psk'] = current_psk
+            console.print("[dim]Keeping current PSK[/dim]")
 
         # --- MQTT SETTINGS (Optional) ---
         console.print("\n[bold]4. MQTT Settings (Optional)[/bold]")
         console.print("[dim]Enable uplink/downlink for MQTT gateway integration[/dim]\n")
 
-        if Confirm.ask("Configure MQTT settings?", default=False):
-            channel['uplink_enabled'] = Confirm.ask("  Enable Uplink (send to MQTT)?", default=False)
-            channel['downlink_enabled'] = Confirm.ask("  Enable Downlink (receive from MQTT)?", default=False)
+        current_uplink = existing.get('uplink_enabled', False) if existing else False
+        current_downlink = existing.get('downlink_enabled', False) if existing else False
+        if editing and (current_uplink or current_downlink):
+            console.print(f"[dim]Current: Uplink={current_uplink}, Downlink={current_downlink}[/dim]")
+
+        if Confirm.ask("Configure MQTT settings?", default=editing and (current_uplink or current_downlink)):
+            channel['uplink_enabled'] = Confirm.ask("  Enable Uplink (send to MQTT)?", default=current_uplink)
+            channel['downlink_enabled'] = Confirm.ask("  Enable Downlink (receive from MQTT)?", default=current_downlink)
         else:
-            channel['uplink_enabled'] = False
-            channel['downlink_enabled'] = False
+            channel['uplink_enabled'] = current_uplink if editing else False
+            channel['downlink_enabled'] = current_downlink if editing else False
 
         # --- POSITION PRECISION (Location Sharing) ---
         console.print("\n[bold]5. Position Precision (Location Sharing)[/bold]")
         console.print("[dim]Controls how precisely your location is shared on this channel[/dim]\n")
 
-        console.print("  [bold]1[/bold]. Disabled - No location sharing")
+        current_precision = existing.get('position_precision') if existing else None
+        precision_names = {0: "Disabled", 32: "Low", 16: "Medium", 13: "High", 12: "Full", None: "Device default"}
+        if editing and current_precision is not None:
+            console.print(f"[dim]Current: {precision_names.get(current_precision, current_precision)}[/dim]")
+
+        console.print("\n  [bold]1[/bold]. Disabled - No location sharing")
         console.print("  [bold]2[/bold]. Low (32 bits) - ~1.1km accuracy")
         console.print("  [bold]3[/bold]. Medium (16 bits) - ~350m accuracy [green](default)[/green]")
         console.print("  [bold]4[/bold]. High (13 bits) - ~100m accuracy")
         console.print("  [bold]5[/bold]. Full (12 bits) - ~50m accuracy")
-        console.print("\n  [bold]0[/bold]. Skip (use device default)")
+        console.print("\n  [bold]0[/bold]. Skip (use device default)" + (" / keep current" if editing else ""))
+
+        # Determine default based on current value
+        precision_to_choice = {None: "0", 0: "1", 32: "2", 16: "3", 13: "4", 12: "5"}
+        default_precision = precision_to_choice.get(current_precision, "0") if editing else "0"
 
         precision_choice = Prompt.ask("\n[cyan]Select precision[/cyan]",
-                                       choices=["0", "1", "2", "3", "4", "5"], default="0")
+                                       choices=["0", "1", "2", "3", "4", "5"], default=default_precision)
 
         precision_map = {
-            "0": None,      # Skip/default
+            "0": current_precision if editing else None,  # Keep current or skip
             "1": 0,         # Disabled
             "2": 32,        # Low
             "3": 16,        # Medium (default)

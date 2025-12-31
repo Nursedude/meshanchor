@@ -1,6 +1,6 @@
 # Meshtasticd Installer - Development Session Notes
 
-## Session Date: 2025-12-30/31 (Updated)
+## Session Date: 2025-12-31 (v3.0.3)
 
 ### Branch: `claude/review-meshtasticd-installer-52ENu`
 ### PR: https://github.com/Nursedude/Meshtasticd_interactive_UI/pull/37
@@ -9,65 +9,42 @@
 
 ## PERPETUAL MEMORY - Pick Up Here
 
-### ✅ COMPLETED This Session
+### ✅ COMPLETED This Session (v3.0.3)
 
-1. **Modem Presets Updated** (`src/config/lora.py`)
-   - Added SHORT_TURBO with legal warning (500kHz)
-   - Reordered: Fastest → Slowest (official Meshtastic order)
-   - Order: SHORT_TURBO → SHORT_FAST → SHORT_SLOW → MEDIUM_FAST → MEDIUM_SLOW → LONG_FAST → LONG_MODERATE → LONG_SLOW → VERY_LONG_SLOW
-   - Added back options (0, m) to preset selection
+1. **Edit Existing Channels** (`src/config/lora.py`)
+   - New menu option "Edit Existing Channel"
+   - Pre-fills current values when editing
+   - Shows [current] markers on role options
+   - "Keep current PSK" option when editing
 
-2. **Channel Configuration Rewritten** (`src/config/lora.py`)
-   - Full interactive menu with back navigation
-   - Options: Primary, Secondary, View, Clear, Save
-   - Back (0) and Main Menu (m) options
+2. **Consistent Menu Navigation**
+   - All menus now use `m` for Main Menu
+   - All menus have `0` for Back
+   - Region selection updated with back/menu options
+   - Channel config role/PSK selections have proper navigation
 
-3. **Goodbye Message Changed**
-   - Now says "A Hui Hou! Happy meshing!" (was "Goodbye!")
+3. **Improved Emoji Detection** (`src/utils/emoji.py`)
+   - Better SSH terminal detection
+   - Checks locale (LANG, LC_ALL, LC_CTYPE) for UTF-8
+   - Modern terminals (256color, xterm) get emojis
+   - Still respects ENABLE_EMOJI/DISABLE_EMOJI env vars
 
-4. **Launcher Wizard** (`src/launcher.py`)
-   - Environment detection (display, GTK4, Textual)
-   - Interface selection with recommendations
+### ✅ COMPLETED Previously (v3.0.2)
 
-5. **Log Following Fixed**
-   - GTK4: Fixed journalctl --since format, auto-scroll
-   - TUI: Added start/stop toggle
+1. **Modem Presets Updated** - SHORT_TURBO added, Fastest→Slowest order
+2. **Channel Configuration Saves** - meshtastic CLI integration
+3. **Auto-Install Meshtastic CLI** - via pipx with PATH auto-add
+4. **PSK Key Generation** - 256-bit, 128-bit, custom, none options
+5. **MQTT Settings** - uplink/downlink per channel
+6. **Position Precision** - location sharing accuracy settings
+7. **Live Log Exit Fixed** - Popen with proper terminate()
 
-6. **README.md Merge Conflict Resolved**
-   - Combined v3.0.1 and v3.0.0 changes from both branches
-   - Removed MeshAdv-Mini 400MHz variant from templates list
-   - Updated project structure with launcher.py
-   - Kept all installation options (Web, Docker, Manual)
+### ⏳ STILL PENDING
 
-7. **Channel Configuration Now Saves!** (`src/config/lora.py`)
-   - Reads existing channels from device via `meshtastic --info`
-   - "Apply & Save to Device" runs `meshtastic --ch-set` commands
-   - "Refresh from Device" re-reads current configuration
-   - No longer requires primary channel if one already exists
-   - Added tip about using meshtastic CLI or http://client.meshtastic.org
-
-8. **Live Log Exit Fixed** (`src/services/service_manager.py`)
-   - Clearer exit instructions (Ctrl+C/Ctrl+Z)
-   - Uses Popen instead of run() for better interrupt handling
-   - Properly terminates process on exit
-
-### ⏳ STILL PENDING (For Wednesday)
-
-1. **Add back options to ALL menus** - Many submenus still missing
-   - Region selection (line-by-line, no back)
-   - Device configuration wizard
-   - Template manager
-   - Check all Prompt.ask() calls
-
-2. ~~**Remove MeshAdv-Mini 400MHz variant**~~ - ✅ DONE
-
-3. ~~**Service Management Live Logs**~~ - ✅ FIXED (clearer exit, Popen)
-
-4. **UI Selection Not Working** - "Same look every time" - investigate launcher
-
-5. **Add Uninstaller Option** - Create uninstall functionality
-
-6. **Progress Indicators** - Show progress during installs/updates
+1. **UI Selection Not Working** - "Same look every time" - investigate launcher
+2. **Add Uninstaller Option** - Create uninstall functionality
+3. **Progress Indicators** - Show progress during installs/updates
+4. **Device Configuration Wizard** - May need more back options
 
 ---
 

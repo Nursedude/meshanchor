@@ -2,7 +2,14 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.0.2** | [Changelog](#version-history)
+**Version 3.0.3** | [Changelog](#version-history)
+
+## What's New in v3.0.3
+
+- **Edit Existing Channels** - Select a channel and modify with pre-filled current values
+- **Consistent Navigation** - `m` = Main Menu everywhere, `0` = Back
+- **Better Emoji Support** - Improved detection for SSH and Raspberry Pi terminals
+- **Region Selection Fix** - Now includes back/menu navigation options
 
 ## What's New in v3.0.2
 
@@ -393,6 +400,12 @@ Meshtasticd_interactive_UI/
 ```
 
 ## Version History
+
+### v3.0.3 (2025-12-31)
+- **Edit Existing Channels** - Modify channels with pre-filled current values
+- **Consistent Navigation** - `m` = Main Menu, `0` = Back in all menus
+- **Better Emoji Support** - Improved detection for SSH and RPi terminals
+- **Region Selection** - Now includes back/menu navigation options
 
 ### v3.0.2 (2025-12-31)
 - **Enhanced Channel Configuration** - Full interactive setup with Role, PSK, and MQTT
