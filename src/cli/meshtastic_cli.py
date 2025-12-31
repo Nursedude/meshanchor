@@ -1,11 +1,11 @@
 """Interactive Meshtastic CLI command interface"""
 
 import subprocess
-import shutil
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.table import Table
+from utils.cli import find_meshtastic_cli, get_meshtastic_install_instructions
 
 console = Console()
 
@@ -21,7 +21,8 @@ class MeshtasticCLI:
 
     def _check_cli_installed(self):
         """Check if meshtastic CLI is installed"""
-        self._cli_available = shutil.which('meshtastic') is not None
+        self._cli_path = find_meshtastic_cli()
+        self._cli_available = self._cli_path is not None
 
     def _prompt_back(self, additional_choices=None):
         """Standard prompt with back options"""
@@ -53,10 +54,10 @@ class MeshtasticCLI:
         """Run a meshtastic CLI command"""
         if not self._cli_available:
             console.print("[red]Meshtastic CLI not installed![/red]")
-            console.print("[cyan]Install with: pipx install meshtastic[cli][/cyan]")
+            console.print(f"[cyan]Install with: {get_meshtastic_install_instructions()}[/cyan]")
             return None
 
-        full_args = ["meshtastic"] + self._get_connection_args() + args
+        full_args = [self._cli_path] + self._get_connection_args() + args
 
         console.print(f"[dim]Running: {' '.join(full_args)}[/dim]\n")
 
@@ -79,9 +80,10 @@ class MeshtasticCLI:
         """Run command with direct output (no capture)"""
         if not self._cli_available:
             console.print("[red]Meshtastic CLI not installed![/red]")
+            console.print(f"[cyan]Install with: {get_meshtastic_install_instructions()}[/cyan]")
             return None
 
-        full_args = ["meshtastic"] + self._get_connection_args() + args
+        full_args = [self._cli_path] + self._get_connection_args() + args
         console.print(f"[dim]Running: {' '.join(full_args)}[/dim]\n")
 
         try:
@@ -97,7 +99,7 @@ class MeshtasticCLI:
 
         if not self._cli_available:
             console.print("\n[red]Meshtastic CLI is not installed![/red]")
-            console.print("[cyan]Install with: sudo apt install pipx && pipx install 'meshtastic[cli]'[/cyan]")
+            console.print(f"[cyan]Install with: {get_meshtastic_install_instructions()}[/cyan]")
             if not Confirm.ask("\nContinue anyway?", default=False):
                 return
 

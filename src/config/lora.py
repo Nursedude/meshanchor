@@ -667,18 +667,18 @@ class LoRaConfigurator:
     def _apply_modem_preset(self, preset_key):
         """Apply modem preset to device via meshtastic CLI"""
         import subprocess
-        import shutil
 
         # Ensure meshtastic CLI is available
         if not self._ensure_meshtastic_cli():
             return False
 
+        cli_path = self._find_meshtastic_cli()
         console.print(f"\n[dim]Applying modem preset {preset_key} to device...[/dim]")
 
         try:
             # Use meshtastic CLI to set the modem preset
             result = subprocess.run(
-                ['meshtastic', '--host', 'localhost', '--set', 'lora.modem_preset', preset_key],
+                [cli_path, '--host', 'localhost', '--set', 'lora.modem_preset', preset_key],
                 capture_output=True, text=True, timeout=30
             )
 
@@ -689,7 +689,7 @@ class LoRaConfigurator:
                 console.print(f"[yellow]Warning: {result.stderr or 'Could not set preset'}[/yellow]")
                 # Try alternative command format
                 result = subprocess.run(
-                    ['meshtastic', '--host', 'localhost', '--ch-set', 'modem_config', preset_key, '--ch-index', '0'],
+                    [cli_path, '--host', 'localhost', '--ch-set', 'modem_config', preset_key, '--ch-index', '0'],
                     capture_output=True, text=True, timeout=30
                 )
                 if result.returncode == 0:
@@ -705,16 +705,16 @@ class LoRaConfigurator:
     def _get_existing_channels(self):
         """Get existing channel configuration from device via meshtastic CLI"""
         import subprocess
-        import shutil
 
-        if not shutil.which('meshtastic'):
+        cli_path = self._find_meshtastic_cli()
+        if not cli_path:
             return None
 
         try:
             # Get channel info for slots 0-7
             channels = []
             result = subprocess.run(
-                ['meshtastic', '--host', 'localhost', '--info'],
+                [cli_path, '--host', 'localhost', '--info'],
                 capture_output=True, text=True, timeout=30
             )
 
@@ -751,26 +751,53 @@ class LoRaConfigurator:
             console.print(f"[dim]Could not read existing channels: {e}[/dim]")
             return None
 
+    def _find_meshtastic_cli(self):
+        """Find the meshtastic CLI executable"""
+        import shutil
+        import os
+
+        # Check if in PATH
+        cli_path = shutil.which('meshtastic')
+        if cli_path:
+            return cli_path
+
+        # Check common pipx installation paths
+        pipx_paths = [
+            '/root/.local/bin/meshtastic',
+            '/home/pi/.local/bin/meshtastic',
+            os.path.expanduser('~/.local/bin/meshtastic'),
+        ]
+
+        # Also check for the original user's home if running with sudo
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            pipx_paths.append(f'/home/{sudo_user}/.local/bin/meshtastic')
+
+        for path in pipx_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                # Add the directory to PATH for this session
+                pipx_bin = os.path.dirname(path)
+                if pipx_bin not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = f"{pipx_bin}:{os.environ.get('PATH', '')}"
+                return path
+
+        return None
+
     def _ensure_meshtastic_cli(self):
         """Ensure meshtastic CLI is installed, offer to install if not"""
         import subprocess
         import shutil
         import os
 
-        # First check if already in PATH
-        if shutil.which('meshtastic'):
+        # First check if already available
+        cli_path = self._find_meshtastic_cli()
+        if cli_path:
             return True
 
-        # Check common install locations and add to PATH if found
+        # Get pipx bin path for installation
         home = os.path.expanduser('~')
         pipx_bin = os.path.join(home, '.local', 'bin')
         meshtastic_path = os.path.join(pipx_bin, 'meshtastic')
-
-        if os.path.exists(meshtastic_path):
-            # Add to PATH for this session
-            os.environ['PATH'] = f"{pipx_bin}:{os.environ.get('PATH', '')}"
-            console.print(f"[dim]Added {pipx_bin} to PATH[/dim]")
-            return True
 
         console.print("\n[yellow]Meshtastic CLI is required to save configuration to device.[/yellow]")
         console.print("[dim]The CLI communicates with meshtasticd to configure the LoRa radio.[/dim]\n")
@@ -831,16 +858,13 @@ class LoRaConfigurator:
     def _apply_channel_config(self, channels):
         """Apply channel configuration to device via meshtastic CLI"""
         import subprocess
-        import shutil
-        import os
 
         # Ensure meshtastic CLI is available
         if not self._ensure_meshtastic_cli():
             return False
 
-        # Get meshtastic path (may be in ~/.local/bin)
-        home = os.path.expanduser('~')
-        meshtastic_cmd = shutil.which('meshtastic') or os.path.join(home, '.local', 'bin', 'meshtastic')
+        # Get meshtastic CLI path
+        meshtastic_cmd = self._find_meshtastic_cli()
 
         console.print("\n[cyan]Applying channel configuration to device...[/cyan]\n")
 

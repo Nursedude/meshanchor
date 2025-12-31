@@ -80,16 +80,24 @@ def check_textual():
 
 def check_meshtastic_cli():
     """Check if meshtastic CLI is installed"""
-    # Check various locations
+    # Check if in PATH
+    if shutil.which('meshtastic'):
+        return True
+
+    # Check common pipx installation paths
     cli_paths = [
-        'meshtastic',
         '/root/.local/bin/meshtastic',
         '/home/pi/.local/bin/meshtastic',
         os.path.expanduser('~/.local/bin/meshtastic'),
     ]
 
+    # Also check for the original user's home if running with sudo
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        cli_paths.append(f'/home/{sudo_user}/.local/bin/meshtastic')
+
     for path in cli_paths:
-        if shutil.which(path):
+        if os.path.isfile(path) and os.access(path, os.X_OK):
             return True
 
     # CLI not found - warn user

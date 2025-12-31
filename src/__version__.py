@@ -1,11 +1,22 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.0.5"
-__version_info__ = (3, 0, 5)
+__version__ = "3.0.6"
+__version_info__ = (3, 0, 6)
 __release_date__ = "2025-12-31"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.0.6",
+        "date": "2025-12-31",
+        "changes": [
+            "FIX: Meshtastic CLI detection now works with pipx installations",
+            "FIX: CLI found in /root/.local/bin, /home/pi/.local/bin, ~/.local/bin",
+            "FIX: SUDO_USER environment variable checked for user's home directory",
+            "NEW: Centralized find_meshtastic_cli() utility in utils/cli.py",
+            "IMPROVED: All modules now use consistent CLI detection"
+        ]
+    },
     {
         "version": "3.0.5",
         "date": "2025-12-31",

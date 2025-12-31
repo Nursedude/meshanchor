@@ -6,9 +6,36 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
+import os
 import subprocess
 import threading
 import shutil
+
+
+def _find_meshtastic_cli():
+    """Find the meshtastic CLI executable"""
+    # Check if in PATH
+    cli_path = shutil.which('meshtastic')
+    if cli_path:
+        return cli_path
+
+    # Check common pipx installation paths
+    pipx_paths = [
+        '/root/.local/bin/meshtastic',
+        '/home/pi/.local/bin/meshtastic',
+        os.path.expanduser('~/.local/bin/meshtastic'),
+    ]
+
+    # Also check for the original user's home if running with sudo
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        pipx_paths.append(f'/home/{sudo_user}/.local/bin/meshtastic')
+
+    for path in pipx_paths:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    return None
 
 
 class CLIPanel(Gtk.Box):
@@ -189,21 +216,18 @@ class CLIPanel(Gtk.Box):
     def _check_cli_available(self):
         """Check if meshtastic CLI is available"""
         def check():
-            # Check pipx path first
-            pipx_path = "/root/.local/bin/meshtastic"
-            if shutil.which("meshtastic") or shutil.which(pipx_path):
-                GLib.idle_add(self._update_cli_status, True)
-            else:
-                GLib.idle_add(self._update_cli_status, False)
+            cli_path = _find_meshtastic_cli()
+            GLib.idle_add(self._update_cli_status, cli_path is not None, cli_path)
 
         thread = threading.Thread(target=check)
         thread.daemon = True
         thread.start()
 
-    def _update_cli_status(self, available):
+    def _update_cli_status(self, available, cli_path=None):
         """Update CLI status label"""
+        self._cli_path = cli_path
         if available:
-            self.cli_status.set_label("CLI Status: Available")
+            self.cli_status.set_label(f"CLI Status: Available ({cli_path})")
             self.cli_status.remove_css_class("error")
             self.cli_status.add_css_class("success")
         else:
@@ -254,13 +278,18 @@ class CLIPanel(Gtk.Box):
 
         def run():
             try:
-                # Build command
-                cmd = ["meshtastic"] + self._get_connection_args() + args
+                # Find CLI path
+                cli_path = getattr(self, '_cli_path', None) or _find_meshtastic_cli()
+                if not cli_path:
+                    GLib.idle_add(
+                        self._command_complete,
+                        "meshtastic CLI not found. Install with:\nsudo apt install pipx && pipx install 'meshtastic[cli]'",
+                        False
+                    )
+                    return
 
-                # Also try pipx path
-                pipx_meshtastic = "/root/.local/bin/meshtastic"
-                if not shutil.which("meshtastic") and shutil.which(pipx_meshtastic):
-                    cmd[0] = pipx_meshtastic
+                # Build command
+                cmd = [cli_path] + self._get_connection_args() + args
 
                 result = subprocess.run(
                     cmd,

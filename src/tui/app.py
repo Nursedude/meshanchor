@@ -654,15 +654,14 @@ class CLIPane(Container):
     @work
     async def run_meshtastic(self, host: str, args: list, output: Log):
         """Run meshtastic command"""
-        cmd = ['meshtastic', '--host', host] + args
+        # Find meshtastic CLI
+        cli_path = self._find_meshtastic_cli()
+        if not cli_path:
+            output.write("[red]meshtastic CLI not found. Install with:[/red]")
+            output.write("sudo apt install pipx && pipx install 'meshtastic[cli]'")
+            return
 
-        # Try pipx path
-        import shutil
-        if not shutil.which('meshtastic'):
-            pipx_path = '/root/.local/bin/meshtastic'
-            if shutil.which(pipx_path):
-                cmd[0] = pipx_path
-
+        cmd = [cli_path, '--host', host] + args
         output.write(f"$ {' '.join(cmd)}\n")
 
         try:
@@ -680,9 +679,37 @@ class CLIPane(Container):
 
         except FileNotFoundError:
             output.write("[red]meshtastic CLI not found. Install with:[/red]")
-            output.write("pipx install 'meshtastic[cli]'")
+            output.write("sudo apt install pipx && pipx install 'meshtastic[cli]'")
         except Exception as e:
             output.write(f"[red]Error: {e}[/red]")
+
+    def _find_meshtastic_cli(self):
+        """Find the meshtastic CLI executable"""
+        import shutil
+        import os
+
+        # Check if in PATH
+        cli_path = shutil.which('meshtastic')
+        if cli_path:
+            return cli_path
+
+        # Check common pipx installation paths
+        pipx_paths = [
+            '/root/.local/bin/meshtastic',
+            '/home/pi/.local/bin/meshtastic',
+            os.path.expanduser('~/.local/bin/meshtastic'),
+        ]
+
+        # Also check for the original user's home if running with sudo
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            pipx_paths.append(f'/home/{sudo_user}/.local/bin/meshtastic')
+
+        for path in pipx_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+
+        return None
 
 
 class MeshtasticdTUI(App):
