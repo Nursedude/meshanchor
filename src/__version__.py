@@ -1,11 +1,24 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.1.1"
-__version_info__ = (3, 1, 1)
+__version__ = "3.2.0"
+__version_info__ = (3, 2, 0)
 __release_date__ = "2026-01-01"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.2.0",
+        "date": "2026-01-01",
+        "changes": [
+            "NEW: Network Tools - TCP/IP diagnostics, ping, port scanning, device discovery",
+            "NEW: RF Tools - Link budget calculator, FSPL, Fresnel zones, LoRa analysis",
+            "NEW: MUDP Tools - Meshtastic UDP monitoring, multicast, virtual node",
+            "NEW: Tool Manager - Install, update, and version check for all tools",
+            "NEW: RESEARCH.md - Bibliography and technical documentation",
+            "FIX: Site Planner URL display for headless/SSH sessions",
+            "IMPROVED: Tools available across all UIs (CLI, GTK4, TUI)"
+        ]
+    },
     {
         "version": "3.1.1",
         "date": "2026-01-01",

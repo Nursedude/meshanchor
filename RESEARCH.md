@@ -1,0 +1,278 @@
+# Meshtasticd Installer - Research & Bibliography
+
+This document contains research notes, references, and technical documentation for the networking and RF tools integrated into the Meshtasticd Installer.
+
+---
+
+## Table of Contents
+
+1. [MUDP - Meshtastic UDP Library](#mudp---meshtastic-udp-library)
+2. [Meshtastic TCP Interface](#meshtastic-tcp-interface)
+3. [RF Tools & Coverage Planning](#rf-tools--coverage-planning)
+4. [Network Architecture](#network-architecture)
+5. [Protocol References](#protocol-references)
+
+---
+
+## MUDP - Meshtastic UDP Library
+
+### Overview
+
+MUDP is a Python library that enables UDP-based broadcasting of Meshtastic-compatible packets. It allows monitoring and transmitting mesh network messages over local area networks without requiring direct hardware connections.
+
+### Repository
+
+- **GitHub:** https://github.com/pdxlocations/mudp
+- **Author:** pdxlocations
+- **License:** GPL-3.0
+- **Language:** 100% Python
+
+### Installation
+
+```bash
+pip install mudp
+```
+
+For development:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### CLI Usage
+
+Monitor all Meshtastic UDP activity on local network:
+```bash
+mudp
+```
+
+### Core Features
+
+**PubSub Topics for Received Packets:**
+
+| Topic | Description |
+|-------|-------------|
+| `mesh.rx.raw` | Raw UDP packet bytes with source address |
+| `mesh.rx.packet` | Parsed MeshPacket objects |
+| `mesh.rx.decoded` | Decoded payloads with port identifiers |
+| `mesh.rx.port.<portnum>` | Port-specific filtering |
+| `mesh.rx.decode_error` | Decoding failure events |
+
+**Transmission Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `send_text_message()` | Broadcast text messages |
+| `send_nodeinfo()` | Transmit node metadata |
+| `send_device_telemetry()` | Battery, voltage, channel metrics |
+| `send_position()` | GPS coordinates and accuracy |
+| `send_environment_metrics()` | Temperature, humidity, pressure |
+| `send_power_metrics()` | Multi-channel voltage/current |
+| `send_health_metrics()` | Biometric readings |
+| `send_waypoint()` | Coordinate waypoints |
+| `send_data()` | Raw binary with custom port numbers |
+
+**Optional Parameters (all functions):**
+- `to` - Destination node ID
+- `hop_limit` - Maximum hop count
+- `hop_start` - Starting hop count
+- `want_ack` - Request acknowledgment
+- `want_response` - Request response
+
+### Configuration
+
+- **Multicast Group:** 224.0.0.69:4403 (default)
+- **Node ID:** Unique identifier for the node
+- **Long Name / Short Name:** Human-readable node names
+- **Channel:** Channel configuration
+- **Encryption Key:** PSK for encrypted communications
+
+### Examples
+
+1. **helloworld-example.py** - Basic MUDP setup and usage
+2. **iss-example.py** - Real-world data integration (ISS tracking)
+3. **pubsub-example.py** - Event-driven pub/sub pattern
+
+---
+
+## Meshtastic TCP Interface
+
+### Port 4403 - Standard Meshtastic TCP Port
+
+The Meshtastic ecosystem uses TCP port 4403 as the standard port for device communication.
+
+### Python TCP Interface
+
+```python
+from meshtastic.tcp_interface import TCPInterface
+
+# Connect to device
+interface = TCPInterface(hostname="192.168.1.100", portNumber=4403)
+```
+
+**Reference:** https://python.meshtastic.org/tcp_interface.html
+
+### Linux Native (meshtasticd)
+
+```bash
+# Expose TCP port for network access
+docker run -p 4403:4403 meshtasticd
+
+# Connect with Python CLI
+meshtastic --host 192.168.1.100
+```
+
+**Reference:** https://meshtastic.org/docs/software/linux/usage/
+
+### Service Discovery (mDNS/Avahi)
+
+Meshtastic devices advertise via Avahi:
+- Service type: `_meshtastic._tcp`
+- Port: 4403
+- Protocol: IPv4
+
+### Bridge Tools
+
+**Serial Bridge:**
+- Connects USB/Serial devices to TCP
+- Exposes port 4403
+- Uses socat for protocol translation
+- Docker-based deployment
+
+**BLE Bridge:**
+- Connects Bluetooth LE devices to TCP
+- Exposes port 4403
+- Translates BLE protobuf to TCP framed protocol
+
+**Reference:** https://meshmonitor.org/configuration/serial-bridge
+
+### Virtual Node Server
+
+MeshMonitor's Virtual Node Server:
+- Acts as TCP proxy between apps and physical nodes
+- Port 4404 (to avoid conflict with 4403)
+- Binary protobuf protocol (not HTTP)
+
+**Reference:** https://meshmonitor.org/configuration/virtual-node.html
+
+---
+
+## RF Tools & Coverage Planning
+
+### Meshtastic Site Planner
+
+Official tool for network planning and coverage analysis.
+
+**URL:** https://meshtastic.org/docs/software/site-planner/
+
+### Radio Mobile Online
+
+RF propagation and coverage prediction tool.
+
+**URL:** https://www.ve2dbe.com/rmonline_s.asp
+
+### HeyWhatsThat
+
+Line-of-sight and viewshed analysis for radio planning.
+
+**URL:** https://www.heywhatsthat.com/
+
+### Splat! RF Coverage
+
+Open-source RF signal propagation analysis tool.
+
+**URL:** https://www.qsl.net/kd2bd/splat.html
+
+---
+
+## Network Architecture
+
+### Meshtastic Port Numbers
+
+Official port number documentation for Meshtastic protocol.
+
+**Reference:** https://meshtastic.org/docs/development/firmware/portnum/
+
+### Client API (Serial/TCP/BLE)
+
+Device communication API documentation.
+
+**Reference:** https://meshtastic.org/docs/development/device/client-api/
+
+### RNS Over Meshtastic
+
+Reticulum Network Stack integration with Meshtastic.
+
+**Repository:** https://github.com/landandair/RNS_Over_Meshtastic
+
+Configuration:
+```ini
+tcp_port = 127.0.0.1:4403
+```
+
+---
+
+## Protocol References
+
+### UDP Multicast
+
+- **Address:** 224.0.0.69
+- **Port:** 4403
+- **Protocol:** Meshtastic protobuf packets
+
+### TCP Framing
+
+Meshtastic TCP uses a framed protocol:
+1. 4-byte header with packet length
+2. Protobuf-encoded MeshPacket
+3. CRC validation
+
+### Protobuf Definitions
+
+Meshtastic protocol buffer definitions:
+- https://github.com/meshtastic/protobufs
+
+---
+
+## Tools Integration Notes
+
+### Version Checking
+
+All tools should support version checking for upgradability:
+```python
+def check_tool_version(tool_name):
+    """Check if tool update is available"""
+    # PyPI version check for pip packages
+    # GitHub releases API for source tools
+```
+
+### Installation Methods
+
+1. **pip** - Standard Python packages (mudp, meshtastic)
+2. **pipx** - Isolated CLI tools
+3. **apt** - System packages (net-tools, iproute2)
+4. **source** - GitHub repositories
+
+---
+
+## Changelog
+
+| Date | Version | Changes |
+|------|---------|---------|
+| 2026-01-01 | 3.2.0 | Initial research document, MUDP integration |
+
+---
+
+## Contributors
+
+- Meshtastic Community
+- pdxlocations (MUDP)
+- Nursedude (Installer)
+
+---
+
+## License
+
+This research document is part of the Meshtasticd Interactive Installer project.
+See LICENSE file for details.

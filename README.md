@@ -2,7 +2,50 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.1.0** | [Changelog](#version-history)
+**Version 3.2.0** | [Changelog](#version-history)
+
+## What's New in v3.2.0
+
+### Network Tools (Main Menu → `n`)
+- **Ping Test** - ICMP connectivity testing
+- **TCP Port Test** - Check if ports are open
+- **Meshtastic TCP Test** - Test port 4403 connectivity
+- **Network Interfaces** - View interface configuration
+- **Routing Table** - Display network routes
+- **DNS Lookup** - Resolve hostnames
+- **Active Connections** - Show listening ports
+- **Network Scan** - Discover devices on LAN
+- **Find Meshtastic Devices** - Scan for port 4403
+
+### RF Tools (Main Menu → `r`)
+- **Link Budget Calculator** - Full TX/RX analysis with EIRP, path loss, margin
+- **FSPL Calculator** - Free Space Path Loss at any distance/frequency
+- **Fresnel Zone Calculator** - Required clearance for reliable links
+- **LoRa Preset Comparison** - All presets with data rate, sensitivity, range
+- **Range Estimator** - Estimate max range for given parameters
+- **Time-on-Air Calculator** - Calculate packet transmission time
+- **Detect LoRa Radio** - Find SPI/GPIO radio hardware
+- **SPI/GPIO Status** - Check interface availability
+- **Frequency Band Reference** - Regional bands and power limits
+
+### MUDP Tools (Main Menu → `m`)
+- **Monitor UDP Traffic** - Run `mudp` CLI to watch mesh packets
+- **Listen to Multicast** - Join 224.0.0.69:4403 and display packets
+- **View UDP Sockets** - Show active UDP listeners
+- **Send Test Packet** - Transmit test UDP datagram
+- **UDP Echo Test** - Test echo server connectivity
+- **Multicast Join Test** - Verify multicast group joining
+- **MUDP Configuration** - View PubSub topics and send functions
+- **Install/Update MUDP** - pip install mudp package
+
+### Tool Manager (Main Menu → `g`)
+- **View Installed Tools** - Status of all network/RF tools
+- **Install/Update Tools** - Manage mudp, meshtastic, nmap, etc.
+- **Check for Updates** - Query PyPI for latest versions
+- **Install All Missing** - One-click install of all tools
+
+### Research Documentation
+- **RESEARCH.md** - Bibliography with MUDP, TCP API, RF tools references
 
 ## What's New in v3.1.0
 

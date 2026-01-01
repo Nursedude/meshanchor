@@ -146,6 +146,10 @@ def interactive_menu():
         console.print("\n[dim cyan]── Tools ──[/dim cyan]")
         console.print(f"  [bold]t[/bold]. {em.get('🔧')} [cyan]System Diagnostics[/cyan] [dim](Network, Hardware, Health)[/dim]")
         console.print(f"  [bold]p[/bold]. {em.get('📡')} [cyan]Site Planner[/cyan] [dim](Coverage, Link Budget)[/dim]")
+        console.print(f"  [bold]n[/bold]. {em.get('🌐')} [cyan]Network Tools[/cyan] [dim](TCP/IP, Ping, Scanning)[/dim]")
+        console.print(f"  [bold]r[/bold]. {em.get('📻')} [cyan]RF Tools[/cyan] [dim](Link Budget, LoRa Analysis)[/dim]")
+        console.print(f"  [bold]m[/bold]. {em.get('📡')} [cyan]MUDP Tools[/cyan] [dim](UDP, Multicast, Virtual Node)[/dim]")
+        console.print(f"  [bold]g[/bold]. {em.get('📦')} [cyan]Tool Manager[/cyan] [dim](Install, Update, Version)[/dim]")
 
         # System Section
         console.print("\n[dim cyan]── System ──[/dim cyan]")
@@ -157,7 +161,7 @@ def interactive_menu():
         console.print(f"\n  [bold]q[/bold]. {em.get('🚪')} Exit")
         console.print(f"  [bold]?[/bold]. {em.get('❓')} Help")
 
-        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "t", "p", "h", "d", "u", "?"], default="1")
+        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "t", "p", "n", "r", "m", "g", "h", "d", "u", "?"], default="1")
 
         if choice == "1":
             show_dashboard()
@@ -181,6 +185,14 @@ def interactive_menu():
             system_diagnostics_menu()
         elif choice == "p":
             site_planner_menu()
+        elif choice == "n":
+            network_tools_menu()
+        elif choice == "r":
+            rf_tools_menu()
+        elif choice == "m":
+            mudp_tools_menu()
+        elif choice == "g":
+            tool_manager_menu()
         elif choice == "9":
             check_dependencies()
         elif choice == "h":
@@ -228,6 +240,38 @@ def site_planner_menu():
 
     planner = SitePlanner()
     planner.interactive_menu()
+
+
+def network_tools_menu():
+    """Network tools menu (TCP/IP, ping, scanning)"""
+    from tools.network_tools import NetworkTools
+
+    tools = NetworkTools()
+    tools.interactive_menu()
+
+
+def rf_tools_menu():
+    """RF tools menu (link budget, LoRa analysis)"""
+    from tools.rf_tools import RFTools
+
+    tools = RFTools()
+    tools.interactive_menu()
+
+
+def mudp_tools_menu():
+    """MUDP tools menu (UDP, multicast)"""
+    from tools.mudp_tools import MUDPTools
+
+    tools = MUDPTools()
+    tools.interactive_menu()
+
+
+def tool_manager_menu():
+    """Tool manager menu (install, update, version)"""
+    from tools.tool_manager import ToolManager
+
+    manager = ToolManager()
+    manager.interactive_menu()
 
 
 def show_dashboard():

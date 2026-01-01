@@ -100,6 +100,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         self._add_config_page()
         self._add_cli_page()
         self._add_hardware_page()
+        self._add_tools_page()
 
         # Left sidebar navigation (after content_stack exists)
         sidebar = self._create_sidebar()
@@ -203,6 +204,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             ("config", "Config File Manager", "document-edit-symbolic"),
             ("cli", "Meshtastic CLI", "utilities-terminal-symbolic"),
             ("hardware", "Hardware Detection", "drive-harddisk-symbolic"),
+            ("tools", "System Tools", "applications-utilities-symbolic"),
         ]
 
         for name, label, icon in nav_items:
@@ -277,6 +279,13 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         panel = HardwarePanel(self)
         self.content_stack.add_named(panel, "hardware")
         self.hardware_panel = panel
+
+    def _add_tools_page(self):
+        """Add the system tools page"""
+        from .panels.tools import ToolsPanel
+        panel = ToolsPanel(self)
+        self.content_stack.add_named(panel, "tools")
+        self.tools_panel = panel
 
     def _create_bottom_status(self):
         """Create bottom status bar"""

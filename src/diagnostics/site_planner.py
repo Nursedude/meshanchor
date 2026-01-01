@@ -575,13 +575,24 @@ class SitePlanner:
         console.print("[dim]Check your country's amateur/ISM band rules before transmitting.[/dim]")
 
     def _open_url(self, url: str):
-        """Open URL in browser"""
-        try:
-            # Try xdg-open first (Linux)
-            if os.system(f'xdg-open "{url}" 2>/dev/null &') == 0:
-                return
+        """Open URL in browser or display for manual access"""
+        # Check if we're in a graphical environment
+        display = os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')
 
-            # Try webbrowser module
-            webbrowser.open(url)
-        except Exception:
-            console.print(f"[dim]Could not open browser. Visit: {url}[/dim]")
+        if display:
+            try:
+                # Try xdg-open first (Linux with display)
+                result = subprocess.run(
+                    ['xdg-open', url],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    console.print(f"[green]Opened in browser[/green]")
+                    return
+            except Exception:
+                pass
+
+        # No display or xdg-open failed - just show the URL
+        console.print(f"\n[cyan]Open this URL in your browser:[/cyan]")
+        console.print(f"[bold white]{url}[/bold white]")
+        console.print(f"\n[dim]Tip: Copy the URL above and paste into a browser on another device[/dim]")

@@ -1,6 +1,6 @@
 # Meshtasticd Installer - Development Session Notes
 
-## Session Date: 2026-01-01 (v3.1.1)
+## Session Date: 2026-01-01 (v3.2.0)
 
 ### Branch: `claude/review-meshtasticd-installer-52ENu`
 ### PR: https://github.com/Nursedude/Meshtasticd_interactive_UI/pull/37
@@ -9,7 +9,50 @@
 
 ## PERPETUAL MEMORY - Pick Up Here
 
-### ✅ COMPLETED This Session (v3.1.1)
+### ✅ COMPLETED This Session (v3.2.0)
+
+1. **Network Tools** (`src/tools/network_tools.py`) - NEW MODULE
+   - Ping test, TCP port test, Meshtastic TCP (4403) test
+   - Network interfaces, routing table, DNS lookup
+   - Active connections, network scan, find Meshtastic devices
+
+2. **RF Tools** (`src/tools/rf_tools.py`) - NEW MODULE
+   - Link budget calculator with full TX/RX analysis
+   - FSPL calculator, Fresnel zone calculator
+   - LoRa preset comparison (all 9 presets)
+   - Range estimator, time-on-air calculator
+   - Detect LoRa radio, SPI/GPIO status
+   - Frequency band reference (all regions)
+
+3. **MUDP Tools** (`src/tools/mudp_tools.py`) - NEW MODULE
+   - Monitor UDP traffic with mudp CLI
+   - Multicast listener (224.0.0.69:4403)
+   - UDP socket viewer, test packet sender
+   - UDP echo test, multicast join test
+   - MUDP config display, install/update
+
+4. **Tool Manager** (`src/tools/tool_manager.py`) - NEW MODULE
+   - Track installed tools (mudp, meshtastic, nmap, etc.)
+   - Version checking via pip/pipx/apt
+   - Install/update all tools
+   - PyPI version checking for updates
+
+5. **Research Documentation** (`RESEARCH.md`) - NEW FILE
+   - MUDP library documentation
+   - TCP interface (port 4403) reference
+   - RF tools and coverage planning links
+   - Protocol references
+
+6. **GTK4 Tools Panel** (`src/gtk_ui/panels/tools.py`) - NEW
+   - Network, RF, MUDP tools in GTK4 interface
+   - Status display and action buttons
+   - Background thread operations
+
+7. **Site Planner Fix** (`src/diagnostics/site_planner.py`)
+   - FIX: URL display for headless/SSH sessions
+   - No longer opens text browser (lynx)
+
+### ✅ COMPLETED (v3.1.1)
 
 1. **Textual TUI Bug Fixes** (`src/tui/app.py`)
    - FIX: Widget IDs now handle dots in filenames (e.g., `display-waveshare-2.8.yaml`)
