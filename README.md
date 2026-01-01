@@ -179,6 +179,10 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.
 
 **For Textual TUI:**
 ```bash
+# On Raspberry Pi / Debian (outside virtual environment):
+pip install --break-system-packages textual
+
+# In a virtual environment or on other systems:
 pip install textual
 ```
 
