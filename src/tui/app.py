@@ -456,17 +456,19 @@ class ConfigPane(Container):
         elif button_id == "cfg-activate":
             available_list = self.query_one("#available-list", ListView)
             if available_list.highlighted_child:
-                item_id = available_list.highlighted_child.id or ""
-                if item_id.startswith("avail-"):
-                    name = item_id.replace("avail-", "")
+                # Get actual filename from Label (IDs have dots replaced with underscores)
+                label = available_list.highlighted_child.query_one(Label)
+                name = str(label.renderable) if label else ""
+                if name:
                     await self.activate_config(name)
 
         elif button_id == "cfg-deactivate":
             active_list = self.query_one("#active-list", ListView)
             if active_list.highlighted_child:
-                item_id = active_list.highlighted_child.id or ""
-                if item_id.startswith("active-"):
-                    name = item_id.replace("active-", "")
+                # Get actual filename from Label (IDs have dots replaced with underscores)
+                label = active_list.highlighted_child.query_one(Label)
+                name = str(label.renderable) if label else ""
+                if name:
                     await self.deactivate_config(name)
 
         elif button_id == "cfg-edit":
@@ -517,14 +519,16 @@ class ConfigPane(Container):
 
         path = None
         if available_list.highlighted_child:
-            item_id = available_list.highlighted_child.id or ""
-            if item_id.startswith("avail-"):
-                name = item_id.replace("avail-", "")
+            # Get actual filename from Label (IDs have dots replaced with underscores)
+            label = available_list.highlighted_child.query_one(Label)
+            name = str(label.renderable) if label else ""
+            if name:
                 path = self.AVAILABLE_D / name
         elif active_list.highlighted_child:
-            item_id = active_list.highlighted_child.id or ""
-            if item_id.startswith("active-"):
-                name = item_id.replace("active-", "")
+            # Get actual filename from Label (IDs have dots replaced with underscores)
+            label = active_list.highlighted_child.query_one(Label)
+            name = str(label.renderable) if label else ""
+            if name:
                 path = self.CONFIG_D / name
 
         if path:
