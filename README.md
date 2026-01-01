@@ -2,7 +2,37 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.2.0** | [Changelog](#version-history)
+**Version 3.2.1** | [Changelog](#version-history)
+
+## What's New in v3.2.1
+
+### Hardware Configuration (Main Menu → `w`)
+- **SPI Configuration** - Enable/disable SPI interface via raspi-config
+- **I2C Configuration** - Enable/disable I2C interface
+- **Serial Port Setup** - Configure UART for GPS modules and serial devices
+- **SPI Overlay Management** - Add dtoverlay=spi0-0cs for LoRa HATs
+- **Hardware Detection** - Detect SPI, I2C, Serial, and GPIO devices
+- **Device Selection** - Select and configure known Meshtastic hardware:
+  - LoRa 900MHz 30dBm/22dBm SX1262 modules
+  - LoRa 868MHz EU modules
+  - Waveshare displays (1.44", 2.8")
+  - I2C OLED displays
+  - Serial GPS modules
+- **Config File Copy** - Copy configs from available.d to config.d
+- **YAML Config Editor** - Edit config files with validation
+- **Safe Reboot** - Checks for running applications before rebooting:
+  - Detects open editors (nano, vim, emacs)
+  - Shows active SSH sessions
+  - Checks for apt/dpkg locks
+  - Graceful meshtasticd shutdown
+  - Countdown with cancel option
+
+### Channel Configuration Enhancements
+- **Full Channel Add/Modify** - Complete channel editor with all settings
+- **PSK Key Management** - Generate/enter 256-bit, 128-bit, or custom keys
+- **MQTT Per-Channel** - Configure uplink/downlink for each channel
+- **Position Precision** - Set location sharing accuracy per channel
+- **Existing Channel Detection** - Pre-fills values when editing
 
 ## What's New in v3.2.0
 
@@ -364,9 +394,17 @@ Main Menu:
 7. Configuration Templates
 8. Config File Manager
 c. Meshtastic CLI Commands
+t. System Diagnostics
+p. Site Planner
+n. Network Tools
+r. RF Tools
+m. MUDP Tools
+g. Tool Manager
 9. Check dependencies
 h. Hardware detection
+w. Hardware Configuration (SPI, Serial, GPIO)
 d. Debug & troubleshooting
+u. Uninstall
 q. Exit
 ```
 
@@ -445,10 +483,16 @@ Meshtasticd_interactive_UI/
 │   │   ├── radio.py               # Radio configuration
 │   │   ├── device.py              # Device configuration
 │   │   ├── hardware.py            # Hardware detection
+│   │   ├── hardware_config.py     # SPI/Serial/GPIO config (NEW)
 │   │   ├── modules.py             # Module configuration
 │   │   ├── spi_hats.py            # SPI HAT configuration
 │   │   ├── yaml_editor.py         # YAML editor
 │   │   └── channel_presets.py     # Channel presets
+│   ├── tools/                     # System tools (NEW)
+│   │   ├── network_tools.py       # TCP/IP, ping, scanning
+│   │   ├── rf_tools.py            # Link budget, LoRa analysis
+│   │   ├── mudp_tools.py          # UDP, multicast, MUDP
+│   │   └── tool_manager.py        # Tool install/update
 │   ├── services/                  # Service management
 │   │   └── service_manager.py     # Systemd controls
 │   ├── cli/                       # Meshtastic CLI wrapper

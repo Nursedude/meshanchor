@@ -1,11 +1,25 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.2.0"
-__version_info__ = (3, 2, 0)
+__version__ = "3.2.1"
+__version_info__ = (3, 2, 1)
 __release_date__ = "2026-01-01"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.2.1",
+        "date": "2026-01-01",
+        "changes": [
+            "NEW: Hardware Configuration (Main Menu → w) - SPI, I2C, Serial, GPIO setup",
+            "NEW: Safe Reboot - Checks for running editors, SSH sessions, apt locks before reboot",
+            "NEW: Device Selection - Configure known Meshtastic hardware with auto-setup",
+            "NEW: SPI Overlay Management - Add dtoverlay=spi0-0cs for LoRa HATs",
+            "NEW: Config File Copy - Copy configs from available.d to config.d",
+            "NEW: YAML Config Editor - Edit config files with syntax validation",
+            "IMPROVED: Channel configuration with PSK key management, MQTT, position precision",
+            "IMPROVED: Raspi-config integration for interface enable/disable"
+        ]
+    },
     {
         "version": "3.2.0",
         "date": "2026-01-01",

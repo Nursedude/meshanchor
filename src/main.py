@@ -155,13 +155,14 @@ def interactive_menu():
         console.print("\n[dim cyan]── System ──[/dim cyan]")
         console.print(f"  [bold]9[/bold]. {em.get('🔍')} Check dependencies")
         console.print(f"  [bold]h[/bold]. {em.get('🔌')} Hardware detection")
+        console.print(f"  [bold]w[/bold]. {em.get('🛠️')} [yellow]Hardware Configuration[/yellow] [dim](SPI, Serial, GPIO)[/dim]")
         console.print(f"  [bold]d[/bold]. {em.get('🐛')} Debug & troubleshooting")
         console.print(f"  [bold]u[/bold]. {em.get('🗑️', '[DEL]')} [red]Uninstall[/red]")
 
         console.print(f"\n  [bold]q[/bold]. {em.get('🚪')} Exit")
         console.print(f"  [bold]?[/bold]. {em.get('❓')} Help")
 
-        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "t", "p", "n", "r", "m", "g", "h", "d", "u", "?"], default="1")
+        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "t", "p", "n", "r", "m", "g", "h", "w", "d", "u", "?"], default="1")
 
         if choice == "1":
             show_dashboard()
@@ -197,6 +198,8 @@ def interactive_menu():
             check_dependencies()
         elif choice == "h":
             detect_hardware()
+        elif choice == "w":
+            hardware_config_menu()
         elif choice == "d":
             debug_menu()
         elif choice == "u":
@@ -272,6 +275,14 @@ def tool_manager_menu():
 
     manager = ToolManager()
     manager.interactive_menu()
+
+
+def hardware_config_menu():
+    """Hardware configuration menu (SPI, Serial, GPIO)"""
+    from config.hardware_config import HardwareConfigurator
+
+    configurator = HardwareConfigurator()
+    configurator.interactive_menu()
 
 
 def show_dashboard():
