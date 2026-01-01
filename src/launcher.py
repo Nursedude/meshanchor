@@ -218,7 +218,7 @@ def install_dependencies():
     print()
 
     print(f"  {Colors.BOLD}2{Colors.NC}. Install Textual (for terminal UI)")
-    print(f"     {Colors.DIM}sudo pip install --break-system-packages textual{Colors.NC}")
+    print(f"     {Colors.DIM}sudo pip install --break-system-packages --ignore-installed textual{Colors.NC}")
     print()
 
     print(f"  {Colors.BOLD}3{Colors.NC}. Install both")
@@ -252,7 +252,7 @@ def install_dependencies():
         print(f"\n{Colors.CYAN}Installing Textual...{Colors.NC}")
         try:
             subprocess.run([
-                'sudo', 'pip', 'install', '--break-system-packages', 'textual'
+                'sudo', 'pip', 'install', '--break-system-packages', '--ignore-installed', 'textual'
             ], check=True)
             print(f"{Colors.GREEN}Textual installed!{Colors.NC}")
         except subprocess.CalledProcessError as e:
@@ -397,7 +397,7 @@ def main():
                     confirm = input(f"Install Textual? [Y/n]: ").strip().lower()
                     if confirm in ['', 'y', 'yes']:
                         subprocess.run([
-                            'sudo', 'pip', 'install', '--break-system-packages', 'textual'
+                            'sudo', 'pip', 'install', '--break-system-packages', '--ignore-installed', 'textual'
                         ], check=True)
                         print(f"{Colors.GREEN}Textual installed!{Colors.NC}")
                 except (KeyboardInterrupt, EOFError):

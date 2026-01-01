@@ -43,10 +43,10 @@ def check_textual():
         print("Install options:")
         print()
         print("  Option 1 - With sudo (recommended for Raspberry Pi):")
-        print("    sudo pip install --break-system-packages textual")
+        print("    sudo pip install --break-system-packages --ignore-installed textual")
         print()
         print("  Option 2 - Without sudo:")
-        print("    pip install --break-system-packages textual")
+        print("    pip install --break-system-packages --ignore-installed textual")
         print()
         print("  Option 3 - In a virtual environment:")
         print("    python3 -m venv venv && source venv/bin/activate")
@@ -59,7 +59,7 @@ def check_textual():
             if response in ('', 'y', 'yes'):
                 print("\nInstalling textual...")
                 result = subprocess.run(
-                    ['sudo', 'pip', 'install', '--break-system-packages', 'textual'],
+                    ['sudo', 'pip', 'install', '--break-system-packages', '--ignore-installed', 'textual'],
                     capture_output=False
                 )
                 if result.returncode == 0:
