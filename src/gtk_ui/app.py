@@ -88,7 +88,20 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         content_box.set_vexpand(True)
         main_box.append(content_box)
 
-        # Left sidebar navigation
+        # Main content stack (create BEFORE sidebar to avoid callback issues)
+        self.content_stack = Gtk.Stack()
+        self.content_stack.set_hexpand(True)
+        self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+
+        # Add content pages BEFORE sidebar (so stack has pages when nav callback fires)
+        self._add_dashboard_page()
+        self._add_service_page()
+        self._add_install_page()
+        self._add_config_page()
+        self._add_cli_page()
+        self._add_hardware_page()
+
+        # Left sidebar navigation (after content_stack exists)
         sidebar = self._create_sidebar()
         content_box.append(sidebar)
 
@@ -96,19 +109,8 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         content_box.append(separator)
 
-        # Main content stack
-        self.content_stack = Gtk.Stack()
-        self.content_stack.set_hexpand(True)
-        self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        # Add content stack to layout
         content_box.append(self.content_stack)
-
-        # Add content pages
-        self._add_dashboard_page()
-        self._add_service_page()
-        self._add_install_page()
-        self._add_config_page()
-        self._add_cli_page()
-        self._add_hardware_page()
 
         # Bottom status bar
         self.bottom_status = self._create_bottom_status()
