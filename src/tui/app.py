@@ -407,24 +407,28 @@ class ConfigPane(Container):
         # Load available configs
         if self.AVAILABLE_D.exists():
             for config in sorted(self.AVAILABLE_D.glob("*.yaml")):
-                # Use stem (no extension) for ID - dots are invalid in Textual IDs
-                available_list.append(ListItem(Label(config.name), id=f"avail-{config.stem}"))
+                # Replace dots with underscores for ID - dots are invalid in Textual IDs
+                safe_id = config.stem.replace(".", "_")
+                available_list.append(ListItem(Label(config.name), id=f"avail-{safe_id}"))
 
         # Load active configs
         if self.CONFIG_D.exists():
             for config in sorted(self.CONFIG_D.glob("*.yaml")):
-                # Use stem (no extension) for ID - dots are invalid in Textual IDs
-                active_list.append(ListItem(Label(config.name), id=f"active-{config.stem}"))
+                # Replace dots with underscores for ID - dots are invalid in Textual IDs
+                safe_id = config.stem.replace(".", "_")
+                active_list.append(ListItem(Label(config.name), id=f"active-{safe_id}"))
 
     async def on_list_view_selected(self, event: ListView.Selected):
         """Handle list selection"""
         if event.item:
             item_id = event.item.id or ""
+            # Get the actual filename from the Label (first child)
+            label = event.item.query_one(Label)
+            name = str(label.renderable) if label else ""
+
             if item_id.startswith("avail-"):
-                name = item_id.replace("avail-", "") + ".yaml"
                 path = self.AVAILABLE_D / name
             elif item_id.startswith("active-"):
-                name = item_id.replace("active-", "") + ".yaml"
                 path = self.CONFIG_D / name
             else:
                 return
