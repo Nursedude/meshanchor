@@ -407,22 +407,24 @@ class ConfigPane(Container):
         # Load available configs
         if self.AVAILABLE_D.exists():
             for config in sorted(self.AVAILABLE_D.glob("*.yaml")):
-                available_list.append(ListItem(Label(config.name), id=f"avail-{config.name}"))
+                # Use stem (no extension) for ID - dots are invalid in Textual IDs
+                available_list.append(ListItem(Label(config.name), id=f"avail-{config.stem}"))
 
         # Load active configs
         if self.CONFIG_D.exists():
             for config in sorted(self.CONFIG_D.glob("*.yaml")):
-                active_list.append(ListItem(Label(config.name), id=f"active-{config.name}"))
+                # Use stem (no extension) for ID - dots are invalid in Textual IDs
+                active_list.append(ListItem(Label(config.name), id=f"active-{config.stem}"))
 
     async def on_list_view_selected(self, event: ListView.Selected):
         """Handle list selection"""
         if event.item:
             item_id = event.item.id or ""
             if item_id.startswith("avail-"):
-                name = item_id.replace("avail-", "")
+                name = item_id.replace("avail-", "") + ".yaml"
                 path = self.AVAILABLE_D / name
             elif item_id.startswith("active-"):
-                name = item_id.replace("active-", "")
+                name = item_id.replace("active-", "") + ".yaml"
                 path = self.CONFIG_D / name
             else:
                 return
