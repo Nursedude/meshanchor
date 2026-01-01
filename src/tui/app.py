@@ -722,6 +722,263 @@ class CLIPane(Container):
         return None
 
 
+class ToolsPane(Container):
+    """System Tools pane - Network, RF, MUDP"""
+
+    def compose(self) -> ComposeResult:
+        yield Static("# System Tools", classes="title")
+        yield Rule()
+
+        yield Static("## Network Tools", classes="section-title")
+        with Horizontal(classes="button-row"):
+            yield Button("Ping Test", id="tool-ping")
+            yield Button("Port 4403", id="tool-port")
+            yield Button("Interfaces", id="tool-ifaces")
+            yield Button("Find Devices", id="tool-scan")
+
+        yield Static("## RF Tools", classes="section-title")
+        with Horizontal(classes="button-row"):
+            yield Button("LoRa Presets", id="tool-presets")
+            yield Button("Detect Radio", id="tool-radio")
+            yield Button("SPI/GPIO", id="tool-spi")
+
+        yield Static("## MUDP Tools", classes="section-title")
+        with Horizontal(classes="button-row"):
+            yield Button("MUDP Status", id="tool-mudp-status")
+            yield Button("Install MUDP", id="tool-mudp-install")
+            yield Button("Multicast Test", id="tool-multicast")
+
+        yield Static("## Output", classes="section-title")
+        with Horizontal(classes="button-row"):
+            yield Button("Clear", id="tool-clear")
+            yield Button("Refresh", id="tool-refresh")
+
+        yield Log(id="tool-output", classes="log-panel")
+
+    async def on_mount(self):
+        """Called when widget is mounted"""
+        self._refresh_status()
+
+    def _refresh_status(self):
+        """Refresh tool status"""
+        output = self.query_one("#tool-output", Log)
+        output.clear()
+        output.write("[cyan]System Tools Ready[/cyan]")
+        output.write("Select a tool above to run diagnostics")
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses"""
+        button_id = event.button.id
+        output = self.query_one("#tool-output", Log)
+
+        if button_id == "tool-clear":
+            output.clear()
+            return
+        elif button_id == "tool-refresh":
+            self._refresh_status()
+            return
+        elif button_id == "tool-ping":
+            await self._run_ping(output)
+        elif button_id == "tool-port":
+            await self._test_port(output)
+        elif button_id == "tool-ifaces":
+            await self._show_interfaces(output)
+        elif button_id == "tool-scan":
+            await self._scan_devices(output)
+        elif button_id == "tool-presets":
+            self._show_presets(output)
+        elif button_id == "tool-radio":
+            await self._detect_radio(output)
+        elif button_id == "tool-spi":
+            await self._check_spi(output)
+        elif button_id == "tool-mudp-status":
+            await self._mudp_status(output)
+        elif button_id == "tool-mudp-install":
+            await self._install_mudp(output)
+        elif button_id == "tool-multicast":
+            await self._test_multicast(output)
+
+    @work
+    async def _run_ping(self, output: Log):
+        """Run ping test"""
+        output.write("\n[cyan]Pinging 8.8.8.8...[/cyan]")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                'ping', '-c', '4', '8.8.8.8',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            output.write(stdout.decode())
+        except Exception as e:
+            output.write(f"[red]Error: {e}[/red]")
+
+    @work
+    async def _test_port(self, output: Log):
+        """Test Meshtastic TCP port"""
+        import socket
+        output.write("\n[cyan]Testing port 4403...[/cyan]")
+        for host in ['127.0.0.1', 'localhost']:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex((host, 4403))
+                sock.close()
+                status = "[green]OPEN[/green]" if result == 0 else "[red]CLOSED[/red]"
+                output.write(f"  {host}:4403 - {status}")
+            except Exception as e:
+                output.write(f"  {host}:4403 - [red]Error: {e}[/red]")
+
+    @work
+    async def _show_interfaces(self, output: Log):
+        """Show network interfaces"""
+        output.write("\n[cyan]Network Interfaces:[/cyan]")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                'ip', '-br', 'addr',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await result.communicate()
+            output.write(stdout.decode())
+        except Exception as e:
+            output.write(f"[red]Error: {e}[/red]")
+
+    @work
+    async def _scan_devices(self, output: Log):
+        """Scan for Meshtastic devices"""
+        import socket
+        output.write("\n[cyan]Scanning for Meshtastic devices (port 4403)...[/cyan]")
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            base = '.'.join(local_ip.split('.')[:3])
+            found = 0
+            for i in range(1, 255):
+                ip = f"{base}.{i}"
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(0.2)
+                    result = sock.connect_ex((ip, 4403))
+                    sock.close()
+                    if result == 0:
+                        output.write(f"  [green]Found: {ip}:4403[/green]")
+                        found += 1
+                except Exception:
+                    pass
+            output.write(f"Scan complete. Found {found} device(s)")
+        except Exception as e:
+            output.write(f"[red]Error: {e}[/red]")
+
+    def _show_presets(self, output: Log):
+        """Show LoRa presets"""
+        output.write("\n[cyan]LoRa Modem Presets:[/cyan]")
+        presets = [
+            ("SHORT_TURBO", "21875 bps", "-108 dBm", "~3 km"),
+            ("SHORT_FAST", "10937 bps", "-111 dBm", "~5 km"),
+            ("MEDIUM_FAST", "3516 bps", "-117 dBm", "~12 km"),
+            ("LONG_FAST", "1066 bps", "-123 dBm", "~30 km"),
+            ("LONG_SLOW", "293 bps", "-129 dBm", "~80 km"),
+            ("VERY_LONG_SLOW", "146 bps", "-132 dBm", "~120 km"),
+        ]
+        for name, rate, sens, range_ in presets:
+            output.write(f"  {name}: {rate}, {sens}, {range_}")
+
+    @work
+    async def _detect_radio(self, output: Log):
+        """Detect LoRa radio"""
+        from pathlib import Path
+        output.write("\n[cyan]Detecting LoRa Radio...[/cyan]")
+        spi = list(Path('/dev').glob('spidev*'))
+        if spi:
+            output.write(f"  [green]SPI devices: {len(spi)}[/green]")
+            for d in spi:
+                output.write(f"    {d}")
+        else:
+            output.write("  [red]No SPI devices found[/red]")
+
+    @work
+    async def _check_spi(self, output: Log):
+        """Check SPI/GPIO status"""
+        from pathlib import Path
+        output.write("\n[cyan]SPI/GPIO Status:[/cyan]")
+
+        spi = Path('/dev/spidev0.0').exists() or Path('/dev/spidev0.1').exists()
+        output.write(f"  SPI: {'[green]Enabled[/green]' if spi else '[red]Disabled[/red]'}")
+
+        i2c = Path('/dev/i2c-1').exists()
+        output.write(f"  I2C: {'[green]Enabled[/green]' if i2c else '[yellow]Disabled[/yellow]'}")
+
+        gpio = Path('/sys/class/gpio').exists()
+        output.write(f"  GPIO: {'[green]Available[/green]' if gpio else '[red]Not available[/red]'}")
+
+    @work
+    async def _mudp_status(self, output: Log):
+        """Check MUDP status"""
+        output.write("\n[cyan]MUDP Status:[/cyan]")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                'pip', 'show', 'mudp',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await result.communicate()
+            if result.returncode == 0:
+                for line in stdout.decode().split('\n'):
+                    if line.startswith(('Name:', 'Version:')):
+                        output.write(f"  {line}")
+                output.write("  [green]MUDP is installed[/green]")
+            else:
+                output.write("  [yellow]MUDP not installed[/yellow]")
+                output.write("  Install with: pip install mudp")
+        except Exception as e:
+            output.write(f"[red]Error: {e}[/red]")
+
+    @work
+    async def _install_mudp(self, output: Log):
+        """Install MUDP"""
+        output.write("\n[cyan]Installing MUDP...[/cyan]")
+        try:
+            result = await asyncio.create_subprocess_exec(
+                'pip', 'install', '--upgrade', '--break-system-packages', 'mudp',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            if result.returncode == 0:
+                output.write("[green]MUDP installed successfully![/green]")
+            else:
+                output.write(f"[red]Install failed: {stderr.decode()}[/red]")
+        except Exception as e:
+            output.write(f"[red]Error: {e}[/red]")
+
+    @work
+    async def _test_multicast(self, output: Log):
+        """Test multicast join"""
+        import socket
+        import struct
+        output.write("\n[cyan]Testing multicast group 224.0.0.69...[/cyan]")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('', 4403))
+            mreq = struct.pack("4sl", socket.inet_aton("224.0.0.69"), socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            output.write("  [green]Joined multicast group successfully[/green]")
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, mreq)
+            sock.close()
+            output.write("  [green]Left multicast group[/green]")
+        except OSError as e:
+            if "Address already in use" in str(e):
+                output.write("  [yellow]Port 4403 in use (meshtasticd running?) - OK[/yellow]")
+            else:
+                output.write(f"  [red]Error: {e}[/red]")
+        except Exception as e:
+            output.write(f"  [red]Error: {e}[/red]")
+
+
 class MeshtasticdTUI(App):
     """Meshtasticd Manager TUI Application"""
 
@@ -824,6 +1081,7 @@ class MeshtasticdTUI(App):
         Binding("s", "switch_tab('service')", "Service"),
         Binding("c", "switch_tab('config')", "Config"),
         Binding("m", "switch_tab('cli')", "CLI"),
+        Binding("t", "switch_tab('tools')", "Tools"),
         Binding("r", "refresh", "Refresh"),
     ]
 
@@ -841,6 +1099,8 @@ class MeshtasticdTUI(App):
                 yield ConfigPane()
             with TabPane("CLI", id="cli"):
                 yield CLIPane()
+            with TabPane("Tools", id="tools"):
+                yield ToolsPane()
 
         yield Footer()
 
