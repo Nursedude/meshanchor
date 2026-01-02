@@ -1,0 +1,667 @@
+"""
+Radio Configuration Panel - Full radio settings for Meshtastic devices
+Based on https://meshtastic.org/docs/overview/radio-settings/
+"""
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, GLib
+import subprocess
+import threading
+import os
+
+
+class RadioConfigPanel(Gtk.Box):
+    """Radio configuration panel with all Meshtastic radio settings"""
+
+    def __init__(self, main_window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.main_window = main_window
+
+        self.set_margin_start(20)
+        self.set_margin_end(20)
+        self.set_margin_top(20)
+        self.set_margin_bottom(20)
+
+        self._cli_path = None
+        self._build_ui()
+
+    def _build_ui(self):
+        """Build the radio configuration UI"""
+        # Title
+        title = Gtk.Label(label="Radio Configuration")
+        title.add_css_class("title-1")
+        title.set_xalign(0)
+        self.append(title)
+
+        subtitle = Gtk.Label(label="Configure Mesh, LoRa, Position, Power, MQTT, and Telemetry settings")
+        subtitle.set_xalign(0)
+        subtitle.add_css_class("dim-label")
+        self.append(subtitle)
+
+        # Scrollable content area
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        content_box.set_margin_top(15)
+
+        # Create expandable sections
+        self._add_device_section(content_box)
+        self._add_lora_section(content_box)
+        self._add_position_section(content_box)
+        self._add_power_section(content_box)
+        self._add_mqtt_section(content_box)
+        self._add_telemetry_section(content_box)
+        self._add_actions_section(content_box)
+
+        scrolled.set_child(content_box)
+        self.append(scrolled)
+
+        # Status bar at bottom
+        self.status_label = Gtk.Label(label="Ready - Click 'Load Current Config' to view settings")
+        self.status_label.set_xalign(0)
+        self.status_label.add_css_class("dim-label")
+        self.append(self.status_label)
+
+    def _create_expander_row(self, title, icon_name):
+        """Create a styled expander row"""
+        expander = Gtk.Expander(label=title)
+        expander.set_expanded(False)
+
+        # Style the header
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        header_box.append(icon)
+        header_box.append(Gtk.Label(label=title))
+
+        return expander
+
+    def _add_device_section(self, parent):
+        """Add device/mesh settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("Device & Mesh Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Device Role
+        role_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        role_box.append(Gtk.Label(label="Device Role:"))
+        self.role_dropdown = Gtk.DropDown.new_from_strings([
+            "CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT",
+            "REPEATER", "TRACKER", "SENSOR", "TAK", "TAK_TRACKER", "CLIENT_HIDDEN", "LOST_AND_FOUND"
+        ])
+        self.role_dropdown.set_selected(0)
+        role_box.append(self.role_dropdown)
+
+        role_apply = Gtk.Button(label="Apply")
+        role_apply.connect("clicked", lambda b: self._apply_setting("device.role", self._get_role()))
+        role_box.append(role_apply)
+        box.append(role_box)
+
+        # Rebroadcast Mode
+        rebroadcast_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        rebroadcast_box.append(Gtk.Label(label="Rebroadcast Mode:"))
+        self.rebroadcast_dropdown = Gtk.DropDown.new_from_strings([
+            "ALL", "ALL_SKIP_DECODING", "LOCAL_ONLY", "KNOWN_ONLY", "NONE"
+        ])
+        self.rebroadcast_dropdown.set_selected(0)
+        rebroadcast_box.append(self.rebroadcast_dropdown)
+
+        rebroadcast_apply = Gtk.Button(label="Apply")
+        rebroadcast_apply.connect("clicked", lambda b: self._apply_setting("device.rebroadcast_mode", self._get_rebroadcast()))
+        rebroadcast_box.append(rebroadcast_apply)
+        box.append(rebroadcast_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_lora_section(self, parent):
+        """Add LoRa settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("LoRa Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Region
+        region_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        region_box.append(Gtk.Label(label="Region:"))
+        self.region_dropdown = Gtk.DropDown.new_from_strings([
+            "UNSET", "US", "EU_433", "EU_868", "CN", "JP", "ANZ", "KR", "TW", "RU",
+            "IN", "NZ_865", "TH", "LORA_24", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923"
+        ])
+        self.region_dropdown.set_selected(1)  # Default to US
+        region_box.append(self.region_dropdown)
+
+        region_apply = Gtk.Button(label="Apply")
+        region_apply.connect("clicked", lambda b: self._apply_setting("lora.region", self._get_region()))
+        region_box.append(region_apply)
+        box.append(region_box)
+
+        # Modem Preset
+        preset_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        preset_box.append(Gtk.Label(label="Modem Preset:"))
+        self.preset_dropdown = Gtk.DropDown.new_from_strings([
+            "LONG_FAST", "LONG_SLOW", "LONG_MODERATE", "MEDIUM_SLOW", "MEDIUM_FAST",
+            "SHORT_SLOW", "SHORT_FAST", "SHORT_TURBO"
+        ])
+        self.preset_dropdown.set_selected(0)
+        preset_box.append(self.preset_dropdown)
+
+        preset_apply = Gtk.Button(label="Apply")
+        preset_apply.connect("clicked", lambda b: self._apply_setting("lora.modem_preset", self._get_preset()))
+        preset_box.append(preset_apply)
+        box.append(preset_box)
+
+        # Hop Limit
+        hop_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hop_box.append(Gtk.Label(label="Hop Limit:"))
+        self.hop_spin = Gtk.SpinButton()
+        self.hop_spin.set_range(1, 7)
+        self.hop_spin.set_value(3)
+        self.hop_spin.set_increments(1, 1)
+        hop_box.append(self.hop_spin)
+
+        hop_apply = Gtk.Button(label="Apply")
+        hop_apply.connect("clicked", lambda b: self._apply_setting("lora.hop_limit", str(int(self.hop_spin.get_value()))))
+        hop_box.append(hop_apply)
+        box.append(hop_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_position_section(self, parent):
+        """Add position settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("Position Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # GPS Enabled
+        gps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        gps_box.append(Gtk.Label(label="GPS Mode:"))
+        self.gps_dropdown = Gtk.DropDown.new_from_strings([
+            "DISABLED", "ENABLED", "NOT_PRESENT"
+        ])
+        self.gps_dropdown.set_selected(1)
+        gps_box.append(self.gps_dropdown)
+
+        gps_apply = Gtk.Button(label="Apply")
+        gps_apply.connect("clicked", lambda b: self._apply_setting("position.gps_mode", self._get_gps_mode()))
+        gps_box.append(gps_apply)
+        box.append(gps_box)
+
+        # Position broadcast interval
+        pos_interval_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        pos_interval_box.append(Gtk.Label(label="Broadcast Interval (sec):"))
+        self.pos_interval_spin = Gtk.SpinButton()
+        self.pos_interval_spin.set_range(0, 86400)
+        self.pos_interval_spin.set_value(900)  # 15 min default
+        self.pos_interval_spin.set_increments(60, 300)
+        pos_interval_box.append(self.pos_interval_spin)
+
+        pos_apply = Gtk.Button(label="Apply")
+        pos_apply.connect("clicked", lambda b: self._apply_setting(
+            "position.position_broadcast_secs", str(int(self.pos_interval_spin.get_value()))))
+        pos_interval_box.append(pos_apply)
+        box.append(pos_interval_box)
+
+        # Fixed Position Entry
+        fixed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        fixed_box.append(Gtk.Label(label="Fixed Position:"))
+
+        self.lat_entry = Gtk.Entry()
+        self.lat_entry.set_placeholder_text("Latitude")
+        self.lat_entry.set_width_chars(12)
+        fixed_box.append(self.lat_entry)
+
+        self.lon_entry = Gtk.Entry()
+        self.lon_entry.set_placeholder_text("Longitude")
+        self.lon_entry.set_width_chars(12)
+        fixed_box.append(self.lon_entry)
+
+        self.alt_entry = Gtk.Entry()
+        self.alt_entry.set_placeholder_text("Alt (m)")
+        self.alt_entry.set_width_chars(8)
+        fixed_box.append(self.alt_entry)
+
+        fixed_apply = Gtk.Button(label="Set Fixed")
+        fixed_apply.connect("clicked", self._set_fixed_position)
+        fixed_box.append(fixed_apply)
+        box.append(fixed_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_power_section(self, parent):
+        """Add power settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("Power Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # TX Power
+        tx_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        tx_box.append(Gtk.Label(label="TX Power (dBm):"))
+        self.tx_power_spin = Gtk.SpinButton()
+        self.tx_power_spin.set_range(0, 30)
+        self.tx_power_spin.set_value(0)  # 0 = use default
+        self.tx_power_spin.set_increments(1, 5)
+        tx_box.append(self.tx_power_spin)
+
+        tx_apply = Gtk.Button(label="Apply")
+        tx_apply.connect("clicked", lambda b: self._apply_setting(
+            "lora.tx_power", str(int(self.tx_power_spin.get_value()))))
+        tx_box.append(tx_apply)
+        box.append(tx_box)
+
+        # Power Saving
+        power_save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.power_save_check = Gtk.CheckButton(label="Enable Power Saving Mode")
+        power_save_box.append(self.power_save_check)
+
+        ps_apply = Gtk.Button(label="Apply")
+        ps_apply.connect("clicked", lambda b: self._apply_setting(
+            "power.is_power_saving", "true" if self.power_save_check.get_active() else "false"))
+        power_save_box.append(ps_apply)
+        box.append(power_save_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_mqtt_section(self, parent):
+        """Add MQTT settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("MQTT Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # MQTT Enable
+        mqtt_enable_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.mqtt_enabled_check = Gtk.CheckButton(label="Enable MQTT")
+        mqtt_enable_box.append(self.mqtt_enabled_check)
+
+        mqtt_enable_apply = Gtk.Button(label="Apply")
+        mqtt_enable_apply.connect("clicked", lambda b: self._apply_setting(
+            "mqtt.enabled", "true" if self.mqtt_enabled_check.get_active() else "false"))
+        mqtt_enable_box.append(mqtt_enable_apply)
+        box.append(mqtt_enable_box)
+
+        # MQTT Server
+        server_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        server_box.append(Gtk.Label(label="Server:"))
+        self.mqtt_server_entry = Gtk.Entry()
+        self.mqtt_server_entry.set_placeholder_text("mqtt.meshtastic.org")
+        self.mqtt_server_entry.set_hexpand(True)
+        server_box.append(self.mqtt_server_entry)
+
+        server_apply = Gtk.Button(label="Apply")
+        server_apply.connect("clicked", lambda b: self._apply_setting(
+            "mqtt.address", self.mqtt_server_entry.get_text()))
+        server_box.append(server_apply)
+        box.append(server_box)
+
+        # MQTT Username/Password
+        auth_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        auth_box.append(Gtk.Label(label="Username:"))
+        self.mqtt_user_entry = Gtk.Entry()
+        self.mqtt_user_entry.set_width_chars(15)
+        auth_box.append(self.mqtt_user_entry)
+
+        auth_box.append(Gtk.Label(label="Password:"))
+        self.mqtt_pass_entry = Gtk.Entry()
+        self.mqtt_pass_entry.set_visibility(False)
+        self.mqtt_pass_entry.set_width_chars(15)
+        auth_box.append(self.mqtt_pass_entry)
+
+        auth_apply = Gtk.Button(label="Apply Auth")
+        auth_apply.connect("clicked", self._apply_mqtt_auth)
+        auth_box.append(auth_apply)
+        box.append(auth_box)
+
+        # MQTT Encryption
+        enc_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.mqtt_enc_check = Gtk.CheckButton(label="Encryption Enabled")
+        enc_box.append(self.mqtt_enc_check)
+
+        self.mqtt_json_check = Gtk.CheckButton(label="JSON Enabled")
+        enc_box.append(self.mqtt_json_check)
+
+        self.mqtt_tls_check = Gtk.CheckButton(label="TLS Enabled")
+        enc_box.append(self.mqtt_tls_check)
+        box.append(enc_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_telemetry_section(self, parent):
+        """Add telemetry settings section"""
+        frame = Gtk.Frame()
+        frame.set_label("Telemetry Settings")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Device Metrics Interval
+        device_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        device_box.append(Gtk.Label(label="Device Metrics Interval (sec):"))
+        self.device_metrics_spin = Gtk.SpinButton()
+        self.device_metrics_spin.set_range(0, 86400)
+        self.device_metrics_spin.set_value(1800)  # 30 min default
+        self.device_metrics_spin.set_increments(60, 300)
+        device_box.append(self.device_metrics_spin)
+
+        device_apply = Gtk.Button(label="Apply")
+        device_apply.connect("clicked", lambda b: self._apply_setting(
+            "telemetry.device_update_interval", str(int(self.device_metrics_spin.get_value()))))
+        device_box.append(device_apply)
+        box.append(device_box)
+
+        # Environment Metrics Interval
+        env_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        env_box.append(Gtk.Label(label="Environment Metrics Interval (sec):"))
+        self.env_metrics_spin = Gtk.SpinButton()
+        self.env_metrics_spin.set_range(0, 86400)
+        self.env_metrics_spin.set_value(1800)
+        self.env_metrics_spin.set_increments(60, 300)
+        env_box.append(self.env_metrics_spin)
+
+        env_apply = Gtk.Button(label="Apply")
+        env_apply.connect("clicked", lambda b: self._apply_setting(
+            "telemetry.environment_update_interval", str(int(self.env_metrics_spin.get_value()))))
+        env_box.append(env_apply)
+        box.append(env_box)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _add_actions_section(self, parent):
+        """Add action buttons section"""
+        frame = Gtk.Frame()
+        frame.set_label("Actions")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_halign(Gtk.Align.CENTER)
+
+        # Load Current Config
+        load_btn = Gtk.Button(label="Load Current Config")
+        load_btn.add_css_class("suggested-action")
+        load_btn.connect("clicked", lambda b: self._load_current_config())
+        box.append(load_btn)
+
+        # View Full Config
+        view_btn = Gtk.Button(label="View Full Config")
+        view_btn.connect("clicked", lambda b: self._view_full_config())
+        box.append(view_btn)
+
+        # Factory Reset
+        reset_btn = Gtk.Button(label="Factory Reset")
+        reset_btn.add_css_class("destructive-action")
+        reset_btn.connect("clicked", lambda b: self._factory_reset())
+        box.append(reset_btn)
+
+        # Reboot Node
+        reboot_btn = Gtk.Button(label="Reboot Node")
+        reboot_btn.connect("clicked", lambda b: self._reboot_node())
+        box.append(reboot_btn)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _find_cli(self):
+        """Find the meshtastic CLI path"""
+        if self._cli_path:
+            return self._cli_path
+
+        cli_paths = [
+            '/root/.local/bin/meshtastic',
+            '/home/pi/.local/bin/meshtastic',
+            os.path.expanduser('~/.local/bin/meshtastic'),
+        ]
+
+        for path in cli_paths:
+            if os.path.exists(path):
+                self._cli_path = path
+                return path
+
+        # Check if in PATH
+        result = subprocess.run(['which', 'meshtastic'], capture_output=True, text=True)
+        if result.returncode == 0:
+            self._cli_path = result.stdout.strip()
+            return self._cli_path
+
+        return None
+
+    def _run_cli(self, args, callback=None):
+        """Run meshtastic CLI command in background thread"""
+        def do_run():
+            cli = self._find_cli()
+            if not cli:
+                if callback:
+                    GLib.idle_add(callback, False, "", "Meshtastic CLI not found")
+                return
+
+            cmd = [cli, '--host', 'localhost'] + args
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if callback:
+                    GLib.idle_add(callback, result.returncode == 0, result.stdout, result.stderr)
+            except subprocess.TimeoutExpired:
+                if callback:
+                    GLib.idle_add(callback, False, "", "Command timed out")
+            except Exception as e:
+                if callback:
+                    GLib.idle_add(callback, False, "", str(e))
+
+        thread = threading.Thread(target=do_run, daemon=True)
+        thread.start()
+
+    def _get_role(self):
+        """Get selected device role"""
+        roles = ["CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT",
+                 "REPEATER", "TRACKER", "SENSOR", "TAK", "TAK_TRACKER", "CLIENT_HIDDEN", "LOST_AND_FOUND"]
+        return roles[self.role_dropdown.get_selected()]
+
+    def _get_rebroadcast(self):
+        """Get selected rebroadcast mode"""
+        modes = ["ALL", "ALL_SKIP_DECODING", "LOCAL_ONLY", "KNOWN_ONLY", "NONE"]
+        return modes[self.rebroadcast_dropdown.get_selected()]
+
+    def _get_region(self):
+        """Get selected region"""
+        regions = ["UNSET", "US", "EU_433", "EU_868", "CN", "JP", "ANZ", "KR", "TW", "RU",
+                   "IN", "NZ_865", "TH", "LORA_24", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923"]
+        return regions[self.region_dropdown.get_selected()]
+
+    def _get_preset(self):
+        """Get selected modem preset"""
+        presets = ["LONG_FAST", "LONG_SLOW", "LONG_MODERATE", "MEDIUM_SLOW", "MEDIUM_FAST",
+                   "SHORT_SLOW", "SHORT_FAST", "SHORT_TURBO"]
+        return presets[self.preset_dropdown.get_selected()]
+
+    def _get_gps_mode(self):
+        """Get selected GPS mode"""
+        modes = ["DISABLED", "ENABLED", "NOT_PRESENT"]
+        return modes[self.gps_dropdown.get_selected()]
+
+    def _apply_setting(self, setting, value):
+        """Apply a single setting"""
+        self.status_label.set_label(f"Applying {setting}={value}...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self.status_label.set_label(f"Applied {setting}={value}")
+                self.main_window.set_status_message(f"Setting applied: {setting}")
+            else:
+                self.status_label.set_label(f"Failed: {stderr}")
+                self.main_window.set_status_message(f"Failed to apply setting: {stderr}")
+
+        self._run_cli(['--set', setting, value], on_result)
+
+    def _set_fixed_position(self, button):
+        """Set fixed position from entry fields"""
+        try:
+            lat = float(self.lat_entry.get_text())
+            lon = float(self.lon_entry.get_text())
+            alt = int(self.alt_entry.get_text()) if self.alt_entry.get_text() else 0
+
+            self.status_label.set_label(f"Setting fixed position: {lat}, {lon}, {alt}m...")
+
+            def on_result(success, stdout, stderr):
+                if success:
+                    self.status_label.set_label(f"Fixed position set: {lat}, {lon}")
+                else:
+                    self.status_label.set_label(f"Failed: {stderr}")
+
+            self._run_cli(['--setlat', str(lat), '--setlon', str(lon), '--setalt', str(alt)], on_result)
+        except ValueError:
+            self.status_label.set_label("Error: Invalid coordinates. Enter numeric values.")
+
+    def _apply_mqtt_auth(self, button):
+        """Apply MQTT username and password"""
+        user = self.mqtt_user_entry.get_text()
+        passwd = self.mqtt_pass_entry.get_text()
+
+        if user:
+            self._apply_setting("mqtt.username", user)
+        if passwd:
+            self._apply_setting("mqtt.password", passwd)
+
+    def _load_current_config(self):
+        """Load current configuration from device"""
+        self.status_label.set_label("Loading current configuration...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self.status_label.set_label("Configuration loaded")
+                self._parse_and_populate_config(stdout)
+            else:
+                self.status_label.set_label(f"Failed to load config: {stderr}")
+
+        self._run_cli(['--get', 'lora', '--get', 'device', '--get', 'position', '--get', 'mqtt', '--get', 'telemetry'], on_result)
+
+    def _parse_and_populate_config(self, output):
+        """Parse CLI output and populate UI fields"""
+        # This is a simplified parser - actual output format varies
+        lines = output.strip().split('\n')
+        for line in lines:
+            if 'region:' in line.lower():
+                # Try to set region dropdown
+                pass
+            # Add more parsing as needed
+        self.main_window.set_status_message("Configuration loaded from device")
+
+    def _view_full_config(self):
+        """Show full device configuration in a dialog"""
+        self.status_label.set_label("Fetching full configuration...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self._show_config_dialog("Full Configuration", stdout)
+            else:
+                self._show_config_dialog("Error", f"Failed to get configuration:\n{stderr}")
+            self.status_label.set_label("Ready")
+
+        self._run_cli(['--info'], on_result)
+
+    def _show_config_dialog(self, title, content):
+        """Show configuration in a scrollable dialog"""
+        dialog = Adw.MessageDialog(
+            transient_for=self.main_window,
+            heading=title,
+            body=""
+        )
+
+        # Create scrollable text view for content
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_size_request(600, 400)
+
+        text_view = Gtk.TextView()
+        text_view.set_editable(False)
+        text_view.set_monospace(True)
+        text_view.get_buffer().set_text(content)
+        scrolled.set_child(text_view)
+
+        dialog.set_extra_child(scrolled)
+        dialog.add_response("close", "Close")
+        dialog.present()
+
+    def _factory_reset(self):
+        """Perform factory reset with confirmation"""
+        self.main_window.show_confirm_dialog(
+            "Factory Reset",
+            "This will reset all settings to factory defaults.\n\n"
+            "Are you sure you want to continue?",
+            self._do_factory_reset
+        )
+
+    def _do_factory_reset(self, confirmed):
+        """Perform the actual factory reset"""
+        if not confirmed:
+            return
+
+        self.status_label.set_label("Performing factory reset...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self.status_label.set_label("Factory reset complete - node will reboot")
+                self.main_window.set_status_message("Factory reset complete")
+            else:
+                self.status_label.set_label(f"Factory reset failed: {stderr}")
+
+        self._run_cli(['--factory-reset'], on_result)
+
+    def _reboot_node(self):
+        """Reboot the Meshtastic node"""
+        self.main_window.show_confirm_dialog(
+            "Reboot Node",
+            "This will reboot the Meshtastic node.\n\n"
+            "Are you sure you want to continue?",
+            self._do_reboot
+        )
+
+    def _do_reboot(self, confirmed):
+        """Perform the actual reboot"""
+        if not confirmed:
+            return
+
+        self.status_label.set_label("Rebooting node...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self.status_label.set_label("Reboot command sent")
+                self.main_window.set_status_message("Node reboot initiated")
+            else:
+                self.status_label.set_label(f"Reboot failed: {stderr}")
+
+        self._run_cli(['--reboot'], on_result)

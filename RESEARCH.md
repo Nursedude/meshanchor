@@ -8,9 +8,10 @@ This document contains research notes, references, and technical documentation f
 
 1. [MUDP - Meshtastic UDP Library](#mudp---meshtastic-udp-library)
 2. [Meshtastic TCP Interface](#meshtastic-tcp-interface)
-3. [RF Tools & Coverage Planning](#rf-tools--coverage-planning)
-4. [Network Architecture](#network-architecture)
-5. [Protocol References](#protocol-references)
+3. [Meshtastic Web Client](#meshtastic-web-client)
+4. [RF Tools & Coverage Planning](#rf-tools--coverage-planning)
+5. [Network Architecture](#network-architecture)
+6. [Protocol References](#protocol-references)
 
 ---
 
@@ -158,6 +159,138 @@ MeshMonitor's Virtual Node Server:
 
 ---
 
+## Meshtastic Web Client
+
+The Meshtastic Web Client provides a browser-based interface for configuring and monitoring Meshtastic devices. It runs directly in your browser.
+
+### Overview
+
+- **Official Web Client:** https://client.meshtastic.org/
+- **Staging/Test Site:** https://client-test.meshtastic.org/
+- **Documentation:** https://meshtastic.org/docs/software/web-client/
+- **Development Docs:** https://meshtastic.org/docs/development/web/
+
+### Hosting Options
+
+1. **Cloud-Hosted:** Access at https://client.meshtastic.org/
+2. **Device-Hosted:** ESP32 devices serve the web client directly
+3. **Self-Hosted:** Run your own instance for advanced use cases
+
+### Browser Compatibility
+
+- Best experience: Chromium-based browsers (Chrome, Edge)
+- All major browsers supported with limited functionality
+- Web Serial API: Limited browser support
+- Web Bluetooth API: Primarily Chromium browsers
+
+### Device Limitations
+
+- HTTP method limited to ESP32 devices with WiFi
+- Serial connection requires USB and compatible browser
+
+### Connection Methods
+
+The web client supports three connection protocols:
+
+#### 1. HTTP Connection
+
+For ESP32-based devices with WiFi:
+- Access via `http://meshtastic.local` or device IP address
+- Web client stored in device flash memory
+- Cloud-hosted version at https://client.meshtastic.org/
+- Self-hosted options available for advanced users
+
+**HTTPS Note:** When using the hosted version, all traffic must be served over HTTPS. Meshtastic nodes generate self-signed certificates. You must trust the certificate by first accessing your node directly: `https://NODE_IP_ADDRESS/`
+
+#### 2. Bluetooth Low Energy (BLE) Connection
+
+- Connects directly to devices using Web Bluetooth API
+- Requires secure context (HTTPS or localhost)
+- Primarily supported in Chromium-based browsers
+- Three BLE endpoints: FromRadio, FromNum (notifications), ToRadio
+
+#### 3. Serial Connection (USB)
+
+- Connects via USB using Web Serial API
+- Direct, reliable connection for configuration
+- Limited browser support (check Meshtastic docs for compatibility)
+- Best for development and debugging
+
+### Client API
+
+The protocol is almost identical across BLE, Serial/USB, and TCP transports.
+
+**Python Interfaces:**
+```python
+from meshtastic.serial_interface import SerialInterface
+from meshtastic.tcp_interface import TCPInterface
+from meshtastic.ble_interface import BLEInterface
+
+# Serial connection
+serial = SerialInterface("/dev/ttyUSB0")
+
+# TCP connection
+tcp = TCPInterface(hostname="192.168.1.100")
+
+# BLE connection
+ble = BLEInterface("device_address")
+```
+
+### Related Tools
+
+#### Meshtastic UI (MUI)
+- Started development in early 2024, preview released early 2025
+- 12,000 lines of handwritten code, 50,000 lines generated
+- Ported to 10+ devices, translated into 18 languages
+- Install via Meshtastic Web Flasher (look for MUI logo)
+
+#### BaseUI (Meshtastic 2.7+)
+- Released June 2025 - biggest UI overhaul in 4+ years
+- Rebuilt interface from the ground up
+- More intuitive, more capable, wider device support
+- Available in Web Flasher under "Preview" section
+
+### Source Code & Development
+
+**Repository:** https://github.com/meshtastic/web
+
+A monorepo consolidating the official Meshtastic web interface and JavaScript libraries.
+
+**Technologies:**
+- Runtime: pnpm and Deno
+- Frontend: React.js with Tailwind CSS
+- Build Tool: Vite
+- Language: TypeScript
+- Testing: Vitest and React Testing Library
+
+**Package Structure:**
+- `packages/web` - Main client interface (client.meshtastic.org)
+- `packages/core` - Core JavaScript functionality
+- Transport packages: Node TCP/serial, Deno TCP, HTTP, Web Bluetooth, Web Serial
+- `packages/protobufs` - Shared protobuf definitions
+
+**Quick Start:**
+```bash
+git clone https://github.com/meshtastic/web
+cd web
+pnpm install
+# Install Buf CLI for protobuf building
+```
+
+All JavaScript packages publish to both JSR and NPM registries.
+
+### References
+
+- Web Client Documentation: https://meshtastic.org/docs/software/web-client/
+- Web Development: https://meshtastic.org/docs/development/web/
+- GitHub Repository: https://github.com/meshtastic/web
+- Meshtastic UI: https://meshtastic.org/docs/software/meshtastic-ui/
+- Client API: https://meshtastic.org/docs/development/device/client-api/
+- Python API: https://python.meshtastic.org/
+- BLE Interface: https://python.meshtastic.org/ble_interface.html
+
+---
+
 ## RF Tools & Coverage Planning
 
 ### Meshtastic Site Planner
@@ -260,6 +393,7 @@ def check_tool_version(tool_name):
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 2026-01-02 | 3.2.2 | Added Web Client documentation |
 | 2026-01-01 | 3.2.0 | Initial research document, MUDP integration |
 
 ---

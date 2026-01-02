@@ -98,6 +98,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         self._add_service_page()
         self._add_install_page()
         self._add_config_page()
+        self._add_radio_config_page()
         self._add_cli_page()
         self._add_hardware_page()
         self._add_tools_page()
@@ -202,6 +203,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             ("service", "Service Management", "system-run-symbolic"),
             ("install", "Install / Update", "system-software-install-symbolic"),
             ("config", "Config File Manager", "document-edit-symbolic"),
+            ("radio_config", "Radio Configuration", "network-wireless-symbolic"),
             ("cli", "Meshtastic CLI", "utilities-terminal-symbolic"),
             ("hardware", "Hardware Detection", "drive-harddisk-symbolic"),
             ("tools", "System Tools", "applications-utilities-symbolic"),
@@ -266,6 +268,13 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         self.content_stack.add_named(panel, "config")
         self.config_panel = panel
 
+    def _add_radio_config_page(self):
+        """Add the radio configuration page"""
+        from .panels.radio_config import RadioConfigPanel
+        panel = RadioConfigPanel(self)
+        self.content_stack.add_named(panel, "radio_config")
+        self.radio_config_panel = panel
+
     def _add_cli_page(self):
         """Add the meshtastic CLI page"""
         from .panels.cli import CLIPanel
@@ -326,6 +335,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
 
             # Get uptime if active
             uptime = "--"
+            node_count = "--"
             if is_active:
                 result = subprocess.run(
                     ['systemctl', 'show', 'meshtasticd', '--property=ActiveEnterTimestamp'],
@@ -336,13 +346,71 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
                     if timestamp:
                         uptime = self._calculate_uptime(timestamp)
 
+                # Try to get node count from meshtastic CLI
+                node_count = self._get_node_count()
+
             # Update UI in main thread
-            GLib.idle_add(self._update_status_ui, is_active, uptime)
+            GLib.idle_add(self._update_status_ui, is_active, uptime, node_count)
 
         except Exception as e:
-            GLib.idle_add(self._update_status_ui, False, "--")
+            GLib.idle_add(self._update_status_ui, False, "--", "--")
 
-    def _update_status_ui(self, is_active, uptime):
+    def _get_node_count(self):
+        """Get the number of nodes from meshtastic CLI"""
+        try:
+            # Find meshtastic CLI
+            cli_paths = [
+                '/root/.local/bin/meshtastic',
+                '/home/pi/.local/bin/meshtastic',
+                os.path.expanduser('~/.local/bin/meshtastic'),
+                'meshtastic'
+            ]
+
+            cli_path = None
+            for path in cli_paths:
+                if path == 'meshtastic':
+                    # Check if in PATH
+                    result = subprocess.run(['which', 'meshtastic'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        cli_path = 'meshtastic'
+                        break
+                elif os.path.exists(path):
+                    cli_path = path
+                    break
+
+            if not cli_path:
+                return "--"
+
+            # Run meshtastic --info to get node info
+            result = subprocess.run(
+                [cli_path, '--host', 'localhost', '--nodes'],
+                capture_output=True, text=True,
+                timeout=10
+            )
+
+            if result.returncode == 0:
+                # Count lines that look like node entries
+                lines = result.stdout.strip().split('\n')
+                # Look for node IDs in the output (format: !xxxxxxxx)
+                node_lines = [l for l in lines if '!' in l and 'Node' not in l and 'node' not in l]
+                if node_lines:
+                    return str(len(node_lines))
+                # Alternative: count lines with signal strength (dB)
+                node_lines = [l for l in lines if 'dB' in l or 'SNR' in l]
+                if node_lines:
+                    return str(len(node_lines))
+                # Fallback: look for numeric IDs
+                import re
+                node_ids = re.findall(r'!([0-9a-fA-F]{8})', result.stdout)
+                if node_ids:
+                    return str(len(set(node_ids)))
+            return "--"
+        except subprocess.TimeoutExpired:
+            return "--"
+        except Exception:
+            return "--"
+
+    def _update_status_ui(self, is_active, uptime, node_count="--"):
         """Update status UI elements (must run in main thread)"""
         if is_active:
             self.service_status_icon.set_from_icon_name("emblem-default")
@@ -356,6 +424,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             self.service_status_label.add_css_class("error")
 
         self.uptime_label.set_label(f"Uptime: {uptime}")
+        self.node_count_label.set_label(f"Nodes: {node_count}")
         return False
 
     def _calculate_uptime(self, timestamp):

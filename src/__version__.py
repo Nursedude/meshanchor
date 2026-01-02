@@ -1,11 +1,25 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.2.1"
-__version_info__ = (3, 2, 1)
-__release_date__ = "2026-01-01"
+__version__ = "3.2.2"
+__version_info__ = (3, 2, 2)
+__release_date__ = "2026-01-02"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.2.2",
+        "date": "2026-01-02",
+        "changes": [
+            "NEW: Radio Configuration Panel in GTK UI (Mesh, LoRa, Position, Power, MQTT, Telemetry)",
+            "NEW: Real-time node count in GTK status bar from meshtastic CLI",
+            "FIX: GTK status bar now shows nodes and uptime correctly",
+            "FIX: GTK dashboard config count now checks both .yaml and .yml files",
+            "FIX: Hardware detection Enable buttons now work with sudo",
+            "FIX: Hardware detection shows active meshtasticd hardware and configs",
+            "IMPROVED: Hardware panel queries running meshtasticd for device info",
+            "DOCS: Added Meshtastic Web Client documentation to RESEARCH.md"
+        ]
+    },
     {
         "version": "3.2.1",
         "date": "2026-01-01",

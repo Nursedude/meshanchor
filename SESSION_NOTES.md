@@ -1,6 +1,6 @@
 # Meshtasticd Installer - Development Session Notes
 
-## Current Version: v3.2.1
+## Current Version: v3.2.2
 ## Session Date: 2026-01-02
 ## Branch: `claude/review-meshtasticd-installer-52ENu`
 
@@ -27,32 +27,45 @@ sudo python3 src/main_gtk.py    # GTK4 GUI
 
 ## Latest Session Summary (2026-01-02)
 
-### Completed This Session
+### Completed This Session (v3.2.2)
 
-1. **Full Radio Configuration** (`src/config/radio_config.py`) - NEW
-   - Menu option `f` in main menu
-   - Mesh Settings: Device role, rebroadcast mode, node info intervals
-   - Position Settings: GPS config, fixed position, smart broadcasting
-   - Power Settings: TX power (0-33 dBm), power saving, screen timeout
+1. **Radio Configuration Panel in GTK UI** (`src/gtk_ui/panels/radio_config.py`) - NEW
+   - New sidebar navigation item "Radio Configuration"
+   - Device & Mesh Settings: Role, rebroadcast mode
    - LoRa Settings: Region, modem preset, hop limit
-   - Channel Settings: Links to full channel editor
-   - MQTT Settings: Server, auth, encryption, JSON, TLS
-   - Telemetry Settings: Device/environment/power metrics
-   - Store & Forward: Message history server
-   - View Current Config / Factory Reset
+   - Position Settings: GPS mode, broadcast interval, fixed position
+   - Power Settings: TX power, power saving mode
+   - MQTT Settings: Enable, server, auth, encryption, TLS
+   - Telemetry Settings: Device and environment metrics intervals
+   - Actions: Load Config, View Full Config, Factory Reset, Reboot Node
 
-2. **GTK Service Panel Fix** (`src/gtk_ui/panels/service.py`)
-   - FIX: Added `sudo` prefix to all systemctl commands
-   - Start/Stop/Restart/Reload/Enable/Disable now work correctly
+2. **Fixed GTK Status Bar** (`src/gtk_ui/app.py`)
+   - FIX: Node count now updates from meshtastic CLI
+   - FIX: Uptime now displays correctly when service running
+   - NEW: `_get_node_count()` method queries `meshtastic --nodes`
 
-3. **Hardware Configuration** (`src/config/hardware_config.py`) - NEW (v3.2.1)
-   - Menu option `w` in main menu
-   - SPI/I2C/Serial configuration via raspi-config
-   - SPI overlay management (dtoverlay=spi0-0cs)
-   - Hardware device selection with known Meshtastic hardware
-   - Config file copy from available.d to config.d
-   - YAML config editor with validation
-   - Safe reboot with application checks
+3. **Fixed Dashboard Config Count** (`src/gtk_ui/panels/dashboard.py`)
+   - FIX: Now counts both .yaml and .yml files
+   - FIX: Better detection of meshtasticd installation
+
+4. **Fixed Hardware Detection** (`src/gtk_ui/panels/hardware.py`)
+   - FIX: Enable SPI/I2C buttons now use `sudo`
+   - NEW: Detects active meshtasticd hardware via CLI
+   - NEW: Shows active configs from config.d
+   - IMPROVED: Better I2C device parsing
+
+5. **Web Client Documentation** (`RESEARCH.md`)
+   - NEW: Added Meshtastic Web Client section
+   - HTTP, BLE, Serial connection methods
+   - Browser compatibility notes
+   - MUI and BaseUI (2.7+) documentation
+   - References and links
+
+### Previous Session (v3.2.1)
+
+1. **Full Radio Configuration** (`src/config/radio_config.py`) - CLI version
+2. **GTK Service Panel Fix** - Added sudo to systemctl
+3. **Hardware Configuration** (`src/config/hardware_config.py`) - CLI version
 
 ---
 

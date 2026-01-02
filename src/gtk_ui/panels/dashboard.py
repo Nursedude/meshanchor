@@ -188,12 +188,25 @@ class DashboardPanel(Gtk.Box):
             config_path = Path('/etc/meshtasticd/config.yaml')
             config_d = Path('/etc/meshtasticd/config.d')
 
-            if config_path.exists():
-                active_configs = list(config_d.glob('*.yaml')) if config_d.exists() else []
-                status = f"Found ({len(active_configs)} active configs)"
-                GLib.idle_add(self._update_card_value, self.config_card, status, "success")
+            # Check if meshtasticd is installed (config directory exists)
+            meshtasticd_dir = Path('/etc/meshtasticd')
+            if meshtasticd_dir.exists():
+                # Count active configs (both .yaml and .yml)
+                active_configs = []
+                if config_d.exists():
+                    active_configs = list(config_d.glob('*.yaml')) + list(config_d.glob('*.yml'))
+
+                if active_configs:
+                    status = f"Found ({len(active_configs)} active configs)"
+                    GLib.idle_add(self._update_card_value, self.config_card, status, "success")
+                elif config_path.exists():
+                    status = "Main config only (0 extras)"
+                    GLib.idle_add(self._update_card_value, self.config_card, status, "success")
+                else:
+                    status = "No configs found"
+                    GLib.idle_add(self._update_card_value, self.config_card, status, "warning")
             else:
-                GLib.idle_add(self._update_card_value, self.config_card, "Not configured", "warning")
+                GLib.idle_add(self._update_card_value, self.config_card, "Not installed", "warning")
         except Exception as e:
             GLib.idle_add(self._update_card_value, self.config_card, f"Error: {e}", "error")
 

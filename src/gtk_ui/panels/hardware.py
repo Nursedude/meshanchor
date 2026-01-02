@@ -220,12 +220,12 @@ class HardwarePanel(Gtk.Box):
             try:
                 if interface == "spi":
                     subprocess.run(
-                        ['raspi-config', 'nonint', 'do_spi', '0'],
+                        ['sudo', 'raspi-config', 'nonint', 'do_spi', '0'],
                         check=True, capture_output=True
                     )
                 elif interface == "i2c":
                     subprocess.run(
-                        ['raspi-config', 'nonint', 'do_i2c', '0'],
+                        ['sudo', 'raspi-config', 'nonint', 'do_i2c', '0'],
                         check=True, capture_output=True
                     )
 
@@ -243,7 +243,7 @@ class HardwarePanel(Gtk.Box):
                 GLib.idle_add(
                     self.main_window.show_info_dialog,
                     "Error",
-                    f"Failed to enable {interface.upper()}: {e}"
+                    f"Failed to enable {interface.upper()}: {e}\n\nMake sure you're running as root or have sudo access."
                 )
 
         thread = threading.Thread(target=enable)
@@ -263,7 +263,67 @@ class HardwarePanel(Gtk.Box):
                 break
 
         def detect():
+            import os
             detected = []
+
+            # First, check if meshtasticd is running and get its hardware info
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', 'meshtasticd'],
+                    capture_output=True, text=True
+                )
+                is_running = result.stdout.strip() == 'active'
+
+                if is_running:
+                    # Try to get hardware info from meshtastic CLI
+                    cli_paths = [
+                        '/root/.local/bin/meshtastic',
+                        '/home/pi/.local/bin/meshtastic',
+                        os.path.expanduser('~/.local/bin/meshtastic'),
+                    ]
+                    cli_path = None
+                    for path in cli_paths:
+                        if os.path.exists(path):
+                            cli_path = path
+                            break
+                    if not cli_path:
+                        result = subprocess.run(['which', 'meshtastic'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            cli_path = result.stdout.strip()
+
+                    if cli_path:
+                        result = subprocess.run(
+                            [cli_path, '--host', 'localhost', '--info'],
+                            capture_output=True, text=True, timeout=15
+                        )
+                        if result.returncode == 0:
+                            # Parse hardware info from output
+                            output = result.stdout
+                            hw_model = "Unknown"
+                            for line in output.split('\n'):
+                                if 'hwModel' in line or 'Hardware' in line:
+                                    hw_model = line.split(':')[-1].strip() if ':' in line else line.strip()
+                                    break
+                            detected.append({
+                                "type": "Active",
+                                "device": "meshtasticd",
+                                "description": f"Running - {hw_model}"
+                            })
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception:
+                pass
+
+            # Check active configs in config.d
+            config_d = Path('/etc/meshtasticd/config.d')
+            if config_d.exists():
+                active_configs = list(config_d.glob('*.yaml')) + list(config_d.glob('*.yml'))
+                for config in active_configs:
+                    detected.append({
+                        "type": "Active",
+                        "device": config.name,
+                        "description": "Active configuration"
+                    })
 
             # Check SPI devices
             spi_devices = list(Path('/dev').glob('spidev*'))
@@ -278,28 +338,32 @@ class HardwarePanel(Gtk.Box):
             try:
                 result = subprocess.run(
                     ['i2cdetect', '-y', '1'],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, timeout=5
                 )
                 if result.returncode == 0:
                     # Parse I2C addresses
                     for line in result.stdout.split('\n'):
-                        for addr in line.split()[1:]:
-                            if addr != '--' and addr.isalnum():
-                                detected.append({
-                                    "type": "I2C",
-                                    "device": f"0x{addr}",
-                                    "description": self._identify_i2c_device(addr)
-                                })
-            except:
+                        parts = line.split()
+                        if len(parts) > 1:
+                            for addr in parts[1:]:
+                                if addr != '--' and len(addr) == 2 and all(c in '0123456789abcdefABCDEF' for c in addr):
+                                    detected.append({
+                                        "type": "I2C",
+                                        "device": f"0x{addr}",
+                                        "description": self._identify_i2c_device(addr)
+                                    })
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception:
                 pass
 
             # Check for common LoRa HAT configs in available.d
             available_d = Path('/etc/meshtasticd/available.d')
             if available_d.exists():
-                lora_configs = list(available_d.glob('lora-*.yaml'))
-                for config in lora_configs[:5]:  # Limit to 5
+                lora_configs = list(available_d.glob('lora-*.yaml')) + list(available_d.glob('*.yml'))
+                for config in lora_configs[:10]:  # Limit to 10
                     detected.append({
-                        "type": "Config",
+                        "type": "Available",
                         "device": config.name,
                         "description": "Available LoRa configuration"
                     })
@@ -309,9 +373,10 @@ class HardwarePanel(Gtk.Box):
                 GLib.idle_add(self._add_hardware_row, hw)
 
             if detected:
+                active_count = len([d for d in detected if d["type"] == "Active"])
                 GLib.idle_add(
                     self.hw_info.set_label,
-                    f"Found {len(detected)} items"
+                    f"Found {len(detected)} items ({active_count} active)"
                 )
             else:
                 GLib.idle_add(

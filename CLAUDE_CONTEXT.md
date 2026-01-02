@@ -16,7 +16,7 @@ This file contains essential context for Claude to quickly understand and resume
 3. **GTK4 GUI** (`src/main_gtk.py`) - Graphical interface with libadwaita
 
 ### Current State
-- **Version:** 3.2.1
+- **Version:** 3.2.2
 - **Branch:** `claude/review-meshtasticd-installer-52ENu`
 - **Status:** Feature complete, ready for PR/merge
 
@@ -30,6 +30,7 @@ This file contains essential context for Claude to quickly understand and resume
 | `src/__version__.py` | Version string and changelog |
 | `src/config/lora.py` | Channel configuration (PSK, MQTT, roles) |
 | `src/config/radio_config.py` | Full radio config (Mesh, Position, Power, MQTT) |
+| `src/gtk_ui/panels/radio_config.py` | GTK Radio Configuration panel |
 | `src/config/hardware_config.py` | SPI/I2C/Serial/GPIO configuration |
 | `src/tools/*.py` | Network, RF, MUDP tools |
 | `src/gtk_ui/panels/service.py` | GTK service panel (uses sudo for systemctl) |
@@ -190,12 +191,14 @@ git push -u origin claude/review-meshtasticd-installer-52ENu
 
 | File | Changes |
 |------|---------|
-| `src/config/radio_config.py` | NEW - Full radio configuration |
-| `src/config/hardware_config.py` | NEW - Hardware configuration |
-| `src/gtk_ui/panels/service.py` | Added sudo to systemctl |
-| `src/main.py` | Added 'f' and 'w' menu options |
-| `src/__version__.py` | Updated to 3.2.1 |
-| `README.md` | Updated with v3.2.1 features |
+| `src/gtk_ui/panels/radio_config.py` | NEW - GTK Radio Configuration panel |
+| `src/gtk_ui/app.py` | Fixed nodes/uptime, added radio_config page |
+| `src/gtk_ui/panels/dashboard.py` | Fixed config count (.yaml + .yml) |
+| `src/gtk_ui/panels/hardware.py` | Fixed enable buttons, improved detection |
+| `src/config/radio_config.py` | Full radio configuration (CLI) |
+| `src/config/hardware_config.py` | Hardware configuration (CLI) |
+| `src/__version__.py` | Updated to 3.2.2 |
+| `RESEARCH.md` | Added Web Client documentation |
 
 ---
 
@@ -217,4 +220,4 @@ git push -u origin claude/review-meshtasticd-installer-52ENu
 
 ---
 
-*Last Updated: 2026-01-02 - v3.2.1*
+*Last Updated: 2026-01-02 - v3.2.2*
