@@ -9,6 +9,10 @@ Usage:
     sudo python3 src/main_gtk.py           # Run in foreground
     sudo python3 src/main_gtk.py &         # Run in background (shell)
     sudo python3 src/main_gtk.py --daemon  # Run detached (returns terminal)
+
+Daemon Control:
+    python3 src/main_gtk.py --status       # Check if daemon is running
+    python3 src/main_gtk.py --stop         # Stop running daemon
 """
 
 import os
@@ -16,6 +20,11 @@ import sys
 import shutil
 import subprocess
 import argparse
+import signal
+from pathlib import Path
+
+# PID file for daemon management
+PID_FILE = Path('/tmp/meshtasticd-manager.pid')
 
 
 def check_display():
@@ -148,38 +157,129 @@ def check_meshtastic_cli():
         return False
 
 
+def save_pid():
+    """Save current PID to file"""
+    PID_FILE.write_text(str(os.getpid()))
+
+
+def get_daemon_pid():
+    """Get running daemon PID if exists"""
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            # Check if process is running
+            os.kill(pid, 0)
+            return pid
+        except (ValueError, ProcessLookupError, PermissionError):
+            # Process not running, clean up stale PID file
+            PID_FILE.unlink(missing_ok=True)
+    return None
+
+
+def daemon_status():
+    """Check daemon status"""
+    pid = get_daemon_pid()
+    if pid:
+        print(f"Meshtasticd Manager is running (PID: {pid})")
+        return True
+    else:
+        print("Meshtasticd Manager is not running")
+        return False
+
+
+def stop_daemon():
+    """Stop running daemon"""
+    pid = get_daemon_pid()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print(f"Sent SIGTERM to Meshtasticd Manager (PID: {pid})")
+            # Wait a moment and check if stopped
+            import time
+            time.sleep(1)
+            try:
+                os.kill(pid, 0)
+                # Still running, try SIGKILL
+                os.kill(pid, signal.SIGKILL)
+                print("Process killed with SIGKILL")
+            except ProcessLookupError:
+                pass
+            PID_FILE.unlink(missing_ok=True)
+            print("Daemon stopped")
+            return True
+        except ProcessLookupError:
+            print("Process already stopped")
+            PID_FILE.unlink(missing_ok=True)
+            return True
+        except PermissionError:
+            print("Permission denied. Try with sudo.")
+            return False
+    else:
+        print("Daemon is not running")
+        return True
+
+
 def daemonize():
-    """Fork process to run in background and return terminal control"""
-    # First fork
-    pid = os.fork()
-    if pid > 0:
-        # Parent exits, returning terminal to user
-        print(f"Meshtasticd Manager started in background (PID: {pid})")
-        sys.exit(0)
+    """
+    Start process in background using subprocess (avoids fork() warning).
+    This is safer than fork() in multi-threaded environments.
+    """
+    # Check if already running
+    existing_pid = get_daemon_pid()
+    if existing_pid:
+        print(f"Meshtasticd Manager already running (PID: {existing_pid})")
+        print("Use --stop to stop it first, or --status to check")
+        sys.exit(1)
 
-    # Create new session
-    os.setsid()
+    # Get the current script path
+    script_path = os.path.abspath(__file__)
 
-    # Second fork to prevent zombie processes
-    pid = os.fork()
-    if pid > 0:
-        sys.exit(0)
+    # Use subprocess to spawn a new process instead of fork()
+    # This avoids the multi-threaded fork() warning
+    env = os.environ.copy()
+    env['MESHTASTICD_DAEMON'] = '1'  # Mark as daemon
 
-    # Redirect standard file descriptors to /dev/null
-    sys.stdout.flush()
-    sys.stderr.flush()
-    with open('/dev/null', 'r') as devnull:
-        os.dup2(devnull.fileno(), sys.stdin.fileno())
-    # Keep stdout/stderr for now so errors are visible
+    # Start new process detached from terminal
+    proc = subprocess.Popen(
+        [sys.executable, script_path],
+        stdin=subprocess.DEVNULL,
+        stdout=open('/tmp/meshtasticd-manager.log', 'a'),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env=env
+    )
+
+    print(f"Meshtasticd Manager started in background (PID: {proc.pid})")
+    print(f"Log: /tmp/meshtasticd-manager.log")
+    print(f"To stop: sudo python3 {script_path} --stop")
+    print(f"To check status: python3 {script_path} --status")
+    sys.exit(0)
 
 
 def main():
     """Main entry point"""
     # Parse arguments first
-    parser = argparse.ArgumentParser(description='Meshtasticd Manager - GTK4 GUI')
+    parser = argparse.ArgumentParser(
+        description='Meshtasticd Manager - GTK4 GUI',
+        epilog='Daemon control: --status to check, --stop to stop'
+    )
     parser.add_argument('--daemon', '-d', action='store_true',
                         help='Run in background (detach from terminal)')
+    parser.add_argument('--status', action='store_true',
+                        help='Check if daemon is running')
+    parser.add_argument('--stop', action='store_true',
+                        help='Stop running daemon')
     args, remaining = parser.parse_known_args()
+
+    # Handle daemon control commands (don't need root)
+    if args.status:
+        sys.exit(0 if daemon_status() else 1)
+
+    if args.stop:
+        sys.exit(0 if stop_daemon() else 1)
+
+    # Check if we're running as daemon subprocess
+    is_daemon_subprocess = os.environ.get('MESHTASTICD_DAEMON') == '1'
 
     # Check prerequisites
     check_root()
@@ -187,9 +287,13 @@ def main():
     check_gtk()
     check_meshtastic_cli()
 
-    # Daemonize if requested
+    # Daemonize if requested (spawns new process and exits)
     if args.daemon:
         daemonize()
+
+    # Save PID if running as daemon
+    if is_daemon_subprocess:
+        save_pid()
 
     # Suppress GTK accessibility bus warning if a11y service not available
     # This prevents: "Unable to acquire the address of the accessibility bus"

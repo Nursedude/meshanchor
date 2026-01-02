@@ -2,7 +2,27 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.2.5** | [Changelog](#version-history)
+**Version 3.2.6** | [Changelog](#version-history)
+
+## What's New in v3.2.6
+
+### System Monitor & Daemon Control
+- **System Monitor** - Live CPU, Memory, Disk, Temperature with progress bars
+- **htop Integration** - Open htop in terminal, Show Processes button
+- **Daemon Control** - `--status` and `--stop` commands for GTK app
+- **Better Service Detection** - Uses systemctl, pgrep, and TCP port checks
+- **No Fork Warning** - Daemon mode uses subprocess instead of fork()
+
+```bash
+# Start daemon
+sudo python3 src/main_gtk.py -d
+
+# Check status
+python3 src/main_gtk.py --status
+
+# Stop daemon
+sudo python3 src/main_gtk.py --stop
+```
 
 ## What's New in v3.2.5
 

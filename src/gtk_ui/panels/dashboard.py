@@ -149,18 +149,47 @@ class DashboardPanel(Gtk.Box):
 
     def _fetch_data(self):
         """Fetch all status data in background thread"""
-        # Service status
+        # Service status - check multiple methods
         try:
+            is_running = False
+            status_detail = "Stopped"
+
+            # Method 1: systemctl is-active
             result = subprocess.run(
                 ['systemctl', 'is-active', 'meshtasticd'],
                 capture_output=True, text=True
             )
-            service_status = result.stdout.strip()
-            is_running = service_status == 'active'
+            if result.stdout.strip() == 'active':
+                is_running = True
+                status_detail = "Running (systemd)"
+
+            # Method 2: Check if process is running (fallback)
+            if not is_running:
+                result = subprocess.run(
+                    ['pgrep', '-f', 'meshtasticd'],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    is_running = True
+                    status_detail = "Running (process)"
+
+            # Method 3: Check if TCP port 4403 is open (another fallback)
+            if not is_running:
+                import socket
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1.0)
+                    if sock.connect_ex(('localhost', 4403)) == 0:
+                        is_running = True
+                        status_detail = "Running (TCP 4403)"
+                    sock.close()
+                except Exception:
+                    pass
+
             GLib.idle_add(
                 self._update_card_value,
                 self.service_card,
-                "Running" if is_running else "Stopped",
+                status_detail if is_running else "Stopped",
                 "success" if is_running else "error"
             )
         except Exception as e:

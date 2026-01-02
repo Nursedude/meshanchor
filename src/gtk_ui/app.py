@@ -362,12 +362,38 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
     def _update_status_thread(self):
         """Thread for updating status"""
         try:
-            # Check service status
+            import socket
+
+            # Check service status - multiple methods
+            is_active = False
+
+            # Method 1: systemctl is-active
             result = subprocess.run(
                 ['systemctl', 'is-active', 'meshtasticd'],
                 capture_output=True, text=True
             )
-            is_active = result.stdout.strip() == 'active'
+            if result.stdout.strip() == 'active':
+                is_active = True
+
+            # Method 2: Check if process is running
+            if not is_active:
+                result = subprocess.run(
+                    ['pgrep', '-f', 'meshtasticd'],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    is_active = True
+
+            # Method 3: Check TCP port 4403
+            if not is_active:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1.0)
+                    if sock.connect_ex(('localhost', 4403)) == 0:
+                        is_active = True
+                    sock.close()
+                except Exception:
+                    pass
 
             # Get uptime if active
             uptime = "--"

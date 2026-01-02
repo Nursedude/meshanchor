@@ -48,6 +48,93 @@ class ToolsPanel(Gtk.Box):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         content.set_margin_top(15)
 
+        # System Monitor Section
+        sys_frame = Gtk.Frame()
+        sys_frame.set_label("System Monitor")
+        sys_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        sys_box.set_margin_start(15)
+        sys_box.set_margin_end(15)
+        sys_box.set_margin_top(10)
+        sys_box.set_margin_bottom(10)
+
+        # System stats grid
+        sys_grid = Gtk.Grid()
+        sys_grid.set_row_spacing(5)
+        sys_grid.set_column_spacing(15)
+
+        # CPU usage
+        cpu_lbl = Gtk.Label(label="CPU:")
+        cpu_lbl.set_xalign(1)
+        sys_grid.attach(cpu_lbl, 0, 0, 1, 1)
+        self.cpu_label = Gtk.Label(label="--")
+        self.cpu_label.set_xalign(0)
+        sys_grid.attach(self.cpu_label, 1, 0, 1, 1)
+        self.cpu_bar = Gtk.ProgressBar()
+        self.cpu_bar.set_hexpand(True)
+        sys_grid.attach(self.cpu_bar, 2, 0, 1, 1)
+
+        # Memory usage
+        mem_lbl = Gtk.Label(label="Memory:")
+        mem_lbl.set_xalign(1)
+        sys_grid.attach(mem_lbl, 0, 1, 1, 1)
+        self.mem_label = Gtk.Label(label="--")
+        self.mem_label.set_xalign(0)
+        sys_grid.attach(self.mem_label, 1, 1, 1, 1)
+        self.mem_bar = Gtk.ProgressBar()
+        self.mem_bar.set_hexpand(True)
+        sys_grid.attach(self.mem_bar, 2, 1, 1, 1)
+
+        # Disk usage
+        disk_lbl = Gtk.Label(label="Disk:")
+        disk_lbl.set_xalign(1)
+        sys_grid.attach(disk_lbl, 0, 2, 1, 1)
+        self.disk_label = Gtk.Label(label="--")
+        self.disk_label.set_xalign(0)
+        sys_grid.attach(self.disk_label, 1, 2, 1, 1)
+        self.disk_bar = Gtk.ProgressBar()
+        self.disk_bar.set_hexpand(True)
+        sys_grid.attach(self.disk_bar, 2, 2, 1, 1)
+
+        # Temperature
+        temp_lbl = Gtk.Label(label="CPU Temp:")
+        temp_lbl.set_xalign(1)
+        sys_grid.attach(temp_lbl, 0, 3, 1, 1)
+        self.temp_label = Gtk.Label(label="--")
+        self.temp_label.set_xalign(0)
+        sys_grid.attach(self.temp_label, 1, 3, 1, 1)
+        self.temp_bar = Gtk.ProgressBar()
+        self.temp_bar.set_hexpand(True)
+        sys_grid.attach(self.temp_bar, 2, 3, 1, 1)
+
+        # Uptime
+        uptime_lbl = Gtk.Label(label="Uptime:")
+        uptime_lbl.set_xalign(1)
+        sys_grid.attach(uptime_lbl, 0, 4, 1, 1)
+        self.uptime_label = Gtk.Label(label="--")
+        self.uptime_label.set_xalign(0)
+        sys_grid.attach(self.uptime_label, 1, 4, 2, 1)
+
+        sys_box.append(sys_grid)
+
+        # System monitor buttons
+        sys_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        sys_buttons.set_margin_top(10)
+
+        htop_btn = Gtk.Button(label="Open htop")
+        htop_btn.connect("clicked", self._on_open_htop)
+        sys_buttons.append(htop_btn)
+
+        top_btn = Gtk.Button(label="Show Processes")
+        top_btn.connect("clicked", self._on_show_processes)
+        sys_buttons.append(top_btn)
+
+        sys_box.append(sys_buttons)
+        sys_frame.set_child(sys_box)
+        content.append(sys_frame)
+
+        # Start system monitor update timer
+        GLib.timeout_add_seconds(2, self._update_system_stats)
+
         # Network Tools Section
         net_frame = Gtk.Frame()
         net_frame.set_label("Network Tools")
@@ -209,6 +296,151 @@ class ToolsPanel(Gtk.Box):
         """Add message to log"""
         end_iter = self.output_buffer.get_end_iter()
         self.output_buffer.insert(end_iter, message + "\n")
+
+    def _update_system_stats(self):
+        """Update system statistics"""
+        threading.Thread(target=self._fetch_system_stats, daemon=True).start()
+        return True  # Continue timer
+
+    def _fetch_system_stats(self):
+        """Fetch system stats in background"""
+        import os
+
+        # CPU usage
+        try:
+            with open('/proc/stat', 'r') as f:
+                line = f.readline()
+            cpu_vals = [int(x) for x in line.split()[1:8]]
+            idle = cpu_vals[3]
+            total = sum(cpu_vals)
+            if hasattr(self, '_last_cpu'):
+                diff_idle = idle - self._last_cpu[0]
+                diff_total = total - self._last_cpu[1]
+                cpu_pct = 100 * (1 - diff_idle / diff_total) if diff_total > 0 else 0
+            else:
+                cpu_pct = 0
+            self._last_cpu = (idle, total)
+            GLib.idle_add(self.cpu_label.set_label, f"{cpu_pct:.1f}%")
+            GLib.idle_add(self.cpu_bar.set_fraction, cpu_pct / 100)
+        except Exception:
+            pass
+
+        # Memory usage
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                lines = f.readlines()
+            mem_info = {}
+            for line in lines:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = int(parts[1].split()[0])  # kB
+                    mem_info[key] = val
+            total = mem_info.get('MemTotal', 1)
+            avail = mem_info.get('MemAvailable', mem_info.get('MemFree', 0))
+            used = total - avail
+            mem_pct = 100 * used / total if total > 0 else 0
+            used_mb = used / 1024
+            total_mb = total / 1024
+            GLib.idle_add(self.mem_label.set_label, f"{used_mb:.0f}/{total_mb:.0f} MB")
+            GLib.idle_add(self.mem_bar.set_fraction, mem_pct / 100)
+        except Exception:
+            pass
+
+        # Disk usage
+        try:
+            stat = os.statvfs('/')
+            total = stat.f_blocks * stat.f_frsize
+            free = stat.f_bfree * stat.f_frsize
+            used = total - free
+            disk_pct = 100 * used / total if total > 0 else 0
+            used_gb = used / (1024**3)
+            total_gb = total / (1024**3)
+            GLib.idle_add(self.disk_label.set_label, f"{used_gb:.1f}/{total_gb:.1f} GB")
+            GLib.idle_add(self.disk_bar.set_fraction, disk_pct / 100)
+        except Exception:
+            pass
+
+        # Temperature
+        try:
+            temp = None
+            # Try thermal zone first
+            temp_file = Path('/sys/class/thermal/thermal_zone0/temp')
+            if temp_file.exists():
+                temp = int(temp_file.read_text().strip()) / 1000
+            # Try vcgencmd (Raspberry Pi)
+            if temp is None:
+                result = subprocess.run(['vcgencmd', 'measure_temp'],
+                                       capture_output=True, text=True)
+                if result.returncode == 0:
+                    # Format: temp=45.0'C
+                    match = result.stdout.strip()
+                    if 'temp=' in match:
+                        temp = float(match.split('=')[1].replace("'C", ""))
+            if temp is not None:
+                temp_pct = min(temp / 85, 1.0)  # 85°C as max
+                GLib.idle_add(self.temp_label.set_label, f"{temp:.1f}°C")
+                GLib.idle_add(self.temp_bar.set_fraction, temp_pct)
+        except Exception:
+            pass
+
+        # Uptime
+        try:
+            with open('/proc/uptime', 'r') as f:
+                uptime_sec = float(f.read().split()[0])
+            days = int(uptime_sec // 86400)
+            hours = int((uptime_sec % 86400) // 3600)
+            mins = int((uptime_sec % 3600) // 60)
+            if days > 0:
+                uptime_str = f"{days}d {hours}h {mins}m"
+            elif hours > 0:
+                uptime_str = f"{hours}h {mins}m"
+            else:
+                uptime_str = f"{mins}m"
+            GLib.idle_add(self.uptime_label.set_label, uptime_str)
+        except Exception:
+            pass
+
+    def _on_open_htop(self, button):
+        """Open htop in a terminal"""
+        threading.Thread(target=self._run_htop, daemon=True).start()
+
+    def _run_htop(self):
+        """Run htop in terminal"""
+        terminals = [
+            ['x-terminal-emulator', '-e', 'htop'],
+            ['gnome-terminal', '--', 'htop'],
+            ['xfce4-terminal', '-e', 'htop'],
+            ['lxterminal', '-e', 'htop'],
+            ['xterm', '-e', 'htop'],
+        ]
+        for term in terminals:
+            try:
+                subprocess.Popen(term, start_new_session=True)
+                GLib.idle_add(self._log, "htop opened in terminal")
+                return
+            except FileNotFoundError:
+                continue
+        GLib.idle_add(self._log, "No terminal emulator found. Install htop and run manually.")
+
+    def _on_show_processes(self, button):
+        """Show top processes"""
+        GLib.idle_add(self._log, "\n=== Top Processes (by CPU) ===")
+        threading.Thread(target=self._fetch_processes, daemon=True).start()
+
+    def _fetch_processes(self):
+        """Fetch process list"""
+        try:
+            result = subprocess.run(
+                ['ps', 'aux', '--sort=-%cpu'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')[:11]  # Header + 10 processes
+                for line in lines:
+                    GLib.idle_add(self._log, line[:100])
+        except Exception as e:
+            GLib.idle_add(self._log, f"Error: {e}")
 
     def _refresh_status(self):
         """Refresh tool status"""

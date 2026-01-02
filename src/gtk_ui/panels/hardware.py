@@ -264,15 +264,39 @@ class HardwarePanel(Gtk.Box):
 
         def detect():
             import os
+            import re
+            import socket
             detected = []
 
             # First, check if meshtasticd is running and get its hardware info
             try:
+                is_running = False
+
+                # Check systemctl
                 result = subprocess.run(
                     ['systemctl', 'is-active', 'meshtasticd'],
                     capture_output=True, text=True
                 )
-                is_running = result.stdout.strip() == 'active'
+                if result.stdout.strip() == 'active':
+                    is_running = True
+
+                # Check process
+                if not is_running:
+                    result = subprocess.run(['pgrep', '-f', 'meshtasticd'],
+                                           capture_output=True, text=True)
+                    if result.returncode == 0:
+                        is_running = True
+
+                # Check TCP port
+                if not is_running:
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(1.0)
+                        if sock.connect_ex(('localhost', 4403)) == 0:
+                            is_running = True
+                        sock.close()
+                    except Exception:
+                        pass
 
                 if is_running:
                     # Try to get hardware info from meshtastic CLI
@@ -281,9 +305,15 @@ class HardwarePanel(Gtk.Box):
                         '/home/pi/.local/bin/meshtastic',
                         os.path.expanduser('~/.local/bin/meshtastic'),
                     ]
+
+                    # Check SUDO_USER path
+                    sudo_user = os.environ.get('SUDO_USER')
+                    if sudo_user:
+                        cli_paths.insert(0, f'/home/{sudo_user}/.local/bin/meshtastic')
+
                     cli_path = None
                     for path in cli_paths:
-                        if os.path.exists(path):
+                        if os.path.exists(path) and os.access(path, os.X_OK):
                             cli_path = path
                             break
                     if not cli_path:
@@ -291,26 +321,38 @@ class HardwarePanel(Gtk.Box):
                         if result.returncode == 0:
                             cli_path = result.stdout.strip()
 
+                    hw_model = "Connected"
+                    firmware = ""
                     if cli_path:
-                        result = subprocess.run(
-                            [cli_path, '--host', 'localhost', '--info'],
-                            capture_output=True, text=True, timeout=15
-                        )
-                        if result.returncode == 0:
-                            # Parse hardware info from output
-                            output = result.stdout
-                            hw_model = "Unknown"
-                            for line in output.split('\n'):
-                                if 'hwModel' in line or 'Hardware' in line:
-                                    hw_model = line.split(':')[-1].strip() if ':' in line else line.strip()
-                                    break
-                            detected.append({
-                                "type": "Active",
-                                "device": "meshtasticd",
-                                "description": f"Running - {hw_model}"
-                            })
-            except subprocess.TimeoutExpired:
-                pass
+                        try:
+                            result = subprocess.run(
+                                [cli_path, '--host', 'localhost', '--info'],
+                                capture_output=True, text=True, timeout=15
+                            )
+                            if result.returncode == 0:
+                                output = result.stdout
+                                # Parse hardware model from JSON
+                                hw_match = re.search(r'"hwModel":\s*"([^"]+)"', output)
+                                if hw_match:
+                                    hw_model = hw_match.group(1)
+                                # Parse firmware
+                                fw_match = re.search(r'"firmwareVersion":\s*"([^"]+)"', output)
+                                if fw_match:
+                                    firmware = f" (v{fw_match.group(1)})"
+                        except Exception:
+                            pass
+
+                    detected.append({
+                        "type": "Active",
+                        "device": "meshtasticd",
+                        "description": f"Running - {hw_model}{firmware}"
+                    })
+                else:
+                    detected.append({
+                        "type": "Info",
+                        "device": "meshtasticd",
+                        "description": "Service not running"
+                    })
             except Exception:
                 pass
 

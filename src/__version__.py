@@ -1,11 +1,25 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.2.5"
-__version_info__ = (3, 2, 5)
+__version__ = "3.2.6"
+__version_info__ = (3, 2, 6)
 __release_date__ = "2026-01-02"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.2.6",
+        "date": "2026-01-02",
+        "changes": [
+            "NEW: System Monitor in Tools - CPU, Memory, Disk, Temperature with progress bars",
+            "NEW: Open htop button and Show Processes in System Tools",
+            "NEW: Daemon control - --status and --stop commands for GTK app",
+            "FIX: Daemon mode no longer causes fork() deprecation warning",
+            "FIX: Service detection uses multiple methods (systemctl, pgrep, TCP port)",
+            "FIX: Hardware detection improved with better meshtasticd status check",
+            "FIX: Dashboard shows 'Running (systemd/process/TCP)' based on detection method",
+            "IMPROVED: Daemon mode uses subprocess instead of fork() for safety"
+        ]
+    },
     {
         "version": "3.2.5",
         "date": "2026-01-02",
