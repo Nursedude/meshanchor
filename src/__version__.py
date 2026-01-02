@@ -17,7 +17,9 @@ VERSION_HISTORY = [
             "FIX: Service detection uses multiple methods (systemctl, pgrep, TCP port)",
             "FIX: Hardware detection improved with better meshtasticd status check",
             "FIX: Dashboard shows 'Running (systemd/process/TCP)' based on detection method",
-            "IMPROVED: Daemon mode uses subprocess instead of fork() for safety"
+            "FIX: PID file cleanup handles permission errors gracefully",
+            "IMPROVED: Daemon mode uses subprocess instead of fork() for safety",
+            "IMPROVED: --status shows helpful info for finding the GTK window"
         ]
     },
     {

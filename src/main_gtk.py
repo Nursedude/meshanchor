@@ -170,9 +170,16 @@ def get_daemon_pid():
             # Check if process is running
             os.kill(pid, 0)
             return pid
-        except (ValueError, ProcessLookupError, PermissionError):
+        except (ValueError, ProcessLookupError):
             # Process not running, clean up stale PID file
-            PID_FILE.unlink(missing_ok=True)
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                # Can't delete root-owned file, but that's okay
+                pass
+        except PermissionError:
+            # Can't signal process (different user), but it exists
+            return pid
     return None
 
 
@@ -181,9 +188,22 @@ def daemon_status():
     pid = get_daemon_pid()
     if pid:
         print(f"Meshtasticd Manager is running (PID: {pid})")
+        print()
+        print("The GTK window should be visible on your desktop.")
+        print("If you can't find it:")
+        print("  - Check other workspaces/virtual desktops")
+        print("  - Look for minimized windows")
+        print("  - Check log: cat /tmp/meshtasticd-manager.log")
+        print()
+        print("To restart the app:")
+        print(f"  sudo python3 {os.path.abspath(__file__)} --stop")
+        print(f"  sudo python3 {os.path.abspath(__file__)} --daemon")
         return True
     else:
         print("Meshtasticd Manager is not running")
+        print()
+        print("To start:")
+        print(f"  sudo python3 {os.path.abspath(__file__)} --daemon")
         return False
 
 
@@ -204,15 +224,22 @@ def stop_daemon():
                 print("Process killed with SIGKILL")
             except ProcessLookupError:
                 pass
-            PID_FILE.unlink(missing_ok=True)
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                print("Note: Could not remove PID file (run with sudo to clean up)")
             print("Daemon stopped")
             return True
         except ProcessLookupError:
             print("Process already stopped")
-            PID_FILE.unlink(missing_ok=True)
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                print("Note: Could not remove stale PID file (run with sudo to clean up)")
             return True
         except PermissionError:
-            print("Permission denied. Try with sudo.")
+            print("Permission denied. Try with sudo:")
+            print(f"  sudo python3 {os.path.abspath(__file__)} --stop")
             return False
     else:
         print("Daemon is not running")
