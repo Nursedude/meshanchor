@@ -26,7 +26,9 @@ class MeshtasticdApp(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id='org.meshtastic.installer',
-            flags=Gio.ApplicationFlags.FLAGS_NONE
+            # NON_UNIQUE allows running without D-Bus registration
+            # This fixes "Failed to register: Timeout was reached" when running as root
+            flags=Gio.ApplicationFlags.NON_UNIQUE
         )
         self.window = None
         self.connect('activate', self.on_activate)
