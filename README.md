@@ -10,6 +10,8 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 Access meshtasticd manager from any browser on your network!
 
 - **Dashboard** - Service status, CPU, Memory, Disk, Temperature with live updates
+- **Nodes Tab** - View all connected mesh nodes with ID, name, and hardware info
+- **Messages Tab** - Send text messages to the mesh (broadcast or to specific node)
 - **Service Control** - Start/Stop/Restart meshtasticd from browser
 - **Config Management** - Activate/deactivate YAML configurations
 - **Hardware Detection** - View SPI, I2C, and connected devices
@@ -18,6 +20,8 @@ Access meshtasticd manager from any browser on your network!
 - **Optional Authentication** - Password protection with `--password` flag
 - **Custom Port** - Use `--port` to change from default 8880
 - **Environment Variables** - Configure via `MESHTASTICD_WEB_PORT`, `MESHTASTICD_WEB_PASSWORD`
+- **Clean Shutdown** - Proper signal handling ensures no orphan processes
+- **Instance Management** - `--stop` and `--status` options for managing running instance
 
 ```bash
 # Start web UI (default port 8880)
@@ -30,6 +34,12 @@ sudo python3 src/main_web.py -p 8080  # short form
 # With password protection
 sudo python3 src/main_web.py --password mysecretpassword
 
+# Check if web UI is running
+sudo python3 src/main_web.py --status
+
+# Stop running web UI
+sudo python3 src/main_web.py --stop
+
 # Using environment variables (add to .bashrc for persistence)
 export MESHTASTICD_WEB_PORT=9000
 export MESHTASTICD_WEB_PASSWORD=mysecret
@@ -39,6 +49,10 @@ sudo -E python3 src/main_web.py
 # http://localhost:8880/
 # http://your-pi-ip:8880/
 ```
+
+### GTK4 Improvements
+- **FIX: D-Bus Registration Timeout** - GTK app now works reliably when running as root
+- Uses `NON_UNIQUE` flag to avoid D-Bus session bus conflicts
 
 **Security Note:** For remote access over the internet, use a VPN (WireGuard, Tailscale)
 or SSH tunnel rather than exposing the port directly.
@@ -645,6 +659,21 @@ Meshtasticd_interactive_UI/
 ```
 
 ## Version History
+
+### v3.2.7 (2026-01-02)
+- **Web UI Nodes Tab** - View all connected mesh nodes
+- **Web UI Messages Tab** - Send text messages to mesh (broadcast or direct)
+- **Web UI Instance Management** - `--stop` and `--status` options
+- **Web UI Clean Shutdown** - Signal handlers ensure proper process cleanup
+- **FIX**: GTK D-Bus "Failed to register: Timeout" error when running as root
+- **FIX**: Web UI subprocess cleanup prevents orphan processes
+- **FIX**: Tab persistence in Web UI (localStorage)
+
+### v3.2.6 (2026-01-02)
+- **System Monitor** - Live CPU, Memory, Disk, Temperature with progress bars
+- **htop Integration** - Open htop in terminal, Show Processes button
+- **Daemon Control** - `--status` and `--stop` commands for GTK app
+- **Better Service Detection** - Uses systemctl, pgrep, and TCP port checks
 
 ### v3.2.5 (2026-01-02)
 - **Keyboard Shortcuts** - Escape exits fullscreen, F11 toggles fullscreen, Ctrl+Q quits

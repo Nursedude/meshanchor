@@ -29,6 +29,14 @@ Run the installer:
 sudo meshtasticd-installer
 ```
 
+### Web UI Management (New in v3.2.7)
+```bash
+# Start browser-based management
+sudo python3 src/main_web.py
+
+# Access from any device: http://<your-pi-ip>:8880
+```
+
 Or use CLI options:
 ```bash
 # Install stable version
