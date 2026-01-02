@@ -31,11 +31,70 @@ Examples:
 
 import argparse
 import json
+import os
 import sys
 import time
 import signal
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
+
+# Config file location
+CONFIG_DIR = Path.home() / '.config' / 'meshtastic-monitor'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+
+def load_config() -> dict:
+    """Load saved configuration"""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_config(config: dict):
+    """Save configuration"""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save config: {e}")
+
+def setup_interactive() -> dict:
+    """Interactive setup for host configuration"""
+    print("\n=== Meshtastic Monitor Setup ===\n")
+
+    config = load_config()
+    current_host = config.get('host', 'localhost')
+    current_port = config.get('port', 4403)
+
+    print(f"Current host: {current_host}")
+    print(f"Current port: {current_port}\n")
+
+    # Get new host
+    host_input = input(f"Enter meshtasticd host [{current_host}]: ").strip()
+    host = host_input if host_input else current_host
+
+    # Get new port
+    port_input = input(f"Enter port [{current_port}]: ").strip()
+    try:
+        port = int(port_input) if port_input else current_port
+    except ValueError:
+        print("Invalid port, using default")
+        port = current_port
+
+    # Save config
+    config['host'] = host
+    config['port'] = port
+    save_config(config)
+
+    print(f"\nConfiguration saved to {CONFIG_FILE}")
+    print(f"  Host: {host}")
+    print(f"  Port: {port}\n")
+
+    return config
 
 # Handle graceful shutdown
 _running = True
@@ -188,29 +247,57 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 -m src.monitor              # Quick node list
+  python3 -m src.monitor              # Quick node list (uses saved config)
+  python3 -m src.monitor --setup      # Configure host interactively
   python3 -m src.monitor --watch      # Continuous monitoring
   python3 -m src.monitor --json       # JSON output
-  python3 -m src.monitor --host pi4   # Connect to remote node
+  python3 -m src.monitor --host pi4   # Connect to specific host
         """
     )
 
-    parser.add_argument('--host', default='localhost',
-                        help='meshtasticd hostname (default: localhost)')
-    parser.add_argument('--port', type=int, default=4403,
-                        help='meshtasticd port (default: 4403)')
+    parser.add_argument('--host',
+                        help='meshtasticd hostname (default: from config or localhost)')
+    parser.add_argument('--port', type=int,
+                        help='meshtasticd port (default: from config or 4403)')
     parser.add_argument('--json', action='store_true',
                         help='Output as JSON')
     parser.add_argument('--watch', '-w', action='store_true',
                         help='Continuous monitoring mode')
     parser.add_argument('--interval', '-i', type=int, default=5,
                         help='Update interval in seconds (default: 5)')
+    parser.add_argument('--setup', '-s', action='store_true',
+                        help='Interactive setup to configure host')
+    parser.add_argument('--show-config', action='store_true',
+                        help='Show current configuration')
 
     args = parser.parse_args()
 
+    # Handle --setup
+    if args.setup:
+        config = setup_interactive()
+        response = input("Connect now? [Y/n]: ").strip().lower()
+        if response == 'n':
+            return
+        host = config['host']
+        port = config['port']
+    elif args.show_config:
+        config = load_config()
+        if config:
+            print(f"Config file: {CONFIG_FILE}")
+            print(f"  Host: {config.get('host', 'localhost')}")
+            print(f"  Port: {config.get('port', 4403)}")
+        else:
+            print(f"No config found. Run with --setup to configure.")
+        return
+    else:
+        # Load from config or use defaults
+        config = load_config()
+        host = args.host or config.get('host', 'localhost')
+        port = args.port or config.get('port', 4403)
+
     run_monitor(
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         json_output=args.json,
         watch=args.watch,
         interval=args.interval
