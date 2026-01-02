@@ -778,25 +778,25 @@ class ToolsPane(Container):
             self._refresh_status()
             return
         elif button_id == "tool-ping":
-            await self._run_ping(output)
+            self._run_ping(output)
         elif button_id == "tool-port":
-            await self._test_port(output)
+            self._test_port(output)
         elif button_id == "tool-ifaces":
-            await self._show_interfaces(output)
+            self._show_interfaces(output)
         elif button_id == "tool-scan":
-            await self._scan_devices(output)
+            self._scan_devices(output)
         elif button_id == "tool-presets":
             self._show_presets(output)
         elif button_id == "tool-radio":
-            await self._detect_radio(output)
+            self._detect_radio(output)
         elif button_id == "tool-spi":
-            await self._check_spi(output)
+            self._check_spi(output)
         elif button_id == "tool-mudp-status":
-            await self._mudp_status(output)
+            self._mudp_status(output)
         elif button_id == "tool-mudp-install":
-            await self._install_mudp(output)
+            self._install_mudp(output)
         elif button_id == "tool-multicast":
-            await self._test_multicast(output)
+            self._test_multicast(output)
 
     @work
     async def _run_ping(self, output: Log):
