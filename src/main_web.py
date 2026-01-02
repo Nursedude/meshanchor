@@ -633,7 +633,6 @@ MAIN_TEMPLATE = '''
 <head>
     <title>Meshtasticd Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="30">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -963,15 +962,27 @@ MAIN_TEMPLATE = '''
     </div>
 
     <script>
-        // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        // Tab switching with persistence
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+            if (tab) {
                 tab.classList.add('active');
-                document.getElementById(tab.dataset.tab).classList.add('active');
-            });
+                document.getElementById(tabName).classList.add('active');
+                localStorage.setItem('activeTab', tabName);
+            }
+        }
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
         });
+
+        // Restore last active tab
+        const savedTab = localStorage.getItem('activeTab');
+        if (savedTab && document.getElementById(savedTab)) {
+            switchTab(savedTab);
+        }
 
         // API calls
         async function fetchStatus() {
