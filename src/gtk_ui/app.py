@@ -6,7 +6,8 @@ Main application entry point and window management
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gio
+gi.require_version('Gdk', '4.0')
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import sys
 import os
 import subprocess
@@ -57,8 +58,38 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         # Create the main layout
         self._build_ui()
 
+        # Set up keyboard shortcuts
+        self._setup_keyboard_shortcuts()
+
         # Check if we're resuming after reboot
         self._check_resume_state()
+
+    def _setup_keyboard_shortcuts(self):
+        """Set up keyboard shortcuts for the window"""
+        # Create key controller
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(key_controller)
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        """Handle key press events"""
+        # Escape key - unfullscreen if fullscreened
+        if keyval == Gdk.KEY_Escape:
+            if self.is_fullscreen():
+                self.unfullscreen()
+                return True
+        # F11 - toggle fullscreen
+        elif keyval == Gdk.KEY_F11:
+            if self.is_fullscreen():
+                self.unfullscreen()
+            else:
+                self.fullscreen()
+            return True
+        # Ctrl+Q - quit
+        elif keyval == Gdk.KEY_q and (state & Gdk.ModifierType.CONTROL_MASK):
+            self.get_application().quit()
+            return True
+        return False
 
     def _build_ui(self):
         """Build the main UI layout"""
@@ -363,27 +394,24 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
     def _get_node_count(self):
         """Get the number of nodes from meshtastic TCP interface or CLI"""
         import time as time_module
+        import socket
 
         # Check cache first
         now = time_module.time()
         if now - self._node_count_timestamp < self._node_count_cache_ttl:
             return self._node_count_cache
 
-        # First, try using the NodeMonitor (faster and more reliable)
+        # Quick pre-check: is meshtasticd TCP port reachable?
         try:
-            from monitoring import NodeMonitor
-            monitor = NodeMonitor(host="localhost", port=4403)
-            if monitor.connect(timeout=3):
-                count = monitor.get_node_count()
-                monitor.disconnect()
-                if count > 0:
-                    self._node_count_cache = str(count)
-                    self._node_count_timestamp = now
-                    return self._node_count_cache
-        except Exception:
-            pass  # Fall back to CLI method
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)
+            sock.connect(("localhost", 4403))
+            sock.close()
+        except (socket.timeout, socket.error, OSError):
+            # Port not reachable, skip node count
+            return self._node_count_cache
 
-        # Fallback: use meshtastic CLI
+        # Use CLI method (more reliable, avoids meshtastic library noise)
         try:
             import re
             # Find meshtastic CLI
@@ -409,7 +437,7 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             if not cli_path:
                 return self._node_count_cache
 
-            # Run meshtastic --nodes to get node info
+            # Run meshtastic --nodes to get node info (suppress stderr)
             result = subprocess.run(
                 [cli_path, '--host', 'localhost', '--nodes'],
                 capture_output=True, text=True,

@@ -141,14 +141,29 @@ class RadioConfigPanel(Gtk.Box):
 
     def _load_radio_info(self):
         """Load radio info from device using --info command"""
+        import socket
+
+        # Quick pre-check: is meshtasticd reachable?
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(("localhost", 4403))
+            sock.close()
+        except (socket.timeout, socket.error, OSError):
+            self.status_label.set_label("Cannot connect to meshtasticd (port 4403)")
+            return
+
         self.status_label.set_label("Loading radio info...")
 
         def on_result(success, stdout, stderr):
-            if success:
+            if success and stdout.strip():
                 self._parse_radio_info(stdout)
                 self.status_label.set_label("Radio info loaded")
+            elif "not found" in stderr.lower() or not self._find_cli():
+                self.status_label.set_label("Meshtastic CLI not found - install with: pipx install meshtastic")
             else:
-                self.status_label.set_label(f"Failed to load radio info: {stderr}")
+                error_msg = stderr.strip() if stderr else "No response from device"
+                self.status_label.set_label(f"Failed: {error_msg[:50]}")
 
         self._run_cli(['--info'], on_result)
 
@@ -630,8 +645,13 @@ class RadioConfigPanel(Gtk.Box):
             os.path.expanduser('~/.local/bin/meshtastic'),
         ]
 
+        # Also check for the original user's home if running with sudo
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            cli_paths.insert(0, f'/home/{sudo_user}/.local/bin/meshtastic')
+
         for path in cli_paths:
-            if os.path.exists(path):
+            if os.path.exists(path) and os.access(path, os.X_OK):
                 self._cli_path = path
                 return path
 
@@ -760,14 +780,29 @@ class RadioConfigPanel(Gtk.Box):
 
     def _load_current_config(self):
         """Load current configuration from device"""
+        import socket
+
+        # Quick pre-check: is meshtasticd reachable?
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            sock.connect(("localhost", 4403))
+            sock.close()
+        except (socket.timeout, socket.error, OSError):
+            self.status_label.set_label("Cannot connect to meshtasticd (port 4403)")
+            return
+
         self.status_label.set_label("Loading current configuration...")
 
         def on_result(success, stdout, stderr):
-            if success:
+            if success and stdout.strip():
                 self.status_label.set_label("Configuration loaded")
                 self._parse_and_populate_config(stdout)
+            elif "not found" in stderr.lower() or not self._find_cli():
+                self.status_label.set_label("Meshtastic CLI not found")
             else:
-                self.status_label.set_label(f"Failed to load config: {stderr}")
+                error_msg = stderr.strip() if stderr else "No response"
+                self.status_label.set_label(f"Failed: {error_msg[:50]}")
 
         self._run_cli(['--get', 'lora', '--get', 'device', '--get', 'position', '--get', 'mqtt', '--get', 'telemetry'], on_result)
 
@@ -775,8 +810,14 @@ class RadioConfigPanel(Gtk.Box):
         """Auto-load configuration when panel is first shown"""
         if not self._config_loaded:
             self._config_loaded = True
-            self._load_radio_info()  # Load radio info first
-            self._load_current_config()  # Then load config settings
+            # Use GLib.idle_add to avoid race conditions
+            GLib.idle_add(self._load_radio_info)  # Load radio info first
+            GLib.timeout_add(1000, self._delayed_load_config)  # Then load config after 1s
+        return False  # Don't repeat
+
+    def _delayed_load_config(self):
+        """Load config after radio info has had time to load"""
+        self._load_current_config()
         return False  # Don't repeat
 
     def _parse_and_populate_config(self, output):
