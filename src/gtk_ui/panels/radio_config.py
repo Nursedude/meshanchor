@@ -175,16 +175,33 @@ class RadioConfigPanel(Gtk.Box):
             except (json.JSONDecodeError, KeyError):
                 pass
 
-        # Try to parse "Metadata:" block
+        # Try to extract specific values from JSON in output
+        # Look for "firmwareVersion": "x.x.x" pattern
+        fw_match = re.search(r'"firmwareVersion":\s*"([^"]+)"', output)
+        if fw_match:
+            self.radio_firmware.set_label(fw_match.group(1))
+
+        # Look for "hwModel": "MODEL" pattern
+        hw_match = re.search(r'"hwModel":\s*"([^"]+)"', output)
+        if hw_match:
+            self.radio_hardware.set_label(hw_match.group(1))
+
+        # Look for "role": "ROLE" pattern
+        role_match = re.search(r'"role":\s*"([^"]+)"', output)
+        if role_match:
+            # Update the role dropdown if possible
+            pass  # Role is handled elsewhere
+
+        # Try to parse "Metadata:" block as fallback
         metadata_match = re.search(r"Metadata:\s*(\{[^}]+\})", output, re.DOTALL)
         if metadata_match:
             try:
                 meta_str = metadata_match.group(1).replace("'", '"').replace("True", "true").replace("False", "false")
                 meta = json.loads(meta_str)
-                if 'firmwareVersion' in meta:
-                    self.radio_firmware.set_label(meta['firmwareVersion'])
-                if 'hwModel' in meta:
-                    self.radio_hardware.set_label(meta['hwModel'])
+                if 'firmwareVersion' in meta and self.radio_firmware.get_label() == "--":
+                    self.radio_firmware.set_label(str(meta['firmwareVersion']))
+                if 'hwModel' in meta and self.radio_hardware.get_label() == "--":
+                    self.radio_hardware.set_label(str(meta['hwModel']))
             except (json.JSONDecodeError, KeyError):
                 pass
 
@@ -211,17 +228,21 @@ class RadioConfigPanel(Gtk.Box):
                 if match:
                     self.radio_preset.set_label(match.group(1).strip())
 
-            # Hardware model fallback
+            # Hardware model fallback - skip JSON lines
             elif ('hardware' in line_lower or 'hw_model' in line_lower) and self.radio_hardware.get_label() == "--":
-                match = re.search(r':\s*(.+)', line)
-                if match:
-                    self.radio_hardware.set_label(match.group(1).strip())
+                # Skip lines that look like JSON
+                if not line.strip().startswith('{') and '"' not in line:
+                    match = re.search(r':\s*(.+)', line)
+                    if match:
+                        self.radio_hardware.set_label(match.group(1).strip())
 
-            # Firmware version fallback
+            # Firmware version fallback - skip JSON lines
             elif 'firmware' in line_lower and 'version' in line_lower and self.radio_firmware.get_label() == "--":
-                match = re.search(r':\s*(.+)', line)
-                if match:
-                    self.radio_firmware.set_label(match.group(1).strip())
+                # Skip lines that look like JSON (these are handled by regex above)
+                if not line.strip().startswith('{') and '"firmwareVersion"' not in line:
+                    match = re.search(r':\s*(.+)', line)
+                    if match:
+                        self.radio_firmware.set_label(match.group(1).strip())
 
     def _add_device_section(self, parent):
         """Add device/mesh settings section"""
