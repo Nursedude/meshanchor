@@ -1,11 +1,26 @@
 """Version information for Meshtasticd Interactive Installer"""
 
-__version__ = "3.2.2"
-__version_info__ = (3, 2, 2)
+__version__ = "3.2.3"
+__version_info__ = (3, 2, 3)
 __release_date__ = "2026-01-02"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "3.2.3",
+        "date": "2026-01-02",
+        "changes": [
+            "NEW: Node Monitoring module - Sudo-free monitoring via TCP interface",
+            "NEW: Monitor entry point - python3 -m src.monitor (no root required)",
+            "NEW: Interactive setup - Configure host/port with --setup flag",
+            "NEW: Watch mode - Continuous monitoring with --watch",
+            "NEW: JSON output - Machine-readable output with --json",
+            "NEW: Config persistence - Saves host/port to ~/.config/meshtastic-monitor/",
+            "NEW: DEVELOPMENT.md - Critical patterns and methods for contributors",
+            "FIX: TUI @work decorator errors - Removed await from decorated methods",
+            "FIX: Monitor connection timeout - Fast failure with socket pre-check"
+        ]
+    },
     {
         "version": "3.2.2",
         "date": "2026-01-02",

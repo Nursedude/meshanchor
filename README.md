@@ -2,7 +2,45 @@
 
 An interactive installer, updater, and comprehensive configuration tool for meshtasticd on Raspberry Pi OS and compatible Linux systems.
 
-**Version 3.2.1** | [Changelog](#version-history)
+**Version 3.2.3** | [Changelog](#version-history)
+
+## What's New in v3.2.3
+
+### Node Monitoring Module (No Sudo Required!)
+- **Standalone Monitor** - `python3 -m src.monitor` works without root
+- **Interactive Setup** - Configure host/port with `--setup` flag
+- **Watch Mode** - Continuous monitoring with `--watch`
+- **JSON Output** - Machine-readable output with `--json` for scripting
+- **Config Persistence** - Saves settings to `~/.config/meshtastic-monitor/`
+- **Fast Failure** - Socket pre-check for quick connection error detection
+
+```bash
+# Quick start
+python3 -m src.monitor --setup      # Configure host interactively
+python3 -m src.monitor              # View nodes (uses saved config)
+python3 -m src.monitor --watch      # Continuous monitoring
+python3 -m src.monitor --json       # JSON output for scripts
+```
+
+### Developer Documentation
+- **DEVELOPMENT.md** - Critical patterns and methods for contributors
+  - Textual @work decorator rules
+  - GTK4 GLib.idle_add threading pattern
+  - Meshtastic CLI integration patterns
+  - Common pitfalls and solutions
+
+## What's New in v3.2.2
+
+### Radio Configuration Panel (GTK UI)
+- **Full Radio Settings** - Configure all radio parameters from the GUI
+- **Real-time Node Count** - Status bar shows connected nodes
+- **Position Settings** - Set fixed position with `--setlat/--setlon` format
+- **Auto-load Config** - Current settings load when panel opens
+
+### Bug Fixes
+- GTK status bar now shows nodes and uptime correctly
+- Dashboard config count checks both `.yaml` and `.yml` files
+- Hardware detection Enable buttons work with sudo
 
 ## What's New in v3.2.1
 
@@ -141,6 +179,7 @@ An interactive installer, updater, and comprehensive configuration tool for mesh
 | **GTK4 GUI** | `sudo python3 src/main_gtk.py` | Pi with display, VNC, Raspberry Pi Connect desktop |
 | **Textual TUI** | `sudo python3 src/main_tui.py` | SSH, headless, Raspberry Pi Connect terminal |
 | **Rich CLI** | `sudo meshtasticd-cli` | Fallback, minimal environments |
+| **Node Monitor** | `python3 -m src.monitor` | Lightweight monitoring (no sudo required) |
 
 ## Features
 
@@ -458,9 +497,13 @@ Meshtasticd_interactive_UI/
 │   ├── main.py                    # Rich CLI entry point
 │   ├── main_gtk.py                # GTK4 GUI entry point
 │   ├── main_tui.py                # Textual TUI entry point
-│   ├── launcher.py                # Interface wizard (NEW in v3.0.1)
+│   ├── monitor.py                 # Node monitor entry point (no sudo)
+│   ├── launcher.py                # Interface wizard
 │   ├── __version__.py             # Version control
 │   ├── dashboard.py               # Quick Status Dashboard
+│   ├── monitoring/                # Node monitoring module (NEW in v3.2.3)
+│   │   ├── __init__.py            # Module exports
+│   │   └── node_monitor.py        # NodeMonitor class (TCP interface)
 │   ├── gtk_ui/                    # GTK4 interface
 │   │   ├── app.py                 # Main GTK4 application
 │   │   └── panels/                # UI panels
@@ -469,6 +512,7 @@ Meshtasticd_interactive_UI/
 │   │       ├── config.py          # Config file manager
 │   │       ├── cli.py             # Meshtastic CLI
 │   │       ├── install.py         # Install/update
+│   │       ├── radio_config.py    # Radio configuration (NEW in v3.2.2)
 │   │       └── hardware.py        # Hardware detection
 │   ├── tui/                       # Textual TUI
 │   │   └── app.py                 # Textual application
@@ -515,6 +559,34 @@ Meshtasticd_interactive_UI/
 ```
 
 ## Version History
+
+### v3.2.3 (2026-01-02)
+- **Node Monitoring Module** - Sudo-free monitoring via TCP interface
+- **Monitor Entry Point** - `python3 -m src.monitor` works without root
+- **Interactive Setup** - Configure host/port with `--setup` flag
+- **Watch Mode** - Continuous monitoring with `--watch`
+- **JSON Output** - Machine-readable output with `--json`
+- **Config Persistence** - Saves to `~/.config/meshtastic-monitor/`
+- **DEVELOPMENT.md** - Critical patterns for contributors
+- **FIX**: TUI @work decorator errors
+- **FIX**: Fast connection failure detection
+
+### v3.2.2 (2026-01-02)
+- **Radio Configuration Panel** - Full radio settings in GTK UI
+- **Real-time Node Count** - Status bar shows connected nodes
+- **FIX**: GTK status bar nodes and uptime
+- **FIX**: Dashboard config detection (.yaml/.yml)
+
+### v3.2.1 (2026-01-01)
+- **Hardware Configuration** - SPI, I2C, Serial, GPIO setup
+- **Safe Reboot** - Checks for running processes before reboot
+- **Device Selection** - Configure known Meshtastic hardware
+
+### v3.2.0 (2026-01-01)
+- **Network Tools** - TCP/IP diagnostics, ping, port scanning
+- **RF Tools** - Link budget, FSPL, Fresnel zone calculators
+- **MUDP Tools** - Meshtastic UDP monitoring
+- **Tool Manager** - Install/update all tools
 
 ### v3.0.3 (2025-12-31)
 - **Edit Existing Channels** - Modify channels with pre-filled current values

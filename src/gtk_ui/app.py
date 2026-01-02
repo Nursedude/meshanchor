@@ -356,8 +356,21 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._update_status_ui, False, "--", "--")
 
     def _get_node_count(self):
-        """Get the number of nodes from meshtastic CLI"""
+        """Get the number of nodes from meshtastic TCP interface or CLI"""
+        # First, try using the NodeMonitor (faster and more reliable)
         try:
+            from monitoring import NodeMonitor
+            monitor = NodeMonitor(host="localhost", port=4403)
+            if monitor.connect(timeout=5):
+                count = monitor.get_node_count()
+                monitor.disconnect()
+                return str(count) if count > 0 else "--"
+        except Exception:
+            pass  # Fall back to CLI method
+
+        # Fallback: use meshtastic CLI
+        try:
+            import re
             # Find meshtastic CLI
             cli_paths = [
                 '/root/.local/bin/meshtastic',
@@ -381,29 +394,23 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
             if not cli_path:
                 return "--"
 
-            # Run meshtastic --info to get node info
+            # Run meshtastic --nodes to get node info
             result = subprocess.run(
                 [cli_path, '--host', 'localhost', '--nodes'],
                 capture_output=True, text=True,
-                timeout=10
+                timeout=15
             )
 
-            if result.returncode == 0:
-                # Count lines that look like node entries
-                lines = result.stdout.strip().split('\n')
+            if result.returncode == 0 and result.stdout:
                 # Look for node IDs in the output (format: !xxxxxxxx)
-                node_lines = [l for l in lines if '!' in l and 'Node' not in l and 'node' not in l]
-                if node_lines:
-                    return str(len(node_lines))
-                # Alternative: count lines with signal strength (dB)
-                node_lines = [l for l in lines if 'dB' in l or 'SNR' in l]
-                if node_lines:
-                    return str(len(node_lines))
-                # Fallback: look for numeric IDs
-                import re
                 node_ids = re.findall(r'!([0-9a-fA-F]{8})', result.stdout)
                 if node_ids:
                     return str(len(set(node_ids)))
+                # Alternative: count table rows (lines with │)
+                lines = result.stdout.strip().split('\n')
+                data_lines = [l for l in lines if '│' in l and 'User' not in l and '─' not in l]
+                if data_lines:
+                    return str(len(data_lines))
             return "--"
         except subprocess.TimeoutExpired:
             return "--"

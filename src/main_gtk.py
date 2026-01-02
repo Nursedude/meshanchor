@@ -150,6 +150,11 @@ def main():
     check_gtk()
     check_meshtastic_cli()
 
+    # Suppress GTK accessibility bus warning if a11y service not available
+    # This prevents: "Unable to acquire the address of the accessibility bus"
+    if 'GTK_A11Y' not in os.environ:
+        os.environ['GTK_A11Y'] = 'none'
+
     # Add src to path
     src_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, src_dir)
