@@ -21,9 +21,14 @@ import subprocess
 import threading
 import argparse
 import secrets
+import atexit
 from pathlib import Path
 from datetime import datetime
 from functools import wraps
+
+# Track running subprocesses for cleanup
+_running_processes = []
+_shutdown_flag = False
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -49,6 +54,91 @@ CONFIG = {
 
 # CPU stats for delta calculation
 _last_cpu = None
+
+# PID file for tracking
+WEB_PID_FILE = Path('/tmp/meshtasticd-web.pid')
+
+
+def cleanup_processes():
+    """Kill any lingering subprocesses"""
+    global _shutdown_flag
+    _shutdown_flag = True
+
+    for proc in _running_processes[:]:
+        try:
+            if proc.poll() is None:  # Still running
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except Exception:
+            pass
+    _running_processes.clear()
+
+    # Clean up PID file
+    try:
+        if WEB_PID_FILE.exists():
+            WEB_PID_FILE.unlink()
+    except Exception:
+        pass
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    print(f"\nReceived signal {signum}, shutting down...")
+    cleanup_processes()
+    sys.exit(0)
+
+
+def run_subprocess(cmd, **kwargs):
+    """Run a subprocess and track it for cleanup"""
+    global _shutdown_flag
+    if _shutdown_flag:
+        return None
+
+    # Set defaults for safety
+    kwargs.setdefault('capture_output', True)
+    kwargs.setdefault('text', True)
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE if kwargs.get('capture_output') else None,
+            stderr=subprocess.PIPE if kwargs.get('capture_output') else None,
+            text=kwargs.get('text', True)
+        )
+        _running_processes.append(proc)
+
+        timeout = kwargs.get('timeout', 30)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            result = subprocess.CompletedProcess(
+                cmd, proc.returncode, stdout or '', stderr or ''
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            raise
+        finally:
+            if proc in _running_processes:
+                _running_processes.remove(proc)
+
+        return result
+    except Exception as e:
+        # Clean up on error
+        try:
+            if proc in _running_processes:
+                _running_processes.remove(proc)
+        except:
+            pass
+        raise
+
+
+# Register cleanup handlers
+atexit.register(cleanup_processes)
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 
 # ============================================================================
@@ -283,10 +373,12 @@ def get_radio_info(use_cache=True):
 
     try:
         # Increased timeout to 30 seconds - CLI can be slow
-        result = subprocess.run(
+        result = run_subprocess(
             [cli, '--host', 'localhost', '--info'],
-            capture_output=True, text=True, timeout=30
+            timeout=30
         )
+        if result is None:  # Shutdown in progress
+            return {'error': 'Server shutting down'}
         if result.returncode == 0:
             output = result.stdout
             info = {}
@@ -434,10 +526,12 @@ def get_nodes():
         return {'error': 'Cannot connect to meshtasticd'}
 
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             [cli, '--host', 'localhost', '--nodes'],
-            capture_output=True, text=True, timeout=30
+            timeout=30
         )
+        if result is None:
+            return {'error': 'Server shutting down'}
         if result.returncode == 0:
             output = result.stdout
             nodes = []
@@ -517,8 +611,10 @@ def send_mesh_message(text, destination=None):
         if destination:
             cmd.extend(['--dest', destination])
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = run_subprocess(cmd, timeout=30)
 
+        if result is None:
+            return {'error': 'Server shutting down'}
         if result.returncode == 0:
             return {'success': True, 'message': 'Message sent'}
         return {'error': result.stderr or 'Failed to send message'}
@@ -1530,6 +1626,59 @@ def index():
 # Main Entry Point
 # ============================================================================
 
+def get_web_pid():
+    """Get running web UI PID if exists"""
+    if WEB_PID_FILE.exists():
+        try:
+            pid = int(WEB_PID_FILE.read_text().strip())
+            os.kill(pid, 0)  # Check if running
+            return pid
+        except (ValueError, ProcessLookupError):
+            try:
+                WEB_PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+        except PermissionError:
+            return pid  # Can't signal, but exists
+    return None
+
+
+def stop_web_ui():
+    """Stop running web UI"""
+    pid = get_web_pid()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print(f"Sent SIGTERM to Web UI (PID: {pid})")
+            import time
+            time.sleep(1)
+            try:
+                os.kill(pid, 0)
+                os.kill(pid, signal.SIGKILL)
+                print("Process killed with SIGKILL")
+            except ProcessLookupError:
+                pass
+            try:
+                WEB_PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+            print("Web UI stopped")
+            return True
+        except ProcessLookupError:
+            print("Process already stopped")
+            try:
+                WEB_PID_FILE.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+            return True
+        except PermissionError:
+            print("Permission denied. Try with sudo")
+            return False
+    else:
+        print("Web UI is not running")
+        return True
+
+
 def main():
     # Get defaults from environment variables
     default_port = int(os.environ.get('MESHTASTICD_WEB_PORT', 8880))
@@ -1542,6 +1691,7 @@ Examples:
   sudo python3 src/main_web.py                    # Default port 8880
   sudo python3 src/main_web.py --port 9000        # Custom port
   sudo python3 src/main_web.py -p 8080            # Short form
+  sudo python3 src/main_web.py --stop             # Stop running instance
 
 Environment variables:
   MESHTASTICD_WEB_PORT=9000      # Set default port
@@ -1557,7 +1707,32 @@ Environment variables:
                         help='Enable authentication with this password (env: MESHTASTICD_WEB_PASSWORD)')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode')
+    parser.add_argument('--stop', action='store_true',
+                        help='Stop running web UI instance')
+    parser.add_argument('--status', action='store_true',
+                        help='Check if web UI is running')
     args = parser.parse_args()
+
+    # Handle --stop
+    if args.stop:
+        sys.exit(0 if stop_web_ui() else 1)
+
+    # Handle --status
+    if args.status:
+        pid = get_web_pid()
+        if pid:
+            print(f"Web UI is running (PID: {pid})")
+            sys.exit(0)
+        else:
+            print("Web UI is not running")
+            sys.exit(1)
+
+    # Check if already running
+    existing_pid = get_web_pid()
+    if existing_pid:
+        print(f"Web UI already running (PID: {existing_pid})")
+        print("Stop it first with: sudo python3 src/main_web.py --stop")
+        sys.exit(1)
 
     # Check root
     if os.geteuid() != 0:
@@ -1603,12 +1778,23 @@ Environment variables:
     print("Press Ctrl+C to stop")
     print("=" * 60)
 
-    app.run(
-        host=args.host,
-        port=args.port,
-        debug=args.debug,
-        threaded=True
-    )
+    # Write PID file
+    try:
+        WEB_PID_FILE.write_text(str(os.getpid()))
+    except Exception as e:
+        print(f"Warning: Could not write PID file: {e}")
+
+    try:
+        app.run(
+            host=args.host,
+            port=args.port,
+            debug=args.debug,
+            threaded=True,
+            use_reloader=False  # Prevent duplicate processes
+        )
+    finally:
+        # Clean up on exit
+        cleanup_processes()
 
 
 if __name__ == '__main__':
