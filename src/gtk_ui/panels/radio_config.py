@@ -25,7 +25,11 @@ class RadioConfigPanel(Gtk.Box):
         self.set_margin_bottom(20)
 
         self._cli_path = None
+        self._config_loaded = False
         self._build_ui()
+
+        # Auto-load config when panel is first shown
+        GLib.timeout_add(500, self._auto_load_config)
 
     def _build_ui(self):
         """Build the radio configuration UI"""
@@ -191,6 +195,15 @@ class RadioConfigPanel(Gtk.Box):
         box.set_margin_top(10)
         box.set_margin_bottom(10)
 
+        # Current Position Display
+        current_pos_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        current_pos_box.append(Gtk.Label(label="Current Position:"))
+        self.current_pos_label = Gtk.Label(label="Loading...")
+        self.current_pos_label.set_xalign(0)
+        self.current_pos_label.add_css_class("dim-label")
+        current_pos_box.append(self.current_pos_label)
+        box.append(current_pos_box)
+
         # GPS Enabled
         gps_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         gps_box.append(Gtk.Label(label="GPS Mode:"))
@@ -220,26 +233,34 @@ class RadioConfigPanel(Gtk.Box):
         pos_interval_box.append(pos_apply)
         box.append(pos_interval_box)
 
-        # Fixed Position Entry
+        # Fixed Position Entry with format hint
+        hint_label = Gtk.Label(label="Set Fixed Position (format: --setlat 19.435175 --setlon -155.213842)")
+        hint_label.set_xalign(0)
+        hint_label.add_css_class("dim-label")
+        box.append(hint_label)
+
         fixed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        fixed_box.append(Gtk.Label(label="Fixed Position:"))
+        fixed_box.append(Gtk.Label(label="Lat:"))
 
         self.lat_entry = Gtk.Entry()
-        self.lat_entry.set_placeholder_text("Latitude")
-        self.lat_entry.set_width_chars(12)
+        self.lat_entry.set_placeholder_text("19.435175")
+        self.lat_entry.set_width_chars(14)
         fixed_box.append(self.lat_entry)
 
+        fixed_box.append(Gtk.Label(label="Lon:"))
         self.lon_entry = Gtk.Entry()
-        self.lon_entry.set_placeholder_text("Longitude")
-        self.lon_entry.set_width_chars(12)
+        self.lon_entry.set_placeholder_text("-155.213842")
+        self.lon_entry.set_width_chars(14)
         fixed_box.append(self.lon_entry)
 
+        fixed_box.append(Gtk.Label(label="Alt:"))
         self.alt_entry = Gtk.Entry()
-        self.alt_entry.set_placeholder_text("Alt (m)")
+        self.alt_entry.set_placeholder_text("100")
         self.alt_entry.set_width_chars(8)
         fixed_box.append(self.alt_entry)
 
-        fixed_apply = Gtk.Button(label="Set Fixed")
+        fixed_apply = Gtk.Button(label="Set Fixed Position")
+        fixed_apply.add_css_class("suggested-action")
         fixed_apply.connect("clicked", self._set_fixed_position)
         fixed_box.append(fixed_apply)
         box.append(fixed_box)
@@ -528,23 +549,43 @@ class RadioConfigPanel(Gtk.Box):
         self._run_cli(['--set', setting, value], on_result)
 
     def _set_fixed_position(self, button):
-        """Set fixed position from entry fields"""
-        try:
-            lat = float(self.lat_entry.get_text())
-            lon = float(self.lon_entry.get_text())
-            alt = int(self.alt_entry.get_text()) if self.alt_entry.get_text() else 0
+        """Set fixed position from entry fields using --setlat --setlon format"""
+        lat_text = self.lat_entry.get_text().strip()
+        lon_text = self.lon_entry.get_text().strip()
+        alt_text = self.alt_entry.get_text().strip()
 
-            self.status_label.set_label(f"Setting fixed position: {lat}, {lon}, {alt}m...")
+        if not lat_text or not lon_text:
+            self.status_label.set_label("Error: Latitude and Longitude are required")
+            return
+
+        try:
+            lat = float(lat_text)
+            lon = float(lon_text)
+            alt = int(alt_text) if alt_text else 0
+
+            # Validate ranges
+            if not (-90 <= lat <= 90):
+                self.status_label.set_label("Error: Latitude must be between -90 and 90")
+                return
+            if not (-180 <= lon <= 180):
+                self.status_label.set_label("Error: Longitude must be between -180 and 180")
+                return
+
+            self.status_label.set_label(f"Setting: --setlat {lat} --setlon {lon} --setalt {alt}...")
 
             def on_result(success, stdout, stderr):
                 if success:
-                    self.status_label.set_label(f"Fixed position set: {lat}, {lon}")
+                    self.status_label.set_label(f"Fixed position set: {lat}, {lon}, {alt}m")
+                    self.main_window.set_status_message(f"Position set: {lat}, {lon}")
                 else:
-                    self.status_label.set_label(f"Failed: {stderr}")
+                    error_msg = stderr.strip() if stderr else "Unknown error"
+                    self.status_label.set_label(f"Failed: {error_msg}")
 
+            # Use exact format: --setlat 19.435175 --setlon -155.213842 --setalt 100
             self._run_cli(['--setlat', str(lat), '--setlon', str(lon), '--setalt', str(alt)], on_result)
-        except ValueError:
-            self.status_label.set_label("Error: Invalid coordinates. Enter numeric values.")
+
+        except ValueError as e:
+            self.status_label.set_label(f"Error: Invalid coordinates - {e}")
 
     def _apply_mqtt_auth(self, button):
         """Apply MQTT username and password"""
@@ -569,15 +610,132 @@ class RadioConfigPanel(Gtk.Box):
 
         self._run_cli(['--get', 'lora', '--get', 'device', '--get', 'position', '--get', 'mqtt', '--get', 'telemetry'], on_result)
 
+    def _auto_load_config(self):
+        """Auto-load configuration when panel is first shown"""
+        if not self._config_loaded:
+            self._config_loaded = True
+            self._load_current_config()
+        return False  # Don't repeat
+
     def _parse_and_populate_config(self, output):
         """Parse CLI output and populate UI fields"""
-        # This is a simplified parser - actual output format varies
+        import re
+
         lines = output.strip().split('\n')
+
+        # Role mapping
+        roles = ["CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT",
+                 "REPEATER", "TRACKER", "SENSOR", "TAK", "TAK_TRACKER", "CLIENT_HIDDEN", "LOST_AND_FOUND"]
+        regions = ["UNSET", "US", "EU_433", "EU_868", "CN", "JP", "ANZ", "KR", "TW", "RU",
+                   "IN", "NZ_865", "TH", "LORA_24", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923"]
+        presets = ["LONG_FAST", "LONG_SLOW", "LONG_MODERATE", "MEDIUM_SLOW", "MEDIUM_FAST",
+                   "SHORT_SLOW", "SHORT_FAST", "SHORT_TURBO"]
+        gps_modes = ["DISABLED", "ENABLED", "NOT_PRESENT"]
+
         for line in lines:
-            if 'region:' in line.lower():
-                # Try to set region dropdown
-                pass
-            # Add more parsing as needed
+            line_lower = line.lower()
+
+            # Device role
+            if 'role:' in line_lower:
+                for i, role in enumerate(roles):
+                    if role.lower() in line_lower:
+                        self.role_dropdown.set_selected(i)
+                        break
+
+            # Region
+            elif 'region:' in line_lower:
+                for i, region in enumerate(regions):
+                    if region.lower() in line_lower or region in line:
+                        self.region_dropdown.set_selected(i)
+                        break
+
+            # Modem preset
+            elif 'modem_preset:' in line_lower or 'modempreset:' in line_lower:
+                for i, preset in enumerate(presets):
+                    if preset.lower() in line_lower or preset in line:
+                        self.preset_dropdown.set_selected(i)
+                        break
+
+            # Hop limit
+            elif 'hop_limit:' in line_lower or 'hoplimit:' in line_lower:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    self.hop_spin.set_value(int(match.group(1)))
+
+            # GPS mode
+            elif 'gps_mode:' in line_lower or 'gpsmode:' in line_lower:
+                for i, mode in enumerate(gps_modes):
+                    if mode.lower() in line_lower:
+                        self.gps_dropdown.set_selected(i)
+                        break
+
+            # Position broadcast interval
+            elif 'position_broadcast_secs:' in line_lower:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    self.pos_interval_spin.set_value(int(match.group(1)))
+
+            # TX Power
+            elif 'tx_power:' in line_lower:
+                match = re.search(r'(\d+)', line)
+                if match:
+                    self.tx_power_spin.set_value(int(match.group(1)))
+
+            # MQTT enabled
+            elif 'mqtt' in line_lower and 'enabled:' in line_lower:
+                if 'true' in line_lower:
+                    self.mqtt_enabled_check.set_active(True)
+                else:
+                    self.mqtt_enabled_check.set_active(False)
+
+            # Latitude
+            elif 'latitude:' in line_lower or 'lat:' in line_lower:
+                match = re.search(r'[-+]?\d*\.?\d+', line.split(':')[-1])
+                if match:
+                    lat_val = float(match.group())
+                    if lat_val != 0:
+                        self.lat_entry.set_text(str(lat_val))
+                        # Update current position display
+                        if hasattr(self, 'current_pos_label'):
+                            current = self.current_pos_label.get_label()
+                            if 'Loading' in current or 'Not set' in current:
+                                self.current_pos_label.set_label(f"Lat: {lat_val}")
+                            elif 'Lat:' in current and 'Lon:' not in current:
+                                self.current_pos_label.set_label(f"Lat: {lat_val}")
+
+            # Longitude
+            elif 'longitude:' in line_lower or 'lon:' in line_lower:
+                match = re.search(r'[-+]?\d*\.?\d+', line.split(':')[-1])
+                if match:
+                    lon_val = float(match.group())
+                    if lon_val != 0:
+                        self.lon_entry.set_text(str(lon_val))
+                        # Update current position display
+                        if hasattr(self, 'current_pos_label'):
+                            lat_text = self.lat_entry.get_text()
+                            if lat_text:
+                                self.current_pos_label.set_label(f"Lat: {lat_text}, Lon: {lon_val}")
+
+            # Altitude
+            elif 'altitude:' in line_lower or 'alt:' in line_lower:
+                match = re.search(r'[-+]?\d+', line.split(':')[-1])
+                if match:
+                    alt_val = int(match.group())
+                    if alt_val != 0:
+                        self.alt_entry.set_text(str(alt_val))
+
+        # Update current position label if we have coordinates
+        lat = self.lat_entry.get_text()
+        lon = self.lon_entry.get_text()
+        alt = self.alt_entry.get_text()
+        if lat and lon:
+            pos_str = f"Lat: {lat}, Lon: {lon}"
+            if alt:
+                pos_str += f", Alt: {alt}m"
+            self.current_pos_label.set_label(pos_str)
+        else:
+            self.current_pos_label.set_label("Not set or GPS disabled")
+
         self.main_window.set_status_message("Configuration loaded from device")
 
     def _view_full_config(self):

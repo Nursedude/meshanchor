@@ -431,13 +431,57 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         """Calculate uptime from timestamp"""
         try:
             from datetime import datetime
-            # Parse systemd timestamp format
-            start = datetime.strptime(timestamp[:19], '%Y-%m-%d %H:%M:%S')
+            import re
+
+            if not timestamp or timestamp == 'n/a':
+                return "--"
+
+            # Try multiple timestamp formats
+            # Format 1: "2026-01-02 10:30:45 UTC"
+            # Format 2: "Thu 2026-01-02 10:30:45 UTC"
+            # Format 3: "Thu Jan  2 10:30:45 2026"
+
+            start = None
+
+            # Try ISO format first (most common)
+            try:
+                # Remove timezone suffix
+                clean_ts = re.sub(r'\s+(UTC|[A-Z]{3,4})$', '', timestamp)
+                # Remove day name prefix if present
+                clean_ts = re.sub(r'^[A-Za-z]+\s+', '', clean_ts)
+                start = datetime.strptime(clean_ts[:19], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                pass
+
+            # Try alternative format (ctime-like)
+            if not start:
+                try:
+                    # Format: "Thu Jan  2 10:30:45 2026"
+                    start = datetime.strptime(timestamp, '%a %b %d %H:%M:%S %Y')
+                except ValueError:
+                    pass
+
+            # Try with timezone
+            if not start:
+                try:
+                    # Format: "Thu 2026-01-02 10:30:45 PST"
+                    clean_ts = re.sub(r'\s+[A-Z]{3,4}$', '', timestamp)
+                    start = datetime.strptime(clean_ts, '%a %Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    pass
+
+            if not start:
+                return "--"
+
             now = datetime.now()
             delta = now - start
 
-            hours = int(delta.total_seconds() // 3600)
-            minutes = int((delta.total_seconds() % 3600) // 60)
+            total_seconds = delta.total_seconds()
+            if total_seconds < 0:
+                return "--"
+
+            hours = int(total_seconds // 3600)
+            minutes = int((total_seconds % 3600) // 60)
 
             if hours > 24:
                 days = hours // 24

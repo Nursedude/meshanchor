@@ -182,29 +182,57 @@ class DashboardPanel(Gtk.Box):
         except Exception as e:
             GLib.idle_add(self._update_card_value, self.version_card, f"Error: {e}", "error")
 
-        # Config status
+        # Config status - more robust detection
         try:
             from pathlib import Path
             config_path = Path('/etc/meshtasticd/config.yaml')
             config_d = Path('/etc/meshtasticd/config.d')
-
-            # Check if meshtasticd is installed (config directory exists)
+            available_d = Path('/etc/meshtasticd/available.d')
             meshtasticd_dir = Path('/etc/meshtasticd')
+
             if meshtasticd_dir.exists():
                 # Count active configs (both .yaml and .yml)
                 active_configs = []
                 if config_d.exists():
                     active_configs = list(config_d.glob('*.yaml')) + list(config_d.glob('*.yml'))
 
+                # Count available configs
+                available_configs = []
+                if available_d.exists():
+                    available_configs = list(available_d.glob('*.yaml')) + list(available_d.glob('*.yml'))
+
+                # Check for LoRa config specifically
+                has_lora = any('lora' in str(c).lower() for c in active_configs)
+
+                # Build status message
                 if active_configs:
-                    status = f"Found ({len(active_configs)} active configs)"
-                    GLib.idle_add(self._update_card_value, self.config_card, status, "success")
+                    config_names = [c.stem for c in active_configs[:3]]
+                    names_str = ', '.join(config_names)
+                    if len(active_configs) > 3:
+                        names_str += f" +{len(active_configs)-3} more"
+                    status = f"{len(active_configs)} active: {names_str}"
+                    css = "success" if has_lora else "warning"
                 elif config_path.exists():
-                    status = "Main config only (0 extras)"
-                    GLib.idle_add(self._update_card_value, self.config_card, status, "success")
+                    # Check if main config has content
+                    try:
+                        content = config_path.read_text()
+                        if content.strip() and len(content) > 10:
+                            status = "Main config active"
+                            css = "success"
+                        else:
+                            status = "Main config empty"
+                            css = "warning"
+                    except:
+                        status = "Main config exists"
+                        css = "success"
+                elif available_configs:
+                    status = f"0 active ({len(available_configs)} available)"
+                    css = "warning"
                 else:
                     status = "No configs found"
-                    GLib.idle_add(self._update_card_value, self.config_card, status, "warning")
+                    css = "warning"
+
+                GLib.idle_add(self._update_card_value, self.config_card, status, css)
             else:
                 GLib.idle_add(self._update_card_value, self.config_card, "Not installed", "warning")
         except Exception as e:
