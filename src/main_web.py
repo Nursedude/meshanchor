@@ -1199,6 +1199,12 @@ MAIN_TEMPLATE = '''
 # Main Routes
 # ============================================================================
 
+@app.route('/favicon.ico')
+def favicon():
+    """Return empty favicon to avoid 404"""
+    return '', 204
+
+
 @app.route('/')
 @login_required
 def index():
