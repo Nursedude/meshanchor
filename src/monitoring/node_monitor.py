@@ -20,9 +20,10 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional, Any
 from enum import Enum
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - default to WARNING to reduce noise
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logger.setLevel(logging.WARNING)
 
 
 class ConnectionState(Enum):

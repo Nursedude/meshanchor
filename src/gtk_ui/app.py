@@ -49,6 +49,11 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
         # Track subprocess for nano/terminal operations
         self.external_process = None
 
+        # Cache for node count (avoid repeated connections)
+        self._node_count_cache = "--"
+        self._node_count_timestamp = 0
+        self._node_count_cache_ttl = 30  # Cache for 30 seconds
+
         # Create the main layout
         self._build_ui()
 
@@ -357,14 +362,24 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
 
     def _get_node_count(self):
         """Get the number of nodes from meshtastic TCP interface or CLI"""
+        import time as time_module
+
+        # Check cache first
+        now = time_module.time()
+        if now - self._node_count_timestamp < self._node_count_cache_ttl:
+            return self._node_count_cache
+
         # First, try using the NodeMonitor (faster and more reliable)
         try:
             from monitoring import NodeMonitor
             monitor = NodeMonitor(host="localhost", port=4403)
-            if monitor.connect(timeout=5):
+            if monitor.connect(timeout=3):
                 count = monitor.get_node_count()
                 monitor.disconnect()
-                return str(count) if count > 0 else "--"
+                if count > 0:
+                    self._node_count_cache = str(count)
+                    self._node_count_timestamp = now
+                    return self._node_count_cache
         except Exception:
             pass  # Fall back to CLI method
 
@@ -392,30 +407,27 @@ class MeshtasticdWindow(Adw.ApplicationWindow):
                     break
 
             if not cli_path:
-                return "--"
+                return self._node_count_cache
 
             # Run meshtastic --nodes to get node info
             result = subprocess.run(
                 [cli_path, '--host', 'localhost', '--nodes'],
                 capture_output=True, text=True,
-                timeout=15
+                timeout=10
             )
 
             if result.returncode == 0 and result.stdout:
                 # Look for node IDs in the output (format: !xxxxxxxx)
                 node_ids = re.findall(r'!([0-9a-fA-F]{8})', result.stdout)
                 if node_ids:
-                    return str(len(set(node_ids)))
-                # Alternative: count table rows (lines with │)
-                lines = result.stdout.strip().split('\n')
-                data_lines = [l for l in lines if '│' in l and 'User' not in l and '─' not in l]
-                if data_lines:
-                    return str(len(data_lines))
-            return "--"
+                    self._node_count_cache = str(len(set(node_ids)))
+                    self._node_count_timestamp = now
+                    return self._node_count_cache
+            return self._node_count_cache
         except subprocess.TimeoutExpired:
-            return "--"
+            return self._node_count_cache
         except Exception:
-            return "--"
+            return self._node_count_cache
 
     def _update_status_ui(self, is_active, uptime, node_count="--"):
         """Update status UI elements (must run in main thread)"""
