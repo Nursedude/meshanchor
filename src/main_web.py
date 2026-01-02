@@ -251,25 +251,41 @@ def get_service_logs(lines=50):
         return f"Error fetching logs: {e}"
 
 
-def get_radio_info():
-    """Get radio info from meshtastic CLI"""
+# Radio info cache
+_radio_cache = {'data': None, 'timestamp': 0}
+_RADIO_CACHE_TTL = 30  # seconds
+
+
+def get_radio_info(use_cache=True):
+    """Get radio info from meshtastic CLI with caching"""
+    import time
+
+    # Return cached data if fresh
+    if use_cache and _radio_cache['data']:
+        age = time.time() - _radio_cache['timestamp']
+        if age < _RADIO_CACHE_TTL:
+            return _radio_cache['data']
+
     cli = find_meshtastic_cli()
     if not cli:
-        return {'error': 'Meshtastic CLI not found'}
+        return {'error': 'Meshtastic CLI not found. Install with: pipx install meshtastic'}
 
-    # Check if port is reachable first
+    # Check if port is reachable first (quick check)
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2.0)
-        sock.connect(('localhost', 4403))
+        sock.settimeout(3.0)
+        result = sock.connect_ex(('localhost', 4403))
         sock.close()
+        if result != 0:
+            return {'error': 'meshtasticd not running (port 4403 closed)'}
     except Exception:
-        return {'error': 'Cannot connect to meshtasticd (port 4403)'}
+        return {'error': 'Cannot check meshtasticd port 4403'}
 
     try:
+        # Increased timeout to 30 seconds - CLI can be slow
         result = subprocess.run(
             [cli, '--host', 'localhost', '--info'],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0:
             output = result.stdout
@@ -296,28 +312,57 @@ def get_radio_info():
             if id_match:
                 info['node_id'] = id_match.group(1)
 
-            return info
-        return {'error': result.stderr or 'Failed to get info'}
+            # Cache successful result
+            _radio_cache['data'] = info
+            _radio_cache['timestamp'] = time.time()
+
+            return info if info else {'error': 'No radio info found in response'}
+
+        # Check for common errors
+        stderr = result.stderr or ''
+        if 'Connection refused' in stderr:
+            return {'error': 'meshtasticd refused connection'}
+        if 'timed out' in stderr.lower():
+            return {'error': 'Radio not responding (check connection)'}
+
+        return {'error': result.stderr or 'Failed to get radio info'}
+
     except subprocess.TimeoutExpired:
-        return {'error': 'Timeout getting radio info'}
+        return {'error': 'Radio info timeout (30s) - radio may be busy or disconnected'}
     except Exception as e:
-        return {'error': str(e)}
+        return {'error': f'Error: {str(e)}'}
 
 
 def get_configs():
     """Get available and active configurations"""
-    configs = {'available': [], 'active': []}
+    configs = {'available': [], 'active': [], 'main_config': None}
 
-    available_d = Path('/etc/meshtasticd/available.d')
-    config_d = Path('/etc/meshtasticd/config.d')
+    meshtasticd_dir = Path('/etc/meshtasticd')
+    available_d = meshtasticd_dir / 'available.d'
+    config_d = meshtasticd_dir / 'config.d'
+    main_config = meshtasticd_dir / 'config.yaml'
 
+    # Check main config.yaml
+    if main_config.exists():
+        try:
+            size = main_config.stat().st_size
+            configs['main_config'] = f"config.yaml ({size} bytes)"
+        except Exception:
+            configs['main_config'] = "config.yaml (exists)"
+
+    # Check available.d
     if available_d.exists():
         for f in sorted(available_d.glob('*.yaml')) + sorted(available_d.glob('*.yml')):
             configs['available'].append(f.name)
 
+    # Check config.d
     if config_d.exists():
         for f in sorted(config_d.glob('*.yaml')) + sorted(config_d.glob('*.yml')):
             configs['active'].append(f.name)
+
+    # If no directories exist, note that
+    if not meshtasticd_dir.exists():
+        configs['error'] = 'meshtasticd not installed (/etc/meshtasticd missing)'
 
     return configs
 
@@ -402,8 +447,9 @@ def api_logs():
 @app.route('/api/radio')
 @login_required
 def api_radio():
-    """Get radio info"""
-    return jsonify(get_radio_info())
+    """Get radio info (cached by default, use ?refresh=1 to force)"""
+    force_refresh = request.args.get('refresh', '0') == '1'
+    return jsonify(get_radio_info(use_cache=not force_refresh))
 
 
 @app.route('/api/configs')
@@ -901,7 +947,7 @@ MAIN_TEMPLATE = '''
         <div id="radio" class="tab-content">
             <div class="card">
                 <h2>Connected Radio</h2>
-                <button class="btn btn-success" onclick="refreshRadio()" style="margin-bottom: 15px;">Refresh</button>
+                <button class="btn btn-success" onclick="refreshRadio(true)" style="margin-bottom: 15px;">Refresh</button>
                 <div class="radio-info" id="radio-info">Loading...</div>
             </div>
         </div>
@@ -989,20 +1035,35 @@ MAIN_TEMPLATE = '''
                 const data = await resp.json();
 
                 const activeEl = document.getElementById('active-configs');
-                if (data.active.length === 0) {
-                    activeEl.innerHTML = '<li class="config-item">No active configurations</li>';
-                } else {
-                    activeEl.innerHTML = data.active.map(c => `
+                let activeHtml = '';
+
+                // Show main config if exists
+                if (data.main_config) {
+                    activeHtml += `<li class="config-item"><span class="name" style="color: var(--accent);">📄 ${data.main_config}</span></li>`;
+                }
+
+                // Show error if any
+                if (data.error) {
+                    activeHtml += `<li class="config-item" style="color: var(--warning);">${data.error}</li>`;
+                }
+
+                // Show active configs from config.d
+                if (data.active.length > 0) {
+                    activeHtml += data.active.map(c => `
                         <li class="config-item">
                             <span class="name">${c}</span>
                             <button class="btn btn-danger" onclick="deactivateConfig('${c}')">Deactivate</button>
                         </li>
                     `).join('');
+                } else if (!data.main_config && !data.error) {
+                    activeHtml += '<li class="config-item">No configurations in config.d/</li>';
                 }
+
+                activeEl.innerHTML = activeHtml || '<li class="config-item">No configurations found</li>';
 
                 const availEl = document.getElementById('available-configs');
                 if (data.available.length === 0) {
-                    availEl.innerHTML = '<li class="config-item">No configurations found</li>';
+                    availEl.innerHTML = '<li class="config-item">No configurations in available.d/</li>';
                 } else {
                     availEl.innerHTML = data.available.map(c => `
                         <li class="config-item">
@@ -1033,14 +1094,21 @@ MAIN_TEMPLATE = '''
             }
         }
 
-        async function refreshRadio() {
+        async function refreshRadio(forceRefresh = false) {
+            const el = document.getElementById('radio-info');
+            const btn = document.querySelector('[onclick*="refreshRadio"]');
+
+            // Show loading state
+            el.innerHTML = '<div class="item" style="grid-column: span 2;"><em>Loading radio info... (may take up to 30s)</em></div>';
+            if (btn) btn.disabled = true;
+
             try {
-                const resp = await fetch('/api/radio');
+                const url = forceRefresh ? '/api/radio?refresh=1' : '/api/radio';
+                const resp = await fetch(url);
                 const data = await resp.json();
 
-                const el = document.getElementById('radio-info');
                 if (data.error) {
-                    el.innerHTML = `<div class="item" style="grid-column: span 2;">${data.error}</div>`;
+                    el.innerHTML = `<div class="item" style="grid-column: span 2; color: var(--warning);">${data.error}</div>`;
                 } else {
                     el.innerHTML = Object.entries(data).map(([k, v]) => `
                         <div class="item">
@@ -1051,6 +1119,9 @@ MAIN_TEMPLATE = '''
                 }
             } catch (e) {
                 console.error('Error fetching radio:', e);
+                el.innerHTML = '<div class="item" style="grid-column: span 2; color: var(--danger);">Network error fetching radio info</div>';
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
