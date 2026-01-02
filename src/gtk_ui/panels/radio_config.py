@@ -53,6 +53,7 @@ class RadioConfigPanel(Gtk.Box):
         content_box.set_margin_top(15)
 
         # Create expandable sections
+        self._add_radio_info_section(content_box)
         self._add_device_section(content_box)
         self._add_lora_section(content_box)
         self._add_position_section(content_box)
@@ -82,6 +83,134 @@ class RadioConfigPanel(Gtk.Box):
         header_box.append(Gtk.Label(label=title))
 
         return expander
+
+    def _add_radio_info_section(self, parent):
+        """Add connected radio information section"""
+        frame = Gtk.Frame()
+        frame.set_label("Connected Radio")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Create a grid for radio info display
+        grid = Gtk.Grid()
+        grid.set_column_spacing(20)
+        grid.set_row_spacing(5)
+
+        # Labels for radio info (will be populated when config loads)
+        labels = [
+            ("Node ID:", "radio_node_id"),
+            ("Long Name:", "radio_long_name"),
+            ("Short Name:", "radio_short_name"),
+            ("Hardware:", "radio_hardware"),
+            ("Firmware:", "radio_firmware"),
+            ("Region:", "radio_region"),
+            ("Modem Preset:", "radio_preset"),
+            ("Channels:", "radio_channels"),
+        ]
+
+        for row, (label_text, attr_name) in enumerate(labels):
+            label = Gtk.Label(label=label_text)
+            label.set_xalign(1)
+            label.add_css_class("dim-label")
+            grid.attach(label, 0, row, 1, 1)
+
+            value_label = Gtk.Label(label="--")
+            value_label.set_xalign(0)
+            value_label.set_hexpand(True)
+            value_label.set_selectable(True)
+            grid.attach(value_label, 1, row, 1, 1)
+            setattr(self, attr_name, value_label)
+
+        box.append(grid)
+
+        # Refresh button
+        refresh_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        refresh_box.set_margin_top(10)
+
+        refresh_btn = Gtk.Button(label="Refresh Radio Info")
+        refresh_btn.connect("clicked", lambda b: self._load_radio_info())
+        refresh_box.append(refresh_btn)
+
+        box.append(refresh_box)
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _load_radio_info(self):
+        """Load radio info from device using --info command"""
+        self.status_label.set_label("Loading radio info...")
+
+        def on_result(success, stdout, stderr):
+            if success:
+                self._parse_radio_info(stdout)
+                self.status_label.set_label("Radio info loaded")
+            else:
+                self.status_label.set_label(f"Failed to load radio info: {stderr}")
+
+        self._run_cli(['--info'], on_result)
+
+    def _parse_radio_info(self, output):
+        """Parse --info output and populate radio info section"""
+        import re
+
+        lines = output.strip().split('\n')
+
+        for line in lines:
+            line_lower = line.lower()
+
+            # Node ID (Owner)
+            if 'owner:' in line_lower or 'my node' in line_lower:
+                match = re.search(r'(!?[0-9a-fA-F]{8})', line)
+                if match:
+                    self.radio_node_id.set_label(match.group(1))
+
+            # Long name
+            elif 'long name:' in line_lower or 'longname:' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    self.radio_long_name.set_label(match.group(1).strip())
+
+            # Short name
+            elif 'short name:' in line_lower or 'shortname:' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    self.radio_short_name.set_label(match.group(1).strip())
+
+            # Hardware model
+            elif 'hardware:' in line_lower or 'hw_model:' in line_lower or 'hwmodel:' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    self.radio_hardware.set_label(match.group(1).strip())
+
+            # Firmware version
+            elif 'firmware' in line_lower and 'version' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    self.radio_firmware.set_label(match.group(1).strip())
+            elif line.strip().startswith('2.') or line.strip().startswith('1.'):
+                # Firmware version line
+                self.radio_firmware.set_label(line.strip())
+
+            # Region
+            elif 'region:' in line_lower:
+                match = re.search(r':\s*(\w+)', line)
+                if match:
+                    self.radio_region.set_label(match.group(1).strip())
+
+            # Modem preset
+            elif 'modem_preset:' in line_lower or 'modempreset:' in line_lower:
+                match = re.search(r':\s*(\w+)', line)
+                if match:
+                    self.radio_preset.set_label(match.group(1).strip())
+
+            # Channels
+            elif 'channels:' in line_lower or 'num_channels:' in line_lower:
+                match = re.search(r':\s*(\d+)', line)
+                if match:
+                    self.radio_channels.set_label(match.group(1).strip())
 
     def _add_device_section(self, parent):
         """Add device/mesh settings section"""
@@ -614,7 +743,8 @@ class RadioConfigPanel(Gtk.Box):
         """Auto-load configuration when panel is first shown"""
         if not self._config_loaded:
             self._config_loaded = True
-            self._load_current_config()
+            self._load_radio_info()  # Load radio info first
+            self._load_current_config()  # Then load config settings
         return False  # Don't repeat
 
     def _parse_and_populate_config(self, output):
@@ -687,6 +817,45 @@ class RadioConfigPanel(Gtk.Box):
                     self.mqtt_enabled_check.set_active(True)
                 else:
                     self.mqtt_enabled_check.set_active(False)
+
+            # MQTT server/address
+            elif ('mqtt' in line_lower and 'address:' in line_lower) or 'mqtt_server:' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    server = match.group(1).strip().strip('"\'')
+                    if server and server != 'None':
+                        self.mqtt_server_entry.set_text(server)
+
+            # MQTT username
+            elif 'mqtt' in line_lower and 'username:' in line_lower:
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    user = match.group(1).strip().strip('"\'')
+                    if user and user != 'None':
+                        self.mqtt_user_entry.set_text(user)
+
+            # MQTT encryption enabled
+            elif 'mqtt' in line_lower and 'encryption_enabled:' in line_lower:
+                if 'true' in line_lower:
+                    self.mqtt_enc_check.set_active(True)
+
+            # MQTT JSON enabled
+            elif 'mqtt' in line_lower and 'json_enabled:' in line_lower:
+                if 'true' in line_lower:
+                    self.mqtt_json_check.set_active(True)
+
+            # MQTT TLS enabled
+            elif 'mqtt' in line_lower and 'tls_enabled:' in line_lower:
+                if 'true' in line_lower:
+                    self.mqtt_tls_check.set_active(True)
+
+            # Rebroadcast mode
+            elif 'rebroadcast_mode:' in line_lower:
+                modes = ["ALL", "ALL_SKIP_DECODING", "LOCAL_ONLY", "KNOWN_ONLY", "NONE"]
+                for i, mode in enumerate(modes):
+                    if mode.lower() in line_lower:
+                        self.rebroadcast_dropdown.set_selected(i)
+                        break
 
             # Latitude
             elif 'latitude:' in line_lower or 'lat:' in line_lower:

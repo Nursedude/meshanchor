@@ -4,12 +4,18 @@ Meshtasticd Manager - GTK4 GUI Entry Point
 
 This is the graphical interface for systems with a display.
 For headless/SSH access, use main_tui.py instead.
+
+Usage:
+    sudo python3 src/main_gtk.py           # Run in foreground
+    sudo python3 src/main_gtk.py &         # Run in background (shell)
+    sudo python3 src/main_gtk.py --daemon  # Run detached (returns terminal)
 """
 
 import os
 import sys
 import shutil
 import subprocess
+import argparse
 
 
 def check_display():
@@ -142,13 +148,48 @@ def check_meshtastic_cli():
         return False
 
 
+def daemonize():
+    """Fork process to run in background and return terminal control"""
+    # First fork
+    pid = os.fork()
+    if pid > 0:
+        # Parent exits, returning terminal to user
+        print(f"Meshtasticd Manager started in background (PID: {pid})")
+        sys.exit(0)
+
+    # Create new session
+    os.setsid()
+
+    # Second fork to prevent zombie processes
+    pid = os.fork()
+    if pid > 0:
+        sys.exit(0)
+
+    # Redirect standard file descriptors to /dev/null
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open('/dev/null', 'r') as devnull:
+        os.dup2(devnull.fileno(), sys.stdin.fileno())
+    # Keep stdout/stderr for now so errors are visible
+
+
 def main():
     """Main entry point"""
+    # Parse arguments first
+    parser = argparse.ArgumentParser(description='Meshtasticd Manager - GTK4 GUI')
+    parser.add_argument('--daemon', '-d', action='store_true',
+                        help='Run in background (detach from terminal)')
+    args, remaining = parser.parse_known_args()
+
     # Check prerequisites
     check_root()
     check_display()
     check_gtk()
     check_meshtastic_cli()
+
+    # Daemonize if requested
+    if args.daemon:
+        daemonize()
 
     # Suppress GTK accessibility bus warning if a11y service not available
     # This prevents: "Unable to acquire the address of the accessibility bus"
@@ -166,7 +207,7 @@ def main():
     # Launch GTK application
     from gtk_ui.app import MeshtasticdApp
     app = MeshtasticdApp()
-    return app.run(sys.argv)
+    return app.run(remaining or sys.argv[:1])
 
 
 if __name__ == '__main__':
