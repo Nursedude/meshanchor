@@ -16,21 +16,28 @@ Access meshtasticd manager from any browser on your network!
 - **Radio Info** - See connected radio details (firmware, hardware, region)
 - **System Monitor** - View top processes and system stats
 - **Optional Authentication** - Password protection with `--password` flag
-- **Custom Port** - Use `--port` to change from default 8080
+- **Custom Port** - Use `--port` to change from default 8880
+- **Environment Variables** - Configure via `MESHTASTICD_WEB_PORT`, `MESHTASTICD_WEB_PASSWORD`
 
 ```bash
-# Start web UI (default port 8080)
+# Start web UI (default port 8880)
 sudo python3 src/main_web.py
 
-# Custom port
+# Custom port (avoid conflicts with other services)
 sudo python3 src/main_web.py --port 9000
+sudo python3 src/main_web.py -p 8080  # short form
 
 # With password protection
 sudo python3 src/main_web.py --password mysecretpassword
 
+# Using environment variables (add to .bashrc for persistence)
+export MESHTASTICD_WEB_PORT=9000
+export MESHTASTICD_WEB_PASSWORD=mysecret
+sudo -E python3 src/main_web.py
+
 # Access from browser
-# http://localhost:8080/
-# http://your-pi-ip:8080/
+# http://localhost:8880/
+# http://your-pi-ip:8880/
 ```
 
 **Security Note:** For remote access over the internet, use a VPN (WireGuard, Tailscale)

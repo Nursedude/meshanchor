@@ -1144,16 +1144,30 @@ def index():
 # ============================================================================
 
 def main():
+    # Get defaults from environment variables
+    default_port = int(os.environ.get('MESHTASTICD_WEB_PORT', 8880))
+    default_host = os.environ.get('MESHTASTICD_WEB_HOST', '0.0.0.0')
+
     parser = argparse.ArgumentParser(
         description='Meshtasticd Manager - Web UI',
-        epilog='Access via browser at http://your-ip:8080/'
+        epilog='''
+Examples:
+  sudo python3 src/main_web.py                    # Default port 8880
+  sudo python3 src/main_web.py --port 9000        # Custom port
+  sudo python3 src/main_web.py -p 8080            # Short form
+
+Environment variables:
+  MESHTASTICD_WEB_PORT=9000      # Set default port
+  MESHTASTICD_WEB_PASSWORD=xxx   # Enable authentication
+  MESHTASTICD_WEB_HOST=0.0.0.0   # Set bind address
+'''
     )
-    parser.add_argument('--host', default='0.0.0.0',
-                        help='Host to bind to (default: 0.0.0.0)')
-    parser.add_argument('--port', '-p', type=int, default=8080,
-                        help='Port to listen on (default: 8080)')
+    parser.add_argument('--host', default=default_host,
+                        help=f'Host to bind to (default: {default_host}, env: MESHTASTICD_WEB_HOST)')
+    parser.add_argument('--port', '-p', type=int, default=default_port,
+                        help=f'Port to listen on (default: {default_port}, env: MESHTASTICD_WEB_PORT)')
     parser.add_argument('--password', '-P',
-                        help='Enable authentication with this password')
+                        help='Enable authentication with this password (env: MESHTASTICD_WEB_PASSWORD)')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode')
     args = parser.parse_args()
@@ -1171,11 +1185,11 @@ def main():
     if args.password:
         CONFIG['auth_enabled'] = True
         CONFIG['password'] = args.password
-        print(f"Authentication enabled")
+        print("Authentication enabled")
     elif os.environ.get('MESHTASTICD_WEB_PASSWORD'):
         CONFIG['auth_enabled'] = True
         CONFIG['password'] = os.environ.get('MESHTASTICD_WEB_PASSWORD')
-        print(f"Authentication enabled (from environment)")
+        print("Authentication enabled (from environment)")
 
     # Get local IP for display
     try:
