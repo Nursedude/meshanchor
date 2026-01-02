@@ -1,247 +1,243 @@
 # Meshtasticd Installer - Development Session Notes
 
-## Session Date: 2026-01-01 (v3.2.0)
-
-### Branch: `claude/review-meshtasticd-installer-52ENu`
-### PR: https://github.com/Nursedude/Meshtasticd_interactive_UI/pull/37
-
----
-
-## PERPETUAL MEMORY - Pick Up Here
-
-### ✅ COMPLETED This Session (v3.2.0)
-
-1. **Network Tools** (`src/tools/network_tools.py`) - NEW MODULE
-   - Ping test, TCP port test, Meshtastic TCP (4403) test
-   - Network interfaces, routing table, DNS lookup
-   - Active connections, network scan, find Meshtastic devices
-
-2. **RF Tools** (`src/tools/rf_tools.py`) - NEW MODULE
-   - Link budget calculator with full TX/RX analysis
-   - FSPL calculator, Fresnel zone calculator
-   - LoRa preset comparison (all 9 presets)
-   - Range estimator, time-on-air calculator
-   - Detect LoRa radio, SPI/GPIO status
-   - Frequency band reference (all regions)
-
-3. **MUDP Tools** (`src/tools/mudp_tools.py`) - NEW MODULE
-   - Monitor UDP traffic with mudp CLI
-   - Multicast listener (224.0.0.69:4403)
-   - UDP socket viewer, test packet sender
-   - UDP echo test, multicast join test
-   - MUDP config display, install/update
-
-4. **Tool Manager** (`src/tools/tool_manager.py`) - NEW MODULE
-   - Track installed tools (mudp, meshtastic, nmap, etc.)
-   - Version checking via pip/pipx/apt
-   - Install/update all tools
-   - PyPI version checking for updates
-
-5. **Research Documentation** (`RESEARCH.md`) - NEW FILE
-   - MUDP library documentation
-   - TCP interface (port 4403) reference
-   - RF tools and coverage planning links
-   - Protocol references
-
-6. **GTK4 Tools Panel** (`src/gtk_ui/panels/tools.py`) - NEW
-   - Network, RF, MUDP tools in GTK4 interface
-   - Status display and action buttons
-   - Background thread operations
-
-7. **Site Planner Fix** (`src/diagnostics/site_planner.py`)
-   - FIX: URL display for headless/SSH sessions
-   - No longer opens text browser (lynx)
-
-### ✅ COMPLETED (v3.1.1)
-
-1. **Textual TUI Bug Fixes** (`src/tui/app.py`)
-   - FIX: Widget IDs now handle dots in filenames (e.g., `display-waveshare-2.8.yaml`)
-   - FIX: Dots replaced with underscores in IDs, filename retrieved from Label
-   - FIX: Config activate/deactivate/edit now work correctly
-   - FIX: Menu updates properly after tasks complete
-
-2. **GTK4 Bug Fix** (`src/gtk_ui/app.py`)
-   - FIX: `content_stack` initialization race condition
-   - FIX: Stack and pages created BEFORE sidebar to avoid callback issues
-
-3. **pip Install Fix** (`src/main_tui.py`, `src/launcher.py`, `README.md`)
-   - FIX: Added `--ignore-installed` flag for Textual install
-   - FIX: Avoids Debian package conflicts (e.g., Pygments)
-   - Updated all pip install commands and documentation
-
-### ✅ COMPLETED (v3.1.0)
-
-1. **System Diagnostics** (`src/diagnostics/system_diagnostics.py`)
-   - NEW: Network connectivity tests (ping, DNS, HTTPS, gateway)
-   - NEW: Mesh network diagnostics (API, node count, activity)
-   - NEW: MQTT connection testing
-   - NEW: System health (CPU, memory, temp, disk, load, throttling)
-   - NEW: LoRa/Radio diagnostics with SPI device detection
-   - NEW: GPIO/SPI/I2C interface status
-   - NEW: Service diagnostics with error detection
-   - NEW: Log analysis with pattern matching
-   - NEW: Full diagnostic report with health score
-
-2. **Site Planner** (`src/diagnostics/site_planner.py`)
-   - NEW: Integration with Meshtastic Site Planner
-   - NEW: RF coverage tools (Radio Mobile, HeyWhatsThat, Splat!)
-   - NEW: Interactive link budget calculator with FSPL formula
-   - NEW: Preset range estimates for all modem configurations
-   - NEW: Location management (GPS/manual)
-   - NEW: Antenna selection guidelines
-   - NEW: Frequency and power reference by region
-
-3. **Main Menu Updates** (`src/main.py`)
-   - NEW: Tools section with 't' (System Diagnostics) and 'p' (Site Planner)
-
-### ✅ COMPLETED (v3.0.5-3.0.6)
-
-1. **Emoji Font Detection** (`src/utils/emoji.py`)
-   - Checks if `fonts-noto-color-emoji` is installed
-   - Debug menu option 9 for emoji diagnostics
-   - To enable: `sudo apt install fonts-noto-color-emoji && fc-cache -f`
-
-2. **Meshtastic CLI Detection** (`src/utils/cli.py`)
-   - Works with pipx installations
-   - Checks /root/.local/bin, /home/pi/.local/bin, ~/.local/bin
-
-### ⏳ STILL PENDING
-
-1. **Device Configuration Wizard** - May need more back options
-2. **Additional TUI/GTK4 testing** - User testing in progress
+## Current Version: v3.2.1
+## Session Date: 2026-01-02
+## Branch: `claude/review-meshtasticd-installer-52ENu`
 
 ---
 
-## User's Exact Feedback (Verbatim)
+## QUICK RESUME - Start Here
 
-```
-- always have a back option and back to main option in a menu
-- verify UI interface is working as expected
-- pip install --break-system-packages textual for RPI
-- provide sudo as an option when you have pip install textual
-- check and verify if the meshtastic cli is installed
-- emojis not working (less priority)
-- error checking and version control, test and push to repo
-
-PR #36 issues:
-- Presets: SHORT_TURBO, SHORT_FAST, SHORT_SLOW, MEDIUM_FAST, MEDIUM_SLOW,
-  LONG_FAST (Default), LONG_MODERATE, LONG_SLOW, VERY_LONG_SLOW
-- Channel Configuration should be fully configurable
-- offer a back out quit instead of Aborted!
-- remove MeshAdv-Mini 400MHz variant
-- back button/main menu in every window
-- show progress of installs/updates
-- Region selection needs back option
-- goodbye should say "A Hui Hou! Happy meshing!"
-- Service Management live logs not updating, can't quit
-- UI selection not working (same look every time)
-- have an uninstaller option
-```
-
----
-
-## Files Modified This Session
-
-| File | Changes |
-|------|---------|
-| `src/installer/uninstaller.py` | **NEW** - Interactive uninstaller module |
-| `src/utils/progress.py` | **NEW** - Progress indicator utilities |
-| `src/launcher.py` | Preference saving, auto-launch, --wizard flag |
-| `src/main.py` | Added 'u' uninstall menu option |
-| `src/config/lora.py` | Edit existing channels, consistent navigation |
-| `src/utils/emoji.py` | Better SSH/RPi emoji detection |
-| `src/__version__.py` | v3.0.4 |
-| `README.md` | v3.0.4 features |
-
----
-
-## Code Locations for Pending Work
-
-### Back Options Needed
-- `src/config/device.py` - Device configuration wizard
-- `src/config/lora.py:configure_region()` - Region selection
-- `src/installer/meshtasticd.py` - Install process
-- Search: `Prompt.ask` without choices including "0" or "m"
-
-### MeshAdv-Mini 400MHz
-- Search for "400MHz" or "MeshAdv-Mini 400" in templates/
-
-### Live Logs Fix
-- `src/services/service_manager.py` - Rich CLI service menu
-- `src/gtk_ui/panels/service.py` - GTK4 logs (partially fixed)
-- `src/tui/app.py` - TUI logs (partially fixed)
-
-### Uninstaller
-- Create `src/installer/uninstaller.py`
-- Add option to main menu
-
----
-
-## Testing Commands
+When resuming this project, read this file and `CLAUDE_CONTEXT.md` first.
 
 ```bash
-# Switch to feature branch
+# 1. Switch to the feature branch
 git checkout claude/review-meshtasticd-installer-52ENu
 
-# Test launcher wizard
-sudo python3 src/launcher.py
+# 2. Check current status
+git status && git log --oneline -5
 
-# Test specific UIs
-sudo python3 src/main_gtk.py    # GTK4
-sudo python3 src/main_tui.py    # Textual TUI
+# 3. Test the application
 sudo python3 src/main.py        # Rich CLI
-
-# Test modem preset selection
-# In Rich CLI: 6 → Channel Presets → should show new order
-
-# Test channel config
-# In Rich CLI: 5 → Configure device → should have back options
+sudo python3 src/main_tui.py    # Textual TUI
+sudo python3 src/main_gtk.py    # GTK4 GUI
 ```
 
 ---
 
-## Git Status
+## Latest Session Summary (2026-01-02)
 
-```bash
-# Current branch
-claude/review-meshtasticd-installer-52ENu
+### Completed This Session
 
-# Last commits (as of 2025-12-31)
-ee525cc v3.0.5: Improved emoji detection with font checking
-f09a956 docs: Update session notes for v3.0.4 release
-234a62a v3.0.4: Uninstaller, progress indicators, launcher preferences
-b06495a feat: Add progress indicator utilities
-3ab4a8b feat: Add uninstaller functionality
+1. **Full Radio Configuration** (`src/config/radio_config.py`) - NEW
+   - Menu option `f` in main menu
+   - Mesh Settings: Device role, rebroadcast mode, node info intervals
+   - Position Settings: GPS config, fixed position, smart broadcasting
+   - Power Settings: TX power (0-33 dBm), power saving, screen timeout
+   - LoRa Settings: Region, modem preset, hop limit
+   - Channel Settings: Links to full channel editor
+   - MQTT Settings: Server, auth, encryption, JSON, TLS
+   - Telemetry Settings: Device/environment/power metrics
+   - Store & Forward: Message history server
+   - View Current Config / Factory Reset
 
-# PR Status: ✅ PUSHED & READY FOR MERGE - v3.0.5 with emoji font detection
-```
+2. **GTK Service Panel Fix** (`src/gtk_ui/panels/service.py`)
+   - FIX: Added `sudo` prefix to all systemctl commands
+   - Start/Stop/Restart/Reload/Enable/Disable now work correctly
+
+3. **Hardware Configuration** (`src/config/hardware_config.py`) - NEW (v3.2.1)
+   - Menu option `w` in main menu
+   - SPI/I2C/Serial configuration via raspi-config
+   - SPI overlay management (dtoverlay=spi0-0cs)
+   - Hardware device selection with known Meshtastic hardware
+   - Config file copy from available.d to config.d
+   - YAML config editor with validation
+   - Safe reboot with application checks
 
 ---
 
 ## Version History
 
-- **v3.0.5** (2025-12-31) - Emoji font detection, diagnostic in Debug menu
-- **v3.0.4** (2025-12-31) - Uninstaller, progress indicators, launcher preferences
-- **v3.0.3** (2025-12-31) - Edit channels, consistent navigation, emoji detection
-- **v3.0.2** (2025-12-31) - Channel config, CLI auto-install, PSK generation
-- **v3.0.1** (2025-12-30) - Launcher wizard, bug fixes, navigation improvements
-- **v3.0.0** (2025-12-30) - GTK4 GUI, Textual TUI, Config File Manager
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| v3.2.1 | 2026-01-02 | Hardware Configuration, Full Radio Config, GTK service fix |
+| v3.2.0 | 2026-01-01 | Network Tools, RF Tools, MUDP Tools, Tool Manager |
+| v3.1.1 | 2026-01-01 | TUI widget ID fix, GTK content_stack fix, pip --ignore-installed |
+| v3.1.0 | 2026-01-01 | System Diagnostics, Site Planner |
+| v3.0.6 | 2025-12-31 | Meshtastic CLI detection (pipx) |
+| v3.0.5 | 2025-12-31 | Emoji font detection |
+| v3.0.4 | 2025-12-31 | Uninstaller, progress indicators, launcher preferences |
+| v3.0.3 | 2025-12-31 | Edit channels, consistent navigation |
+| v3.0.2 | 2025-12-31 | Channel config, CLI auto-install, PSK generation |
+| v3.0.1 | 2025-12-30 | Launcher wizard, bug fixes |
+| v3.0.0 | 2025-12-30 | GTK4 GUI, Textual TUI, Config File Manager |
 
 ---
 
-## Contact / Collaboration
+## Project Architecture
 
-- GitHub: https://github.com/Nursedude/Meshtasticd_interactive_UI
-- Branch: claude/review-meshtasticd-installer-52ENu
-- PR #37: ✅ Pushed & ready for merge (v3.0.5 - emoji font detection)
+```
+src/
+├── main.py                 # Rich CLI entry point
+├── main_gtk.py             # GTK4 entry point
+├── main_tui.py             # Textual TUI entry point
+├── launcher.py             # UI selection wizard
+├── __version__.py          # Version and changelog
+├── dashboard.py            # Status dashboard
+│
+├── config/                 # Configuration modules
+│   ├── lora.py             # LoRa/Channel configuration
+│   ├── radio.py            # Basic radio settings
+│   ├── radio_config.py     # Full radio config (NEW)
+│   ├── hardware_config.py  # SPI/Serial/GPIO (NEW)
+│   ├── modules.py          # Module configuration
+│   ├── device.py           # Device configuration
+│   ├── hardware.py         # Hardware detection
+│   └── channel_presets.py  # Channel presets
+│
+├── tools/                  # System tools (v3.2.0)
+│   ├── network_tools.py    # TCP/IP, ping, scanning
+│   ├── rf_tools.py         # Link budget, LoRa analysis
+│   ├── mudp_tools.py       # UDP, multicast, MUDP
+│   └── tool_manager.py     # Tool install/update
+│
+├── diagnostics/            # Diagnostic tools (v3.1.0)
+│   ├── system_diagnostics.py
+│   └── site_planner.py
+│
+├── gtk_ui/                 # GTK4 interface
+│   ├── app.py              # Main GTK4 application
+│   └── panels/             # UI panels
+│       ├── dashboard.py
+│       ├── service.py      # Fixed with sudo
+│       ├── config.py
+│       ├── cli.py
+│       ├── hardware.py
+│       └── tools.py        # NEW in v3.2.0
+│
+├── tui/                    # Textual TUI
+│   └── app.py              # Fixed widget IDs
+│
+├── installer/              # Installation modules
+│   ├── meshtasticd.py
+│   ├── dependencies.py
+│   └── uninstaller.py      # v3.0.4
+│
+├── services/               # Service management
+│   └── service_manager.py
+│
+├── cli/                    # Meshtastic CLI wrapper
+│   └── meshtastic_cli.py
+│
+└── utils/                  # Utilities
+    ├── system.py
+    ├── emoji.py            # Font detection
+    ├── cli.py              # CLI path finder
+    ├── progress.py         # Progress indicators
+    └── logger.py
+```
 
 ---
 
-## Resume Instructions
+## Main Menu Options
 
-When resuming:
-1. `git checkout claude/review-meshtasticd-installer-52ENu`
-2. `git status` to see any uncommitted work
-3. Review "STILL PENDING" section above
-4. Check user's testing notes
-5. Continue with pending items
+```
+Main Menu:
+1. Quick Status Dashboard
+2. Service Management
+3. Install meshtasticd
+4. Update meshtasticd
+5. Configure device
+6. Channel Presets (Quick Setup)
+7. Configuration Templates
+8. Config File Manager (YAML + nano)
+f. Full Radio Config (Mesh, MQTT, Position) [NEW]
+c. Meshtastic CLI Commands
+t. System Diagnostics
+p. Site Planner
+n. Network Tools
+r. RF Tools
+m. MUDP Tools
+g. Tool Manager
+9. Check dependencies
+h. Hardware detection
+w. Hardware Configuration (SPI, Serial, GPIO) [NEW]
+d. Debug & troubleshooting
+u. Uninstall
+q. Exit
+```
+
+---
+
+## Known Issues / Pending Work
+
+1. **Device Configuration Wizard** - May need additional back options
+2. **Additional TUI/GTK4 testing** - User testing in progress
+3. **Mobile/tablet UI** - Not yet optimized
+
+---
+
+## Key Technical Details
+
+### Meshtastic Connection
+- Default: `localhost:4403` (TCP)
+- CLI: `meshtastic --host localhost`
+- MUDP: `224.0.0.69:4403` (multicast)
+
+### Raspberry Pi Configuration
+- Boot config: `/boot/firmware/config.txt`
+- SPI overlay: `dtoverlay=spi0-0cs`
+- Config files: `/etc/meshtasticd/config.d/`
+- Available configs: `/etc/meshtasticd/available.d/`
+
+### pip Installation (RPi)
+```bash
+# For Textual TUI
+sudo pip install --break-system-packages --ignore-installed textual
+
+# For GTK4 (system packages)
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1
+```
+
+---
+
+## Git Commands
+
+```bash
+# Current branch
+git checkout claude/review-meshtasticd-installer-52ENu
+
+# View changes
+git diff --stat origin/main..HEAD
+
+# Commit format
+git commit -m "feat: Description of feature"
+git commit -m "fix: Description of fix"
+
+# Push to branch
+git push -u origin claude/review-meshtasticd-installer-52ENu
+```
+
+---
+
+## Testing Checklist
+
+- [ ] Rich CLI menu navigation
+- [ ] Textual TUI all tabs work
+- [ ] GTK4 service buttons work
+- [ ] Config file manager (activate/edit)
+- [ ] Channel configuration (add/edit)
+- [ ] Hardware detection
+- [ ] Service start/stop/restart
+- [ ] Meshtastic CLI commands
+- [ ] System diagnostics
+- [ ] RF tools (link budget)
+- [ ] MUDP tools (if mudp installed)
+
+---
+
+## Contact / Repository
+
+- **GitHub:** https://github.com/Nursedude/Meshtasticd_interactive_UI
+- **Branch:** claude/review-meshtasticd-installer-52ENu
+- **License:** GPL-3.0
