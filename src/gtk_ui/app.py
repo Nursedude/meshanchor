@@ -1,5 +1,6 @@
 """
-GTK4 Application for Meshtasticd Interactive Installer
+MeshForge - GTK4 Application
+LoRa Mesh Network Development & Operations Suite
 Main application entry point and window management
 """
 
@@ -17,15 +18,15 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from __version__ import __version__, get_full_version
+from __version__ import __version__, get_full_version, __app_name__
 
 
-class MeshtasticdApp(Adw.Application):
-    """Main GTK4 Application"""
+class MeshForgeApp(Adw.Application):
+    """MeshForge GTK4 Application"""
 
     def __init__(self):
         super().__init__(
-            application_id='org.meshtastic.installer',
+            application_id='org.meshforge.app',
             # NON_UNIQUE allows running without D-Bus registration
             # This fixes "Failed to register: Timeout was reached" when running as root
             flags=Gio.ApplicationFlags.NON_UNIQUE
@@ -36,17 +37,21 @@ class MeshtasticdApp(Adw.Application):
     def on_activate(self, app):
         """Called when application is activated"""
         if not self.window:
-            self.window = MeshtasticdWindow(application=app)
+            self.window = MeshForgeWindow(application=app)
         self.window.present()
 
 
-class MeshtasticdWindow(Adw.ApplicationWindow):
-    """Main application window"""
+# Backwards compatibility alias
+MeshtasticdApp = MeshForgeApp
+
+
+class MeshForgeWindow(Adw.ApplicationWindow):
+    """MeshForge main application window"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.set_title(f"Meshtasticd Manager v{__version__}")
+        self.set_title(f"MeshForge v{__version__}")
         self.set_default_size(900, 700)
 
         # Track subprocess for nano/terminal operations

@@ -1,6 +1,26 @@
-# Meshtasticd Interactive UI - Development Session Notes
+# MeshForge - Development Session Notes
 
-## Current Version: 3.2.7
+> **LoRa Mesh Network Development & Operations Suite**
+> *Build. Test. Deploy. Monitor.*
+
+## Current Version: 4.0.0
+
+## Project Identity
+
+**Name**: MeshForge
+**Tagline**: "LoRa Mesh Network Development & Operations Suite"
+**Pillars**: Build. Test. Deploy. Monitor.
+
+### Naming Decision (2026-01-03)
+- Considered: MOC (Meshtastic Operations Center), MeshOps, LoRaBase
+- Chosen: **MeshForge** - implies building/creating, craftsmanship, professional grade
+- "Forge" connects to: heat/radio waves, maker culture, industrial strength
+
+### Application ID
+- GTK: `org.meshforge.app`
+- Old: `org.meshtastic.installer`
+
+---
 
 ## Recent Work Summary
 
@@ -10,6 +30,7 @@
 3. Radio Configuration panel parsing improvements
 4. Config File Manager enhancements
 5. Hardware detection without node dependency
+6. **Rebrand to MeshForge v4.0.0**
 
 ---
 

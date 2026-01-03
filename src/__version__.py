@@ -1,11 +1,33 @@
-"""Version information for Meshtasticd Interactive Installer"""
+"""
+MeshForge - LoRa Mesh Network Development & Operations Suite
+Version information and changelog
+"""
 
-__version__ = "3.2.7"
-__version_info__ = (3, 2, 7)
-__release_date__ = "2026-01-02"
+__version__ = "4.0.0"
+__version_info__ = (4, 0, 0)
+__release_date__ = "2026-01-03"
+__app_name__ = "MeshForge"
+__app_description__ = "LoRa Mesh Network Development & Operations Suite"
+__app_tagline__ = "Build. Test. Deploy. Monitor."
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "4.0.0",
+        "date": "2026-01-03",
+        "changes": [
+            "REBRAND: Project renamed to MeshForge",
+            "NEW: Professional suite branding - 'LoRa Mesh Network Development & Operations Suite'",
+            "NEW: Frequency Slot Calculator in Radio Config panel",
+            "NEW: Enhanced Radio Config parsing with robust data extraction",
+            "NEW: Hardware detection for USB LoRa devices (CH340, CP2102, ESP32, nRF52840)",
+            "NEW: Serial port detection for GPS modules",
+            "NEW: Desktop launcher support for Raspberry Pi",
+            "IMPROVED: Session notes for development continuity",
+            "IMPROVED: Debug output for radio parsing troubleshooting",
+            "FOUNDATION: Preparing for future node flashing capability"
+        ]
+    },
     {
         "version": "3.2.7",
         "date": "2026-01-02",
