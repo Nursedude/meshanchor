@@ -56,6 +56,7 @@ class RadioConfigPanel(Gtk.Box):
         self._add_radio_info_section(content_box)
         self._add_device_section(content_box)
         self._add_lora_section(content_box)
+        self._add_frequency_calculator_section(content_box)
         self._add_position_section(content_box)
         self._add_power_section(content_box)
         self._add_mqtt_section(content_box)
@@ -215,9 +216,6 @@ class RadioConfigPanel(Gtk.Box):
         import re
         import ast
 
-        # Debug: print raw output to terminal for troubleshooting
-        print(f"[DEBUG] Raw --info output:\n{output[:500]}...")
-
         # Extract Owner line - format: "Owner: LongName (ShortName/NodeID)"
         # Examples: "Owner: MyNode (MYND) !abcd1234" or "Owner: MyNode (!abcd1234)"
         owner_patterns = [
@@ -256,7 +254,7 @@ class RadioConfigPanel(Gtk.Box):
                     import json
                     json_str = dict_str.replace("'", '"').replace("True", "true").replace("False", "false").replace("None", "null")
                     return json.loads(json_str)
-                except:
+                except (ValueError, SyntaxError, json.JSONDecodeError):
                     return {}
 
         # Parse "My info:" block - may contain numChannels, myNodeNum, etc.
@@ -296,7 +294,7 @@ class RadioConfigPanel(Gtk.Box):
                         if self.radio_hardware.get_label() == "--":
                             self.radio_hardware.set_label(user.get('hwModel', '--'))
                         break  # Only get first node (local node)
-            except:
+            except (ValueError, SyntaxError, KeyError, TypeError):
                 pass
 
         # Extract individual fields using flexible patterns (handles both ' and " quotes)
@@ -369,12 +367,6 @@ class RadioConfigPanel(Gtk.Box):
                     match = re.search(r':\s*(\d+\.\d+\.\d+[a-zA-Z0-9.-]*)', line)
                     if match:
                         self.radio_firmware.set_label(match.group(1))
-
-        # Debug: print what we extracted
-        print(f"[DEBUG] Parsed radio info: Node={self.radio_node_id.get_label()}, "
-              f"Long={self.radio_long_name.get_label()}, Short={self.radio_short_name.get_label()}, "
-              f"HW={self.radio_hardware.get_label()}, FW={self.radio_firmware.get_label()}, "
-              f"Region={self.radio_region.get_label()}, Preset={self.radio_preset.get_label()}")
 
     def _add_device_section(self, parent):
         """Add device/mesh settings section"""
@@ -476,6 +468,206 @@ class RadioConfigPanel(Gtk.Box):
 
         frame.set_child(box)
         parent.append(frame)
+
+    def _add_frequency_calculator_section(self, parent):
+        """Add frequency slot calculator section - calculates frequency from channel name"""
+        frame = Gtk.Frame()
+        frame.set_label("Frequency Slot Calculator")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Description
+        desc = Gtk.Label(label="Calculate the frequency slot and center frequency for a channel name.\n"
+                               "Uses the djb2 hash algorithm from Meshtastic firmware.")
+        desc.set_xalign(0)
+        desc.add_css_class("dim-label")
+        desc.set_wrap(True)
+        box.append(desc)
+
+        # Channel Name Entry
+        name_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        name_box.append(Gtk.Label(label="Channel Name:"))
+        self.freq_calc_channel = Gtk.Entry()
+        self.freq_calc_channel.set_text("LongFast")
+        self.freq_calc_channel.set_hexpand(True)
+        name_box.append(self.freq_calc_channel)
+        box.append(name_box)
+
+        # Region dropdown
+        region_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        region_box.append(Gtk.Label(label="Region:"))
+        self.freq_calc_region = Gtk.DropDown.new_from_strings([
+            "US", "EU_868", "EU_433", "CN", "JP", "ANZ", "KR", "TW", "RU",
+            "IN", "NZ_865", "TH", "LORA_24", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923"
+        ])
+        self.freq_calc_region.set_selected(0)  # Default to US
+        region_box.append(self.freq_calc_region)
+        box.append(region_box)
+
+        # Modem Preset dropdown
+        preset_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        preset_box.append(Gtk.Label(label="Modem Preset:"))
+        self.freq_calc_preset = Gtk.DropDown.new_from_strings([
+            "LONG_FAST", "LONG_SLOW", "LONG_MODERATE", "MEDIUM_SLOW", "MEDIUM_FAST",
+            "SHORT_SLOW", "SHORT_FAST", "SHORT_TURBO"
+        ])
+        self.freq_calc_preset.set_selected(0)
+        preset_box.append(self.freq_calc_preset)
+        box.append(preset_box)
+
+        # Calculate button
+        calc_btn = Gtk.Button(label="Calculate Frequency")
+        calc_btn.add_css_class("suggested-action")
+        calc_btn.connect("clicked", self._on_calculate_frequency)
+        box.append(calc_btn)
+
+        # Results display
+        result_frame = Gtk.Frame()
+        result_frame.set_label("Results")
+        result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        result_box.set_margin_start(10)
+        result_box.set_margin_end(10)
+        result_box.set_margin_top(8)
+        result_box.set_margin_bottom(8)
+
+        # Hash value
+        hash_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hash_row.append(Gtk.Label(label="Hash (djb2):"))
+        self.freq_calc_hash = Gtk.Label(label="--")
+        self.freq_calc_hash.set_xalign(0)
+        self.freq_calc_hash.add_css_class("monospace")
+        hash_row.append(self.freq_calc_hash)
+        result_box.append(hash_row)
+
+        # Slot
+        slot_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        slot_row.append(Gtk.Label(label="Frequency Slot:"))
+        self.freq_calc_slot = Gtk.Label(label="--")
+        self.freq_calc_slot.set_xalign(0)
+        slot_row.append(self.freq_calc_slot)
+        result_box.append(slot_row)
+
+        # Num channels
+        num_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        num_row.append(Gtk.Label(label="Total Slots:"))
+        self.freq_calc_num_slots = Gtk.Label(label="--")
+        self.freq_calc_num_slots.set_xalign(0)
+        num_row.append(self.freq_calc_num_slots)
+        result_box.append(num_row)
+
+        # Center frequency
+        freq_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        freq_row.append(Gtk.Label(label="Center Frequency:"))
+        self.freq_calc_freq = Gtk.Label(label="--")
+        self.freq_calc_freq.set_xalign(0)
+        self.freq_calc_freq.add_css_class("success")
+        freq_row.append(self.freq_calc_freq)
+        result_box.append(freq_row)
+
+        result_frame.set_child(result_box)
+        box.append(result_frame)
+
+        # Common presets info
+        info_label = Gtk.Label(label="Common defaults (US, LongFast): Slot 20 @ 906.875 MHz")
+        info_label.set_xalign(0)
+        info_label.add_css_class("dim-label")
+        box.append(info_label)
+
+        frame.set_child(box)
+        parent.append(frame)
+
+    def _djb2_hash(self, s):
+        """Calculate djb2 hash - same algorithm as Meshtastic firmware"""
+        h = 5381
+        for c in s:
+            h = ((h << 5) + h) + ord(c)
+        return h & 0xFFFFFFFF  # Keep it 32-bit unsigned
+
+    def _get_region_params(self, region):
+        """Get frequency parameters for a region"""
+        # Region parameters: (freqStart, freqEnd, spacing, dutyCycle)
+        # Spacing is typically 0 for most regions (calculated from bandwidth)
+        regions = {
+            "US": (902.0, 928.0, 0, 100),
+            "EU_868": (869.4, 869.65, 0, 10),
+            "EU_433": (433.0, 434.0, 0, 10),
+            "CN": (470.0, 510.0, 0, 100),
+            "JP": (920.8, 923.8, 0, 100),
+            "ANZ": (915.0, 928.0, 0, 100),
+            "KR": (920.0, 923.0, 0, 100),
+            "TW": (920.0, 925.0, 0, 100),
+            "RU": (868.7, 869.2, 0, 100),
+            "IN": (865.0, 867.0, 0, 100),
+            "NZ_865": (864.0, 868.0, 0, 100),
+            "TH": (920.0, 925.0, 0, 100),
+            "LORA_24": (2400.0, 2483.5, 0, 100),
+            "UA_433": (433.0, 434.79, 0, 10),
+            "UA_868": (868.0, 868.6, 0, 1),
+            "MY_433": (433.0, 435.0, 0, 100),
+            "MY_919": (919.0, 924.0, 0, 100),
+            "SG_923": (920.0, 925.0, 0, 100),
+        }
+        return regions.get(region, (902.0, 928.0, 0, 100))
+
+    def _get_preset_bandwidth(self, preset):
+        """Get bandwidth in kHz for a modem preset"""
+        # Bandwidths from Meshtastic modem presets
+        presets = {
+            "LONG_FAST": 250,
+            "LONG_SLOW": 125,
+            "LONG_MODERATE": 125,
+            "MEDIUM_SLOW": 250,
+            "MEDIUM_FAST": 250,
+            "SHORT_SLOW": 250,
+            "SHORT_FAST": 250,
+            "SHORT_TURBO": 500,
+        }
+        return presets.get(preset, 250)
+
+    def _on_calculate_frequency(self, button):
+        """Calculate and display frequency slot"""
+        channel_name = self.freq_calc_channel.get_text().strip()
+        if not channel_name:
+            channel_name = "LongFast"
+
+        # Get selected region
+        regions = ["US", "EU_868", "EU_433", "CN", "JP", "ANZ", "KR", "TW", "RU",
+                   "IN", "NZ_865", "TH", "LORA_24", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923"]
+        region_idx = self.freq_calc_region.get_selected()
+        region = regions[region_idx] if region_idx < len(regions) else "US"
+
+        # Get selected preset
+        presets = ["LONG_FAST", "LONG_SLOW", "LONG_MODERATE", "MEDIUM_SLOW", "MEDIUM_FAST",
+                   "SHORT_SLOW", "SHORT_FAST", "SHORT_TURBO"]
+        preset_idx = self.freq_calc_preset.get_selected()
+        preset = presets[preset_idx] if preset_idx < len(presets) else "LONG_FAST"
+
+        # Get region parameters
+        freq_start, freq_end, spacing, _ = self._get_region_params(region)
+        bw = self._get_preset_bandwidth(preset)
+
+        # Calculate number of channels: floor((freqEnd - freqStart) / (spacing + (bw / 1000)))
+        import math
+        num_channels = int(math.floor((freq_end - freq_start) / (spacing + (bw / 1000))))
+
+        # Calculate hash and slot
+        h = self._djb2_hash(channel_name)
+        slot = h % num_channels
+
+        # Calculate center frequency: freqStart + (bw / 2000) + (slot * (bw / 1000))
+        center_freq = freq_start + (bw / 2000) + (slot * (bw / 1000))
+
+        # Update display
+        self.freq_calc_hash.set_label(f"0x{h:08X} ({h})")
+        self.freq_calc_slot.set_label(f"{slot + 1} (0-indexed: {slot})")
+        self.freq_calc_num_slots.set_label(str(num_channels))
+        self.freq_calc_freq.set_label(f"{center_freq:.3f} MHz")
+
+        self.status_label.set_label(f"Calculated: '{channel_name}' → Slot {slot + 1} @ {center_freq:.3f} MHz ({region})")
 
     def _add_position_section(self, parent):
         """Add position settings section"""
@@ -942,9 +1134,6 @@ class RadioConfigPanel(Gtk.Box):
         import re
         import ast
 
-        # Debug output
-        print(f"[DEBUG] Raw config output:\n{output[:800]}...")
-
         # Option lists for dropdowns (must match dropdown order)
         roles = ["CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT",
                  "REPEATER", "TRACKER", "SENSOR", "TAK", "TAK_TRACKER", "CLIENT_HIDDEN", "LOST_AND_FOUND"]
@@ -1135,10 +1324,6 @@ class RadioConfigPanel(Gtk.Box):
             self.current_pos_label.set_label(pos_str)
         else:
             self.current_pos_label.set_label("Not set or GPS disabled")
-
-        # Debug: show what was set
-        set_fields = [k for k, v in fields_set.items() if v]
-        print(f"[DEBUG] Config fields populated: {set_fields}")
 
         self.main_window.set_status_message("Configuration loaded from device")
 

@@ -322,8 +322,9 @@ def main():
         auto_launch = False
 
     while True:
-        # Clear screen
-        os.system('clear' if os.name == 'posix' else 'cls')
+        # Clear screen (using subprocess for security)
+        import subprocess
+        subprocess.run(['clear'] if os.name == 'posix' else ['cls'], shell=False, check=False)
 
         # Print banner and info
         print_banner()

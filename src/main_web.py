@@ -130,7 +130,7 @@ def run_subprocess(cmd, **kwargs):
         try:
             if proc in _running_processes:
                 _running_processes.remove(proc)
-        except:
+        except (NameError, ValueError):
             pass
         raise
 

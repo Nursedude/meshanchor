@@ -571,7 +571,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
                 return f"{hours}h {minutes}m"
             else:
                 return f"{minutes}m"
-        except:
+        except (ValueError, TypeError, OSError):
             return "--"
 
     def open_terminal_editor(self, file_path, callback=None):

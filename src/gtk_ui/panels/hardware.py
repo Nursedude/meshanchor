@@ -231,7 +231,7 @@ class HardwarePanel(Gtk.Box):
             if model_file.exists():
                 return model_file.read_text().strip().rstrip('\x00')
             return "Unknown"
-        except:
+        except (OSError, PermissionError):
             return "Unknown"
 
     def _enable_interface(self, interface):

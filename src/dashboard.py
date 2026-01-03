@@ -66,7 +66,7 @@ class StatusDashboard:
             with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
                 temp = int(f.read().strip()) / 1000
                 info['cpu_temp'] = f'{temp:.1f}°C'
-        except:
+        except (FileNotFoundError, ValueError, PermissionError):
             info['cpu_temp'] = 'N/A'
 
         # Memory usage
@@ -87,7 +87,7 @@ class StatusDashboard:
                     info['memory'] = f'{usage_pct:.1f}%'
                 else:
                     info['memory'] = 'N/A'
-        except:
+        except (FileNotFoundError, ValueError, KeyError, PermissionError):
             info['memory'] = 'N/A'
 
         # Disk usage
@@ -101,7 +101,7 @@ class StatusDashboard:
                 info['disk'] = f'{usage_pct:.1f}%'
             else:
                 info['disk'] = 'N/A'
-        except:
+        except (OSError, ZeroDivisionError):
             info['disk'] = 'N/A'
 
         return info

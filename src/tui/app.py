@@ -124,7 +124,7 @@ class DashboardPane(Container):
                 self.query_one("#version-status", Static).update("[yellow]Not installed[/yellow]")
         except FileNotFoundError:
             self.query_one("#version-status", Static).update("[yellow]Not installed[/yellow]")
-        except:
+        except Exception:
             pass
 
         # Config status
@@ -163,7 +163,7 @@ class DashboardPane(Container):
             log_widget = self.query_one("#dashboard-log", Log)
             log_widget.clear()
             log_widget.write(stdout.decode())
-        except:
+        except Exception:
             pass
 
 

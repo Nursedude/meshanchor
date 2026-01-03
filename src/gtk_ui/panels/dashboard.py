@@ -251,7 +251,7 @@ class DashboardPanel(Gtk.Box):
                         else:
                             status = "Main config empty"
                             css = "warning"
-                    except:
+                    except (OSError, PermissionError):
                         status = "Main config exists"
                         css = "success"
                 elif available_configs:

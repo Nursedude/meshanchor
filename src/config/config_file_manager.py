@@ -323,7 +323,7 @@ General:
                     first_line = f.readline().strip()
                     if first_line.startswith("#"):
                         desc = first_line[1:].strip()[:50]
-            except:
+            except (OSError, UnicodeDecodeError):
                 pass
             table.add_row(str(i), cfg, desc)
 

@@ -130,14 +130,15 @@ def get_os_type():
         return 'unknown'
 
 
-def run_command(command, shell=False, capture_output=True, stream_output=False):
+def run_command(command, shell=False, capture_output=True, stream_output=False, stderr_to_null=False):
     """Run a system command and return the result
 
     Args:
         command: Command to run (string or list)
-        shell: Use shell execution
+        shell: Use shell execution (avoid for security)
         capture_output: Capture stdout/stderr
         stream_output: Print output in real-time (for interactive commands)
+        stderr_to_null: Redirect stderr to /dev/null (suppress errors)
     """
     try:
         if isinstance(command, str) and not shell:
@@ -170,18 +171,26 @@ def run_command(command, shell=False, capture_output=True, stream_output=False):
                 'success': process.returncode == 0
             }
         else:
-            result = subprocess.run(
-                command,
-                shell=shell,
-                capture_output=capture_output,
-                text=True,
-                timeout=300
-            )
+            # Build subprocess arguments
+            run_kwargs = {
+                'shell': shell,
+                'text': True,
+                'timeout': 300
+            }
+
+            if stderr_to_null:
+                # Redirect stderr to /dev/null
+                run_kwargs['stdout'] = subprocess.PIPE
+                run_kwargs['stderr'] = subprocess.DEVNULL
+            elif capture_output:
+                run_kwargs['capture_output'] = True
+
+            result = subprocess.run(command, **run_kwargs)
 
             return {
                 'returncode': result.returncode,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
+                'stdout': result.stdout if result.stdout else '',
+                'stderr': '' if stderr_to_null else (result.stderr if result.stderr else ''),
                 'success': result.returncode == 0
             }
     except subprocess.TimeoutExpired:

@@ -328,7 +328,8 @@ class HardwareDetector:
 
         if result['success'] and '50' in result['stdout']:
             # HAT EEPROM detected, try to read it
-            eeprom_result = run_command('cat /proc/device-tree/hat/product 2>/dev/null', shell=True)
+            # Read HAT EEPROM product info (using list args for security)
+            eeprom_result = run_command(['cat', '/proc/device-tree/hat/product'], stderr_to_null=True)
 
             if eeprom_result['success'] and eeprom_result['stdout'].strip():
                 return {

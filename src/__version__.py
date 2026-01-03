@@ -3,8 +3,8 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "4.0.0"
-__version_info__ = (4, 0, 0)
+__version__ = "4.0.1"
+__version_info__ = (4, 0, 1)
 __release_date__ = "2026-01-03"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
@@ -12,6 +12,19 @@ __app_tagline__ = "Build. Test. Deploy. Monitor."
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "4.0.1",
+        "date": "2026-01-03",
+        "changes": [
+            "SECURITY: Replaced os.system() with subprocess.run() in launcher.py",
+            "SECURITY: Removed shell=True from subprocess calls in hardware.py",
+            "SECURITY: Fixed bare except clauses across 12 files",
+            "CLEAN: Removed debug print statements from radio_config.py",
+            "NEW: Frequency Slot Calculator with djb2 hash algorithm",
+            "NEW: Region and modem preset selection for frequency calculation",
+            "IMPROVED: Better exception handling with specific exception types"
+        ]
+    },
     {
         "version": "4.0.0",
         "date": "2026-01-03",
