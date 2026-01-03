@@ -105,9 +105,36 @@ class ConfigPanel(Gtk.Box):
         # Right side - Active configs and actions
         right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
 
+        # Main config status frame
+        main_config_frame = Gtk.Frame()
+        main_config_frame.set_label("Main Configuration")
+
+        main_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        main_config_box.set_margin_start(10)
+        main_config_box.set_margin_end(10)
+        main_config_box.set_margin_top(8)
+        main_config_box.set_margin_bottom(8)
+
+        self.main_config_status = Gtk.Label()
+        self.main_config_status.set_xalign(0)
+        self.main_config_status.set_wrap(True)
+        main_config_box.append(self.main_config_status)
+
+        main_config_frame.set_child(main_config_box)
+        right_box.append(main_config_frame)
+
         # Active configs frame
         active_frame = Gtk.Frame()
         active_frame.set_label("Active Configurations (config.d)")
+
+        active_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+
+        self.active_status = Gtk.Label()
+        self.active_status.set_xalign(0)
+        self.active_status.set_margin_start(10)
+        self.active_status.set_margin_top(5)
+        self.active_status.add_css_class("dim-label")
+        active_box.append(self.active_status)
 
         active_scrolled = Gtk.ScrolledWindow()
         active_scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -115,9 +142,11 @@ class ConfigPanel(Gtk.Box):
 
         self.active_list = Gtk.ListBox()
         self.active_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.active_list.connect("row-selected", self._on_active_config_selected)
         active_scrolled.set_child(self.active_list)
 
-        active_frame.set_child(active_scrolled)
+        active_box.append(active_scrolled)
+        active_frame.set_child(active_box)
         right_box.append(active_frame)
 
         # Preview frame
@@ -196,6 +225,9 @@ class ConfigPanel(Gtk.Box):
             else:
                 break
 
+        # Update main config status
+        self._update_main_config_status()
+
         # Get filter
         filter_map = {
             0: None,  # All
@@ -207,6 +239,7 @@ class ConfigPanel(Gtk.Box):
         selected_filter = filter_map.get(self.filter_dropdown.get_selected())
 
         # Load available configs
+        available_count = 0
         if self.AVAILABLE_D.exists():
             configs = sorted(self.AVAILABLE_D.glob("*.yaml"))
 
@@ -230,12 +263,70 @@ class ConfigPanel(Gtk.Box):
                             continue
 
                 self._add_config_row(self.available_list, config_path, False)
+                available_count += 1
 
         # Load active configs
+        active_count = 0
         if self.CONFIG_D.exists():
             active_configs = sorted(self.CONFIG_D.glob("*.yaml"))
             for config_path in active_configs:
                 self._add_config_row(self.active_list, config_path, True)
+                active_count += 1
+
+        # Update active status
+        if active_count == 0:
+            self.active_status.set_label("No additional configs active. Select from available.d to activate.")
+        else:
+            self.active_status.set_label(f"{active_count} config(s) active")
+
+    def _update_main_config_status(self):
+        """Update the main config.yaml status display"""
+        if not self.CONFIG_BASE.exists():
+            self.main_config_status.set_label("meshtasticd not installed\n/etc/meshtasticd/ does not exist")
+            return
+
+        status_lines = []
+
+        # Check main config.yaml
+        if self.MAIN_CONFIG.exists():
+            try:
+                size = self.MAIN_CONFIG.stat().st_size
+                status_lines.append(f"config.yaml: {size} bytes")
+
+                # Try to read first few lines for module info
+                content = self.MAIN_CONFIG.read_text()
+                for line in content.split('\n')[:20]:
+                    if 'Module:' in line or 'module:' in line:
+                        status_lines.append(f"  {line.strip()}")
+                        break
+            except Exception as e:
+                status_lines.append(f"config.yaml: Error reading - {e}")
+        else:
+            status_lines.append("config.yaml: Not found (click 'Edit config.yaml' to create)")
+
+        # Check directories
+        if self.AVAILABLE_D.exists():
+            available_count = len(list(self.AVAILABLE_D.glob("*.yaml")))
+            status_lines.append(f"available.d/: {available_count} templates")
+        else:
+            status_lines.append("available.d/: Not found")
+
+        if self.CONFIG_D.exists():
+            active_count = len(list(self.CONFIG_D.glob("*.yaml")))
+            status_lines.append(f"config.d/: {active_count} active")
+        else:
+            status_lines.append("config.d/: Not found")
+
+        self.main_config_status.set_label('\n'.join(status_lines))
+
+    def _on_active_config_selected(self, listbox, row):
+        """Handle active config selection"""
+        if row:
+            config_path = Path(row.get_name())
+            self.deactivate_btn.set_sensitive(True)
+            self._show_preview(config_path)
+        else:
+            self.deactivate_btn.set_sensitive(False)
 
     def _add_config_row(self, listbox, config_path, is_active):
         """Add a config row to a listbox"""

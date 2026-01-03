@@ -95,6 +95,12 @@ class RadioConfigPanel(Gtk.Box):
         box.set_margin_top(10)
         box.set_margin_bottom(10)
 
+        # Connection status indicator
+        self.connection_status = Gtk.Label(label="Checking connection...")
+        self.connection_status.set_xalign(0)
+        self.connection_status.add_css_class("dim-label")
+        box.append(self.connection_status)
+
         # Create a grid for radio info display
         grid = Gtk.Grid()
         grid.set_column_spacing(20)
@@ -143,29 +149,66 @@ class RadioConfigPanel(Gtk.Box):
         """Load radio info from device using --info command"""
         import socket
 
+        # Reset all fields to indicate loading
+        self._clear_radio_info()
+
         # Quick pre-check: is meshtasticd reachable?
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2.0)
             sock.connect(("localhost", 4403))
             sock.close()
+            self.connection_status.set_label("meshtasticd is running on port 4403")
         except (socket.timeout, socket.error, OSError):
-            self.status_label.set_label("Cannot connect to meshtasticd (port 4403)")
+            self.connection_status.set_label("Not connected - meshtasticd not running on port 4403")
+            self.status_label.set_label("Start meshtasticd service to see radio info")
+            self._set_no_radio_message()
             return
 
         self.status_label.set_label("Loading radio info...")
+        self.connection_status.set_label("Connecting to radio...")
 
         def on_result(success, stdout, stderr):
             if success and stdout.strip():
                 self._parse_radio_info(stdout)
+                self.connection_status.set_label("Connected to radio")
                 self.status_label.set_label("Radio info loaded")
             elif "not found" in stderr.lower() or not self._find_cli():
+                self.connection_status.set_label("CLI not installed")
                 self.status_label.set_label("Meshtastic CLI not found - install with: pipx install meshtastic")
+                self._set_no_radio_message()
             else:
                 error_msg = stderr.strip() if stderr else "No response from device"
+                if "timed out" in error_msg.lower() or not stdout.strip():
+                    self.connection_status.set_label("No radio detected - check hardware connection")
+                    self._set_no_radio_message()
+                else:
+                    self.connection_status.set_label("Connection issue")
                 self.status_label.set_label(f"Failed: {error_msg[:50]}")
 
         self._run_cli(['--info'], on_result)
+
+    def _clear_radio_info(self):
+        """Clear all radio info fields"""
+        self.radio_node_id.set_label("--")
+        self.radio_long_name.set_label("--")
+        self.radio_short_name.set_label("--")
+        self.radio_hardware.set_label("--")
+        self.radio_firmware.set_label("--")
+        self.radio_region.set_label("--")
+        self.radio_preset.set_label("--")
+        self.radio_channels.set_label("--")
+
+    def _set_no_radio_message(self):
+        """Set message indicating no radio is connected"""
+        self.radio_node_id.set_label("No radio connected")
+        self.radio_long_name.set_label("--")
+        self.radio_short_name.set_label("--")
+        self.radio_hardware.set_label("Connect a radio or start meshtasticd")
+        self.radio_firmware.set_label("--")
+        self.radio_region.set_label("--")
+        self.radio_preset.set_label("--")
+        self.radio_channels.set_label("--")
 
     def _parse_radio_info(self, output):
         """Parse --info output and populate radio info section"""
