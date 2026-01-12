@@ -46,6 +46,15 @@ try:
 except ImportError:
     HAS_SETTINGS_MANAGER = False
 
+# Import Space Weather API for NOAA data
+try:
+    from utils.space_weather import SpaceWeatherAPI, SpaceWeatherData
+    HAS_SPACE_WEATHER = True
+except ImportError:
+    HAS_SPACE_WEATHER = False
+    SpaceWeatherAPI = None
+    SpaceWeatherData = None
+
 # Import service availability checker
 try:
     from utils.service_check import check_port, check_service
@@ -1786,35 +1795,123 @@ class HamClockPanel(Gtk.Box):
         threading.Thread(target=try_open_browser, daemon=True).start()
 
     def _on_fetch_noaa(self, button):
-        """Fetch space weather data from NOAA"""
+        """Fetch space weather data from NOAA using SpaceWeatherAPI"""
         logger.info("[HamClock] NOAA fetch button clicked")
-        self.status_label.set_label("Fetching NOAA data...")
+        self.status_label.set_label("Fetching NOAA SWPC data...")
 
         def fetch():
             try:
-                # NOAA Space Weather Prediction Center - Solar data
-                noaa_url = "https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json"
-                req = urllib.request.Request(noaa_url)
-                req.add_header('User-Agent', 'MeshForge/1.0')
-
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-
-                # Get most recent entry
-                if data and len(data) > 0:
-                    latest = data[-1]
-                    GLib.idle_add(self._update_noaa_display, latest)
+                if HAS_SPACE_WEATHER and SpaceWeatherAPI:
+                    # Use centralized SpaceWeatherAPI
+                    api = SpaceWeatherAPI(timeout=15)
+                    data = api.get_current_conditions()
+                    GLib.idle_add(self._update_noaa_display, data)
                 else:
-                    GLib.idle_add(lambda: self.status_label.set_label("No NOAA data"))
+                    # Fallback to direct API call
+                    noaa_url = "https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json"
+                    req = urllib.request.Request(noaa_url)
+                    req.add_header('User-Agent', 'MeshForge/1.0')
+
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        raw_data = json.loads(response.read().decode('utf-8'))
+
+                    if raw_data and len(raw_data) > 0:
+                        latest = raw_data[-1]
+                        GLib.idle_add(self._update_noaa_display_legacy, latest)
+                    else:
+                        GLib.idle_add(lambda: self.status_label.set_label("No NOAA data"))
 
             except Exception as e:
                 logger.error(f"NOAA fetch error: {e}")
-                GLib.idle_add(lambda: self.status_label.set_label(f"NOAA error: {e}"))
+                GLib.idle_add(lambda: self.status_label.set_label(f"NOAA error: {str(e)[:50]}"))
 
         threading.Thread(target=fetch, daemon=True).start()
 
     def _update_noaa_display(self, data):
-        """Update display with NOAA solar data"""
+        """Update display with SpaceWeatherData from NOAA SWPC"""
+        try:
+            # Solar Flux Index
+            if data.solar_flux:
+                self.stat_labels['sfi'].set_label(f"{int(data.solar_flux)}")
+
+            # Sunspot number (if available)
+            if data.sunspot_number:
+                self.stat_labels['sunspots'].set_label(str(data.sunspot_number))
+
+            # K-index and geomagnetic status
+            if data.k_index is not None:
+                k_str = f"K:{data.k_index}"
+                if hasattr(data, 'geomag_storm') and data.geomag_storm:
+                    k_str += f" ({data.geomag_storm.value})"
+                # Update A-index label if we have K
+                if 'a_index' in self.stat_labels:
+                    self.stat_labels['a_index'].set_label(k_str)
+
+            # X-ray flux
+            if data.xray_flux and 'xray' in self.stat_labels:
+                self.stat_labels['xray'].set_label(data.xray_flux)
+
+            # Band conditions from SpaceWeatherAPI assessment
+            if data.band_conditions:
+                # Map SpaceWeatherAPI band names to our display labels
+                band_mapping = {
+                    '80m': '80m-40m', '40m': '80m-40m',
+                    '30m': '30m-20m', '20m': '30m-20m',
+                    '17m': '17m-15m', '15m': '17m-15m',
+                    '12m': '12m-10m', '10m': '12m-10m',
+                }
+
+                # Aggregate conditions for band pairs
+                pair_conditions = {}
+                for band, condition in data.band_conditions.items():
+                    pair_key = band_mapping.get(band, band)
+                    cond_value = condition.value if hasattr(condition, 'value') else str(condition)
+                    if pair_key not in pair_conditions:
+                        pair_conditions[pair_key] = cond_value
+                    else:
+                        # Combine like "Good/Fair"
+                        pair_conditions[pair_key] = f"{pair_conditions[pair_key]}/{cond_value}"
+
+                for band_pair, condition in pair_conditions.items():
+                    if band_pair in self.band_labels:
+                        self.band_labels[band_pair].set_label(condition)
+
+            # Overall conditions
+            if data.solar_flux:
+                sfi = data.solar_flux
+                if sfi >= 150:
+                    conditions = "Excellent"
+                elif sfi >= 120:
+                    conditions = "Good"
+                elif sfi >= 90:
+                    conditions = "Fair"
+                else:
+                    conditions = "Poor"
+
+                # Adjust for K-index
+                if data.k_index and data.k_index >= 5:
+                    conditions = "Disturbed"
+
+                self.stat_labels['conditions'].set_label(conditions)
+
+            # Update status with summary
+            summary_parts = []
+            if data.solar_flux:
+                summary_parts.append(f"SFI:{int(data.solar_flux)}")
+            if data.k_index is not None:
+                summary_parts.append(f"K:{data.k_index}")
+            if data.xray_flux:
+                summary_parts.append(f"X-ray:{data.xray_flux}")
+
+            self.status_label.set_label(f"NOAA SWPC: {' '.join(summary_parts)}")
+            self._record_update_time()
+
+        except Exception as e:
+            logger.error(f"[HamClock] Error updating NOAA display: {e}")
+            self.status_label.set_label(f"Parse error: {str(e)[:40]}")
+
+    def _update_noaa_display_legacy(self, data):
+        """Legacy update display with raw NOAA solar cycle data"""
         try:
             # Solar Flux Index
             if 'f10.7' in data:
@@ -1850,6 +1947,7 @@ class HamClockPanel(Gtk.Box):
                     self.band_labels[band].set_label(condition)
 
             self.status_label.set_label(f"NOAA data updated (SFI: {sfi})")
+            self._record_update_time()
         except Exception as e:
             self.status_label.set_label(f"Parse error: {e}")
 
