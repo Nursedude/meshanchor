@@ -278,8 +278,11 @@ class MeshCorePlugin(ProtocolPlugin):
             except Exception as e:
                 if not self._stop_receive.is_set():
                     logger.error(f"MeshCore: TCP receive error: {e}")
+                self._connected = False
                 break
 
+        # Ensure connection state is updated when loop exits
+        self._connected = False
         logger.debug("MeshCore: TCP receive loop ended")
 
     def _process_tcp_message(self, message: str):
