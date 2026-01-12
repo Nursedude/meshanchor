@@ -74,7 +74,7 @@
 
 ### Analytics
 - [ ] Coverage analytics
-- [ ] VOACAP propagation predictions (in progress)
+- [x] VOACAP propagation predictions (2026-01-12)
 - [ ] Link budget history/trends
 
 ### API
@@ -114,6 +114,9 @@
 - [x] **Gateway setup wizard** (2026-01-12)
 - [x] **MeshCore TCP connection** (2026-01-12)
 - [x] **Dark mode CSS foundation** (2026-01-12)
+- [x] **HamClock DX Spots integration** (2026-01-12)
+- [x] **HamClock Satellite tracking** (2026-01-12)
+- [x] **HamClock DE/DX location display** (2026-01-12)
 
 ---
 
@@ -133,7 +136,7 @@
 | rns.py | 2953 | Split: config_editor.py, meshchat_panel.py |
 | main_web.py | 2911 | Split: Flask blueprints |
 | tools.py | 2695 | Split: rf_tools.py, network_diag.py |
-| hamclock.py | 1893 | OK for now |
+| hamclock.py | ~2400 | Monitor - approaching split threshold |
 | radio_config.py | 1839 | Consider splitting |
 
 ---
