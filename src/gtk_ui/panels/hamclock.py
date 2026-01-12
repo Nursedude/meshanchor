@@ -29,15 +29,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # Import the proper path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    # Fallback for standalone usage
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+from utils.paths import get_real_user_home
 
 # Use centralized settings manager
 try:
@@ -61,17 +53,6 @@ try:
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
-    # Fallback check_port for when service_check module unavailable
-    def check_port(port, host='localhost', timeout=2.0):
-        import socket
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
-        except (socket.error, OSError):
-            return False
 
 # Import admin command helper for proper privilege escalation (pkexec)
 try:

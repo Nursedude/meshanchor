@@ -190,25 +190,16 @@ class TestCheckRnsConfig:
 
         assert result is False
 
-    def test_sudo_user_fallback(self):
-        """Use SUDO_USER when utils.paths import fails."""
-        # This test verifies the code doesn't crash when SUDO_USER is set
-        # The fallback path construction is tested implicitly
+    def test_sudo_user_handling(self):
+        """Verify SUDO_USER is handled via centralized utils.paths."""
+        # This test verifies the code uses get_real_user_home from utils.paths
+        # which properly handles SUDO_USER for correct home directory resolution
         import os
-        import builtins
-
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == 'utils.paths':
-                raise ImportError("Simulated import error")
-            return original_import(name, *args, **kwargs)
 
         with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
-            with patch.object(builtins, '__import__', mock_import):
-                with patch('pathlib.Path.exists', return_value=False):
-                    # The function should not crash and should use SUDO_USER fallback
-                    result = check_rns_config('/dev/ttyUSB0')
+            with patch('pathlib.Path.exists', return_value=False):
+                # The function should not crash and should use centralized path utility
+                result = check_rns_config('/dev/ttyUSB0')
 
         assert result is False  # No config exists, but it didn't crash
 

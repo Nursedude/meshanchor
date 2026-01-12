@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+from utils.paths import get_real_user_home
+
 # Import diagnostic system
 try:
     from utils.network_diagnostics import (
@@ -784,13 +786,7 @@ class DiagnosticsPanel(Gtk.Box):
             results.append(f"[WARN] Could not check rnsd: {e}")
 
         # Check config - use real user home for sudo compatibility
-        try:
-            from utils.paths import get_real_user_home
-            user_home = get_real_user_home()
-        except ImportError:
-            import os as os_mod
-            sudo_user = os_mod.environ.get('SUDO_USER')
-            user_home = Path(f'/home/{sudo_user}') if sudo_user and sudo_user != 'root' else Path.home()
+        user_home = get_real_user_home()
         rns_config = user_home / '.reticulum' / 'config'
         if rns_config.exists():
             results.append(f"[PASS] RNS config exists: {rns_config}")

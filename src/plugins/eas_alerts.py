@@ -99,21 +99,7 @@ except ImportError:
             pass
 
 # Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        """Get real user home, avoiding Path.home() bug under sudo."""
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        # Additional fallback checks to avoid Path.home() returning /root
-        real_user = os.environ.get('LOGNAME') or os.environ.get('USER')
-        if real_user and real_user != 'root':
-            home_path = Path(f'/home/{real_user}')
-            if home_path.exists():
-                return home_path
-        return Path.home()
+from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 
