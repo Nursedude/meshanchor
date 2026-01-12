@@ -76,10 +76,31 @@ class MeshForgeVTEApp(Adw.Application if GTK_VERSION == 4 else Gtk.Application):
             super().__init__(application_id=app_id, flags=flags)
 
         self.window = None
+        self._icons_registered = False
         self.connect('activate', self.on_activate)
+
+    def _register_icons(self):
+        """Register MeshForge icons with the icon theme"""
+        if self._icons_registered:
+            return
+
+        src_dir = Path(__file__).parent.parent
+        assets_dir = src_dir / 'assets'
+
+        if GTK_VERSION == 4:
+            display = Gdk.Display.get_default()
+            if display:
+                icon_theme = Gtk.IconTheme.get_for_display(display)
+                if assets_dir.exists():
+                    icon_theme.add_search_path(str(assets_dir))
+                Gtk.Window.set_default_icon_name("org.meshforge.app")
+                self._icons_registered = True
 
     def on_activate(self, app):
         """Handle app activation"""
+        # Register icons before creating window
+        self._register_icons()
+
         if not self.window:
             self.window = MeshForgeVTEWindow(application=app)
         self.window.present()
@@ -101,23 +122,55 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         self._build_ui()
 
     def _set_window_icon(self):
-        """Set window icon for taskbar"""
+        """Set window icon for taskbar - handles GTK4/libadwaita properly"""
         try:
-            # Find icon
+            # For GTK4/libadwaita, we need icons in the icon theme
+            # Add assets directory to search path first
             src_dir = Path(__file__).parent.parent
-            icon_paths = [
-                src_dir / 'assets' / 'meshforge-icon.svg',
-                Path('/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg'),
-                Path('/usr/share/pixmaps/org.meshforge.app.svg'),
-            ]
+            assets_dir = src_dir / 'assets'
+            icon_file = assets_dir / 'meshforge-icon.svg'
 
-            for path in icon_paths:
-                if path.exists():
-                    if GTK_VERSION == 4:
-                        self.set_icon_name("org.meshforge.app")
-                    else:
+            if GTK_VERSION == 4:
+                display = Gdk.Display.get_default()
+                if display:
+                    icon_theme = Gtk.IconTheme.get_for_display(display)
+
+                    # Add assets dir to theme search path
+                    if assets_dir.exists():
+                        icon_theme.add_search_path(str(assets_dir))
+
+                    # Try to install icon to system if we have permission
+                    system_icon = Path('/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg')
+                    if icon_file.exists() and not system_icon.exists():
+                        try:
+                            import shutil
+                            system_icon.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy(str(icon_file), str(system_icon))
+                            # Update icon cache
+                            import subprocess
+                            subprocess.run(['gtk-update-icon-cache', '-f', '-q', '/usr/share/icons/hicolor'],
+                                         capture_output=True, timeout=10)
+                        except (PermissionError, OSError):
+                            pass  # Skip if no permission
+
+                # Set default icon for all windows
+                Gtk.Window.set_default_icon_name("org.meshforge.app")
+                self.set_icon_name("org.meshforge.app")
+
+                # Also try by matching file in assets (meshforge-icon.svg -> icon name "meshforge-icon")
+                if icon_file.exists():
+                    self.set_icon_name("meshforge-icon")
+            else:
+                # GTK3: use set_icon_from_file
+                icon_paths = [
+                    icon_file,
+                    Path('/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg'),
+                    Path('/usr/share/pixmaps/org.meshforge.app.svg'),
+                ]
+                for path in icon_paths:
+                    if path.exists():
                         self.set_icon_from_file(str(path))
-                    break
+                        break
         except Exception as e:
             print(f"Icon setup: {e}")
 
