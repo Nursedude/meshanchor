@@ -19,6 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from functools import wraps
 
+# Import canonical check_port from service_check
+from utils.service_check import check_port
+
 # Flask with minimal dependencies
 try:
     from flask import Flask, jsonify, request, Response
@@ -110,18 +113,6 @@ def cached(ttl=CACHE_TTL):
     return decorator
 
 
-def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
-    """Check if a TCP port is listening"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
 def check_systemd_service(name: str) -> dict:
     """Check systemd service status"""
     try:
@@ -142,11 +133,11 @@ def get_services_status() -> dict:
     """Get status of core services"""
     return {
         'meshtasticd': {
-            'port_open': check_port('127.0.0.1', MESHTASTICD_PORT),
+            'port_open': check_port(MESHTASTICD_PORT, '127.0.0.1'),
             'systemd': check_systemd_service('meshtasticd')
         },
         'rnsd': {
-            'port_open': check_port('127.0.0.1', RNSD_PORT),
+            'port_open': check_port(RNSD_PORT, '127.0.0.1'),
             'systemd': check_systemd_service('rnsd')
         }
     }

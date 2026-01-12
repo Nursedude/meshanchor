@@ -48,14 +48,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 # Import path utilities
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+from utils.paths import get_real_user_home
 
 # Import settings manager
 try:
@@ -70,16 +63,6 @@ try:
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
-    def check_port(port, host='localhost', timeout=2.0):
-        import socket
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
-        except Exception:
-            return False
 
 
 class HamToolsPanel(Gtk.Box):

@@ -316,16 +316,8 @@ def check_rns_config(port: str) -> bool:
     Returns:
         True if port is in RNS config
     """
-    try:
-        from utils.paths import get_real_user_home
-        config_path = get_real_user_home() / '.reticulum' / 'config'
-    except ImportError:
-        # Fallback: use SUDO_USER to avoid Path.home() returning /root
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            config_path = Path(f'/home/{sudo_user}') / '.reticulum' / 'config'
-        else:
-            config_path = Path.home() / '.reticulum' / 'config'
+    from utils.paths import get_real_user_home
+    config_path = get_real_user_home() / '.reticulum' / 'config'
 
     if not config_path.exists():
         return False

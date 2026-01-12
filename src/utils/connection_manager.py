@@ -40,13 +40,8 @@ logger = logging.getLogger(__name__)
 # Cooldown between connections (meshtasticd needs time to cleanup)
 CONNECTION_COOLDOWN = 1.0  # seconds
 
-# Try to import paths helper for proper home directory resolution
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home():
-        import os
-        return Path(os.environ.get('SUDO_USER', os.environ.get('USER', 'root'))).home()
+# Import centralized path utility for proper home directory resolution
+from utils.paths import get_real_user_home
 
 
 class ConnectionBusy(Exception):

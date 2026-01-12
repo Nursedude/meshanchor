@@ -55,14 +55,7 @@ from utils.plugins import (
 )
 
 # Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 

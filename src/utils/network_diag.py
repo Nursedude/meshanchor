@@ -15,6 +15,9 @@ import socket
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Import canonical check_port from service_check
+from utils.service_check import check_port
+
 # TCP state mapping (hex to name)
 TCP_STATES = {
     '01': 'ESTABLISHED',
@@ -195,25 +198,8 @@ def get_listening_ports(protocol: str = 'tcp') -> List[Dict]:
     return connections
 
 
-def check_port_open(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool:
-    """Check if a TCP port is open.
-
-    Args:
-        port: Port number
-        host: Hostname (default localhost)
-        timeout: Connection timeout in seconds
-
-    Returns:
-        True if port is open
-    """
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except (socket.error, OSError):
-        return False
+# Alias for backwards compatibility with existing imports
+check_port_open = check_port
 
 
 def get_all_connections() -> Dict[str, List[Dict]]:

@@ -15,16 +15,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os
-    from pathlib import Path
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+import os
+from pathlib import Path
+from utils.paths import get_real_user_home
 
 # Import LoRa presets for Meshtastic compatibility
 try:
