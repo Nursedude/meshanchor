@@ -497,6 +497,193 @@ class HamClockPanel(Gtk.Box):
         voacap_frame.set_child(voacap_box)
         content_box.append(voacap_frame)
 
+        # DE/DX Location Frame
+        location_frame = Gtk.Frame()
+        location_frame.set_label("Station Locations (DE/DX)")
+        location_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        location_box.set_margin_start(15)
+        location_box.set_margin_end(15)
+        location_box.set_margin_top(10)
+        location_box.set_margin_bottom(10)
+
+        # DE (Home) location
+        de_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        de_label = Gtk.Label(label="DE (Home):")
+        de_label.set_xalign(0)
+        de_label.set_width_chars(12)
+        de_row.append(de_label)
+
+        self.de_callsign_label = Gtk.Label(label="--")
+        self.de_callsign_label.set_xalign(0)
+        self.de_callsign_label.set_hexpand(True)
+        de_row.append(self.de_callsign_label)
+
+        self.de_grid_label = Gtk.Label(label="--")
+        self.de_grid_label.set_xalign(1)
+        de_row.append(self.de_grid_label)
+        location_box.append(de_row)
+
+        # DX (Target) location
+        dx_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        dx_label = Gtk.Label(label="DX (Target):")
+        dx_label.set_xalign(0)
+        dx_label.set_width_chars(12)
+        dx_row.append(dx_label)
+
+        self.dx_callsign_label = Gtk.Label(label="--")
+        self.dx_callsign_label.set_xalign(0)
+        self.dx_callsign_label.set_hexpand(True)
+        dx_row.append(self.dx_callsign_label)
+
+        self.dx_grid_label = Gtk.Label(label="--")
+        self.dx_grid_label.set_xalign(1)
+        dx_row.append(self.dx_grid_label)
+        location_box.append(dx_row)
+
+        # Path info
+        path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        path_label = Gtk.Label(label="Path:")
+        path_label.set_xalign(0)
+        path_label.set_width_chars(12)
+        path_row.append(path_label)
+
+        self.path_info_label = Gtk.Label(label="--")
+        self.path_info_label.set_xalign(0)
+        self.path_info_label.set_hexpand(True)
+        self.path_info_label.add_css_class("dim-label")
+        path_row.append(self.path_info_label)
+        location_box.append(path_row)
+
+        # Fetch locations button
+        location_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        location_btn_row.set_margin_top(5)
+
+        fetch_loc_btn = Gtk.Button(label="Fetch Locations")
+        fetch_loc_btn.set_tooltip_text("Get DE/DX locations from HamClock")
+        fetch_loc_btn.connect("clicked", self._on_fetch_locations)
+        location_btn_row.append(fetch_loc_btn)
+
+        location_box.append(location_btn_row)
+        location_frame.set_child(location_box)
+        content_box.append(location_frame)
+
+        # DX Cluster Spots Frame
+        dx_spots_frame = Gtk.Frame()
+        dx_spots_frame.set_label("DX Cluster Spots")
+        dx_spots_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        dx_spots_box.set_margin_start(15)
+        dx_spots_box.set_margin_end(15)
+        dx_spots_box.set_margin_top(10)
+        dx_spots_box.set_margin_bottom(10)
+
+        dx_spots_info = Gtk.Label(
+            label="Recent DX spots from HamClock cluster connection"
+        )
+        dx_spots_info.set_xalign(0)
+        dx_spots_info.add_css_class("dim-label")
+        dx_spots_box.append(dx_spots_info)
+
+        # DX spots list (using a scrolled text view for simplicity)
+        dx_spots_scroll = Gtk.ScrolledWindow()
+        dx_spots_scroll.set_min_content_height(100)
+        dx_spots_scroll.set_max_content_height(150)
+        dx_spots_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        self.dx_spots_text = Gtk.TextView()
+        self.dx_spots_text.set_editable(False)
+        self.dx_spots_text.set_cursor_visible(False)
+        self.dx_spots_text.set_monospace(True)
+        self.dx_spots_text.set_wrap_mode(Gtk.WrapMode.NONE)
+        buffer = self.dx_spots_text.get_buffer()
+        buffer.set_text("No DX spots loaded")
+
+        dx_spots_scroll.set_child(self.dx_spots_text)
+        dx_spots_box.append(dx_spots_scroll)
+
+        # DX spots buttons
+        dx_spots_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        dx_spots_btn_row.set_margin_top(5)
+
+        fetch_dx_btn = Gtk.Button(label="Fetch DX Spots")
+        fetch_dx_btn.set_tooltip_text("Get recent DX spots from HamClock")
+        fetch_dx_btn.connect("clicked", self._on_fetch_dx_spots)
+        fetch_dx_btn.add_css_class("suggested-action")
+        dx_spots_btn_row.append(fetch_dx_btn)
+
+        dx_cluster_btn = Gtk.Button(label="DX Summit")
+        dx_cluster_btn.set_tooltip_text("Open DX Summit web cluster in browser")
+        dx_cluster_btn.connect("clicked", self._on_open_dx_cluster)
+        dx_spots_btn_row.append(dx_cluster_btn)
+
+        dx_spots_box.append(dx_spots_btn_row)
+        dx_spots_frame.set_child(dx_spots_box)
+        content_box.append(dx_spots_frame)
+
+        # Satellite Tracking Frame
+        sat_frame = Gtk.Frame()
+        sat_frame.set_label("Satellite Tracking")
+        sat_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        sat_box.set_margin_start(15)
+        sat_box.set_margin_end(15)
+        sat_box.set_margin_top(10)
+        sat_box.set_margin_bottom(10)
+
+        sat_info = Gtk.Label(
+            label="Satellite pass predictions from HamClock"
+        )
+        sat_info.set_xalign(0)
+        sat_info.add_css_class("dim-label")
+        sat_box.append(sat_info)
+
+        # Current satellite info
+        self.sat_labels = {}
+        sat_fields = [
+            ("name", "Satellite:"),
+            ("az", "Azimuth:"),
+            ("el", "Elevation:"),
+            ("range", "Range:"),
+            ("next_pass", "Next Pass:"),
+        ]
+
+        for key, label_text in sat_fields:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            label = Gtk.Label(label=label_text)
+            label.set_xalign(0)
+            label.set_width_chars(12)
+            row.append(label)
+
+            value = Gtk.Label(label="--")
+            value.set_xalign(0)
+            value.set_hexpand(True)
+            row.append(value)
+            self.sat_labels[key] = value
+
+            sat_box.append(row)
+
+        # Satellite buttons
+        sat_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        sat_btn_row.set_margin_top(5)
+
+        fetch_sat_btn = Gtk.Button(label="Fetch Satellite")
+        fetch_sat_btn.set_tooltip_text("Get current satellite info from HamClock")
+        fetch_sat_btn.connect("clicked", self._on_fetch_satellite)
+        fetch_sat_btn.add_css_class("suggested-action")
+        sat_btn_row.append(fetch_sat_btn)
+
+        sat_list_btn = Gtk.Button(label="Satellite List")
+        sat_list_btn.set_tooltip_text("Show available satellites")
+        sat_list_btn.connect("clicked", self._on_fetch_sat_list)
+        sat_btn_row.append(sat_list_btn)
+
+        heavens_btn = Gtk.Button(label="Heavens-Above")
+        heavens_btn.set_tooltip_text("Open Heavens-Above for detailed satellite tracking")
+        heavens_btn.connect("clicked", self._on_open_heavens_above)
+        sat_btn_row.append(heavens_btn)
+
+        sat_box.append(sat_btn_row)
+        sat_frame.set_child(sat_box)
+        content_box.append(sat_frame)
+
         # Live view (if WebKit available)
         if HAS_WEBKIT:
             view_frame = Gtk.Frame()
@@ -1884,6 +2071,369 @@ class HamClockPanel(Gtk.Box):
         """Record that data was updated"""
         self._last_update_time = time.time()
         self._check_data_freshness()  # Immediately update display
+
+    # ==================== DE/DX Location Methods ====================
+
+    def _on_fetch_locations(self, button):
+        """Fetch DE and DX locations from HamClock"""
+        logger.info("[HamClock] Fetch Locations button clicked")
+
+        url = self._settings.get("url", "").rstrip('/')
+        api_port = self._settings.get("api_port", 8080)
+
+        if not url:
+            self.status_label.set_label("Configure HamClock URL first")
+            return
+
+        self.status_label.set_label("Fetching locations...")
+
+        def fetch():
+            api_url = f"{url}:{api_port}"
+            de_data = {}
+            dx_data = {}
+
+            # Fetch DE location
+            try:
+                de_url = f"{api_url}/get_de.txt"
+                req = urllib.request.Request(de_url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = response.read().decode('utf-8')
+                    de_data = self._parse_location(data)
+            except Exception as e:
+                logger.debug(f"[HamClock] DE fetch error: {e}")
+
+            # Fetch DX location
+            try:
+                dx_url = f"{api_url}/get_dx.txt"
+                req = urllib.request.Request(dx_url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = response.read().decode('utf-8')
+                    dx_data = self._parse_location(data)
+            except Exception as e:
+                logger.debug(f"[HamClock] DX fetch error: {e}")
+
+            GLib.idle_add(self._update_location_display, de_data, dx_data)
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _parse_location(self, data):
+        """Parse DE or DX location response"""
+        result = {}
+        for line in data.strip().split('\n'):
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key_lower = key.strip().lower()
+                value = value.strip()
+
+                if 'call' in key_lower:
+                    result['callsign'] = value
+                elif 'grid' in key_lower:
+                    result['grid'] = value
+                elif 'lat' in key_lower:
+                    result['lat'] = value
+                elif 'lng' in key_lower or 'lon' in key_lower:
+                    result['lon'] = value
+                elif 'dist' in key_lower:
+                    result['distance'] = value
+                elif 'bear' in key_lower or 'az' in key_lower:
+                    result['bearing'] = value
+
+        return result
+
+    def _update_location_display(self, de_data, dx_data):
+        """Update the location display with fetched data"""
+        updated = 0
+
+        if de_data:
+            callsign = de_data.get('callsign', '--')
+            grid = de_data.get('grid', '--')
+            self.de_callsign_label.set_label(callsign)
+            self.de_grid_label.set_label(grid)
+            updated += 1
+
+        if dx_data:
+            callsign = dx_data.get('callsign', '--')
+            grid = dx_data.get('grid', '--')
+            self.dx_callsign_label.set_label(callsign)
+            self.dx_grid_label.set_label(grid)
+            updated += 1
+
+            # Update path info if available
+            distance = dx_data.get('distance', '')
+            bearing = dx_data.get('bearing', '')
+            if distance or bearing:
+                path_parts = []
+                if distance:
+                    path_parts.append(f"{distance} km")
+                if bearing:
+                    path_parts.append(f"{bearing}°")
+                self.path_info_label.set_label(" | ".join(path_parts))
+
+        if updated > 0:
+            self.status_label.set_label("Locations updated")
+        else:
+            self.status_label.set_label("No location data received")
+
+    # ==================== DX Spots Methods ====================
+
+    def _on_fetch_dx_spots(self, button):
+        """Fetch DX cluster spots from HamClock"""
+        logger.info("[HamClock] Fetch DX Spots button clicked")
+
+        url = self._settings.get("url", "").rstrip('/')
+        api_port = self._settings.get("api_port", 8080)
+
+        if not url:
+            self.status_label.set_label("Configure HamClock URL first")
+            return
+
+        self.status_label.set_label("Fetching DX spots...")
+
+        def fetch():
+            api_url = f"{url}:{api_port}"
+            try:
+                dx_url = f"{api_url}/get_dxspots.txt"
+                req = urllib.request.Request(dx_url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = response.read().decode('utf-8')
+                    spots = self._parse_dx_spots(data)
+                    GLib.idle_add(self._update_dx_spots_display, spots)
+            except urllib.error.HTTPError as e:
+                logger.debug(f"[HamClock] DX spots HTTP error: {e.code}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"DX spots not available (HTTP {e.code})")
+                )
+            except Exception as e:
+                logger.debug(f"[HamClock] DX spots fetch error: {e}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"DX spots error: {e}")
+                )
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _parse_dx_spots(self, data):
+        """Parse DX spots response from HamClock
+
+        Expected format varies, but typically:
+            Spot_0_call=XX0XX
+            Spot_0_freq=14.205
+            Spot_0_time=1234
+            ...
+        """
+        spots = []
+        current_spot = {}
+
+        for line in data.strip().split('\n'):
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key_lower = key.strip().lower()
+                value = value.strip()
+
+                if 'call' in key_lower:
+                    if current_spot and 'callsign' in current_spot:
+                        spots.append(current_spot)
+                        current_spot = {}
+                    current_spot['callsign'] = value
+                elif 'freq' in key_lower:
+                    current_spot['freq'] = value
+                elif 'time' in key_lower:
+                    current_spot['time'] = value
+                elif 'mode' in key_lower:
+                    current_spot['mode'] = value
+                elif 'spotter' in key_lower:
+                    current_spot['spotter'] = value
+
+        # Don't forget the last spot
+        if current_spot and 'callsign' in current_spot:
+            spots.append(current_spot)
+
+        return spots
+
+    def _update_dx_spots_display(self, spots):
+        """Update the DX spots text view"""
+        if not spots:
+            buffer = self.dx_spots_text.get_buffer()
+            buffer.set_text("No DX spots available\n\nMake sure HamClock is connected to a DX cluster.")
+            self.status_label.set_label("No DX spots found")
+            return
+
+        # Format spots as text
+        lines = []
+        lines.append(f"{'Call':<10} {'Freq':>10} {'Mode':<5} {'Time':>5}")
+        lines.append("-" * 35)
+
+        for spot in spots[:20]:  # Limit to 20 spots
+            call = spot.get('callsign', '???')[:10]
+            freq = spot.get('freq', '---')[:10]
+            mode = spot.get('mode', '-')[:5]
+            time_str = spot.get('time', '--')[:5]
+            lines.append(f"{call:<10} {freq:>10} {mode:<5} {time_str:>5}")
+
+        buffer = self.dx_spots_text.get_buffer()
+        buffer.set_text("\n".join(lines))
+        self.status_label.set_label(f"Loaded {len(spots)} DX spots")
+
+    def _on_open_dx_cluster(self, button):
+        """Open DX Summit web cluster in browser"""
+        logger.info("[HamClock] DX Summit button clicked")
+        url = "https://dxsummit.fi/"
+        self._open_url_in_browser(url)
+
+    # ==================== Satellite Tracking Methods ====================
+
+    def _on_fetch_satellite(self, button):
+        """Fetch current satellite info from HamClock"""
+        logger.info("[HamClock] Fetch Satellite button clicked")
+
+        url = self._settings.get("url", "").rstrip('/')
+        api_port = self._settings.get("api_port", 8080)
+
+        if not url:
+            self.status_label.set_label("Configure HamClock URL first")
+            return
+
+        self.status_label.set_label("Fetching satellite info...")
+
+        def fetch():
+            api_url = f"{url}:{api_port}"
+            try:
+                sat_url = f"{api_url}/get_satellite.txt"
+                req = urllib.request.Request(sat_url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = response.read().decode('utf-8')
+                    sat_data = self._parse_satellite(data)
+                    GLib.idle_add(self._update_satellite_display, sat_data)
+            except urllib.error.HTTPError as e:
+                logger.debug(f"[HamClock] Satellite HTTP error: {e.code}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"Satellite not available (HTTP {e.code})")
+                )
+            except Exception as e:
+                logger.debug(f"[HamClock] Satellite fetch error: {e}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"Satellite error: {e}")
+                )
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _parse_satellite(self, data):
+        """Parse satellite response from HamClock"""
+        result = {}
+        for line in data.strip().split('\n'):
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key_lower = key.strip().lower()
+                value = value.strip()
+
+                if 'name' in key_lower or 'sat' in key_lower:
+                    result['name'] = value
+                elif 'az' in key_lower:
+                    result['az'] = f"{value}°"
+                elif 'el' in key_lower:
+                    result['el'] = f"{value}°"
+                elif 'range' in key_lower or 'rng' in key_lower:
+                    result['range'] = f"{value} km"
+                elif 'rise' in key_lower or 'aos' in key_lower:
+                    result['next_pass'] = f"AOS: {value}"
+                elif 'set' in key_lower or 'los' in key_lower:
+                    if 'next_pass' not in result:
+                        result['next_pass'] = f"LOS: {value}"
+                elif 'up' in key_lower and 'link' not in key_lower:
+                    result['uplink'] = value
+                elif 'down' in key_lower and 'link' not in key_lower:
+                    result['downlink'] = value
+
+        return result
+
+    def _update_satellite_display(self, sat_data):
+        """Update the satellite display with fetched data"""
+        if not sat_data:
+            for label in self.sat_labels.values():
+                label.set_label("--")
+            self.status_label.set_label("No satellite data")
+            return
+
+        updated = 0
+        for key, label in self.sat_labels.items():
+            if key in sat_data:
+                label.set_label(str(sat_data[key]))
+                updated += 1
+            else:
+                label.set_label("--")
+
+        if updated > 0:
+            self.status_label.set_label(f"Satellite: {sat_data.get('name', 'Unknown')}")
+        else:
+            self.status_label.set_label("Satellite data incomplete")
+
+    def _on_fetch_sat_list(self, button):
+        """Fetch list of available satellites from HamClock"""
+        logger.info("[HamClock] Satellite List button clicked")
+
+        url = self._settings.get("url", "").rstrip('/')
+        api_port = self._settings.get("api_port", 8080)
+
+        if not url:
+            self.status_label.set_label("Configure HamClock URL first")
+            return
+
+        self.status_label.set_label("Fetching satellite list...")
+
+        def fetch():
+            api_url = f"{url}:{api_port}"
+            try:
+                sat_url = f"{api_url}/get_satlist.txt"
+                req = urllib.request.Request(sat_url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = response.read().decode('utf-8')
+                    GLib.idle_add(self._show_sat_list, data)
+            except urllib.error.HTTPError as e:
+                logger.debug(f"[HamClock] Sat list HTTP error: {e.code}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"Sat list not available (HTTP {e.code})")
+                )
+            except Exception as e:
+                logger.debug(f"[HamClock] Sat list fetch error: {e}")
+                GLib.idle_add(
+                    lambda: self.status_label.set_label(f"Sat list error: {e}")
+                )
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _show_sat_list(self, data):
+        """Display satellite list in DX spots text area temporarily"""
+        # Parse satellite names
+        sats = []
+        for line in data.strip().split('\n'):
+            if '=' in line:
+                key, value = line.split('=', 1)
+                if 'name' in key.lower() or 'sat' in key.lower():
+                    sats.append(value.strip())
+            elif line.strip():
+                # Some formats just list names
+                sats.append(line.strip())
+
+        if sats:
+            buffer = self.dx_spots_text.get_buffer()
+            text = "Available Satellites:\n" + "-" * 30 + "\n"
+            text += "\n".join(sats[:30])  # Limit display
+            if len(sats) > 30:
+                text += f"\n... and {len(sats) - 30} more"
+            buffer.set_text(text)
+            self.status_label.set_label(f"Found {len(sats)} satellites")
+        else:
+            self.status_label.set_label("No satellites in list")
+
+    def _on_open_heavens_above(self, button):
+        """Open Heavens-Above satellite tracking website"""
+        logger.info("[HamClock] Heavens-Above button clicked")
+        url = "https://www.heavens-above.com/"
+        self._open_url_in_browser(url)
 
     def cleanup(self):
         """Clean up resources when panel is destroyed"""
