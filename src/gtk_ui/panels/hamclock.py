@@ -52,6 +52,14 @@ try:
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
+
+# Import admin command helper for proper privilege escalation (pkexec)
+try:
+    from utils.system import run_admin_command_async
+    HAS_ADMIN_HELPER = True
+except ImportError:
+    HAS_ADMIN_HELPER = False
+    run_admin_command_async = None
     def check_port(port, host='localhost', timeout=2.0):
         import socket
         try:
@@ -947,47 +955,74 @@ class HamClockPanel(Gtk.Box):
         return False
 
     def _service_action(self, action):
-        """Perform HamClock service action (start/stop/restart)"""
+        """Perform HamClock service action (start/stop/restart)
+
+        Uses pkexec for GUI password prompt when available (proper GTK integration).
+        Falls back to sudo if pkexec is unavailable.
+        """
         logger.debug(f"[HamClock] Service action: {action}...")
         self.main_window.set_status_message(f"{action.capitalize()}ing HamClock...")
 
-        def do_action():
-            service_names = ['hamclock', 'hamclock-web', 'hamclock-systemd']
-            success = False
-            error = None
+        # Disable buttons during operation
+        self.service_start_btn.set_sensitive(False)
+        self.service_stop_btn.set_sensitive(False)
+        self.service_restart_btn.set_sensitive(False)
 
-            for name in service_names:
+        # Find which HamClock service is installed
+        service_name = self._find_hamclock_service()
+        if not service_name:
+            self._service_action_complete(action, False, "No HamClock service found")
+            return
+
+        logger.debug(f"[HamClock] Using service: {service_name}")
+
+        # Use proper admin helper with pkexec (GUI password dialog)
+        if HAS_ADMIN_HELPER and run_admin_command_async:
+            def on_complete(success, stdout, stderr):
+                error = stderr.strip() if stderr else None
+                GLib.idle_add(self._service_action_complete, action, success, error)
+
+            run_admin_command_async(
+                ['systemctl', action, service_name],
+                on_complete,
+                use_gui=True,
+                timeout=30
+            )
+        else:
+            # Fallback to threaded sudo (less reliable in GUI)
+            def do_action():
                 try:
-                    # Check if this service exists
-                    check = subprocess.run(
-                        ['systemctl', 'status', name],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if check.returncode == 4:  # Unit not found
-                        continue
-
-                    # Try the action
                     result = subprocess.run(
-                        ['sudo', 'systemctl', action, name],
+                        ['sudo', 'systemctl', action, service_name],
                         capture_output=True, text=True, timeout=30
                     )
-                    if result.returncode == 0:
-                        success = True
-                        logger.debug(f"[HamClock] {action} {name}: OK")
-                        break
-                    else:
-                        error = result.stderr.strip()
+                    success = result.returncode == 0
+                    error = result.stderr.strip() if not success else None
+                    GLib.idle_add(self._service_action_complete, action, success, error)
                 except subprocess.TimeoutExpired:
-                    error = "Command timed out"
+                    GLib.idle_add(self._service_action_complete, action, False, "Command timed out")
                 except Exception as e:
-                    error = str(e)
+                    GLib.idle_add(self._service_action_complete, action, False, str(e))
 
-            if not success and not error:
-                error = "No HamClock service found"
+            threading.Thread(target=do_action, daemon=True).start()
 
-            GLib.idle_add(self._service_action_complete, action, success, error)
+    def _find_hamclock_service(self):
+        """Find which HamClock service is installed on the system."""
+        service_names = ['hamclock', 'hamclock-web', 'hamclock-systemd']
 
-        threading.Thread(target=do_action, daemon=True).start()
+        for name in service_names:
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'status', name],
+                    capture_output=True, text=True, timeout=5
+                )
+                # returncode 4 = unit not found, other codes = unit exists
+                if result.returncode != 4:
+                    return name
+            except Exception as e:
+                logger.debug(f"[HamClock] Error checking {name}: {e}")
+
+        return None
 
     def _service_action_complete(self, action, success, error):
         """Handle service action completion"""
