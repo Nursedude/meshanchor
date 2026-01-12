@@ -285,7 +285,8 @@ class RNSPanel(Gtk.Box):
 
         # Action button
         action_btn = Gtk.Button(label="Install")
-        action_btn.connect("clicked", lambda b: self._install_component(component))
+        # Use default arg to capture component by value, not reference (closure bug fix)
+        action_btn.connect("clicked", lambda b, c=component: self._install_component(c))
         row.append(action_btn)
 
         # Store references for updates
