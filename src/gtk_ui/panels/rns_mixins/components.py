@@ -104,7 +104,8 @@ class ComponentsMixin:
 
         # Action button
         action_btn = Gtk.Button(label="Install")
-        action_btn.connect("clicked", lambda b: self._install_component(component))
+        # Use default arg to capture component by value, not reference (closure bug fix)
+        action_btn.connect("clicked", lambda b, c=component: self._install_component(c))
         row.append(action_btn)
 
         # Store references for updates
@@ -120,7 +121,7 @@ class ComponentsMixin:
         try:
             result = subprocess.run(
                 ['python3', '-c', 'import RNS'],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
         except Exception:
@@ -132,7 +133,7 @@ class ComponentsMixin:
             # Check for rnsd process
             result = subprocess.run(
                 ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=5
             )
             return result.returncode == 0
         except Exception:
@@ -143,7 +144,7 @@ class ComponentsMixin:
         try:
             result = subprocess.run(
                 ['pip3', 'show', package],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
@@ -285,18 +286,19 @@ class ComponentsMixin:
                 is_root = os.geteuid() == 0
                 real_user = self._get_real_username()
 
-                # Build pip install command
-                pip_args = ['pip', 'install', '--upgrade', '--user',
-                           '--no-cache-dir', '--break-system-packages', package]
+                # Build pip install command using python3 -m pip for reliability
+                pip_install_args = ['install', '--upgrade', '--user',
+                                   '--no-cache-dir', '--break-system-packages', package]
 
                 # When running as root, install as the real user
                 if is_root and real_user != 'root':
-                    # Use sudo -i -u to get user's environment and install to their home
-                    cmd = ['sudo', '-i', '-u', real_user] + pip_args
+                    # Use sudo -H -u to run as user with their HOME set
+                    # python3 -m pip ensures we use the right pip
+                    cmd = ['sudo', '-H', '-u', real_user, 'python3', '-m', 'pip'] + pip_install_args
                     logger.debug(f"[RNS] Installing as user {real_user}: {' '.join(cmd)}")
                 else:
                     # Running as normal user, use python -m pip
-                    cmd = [sys.executable, '-m'] + pip_args
+                    cmd = [sys.executable, '-m', 'pip'] + pip_install_args
                     logger.debug(f"[RNS] Running: {' '.join(cmd)}")
 
                 result = subprocess.run(
@@ -364,16 +366,17 @@ class ComponentsMixin:
                 is_root = os.geteuid() == 0
                 real_user = self._get_real_username()
 
-                # Build pip install command
-                pip_args = ['pip', 'install', '--upgrade', '--user',
-                           '--no-cache-dir', '--break-system-packages'] + packages
+                # Build pip install command using python3 -m pip for reliability
+                pip_install_args = ['install', '--upgrade', '--user',
+                                   '--no-cache-dir', '--break-system-packages'] + packages
 
                 # When running as root, install as the real user
                 if is_root and real_user != 'root':
-                    cmd = ['sudo', '-i', '-u', real_user] + pip_args
+                    # Use sudo -H -u to run as user with their HOME set
+                    cmd = ['sudo', '-H', '-u', real_user, 'python3', '-m', 'pip'] + pip_install_args
                     logger.debug(f"[RNS] Installing as user {real_user}: {' '.join(cmd)}")
                 else:
-                    cmd = [sys.executable, '-m'] + pip_args
+                    cmd = [sys.executable, '-m', 'pip'] + pip_install_args
                     logger.debug(f"[RNS] Running: {' '.join(cmd)}")
 
                 result = subprocess.run(
