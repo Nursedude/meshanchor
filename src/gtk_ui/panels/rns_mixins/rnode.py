@@ -32,6 +32,23 @@ except ImportError:
     MESHTASTIC_PRESETS = {}
     PROVEN_GATEWAY_CONFIGS = {}
 
+# Import RNode device detection
+try:
+    from commands.rnode import detect_devices, RNodeDevice
+    HAS_RNODE_DETECTION = True
+except ImportError:
+    HAS_RNODE_DETECTION = False
+    detect_devices = None
+    RNodeDevice = None
+
+# Import service check for meshtasticd
+try:
+    from utils.service_check import check_port
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    HAS_SERVICE_CHECK = False
+    check_port = None
+
 
 class RNodeMixin:
     """
@@ -59,6 +76,73 @@ class RNodeMixin:
         desc.set_xalign(0)
         desc.add_css_class("dim-label")
         box.append(desc)
+
+        # =====================================================================
+        # Radio Detection Section
+        # =====================================================================
+        detect_frame = Gtk.Frame()
+        detect_frame.set_label("Radio Detection")
+
+        detect_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        detect_box.set_margin_start(10)
+        detect_box.set_margin_end(10)
+        detect_box.set_margin_top(8)
+        detect_box.set_margin_bottom(8)
+
+        # Service status row
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        # meshtasticd status
+        self.meshtasticd_status = Gtk.Label(label="● meshtasticd: checking...")
+        self.meshtasticd_status.set_xalign(0)
+        status_row.append(self.meshtasticd_status)
+
+        # rnsd status
+        self.rnsd_status = Gtk.Label(label="● rnsd: checking...")
+        self.rnsd_status.set_xalign(0)
+        self.rnsd_status.set_margin_start(20)
+        status_row.append(self.rnsd_status)
+
+        detect_box.append(status_row)
+
+        # Device selection row
+        device_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        device_label = Gtk.Label(label="Device:")
+        device_label.set_width_chars(10)
+        device_label.set_xalign(0)
+        device_row.append(device_label)
+
+        # Device dropdown (starts empty, populated on detect)
+        self.device_dropdown = Gtk.DropDown.new_from_strings(["No devices detected"])
+        self.device_dropdown.set_hexpand(True)
+        self.device_dropdown.connect("notify::selected", self._on_device_selected)
+        device_row.append(self.device_dropdown)
+
+        # Detect button
+        detect_btn = Gtk.Button(label="Detect")
+        detect_btn.add_css_class("suggested-action")
+        detect_btn.set_tooltip_text("Scan for RNode and Meshtastic devices")
+        detect_btn.connect("clicked", self._on_detect_devices)
+        device_row.append(detect_btn)
+
+        detect_box.append(device_row)
+
+        # Device info display
+        self.device_info_label = Gtk.Label(label="Click 'Detect' to scan for connected radios")
+        self.device_info_label.set_xalign(0)
+        self.device_info_label.add_css_class("dim-label")
+        self.device_info_label.set_wrap(True)
+        detect_box.append(self.device_info_label)
+
+        detect_frame.set_child(detect_box)
+        box.append(detect_frame)
+
+        # Store detected devices for later reference
+        self._detected_devices = []
+
+        # Check service status on startup
+        GLib.idle_add(self._check_radio_services)
 
         # =====================================================================
         # Meshtastic Preset Section (for gateway bridging)
@@ -569,3 +653,173 @@ class RNodeMixin:
             except Exception as e:
                 logger.error(f"Apply proven config error: {e}")
                 self._set_rnode_status(f"Error applying config: {e}")
+
+    # =========================================================================
+    # Radio Detection Methods
+    # =========================================================================
+
+    def _check_radio_services(self):
+        """Check status of meshtasticd and rnsd services"""
+        def do_check():
+            # Check meshtasticd (port 4403)
+            meshtasticd_running = False
+            if HAS_SERVICE_CHECK and check_port:
+                meshtasticd_running = check_port(4403)
+            else:
+                # Fallback: try socket
+                import socket
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    result = sock.connect_ex(('localhost', 4403))
+                    sock.close()
+                    meshtasticd_running = result == 0
+                except (socket.error, OSError):
+                    pass
+
+            # Check rnsd (use systemctl)
+            rnsd_running = False
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['systemctl', 'is-active', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                pass
+
+            # Update UI
+            if meshtasticd_running:
+                GLib.idle_add(
+                    self.meshtasticd_status.set_label,
+                    "● meshtasticd: running"
+                )
+                GLib.idle_add(
+                    self.meshtasticd_status.remove_css_class, "error"
+                )
+                GLib.idle_add(
+                    self.meshtasticd_status.add_css_class, "success"
+                )
+            else:
+                GLib.idle_add(
+                    self.meshtasticd_status.set_label,
+                    "● meshtasticd: not running"
+                )
+                GLib.idle_add(
+                    self.meshtasticd_status.add_css_class, "warning"
+                )
+
+            if rnsd_running:
+                GLib.idle_add(
+                    self.rnsd_status.set_label,
+                    "● rnsd: running"
+                )
+                GLib.idle_add(
+                    self.rnsd_status.add_css_class, "success"
+                )
+            else:
+                GLib.idle_add(
+                    self.rnsd_status.set_label,
+                    "● rnsd: not running"
+                )
+                GLib.idle_add(
+                    self.rnsd_status.add_css_class, "warning"
+                )
+
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def _on_detect_devices(self, button):
+        """Detect RNode and Meshtastic devices"""
+        button.set_sensitive(False)
+        self.device_info_label.set_label("Scanning for devices...")
+
+        def do_detect():
+            devices = []
+            device_names = []
+
+            # Use centralized RNode detection
+            if HAS_RNODE_DETECTION and detect_devices:
+                try:
+                    detected = detect_devices(probe=True)
+                    for dev in detected:
+                        devices.append(dev)
+                        # Build display name
+                        name = f"{dev.port}"
+                        if dev.model and dev.model != "Unknown":
+                            name += f" ({dev.model})"
+                        if dev.is_rnode:
+                            name += " [RNode]"
+                        if dev.is_configured:
+                            name += " [Configured]"
+                        device_names.append(name)
+                except Exception as e:
+                    logger.error(f"Device detection error: {e}")
+            else:
+                # Fallback: just glob serial ports
+                import glob
+                ports = []
+                for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/ttyAMA*']:
+                    ports.extend(glob.glob(pattern))
+                for port in sorted(set(ports)):
+                    device_names.append(port)
+
+            # Store detected devices
+            self._detected_devices = devices
+
+            if not device_names:
+                device_names = ["No devices detected"]
+                info_text = "No RNode or Meshtastic devices found.\nCheck USB connections."
+            else:
+                info_text = f"Found {len(device_names)} device(s)"
+                if devices:
+                    # Show details of first device
+                    dev = devices[0]
+                    info_text += f"\n{dev.port}: {dev.model}"
+                    if dev.vid and dev.pid:
+                        info_text += f" (VID:{dev.vid} PID:{dev.pid})"
+                    if dev.is_configured:
+                        info_text += "\n✓ Already configured in RNS"
+
+            # Update UI
+            GLib.idle_add(self._update_device_dropdown, device_names)
+            GLib.idle_add(self.device_info_label.set_label, info_text)
+            GLib.idle_add(button.set_sensitive, True)
+
+        threading.Thread(target=do_detect, daemon=True).start()
+
+    def _update_device_dropdown(self, device_names):
+        """Update the device dropdown with detected devices"""
+        # Create new string list model
+        model = Gtk.StringList.new(device_names)
+        self.device_dropdown.set_model(model)
+        if device_names and device_names[0] != "No devices detected":
+            self.device_dropdown.set_selected(0)
+
+    def _on_device_selected(self, dropdown, _):
+        """Handle device selection from dropdown"""
+        selected_idx = dropdown.get_selected()
+
+        if not self._detected_devices or selected_idx >= len(self._detected_devices):
+            return
+
+        device = self._detected_devices[selected_idx]
+
+        # Update port entry with selected device
+        if hasattr(self, 'rnode_port'):
+            self.rnode_port.set_text(device.port)
+
+        # Update device info
+        info_parts = [f"Port: {device.port}"]
+        if device.model and device.model != "Unknown":
+            info_parts.append(f"Model: {device.model}")
+        if device.vid and device.pid:
+            info_parts.append(f"USB: VID:{device.vid} PID:{device.pid}")
+        if device.is_rnode:
+            info_parts.append("✓ RNode firmware detected")
+        if device.firmware_version:
+            info_parts.append(f"Firmware: {device.firmware_version}")
+        if device.is_configured:
+            info_parts.append("✓ Configured in RNS config")
+
+        self.device_info_label.set_label("\n".join(info_parts))
