@@ -16,6 +16,11 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import GLib
 
+from utils.ports import (
+    MESHTASTICD_PORT, MESHTASTICD_WEB_PORT,
+    RNS_SHARED_INSTANCE_PORT, RNS_TCP_SERVER_PORT
+)
+
 
 class NetworkDiagnosticsMixin:
     """Mixin providing network diagnostics functionality for ToolsPanel"""
@@ -179,8 +184,8 @@ class NetworkDiagnosticsMixin:
         GLib.idle_add(self._log, "\n=== RNS Port Check ===")
 
         rns_ports = [
-            (37428, 'UDP', 'RNS AutoInterface'),
-            (4242, 'TCP', 'RNS TCP Server'),
+            (RNS_SHARED_INSTANCE_PORT, 'UDP', 'RNS Shared Instance'),
+            (RNS_TCP_SERVER_PORT, 'TCP', 'RNS TCP Server'),
         ]
 
         import socket
@@ -206,8 +211,8 @@ class NetworkDiagnosticsMixin:
         GLib.idle_add(self._log, "\n=== Meshtastic Port Check ===")
 
         mesh_ports = [
-            (4403, 'TCP', 'meshtasticd API'),
-            (9443, 'TCP', 'meshtasticd gRPC'),
+            (MESHTASTICD_PORT, 'TCP', 'meshtasticd API'),
+            (MESHTASTICD_WEB_PORT, 'TCP', 'meshtasticd gRPC'),
         ]
 
         import socket
