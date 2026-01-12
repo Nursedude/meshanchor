@@ -464,4 +464,51 @@ except (subprocess.TimeoutExpired, OSError):
 
 ---
 
-*Last updated: 2026-01-11 - Added issues #7-9 from gateway bridge CLI session*
+---
+
+## Issue #10: Lambda Closure Bug in Loops
+
+### Symptom
+Clicking different buttons (like Install buttons for different RNS components) always triggers the action for the **last** item in the loop, not the intended one.
+
+### Root Cause
+When creating lambdas inside a `for` loop, the loop variable is captured **by reference**, not by value:
+
+```python
+# WRONG - classic closure bug
+for component in self.COMPONENTS:
+    btn = Gtk.Button(label=component['name'])
+    btn.connect("clicked", lambda b: self._install(component))  # All buttons install last component!
+```
+
+By the time any button is clicked, `component` has the value from the last iteration.
+
+### Impact
+- Wrong component gets installed
+- Wrong action gets triggered
+- Debugging is confusing because logs show wrong item being processed
+
+### Proper Fix
+Use a **default argument** to capture the value at iteration time:
+
+```python
+# CORRECT - capture by value using default argument
+for component in self.COMPONENTS:
+    btn = Gtk.Button(label=component['name'])
+    btn.connect("clicked", lambda b, c=component: self._install(c))  # Each button gets its own copy
+```
+
+The `c=component` creates a new binding at each iteration, capturing the current value.
+
+### Files Fixed (2026-01-12)
+- [x] `src/gtk_ui/panels/rns.py:288` - Component install buttons
+- [x] `src/gtk_ui/panels/rns_mixins/components.py:107` - Component install buttons (mixin)
+
+### Prevention
+- Search for `lambda.*for.*in` or `connect.*lambda` patterns before committing
+- When using lambdas in loops, ALWAYS use default argument pattern
+- Code review should flag any `lambda b: self._method(loop_var)` inside loops
+
+---
+
+*Last updated: 2026-01-12 - Added issue #10 (lambda closure bug in loops)*
