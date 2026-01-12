@@ -432,9 +432,15 @@ class EASAlertsPanel(Gtk.Box):
         if response == "open":
             # Open config file in default editor
             import subprocess
-            config_path = "~/.config/meshforge/plugins/eas_alerts.ini"
+            from pathlib import Path
+            # Use get_real_user_home to handle sudo properly
             try:
-                subprocess.run(["xdg-open", config_path], check=False)
+                from utils.paths import get_real_user_home
+                config_path = str(get_real_user_home() / ".config/meshforge/plugins/eas_alerts.ini")
+            except ImportError:
+                config_path = str(Path.home() / ".config/meshforge/plugins/eas_alerts.ini")
+            try:
+                subprocess.run(["xdg-open", config_path], check=False, timeout=10)
             except Exception as e:
                 logger.error(f"Failed to open config: {e}")
 
@@ -443,5 +449,5 @@ class EASAlertsPanel(Gtk.Box):
         if self.plugin:
             try:
                 self.plugin.deactivate()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Plugin cleanup (non-critical): {e}")
