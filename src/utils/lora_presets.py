@@ -74,6 +74,8 @@ MESHTASTIC_PRESETS = {
         'description': 'Very high speed, very short range (<1km)',
         'estimated_range': '<1 km',
         'estimated_throughput': '~21.9 kbps',
+        'rns_data_speed': 8,  # RNS_Over_Meshtastic setting
+        'rns_delay': 0.4,     # Recommended for RNS bridge
         'warning': 'May be illegal in some regions (500kHz BW)',
     },
     'SHORT_FAST': {
@@ -83,6 +85,8 @@ MESHTASTIC_PRESETS = {
         'description': 'High speed, short range - Urban/high-density',
         'estimated_range': '1-5 km',
         'estimated_throughput': '~10.9 kbps',
+        'rns_data_speed': 6,
+        'rns_delay': 1.0,
     },
     'SHORT_SLOW': {
         'bandwidth': 125000,
@@ -91,6 +95,8 @@ MESHTASTIC_PRESETS = {
         'description': 'Fast, reliable short range',
         'estimated_range': '1-5 km',
         'estimated_throughput': '~5.5 kbps',
+        'rns_data_speed': 5,
+        'rns_delay': 3.0,
     },
     'MEDIUM_FAST': {
         'bandwidth': 250000,
@@ -99,6 +105,8 @@ MESHTASTIC_PRESETS = {
         'description': 'MtnMesh Community Standard - Best balance',
         'estimated_range': '5-20 km',
         'estimated_throughput': '~3.5 kbps',
+        'rns_data_speed': 4,
+        'rns_delay': 4.0,
         'recommended': True,
     },
     'MEDIUM_SLOW': {
@@ -108,6 +116,8 @@ MESHTASTIC_PRESETS = {
         'description': 'Balanced speed and range',
         'estimated_range': '5-20 km',
         'estimated_throughput': '~1.8 kbps',
+        'rns_data_speed': 3,
+        'rns_delay': 6.0,
     },
     'LONG_FAST': {
         'bandwidth': 250000,
@@ -116,7 +126,10 @@ MESHTASTIC_PRESETS = {
         'description': 'Default Meshtastic - Good for most deployments',
         'estimated_range': '10-30 km',
         'estimated_throughput': '~1.1 kbps',
+        'rns_data_speed': 0,
+        'rns_delay': 8.0,
         'default': True,
+        'rns_warning': 'Not recommended for RNS - slow throughput',
     },
     'LONG_MODERATE': {
         'bandwidth': 125000,
@@ -125,6 +138,9 @@ MESHTASTIC_PRESETS = {
         'description': 'Extended range with moderate speed',
         'estimated_range': '15-40 km',
         'estimated_throughput': '~550 bps',
+        'rns_data_speed': 7,
+        'rns_delay': 12.0,
+        'rns_warning': 'Very slow for RNS data transfer',
     },
     'LONG_SLOW': {
         'bandwidth': 125000,
@@ -133,6 +149,9 @@ MESHTASTIC_PRESETS = {
         'description': 'Maximum range - Search and Rescue',
         'estimated_range': '20-50 km',
         'estimated_throughput': '~300 bps',
+        'rns_data_speed': 1,
+        'rns_delay': 15.0,
+        'rns_warning': 'Not recommended for RNS - extremely slow',
     },
     'VERY_LONG_SLOW': {
         'bandwidth': 62500,
@@ -141,8 +160,25 @@ MESHTASTIC_PRESETS = {
         'description': 'Experimental - Extreme range',
         'estimated_range': '30-60+ km',
         'estimated_throughput': '~150 bps',
+        'rns_data_speed': None,  # Not supported
+        'rns_delay': None,
         'warning': 'Experimental, very slow',
+        'rns_warning': 'Not supported by RNS_Over_Meshtastic',
     },
+}
+
+
+# RNS_Over_Meshtastic data_speed to preset mapping
+# From: https://github.com/landandair/RNS_Over_Meshtastic
+RNS_DATA_SPEED_MAP = {
+    8: {'preset': 'SHORT_TURBO', 'delay': 0.4, 'throughput': '~500 B/s', 'recommended': True},
+    6: {'preset': 'SHORT_FAST', 'delay': 1.0, 'throughput': '~300 B/s'},
+    5: {'preset': 'SHORT_SLOW', 'delay': 3.0, 'throughput': '~150 B/s'},
+    4: {'preset': 'MEDIUM_FAST', 'delay': 4.0, 'throughput': '~100 B/s'},
+    3: {'preset': 'MEDIUM_SLOW', 'delay': 6.0, 'throughput': '~70 B/s'},
+    7: {'preset': 'LONG_MODERATE', 'delay': 12.0, 'throughput': '~35 B/s'},
+    0: {'preset': 'LONG_FAST', 'delay': 8.0, 'throughput': '~50 B/s', 'warning': 'Not recommended'},
+    1: {'preset': 'LONG_SLOW', 'delay': 15.0, 'throughput': '~25 B/s', 'warning': 'Very slow'},
 }
 
 
@@ -184,7 +220,43 @@ REGION_FREQUENCIES = {
 
 
 # Proven/tested gateway configurations
+# Reference: https://github.com/landandair/RNS_Over_Meshtastic
 PROVEN_GATEWAY_CONFIGS = {
+    'rns_turbo_gateway': {
+        'name': 'RNS Turbo Gateway',
+        'description': 'Recommended for RNS_Over_Meshtastic - Maximum throughput',
+        'meshtastic_preset': 'SHORT_TURBO',
+        'meshtastic_slot': 0,
+        'region': 'US',
+        'frequency': 903080000,
+        'bandwidth': 500000,
+        'spreading_factor': 7,
+        'coding_rate': 8,
+        'tx_power': 22,
+        'rns_data_speed': 8,
+        'rns_throughput': '~500 B/s',
+        'tested': True,
+        'recommended_for_rns': True,
+        'notes': 'Best for RNS bridge - ~500 bytes/sec, 0.4s delay',
+        'warning': '500kHz BW may be illegal in some regions',
+    },
+    'rns_shortfast_gateway': {
+        'name': 'RNS Short-Fast Gateway',
+        'description': 'Legal alternative for RNS bridge - Good throughput',
+        'meshtastic_preset': 'SHORT_FAST',
+        'meshtastic_slot': 0,
+        'region': 'US',
+        'frequency': 903080000,
+        'bandwidth': 250000,
+        'spreading_factor': 7,
+        'coding_rate': 8,
+        'tx_power': 22,
+        'rns_data_speed': 6,
+        'rns_throughput': '~300 B/s',
+        'tested': True,
+        'recommended_for_rns': True,
+        'notes': 'Good RNS bridge option - ~300 bytes/sec, 1.0s delay',
+    },
     'mtnmesh_gateway': {
         'name': 'MtnMesh Gateway',
         'description': 'Tested configuration for MtnMesh community networks',
@@ -196,6 +268,8 @@ PROVEN_GATEWAY_CONFIGS = {
         'spreading_factor': 10,
         'coding_rate': 8,
         'tx_power': 22,
+        'rns_data_speed': 4,
+        'rns_throughput': '~100 B/s',
         'tested': True,
         'notes': 'Standard MtnMesh configuration - SF10, BW250, CR8',
     },
@@ -210,8 +284,11 @@ PROVEN_GATEWAY_CONFIGS = {
         'spreading_factor': 11,
         'coding_rate': 8,
         'tx_power': 22,
+        'rns_data_speed': 0,
+        'rns_throughput': '~50 B/s',
         'tested': True,
         'notes': 'Compatible with default Meshtastic installations',
+        'rns_warning': 'Not recommended for RNS - slow throughput',
     },
     'urban_fast_gateway': {
         'name': 'Urban Fast Gateway',
@@ -224,6 +301,8 @@ PROVEN_GATEWAY_CONFIGS = {
         'spreading_factor': 7,
         'coding_rate': 8,
         'tx_power': 20,
+        'rns_data_speed': 6,
+        'rns_throughput': '~300 B/s',
         'tested': True,
         'notes': 'Fastest reliable config for city deployments',
     },
@@ -238,8 +317,11 @@ PROVEN_GATEWAY_CONFIGS = {
         'spreading_factor': 12,
         'coding_rate': 8,
         'tx_power': 30,  # High-power hardware required
+        'rns_data_speed': 1,
+        'rns_throughput': '~25 B/s',
         'tested': True,
         'notes': 'Extreme range, very slow - for emergency comms only',
+        'rns_warning': 'Not recommended for RNS - extremely slow',
     },
 }
 
