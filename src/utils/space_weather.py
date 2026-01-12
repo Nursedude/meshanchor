@@ -153,8 +153,8 @@ class SpaceWeatherAPI:
             logger.warning(f"[SWPC] HTTP error fetching {endpoint}: {e.code}")
         except urllib.error.URLError as e:
             logger.warning(f"[SWPC] URL error fetching {endpoint}: {e.reason}")
-        except Exception as e:
-            logger.warning(f"[SWPC] Error fetching {endpoint}: {e}")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"[SWPC] Parse error fetching {endpoint}: {e}")
 
         return None
 
@@ -172,16 +172,18 @@ class SpaceWeatherAPI:
                 # Get most recent entry
                 latest = data[-1]
 
-                # Parse timestamp: "2026-01-12 10:00:00.000"
+                # Parse timestamp: "2026-01-12 10:00:00.000" (variable milliseconds)
                 if isinstance(latest, list) and len(latest) >= 2:
                     ts_str = latest[0]
                     kp = float(latest[1])
 
-                    ts = datetime.fromisoformat(ts_str.replace('.000', ''))
+                    # Strip any milliseconds (handles .000, .123, or none)
+                    ts_str_clean = ts_str.split('.')[0] if '.' in ts_str else ts_str
+                    ts = datetime.fromisoformat(ts_str_clean)
                     k_index = int(round(kp))
 
                     return (k_index, ts)
-            except Exception as e:
+            except (ValueError, KeyError, IndexError, TypeError) as e:
                 logger.debug(f"[SWPC] Error parsing K-index: {e}")
 
         return None
@@ -200,7 +202,7 @@ class SpaceWeatherAPI:
                 for entry in reversed(data):
                     if entry.get('flux'):
                         return float(entry['flux'])
-            except Exception as e:
+            except (ValueError, KeyError, TypeError) as e:
                 logger.debug(f"[SWPC] Error parsing solar flux: {e}")
 
         return None
@@ -220,7 +222,7 @@ class SpaceWeatherAPI:
                 if flux:
                     # Convert W/m² to class
                     return self._flux_to_class(float(flux))
-            except Exception as e:
+            except (ValueError, KeyError, TypeError, IndexError) as e:
                 logger.debug(f"[SWPC] Error parsing X-ray flux: {e}")
 
         return None
