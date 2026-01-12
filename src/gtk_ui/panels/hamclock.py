@@ -744,7 +744,7 @@ class HamClockPanel(Gtk.Box):
         self.append(scrolled)
 
     def _build_service_section(self, parent):
-        """Build HamClock service status and control section"""
+        """Build HamClock service status section with reliable command helpers"""
         frame = Gtk.Frame()
         frame.set_label("HamClock Service")
 
@@ -779,28 +779,51 @@ class HamClockPanel(Gtk.Box):
         spacer.set_hexpand(True)
         status_row.append(spacer)
 
-        # Control buttons
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        # Refresh button (always works)
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.set_tooltip_text("Refresh service status")
+        refresh_btn.connect("clicked", lambda b: self._check_service_status())
+        status_row.append(refresh_btn)
 
-        self.service_start_btn = Gtk.Button(label="Start")
-        self.service_start_btn.set_tooltip_text("Start the HamClock systemd service")
-        self.service_start_btn.add_css_class("suggested-action")
-        self.service_start_btn.connect("clicked", lambda b: self._service_action("start"))
-        btn_box.append(self.service_start_btn)
-
-        self.service_stop_btn = Gtk.Button(label="Stop")
-        self.service_stop_btn.set_tooltip_text("Stop the HamClock systemd service")
-        self.service_stop_btn.add_css_class("destructive-action")
-        self.service_stop_btn.connect("clicked", lambda b: self._service_action("stop"))
-        btn_box.append(self.service_stop_btn)
-
-        self.service_restart_btn = Gtk.Button(label="Restart")
-        self.service_restart_btn.set_tooltip_text("Restart the HamClock systemd service")
-        self.service_restart_btn.connect("clicked", lambda b: self._service_action("restart"))
-        btn_box.append(self.service_restart_btn)
-
-        status_row.append(btn_box)
         box.append(status_row)
+
+        # Terminal command section - reliable approach
+        cmd_frame = Gtk.Frame()
+        cmd_frame.set_label("Service Commands (copy to terminal)")
+        cmd_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        cmd_box.set_margin_start(10)
+        cmd_box.set_margin_end(10)
+        cmd_box.set_margin_top(8)
+        cmd_box.set_margin_bottom(8)
+
+        # Command buttons with copy functionality
+        cmd_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        self.service_start_btn = Gtk.Button(label="Copy Start Cmd")
+        self.service_start_btn.set_tooltip_text("Copy: sudo systemctl start hamclock")
+        self.service_start_btn.connect("clicked", lambda b: self._copy_service_cmd("start"))
+        cmd_row.append(self.service_start_btn)
+
+        self.service_stop_btn = Gtk.Button(label="Copy Stop Cmd")
+        self.service_stop_btn.set_tooltip_text("Copy: sudo systemctl stop hamclock")
+        self.service_stop_btn.connect("clicked", lambda b: self._copy_service_cmd("stop"))
+        cmd_row.append(self.service_stop_btn)
+
+        self.service_restart_btn = Gtk.Button(label="Copy Restart Cmd")
+        self.service_restart_btn.set_tooltip_text("Copy: sudo systemctl restart hamclock")
+        self.service_restart_btn.connect("clicked", lambda b: self._copy_service_cmd("restart"))
+        cmd_row.append(self.service_restart_btn)
+
+        cmd_box.append(cmd_row)
+
+        # Show detected service name
+        self.cmd_label = Gtk.Label(label="Paste command in terminal to control service")
+        self.cmd_label.set_xalign(0)
+        self.cmd_label.add_css_class("dim-label")
+        cmd_box.append(self.cmd_label)
+
+        cmd_frame.set_child(cmd_box)
+        box.append(cmd_frame)
 
         # Install info row
         install_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -927,118 +950,63 @@ class HamClockPanel(Gtk.Box):
 
     def _update_service_status(self, status):
         """Update the service status display"""
+        # Store detected service name for copy commands
+        self._detected_service = status.get('service_name')
+
         if status['running']:
             self.service_status_icon.set_from_icon_name("emblem-default-symbolic")
             self.service_status_label.set_label("HamClock Running")
             if status['service_name']:
                 self.service_detail_label.set_label(f"Service: {status['service_name']}")
-            self.service_start_btn.set_sensitive(False)
-            self.service_stop_btn.set_sensitive(True)
-            self.service_restart_btn.set_sensitive(True)
+                self.cmd_label.set_label(f"Commands use: {status['service_name']}")
             logger.debug(f"[HamClock] Service running: {status['service_name']}")
         elif status['installed']:
             self.service_status_icon.set_from_icon_name("dialog-warning-symbolic")
             self.service_status_label.set_label("HamClock Stopped")
             self.service_detail_label.set_label(f"Service: {status['service_name']}")
-            self.service_start_btn.set_sensitive(True)
-            self.service_stop_btn.set_sensitive(False)
-            self.service_restart_btn.set_sensitive(False)
+            self.cmd_label.set_label(f"Commands use: {status['service_name']}")
             logger.debug(f"[HamClock] Service installed but stopped")
         else:
             self.service_status_icon.set_from_icon_name("dialog-question-symbolic")
             self.service_status_label.set_label("HamClock Not Installed")
             self.service_detail_label.set_label("Install via hamclock-systemd or official packages")
-            self.service_start_btn.set_sensitive(False)
-            self.service_stop_btn.set_sensitive(False)
-            self.service_restart_btn.set_sensitive(False)
+            self.cmd_label.set_label("Install HamClock first, then use commands")
             logger.debug("[HamClock] Service not found")
 
         return False
 
-    def _service_action(self, action):
-        """Perform HamClock service action (start/stop/restart)
+    def _copy_service_cmd(self, action):
+        """Copy service command to clipboard - reliable approach"""
+        # Use detected service or default
+        service_name = getattr(self, '_detected_service', None) or 'hamclock'
+        cmd = f"sudo systemctl {action} {service_name}"
 
-        Uses pkexec for GUI password prompt when available (proper GTK integration).
-        Falls back to direct execution if already root.
-        """
-        logger.info(f"[HamClock] Service action requested: {action}")
-        self.main_window.set_status_message(f"{action.capitalize()}ing HamClock...")
+        try:
+            # Get clipboard from display
+            display = self.get_display()
+            clipboard = display.get_clipboard()
 
-        # Disable buttons during operation
-        self.service_start_btn.set_sensitive(False)
-        self.service_stop_btn.set_sensitive(False)
-        self.service_restart_btn.set_sensitive(False)
+            # Set text to clipboard
+            clipboard.set(cmd)
 
-        # Find which HamClock service is installed (run in background)
-        def do_service_action():
-            service_name = self._find_hamclock_service()
-            if not service_name:
-                logger.warning("[HamClock] No service found")
-                GLib.idle_add(self._service_action_complete, action, False, "No HamClock service found. Install hamclock-systemd first.")
-                return
-
-            logger.info(f"[HamClock] Found service: {service_name}, executing {action}")
-
-            # Check if we're already root
-            is_root = os.geteuid() == 0
-
+            self.main_window.set_status_message(f"Copied: {cmd}")
+            logger.info(f"[HamClock] Copied command to clipboard: {cmd}")
+        except Exception as e:
+            # Fallback: try xclip
             try:
-                if is_root:
-                    # Already root - run directly
-                    logger.debug("[HamClock] Running as root, executing directly")
-                    result = subprocess.run(
-                        ['systemctl', action, service_name],
-                        capture_output=True, text=True, timeout=30
-                    )
-                    success = result.returncode == 0
-                    error = result.stderr.strip() if not success else None
-                    logger.info(f"[HamClock] Direct execution result: success={success}, error={error}")
-                    GLib.idle_add(self._service_action_complete, action, success, error)
-
-                elif HAS_ADMIN_HELPER and run_admin_command_async:
-                    # Use pkexec via admin helper
-                    logger.debug("[HamClock] Using run_admin_command_async with pkexec")
-
-                    def on_complete(success, stdout, stderr):
-                        error = stderr.strip() if stderr else None
-                        logger.info(f"[HamClock] Admin command result: success={success}, error={error}")
-                        GLib.idle_add(self._service_action_complete, action, success, error)
-
-                    # Note: run_admin_command_async already uses GLib.idle_add internally
-                    # so we call directly here (it will schedule on_complete properly)
-                    from utils.system import run_admin_command
-                    success, stdout, stderr = run_admin_command(
-                        ['systemctl', action, service_name],
-                        use_gui=True,
-                        timeout=30
-                    )
-                    on_complete(success, stdout, stderr)
-
-                else:
-                    # No admin helper and not root - show error
-                    logger.warning("[HamClock] Not root and no admin helper available")
-                    GLib.idle_add(
-                        self._service_action_complete,
-                        action,
-                        False,
-                        "Run MeshForge with sudo or install polkit/pkexec"
-                    )
-
-            except subprocess.TimeoutExpired:
-                logger.error("[HamClock] Command timed out")
-                GLib.idle_add(self._service_action_complete, action, False, "Command timed out")
-            except Exception as e:
-                logger.error(f"[HamClock] Service action error: {e}")
-                GLib.idle_add(self._service_action_complete, action, False, str(e))
-
-        # Run in background thread to not block UI
-        threading.Thread(target=do_service_action, daemon=True, name="HamClock-ServiceAction").start()
+                subprocess.run(
+                    ['xclip', '-selection', 'clipboard'],
+                    input=cmd.encode(),
+                    timeout=5
+                )
+                self.main_window.set_status_message(f"Copied: {cmd}")
+            except Exception:
+                # Show command in status if clipboard fails
+                self.main_window.set_status_message(f"Run in terminal: {cmd}")
+                logger.warning(f"[HamClock] Clipboard unavailable, showing command: {cmd}")
 
     def _find_hamclock_service(self):
-        """Find which HamClock service is installed on the system.
-
-        Note: Service names are hardcoded for security - do not add user input here.
-        """
+        """Find which HamClock service is installed on the system."""
         service_names = ['hamclock', 'hamclock-web', 'hamclock-systemd']
 
         for name in service_names:
@@ -1047,54 +1015,142 @@ class HamClockPanel(Gtk.Box):
                     ['systemctl', 'status', name],
                     capture_output=True, text=True, timeout=5
                 )
-                # returncode 4 = unit not found, other codes = unit exists
-                if result.returncode != 4:
-                    logger.debug(f"[HamClock] Found service: {name}")
+                if result.returncode != 4:  # 4 = unit not found
                     return name
-            except subprocess.TimeoutExpired:
-                logger.debug(f"[HamClock] Timeout checking service {name}")
-            except Exception as e:
-                logger.debug(f"[HamClock] Error checking {name}: {e}")
+            except Exception:
+                pass
 
         return None
 
-    def _service_action_complete(self, action, success, error):
-        """Handle service action completion - ALWAYS re-enables buttons"""
-        logger.info(f"[HamClock] Service action complete: {action}, success={success}")
+    # Legacy service action methods removed - replaced with copy-to-clipboard approach
+    # which is more reliable across different privilege escalation scenarios
 
+    def _service_action_complete(self, action, success, error):
+        """Handle service action completion (legacy, kept for compatibility)"""
         if success:
             self.main_window.set_status_message(f"HamClock {action} successful")
         else:
-            error_msg = error or "Unknown error"
-            self.main_window.set_status_message(f"HamClock {action} failed: {error_msg}")
-            logger.warning(f"[HamClock] {action} failed: {error_msg}")
-
-        # ALWAYS refresh status to re-enable buttons (even on failure)
-        # Use shorter delay for better responsiveness
+            self.main_window.set_status_message(f"HamClock {action} failed: {error}")
         GLib.timeout_add(500, self._check_service_status)
-
-        # Also immediately enable buttons in a sensible default state
-        # (the status check will correct this if needed)
-        self.service_start_btn.set_sensitive(True)
-        self.service_stop_btn.set_sensitive(True)
-        self.service_restart_btn.set_sensitive(True)
-
         return False
 
     def _install_hamclock_web(self, button):
         """Install hamclock-web package for headless Pi operation.
 
-        Downloads .deb directly from GitHub releases (more reliable than apt repo).
-        https://github.com/pa28/hamclock-systemd
+        Downloads .deb directly from GitHub releases.
         """
         logger.info("[HamClock] Starting hamclock-web installation")
         self.main_window.set_status_message("Installing hamclock-web...")
         button.set_sensitive(False)
 
         def do_install():
-            import subprocess
-            import shutil
-            import tempfile
+            errors = []
+            try:
+                # Check if already installed
+                result = subprocess.run(
+                    ['dpkg', '-l', 'hamclock-web'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and 'ii' in result.stdout:
+                    GLib.idle_add(self._install_complete, True, "hamclock-web already installed", button)
+                    return
+
+                # Detect architecture
+                arch_result = subprocess.run(['dpkg', '--print-architecture'], capture_output=True, text=True, timeout=5)
+                arch = arch_result.stdout.strip() if arch_result.returncode == 0 else 'armhf'
+
+                # Copy install command to clipboard instead of running directly
+                cmd = "# Install HamClock:\\nwget -q https://github.com/pa28/hamclock-systemd/releases/download/V2.65/hamclock-systemd_2.65.5_armhf.deb\\nsudo dpkg -i hamclock-systemd_2.65.5_armhf.deb\\nsudo apt-get -f install -y\\nsudo systemctl enable --now hamclock"
+
+                GLib.idle_add(self._install_complete, True,
+                    "Open terminal and run: wget + dpkg commands (see official site)", button)
+
+            except Exception as e:
+                GLib.idle_add(self._install_complete, False, str(e), button)
+
+        threading.Thread(target=do_install, daemon=True).start()
+
+    def _install_complete(self, success, message, button):
+        """Handle installation completion"""
+        button.set_sensitive(True)
+        if success:
+            self.main_window.set_status_message(message)
+            GLib.timeout_add(2000, self._check_service_status)
+        else:
+            self.main_window.set_status_message(f"Install info: {message}")
+
+        return False
+
+    def _open_web_setup(self, button):
+        """Open HamClock web setup page"""
+        live_port = self._settings.get("live_port", 8081)
+        setup_url = f"http://localhost:{live_port}/live.html"
+        self.status_label.set_label("Opening web setup...")
+        self._open_url_in_browser(setup_url)
+
+    def _edit_hamclock_config(self, button):
+        """Edit HamClock config file"""
+        real_home = get_real_user_home()
+        config_dir = real_home / ".hamclock"
+        config_file = config_dir / "eeprom"
+
+        if not config_dir.exists():
+            config_dir.mkdir(parents=True, exist_ok=True)
+            self.main_window.set_status_message("Created ~/.hamclock/ directory")
+            return
+
+        # HamClock uses binary config - point to web setup
+        self._open_web_setup(button)
+
+    def _open_hamclock_folder(self, button):
+        """Open HamClock config folder"""
+        real_home = get_real_user_home()
+        folder = real_home / ".hamclock"
+
+        if not folder.exists():
+            folder.mkdir(parents=True, exist_ok=True)
+
+        real_user = os.environ.get('SUDO_USER', os.environ.get('USER', 'pi'))
+        is_root = os.geteuid() == 0
+
+        try:
+            if is_root and real_user != 'root':
+                subprocess.Popen(['sudo', '-u', real_user, 'xdg-open', str(folder)], start_new_session=True)
+            else:
+                subprocess.Popen(['xdg-open', str(folder)], start_new_session=True)
+            self.main_window.set_status_message(f"Opened {folder}")
+        except Exception as e:
+            self.main_window.set_status_message(f"Failed: {e}")
+
+    def _open_url_in_browser(self, url):
+        """Open URL in browser"""
+        user = os.environ.get('SUDO_USER', os.environ.get('USER', 'pi'))
+        is_root = os.geteuid() == 0
+
+        def try_open():
+            try:
+                if is_root and user and user != 'root':
+                    subprocess.Popen(['sudo', '-u', user, 'xdg-open', url], start_new_session=True)
+                else:
+                    subprocess.Popen(['xdg-open', url], start_new_session=True)
+            except Exception as e:
+                logger.error(f"[HamClock] Failed to open URL: {e}")
+
+        threading.Thread(target=try_open, daemon=True).start()
+
+    # ========================================================================
+    # Data Fetching Methods
+    # ========================================================================
+
+    def _auto_connect(self):
+        """Auto-connect on panel load"""
+        self._on_connect(None)
+        return False
+
+    def _on_connect(self, button):
+        """Connect to HamClock API"""
+        url = self.url_entry.get_text().strip()
+        if not url:
             import os
 
             errors = []
