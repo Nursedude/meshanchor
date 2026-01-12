@@ -798,35 +798,35 @@ class HamClockPanel(Gtk.Box):
 
         # Terminal command section - reliable approach
         cmd_frame = Gtk.Frame()
-        cmd_frame.set_label("Service Commands (copy to terminal)")
+        cmd_frame.set_label("Service Control")
         cmd_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         cmd_box.set_margin_start(10)
         cmd_box.set_margin_end(10)
         cmd_box.set_margin_top(8)
         cmd_box.set_margin_bottom(8)
 
-        # Command buttons with copy functionality
+        # Service control buttons - try D-Bus first, fall back to pkexec
         cmd_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
-        self.service_start_btn = Gtk.Button(label="Copy Start Cmd")
-        self.service_start_btn.set_tooltip_text("Copy: sudo systemctl start hamclock")
-        self.service_start_btn.connect("clicked", lambda b: self._copy_service_cmd("start"))
+        self.service_start_btn = Gtk.Button(label="Start")
+        self.service_start_btn.set_tooltip_text("Start HamClock service")
+        self.service_start_btn.connect("clicked", lambda b: self._control_service("start"))
         cmd_row.append(self.service_start_btn)
 
-        self.service_stop_btn = Gtk.Button(label="Copy Stop Cmd")
-        self.service_stop_btn.set_tooltip_text("Copy: sudo systemctl stop hamclock")
-        self.service_stop_btn.connect("clicked", lambda b: self._copy_service_cmd("stop"))
+        self.service_stop_btn = Gtk.Button(label="Stop")
+        self.service_stop_btn.set_tooltip_text("Stop HamClock service")
+        self.service_stop_btn.connect("clicked", lambda b: self._control_service("stop"))
         cmd_row.append(self.service_stop_btn)
 
-        self.service_restart_btn = Gtk.Button(label="Copy Restart Cmd")
-        self.service_restart_btn.set_tooltip_text("Copy: sudo systemctl restart hamclock")
-        self.service_restart_btn.connect("clicked", lambda b: self._copy_service_cmd("restart"))
+        self.service_restart_btn = Gtk.Button(label="Restart")
+        self.service_restart_btn.set_tooltip_text("Restart HamClock service")
+        self.service_restart_btn.connect("clicked", lambda b: self._control_service("restart"))
         cmd_row.append(self.service_restart_btn)
 
         cmd_box.append(cmd_row)
 
-        # Show detected service name
-        self.cmd_label = Gtk.Label(label="Paste command in terminal to control service")
+        # Service status label
+        self.cmd_label = Gtk.Label(label="Checking service status...")
         self.cmd_label.set_xalign(0)
         self.cmd_label.add_css_class("dim-label")
         cmd_box.append(self.cmd_label)
@@ -984,35 +984,71 @@ class HamClockPanel(Gtk.Box):
 
         return False
 
-    def _copy_service_cmd(self, action):
-        """Copy service command to clipboard - reliable approach"""
-        # Use detected service or default
+    def _control_service(self, action):
+        """Control HamClock service using systemctl with privilege escalation"""
         service_name = getattr(self, '_detected_service', None) or 'hamclock'
-        cmd = f"sudo systemctl {action} {service_name}"
+        self.main_window.set_status_message(f"Attempting to {action} {service_name}...")
+        logger.info(f"[HamClock] Service control: {action} {service_name}")
 
+        def do_control():
+            try:
+                # Check if already running as root
+                is_root = os.geteuid() == 0
+
+                if is_root:
+                    # Direct systemctl when running as root
+                    cmd = ['systemctl', action, service_name]
+                else:
+                    # Try pkexec for graphical privilege escalation
+                    cmd = ['pkexec', 'systemctl', action, service_name]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+                if result.returncode == 0:
+                    GLib.idle_add(self._on_service_control_success, action, service_name)
+                else:
+                    error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                    # If pkexec failed, try polkit dbus
+                    if not is_root and 'polkit' in error.lower() or result.returncode == 126:
+                        GLib.idle_add(self._on_service_control_failed, action, "Authentication cancelled")
+                    else:
+                        GLib.idle_add(self._on_service_control_failed, action, error[:100])
+
+            except subprocess.TimeoutExpired:
+                GLib.idle_add(self._on_service_control_failed, action, "Timeout waiting for response")
+            except FileNotFoundError:
+                # pkexec not found, try with sudo in terminal
+                GLib.idle_add(self._show_manual_command, action, service_name)
+            except Exception as e:
+                GLib.idle_add(self._on_service_control_failed, action, str(e)[:100])
+
+        threading.Thread(target=do_control, daemon=True).start()
+
+    def _on_service_control_success(self, action, service_name):
+        """Handle successful service control"""
+        self.main_window.set_status_message(f"Service {action}ed successfully")
+        logger.info(f"[HamClock] Service {action}ed: {service_name}")
+        # Refresh status
+        GLib.timeout_add(1000, self._check_service_status)
+
+    def _on_service_control_failed(self, action, error):
+        """Handle failed service control"""
+        self.main_window.set_status_message(f"Failed to {action}: {error}")
+        logger.warning(f"[HamClock] Service {action} failed: {error}")
+
+    def _show_manual_command(self, action, service_name):
+        """Show manual command when privilege escalation unavailable"""
+        cmd = f"sudo systemctl {action} {service_name}"
+        self.main_window.set_status_message(f"Run manually: {cmd}")
+
+        # Also copy to clipboard as fallback
         try:
-            # Get clipboard from display
             display = self.get_display()
             clipboard = display.get_clipboard()
-
-            # Set text to clipboard
             clipboard.set(cmd)
-
-            self.main_window.set_status_message(f"Copied: {cmd}")
-            logger.info(f"[HamClock] Copied command to clipboard: {cmd}")
-        except Exception as e:
-            # Fallback: try xclip
-            try:
-                subprocess.run(
-                    ['xclip', '-selection', 'clipboard'],
-                    input=cmd.encode(),
-                    timeout=5
-                )
-                self.main_window.set_status_message(f"Copied: {cmd}")
-            except Exception:
-                # Show command in status if clipboard fails
-                self.main_window.set_status_message(f"Run in terminal: {cmd}")
-                logger.warning(f"[HamClock] Clipboard unavailable, showing command: {cmd}")
+            self.main_window.set_status_message(f"Copied to clipboard: {cmd}")
+        except Exception:
+            pass
 
     def _find_hamclock_service(self):
         """Find which HamClock service is installed on the system."""
