@@ -414,7 +414,8 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
                     subprocess.Popen(term_cmd)
                     self.close()
                     return
-                except Exception:
+                except Exception as e:
+                    print(f"Failed to launch {term_cmd[0]}: {e}")
                     continue
 
         print("No terminal emulator found")
