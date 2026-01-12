@@ -14,7 +14,6 @@ Usage:
 """
 
 import os
-import subprocess
 import logging
 import re
 from pathlib import Path
@@ -321,7 +320,12 @@ def check_rns_config(port: str) -> bool:
         from utils.paths import get_real_user_home
         config_path = get_real_user_home() / '.reticulum' / 'config'
     except ImportError:
-        config_path = Path.home() / '.reticulum' / 'config'
+        # Fallback: use SUDO_USER to avoid Path.home() returning /root
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            config_path = Path(f'/home/{sudo_user}') / '.reticulum' / 'config'
+        else:
+            config_path = Path.home() / '.reticulum' / 'config'
 
     if not config_path.exists():
         return False
@@ -329,7 +333,8 @@ def check_rns_config(port: str) -> bool:
     try:
         content = config_path.read_text()
         return port in content
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not read RNS config at {config_path}: {e}")
         return False
 
 
