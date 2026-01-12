@@ -8,6 +8,7 @@ Available Plugins:
 - meshcore: MeshCore protocol support
 - meshing_around: Bot framework integration
 - sartopo: CalTopo/SARTopo mapping integration
+- eas_alerts: Emergency Alert System (NOAA, FEMA, USGS)
 """
 
 from pathlib import Path
