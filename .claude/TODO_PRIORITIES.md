@@ -11,7 +11,7 @@
 - [x] **RNS-Meshtastic bidirectional messaging** - Core bridge functionality
 - [x] **RNS Over Meshtastic transport layer** - Packet transport via LoRa
 - [ ] **Message routing visualization** - See message flow between networks
-- [ ] **Gateway setup wizard** - Guided configuration for new users
+- [x] **Gateway setup wizard** - Guided configuration for new users (2026-01-12)
 - [x] **Bridge status monitoring** - Real-time health checks (API endpoints)
 - [x] `rns_bridge.py:624` - Implement regex matching for filters (2026-01-11)
 
@@ -38,8 +38,8 @@
 - [x] Configuration editor
 
 ### Plugins
-- [ ] `meshcore.py:81` - Implement actual MeshCore connection
-- [ ] `meshcore.py:107` - Implement actual message sending
+- [x] `meshcore.py:81` - Implement actual MeshCore connection (2026-01-12)
+- [x] `meshcore.py:107` - Implement actual message sending (2026-01-12)
 - [ ] **MQTT dashboard** - Bridge to MQTT brokers
 - [ ] **NanoVNA plugin** - Antenna tuning integration
 
@@ -52,8 +52,9 @@
 ## 🟡 Priority 3: UI/UX Improvements
 
 ### Dark Mode
+- [x] **CSS variable foundation** - Theme system with light/dark support (2026-01-12)
 - [ ] GTK dark mode toggle
-- [ ] Web UI dark mode
+- [ ] Web UI dark mode (integration)
 - [ ] TUI dark mode
 - [ ] Unified theme system
 
@@ -110,6 +111,9 @@
 - [x] **Network diagnostics tests** (2026-01-12)
 - [x] **Gateway setup documentation** (2026-01-12)
 - [x] **RNODE device detection module** (2026-01-12)
+- [x] **Gateway setup wizard** (2026-01-12)
+- [x] **MeshCore TCP connection** (2026-01-12)
+- [x] **Dark mode CSS foundation** (2026-01-12)
 
 ---
 
@@ -117,7 +121,7 @@
 
 1. [x] Add pytest to requirements.txt
 2. [x] Create test for network diagnostics API (2026-01-12)
-3. [ ] Add dark mode CSS variable foundation
+3. [x] Add dark mode CSS variable foundation (2026-01-12)
 4. [x] Document gateway setup steps (2026-01-12)
 
 ---
