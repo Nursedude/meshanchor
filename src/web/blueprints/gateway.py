@@ -17,6 +17,8 @@ from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 
+from utils.paths import get_real_user_home
+
 # Import meshtastic connection utilities
 try:
     from utils.meshtastic_connection import (
@@ -61,11 +63,7 @@ _bridge_instance = None
 
 def get_config_path():
     """Get gateway config path"""
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
-        home = Path(f'/home/{sudo_user}')
-    else:
-        home = Path.home()
+    home = get_real_user_home()
     return home / '.config' / 'meshforge' / 'gateway.json'
 
 
@@ -134,12 +132,7 @@ def get_tracked_nodes():
     nodes = {'meshtastic': [], 'rns': [], 'total': 0}
 
     # Try to read from cache file
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
-        home = Path(f'/home/{sudo_user}')
-    else:
-        home = Path.home()
-
+    home = get_real_user_home()
     cache_file = home / '.config' / 'meshforge' / 'node_cache.json'
 
     if cache_file.exists():
@@ -419,12 +412,7 @@ def gateway_diagnostic():
         })
 
     # Check RNS config
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
-        home = Path(f'/home/{sudo_user}')
-    else:
-        home = Path.home()
-
+    home = get_real_user_home()
     rns_config = home / '.reticulum' / 'config'
     if rns_config.exists():
         results.append({

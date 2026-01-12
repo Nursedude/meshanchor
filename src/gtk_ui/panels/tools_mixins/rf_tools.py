@@ -14,16 +14,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import GLib
 
-# Import centralized path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+from utils.paths import get_real_user_home
 
 
 class RFToolsMixin:
