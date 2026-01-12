@@ -341,7 +341,11 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         los_inner.set_margin_bottom(8)
 
         # Location presets and history
-        self._load_los_locations()
+        los_data = self._load_los_locations()
+        self.los_custom_locations = los_data.get('presets', [])
+        self.los_history = los_data.get('history', [])
+        # Combine default locations with user-saved custom locations
+        self.los_locations = self.DEFAULT_LOCATIONS + self.los_custom_locations
 
         preset_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         preset_box.append(Gtk.Label(label="Presets:"))
@@ -1283,7 +1287,10 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
                     new_loc = {"name": name, "lat": lat, "lon": lon}
                     self.los_custom_locations.append(new_loc)
                     self.los_locations.append(new_loc)
-                    self._save_los_locations()
+                    self._save_los_locations({
+                        'presets': self.los_custom_locations,
+                        'history': self.los_history
+                    })
 
                     # Update dropdown
                     location_names = ["-- Select Location --"] + [loc["name"] for loc in self.los_locations]
@@ -1311,7 +1318,10 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         if len(self.los_history) > 10:
             self.los_history = self.los_history[-10:]
 
-        self._save_los_locations()
+        self._save_los_locations({
+            'presets': self.los_custom_locations,
+            'history': self.los_history
+        })
 
     # =====================
     # Utility Methods

@@ -394,9 +394,18 @@ def list_proven_configs() -> List[Dict]:
     ]
 
 
-def detect_meshtastic_settings() -> Optional[Dict]:
+def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     """
     Detect current Meshtastic LoRa settings from connected device.
+
+    Tries multiple connection methods in order:
+    1. meshtasticd on localhost:4403
+    2. meshtasticd on alternative ports (4404)
+    3. Direct USB/serial connection
+    4. BLE connection (if available)
+
+    Args:
+        verbose: If True, include detailed attempt log in result
 
     Returns dict with:
         - preset: str (preset name like 'MEDIUM_FAST')
@@ -405,76 +414,175 @@ def detect_meshtastic_settings() -> Optional[Dict]:
         - spreading_factor: int
         - coding_rate: int
         - channel_slot: int
+        - detection_method: str (how it was detected)
+        - attempts_log: list (if verbose, log of all attempts)
 
     Returns None if detection fails.
     """
     import subprocess
-    import json
+    import glob
+    import time
 
-    try:
-        # Try meshtastic CLI to get current config
-        result = subprocess.run(
-            ['meshtastic', '--host', 'localhost', '--export-config'],
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
+    attempts_log = []
+    result_data = None
 
-        if result.returncode != 0:
-            # Try direct serial connection
-            result = subprocess.run(
-                ['meshtastic', '--export-config'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
+    def log_attempt(method: str, status: str, detail: str = ""):
+        msg = f"[{method}] {status}"
+        if detail:
+            msg += f" - {detail}"
+        attempts_log.append(msg)
+        logger.info(msg)
 
-        if result.returncode == 0 and result.stdout:
-            # Parse the YAML/JSON output
+    def run_meshtastic_cmd(args: list, description: str) -> Optional[subprocess.CompletedProcess]:
+        """Run meshtastic CLI with error handling and retries"""
+        for attempt in range(2):  # Retry once
             try:
-                # meshtastic --export-config outputs YAML-like format
-                lines = result.stdout.strip().split('\n')
-                settings = {}
-
-                for line in lines:
-                    if 'modem_preset' in line.lower():
-                        # Extract preset name
-                        parts = line.split(':')
-                        if len(parts) >= 2:
-                            preset = parts[1].strip().strip('"\'')
-                            settings['preset'] = preset
-                    elif 'region' in line.lower() and 'region' not in settings:
-                        parts = line.split(':')
-                        if len(parts) >= 2:
-                            settings['region'] = parts[1].strip().strip('"\'')
-
-                if 'preset' in settings:
-                    # Get full config from preset
-                    preset = settings['preset']
-                    if preset in MESHTASTIC_PRESETS:
-                        preset_data = MESHTASTIC_PRESETS[preset]
-                        region = settings.get('region', 'US')
-                        region_data = REGION_FREQUENCIES.get(region, REGION_FREQUENCIES['US'])
-
-                        return {
-                            'preset': preset,
-                            'region': region,
-                            'frequency': region_data['primary'],
-                            'bandwidth': preset_data['bandwidth'],
-                            'spreading_factor': preset_data['spreading_factor'],
-                            'coding_rate': preset_data['coding_rate'],
-                            'description': preset_data['description'],
-                        }
-
+                log_attempt(description, "Trying..." if attempt == 0 else "Retrying...")
+                result = subprocess.run(
+                    ['meshtastic'] + args,
+                    capture_output=True,
+                    text=True,
+                    timeout=20
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    log_attempt(description, "SUCCESS", f"Got {len(result.stdout)} bytes")
+                    return result
+                else:
+                    error = result.stderr.strip()[:100] if result.stderr else "No output"
+                    log_attempt(description, "FAILED", error)
+            except subprocess.TimeoutExpired:
+                log_attempt(description, "TIMEOUT", f"Attempt {attempt + 1}")
+            except FileNotFoundError:
+                log_attempt(description, "NOT_FOUND", "meshtastic CLI not installed")
+                return None
             except Exception as e:
-                logger.warning(f"Error parsing meshtastic config: {e}")
+                log_attempt(description, "ERROR", str(e)[:100])
 
-    except subprocess.TimeoutExpired:
-        logger.warning("Meshtastic detection timed out")
-    except FileNotFoundError:
-        logger.warning("meshtastic CLI not found")
-    except Exception as e:
-        logger.warning(f"Meshtastic detection error: {e}")
+            if attempt == 0:
+                time.sleep(1)  # Brief pause before retry
+
+        return None
+
+    def parse_meshtastic_output(output: str) -> Optional[Dict]:
+        """Parse meshtastic --export-config output"""
+        lines = output.strip().split('\n')
+        settings = {}
+
+        for line in lines:
+            line_lower = line.lower()
+            if 'modem_preset' in line_lower:
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    preset = parts[1].strip().strip('"\'')
+                    settings['preset'] = preset
+            elif 'region' in line_lower and 'region' not in settings:
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    settings['region'] = parts[1].strip().strip('"\'')
+
+        return settings if 'preset' in settings else None
+
+    # =========================================================================
+    # Method 1: Try meshtasticd on localhost (most common)
+    # =========================================================================
+    for port in [4403, 4404]:
+        result = run_meshtastic_cmd(
+            ['--host', 'localhost', '--port', str(port), '--export-config'],
+            f"meshtasticd TCP localhost:{port}"
+        )
+        if result:
+            settings = parse_meshtastic_output(result.stdout)
+            if settings:
+                result_data = settings
+                result_data['detection_method'] = f"TCP localhost:{port}"
+                break
+
+    # =========================================================================
+    # Method 2: Try meshtasticd with default host (auto-detect)
+    # =========================================================================
+    if not result_data:
+        result = run_meshtastic_cmd(
+            ['--host', 'localhost', '--export-config'],
+            "meshtasticd TCP auto"
+        )
+        if result:
+            settings = parse_meshtastic_output(result.stdout)
+            if settings:
+                result_data = settings
+                result_data['detection_method'] = "TCP auto"
+
+    # =========================================================================
+    # Method 3: Try direct serial/USB connection
+    # =========================================================================
+    if not result_data:
+        # Find serial ports
+        serial_ports = []
+        for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/tty.usbserial*', '/dev/tty.usbmodem*']:
+            serial_ports.extend(glob.glob(pattern))
+
+        if serial_ports:
+            log_attempt("Serial scan", "Found ports", ", ".join(serial_ports[:3]))
+
+            for port in sorted(set(serial_ports))[:3]:  # Try up to 3 ports
+                result = run_meshtastic_cmd(
+                    ['--port', port, '--export-config'],
+                    f"USB serial {port}"
+                )
+                if result:
+                    settings = parse_meshtastic_output(result.stdout)
+                    if settings:
+                        result_data = settings
+                        result_data['detection_method'] = f"USB {port}"
+                        break
+        else:
+            log_attempt("Serial scan", "No ports found", "No /dev/ttyUSB* or /dev/ttyACM* devices")
+
+    # =========================================================================
+    # Method 4: Try without any host/port (meshtastic CLI auto-detect)
+    # =========================================================================
+    if not result_data:
+        result = run_meshtastic_cmd(
+            ['--export-config'],
+            "meshtastic CLI auto-detect"
+        )
+        if result:
+            settings = parse_meshtastic_output(result.stdout)
+            if settings:
+                result_data = settings
+                result_data['detection_method'] = "CLI auto-detect"
+
+    # =========================================================================
+    # Build final result
+    # =========================================================================
+    if result_data:
+        preset = result_data.get('preset')
+        if preset and preset in MESHTASTIC_PRESETS:
+            preset_data = MESHTASTIC_PRESETS[preset]
+            region = result_data.get('region', 'US')
+            region_data = REGION_FREQUENCIES.get(region, REGION_FREQUENCIES['US'])
+
+            final_result = {
+                'preset': preset,
+                'region': region,
+                'frequency': region_data['primary'],
+                'bandwidth': preset_data['bandwidth'],
+                'spreading_factor': preset_data['spreading_factor'],
+                'coding_rate': preset_data['coding_rate'],
+                'description': preset_data.get('description', ''),
+                'detection_method': result_data.get('detection_method', 'unknown'),
+            }
+
+            if verbose:
+                final_result['attempts_log'] = attempts_log
+
+            log_attempt("RESULT", "SUCCESS", f"Detected {preset} via {final_result['detection_method']}")
+            return final_result
+
+    # Detection failed - log summary
+    log_attempt("RESULT", "FAILED", f"Tried {len(attempts_log)} methods, none succeeded")
+
+    if verbose:
+        return {'preset': None, 'error': True, 'attempts_log': attempts_log}
 
     return None
 
