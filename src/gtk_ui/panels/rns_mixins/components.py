@@ -140,12 +140,22 @@ class ComponentsMixin:
             return False
 
     def _get_package_version(self, package):
-        """Get installed version of a pip package"""
+        """Get installed version of a pip package.
+
+        When running as root, checks the real user's packages since
+        we install with --user to the real user's ~/.local/
+        """
         try:
-            result = subprocess.run(
-                ['pip3', 'show', package],
-                capture_output=True, text=True, timeout=10
-            )
+            is_root = os.geteuid() == 0
+            real_user = self._get_real_username()
+
+            # Run pip show as the real user to find packages in their ~/.local/
+            if is_root and real_user != 'root':
+                cmd = ['sudo', '-H', '-u', real_user, 'python3', '-m', 'pip', 'show', package]
+            else:
+                cmd = ['python3', '-m', 'pip', 'show', package]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
                     if line.startswith('Version:'):
