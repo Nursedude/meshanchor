@@ -798,35 +798,35 @@ class HamClockPanel(Gtk.Box):
 
         # Terminal command section - reliable approach
         cmd_frame = Gtk.Frame()
-        cmd_frame.set_label("Service Commands (copy to terminal)")
+        cmd_frame.set_label("Service Control")
         cmd_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         cmd_box.set_margin_start(10)
         cmd_box.set_margin_end(10)
         cmd_box.set_margin_top(8)
         cmd_box.set_margin_bottom(8)
 
-        # Command buttons with copy functionality
+        # Service control buttons - try D-Bus first, fall back to pkexec
         cmd_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
-        self.service_start_btn = Gtk.Button(label="Copy Start Cmd")
-        self.service_start_btn.set_tooltip_text("Copy: sudo systemctl start hamclock")
-        self.service_start_btn.connect("clicked", lambda b: self._copy_service_cmd("start"))
+        self.service_start_btn = Gtk.Button(label="Start")
+        self.service_start_btn.set_tooltip_text("Start HamClock service")
+        self.service_start_btn.connect("clicked", lambda b: self._control_service("start"))
         cmd_row.append(self.service_start_btn)
 
-        self.service_stop_btn = Gtk.Button(label="Copy Stop Cmd")
-        self.service_stop_btn.set_tooltip_text("Copy: sudo systemctl stop hamclock")
-        self.service_stop_btn.connect("clicked", lambda b: self._copy_service_cmd("stop"))
+        self.service_stop_btn = Gtk.Button(label="Stop")
+        self.service_stop_btn.set_tooltip_text("Stop HamClock service")
+        self.service_stop_btn.connect("clicked", lambda b: self._control_service("stop"))
         cmd_row.append(self.service_stop_btn)
 
-        self.service_restart_btn = Gtk.Button(label="Copy Restart Cmd")
-        self.service_restart_btn.set_tooltip_text("Copy: sudo systemctl restart hamclock")
-        self.service_restart_btn.connect("clicked", lambda b: self._copy_service_cmd("restart"))
+        self.service_restart_btn = Gtk.Button(label="Restart")
+        self.service_restart_btn.set_tooltip_text("Restart HamClock service")
+        self.service_restart_btn.connect("clicked", lambda b: self._control_service("restart"))
         cmd_row.append(self.service_restart_btn)
 
         cmd_box.append(cmd_row)
 
-        # Show detected service name
-        self.cmd_label = Gtk.Label(label="Paste command in terminal to control service")
+        # Service status label
+        self.cmd_label = Gtk.Label(label="Checking service status...")
         self.cmd_label.set_xalign(0)
         self.cmd_label.add_css_class("dim-label")
         cmd_box.append(self.cmd_label)
@@ -984,35 +984,71 @@ class HamClockPanel(Gtk.Box):
 
         return False
 
-    def _copy_service_cmd(self, action):
-        """Copy service command to clipboard - reliable approach"""
-        # Use detected service or default
+    def _control_service(self, action):
+        """Control HamClock service using systemctl with privilege escalation"""
         service_name = getattr(self, '_detected_service', None) or 'hamclock'
-        cmd = f"sudo systemctl {action} {service_name}"
+        self.main_window.set_status_message(f"Attempting to {action} {service_name}...")
+        logger.info(f"[HamClock] Service control: {action} {service_name}")
 
+        def do_control():
+            try:
+                # Check if already running as root
+                is_root = os.geteuid() == 0
+
+                if is_root:
+                    # Direct systemctl when running as root
+                    cmd = ['systemctl', action, service_name]
+                else:
+                    # Try pkexec for graphical privilege escalation
+                    cmd = ['pkexec', 'systemctl', action, service_name]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+                if result.returncode == 0:
+                    GLib.idle_add(self._on_service_control_success, action, service_name)
+                else:
+                    error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                    # If pkexec failed, try polkit dbus
+                    if not is_root and 'polkit' in error.lower() or result.returncode == 126:
+                        GLib.idle_add(self._on_service_control_failed, action, "Authentication cancelled")
+                    else:
+                        GLib.idle_add(self._on_service_control_failed, action, error[:100])
+
+            except subprocess.TimeoutExpired:
+                GLib.idle_add(self._on_service_control_failed, action, "Timeout waiting for response")
+            except FileNotFoundError:
+                # pkexec not found, try with sudo in terminal
+                GLib.idle_add(self._show_manual_command, action, service_name)
+            except Exception as e:
+                GLib.idle_add(self._on_service_control_failed, action, str(e)[:100])
+
+        threading.Thread(target=do_control, daemon=True).start()
+
+    def _on_service_control_success(self, action, service_name):
+        """Handle successful service control"""
+        self.main_window.set_status_message(f"Service {action}ed successfully")
+        logger.info(f"[HamClock] Service {action}ed: {service_name}")
+        # Refresh status
+        GLib.timeout_add(1000, self._check_service_status)
+
+    def _on_service_control_failed(self, action, error):
+        """Handle failed service control"""
+        self.main_window.set_status_message(f"Failed to {action}: {error}")
+        logger.warning(f"[HamClock] Service {action} failed: {error}")
+
+    def _show_manual_command(self, action, service_name):
+        """Show manual command when privilege escalation unavailable"""
+        cmd = f"sudo systemctl {action} {service_name}"
+        self.main_window.set_status_message(f"Run manually: {cmd}")
+
+        # Also copy to clipboard as fallback
         try:
-            # Get clipboard from display
             display = self.get_display()
             clipboard = display.get_clipboard()
-
-            # Set text to clipboard
             clipboard.set(cmd)
-
-            self.main_window.set_status_message(f"Copied: {cmd}")
-            logger.info(f"[HamClock] Copied command to clipboard: {cmd}")
-        except Exception as e:
-            # Fallback: try xclip
-            try:
-                subprocess.run(
-                    ['xclip', '-selection', 'clipboard'],
-                    input=cmd.encode(),
-                    timeout=5
-                )
-                self.main_window.set_status_message(f"Copied: {cmd}")
-            except Exception:
-                # Show command in status if clipboard fails
-                self.main_window.set_status_message(f"Run in terminal: {cmd}")
-                logger.warning(f"[HamClock] Clipboard unavailable, showing command: {cmd}")
+            self.main_window.set_status_message(f"Copied to clipboard: {cmd}")
+        except Exception:
+            pass
 
     def _find_hamclock_service(self):
         """Find which HamClock service is installed on the system."""
@@ -1155,153 +1191,6 @@ class HamClockPanel(Gtk.Box):
         """Auto-connect on panel load"""
         self._on_connect(None)
         return False
-
-    def _on_connect(self, button):
-        """Connect to HamClock API"""
-        url = self.url_entry.get_text().strip()
-        if not url:
-            import os
-
-            errors = []
-
-            try:
-                # Check if already installed
-                result = subprocess.run(
-                    ['dpkg', '-l', 'hamclock-web'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0 and 'ii' in result.stdout:
-                    GLib.idle_add(self._install_complete, True, "hamclock-web already installed", button)
-                    return
-
-                # Detect architecture
-                arch_result = subprocess.run(['dpkg', '--print-architecture'], capture_output=True, text=True, timeout=5)
-                arch = arch_result.stdout.strip() if arch_result.returncode == 0 else 'armhf'
-                logger.info(f"[HamClock] Detected architecture: {arch}")
-
-                # Map to GitHub release naming - hamclock-systemd only available for armhf
-                # hamclock available for armhf and amd64
-                # arm64 (aarch64) can run armhf packages via multiarch on Pi
-                version = "2.65.5"
-                if arch in ['armhf', 'arm64', 'aarch64']:
-                    # arm64 Pi can run armhf packages - enable multiarch first
-                    if arch in ['arm64', 'aarch64']:
-                        logger.info("[HamClock] arm64 detected, enabling armhf multiarch")
-                        GLib.idle_add(self.main_window.set_status_message, "Enabling armhf multiarch for arm64...")
-                        subprocess.run(['sudo', 'dpkg', '--add-architecture', 'armhf'],
-                                       capture_output=True, timeout=30)
-                        subprocess.run(['sudo', 'apt', 'update'], capture_output=True, timeout=120)
-                    # Use hamclock-systemd for Pi (includes web service)
-                    deb_name = f"hamclock-systemd_{version}_armhf.deb"
-                elif arch == 'amd64':
-                    deb_name = f"hamclock_{version}_amd64.deb"
-                else:
-                    errors.append(f"Unsupported architecture: {arch}")
-                    GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-                    return
-
-                deb_url = f"https://github.com/pa28/hamclock-systemd/releases/download/V2.65/{deb_name}"
-                logger.info(f"[HamClock] Downloading: {deb_url}")
-
-                # Step 1: Download .deb directly from GitHub
-                GLib.idle_add(self.main_window.set_status_message, f"Downloading {deb_name}...")
-
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    deb_path = os.path.join(tmpdir, deb_name)
-
-                    # Try wget first
-                    wget_cmd = ['wget', '-q', '-O', deb_path, deb_url]
-                    wget_result = subprocess.run(wget_cmd, capture_output=True, timeout=120)
-
-                    if wget_result.returncode != 0:
-                        # Try curl as fallback
-                        curl_cmd = ['curl', '-sL', '-o', deb_path, deb_url]
-                        curl_result = subprocess.run(curl_cmd, capture_output=True, timeout=120)
-                        if curl_result.returncode != 0:
-                            errors.append(f"Failed to download {deb_name}")
-                            GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-                            return
-
-                    # Verify download
-                    if not os.path.exists(deb_path) or os.path.getsize(deb_path) < 10000:
-                        errors.append("Downloaded package is invalid or too small")
-                        GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-                        return
-
-                    # Step 2: Install the .deb
-                    GLib.idle_add(self.main_window.set_status_message, "Installing HamClock...")
-
-                    # Use apt to install (handles dependencies)
-                    install_cmd = ['sudo', 'apt', 'install', '-y', '-f', deb_path]
-                    install_result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=300)
-
-                    if install_result.returncode != 0:
-                        # Try dpkg + fix dependencies
-                        dpkg_cmd = ['sudo', 'dpkg', '-i', deb_path]
-                        dpkg_result = subprocess.run(dpkg_cmd, capture_output=True, text=True, timeout=120)
-
-                        # Fix any missing dependencies
-                        fix_cmd = ['sudo', 'apt-get', '-f', 'install', '-y']
-                        subprocess.run(fix_cmd, capture_output=True, timeout=120)
-
-                        # Verify install
-                        check = subprocess.run(['dpkg', '-l', 'hamclock-systemd'], capture_output=True, text=True, timeout=10)
-                        if check.returncode != 0 or 'ii' not in check.stdout:
-                            check2 = subprocess.run(['dpkg', '-l', 'hamclock'], capture_output=True, text=True, timeout=10)
-                            if check2.returncode != 0 or 'ii' not in check2.stdout:
-                                errors.append(f"Install failed: {dpkg_result.stderr[:200]}")
-                                GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-                                return
-
-                # Step 3: Enable and start service
-                GLib.idle_add(self.main_window.set_status_message, "Enabling hamclock service...")
-
-                # Try service names in order of preference
-                service_enabled = False
-                for service_name in ['hamclock-systemd', 'hamclock-web', 'hamclock']:
-                    enable_cmd = ['sudo', 'systemctl', 'enable', '--now', service_name]
-                    enable_result = subprocess.run(enable_cmd, capture_output=True, text=True, timeout=30)
-                    if enable_result.returncode == 0:
-                        logger.info(f"[HamClock] Enabled service: {service_name}")
-                        service_enabled = True
-                        break
-
-                if service_enabled:
-                    GLib.idle_add(self._install_complete, True, "HamClock installed successfully!", button)
-                else:
-                    GLib.idle_add(self._install_complete, True, "HamClock installed (start service manually)", button)
-
-            except subprocess.TimeoutExpired:
-                errors.append("Installation timed out")
-                GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-            except Exception as e:
-                logger.error(f"[HamClock] Install error: {e}")
-                errors.append(str(e))
-                GLib.idle_add(self._install_complete, False, "; ".join(errors), button)
-
-        threading.Thread(target=do_install, daemon=True).start()
-
-    def _install_complete(self, success, message, button):
-        """Handle installation completion."""
-        button.set_sensitive(True)
-
-        if success:
-            self.main_window.set_status_message(message)
-            logger.info(f"[HamClock] Install: {message}")
-            # Update URL to localhost since we just installed locally
-            self.url_entry.set_text("http://localhost")
-            # Refresh service status
-            GLib.timeout_add(2000, self._check_service_status)
-        else:
-            self.main_window.set_status_message(f"Install failed: {message}")
-            logger.error(f"[HamClock] Install failed: {message}")
-
-        return False
-
-    def _auto_connect(self):
-        """Auto-connect on startup"""
-        self._on_connect(None)
-        return False  # Don't repeat
 
     def _validate_url(self, url):
         """Validate URL format and return (valid, error_message)"""

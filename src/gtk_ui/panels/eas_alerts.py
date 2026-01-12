@@ -165,9 +165,68 @@ class EASAlertsPanel(Gtk.Box):
         self.set_margin_top(20)
         self.set_margin_bottom(20)
 
+        # Load location settings
+        self._load_location_settings()
+
         self._init_plugin()
         self._build_ui()
         self._refresh_alerts()
+
+    def _load_location_settings(self):
+        """Load user location settings"""
+        import os
+        from pathlib import Path
+
+        # Default location (Hawaii - user's example)
+        self.user_lat = 19.435175
+        self.user_lon = -155.213842
+        self.show_all_alerts = False
+
+        # Try to load from settings
+        try:
+            from utils.paths import get_real_user_home
+            config_dir = get_real_user_home() / ".config" / "meshforge"
+        except ImportError:
+            config_dir = Path.home() / ".config" / "meshforge"
+
+        settings_file = config_dir / "eas_location.json"
+        if settings_file.exists():
+            try:
+                import json
+                with open(settings_file) as f:
+                    settings = json.load(f)
+                    self.user_lat = settings.get('latitude', self.user_lat)
+                    self.user_lon = settings.get('longitude', self.user_lon)
+                    self.show_all_alerts = settings.get('show_all_alerts', False)
+            except Exception as e:
+                logger.debug(f"[EAS] Could not load location settings: {e}")
+
+    def _save_location_settings(self):
+        """Save user location settings"""
+        import os
+        from pathlib import Path
+
+        try:
+            from utils.paths import get_real_user_home
+            config_dir = get_real_user_home() / ".config" / "meshforge"
+        except ImportError:
+            config_dir = Path.home() / ".config" / "meshforge"
+
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            settings_file = config_dir / "eas_location.json"
+
+            import json
+            settings = {
+                'latitude': self.user_lat,
+                'longitude': self.user_lon,
+                'show_all_alerts': self.show_all_alerts
+            }
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+            logger.info(f"[EAS] Saved location: {self.user_lat}, {self.user_lon}")
+        except Exception as e:
+            logger.error(f"[EAS] Could not save location settings: {e}")
 
     def _init_plugin(self):
         """Initialize the EAS plugin"""
@@ -253,6 +312,74 @@ class EASAlertsPanel(Gtk.Box):
         self.current_filter = "all"
         self.append(source_box)
 
+        # Location settings frame
+        location_frame = Gtk.Frame()
+        location_frame.set_label("Your Location")
+        location_frame.set_margin_top(10)
+
+        location_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        location_box.set_margin_start(10)
+        location_box.set_margin_end(10)
+        location_box.set_margin_top(8)
+        location_box.set_margin_bottom(8)
+
+        # Lat/Lon row
+        coords_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        lat_label = Gtk.Label(label="Latitude:")
+        coords_row.append(lat_label)
+
+        self.lat_entry = Gtk.Entry()
+        self.lat_entry.set_text(str(self.user_lat))
+        self.lat_entry.set_width_chars(12)
+        self.lat_entry.set_placeholder_text("e.g., 19.435175")
+        self.lat_entry.set_tooltip_text("Your latitude (decimal degrees)")
+        coords_row.append(self.lat_entry)
+
+        lon_label = Gtk.Label(label="Longitude:")
+        lon_label.set_margin_start(15)
+        coords_row.append(lon_label)
+
+        self.lon_entry = Gtk.Entry()
+        self.lon_entry.set_text(str(self.user_lon))
+        self.lon_entry.set_width_chars(12)
+        self.lon_entry.set_placeholder_text("e.g., -155.213842")
+        self.lon_entry.set_tooltip_text("Your longitude (decimal degrees)")
+        coords_row.append(self.lon_entry)
+
+        # Apply location button
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.set_tooltip_text("Apply location and refresh alerts")
+        apply_btn.connect("clicked", self._on_apply_location)
+        apply_btn.set_margin_start(15)
+        coords_row.append(apply_btn)
+
+        location_box.append(coords_row)
+
+        # Show all alerts toggle
+        all_alerts_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        self.show_all_switch = Gtk.Switch()
+        self.show_all_switch.set_active(self.show_all_alerts)
+        self.show_all_switch.connect("notify::active", self._on_show_all_toggled)
+        all_alerts_row.append(self.show_all_switch)
+
+        all_alerts_label = Gtk.Label(label="Show alerts outside my area (nationwide)")
+        all_alerts_label.set_xalign(0)
+        all_alerts_row.append(all_alerts_label)
+
+        location_box.append(all_alerts_row)
+
+        # Current location display
+        self.location_label = Gtk.Label()
+        self.location_label.set_xalign(0)
+        self.location_label.add_css_class("dim-label")
+        self._update_location_label()
+        location_box.append(self.location_label)
+
+        location_frame.set_child(location_box)
+        self.append(location_frame)
+
         # Alerts list in scrolled window
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -306,9 +433,21 @@ class EASAlertsPanel(Gtk.Box):
         self.status_label.set_text("Checking for alerts...")
         self.status_icon.set_from_icon_name("content-loading-symbolic")
 
+        # Update plugin config with user's location
+        if hasattr(self.plugin, '_config') and self.plugin._config:
+            if not self.plugin._config.has_section('location'):
+                self.plugin._config.add_section('location')
+            self.plugin._config.set('location', 'latitude', str(self.user_lat))
+            self.plugin._config.set('location', 'longitude', str(self.user_lon))
+
         def fetch_alerts():
             try:
-                alerts = self.plugin.check_all_alerts()
+                if self.show_all_alerts:
+                    # Fetch nationwide alerts (no location filter)
+                    alerts = self._fetch_nationwide_alerts()
+                else:
+                    # Fetch local alerts based on user's location
+                    alerts = self.plugin.check_all_alerts()
                 GLib.idle_add(self._update_alerts_display, alerts)
             except Exception as e:
                 logger.error(f"[EAS Panel] Error fetching alerts: {e}")
@@ -316,6 +455,66 @@ class EASAlertsPanel(Gtk.Box):
 
         thread = threading.Thread(target=fetch_alerts, daemon=True)
         thread.start()
+
+    def _fetch_nationwide_alerts(self):
+        """Fetch alerts from all US without location filtering"""
+        import urllib.request
+        import json
+
+        all_alerts = []
+
+        # NOAA/NWS nationwide alerts
+        try:
+            url = "https://api.weather.gov/alerts/active?status=actual"
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'MeshForge/1.0')
+            req.add_header('Accept', 'application/geo+json')
+
+            with urllib.request.urlopen(req, timeout=15) as response:
+                data = json.loads(response.read().decode('utf-8'))
+
+            if 'features' in data:
+                for feature in data['features'][:50]:  # Limit to 50 for performance
+                    props = feature.get('properties', {})
+                    if EAS_AVAILABLE:
+                        from plugins.eas_alerts import Alert, AlertSeverity, AlertSource
+                        try:
+                            severity_map = {
+                                'Extreme': AlertSeverity.EXTREME,
+                                'Severe': AlertSeverity.SEVERE,
+                                'Moderate': AlertSeverity.MODERATE,
+                                'Minor': AlertSeverity.MINOR
+                            }
+                            severity = severity_map.get(props.get('severity', ''), AlertSeverity.UNKNOWN)
+
+                            alert = Alert(
+                                title=props.get('headline', props.get('event', 'Alert')),
+                                description=props.get('description', ''),
+                                severity=severity,
+                                source=AlertSource.NOAA,
+                                event_type=props.get('event', ''),
+                                areas=props.get('areaDesc', '').split('; ') if props.get('areaDesc') else [],
+                            )
+                            all_alerts.append(alert)
+                        except Exception as e:
+                            logger.debug(f"[EAS] Could not parse alert: {e}")
+
+        except Exception as e:
+            logger.error(f"[EAS] Error fetching nationwide alerts: {e}")
+
+        # Also get local alerts if plugin available
+        if self.plugin:
+            try:
+                local_alerts = self.plugin.check_all_alerts()
+                # Merge, avoiding duplicates
+                existing_titles = {a.title for a in all_alerts}
+                for alert in local_alerts:
+                    if alert.title not in existing_titles:
+                        all_alerts.append(alert)
+            except Exception as e:
+                logger.debug(f"[EAS] Could not get local alerts: {e}")
+
+        return all_alerts
 
     def _update_alerts_display(self, alerts: List['Alert']):
         """Update the alerts display (must be called from main thread)"""
@@ -408,6 +607,49 @@ class EASAlertsPanel(Gtk.Box):
         self.status_icon.set_from_icon_name("dialog-error-symbolic")
         self.status_label.set_text(f"Error: {error_msg[:50]}")
 
+    def _update_location_label(self):
+        """Update the location display label"""
+        if self.show_all_alerts:
+            self.location_label.set_text(f"Location: {self.user_lat:.4f}, {self.user_lon:.4f} (showing nationwide)")
+        else:
+            self.location_label.set_text(f"Location: {self.user_lat:.4f}, {self.user_lon:.4f} (local alerts only)")
+
+    def _on_apply_location(self, button):
+        """Apply new location settings"""
+        try:
+            new_lat = float(self.lat_entry.get_text().strip())
+            new_lon = float(self.lon_entry.get_text().strip())
+
+            # Validate ranges
+            if not (-90 <= new_lat <= 90):
+                self.main_window.set_status_message("Latitude must be between -90 and 90")
+                return
+            if not (-180 <= new_lon <= 180):
+                self.main_window.set_status_message("Longitude must be between -180 and 180")
+                return
+
+            self.user_lat = new_lat
+            self.user_lon = new_lon
+            self._save_location_settings()
+            self._update_location_label()
+            self.main_window.set_status_message(f"Location set to {new_lat:.4f}, {new_lon:.4f}")
+
+            # Refresh alerts with new location
+            self._refresh_alerts()
+
+        except ValueError:
+            self.main_window.set_status_message("Invalid coordinates - use decimal degrees (e.g., 19.435)")
+
+    def _on_show_all_toggled(self, switch, gparam):
+        """Handle show all alerts toggle"""
+        self.show_all_alerts = switch.get_active()
+        self._save_location_settings()
+        self._update_location_label()
+        self.main_window.set_status_message(
+            "Showing nationwide alerts" if self.show_all_alerts else "Showing local alerts only"
+        )
+        self._refresh_alerts()
+
     def _on_settings_clicked(self, button):
         """Open settings dialog"""
         dialog = Adw.MessageDialog.new(
@@ -432,9 +674,15 @@ class EASAlertsPanel(Gtk.Box):
         if response == "open":
             # Open config file in default editor
             import subprocess
-            config_path = "~/.config/meshforge/plugins/eas_alerts.ini"
+            from pathlib import Path
+            # Use get_real_user_home to handle sudo properly
             try:
-                subprocess.run(["xdg-open", config_path], check=False)
+                from utils.paths import get_real_user_home
+                config_path = str(get_real_user_home() / ".config/meshforge/plugins/eas_alerts.ini")
+            except ImportError:
+                config_path = str(Path.home() / ".config/meshforge/plugins/eas_alerts.ini")
+            try:
+                subprocess.run(["xdg-open", config_path], check=False, timeout=10)
             except Exception as e:
                 logger.error(f"Failed to open config: {e}")
 
@@ -443,5 +691,5 @@ class EASAlertsPanel(Gtk.Box):
         if self.plugin:
             try:
                 self.plugin.deactivate()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Plugin cleanup (non-critical): {e}")
