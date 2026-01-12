@@ -74,53 +74,90 @@ class MeshForgeApp(Adw.Application):
         self.connect('activate', self.on_activate)
 
     def _register_custom_icons(self):
-        """Register custom icons from assets directory"""
+        """Register custom icons from assets directory.
+
+        Installs to user's local icon theme (~/.local/share/icons/) which
+        works reliably even when running with sudo. Fixes ownership if needed.
+        """
         if self._icons_registered:
             return
 
         # Find assets directory relative to source
         src_dir = Path(__file__).parent.parent.parent
         assets_dir = src_dir / 'assets'
+        icon_src = assets_dir / 'meshforge-icon.svg'
 
         if assets_dir.exists():
             display = Gdk.Display.get_default()
             if display:
                 icon_theme = Gtk.IconTheme.get_for_display(display)
+
+                # Install to user's local icon theme (works without root)
+                self._install_icon_to_user_theme(icon_src)
+
+                # Add user's local icons to theme search path
+                user_home = get_real_user_home()
+                local_icons = user_home / '.local' / 'share' / 'icons' / 'hicolor'
+                if local_icons.exists():
+                    icon_theme.add_search_path(str(local_icons))
+
+                # Add assets directory as fallback
                 icon_theme.add_search_path(str(assets_dir))
                 self._icons_registered = True
 
-                # Set default window icon (use application_id for GTK4/libadwaita)
+                # Set default window icon
                 Gtk.Window.set_default_icon_name("org.meshforge.app")
 
-                # Install icon to system location with app_id name for GTK4 title bar
-                icon_src = assets_dir / 'meshforge-icon.svg'
-                icons_dir = Path('/usr/share/icons/hicolor/scalable/apps')
+    def _install_icon_to_user_theme(self, icon_src: Path):
+        """Install icon to user's local hicolor icon theme.
+
+        Uses get_real_user_home() to handle running with sudo correctly.
+        Fixes file ownership when running as root for another user.
+        """
+        if not icon_src.exists():
+            return
+
+        import shutil
+
+        user_home = get_real_user_home()
+        local_icon_dir = user_home / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+        target_icon = local_icon_dir / 'org.meshforge.app.svg'
+
+        def should_update(src: Path, dest: Path) -> bool:
+            if not dest.exists():
+                return True
+            return src.stat().st_mtime > dest.stat().st_mtime
+
+        if not should_update(icon_src, target_icon):
+            return
+
+        try:
+            local_icon_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(icon_src), str(target_icon))
+            logger.debug(f"Installed icon: {target_icon}")
+
+            # Fix ownership if running as root for another user
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and os.geteuid() == 0:
+                import pwd
                 try:
-                    icons_dir.mkdir(parents=True, exist_ok=True)
-                    import shutil
+                    user_info = pwd.getpwnam(sudo_user)
+                    icons_base = user_home / '.local' / 'share' / 'icons'
+                    for dirpath, dirnames, filenames in os.walk(str(icons_base)):
+                        os.chown(dirpath, user_info.pw_uid, user_info.pw_gid)
+                        for filename in filenames:
+                            os.chown(os.path.join(dirpath, filename), user_info.pw_uid, user_info.pw_gid)
+                except (KeyError, OSError) as e:
+                    logger.debug(f"Chown skipped: {e}")
 
-                    def should_update_icon(src: Path, dest: Path) -> bool:
-                        """Check if icon should be updated (source newer or dest missing)"""
-                        if not dest.exists():
-                            return True
-                        return src.stat().st_mtime > dest.stat().st_mtime
-
-                    # Install with application_id name (required for GTK4/libadwaita taskbar)
-                    app_icon_dest = icons_dir / 'org.meshforge.app.svg'
-                    if icon_src.exists() and should_update_icon(icon_src, app_icon_dest):
-                        shutil.copy(str(icon_src), str(app_icon_dest))
-                        logger.debug(f"Updated taskbar icon: {app_icon_dest}")
-
-                    # Also keep legacy name for compatibility
-                    legacy_icon_dest = icons_dir / 'meshforge-icon.svg'
-                    if icon_src.exists() and should_update_icon(icon_src, legacy_icon_dest):
-                        shutil.copy(str(icon_src), str(legacy_icon_dest))
-
-                    # Update icon cache to reflect changes
-                    subprocess.run(['gtk-update-icon-cache', '-f', '-q', '/usr/share/icons/hicolor'],
-                                   capture_output=True, timeout=10)
-                except Exception as e:
-                    logger.debug(f"Icon installation skipped: {e}")
+            # Update icon cache
+            hicolor_dir = user_home / '.local' / 'share' / 'icons' / 'hicolor'
+            subprocess.run(
+                ['gtk-update-icon-cache', '-f', '-q', str(hicolor_dir)],
+                capture_output=True, timeout=10
+            )
+        except (PermissionError, OSError, subprocess.SubprocessError) as e:
+            logger.debug(f"Icon installation skipped: {e}")
 
     def on_activate(self, app):
         """Called when application is activated"""
