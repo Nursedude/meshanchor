@@ -823,3 +823,69 @@ class RNodeMixin:
             info_parts.append("✓ Configured in RNS config")
 
         self.device_info_label.set_label("\n".join(info_parts))
+
+        # If device has RNS config, try to auto-detect Meshtastic and suggest gateway template
+        if device.is_rnode or device.model != "Unknown":
+            self._auto_match_gateway_template()
+
+    def _auto_match_gateway_template(self):
+        """Automatically suggest gateway template based on detected settings"""
+        if not HAS_LORA_PRESETS:
+            return
+
+        def do_match():
+            # Detect Meshtastic settings
+            settings = detect_meshtastic_settings() if detect_meshtastic_settings else None
+
+            if settings:
+                preset = settings.get('preset', 'Unknown')
+
+                # Find matching proven gateway config
+                matched_config = None
+                matched_key = None
+                for key, config in PROVEN_GATEWAY_CONFIGS.items():
+                    if config.get('meshtastic_preset') == preset:
+                        matched_config = config
+                        matched_key = key
+                        break
+
+                if matched_config:
+                    info = (
+                        f"✓ Detected Meshtastic: {preset}\n"
+                        f"→ Recommended: {matched_config['name']}\n"
+                        f"  {matched_config.get('notes', '')}"
+                    )
+                    GLib.idle_add(self._suggest_gateway_config, matched_key, info)
+                else:
+                    info = (
+                        f"✓ Detected Meshtastic: {preset}\n"
+                        f"→ No proven gateway template for this preset.\n"
+                        f"  Use 'Apply Preset' to configure manually."
+                    )
+                    GLib.idle_add(self.device_info_label.set_label, info)
+            else:
+                GLib.idle_add(
+                    self.device_info_label.set_label,
+                    "Could not detect Meshtastic settings.\n"
+                    "Select a preset manually or ensure meshtasticd is running."
+                )
+
+        threading.Thread(target=do_match, daemon=True).start()
+
+    def _suggest_gateway_config(self, config_key, info_text):
+        """Suggest and optionally auto-select a gateway configuration"""
+        # Update info display
+        current_text = self.device_info_label.get_label()
+        self.device_info_label.set_label(f"{current_text}\n\n{info_text}")
+
+        # Select the matching proven config in dropdown
+        if hasattr(self, 'proven_dropdown'):
+            proven_configs = list(PROVEN_GATEWAY_CONFIGS.keys())
+            try:
+                idx = proven_configs.index(config_key)
+                self.proven_dropdown.set_selected(idx)
+            except ValueError:
+                pass
+
+        # Also set the RNode status
+        self._set_rnode_status(f"Suggested: {PROVEN_GATEWAY_CONFIGS[config_key]['name']}")
