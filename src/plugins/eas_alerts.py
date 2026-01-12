@@ -103,9 +103,16 @@ try:
     from utils.paths import get_real_user_home
 except ImportError:
     def get_real_user_home() -> Path:
+        """Get real user home, avoiding Path.home() bug under sudo."""
         sudo_user = os.environ.get('SUDO_USER')
         if sudo_user and sudo_user != 'root':
             return Path(f'/home/{sudo_user}')
+        # Additional fallback checks to avoid Path.home() returning /root
+        real_user = os.environ.get('LOGNAME') or os.environ.get('USER')
+        if real_user and real_user != 'root':
+            home_path = Path(f'/home/{real_user}')
+            if home_path.exists():
+                return home_path
         return Path.home()
 
 logger = logging.getLogger(__name__)
@@ -914,11 +921,19 @@ class EASAlertsPlugin(IntegrationPlugin):
             return None
         try:
             # Handle various ISO formats
+            # Replace Z with UTC offset for fromisoformat
             dt_str = dt_str.replace('Z', '+00:00')
+            # Strip timezone for naive datetime (consistent comparison)
             if '+' in dt_str:
                 dt_str = dt_str.split('+')[0]
+            if '-' in dt_str and dt_str.count('-') > 2:
+                # Handle negative offset like -05:00
+                parts = dt_str.rsplit('-', 1)
+                if len(parts[1]) <= 6:  # Timezone part
+                    dt_str = parts[0]
             return datetime.fromisoformat(dt_str)
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"[EAS] Failed to parse datetime '{dt_str}': {e}")
             return None
 
     def check_all_alerts(self) -> List[Alert]:

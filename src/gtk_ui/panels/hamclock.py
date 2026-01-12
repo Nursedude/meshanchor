@@ -52,14 +52,7 @@ try:
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
-
-# Import admin command helper for proper privilege escalation (pkexec)
-try:
-    from utils.system import run_admin_command_async
-    HAS_ADMIN_HELPER = True
-except ImportError:
-    HAS_ADMIN_HELPER = False
-    run_admin_command_async = None
+    # Fallback check_port for when service_check module unavailable
     def check_port(port, host='localhost', timeout=2.0):
         import socket
         try:
@@ -68,8 +61,16 @@ except ImportError:
             result = sock.connect_ex((host, port))
             sock.close()
             return result == 0
-        except Exception:
+        except (socket.error, OSError):
             return False
+
+# Import admin command helper for proper privilege escalation (pkexec)
+try:
+    from utils.system import run_admin_command_async
+    HAS_ADMIN_HELPER = True
+except ImportError:
+    HAS_ADMIN_HELPER = False
+    run_admin_command_async = None
 
 # Try to import WebKit for embedded view
 # Note: WebKit doesn't work when running as root (sandbox issues)
@@ -958,9 +959,9 @@ class HamClockPanel(Gtk.Box):
         """Perform HamClock service action (start/stop/restart)
 
         Uses pkexec for GUI password prompt when available (proper GTK integration).
-        Falls back to sudo if pkexec is unavailable.
+        Falls back to direct execution if already root.
         """
-        logger.debug(f"[HamClock] Service action: {action}...")
+        logger.info(f"[HamClock] Service action requested: {action}")
         self.main_window.set_status_message(f"{action.capitalize()}ing HamClock...")
 
         # Disable buttons during operation
@@ -968,46 +969,76 @@ class HamClockPanel(Gtk.Box):
         self.service_stop_btn.set_sensitive(False)
         self.service_restart_btn.set_sensitive(False)
 
-        # Find which HamClock service is installed
-        service_name = self._find_hamclock_service()
-        if not service_name:
-            self._service_action_complete(action, False, "No HamClock service found")
-            return
+        # Find which HamClock service is installed (run in background)
+        def do_service_action():
+            service_name = self._find_hamclock_service()
+            if not service_name:
+                logger.warning("[HamClock] No service found")
+                GLib.idle_add(self._service_action_complete, action, False, "No HamClock service found. Install hamclock-systemd first.")
+                return
 
-        logger.debug(f"[HamClock] Using service: {service_name}")
+            logger.info(f"[HamClock] Found service: {service_name}, executing {action}")
 
-        # Use proper admin helper with pkexec (GUI password dialog)
-        if HAS_ADMIN_HELPER and run_admin_command_async:
-            def on_complete(success, stdout, stderr):
-                error = stderr.strip() if stderr else None
-                GLib.idle_add(self._service_action_complete, action, success, error)
+            # Check if we're already root
+            is_root = os.geteuid() == 0
 
-            run_admin_command_async(
-                ['systemctl', action, service_name],
-                on_complete,
-                use_gui=True,
-                timeout=30
-            )
-        else:
-            # Fallback to threaded sudo (less reliable in GUI)
-            def do_action():
-                try:
+            try:
+                if is_root:
+                    # Already root - run directly
+                    logger.debug("[HamClock] Running as root, executing directly")
                     result = subprocess.run(
-                        ['sudo', 'systemctl', action, service_name],
+                        ['systemctl', action, service_name],
                         capture_output=True, text=True, timeout=30
                     )
                     success = result.returncode == 0
                     error = result.stderr.strip() if not success else None
+                    logger.info(f"[HamClock] Direct execution result: success={success}, error={error}")
                     GLib.idle_add(self._service_action_complete, action, success, error)
-                except subprocess.TimeoutExpired:
-                    GLib.idle_add(self._service_action_complete, action, False, "Command timed out")
-                except Exception as e:
-                    GLib.idle_add(self._service_action_complete, action, False, str(e))
 
-            threading.Thread(target=do_action, daemon=True).start()
+                elif HAS_ADMIN_HELPER and run_admin_command_async:
+                    # Use pkexec via admin helper
+                    logger.debug("[HamClock] Using run_admin_command_async with pkexec")
+
+                    def on_complete(success, stdout, stderr):
+                        error = stderr.strip() if stderr else None
+                        logger.info(f"[HamClock] Admin command result: success={success}, error={error}")
+                        GLib.idle_add(self._service_action_complete, action, success, error)
+
+                    # Note: run_admin_command_async already uses GLib.idle_add internally
+                    # so we call directly here (it will schedule on_complete properly)
+                    from utils.system import run_admin_command
+                    success, stdout, stderr = run_admin_command(
+                        ['systemctl', action, service_name],
+                        use_gui=True,
+                        timeout=30
+                    )
+                    on_complete(success, stdout, stderr)
+
+                else:
+                    # No admin helper and not root - show error
+                    logger.warning("[HamClock] Not root and no admin helper available")
+                    GLib.idle_add(
+                        self._service_action_complete,
+                        action,
+                        False,
+                        "Run MeshForge with sudo or install polkit/pkexec"
+                    )
+
+            except subprocess.TimeoutExpired:
+                logger.error("[HamClock] Command timed out")
+                GLib.idle_add(self._service_action_complete, action, False, "Command timed out")
+            except Exception as e:
+                logger.error(f"[HamClock] Service action error: {e}")
+                GLib.idle_add(self._service_action_complete, action, False, str(e))
+
+        # Run in background thread to not block UI
+        threading.Thread(target=do_service_action, daemon=True, name="HamClock-ServiceAction").start()
 
     def _find_hamclock_service(self):
-        """Find which HamClock service is installed on the system."""
+        """Find which HamClock service is installed on the system.
+
+        Note: Service names are hardcoded for security - do not add user input here.
+        """
         service_names = ['hamclock', 'hamclock-web', 'hamclock-systemd']
 
         for name in service_names:
@@ -1018,23 +1049,36 @@ class HamClockPanel(Gtk.Box):
                 )
                 # returncode 4 = unit not found, other codes = unit exists
                 if result.returncode != 4:
+                    logger.debug(f"[HamClock] Found service: {name}")
                     return name
+            except subprocess.TimeoutExpired:
+                logger.debug(f"[HamClock] Timeout checking service {name}")
             except Exception as e:
                 logger.debug(f"[HamClock] Error checking {name}: {e}")
 
         return None
 
     def _service_action_complete(self, action, success, error):
-        """Handle service action completion"""
+        """Handle service action completion - ALWAYS re-enables buttons"""
+        logger.info(f"[HamClock] Service action complete: {action}, success={success}")
+
         if success:
             self.main_window.set_status_message(f"HamClock {action} successful")
-            logger.debug(f"[HamClock] {action}: OK")
         else:
-            self.main_window.set_status_message(f"HamClock {action} failed: {error}")
-            logger.debug(f"[HamClock] {action}: FAILED - {error}")
+            error_msg = error or "Unknown error"
+            self.main_window.set_status_message(f"HamClock {action} failed: {error_msg}")
+            logger.warning(f"[HamClock] {action} failed: {error_msg}")
 
-        # Refresh status
-        GLib.timeout_add(1000, self._check_service_status)
+        # ALWAYS refresh status to re-enable buttons (even on failure)
+        # Use shorter delay for better responsiveness
+        GLib.timeout_add(500, self._check_service_status)
+
+        # Also immediately enable buttons in a sensible default state
+        # (the status check will correct this if needed)
+        self.service_start_btn.set_sensitive(True)
+        self.service_stop_btn.set_sensitive(True)
+        self.service_restart_btn.set_sensitive(True)
+
         return False
 
     def _install_hamclock_web(self, button):
