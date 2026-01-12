@@ -52,14 +52,7 @@ try:
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
-
-# Import admin command helper for proper privilege escalation (pkexec)
-try:
-    from utils.system import run_admin_command_async
-    HAS_ADMIN_HELPER = True
-except ImportError:
-    HAS_ADMIN_HELPER = False
-    run_admin_command_async = None
+    # Fallback check_port for when service_check module unavailable
     def check_port(port, host='localhost', timeout=2.0):
         import socket
         try:
@@ -68,8 +61,16 @@ except ImportError:
             result = sock.connect_ex((host, port))
             sock.close()
             return result == 0
-        except Exception:
+        except (socket.error, OSError):
             return False
+
+# Import admin command helper for proper privilege escalation (pkexec)
+try:
+    from utils.system import run_admin_command_async
+    HAS_ADMIN_HELPER = True
+except ImportError:
+    HAS_ADMIN_HELPER = False
+    run_admin_command_async = None
 
 # Try to import WebKit for embedded view
 # Note: WebKit doesn't work when running as root (sandbox issues)
