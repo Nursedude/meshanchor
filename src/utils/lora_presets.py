@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, List
 from enum import Enum
 
+from utils.ports import MESHTASTICD_PORTS
+
 logger = logging.getLogger(__name__)
 
 
@@ -485,7 +487,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     # =========================================================================
     # Method 1: Try meshtasticd on localhost (most common)
     # =========================================================================
-    for port in [4403, 4404]:
+    for port in MESHTASTICD_PORTS:
         result = run_meshtastic_cmd(
             ['--host', 'localhost', '--port', str(port), '--export-config'],
             f"meshtasticd TCP localhost:{port}"

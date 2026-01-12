@@ -6,15 +6,16 @@ Use these instead of assuming services are running.
 
 Usage:
     from utils.service_check import check_port, check_service, ServiceStatus
+    from utils.ports import MESHTASTICD_PORT
 
     # Quick port check
-    if check_port(4403):
+    if check_port(MESHTASTICD_PORT):
         connect_to_meshtasticd()
     else:
-        show_error("meshtasticd not running on port 4403")
+        show_error(f"meshtasticd not running on port {MESHTASTICD_PORT}")
 
     # Full service check with actionable feedback
-    status = check_service('meshtasticd', port=4403)
+    status = check_service('meshtasticd')
     if not status.available:
         show_error(status.message)
         show_fix(status.fix_hint)
@@ -26,6 +27,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from enum import Enum
+
+from utils.ports import MESHTASTICD_PORT, HAMCLOCK_PORT, MQTT_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +57,10 @@ class ServiceStatus:
 
 
 # Known services and their configurations
+# Port numbers imported from utils.ports for centralization
 KNOWN_SERVICES = {
     'meshtasticd': {
-        'port': 4403,
+        'port': MESHTASTICD_PORT,
         'systemd_name': 'meshtasticd',
         'description': 'Meshtastic daemon',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd',
@@ -68,13 +72,13 @@ KNOWN_SERVICES = {
         'fix_hint': 'Start with: rnsd or sudo systemctl start rnsd',
     },
     'hamclock': {
-        'port': 8080,
+        'port': HAMCLOCK_PORT,
         'systemd_name': 'hamclock',
         'description': 'HamClock space weather display',
         'fix_hint': 'Start with: sudo systemctl start hamclock',
     },
     'mosquitto': {
-        'port': 1883,
+        'port': MQTT_PORT,
         'systemd_name': 'mosquitto',
         'description': 'MQTT broker',
         'fix_hint': 'Start with: sudo systemctl start mosquitto',
