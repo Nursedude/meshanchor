@@ -10,7 +10,6 @@ Follows MeshForge patterns for service lifecycle management:
 
 import logging
 import os
-import socket
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+from utils.service_check import check_port
 
 
 class ServiceState(Enum):
@@ -276,15 +276,7 @@ class MeshChatService:
 
     def _check_port(self) -> bool:
         """Check if MeshChat port is accessible."""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex((self.host, self.port))
-            sock.close()
-            return result == 0
-        except Exception as e:
-            logger.debug(f"Port check failed: {e}")
-            return False
+        return check_port(self.port, self.host)
 
     def _get_version(self) -> Optional[str]:
         """Try to get MeshChat version from API."""
