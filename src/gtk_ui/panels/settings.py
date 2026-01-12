@@ -8,6 +8,9 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio
 from pathlib import Path
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import centralized path utility
 try:
@@ -91,7 +94,7 @@ class SettingsPanel(Gtk.Box):
                     saved = json.load(f)
                     defaults.update(saved)
         except Exception as e:
-            print(f"[Settings] Error loading settings: {e}")
+            logger.error(f"[Settings] Error loading settings: {e}")
         return defaults
 
     def _save_settings(self):
@@ -108,7 +111,7 @@ class SettingsPanel(Gtk.Box):
                 with open(settings_file, 'w') as f:
                     json.dump(self._settings, f, indent=2)
             except Exception as e:
-                print(f"[Settings] Error saving settings: {e}")
+                logger.error(f"[Settings] Error saving settings: {e}")
 
     def _build_ui(self):
         """Build the settings UI"""
@@ -569,7 +572,7 @@ class SettingsPanel(Gtk.Box):
             elif mode == "full":
                 sim.enable(SimulationMode.FULL)
         except ImportError as e:
-            print(f"[Settings] Could not load simulator: {e}")
+            logger.debug(f"[Settings] Could not load simulator: {e}")
 
     def _update_simulation_status(self):
         """Update simulation status label"""
