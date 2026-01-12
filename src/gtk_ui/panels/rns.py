@@ -2551,8 +2551,9 @@ WantedBy=multi-user.target
     def _install_component(self, component):
         """Install or update a component"""
         package = component['package']
-        logger.info(f"Install button clicked for: {component['display']} ({package})")
-        logger.debug(f"[RNS] Installing: {component['display']}...", flush=True)  # Console feedback
+        # Log at INFO level so it's visible in normal logging
+        logger.info(f"[RNS] Install button clicked for: {component['display']} (package={package})")
+        print(f"[RNS] Installing {package}...")  # Direct console output for debugging
 
         # Visual feedback - disable button and update text
         try:
@@ -2587,6 +2588,7 @@ WantedBy=multi-user.target
                     cmd = [sys.executable, '-m', 'pip'] + pip_install_args
                     logger.debug(f"[RNS] Running: {' '.join(cmd)}")
 
+                print(f"[RNS] Running: {' '.join(cmd)}")  # Show command
                 result = subprocess.run(
                     cmd,
                     capture_output=True, text=True,
@@ -2594,11 +2596,13 @@ WantedBy=multi-user.target
                 )
                 output = result.stdout + result.stderr
                 success = result.returncode == 0
-                logger.debug(f"[RNS] pip install result: {'OK' if success else 'FAILED'}")
-                if not success:
-                    logger.debug(f"[RNS] Error: {output[:200]}")
+                # Print result so user can see what happened
+                if success:
+                    print(f"[RNS] ✓ {package} installed successfully")
+                    logger.info(f"[RNS] {package} installed successfully")
                 else:
-                    logger.debug(f"[RNS] Install completed successfully")
+                    print(f"[RNS] ✗ {package} install FAILED: {output[:300]}")
+                    logger.error(f"[RNS] {package} install failed: {output[:300]}")
                 GLib.idle_add(self._install_complete, component['display'], success, output)
             except subprocess.TimeoutExpired:
                 logger.debug(f"[RNS] Install timed out after 180s")
