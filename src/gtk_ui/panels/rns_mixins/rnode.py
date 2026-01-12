@@ -542,21 +542,25 @@ class RNodeMixin:
 
         button.set_sensitive(False)
         self._set_rnode_status("Detecting Meshtastic settings...")
+        self.detected_settings_label.set_label("Scanning for Meshtastic devices...\nThis may take 30-60 seconds.")
 
         def do_detect():
-            settings = detect_meshtastic_settings()
+            # Use verbose mode to get detailed logging
+            settings = detect_meshtastic_settings(verbose=True)
 
-            if settings:
+            if settings and settings.get('preset'):
                 # Update UI with detected settings
                 preset = settings.get('preset', 'Unknown')
                 region = settings.get('region', 'US')
                 bw = settings.get('bandwidth', 0) / 1000  # Hz to kHz
                 sf = settings.get('spreading_factor', 0)
                 cr = settings.get('coding_rate', 0)
+                method = settings.get('detection_method', 'unknown')
 
                 info = (
                     f"✓ Detected: {preset} ({region})\n"
-                    f"  BW: {bw:.0f}kHz, SF: {sf}, CR: 4/{cr}"
+                    f"  BW: {bw:.0f}kHz, SF: {sf}, CR: 4/{cr}\n"
+                    f"  Via: {method}"
                 )
                 GLib.idle_add(self.detected_settings_label.set_label, info)
 
@@ -568,14 +572,22 @@ class RNodeMixin:
                 except ValueError:
                     pass
 
-                GLib.idle_add(self._set_rnode_status, f"Detected: {preset}")
+                GLib.idle_add(self._set_rnode_status, f"Detected: {preset} via {method}")
             else:
-                GLib.idle_add(
-                    self.detected_settings_label.set_label,
-                    "⚠️ Could not detect Meshtastic settings.\n"
-                    "Ensure meshtasticd is running (localhost:4403) or device is connected."
+                # Show detailed log of what was tried
+                attempts = settings.get('attempts_log', []) if settings else []
+                log_text = "\n".join(attempts[-6:]) if attempts else "No attempts logged"
+
+                error_msg = (
+                    "⚠️ Detection failed - tried multiple methods:\n"
+                    f"{log_text}\n\n"
+                    "Troubleshooting:\n"
+                    "• Is meshtasticd running? Check: systemctl status meshtasticd\n"
+                    "• Is device connected via USB? Check: ls /dev/ttyUSB* /dev/ttyACM*\n"
+                    "• Is meshtastic CLI installed? Check: meshtastic --version"
                 )
-                GLib.idle_add(self._set_rnode_status, "Detection failed - select preset manually")
+                GLib.idle_add(self.detected_settings_label.set_label, error_msg)
+                GLib.idle_add(self._set_rnode_status, "Detection failed - see details below")
 
             GLib.idle_add(button.set_sensitive, True)
 
@@ -834,11 +846,12 @@ class RNodeMixin:
             return
 
         def do_match():
-            # Detect Meshtastic settings
-            settings = detect_meshtastic_settings() if detect_meshtastic_settings else None
+            # Detect Meshtastic settings with verbose logging
+            settings = detect_meshtastic_settings(verbose=True) if detect_meshtastic_settings else None
 
-            if settings:
+            if settings and settings.get('preset'):
                 preset = settings.get('preset', 'Unknown')
+                method = settings.get('detection_method', 'unknown')
 
                 # Find matching proven gateway config
                 matched_config = None
@@ -851,26 +864,41 @@ class RNodeMixin:
 
                 if matched_config:
                     info = (
-                        f"✓ Detected Meshtastic: {preset}\n"
+                        f"✓ Detected Meshtastic: {preset} (via {method})\n"
                         f"→ Recommended: {matched_config['name']}\n"
                         f"  {matched_config.get('notes', '')}"
                     )
                     GLib.idle_add(self._suggest_gateway_config, matched_key, info)
                 else:
                     info = (
-                        f"✓ Detected Meshtastic: {preset}\n"
+                        f"✓ Detected Meshtastic: {preset} (via {method})\n"
                         f"→ No proven gateway template for this preset.\n"
                         f"  Use 'Apply Preset' to configure manually."
                     )
-                    GLib.idle_add(self.device_info_label.set_label, info)
+                    GLib.idle_add(self._append_device_info, info)
             else:
-                GLib.idle_add(
-                    self.device_info_label.set_label,
+                # Show what was tried
+                attempts = settings.get('attempts_log', []) if settings else []
+                log_summary = attempts[-3:] if attempts else ["No detection attempts"]
+
+                info = (
                     "Could not detect Meshtastic settings.\n"
-                    "Select a preset manually or ensure meshtasticd is running."
+                    f"Tried: {len(attempts)} methods\n"
+                    "Select a preset manually or check:\n"
+                    "• meshtasticd status\n"
+                    "• USB device connection"
                 )
+                GLib.idle_add(self._append_device_info, info)
 
         threading.Thread(target=do_match, daemon=True).start()
+
+    def _append_device_info(self, text):
+        """Append text to device info label"""
+        current = self.device_info_label.get_label()
+        if current:
+            self.device_info_label.set_label(f"{current}\n\n{text}")
+        else:
+            self.device_info_label.set_label(text)
 
     def _suggest_gateway_config(self, config_key, info_text):
         """Suggest and optionally auto-select a gateway configuration"""
