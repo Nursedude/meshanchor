@@ -22,6 +22,18 @@ from pathlib import Path
 # Setup gi before any imports
 import gi
 
+
+def get_real_user_home() -> Path:
+    """Get the real user's home directory, even when running with sudo.
+
+    When running with sudo, Path.home() returns /root. This function
+    checks for SUDO_USER to get the original user's home.
+    """
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user and sudo_user != 'root':
+        return Path(f'/home/{sudo_user}')
+    return Path.home()
+
 # VTE 2.91 is the GIR binding version - works with both GTK3 and GTK4
 # The library (libvte-2.91-gtk4-0) provides GTK4 support
 try:
@@ -122,50 +134,48 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         self._build_ui()
 
     def _set_window_icon(self):
-        """Set window icon for taskbar - handles GTK4/libadwaita properly"""
+        """Set window icon for taskbar - properly installs to XDG icon theme.
+
+        GTK4/libadwaita requires icons in the hicolor theme structure.
+        We install to user's local icons (~/.local/share/icons/) which
+        doesn't require root and works reliably.
+        """
         try:
-            # For GTK4/libadwaita, we need icons in the icon theme
-            # Add assets directory to search path first
             src_dir = Path(__file__).parent.parent
             assets_dir = src_dir / 'assets'
             icon_file = assets_dir / 'meshforge-icon.svg'
 
+            if not icon_file.exists():
+                # Try alternate location
+                icon_file = Path(__file__).parent / 'assets' / 'meshforge-icon.svg'
+
             if GTK_VERSION == 4:
+                # Install icon to user's local icon theme (no root needed)
+                self._install_icon_to_theme(icon_file)
+
                 display = Gdk.Display.get_default()
                 if display:
                     icon_theme = Gtk.IconTheme.get_for_display(display)
 
-                    # Add assets dir to theme search path
+                    # Add user's local icons to search path
+                    local_icons = get_real_user_home() / '.local' / 'share' / 'icons'
+                    if local_icons.exists():
+                        icon_theme.add_search_path(str(local_icons / 'hicolor'))
+
+                    # Also add assets directory as fallback
                     if assets_dir.exists():
                         icon_theme.add_search_path(str(assets_dir))
 
-                    # Try to install icon to system if we have permission
-                    system_icon = Path('/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg')
-                    if icon_file.exists() and not system_icon.exists():
-                        try:
-                            import shutil
-                            system_icon.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy(str(icon_file), str(system_icon))
-                            # Update icon cache
-                            import subprocess
-                            subprocess.run(['gtk-update-icon-cache', '-f', '-q', '/usr/share/icons/hicolor'],
-                                         capture_output=True, timeout=10)
-                        except (PermissionError, OSError):
-                            pass  # Skip if no permission
-
-                # Set default icon for all windows
+                # Set the icon name - must match installed filename (without .svg)
                 Gtk.Window.set_default_icon_name("org.meshforge.app")
                 self.set_icon_name("org.meshforge.app")
-
-                # Also try by matching file in assets (meshforge-icon.svg -> icon name "meshforge-icon")
-                if icon_file.exists():
-                    self.set_icon_name("meshforge-icon")
             else:
-                # GTK3: use set_icon_from_file
+                # GTK3: use set_icon_from_file directly
+                user_home = get_real_user_home()
                 icon_paths = [
+                    user_home / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'org.meshforge.app.svg',
                     icon_file,
                     Path('/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg'),
-                    Path('/usr/share/pixmaps/org.meshforge.app.svg'),
                 ]
                 for path in icon_paths:
                     if path.exists():
@@ -173,6 +183,58 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
                         break
         except Exception as e:
             print(f"Icon setup: {e}")
+
+    def _install_icon_to_theme(self, source_icon: Path):
+        """Install icon to user's local hicolor icon theme.
+
+        Uses get_real_user_home() to handle running with sudo correctly.
+        """
+        if not source_icon.exists():
+            return
+
+        import shutil
+
+        # User's local icon directory - use real user home, not /root
+        user_home = get_real_user_home()
+        local_icon_dir = user_home / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+        target_icon = local_icon_dir / 'org.meshforge.app.svg'
+
+        # Skip if already installed and up to date
+        if target_icon.exists():
+            if target_icon.stat().st_mtime >= source_icon.stat().st_mtime:
+                return
+
+        try:
+            # Create directory structure
+            local_icon_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy icon file
+            shutil.copy2(str(source_icon), str(target_icon))
+
+            # Fix ownership if running as root for another user
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and os.geteuid() == 0:
+                import pwd
+                try:
+                    user_info = pwd.getpwnam(sudo_user)
+                    # Chown the entire .local/share/icons tree we created
+                    icons_base = user_home / '.local' / 'share' / 'icons'
+                    for dirpath, dirnames, filenames in os.walk(str(icons_base)):
+                        os.chown(dirpath, user_info.pw_uid, user_info.pw_gid)
+                        for filename in filenames:
+                            os.chown(os.path.join(dirpath, filename), user_info.pw_uid, user_info.pw_gid)
+                except (KeyError, OSError):
+                    pass
+
+            # Update icon cache (best effort)
+            hicolor_dir = user_home / '.local' / 'share' / 'icons' / 'hicolor'
+            import subprocess
+            subprocess.run(
+                ['gtk-update-icon-cache', '-f', '-q', str(hicolor_dir)],
+                capture_output=True, timeout=10
+            )
+        except (PermissionError, OSError, subprocess.SubprocessError):
+            pass  # Best effort - icon theme search path will still work
 
     def _build_ui(self):
         """Build the terminal UI"""
