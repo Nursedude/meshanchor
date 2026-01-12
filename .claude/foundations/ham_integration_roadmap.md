@@ -10,11 +10,11 @@
 
 | Integration | Completeness | Status |
 |-------------|--------------|--------|
-| **HamClock** | 60% | Working, needs VOACAP & auto-refresh |
+| **HamClock** | 90% | Full API integration: VOACAP, DX spots, satellite, DE/DX |
 | **RF Tools** | 90% | Solid foundation |
 | **AREDN** | 70% | Working, needs topology viz |
 | **Amateur Radio** | 35% | Stubbed, critical gaps |
-| **Propagation** | 40% | Basic, needs predictions |
+| **Propagation** | 80% | VOACAP, band conditions, auto-refresh |
 
 ---
 
@@ -68,24 +68,24 @@ class StationIDTimer:
 
 ## Medium Priority (Operational Capability)
 
-### 4. VOACAP Propagation Predictions
+### 4. VOACAP Propagation Predictions ✅
 **Why**: HAMs need band-by-band propagation forecasts
-**Current**: HamClock has `get_voacap.txt` endpoint but not parsed
+**Status**: COMPLETED (2026-01-12)
 **Implementation**:
-- Parse VOACAP response from HamClock
-- Display band predictions (10m, 15m, 20m, etc.)
-- Show reliability percentages
-- Time-of-day predictions
+- ✅ Parse VOACAP response from HamClock get_voacap.txt
+- ✅ Display band predictions (160m to 6m)
+- ✅ Show reliability percentages with color coding
+- ✅ Path and UTC time display
 **Files**: `src/gtk_ui/panels/hamclock.py`
 
-### 5. Space Weather Auto-Refresh
+### 5. Space Weather Auto-Refresh ✅
 **Why**: Solar conditions change; manual refresh is tedious
-**Current**: Manual refresh only
+**Status**: COMPLETED (2026-01-12)
 **Implementation**:
-- Configurable refresh interval (default 10 min)
-- Background thread polling
-- Status indicator for stale data
-- Network failure retry with backoff
+- ✅ Configurable refresh interval (1-60 min)
+- ✅ Background thread polling with GLib.timeout_add
+- ✅ Status indicator for stale data (>15 min warning)
+- ✅ Network failure retry with exponential backoff
 **Files**: `src/gtk_ui/panels/hamclock.py`
 
 ### 6. Complete Band Plan Reference
@@ -140,14 +140,15 @@ class StationIDTimer:
 - 6-hour forecast
 **Files**: `src/gtk_ui/panels/hamclock.py`
 
-### 11. DX Cluster Integration
+### 11. DX Cluster Integration ✅
 **Why**: Real-time propagation reports from other HAMs
-**Current**: HamClock has `get_dxspots.txt` but not used
+**Status**: COMPLETED (2026-01-12)
 **Implementation**:
-- Parse DX spots from HamClock
-- Filter by band
-- Display recent spots
-- Alert on wanted DX
+- ✅ Parse DX spots from HamClock get_dxspots.txt
+- ✅ Display recent spots with call, freq, mode, time
+- ✅ Link to DX Summit web cluster
+- [ ] Filter by band (future enhancement)
+- [ ] Alert on wanted DX (future enhancement)
 **Files**: `src/gtk_ui/panels/hamclock.py`
 
 ### 12. ARES/RACES Drill Templates

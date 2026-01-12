@@ -512,14 +512,20 @@ class GatewaySetupWizard(Adw.Window):
             host = self.config['meshtastic']['host']
             port = self.config['meshtastic']['port']
 
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(3)
                 sock.connect((host, port))
-                sock.close()
                 results.append(f"✓ Meshtasticd ({host}:{port}) - Connected")
             except Exception as e:
                 results.append(f"✗ Meshtasticd ({host}:{port}) - {e}")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             # Test RNS availability
             try:
@@ -602,6 +608,8 @@ class GatewaySetupWizard(Adw.Window):
             if sudo_user and sudo_user != 'root':
                 config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshforge'
             else:
+                # Last resort fallback - log warning about potential issue
+                logger.warning("Could not determine real user home, config may be saved to wrong location")
                 config_dir = Path.home() / '.config' / 'meshforge'
 
         config_dir.mkdir(parents=True, exist_ok=True)
