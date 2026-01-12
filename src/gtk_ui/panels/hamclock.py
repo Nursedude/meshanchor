@@ -15,7 +15,7 @@ SystemD packages: https://github.com/pa28/hamclock-systemd
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Gio
 import json
 import threading
 import subprocess
@@ -985,44 +985,114 @@ class HamClockPanel(Gtk.Box):
         return False
 
     def _control_service(self, action):
-        """Control HamClock service using systemctl with privilege escalation"""
+        """Control HamClock service using D-Bus systemd interface.
+
+        This is the proper GTK/GNOME way to control services - it uses
+        polkit for authorization automatically through the system bus.
+        """
         service_name = getattr(self, '_detected_service', None) or 'hamclock'
+        unit_name = f"{service_name}.service"
         self.main_window.set_status_message(f"Attempting to {action} {service_name}...")
-        logger.info(f"[HamClock] Service control: {action} {service_name}")
+        logger.info(f"[HamClock] Service control via D-Bus: {action} {unit_name}")
 
         def do_control():
             try:
-                # Check if already running as root
-                is_root = os.geteuid() == 0
+                # Connect to the system bus
+                bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
 
+                # Get the systemd manager object
+                systemd = Gio.DBusProxy.new_sync(
+                    bus,
+                    Gio.DBusProxyFlags.NONE,
+                    None,
+                    'org.freedesktop.systemd1',
+                    '/org/freedesktop/systemd1',
+                    'org.freedesktop.systemd1.Manager',
+                    None
+                )
+
+                # Map action to D-Bus method
+                if action == 'start':
+                    result = systemd.call_sync(
+                        'StartUnit',
+                        GLib.Variant('(ss)', (unit_name, 'replace')),
+                        Gio.DBusCallFlags.NONE,
+                        30000,  # 30 second timeout
+                        None
+                    )
+                elif action == 'stop':
+                    result = systemd.call_sync(
+                        'StopUnit',
+                        GLib.Variant('(ss)', (unit_name, 'replace')),
+                        Gio.DBusCallFlags.NONE,
+                        30000,
+                        None
+                    )
+                elif action == 'restart':
+                    result = systemd.call_sync(
+                        'RestartUnit',
+                        GLib.Variant('(ss)', (unit_name, 'replace')),
+                        Gio.DBusCallFlags.NONE,
+                        30000,
+                        None
+                    )
+                else:
+                    raise ValueError(f"Unknown action: {action}")
+
+                GLib.idle_add(self._on_service_control_success, action, service_name)
+
+            except GLib.Error as e:
+                error_msg = str(e)
+                logger.warning(f"[HamClock] D-Bus error: {error_msg}")
+
+                # Check for common errors
+                if 'org.freedesktop.PolicyKit1.Error.NotAuthorized' in error_msg:
+                    GLib.idle_add(self._on_service_control_failed, action, "Authorization denied")
+                elif 'org.freedesktop.systemd1.NoSuchUnit' in error_msg:
+                    GLib.idle_add(self._on_service_control_failed, action, f"Service {service_name} not found")
+                elif 'Interactive authentication required' in error_msg:
+                    # D-Bus couldn't prompt for auth - fall back to direct subprocess
+                    GLib.idle_add(self._control_service_subprocess, action, service_name)
+                else:
+                    # Extract cleaner error message
+                    clean_error = error_msg.split(':')[-1].strip()[:80] if ':' in error_msg else error_msg[:80]
+                    GLib.idle_add(self._on_service_control_failed, action, clean_error)
+            except Exception as e:
+                logger.error(f"[HamClock] Service control error: {e}")
+                GLib.idle_add(self._on_service_control_failed, action, str(e)[:80])
+
+        threading.Thread(target=do_control, daemon=True).start()
+
+    def _control_service_subprocess(self, action, service_name):
+        """Fallback: control service via subprocess when D-Bus auth unavailable."""
+        logger.info(f"[HamClock] Falling back to subprocess for {action}")
+
+        def do_subprocess():
+            try:
+                is_root = os.geteuid() == 0
                 if is_root:
-                    # Direct systemctl when running as root
                     cmd = ['systemctl', action, service_name]
                 else:
-                    # Try pkexec for graphical privilege escalation
+                    # Try pkexec which shows a graphical auth dialog
                     cmd = ['pkexec', 'systemctl', action, service_name]
 
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
                 if result.returncode == 0:
                     GLib.idle_add(self._on_service_control_success, action, service_name)
+                elif result.returncode == 126:  # pkexec auth cancelled
+                    GLib.idle_add(self._on_service_control_failed, action, "Authentication cancelled")
                 else:
-                    error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-                    # If pkexec failed, try polkit dbus
-                    if not is_root and 'polkit' in error.lower() or result.returncode == 126:
-                        GLib.idle_add(self._on_service_control_failed, action, "Authentication cancelled")
-                    else:
-                        GLib.idle_add(self._on_service_control_failed, action, error[:100])
-
+                    error = result.stderr.strip() or "Command failed"
+                    GLib.idle_add(self._on_service_control_failed, action, error[:80])
             except subprocess.TimeoutExpired:
-                GLib.idle_add(self._on_service_control_failed, action, "Timeout waiting for response")
+                GLib.idle_add(self._on_service_control_failed, action, "Command timed out")
             except FileNotFoundError:
-                # pkexec not found, try with sudo in terminal
                 GLib.idle_add(self._show_manual_command, action, service_name)
             except Exception as e:
-                GLib.idle_add(self._on_service_control_failed, action, str(e)[:100])
+                GLib.idle_add(self._on_service_control_failed, action, str(e)[:80])
 
-        threading.Thread(target=do_control, daemon=True).start()
+        threading.Thread(target=do_subprocess, daemon=True).start()
 
     def _on_service_control_success(self, action, service_name):
         """Handle successful service control"""

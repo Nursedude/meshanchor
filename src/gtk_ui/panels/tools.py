@@ -8,6 +8,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 
 import json
+import logging
 import math
 import os
 import shlex
@@ -21,6 +22,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Import centralized path utility
 try:
@@ -1374,7 +1377,7 @@ class ToolsPanel(Gtk.Box):
                             elev_mid = results[1].get('elevation', 0)
                             elev_b = results[2].get('elevation', 0)
                 except Exception as e:
-                    print(f"[LOS] Elevation API error: {e}")
+                    logger.debug(f"[LOS] Elevation API error: {e}")
 
                 # Build results
                 results = []
@@ -1676,7 +1679,7 @@ class ToolsPanel(Gtk.Box):
                         loc_copy["name"] = f"[Recent] {loc['name']}"
                         self.los_locations.append(loc_copy)
         except Exception as e:
-            print(f"[LOS] Error loading locations: {e}")
+            logger.debug(f"[LOS] Error loading locations: {e}")
 
     def _save_los_locations(self):
         """Save custom locations and history to file"""
@@ -1689,7 +1692,7 @@ class ToolsPanel(Gtk.Box):
             with open(self.LOS_LOCATIONS_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"[LOS] Error saving locations: {e}")
+            logger.error(f"[LOS] Error saving locations: {e}")
 
     def _on_los_preset_selected(self, dropdown, _):
         """Handle location preset selection"""
