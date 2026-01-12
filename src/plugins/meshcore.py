@@ -198,28 +198,121 @@ class MeshCorePlugin(ProtocolPlugin):
         return self._connect_simulation()
 
     def _connect_tcp(self) -> bool:
-        """Connect via TCP."""
+        """Connect via TCP to a MeshCore server.
+
+        Establishes a persistent TCP connection for real-time communication.
+        Falls back to simulation if connection fails.
+        """
         host = self._config.host
         port = self._config.tcp_port
         logger.info(f"MeshCore: Connecting via TCP to {host}:{port}")
 
-        # Actual TCP connection would go here
         import socket
+        import threading
+
         try:
+            # Create socket with timeout
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
+
+            # Attempt connection
             result = sock.connect_ex((host, port))
-            sock.close()
 
             if result == 0:
-                logger.info(f"MeshCore: TCP connection to {host}:{port} available")
-                logger.info("MeshCore: TCP driver not yet implemented, using simulation")
-            else:
-                logger.warning(f"MeshCore: Cannot reach {host}:{port}")
-        except Exception as e:
-            logger.warning(f"MeshCore: TCP test failed: {e}")
+                logger.info(f"MeshCore: TCP connection to {host}:{port} established")
 
+                # Store socket reference
+                self._device = sock
+                self._connected = True
+                self._stats["last_activity"] = datetime.now()
+
+                # Start receive thread
+                self._stop_receive = threading.Event()
+                self._receive_thread = threading.Thread(
+                    target=self._tcp_receive_loop,
+                    daemon=True
+                )
+                self._receive_thread.start()
+
+                return True
+            else:
+                logger.warning(f"MeshCore: Cannot reach {host}:{port} (error {result})")
+                sock.close()
+        except socket.timeout:
+            logger.warning(f"MeshCore: Connection to {host}:{port} timed out")
+        except Exception as e:
+            logger.warning(f"MeshCore: TCP connection failed: {e}")
+
+        # Fall back to simulation if TCP fails
+        logger.info("MeshCore: Falling back to simulation mode")
         return self._connect_simulation()
+
+    def _tcp_receive_loop(self):
+        """Background thread for receiving TCP data."""
+        logger.debug("MeshCore: TCP receive loop started")
+        buffer = b""
+
+        while not self._stop_receive.is_set():
+            try:
+                if not self._device:
+                    break
+
+                self._device.settimeout(1.0)
+                data = self._device.recv(1024)
+
+                if not data:
+                    logger.warning("MeshCore: TCP connection closed by server")
+                    self._connected = False
+                    break
+
+                buffer += data
+                self._stats["last_activity"] = datetime.now()
+
+                # Process complete messages (newline-delimited)
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)
+                    self._process_tcp_message(line.decode('utf-8', errors='ignore'))
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if not self._stop_receive.is_set():
+                    logger.error(f"MeshCore: TCP receive error: {e}")
+                break
+
+        logger.debug("MeshCore: TCP receive loop ended")
+
+    def _process_tcp_message(self, message: str):
+        """Process a message received via TCP."""
+        logger.debug(f"MeshCore: Received: {message}")
+        self._stats["messages_received"] += 1
+
+        try:
+            # Parse message format: NODE_ID:TYPE:DATA
+            if ':' in message:
+                parts = message.split(':', 2)
+                if len(parts) >= 2:
+                    node_id = parts[0]
+                    msg_type = parts[1]
+                    data = parts[2] if len(parts) > 2 else ""
+
+                    msg_dict = {
+                        "source": node_id,
+                        "type": msg_type,
+                        "data": data,
+                        "timestamp": datetime.now().isoformat(),
+                        "protocol": "meshcore"
+                    }
+
+                    # Notify callbacks
+                    for callback in self._message_callbacks:
+                        try:
+                            callback(msg_dict)
+                        except Exception as e:
+                            logger.error(f"MeshCore callback error: {e}")
+
+        except Exception as e:
+            logger.error(f"MeshCore: Error processing message: {e}")
 
     def _connect_ble(self) -> bool:
         """Connect via Bluetooth LE."""
@@ -266,6 +359,17 @@ class MeshCorePlugin(ProtocolPlugin):
 
     def disconnect(self) -> None:
         """Disconnect from MeshCore device."""
+        # Stop receive thread if running
+        if hasattr(self, '_stop_receive'):
+            self._stop_receive.set()
+
+        # Close socket if open
+        if self._device:
+            try:
+                self._device.close()
+            except Exception:
+                pass
+
         self._connected = False
         self._device = None
         self._nodes.clear()
@@ -305,13 +409,31 @@ class MeshCorePlugin(ProtocolPlugin):
                 self._stats["messages_sent"] += 1
                 return True
 
-            # Actual send would go here
+            # Send via TCP if connected
+            if self._config.connection_type == "tcp" and self._device:
+                return self._send_tcp(destination, message)
+
+            # Actual send for other transports
             logger.info(f"MeshCore: Sending to {destination}: {message}")
             self._stats["messages_sent"] += 1
             return True
 
         except Exception as e:
             logger.error(f"MeshCore send failed: {e}")
+            self._stats["messages_failed"] += 1
+            return False
+
+    def _send_tcp(self, destination: str, message: str) -> bool:
+        """Send message via TCP connection."""
+        try:
+            # Format: DEST:MSG:DATA\n
+            packet = f"{destination}:MSG:{message}\n"
+            self._device.sendall(packet.encode('utf-8'))
+            self._stats["messages_sent"] += 1
+            logger.info(f"MeshCore: Sent to {destination} via TCP")
+            return True
+        except Exception as e:
+            logger.error(f"MeshCore TCP send failed: {e}")
             self._stats["messages_failed"] += 1
             return False
 
