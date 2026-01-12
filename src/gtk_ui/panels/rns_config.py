@@ -10,6 +10,8 @@ import subprocess
 import logging
 from pathlib import Path
 
+from utils.paths import get_real_user_home
+
 logger = logging.getLogger(__name__)
 
 # Default RNS config template
@@ -242,24 +244,11 @@ def create_default_nomadnet_config(config_file: str) -> tuple[bool, str]:
 
 def get_rns_config_path() -> Path:
     """Get the RNS config file path."""
-    # Try to get real user home
-    try:
-        from utils.paths import get_real_user_home
-        home = get_real_user_home()
-    except ImportError:
-        username = get_real_username()
-        home = Path(f'/home/{username}') if username != 'root' else Path.home()
-
+    home = get_real_user_home()
     return home / '.reticulum' / 'config'
 
 
 def get_nomadnet_config_path() -> Path:
     """Get the NomadNet config file path."""
-    try:
-        from utils.paths import get_real_user_home
-        home = get_real_user_home()
-    except ImportError:
-        username = get_real_username()
-        home = Path(f'/home/{username}') if username != 'root' else Path.home()
-
+    home = get_real_user_home()
     return home / '.nomadnetwork' / 'config'

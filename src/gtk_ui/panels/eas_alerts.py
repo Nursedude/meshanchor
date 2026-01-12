@@ -17,6 +17,9 @@ import threading
 import logging
 from datetime import datetime
 from typing import List, Optional
+from pathlib import Path
+
+from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 
@@ -174,20 +177,13 @@ class EASAlertsPanel(Gtk.Box):
 
     def _load_location_settings(self):
         """Load user location settings"""
-        import os
-        from pathlib import Path
-
         # Default location (Hawaii - user's example)
         self.user_lat = 19.435175
         self.user_lon = -155.213842
         self.show_all_alerts = False
 
         # Try to load from settings
-        try:
-            from utils.paths import get_real_user_home
-            config_dir = get_real_user_home() / ".config" / "meshforge"
-        except ImportError:
-            config_dir = Path.home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshforge"
 
         settings_file = config_dir / "eas_location.json"
         if settings_file.exists():
@@ -203,14 +199,7 @@ class EASAlertsPanel(Gtk.Box):
 
     def _save_location_settings(self):
         """Save user location settings"""
-        import os
-        from pathlib import Path
-
-        try:
-            from utils.paths import get_real_user_home
-            config_dir = get_real_user_home() / ".config" / "meshforge"
-        except ImportError:
-            config_dir = Path.home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshforge"
 
         try:
             config_dir.mkdir(parents=True, exist_ok=True)
@@ -674,13 +663,8 @@ class EASAlertsPanel(Gtk.Box):
         if response == "open":
             # Open config file in default editor
             import subprocess
-            from pathlib import Path
             # Use get_real_user_home to handle sudo properly
-            try:
-                from utils.paths import get_real_user_home
-                config_path = str(get_real_user_home() / ".config/meshforge/plugins/eas_alerts.ini")
-            except ImportError:
-                config_path = str(Path.home() / ".config/meshforge/plugins/eas_alerts.ini")
+            config_path = str(get_real_user_home() / ".config/meshforge/plugins/eas_alerts.ini")
             try:
                 subprocess.run(["xdg-open", config_path], check=False, timeout=10)
             except Exception as e:

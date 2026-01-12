@@ -599,18 +599,8 @@ class GatewaySetupWizard(Adw.Window):
 
     def _save_config(self):
         """Save gateway configuration to file."""
-        try:
-            from utils.paths import get_real_user_home
-            config_dir = get_real_user_home() / '.config' / 'meshforge'
-        except ImportError:
-            import os
-            sudo_user = os.environ.get('SUDO_USER')
-            if sudo_user and sudo_user != 'root':
-                config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshforge'
-            else:
-                # Last resort fallback - log warning about potential issue
-                logger.warning("Could not determine real user home, config may be saved to wrong location")
-                config_dir = Path.home() / '.config' / 'meshforge'
+        from utils.paths import get_real_user_home
+        config_dir = get_real_user_home() / '.config' / 'meshforge'
 
         config_dir.mkdir(parents=True, exist_ok=True)
         config_file = config_dir / 'gateway.json'

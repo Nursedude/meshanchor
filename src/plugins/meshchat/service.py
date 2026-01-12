@@ -21,15 +21,7 @@ from typing import Optional, Callable, List, Dict, Any
 logger = logging.getLogger(__name__)
 
 # Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not available."""
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+from utils.paths import get_real_user_home
 
 
 class ServiceState(Enum):

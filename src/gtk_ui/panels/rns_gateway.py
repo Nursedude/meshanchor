@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
+from utils.paths import get_real_user_home
+
 logger = logging.getLogger(__name__)
 
 
@@ -101,16 +103,12 @@ def get_gateway_install_path() -> Optional[Path]:
         Path to gateway directory or None if not found
     """
     # Check common installation locations
+    # get_real_user_home() already handles SUDO_USER correctly
     possible_paths = [
-        Path.home() / 'RNS_Over_Meshtastic_Gateway',
+        get_real_user_home() / 'RNS_Over_Meshtastic_Gateway',
         Path('/opt/RNS_Over_Meshtastic_Gateway'),
         Path('/usr/local/share/rns_meshtastic_gateway'),
     ]
-
-    # Also check SUDO_USER home
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
-        possible_paths.insert(0, Path(f'/home/{sudo_user}/RNS_Over_Meshtastic_Gateway'))
 
     for path in possible_paths:
         if path.exists():
