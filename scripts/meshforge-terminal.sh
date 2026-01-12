@@ -31,10 +31,13 @@ launch_vte() {
     exec $VTE_CMD
 }
 
-# xterm with proper class (WORKS - xterm respects -class flag)
+# xterm with proper class (WORKS - xterm respects -class and -name flags)
+# -name sets WM_CLASS instance, -class sets WM_CLASS class
+# Together they allow desktop to find the icon
 # Uses nice font and colors for better TUI experience
 launch_xterm() {
-    xterm -class "$ICON_NAME" \
+    xterm -name "$ICON_NAME" \
+          -class "$ICON_NAME" \
           -title "$TITLE" \
           -fa "Monospace" \
           -fs 11 \
@@ -46,7 +49,7 @@ launch_xterm() {
 
 # xfce4-terminal (works on XFCE desktops)
 launch_xfce() {
-    xfce4-terminal --icon="meshforge-icon" \
+    xfce4-terminal --icon="org.meshforge.app" \
                    --title="$TITLE" \
                    --geometry=100x35 \
                    -e "$TUI_CMD"
