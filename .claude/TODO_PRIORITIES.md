@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-01-11
+> **Last Updated:** 2026-01-12
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -34,7 +34,7 @@
 ### RNS Management Panel (Phase 2)
 - [x] Install/update RNS, LXMF, NomadNet, MeshChat
 - [x] Service management for rnsd
-- [ ] **RNODE device detection and setup** - Hardware wizard
+- [x] **RNODE device detection and setup** - Hardware wizard (2026-01-12)
 - [x] Configuration editor
 
 ### Plugins
@@ -107,15 +107,18 @@
 - [x] Map panel memory leak fix
 - [x] **VTE launcher fallback improvements** (2026-01-11)
 - [x] **Frequency slot calculator with tests** (2026-01-11)
+- [x] **Network diagnostics tests** (2026-01-12)
+- [x] **Gateway setup documentation** (2026-01-12)
+- [x] **RNODE device detection module** (2026-01-12)
 
 ---
 
 ## Quick Wins (< 1 hour each)
 
 1. [x] Add pytest to requirements.txt
-2. [ ] Create test for network diagnostics API
+2. [x] Create test for network diagnostics API (2026-01-12)
 3. [ ] Add dark mode CSS variable foundation
-4. [ ] Document gateway setup steps
+4. [x] Document gateway setup steps (2026-01-12)
 
 ---
 
