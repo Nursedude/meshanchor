@@ -511,4 +511,46 @@ The `c=component` creates a new binding at each iteration, capturing the current
 
 ---
 
-*Last updated: 2026-01-12 - Added issue #10 (lambda closure bug in loops)*
+---
+
+## Issue #11: GTK4/Libadwaita Taskbar Icon Shows Generic
+
+### Symptom
+MeshForge shows a generic application icon in the taskbar/dock instead of the custom MeshForge icon, despite multiple fix attempts.
+
+### Root Cause
+GTK4/libadwaita has strict requirements for taskbar icons:
+1. Icon must be in hicolor theme structure (`~/.local/share/icons/hicolor/scalable/apps/`)
+2. Icon filename must match `application_id` (e.g., `org.meshforge.app.svg`)
+3. Desktop entry `StartupWMClass` must match the window's actual WM_CLASS
+4. Icon cache must be updated after installation
+5. Some desktop environments cache icons aggressively
+
+### Attempts Made (2026-01-12)
+- [x] Install icon to `~/.local/share/icons/hicolor/scalable/apps/org.meshforge.app.svg`
+- [x] Add icon theme search path with `icon_theme.add_search_path()`
+- [x] Set `Gtk.Window.set_default_icon_name("org.meshforge.app")`
+- [x] Update icon cache with `gtk-update-icon-cache`
+- [x] Fix ownership when running as root with sudo
+- [ ] **NOT YET TRIED**: Verify WM_CLASS matches StartupWMClass in .desktop file
+- [ ] **NOT YET TRIED**: Use GResource to bundle icon into application
+- [ ] **NOT YET TRIED**: Check if issue is desktop-environment specific (GNOME vs KDE vs XFCE)
+
+### Files Involved
+- `src/launcher_vte.py` - VTE terminal wrapper (main GTK window)
+- `src/gtk_ui/app.py` - Main GTK application
+- `org.meshforge.app.desktop` - Desktop entry file
+- `assets/meshforge-icon.svg` - Source icon
+
+### Next Steps to Try
+1. **Verify WM_CLASS**: Run `xprop WM_CLASS` and click the MeshForge window - ensure it matches `org.meshforge.app`
+2. **Check GApplication**: Ensure `application_id='org.meshforge.app'` is set correctly in Adw.Application
+3. **Try GResource**: Bundle icon as GResource instead of file system installation
+4. **Desktop-specific**: Test on different DEs to isolate if it's environment-specific
+
+### Workaround
+Currently none - icon shows as generic in taskbar.
+
+---
+
+*Last updated: 2026-01-12 - Added issue #11 (taskbar icon persistent issue)*
