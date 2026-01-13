@@ -16,7 +16,23 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Import canonical check_port from service_check
-from utils.service_check import check_port
+try:
+    from utils.service_check import check_port
+except ImportError:
+    try:
+        from src.utils.service_check import check_port
+    except ImportError:
+        # Fallback implementation
+        def check_port(port: int, host: str = 'localhost') -> bool:
+            import socket
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                return result == 0
+            except (socket.error, OSError):
+                return False
 
 # TCP state mapping (hex to name)
 TCP_STATES = {

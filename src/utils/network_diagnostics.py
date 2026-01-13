@@ -34,7 +34,16 @@ logger = logging.getLogger(__name__)
 
 
 # Import centralized path utility for sudo compatibility
-from utils.paths import get_real_user_home
+try:
+    from utils.paths import get_real_user_home
+except ImportError:
+    # Fallback for when running tests from project root
+    try:
+        from src.utils.paths import get_real_user_home
+    except ImportError:
+        # Ultimate fallback
+        def get_real_user_home():
+            return Path.home()
 
 
 # Diagnostic data directory
