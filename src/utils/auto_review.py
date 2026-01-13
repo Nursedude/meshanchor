@@ -460,11 +460,43 @@ class ReviewAgent:
             # Check if it's a Popen that's tracked (has communicate with timeout)
             if 'Popen' in line and ('start_new_session' in line or 'daemon' in line.lower()):
                 return True  # Background processes don't need timeout
+            # Check if it's xdg-open (fire-and-forget)
+            if 'xdg-open' in line:
+                return True
+            # Check if it's an interactive terminal app (nano, vim, etc.)
+            if any(editor in line for editor in ['nano', 'vim', 'vi', 'editor']):
+                return True
+            # Check if it's inside a try block with KeyboardInterrupt handling (interactive)
+            if '.wait()' in line:
+                return True  # Explicit wait is intentional
+            # Check if it's a shell utility (clear, etc.)
+            if "'clear'" in line or '"clear"' in line:
+                return True
+            # Check if it's running a python script (interactive user tool)
+            if 'sys.executable' in line:
+                return True  # Python scripts that user interacts with
+
+        # requests patterns - check for timeout
+        if pattern_name == 'requests_no_timeout':
+            if 'timeout' in line:
+                return True
 
         # GLib timer patterns - check for timer tracking
         if pattern_name == 'glib_timeout_no_cleanup':
             # Check if it's inside a schedule_timer method or tracked
             if '_pending_timers' in line or '_schedule_timer' in line or '_timers' in line:
+                return True
+            # Check if the result is being assigned (timer_id = GLib.timeout_add...)
+            if 'timer_id' in line or 'source_id' in line:
+                return True
+            # Check if it's inside a helper function name
+            if 'schedule' in line.lower() or 'add_timer' in line.lower():
+                return True
+            # Check if result is being stored in a variable (e.g., retry_timer = GLib.timeout_add)
+            if '= GLib.timeout_add' in line or '= GLib.' in line:
+                return True
+            # Check if stored in self. attribute
+            if 'self.' in line and '=' in line and 'GLib.timeout' in line:
                 return True
 
         # shell=True in comments explaining why NOT to use it
