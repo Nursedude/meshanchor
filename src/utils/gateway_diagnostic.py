@@ -198,6 +198,13 @@ class GatewayDiagnostic:
                 installed.append(display_name)
             except ImportError:
                 missing.append(display_name)
+            except (SystemExit, KeyboardInterrupt, GeneratorExit):
+                # Re-raise critical exceptions
+                raise
+            except BaseException:
+                # Catch pyo3 PanicException and other errors from
+                # RNS's cryptography library when cffi backend is missing
+                missing.append(f"{display_name} (import error)")
 
         if not missing:
             return CheckResult(
@@ -235,12 +242,15 @@ class GatewayDiagnostic:
                 message="RNS not installed",
                 fix_hint="pip3 install --user rns"
             )
-        except Exception as e:
+        except (SystemExit, KeyboardInterrupt, GeneratorExit):
+            raise
+        except BaseException as e:
+            # Catch pyo3 PanicException from RNS's cryptography library
             return CheckResult(
                 name="RNS Installation",
                 status=CheckStatus.WARN,
                 message=f"RNS installed but error: {e}",
-                fix_hint="Try: pip3 install --user --upgrade rns"
+                fix_hint="Try: pip3 install --user --upgrade rns cffi"
             )
 
     def check_rns_config(self) -> CheckResult:
