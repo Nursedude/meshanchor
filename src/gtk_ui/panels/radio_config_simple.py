@@ -1001,18 +1001,27 @@ class RadioConfigSimple(Gtk.Box):
     def _apply_preset(self, button):
         """Apply modem preset."""
         preset_idx = self.preset_dropdown.get_selected()
+        if preset_idx < 0 or preset_idx >= len(PRESET_NAMES):
+            self.main_window.set_status_message("Please select a preset first")
+            return
         preset_name = PRESET_NAMES[preset_idx]
         self._apply_setting("lora.modem_preset", preset_name, f"Preset: {preset_name}")
 
     def _apply_region(self, button):
         """Apply LoRa region. WARNING: Must comply with local regulations!"""
         region_idx = self.region_dropdown.get_selected()
+        if region_idx < 0 or region_idx >= len(REGIONS):
+            self.main_window.set_status_message("Please select a region first")
+            return
         region_name = REGIONS[region_idx]
         self._apply_setting("lora.region", region_name, f"Region: {region_name}")
 
     def _apply_role(self, button):
         """Apply device role."""
         role_idx = self.role_dropdown.get_selected()
+        if role_idx < 0 or role_idx >= len(ROLE_NAMES):
+            self.main_window.set_status_message("Please select a role first")
+            return
         role_name = ROLE_NAMES[role_idx]
         self._apply_setting("device.role", role_name, f"Role: {role_name}")
 
@@ -1029,6 +1038,9 @@ class RadioConfigSimple(Gtk.Box):
     def _apply_rebroadcast(self, button):
         """Apply rebroadcast mode."""
         idx = self.rebroadcast_dropdown.get_selected()
+        if idx < 0 or idx >= len(REBROADCAST_MODES):
+            self.main_window.set_status_message("Please select a rebroadcast mode first")
+            return
         mode = REBROADCAST_MODES[idx]
         self._apply_setting("device.rebroadcast_mode", mode, f"Rebroadcast: {mode}")
 
