@@ -98,8 +98,31 @@ class RadioConfigSimple(Gtk.Box):
         self.set_margin_bottom(20)
 
         self._interface = None
+        self._pending_timers = []  # Track timers for cleanup
+
+        # Connect cleanup handler
+        self.connect("unrealize", self._on_unrealize)
+
         self._build_ui()
-        GLib.timeout_add(500, self._load_config)
+        self._schedule_timer(500, self._load_config)
+
+    def _on_unrealize(self, widget):
+        """Clean up when panel is destroyed."""
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
+
+    def _schedule_timer(self, delay_ms, callback, *args):
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
 
     def _build_ui(self):
         """Build the UI with organized sections."""
@@ -1216,7 +1239,7 @@ class RadioConfigSimple(Gtk.Box):
 
                 if result.returncode == 0:
                     GLib.idle_add(self._update_status, f"Applied: {desc}")
-                    GLib.timeout_add(2000, self._load_config)
+                    self._schedule_timer(2000, self._load_config)
                 else:
                     error = result.stderr or result.stdout or "Unknown error"
                     GLib.idle_add(self._update_status, f"Failed: {error[:50]}")
@@ -1270,7 +1293,7 @@ class RadioConfigSimple(Gtk.Box):
 
                 if result.returncode == 0:
                     GLib.idle_add(self._update_status, f"Applied: {desc}")
-                    GLib.timeout_add(2000, self._load_config)  # Refresh after 2s
+                    self._schedule_timer(2000, self._load_config)  # Refresh after 2s
                 else:
                     error = result.stderr or result.stdout or "Unknown error"
                     GLib.idle_add(self._update_status, f"Failed: {error[:50]}")
