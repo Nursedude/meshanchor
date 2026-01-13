@@ -1319,14 +1319,20 @@ class MeshToolsPanel(Gtk.Box):
 
             # Method 1: Check if meshtasticd TCP port is available first
             tcp_available = False
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 result = sock.connect_ex(('localhost', 4403))
-                sock.close()
                 tcp_available = (result == 0)
             except Exception:
                 pass
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             if tcp_available:
                 # Acquire global lock - meshtasticd only supports one TCP connection
@@ -1473,11 +1479,11 @@ class MeshToolsPanel(Gtk.Box):
 
         # Check which ports are actually open
         for url, port, name in map_options:
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)
                 result = sock.connect_ex(('localhost', port))
-                sock.close()
 
                 if result == 0:
                     self._log_message(f"Found {name} on port {port}")
@@ -1491,6 +1497,12 @@ class MeshToolsPanel(Gtk.Box):
                     return
             except Exception:
                 continue
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
         self._log_message("No map server found on common ports (9443, 8080, 5000, 8000)")
         self._log_message("Make sure meshtasticd or meshbot web is running")
@@ -1753,14 +1765,20 @@ class MeshToolsPanel(Gtk.Box):
                 report_lines.append("  Service: Unknown")
 
             # Check TCP port
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 result = sock.connect_ex(('localhost', 4403))
-                sock.close()
                 report_lines.append(f"  TCP 4403: {'Open' if result == 0 else 'Closed'}")
             except Exception:
                 pass
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             report_lines.append("\n" + "=" * 60)
 
