@@ -98,15 +98,60 @@ class MeshForgeVTEApp(Adw.Application if GTK_VERSION == 4 else Gtk.Application):
 
         src_dir = Path(__file__).parent.parent
         assets_dir = src_dir / 'assets'
+        icon_src = assets_dir / 'meshforge-icon.svg'
 
         if GTK_VERSION == 4:
             display = Gdk.Display.get_default()
             if display:
                 icon_theme = Gtk.IconTheme.get_for_display(display)
+
+                # Install icon to user's local hicolor theme for better integration
+                if icon_src.exists():
+                    self._install_icon_to_user_theme(icon_src)
+
+                    # Add user's local icons to theme search path
+                    local_icons = get_real_user_home() / '.local' / 'share' / 'icons'
+                    if local_icons.exists():
+                        icon_theme.add_search_path(str(local_icons))
+
+                # Also add assets dir as fallback
                 if assets_dir.exists():
                     icon_theme.add_search_path(str(assets_dir))
+
                 Gtk.Window.set_default_icon_name("org.meshforge.app")
                 self._icons_registered = True
+
+    def _install_icon_to_user_theme(self, icon_src: Path):
+        """Install icon to user's local hicolor icon theme."""
+        try:
+            import shutil
+
+            # Install to scalable apps directory
+            local_icon_dir = get_real_user_home() / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+            local_icon_dir.mkdir(parents=True, exist_ok=True)
+
+            target_icon = local_icon_dir / 'org.meshforge.app.svg'
+
+            # Only copy if source is newer or target doesn't exist
+            if not target_icon.exists() or icon_src.stat().st_mtime > target_icon.stat().st_mtime:
+                shutil.copy2(icon_src, target_icon)
+
+                # Fix ownership if running as root
+                if os.geteuid() == 0:
+                    sudo_uid = os.environ.get('SUDO_UID')
+                    sudo_gid = os.environ.get('SUDO_GID')
+                    if sudo_uid and sudo_gid:
+                        os.chown(target_icon, int(sudo_uid), int(sudo_gid))
+                        # Also fix parent directories
+                        for parent in [local_icon_dir, local_icon_dir.parent, local_icon_dir.parent.parent]:
+                            try:
+                                os.chown(parent, int(sudo_uid), int(sudo_gid))
+                            except (OSError, PermissionError):
+                                break
+
+        except Exception as e:
+            # Non-fatal - icon might just show as generic
+            pass
 
     def on_activate(self, app):
         """Handle app activation"""
