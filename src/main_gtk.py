@@ -168,17 +168,6 @@ def check_gtk():
         sys.exit(1)
 
 
-def check_root():
-    """Check for root privileges"""
-    from utils.system import require_root
-    require_root(
-        exit_on_fail=True,
-        message="This application requires root/sudo privileges.\n"
-                "Please run with:\n"
-                "  sudo python3 src/main_gtk.py"
-    )
-
-
 def check_meshtastic_cli():
     """Check if meshtastic CLI is installed"""
     # Use centralized CLI finder
@@ -386,8 +375,14 @@ def main():
     # Check if we're running as daemon subprocess
     is_daemon_subprocess = os.environ.get('MESHTASTICD_DAEMON') == '1'
 
-    # Check prerequisites
-    check_root()
+    # Check prerequisites - require root for hardware access
+    from utils.system import require_root
+    require_root(
+        exit_on_fail=True,
+        message="This application requires root/sudo privileges.\n"
+                "Please run with:\n"
+                "  sudo python3 src/main_gtk.py"
+    )
     check_display()
     check_gtk()
     check_meshtastic_cli()
