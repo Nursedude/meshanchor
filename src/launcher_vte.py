@@ -518,7 +518,14 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         for term_cmd in terminals:
             if shutil.which(term_cmd[0]):
                 try:
-                    subprocess.Popen(term_cmd)
+                    # Detach process from parent so it survives window close
+                    subprocess.Popen(
+                        term_cmd,
+                        start_new_session=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
                     self.close()
                     return
                 except Exception as e:
@@ -578,10 +585,18 @@ def main():
             if term_path:
                 print(f"Launching with {term}...")
                 try:
-                    # No timeout: interactive terminal runs until user closes it
-                    result = subprocess.run([term_path] + args, check=False)
+                    # Long timeout for interactive terminal (4 hours max session)
+                    result = subprocess.run(
+                        [term_path] + args,
+                        check=False,
+                        timeout=14400  # 4 hours - reasonable max for interactive session
+                    )
                     launched = True
                     sys.exit(result.returncode)
+                except subprocess.TimeoutExpired:
+                    print(f"Terminal session timed out after 4 hours")
+                    launched = True
+                    sys.exit(0)
                 except subprocess.SubprocessError as e:
                     print(f"Failed to launch {term}: {e}")
                     continue
@@ -591,8 +606,15 @@ def main():
             xterm = shutil.which('x-terminal-emulator')
             if xterm:
                 print("Launching with x-terminal-emulator...")
-                # No timeout: interactive terminal runs until user closes it
-                subprocess.run([xterm, '-e', f'sudo python3 {tui_path}'], check=False)
+                try:
+                    # Long timeout for interactive terminal (4 hours max session)
+                    subprocess.run(
+                        [xterm, '-e', f'sudo python3 {tui_path}'],
+                        check=False,
+                        timeout=14400  # 4 hours - reasonable max for interactive session
+                    )
+                except subprocess.TimeoutExpired:
+                    print("Terminal session timed out after 4 hours")
             else:
                 print("\nNo terminal emulator found!")
                 print("Please run directly: sudo python3 " + str(tui_path))
