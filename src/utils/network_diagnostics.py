@@ -401,12 +401,12 @@ class NetworkDiagnostics:
 
     def _check_meshtasticd_health(self):
         """Check meshtasticd service health."""
+        sock = None
         try:
             # Check if port 4403 is open
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2.0)
             result = sock.connect_ex(('localhost', 4403))
-            sock.close()
 
             if result == 0:
                 self.update_health(
@@ -424,6 +424,12 @@ class NetworkDiagnostics:
                 "meshtasticd", HealthStatus.UNKNOWN,
                 f"Check failed: {e}"
             )
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def _check_rns_health(self):
         """Check RNS/Reticulum health."""
@@ -515,12 +521,12 @@ class NetworkDiagnostics:
 
     def _check_network_health(self):
         """Check network connectivity health."""
+        sock = None
         try:
             # Check internet connectivity
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(3.0)
             result = sock.connect_ex(('8.8.8.8', 53))
-            sock.close()
 
             if result == 0:
                 self.update_health(
@@ -538,6 +544,12 @@ class NetworkDiagnostics:
                 "internet", HealthStatus.UNKNOWN,
                 f"Check failed: {e}"
             )
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     # ==================== Event Queries ====================
 

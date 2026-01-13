@@ -98,15 +98,21 @@ def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool
     Returns:
         True if port is open, False otherwise
     """
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         result = sock.connect_ex((host, port))
-        sock.close()
         return result == 0
     except (socket.error, OSError) as e:
         logger.debug(f"Port check failed for {host}:{port}: {e}")
         return False
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def check_systemd_service(service_name: str) -> Tuple[bool, bool]:

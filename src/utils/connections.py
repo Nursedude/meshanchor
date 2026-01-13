@@ -384,11 +384,11 @@ def detect_devices() -> List[dict]:
 
     # Check for meshtasticd
     import socket
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
         result = sock.connect_ex(('127.0.0.1', 4403))
-        sock.close()
         if result == 0:
             devices.append({
                 'mode': ConnectionMode.TCP,
@@ -397,5 +397,11 @@ def detect_devices() -> List[dict]:
             })
     except Exception:
         pass
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     return devices

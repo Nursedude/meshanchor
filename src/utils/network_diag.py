@@ -25,14 +25,20 @@ except ImportError:
         # Fallback implementation
         def check_port(port: int, host: str = 'localhost') -> bool:
             import socket
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)
                 result = sock.connect_ex((host, port))
-                sock.close()
                 return result == 0
             except (socket.error, OSError):
                 return False
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
 # TCP state mapping (hex to name)
 TCP_STATES = {
