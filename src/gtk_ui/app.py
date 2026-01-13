@@ -486,6 +486,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             ("meshbot", self._add_meshbot_page),
             ("messaging", self._add_messaging_page),
             ("message_routing", self._add_message_routing_page),
+            ("mqtt_dashboard", self._add_mqtt_dashboard_page),
             ("eas_alerts", self._add_eas_alerts_page),
             ("settings", self._add_settings_page),
         ]
@@ -839,6 +840,13 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         panel = MessageRoutingPanel(self)
         self.content_stack.add_named(panel, "message_routing")
         self.message_routing_panel = panel
+
+    def _add_mqtt_dashboard_page(self):
+        """Add the MQTT dashboard page"""
+        from .panels.mqtt_dashboard import MQTTDashboardPanel
+        panel = MQTTDashboardPanel(self)
+        self.content_stack.add_named(panel, "mqtt_dashboard")
+        self.mqtt_dashboard_panel = panel
 
     def _add_eas_alerts_page(self):
         """Add the Emergency Alert System page"""
