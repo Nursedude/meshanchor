@@ -128,11 +128,12 @@ class RNodeMixin:
 
         detect_box.append(device_row)
 
-        # Device info display
-        self.device_info_label = Gtk.Label(label="Click 'Detect' to scan for connected radios")
+        # Device info display (short summary - details go to log)
+        self.device_info_label = Gtk.Label(label="Click 'Detect' to scan for radios")
         self.device_info_label.set_xalign(0)
         self.device_info_label.add_css_class("dim-label")
         self.device_info_label.set_wrap(True)
+        self.device_info_label.set_max_width_chars(60)
         detect_box.append(self.device_info_label)
 
         detect_frame.set_child(detect_box)
@@ -356,6 +357,102 @@ class RNodeMixin:
         frame.set_child(box)
         parent.append(frame)
 
+        # =====================================================================
+        # Detection Log Section (copyable output like other panels)
+        # =====================================================================
+        log_frame = Gtk.Frame()
+        log_frame.set_label("Detection Log")
+
+        log_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        log_box.set_margin_start(10)
+        log_box.set_margin_end(10)
+        log_box.set_margin_top(8)
+        log_box.set_margin_bottom(8)
+
+        # Log viewer (Gtk.TextView for copyable output)
+        log_scroll = Gtk.ScrolledWindow()
+        log_scroll.set_min_content_height(120)
+        log_scroll.set_max_content_height(200)
+        log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        self.detection_log_view = Gtk.TextView()
+        self.detection_log_view.set_editable(False)
+        self.detection_log_view.set_monospace(True)
+        self.detection_log_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.detection_log_buffer = self.detection_log_view.get_buffer()
+        self.detection_log_buffer.set_text("Click 'Detect' to scan for radios and services.\nLogs will appear here (copyable).")
+        log_scroll.set_child(self.detection_log_view)
+        log_box.append(log_scroll)
+
+        # Log action buttons
+        log_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        log_btn_row.set_halign(Gtk.Align.END)
+
+        clear_log_btn = Gtk.Button(label="Clear")
+        clear_log_btn.set_tooltip_text("Clear detection log")
+        clear_log_btn.connect("clicked", lambda b: self.detection_log_buffer.set_text(""))
+        log_btn_row.append(clear_log_btn)
+
+        copy_log_btn = Gtk.Button(label="Copy All")
+        copy_log_btn.set_tooltip_text("Copy log to clipboard")
+        copy_log_btn.connect("clicked", self._copy_detection_log)
+        log_btn_row.append(copy_log_btn)
+
+        log_box.append(log_btn_row)
+
+        log_frame.set_child(log_box)
+        parent.append(log_frame)
+
+        # =====================================================================
+        # Config Preview Section
+        # =====================================================================
+        config_frame = Gtk.Frame()
+        config_frame.set_label("RNS Config Preview")
+
+        config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        config_box.set_margin_start(10)
+        config_box.set_margin_end(10)
+        config_box.set_margin_top(8)
+        config_box.set_margin_bottom(8)
+
+        # Config preview (read-only)
+        config_scroll = Gtk.ScrolledWindow()
+        config_scroll.set_min_content_height(100)
+        config_scroll.set_max_content_height(150)
+        config_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        self.config_preview_view = Gtk.TextView()
+        self.config_preview_view.set_editable(False)
+        self.config_preview_view.set_monospace(True)
+        self.config_preview_view.set_wrap_mode(Gtk.WrapMode.NONE)
+        self.config_preview_buffer = self.config_preview_view.get_buffer()
+        self.config_preview_buffer.set_text("Config will be shown here after loading.")
+        config_scroll.set_child(self.config_preview_view)
+        config_box.append(config_scroll)
+
+        # Config action buttons
+        config_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        config_btn_row.set_halign(Gtk.Align.END)
+
+        refresh_config_btn = Gtk.Button(label="Refresh")
+        refresh_config_btn.set_tooltip_text("Reload config from file")
+        refresh_config_btn.connect("clicked", lambda b: self._load_config_preview())
+        config_btn_row.append(refresh_config_btn)
+
+        config_path = get_real_user_home() / ".reticulum" / "config"
+        edit_config_btn = Gtk.Button(label="Edit in Terminal")
+        edit_config_btn.set_tooltip_text(f"Edit {config_path} in nano")
+        edit_config_btn.connect("clicked", lambda b: self._edit_config_terminal(config_path))
+        config_btn_row.append(edit_config_btn)
+
+        config_box.append(config_btn_row)
+
+        config_frame.set_child(config_box)
+        parent.append(config_frame)
+
+        # Load config preview after UI is built
+        GLib.timeout_add(2000, self._load_config_preview)
+
         # Try to load current config
         GLib.timeout_add(1500, self._load_rnode_config)
 
@@ -420,6 +517,94 @@ class RNodeMixin:
     def _set_rnode_status(self, msg):
         """Set RNode status message"""
         self.rnode_status.set_label(msg)
+
+    def _log_detection(self, msg, clear=False):
+        """Append message to detection log (copyable TextView)"""
+        if not hasattr(self, 'detection_log_buffer'):
+            return
+
+        def do_log():
+            if clear:
+                self.detection_log_buffer.set_text(msg)
+            else:
+                end_iter = self.detection_log_buffer.get_end_iter()
+                current_text = self.detection_log_buffer.get_text(
+                    self.detection_log_buffer.get_start_iter(),
+                    end_iter,
+                    True
+                )
+                if current_text and not current_text.endswith('\n'):
+                    msg_with_newline = '\n' + msg
+                else:
+                    msg_with_newline = msg
+                self.detection_log_buffer.insert(end_iter, msg_with_newline)
+
+                # Auto-scroll to bottom
+                end_mark = self.detection_log_buffer.create_mark(None, self.detection_log_buffer.get_end_iter(), False)
+                self.detection_log_view.scroll_mark_onscreen(end_mark)
+
+        GLib.idle_add(do_log)
+
+    def _copy_detection_log(self, button):
+        """Copy detection log to clipboard"""
+        if not hasattr(self, 'detection_log_buffer'):
+            return
+
+        text = self.detection_log_buffer.get_text(
+            self.detection_log_buffer.get_start_iter(),
+            self.detection_log_buffer.get_end_iter(),
+            True
+        )
+
+        clipboard = self.detection_log_view.get_clipboard()
+        clipboard.set(text)
+        self._set_rnode_status("Log copied to clipboard")
+
+    def _load_config_preview(self):
+        """Load and display RNS config file in preview"""
+        def do_load():
+            try:
+                config_path = get_real_user_home() / ".reticulum" / "config"
+                if not config_path.exists():
+                    GLib.idle_add(
+                        self.config_preview_buffer.set_text,
+                        f"Config file not found: {config_path}\n\nCreate one by running: rnsd"
+                    )
+                    return
+
+                content = config_path.read_text()
+
+                # Extract RNode section for focused preview
+                lines = content.split('\n')
+                rnode_section = []
+                in_rnode = False
+                for line in lines:
+                    if '[[' in line and 'RNode' in line:
+                        in_rnode = True
+                    elif '[[' in line and in_rnode:
+                        break
+                    if in_rnode:
+                        rnode_section.append(line)
+
+                if rnode_section:
+                    preview = f"# RNode Interface Configuration\n# File: {config_path}\n\n"
+                    preview += '\n'.join(rnode_section)
+                else:
+                    preview = f"# No RNode interface found in config\n# File: {config_path}\n\n"
+                    preview += "# Add an RNode interface using the form above,\n"
+                    preview += "# or click 'Edit in Terminal' to manually configure."
+
+                GLib.idle_add(self.config_preview_buffer.set_text, preview)
+
+            except Exception as e:
+                logger.error(f"Load config preview error: {e}")
+                GLib.idle_add(
+                    self.config_preview_buffer.set_text,
+                    f"Error loading config: {e}"
+                )
+
+        threading.Thread(target=do_load, daemon=True).start()
+        return False  # Don't repeat timeout
 
     def _apply_rnode_config(self, button):
         """Apply RNode configuration to ~/.reticulum/config"""
@@ -542,11 +727,21 @@ class RNodeMixin:
 
         button.set_sensitive(False)
         self._set_rnode_status("Detecting Meshtastic settings...")
-        self.detected_settings_label.set_label("Scanning for Meshtastic devices...\nThis may take 30-60 seconds.")
+        self.detected_settings_label.set_label("Scanning...")
+
+        # Clear and start fresh log
+        self._log_detection("--- Meshtastic Detection Started ---", clear=True)
+        import datetime
+        self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
         def do_detect():
             # Use verbose mode to get detailed logging
             settings = detect_meshtastic_settings(verbose=True)
+
+            # Log all attempts to the log viewer (copyable!)
+            attempts = settings.get('attempts_log', []) if settings else []
+            for attempt in attempts:
+                self._log_detection(attempt)
 
             if settings and settings.get('preset'):
                 # Update UI with detected settings
@@ -557,12 +752,17 @@ class RNodeMixin:
                 cr = settings.get('coding_rate', 0)
                 method = settings.get('detection_method', 'unknown')
 
-                info = (
-                    f"✓ Detected: {preset} ({region})\n"
-                    f"  BW: {bw:.0f}kHz, SF: {sf}, CR: 4/{cr}\n"
-                    f"  Via: {method}"
-                )
+                # Short summary in label
+                info = f"✓ {preset} ({region}) via {method}"
                 GLib.idle_add(self.detected_settings_label.set_label, info)
+
+                # Detailed info in log
+                self._log_detection(f"\n✓ SUCCESS: Detected {preset}")
+                self._log_detection(f"  Region: {region}")
+                self._log_detection(f"  Bandwidth: {bw:.0f} kHz")
+                self._log_detection(f"  Spreading Factor: {sf}")
+                self._log_detection(f"  Coding Rate: 4/{cr}")
+                self._log_detection(f"  Method: {method}")
 
                 # Select the detected preset in dropdown
                 preset_names = list(MESHTASTIC_PRESETS.keys())
@@ -574,20 +774,18 @@ class RNodeMixin:
 
                 GLib.idle_add(self._set_rnode_status, f"Detected: {preset} via {method}")
             else:
-                # Show detailed log of what was tried
-                attempts = settings.get('attempts_log', []) if settings else []
-                log_text = "\n".join(attempts[-6:]) if attempts else "No attempts logged"
+                # Short error in label
+                GLib.idle_add(self.detected_settings_label.set_label, "⚠️ Not detected - see log")
 
-                error_msg = (
-                    "⚠️ Detection failed - tried multiple methods:\n"
-                    f"{log_text}\n\n"
-                    "Troubleshooting:\n"
-                    "• Is meshtasticd running? Check: systemctl status meshtasticd\n"
-                    "• Is device connected via USB? Check: ls /dev/ttyUSB* /dev/ttyACM*\n"
-                    "• Is meshtastic CLI installed? Check: meshtastic --version"
-                )
-                GLib.idle_add(self.detected_settings_label.set_label, error_msg)
-                GLib.idle_add(self._set_rnode_status, "Detection failed - see details below")
+                # Detailed troubleshooting in log
+                self._log_detection("\n⚠️ DETECTION FAILED")
+                self._log_detection("Troubleshooting steps:")
+                self._log_detection("  1. Check meshtasticd: systemctl status meshtasticd")
+                self._log_detection("  2. Check USB devices: ls /dev/ttyUSB* /dev/ttyACM*")
+                self._log_detection("  3. Check CLI: meshtastic --version")
+                self._log_detection("\nNote: Copy this log for debugging (use 'Copy All' button)")
+
+                GLib.idle_add(self._set_rnode_status, "Detection failed - check log below")
 
             GLib.idle_add(button.set_sensitive, True)
 
@@ -673,13 +871,21 @@ class RNodeMixin:
     def _check_radio_services(self):
         """Check status of meshtasticd and rnsd services"""
         def do_check():
+            import datetime
+
+            # Log startup check
+            self._log_detection("--- Service Status Check ---", clear=True)
+            self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
+
             # Check meshtasticd (port 4403)
             meshtasticd_running = False
+            meshtasticd_method = "port check"
             if HAS_SERVICE_CHECK and check_port:
                 meshtasticd_running = check_port(4403)
             else:
                 # Fallback: try socket
                 import socket
+                meshtasticd_method = "socket"
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(1)
@@ -701,7 +907,21 @@ class RNodeMixin:
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
 
-            # Update UI
+            # Log results
+            if meshtasticd_running:
+                self._log_detection(f"✓ meshtasticd: running (TCP :4403 via {meshtasticd_method})")
+            else:
+                self._log_detection(f"✗ meshtasticd: not running (checked :4403)")
+
+            if rnsd_running:
+                self._log_detection("✓ rnsd: running (systemctl)")
+            else:
+                self._log_detection("✗ rnsd: not running")
+
+            self._log_detection("\nClick 'Detect' to scan for hardware devices.")
+            self._log_detection("Click 'Detect Meshtastic' to read radio settings.")
+
+            # Update UI indicators
             if meshtasticd_running:
                 GLib.idle_add(
                     self.meshtasticd_status.set_label,
@@ -716,7 +936,7 @@ class RNodeMixin:
             else:
                 GLib.idle_add(
                     self.meshtasticd_status.set_label,
-                    "● meshtasticd: not running"
+                    "● meshtasticd: stopped"
                 )
                 GLib.idle_add(
                     self.meshtasticd_status.add_css_class, "warning"
@@ -733,7 +953,7 @@ class RNodeMixin:
             else:
                 GLib.idle_add(
                     self.rnsd_status.set_label,
-                    "● rnsd: not running"
+                    "● rnsd: stopped"
                 )
                 GLib.idle_add(
                     self.rnsd_status.add_css_class, "warning"
@@ -744,7 +964,12 @@ class RNodeMixin:
     def _on_detect_devices(self, button):
         """Detect RNode and Meshtastic devices"""
         button.set_sensitive(False)
-        self.device_info_label.set_label("Scanning for devices...")
+        self.device_info_label.set_label("Scanning...")
+
+        # Log to detection log
+        import datetime
+        self._log_detection("--- Device Detection Started ---", clear=True)
+        self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
         def do_detect():
             devices = []
@@ -752,6 +977,7 @@ class RNodeMixin:
 
             # Use centralized RNode detection
             if HAS_RNODE_DETECTION and detect_devices:
+                self._log_detection("Using RNode detection module...")
                 try:
                     detected = detect_devices(probe=True)
                     for dev in detected:
@@ -765,14 +991,33 @@ class RNodeMixin:
                         if dev.is_configured:
                             name += " [Configured]"
                         device_names.append(name)
+
+                        # Log device details
+                        self._log_detection(f"\n✓ Found: {dev.port}")
+                        if dev.model and dev.model != "Unknown":
+                            self._log_detection(f"  Model: {dev.model}")
+                        if dev.vid and dev.pid:
+                            self._log_detection(f"  USB: VID={dev.vid} PID={dev.pid}")
+                        if dev.is_rnode:
+                            self._log_detection("  Type: RNode firmware detected")
+                        if dev.firmware_version:
+                            self._log_detection(f"  Firmware: {dev.firmware_version}")
+                        if dev.is_configured:
+                            self._log_detection("  Status: Configured in RNS")
+
                 except Exception as e:
                     logger.error(f"Device detection error: {e}")
+                    self._log_detection(f"✗ Detection error: {e}")
             else:
                 # Fallback: just glob serial ports
+                self._log_detection("Fallback mode: scanning serial ports...")
                 import glob
                 ports = []
                 for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/ttyAMA*']:
-                    ports.extend(glob.glob(pattern))
+                    found = glob.glob(pattern)
+                    ports.extend(found)
+                    if found:
+                        self._log_detection(f"  {pattern}: {len(found)} found")
                 for port in sorted(set(ports)):
                     device_names.append(port)
 
@@ -781,17 +1026,15 @@ class RNodeMixin:
 
             if not device_names:
                 device_names = ["No devices detected"]
-                info_text = "No RNode or Meshtastic devices found.\nCheck USB connections."
+                info_text = "No devices found"
+                self._log_detection("\n⚠️ No devices detected")
+                self._log_detection("Check:")
+                self._log_detection("  • USB cable connected?")
+                self._log_detection("  • Device powered on?")
+                self._log_detection("  • Permissions: user in 'dialout' group?")
             else:
                 info_text = f"Found {len(device_names)} device(s)"
-                if devices:
-                    # Show details of first device
-                    dev = devices[0]
-                    info_text += f"\n{dev.port}: {dev.model}"
-                    if dev.vid and dev.pid:
-                        info_text += f" (VID:{dev.vid} PID:{dev.pid})"
-                    if dev.is_configured:
-                        info_text += "\n✓ Already configured in RNS"
+                self._log_detection(f"\nTotal: {len(device_names)} device(s) found")
 
             # Update UI
             GLib.idle_add(self._update_device_dropdown, device_names)

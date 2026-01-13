@@ -283,6 +283,8 @@ def check_dependencies() -> CommandResult:
     deps = {}
 
     # Check Python packages
+    # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
+    # from RNS's cryptography library when cffi backend is missing
     python_packages = ['meshtastic', 'RNS', 'LXMF']
     for pkg in python_packages:
         try:
@@ -290,6 +292,11 @@ def check_dependencies() -> CommandResult:
             deps[pkg] = {'installed': True, 'type': 'python'}
         except ImportError:
             deps[pkg] = {'installed': False, 'type': 'python'}
+        except (SystemExit, KeyboardInterrupt, GeneratorExit):
+            raise
+        except BaseException as e:
+            # Catch pyo3 PanicException from cryptography errors
+            deps[pkg] = {'installed': False, 'type': 'python', 'error': str(e)}
 
     # Check system binaries
     binaries = ['meshtasticd', 'meshtastic', 'rnsd']
