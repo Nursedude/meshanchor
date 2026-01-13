@@ -223,6 +223,11 @@ class TestConnectionTest:
             rns_available = True
         except ImportError:
             rns_available = False
+        except (SystemExit, KeyboardInterrupt, GeneratorExit):
+            raise
+        except BaseException:
+            # Catch pyo3 PanicException from RNS's cryptography library
+            rns_available = False
 
         # Either result is valid depending on environment
         assert isinstance(rns_available, bool)

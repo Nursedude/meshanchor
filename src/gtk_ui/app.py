@@ -229,6 +229,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._node_count_timestamp = 0
         self._node_count_cache_ttl = 30  # Cache for 30 seconds
 
+        # Apply saved theme settings on startup
+        self._apply_saved_theme()
+
         # Create the main layout
         self._build_ui()
 
@@ -266,6 +269,45 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
         # Return False to allow the window to close
         return False
+
+    def _apply_saved_theme(self):
+        """Apply saved theme settings on startup."""
+        try:
+            import json
+            from utils.paths import get_real_user_home
+
+            settings_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
+            if settings_file.exists():
+                settings = json.loads(settings_file.read_text())
+
+                # Get theme setting (default to dark)
+                theme = settings.get("theme", "dark")
+                dark_mode = settings.get("dark_mode", True)
+
+                # Apply theme using Adw.StyleManager
+                style_manager = Adw.StyleManager.get_default()
+                if theme == "system":
+                    style_manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
+                elif theme == "dark" or dark_mode:
+                    style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+                else:
+                    style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+
+                logger.debug(f"Applied saved theme: {theme}")
+            else:
+                # Default to dark mode
+                style_manager = Adw.StyleManager.get_default()
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+                logger.debug("No settings file, defaulting to dark theme")
+
+        except Exception as e:
+            logger.warning(f"Could not apply saved theme: {e}")
+            # Default to dark mode on error
+            try:
+                style_manager = Adw.StyleManager.get_default()
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            except Exception:
+                pass
 
     def _get_smart_default_size(self):
         """Calculate smart default window size based on monitor dimensions"""
@@ -485,6 +527,8 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             ("amateur", self._add_amateur_page),
             ("meshbot", self._add_meshbot_page),
             ("messaging", self._add_messaging_page),
+            ("message_routing", self._add_message_routing_page),
+            ("mqtt_dashboard", self._add_mqtt_dashboard_page),
             ("eas_alerts", self._add_eas_alerts_page),
             ("settings", self._add_settings_page),
         ]
@@ -831,6 +875,20 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         panel = HamToolsPanel(self)
         self.content_stack.add_named(panel, "ham_tools")
         self.ham_tools_panel = panel
+
+    def _add_message_routing_page(self):
+        """Add the message routing visualization page"""
+        from .panels.message_routing import MessageRoutingPanel
+        panel = MessageRoutingPanel(self)
+        self.content_stack.add_named(panel, "message_routing")
+        self.message_routing_panel = panel
+
+    def _add_mqtt_dashboard_page(self):
+        """Add the MQTT dashboard page"""
+        from .panels.mqtt_dashboard import MQTTDashboardPanel
+        panel = MQTTDashboardPanel(self)
+        self.content_stack.add_named(panel, "mqtt_dashboard")
+        self.mqtt_dashboard_panel = panel
 
     def _add_eas_alerts_page(self):
         """Add the Emergency Alert System page"""
