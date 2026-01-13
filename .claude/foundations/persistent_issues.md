@@ -548,9 +548,33 @@ GTK4/libadwaita has strict requirements for taskbar icons:
 3. **Try GResource**: Bundle icon as GResource instead of file system installation
 4. **Desktop-specific**: Test on different DEs to isolate if it's environment-specific
 
-### Workaround
-Currently none - icon shows as generic in taskbar.
+### Fix (2026-01-13)
+
+Run the desktop integration installer:
+
+```bash
+cd /opt/meshforge
+sudo ./scripts/install-desktop.sh
+```
+
+This installs icons to:
+- `/usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg`
+- `/usr/share/icons/hicolor/{48,64,128,256}x{48,64,128,256}/apps/`
+- `/usr/share/pixmaps/`
+
+Then clear the icon cache:
+
+```bash
+gtk-update-icon-cache -f /usr/share/icons/hicolor
+# Log out and back in, or restart desktop environment
+```
+
+### If Still Not Working
+
+1. Verify icon installed: `ls /usr/share/icons/hicolor/scalable/apps/org.meshforge.app.svg`
+2. Check WM_CLASS: `xprop WM_CLASS` → click MeshForge window → should show `org.meshforge.app`
+3. Clear DE cache: Some DEs (GNOME, KDE) cache icons aggressively
 
 ---
 
-*Last updated: 2026-01-12 - Added issue #11 (taskbar icon persistent issue)*
+*Last updated: 2026-01-13 - Added fix instructions for taskbar icon*
