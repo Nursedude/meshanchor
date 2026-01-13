@@ -1115,6 +1115,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         """Run multicast test in background"""
         group = "224.0.0.69"
         port = 4403
+        sock = None
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -1127,7 +1128,6 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
             GLib.idle_add(self._log, f"Successfully joined multicast group {group}")
 
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, mreq)
-            sock.close()
             GLib.idle_add(self._log, "Successfully left multicast group")
 
         except OSError as e:
@@ -1137,6 +1137,12 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
                 GLib.idle_add(self._log, f"Error: {e}")
         except Exception as e:
             GLib.idle_add(self._log, f"Error: {e}")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def _on_check_updates(self, button):
         """Check for tool updates"""
