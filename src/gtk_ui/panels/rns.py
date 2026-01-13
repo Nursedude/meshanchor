@@ -99,8 +99,8 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
         self._build_ui()
         self._refresh_all()
 
-        # Start periodic service status monitoring
-        self._start_status_monitor()
+        # NOTE: Periodic monitoring disabled - was causing instability
+        # self._start_status_monitor()
 
     def _on_unrealize(self, widget):
         """Clean up when panel is destroyed to prevent timer crashes."""
