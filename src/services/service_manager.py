@@ -144,21 +144,59 @@ class ServiceManager:
                 console.print("[dim]If Ctrl+C doesn't work, try pressing 'q' or closing terminal[/dim]\n")
                 console.print("─" * 60 + "\n")
 
-                # Use Popen for better control
-                import signal
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                # Use Popen for streaming with thread-based timeout handling
+                import threading
+                import queue
+
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
+
+                # Use a queue for thread-safe line reading with timeout
+                line_queue = queue.Queue()
+                stop_event = threading.Event()
+
+                def reader_thread():
+                    """Read lines from process stdout into queue"""
+                    try:
+                        for line in process.stdout:
+                            if stop_event.is_set():
+                                break
+                            line_queue.put(line)
+                    except Exception:
+                        pass
+                    finally:
+                        line_queue.put(None)  # Sentinel to signal end
+
+                reader = threading.Thread(target=reader_thread, daemon=True)
+                reader.start()
 
                 try:
-                    for line in process.stdout:
-                        console.print(line.rstrip())
+                    while True:
+                        try:
+                            # Timeout per line read - allows checking for interrupts
+                            line = line_queue.get(timeout=1.0)
+                            if line is None:
+                                break
+                            console.print(line.rstrip())
+                        except queue.Empty:
+                            # No new log line, check if process still running
+                            if process.poll() is not None:
+                                break
+                            continue
                 except KeyboardInterrupt:
                     pass
                 finally:
+                    stop_event.set()
                     process.terminate()
                     try:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                        process.wait(timeout=1)
 
                 console.print("\n" + "─" * 60)
                 console.print("[green]Log following stopped[/green]")

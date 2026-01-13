@@ -1265,10 +1265,15 @@ class MeshForgeWindow(Adw.ApplicationWindow):
                         # Build command - nano with the file
                         cmd = term_cmd + ['nano', str(file_path)]
 
-                        # Run and wait for completion
+                        # Run and wait for completion (interactive session)
                         self.external_process = subprocess.Popen(cmd)
-                        self.external_process.wait()
-                        self.external_process = None
+                        try:
+                            self.external_process.wait(timeout=14400)  # 4 hour max
+                        except subprocess.TimeoutExpired:
+                            self.external_process.terminate()
+                            logger.warning("Editor session timed out after 4 hours")
+                        finally:
+                            self.external_process = None
 
                         # Call callback in main thread
                         if callback:
