@@ -661,14 +661,17 @@ class EASAlertsPanel(Gtk.Box):
     def _on_settings_response(self, dialog, response):
         """Handle settings dialog response"""
         if response == "open":
-            # Open config file in default editor
+            # Open config file in default editor (runs in background thread)
             import subprocess
+            import threading
             # Use get_real_user_home to handle sudo properly
             config_path = str(get_real_user_home() / ".config/meshforge/plugins/eas_alerts.ini")
-            try:
-                subprocess.run(["xdg-open", config_path], check=False, timeout=10)
-            except Exception as e:
-                logger.error(f"Failed to open config: {e}")
+            def do_open():
+                try:
+                    subprocess.run(["xdg-open", config_path], check=False, timeout=10)
+                except Exception as e:
+                    logger.error(f"Failed to open config: {e}")
+            threading.Thread(target=do_open, daemon=True).start()
 
     def cleanup(self):
         """Clean up resources"""
