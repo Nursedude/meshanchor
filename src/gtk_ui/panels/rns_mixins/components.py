@@ -393,10 +393,7 @@ class ComponentsMixin:
             self.main_window.set_status_message(msg)
 
         # Refresh status after a short delay to not overwrite the message
-        if hasattr(self, '_schedule_timer'):
-            self._schedule_timer(2000, self._refresh_all)
-        else:
-            GLib.timeout_add(2000, self._refresh_all)
+        self._schedule_timer(2000, self._refresh_all)
         return False
 
     def _on_install_all(self, button):
@@ -467,10 +464,7 @@ class ComponentsMixin:
             self.main_window.set_status_message(msg)
 
         # Refresh status after a short delay to not overwrite the message
-        if hasattr(self, '_schedule_timer'):
-            self._schedule_timer(2000, self._refresh_all)
-        else:
-            GLib.timeout_add(2000, self._refresh_all)
+        self._schedule_timer(2000, self._refresh_all)
         return False
 
     def _on_update_all(self, button):
