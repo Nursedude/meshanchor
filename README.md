@@ -10,26 +10,38 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.6--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="tests/"><img src="https://img.shields.io/badge/tests-779%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="tests/"><img src="https://img.shields.io/badge/tests-1037%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
-  <strong>The first open-source tool to bridge Meshtastic and Reticulum mesh networks.</strong>
+  <strong>Open-source Network Operations Center for LoRa mesh networks.</strong>
 </p>
 
 ---
 
 ## Why MeshForge?
 
-Meshtastic and Reticulum (RNS) are powerful mesh networks, but they can't talk to each other. MeshForge bridges that gap.
+**MeshForge is a Mesh NOC (Network Operations Center)** — a unified platform for managing, monitoring, and bridging LoRa mesh networks.
 
-| Problem | MeshForge Solution |
-|---------|-------------------|
-| Meshtastic and RNS can't communicate | Gateway bridge routes messages between networks |
-| Two separate node databases | Unified map shows all nodes together |
-| Complex config files | GUI editors for meshtasticd, RNS, and gateway |
-| "Will my link work?" | RF tools calculate line-of-sight, Fresnel zones, path loss |
-| Setup troubleshooting | Diagnostics identify and fix issues |
+### The Vision
+
+Mesh networks like Meshtastic, Reticulum (RNS), and AREDN each excel at different things, but they operate in isolation. MeshForge unifies them under one roof:
+
+- **Today**: Reliable Meshtastic ↔ RNS gateway with full configuration control
+- **Tomorrow**: Extensible connectivity to additional mesh protocols and services
+
+### Current Focus: Meshtastic-RNS Gateway
+
+Our proof-of-concept milestone: a **100% reliable** bidirectional gateway between Meshtastic and Reticulum, where users have **complete control** over all configuration files.
+
+| Challenge | MeshForge Solution |
+|-----------|-------------------|
+| Meshtastic and RNS can't communicate | Gateway bridge routes messages bidirectionally |
+| Two separate node databases | Unified tracker shows all nodes together |
+| Complex YAML/config files | GUI editors with templates + direct file access |
+| "Will my link work?" | RF tools: line-of-sight, Fresnel zones, path loss |
+| Service management headaches | One-click start/stop/restart with live logs |
+| Setup troubleshooting | Diagnostics identify issues with actionable fixes |
 
 ---
 
@@ -186,6 +198,6 @@ GPL-3.0 - See [LICENSE](LICENSE)
 <p align="center">
   <img src="assets/shaka-simple.svg" alt="Shaka" width="32" height="32"/><br>
   <strong>MeshForge</strong><br>
-  Build. Test. Deploy. Monitor.<br>
+  Your Mesh Network Operations Center<br>
   <sub>Made with aloha for the mesh community | WH6GXZ</sub>
 </p>
