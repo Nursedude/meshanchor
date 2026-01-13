@@ -358,7 +358,7 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
         parent.append(frame)
 
         # Auto-refresh nodes on panel load
-        GLib.timeout_add(1000, self._refresh_rns_nodes)
+        self._schedule_timer(1000, self._refresh_rns_nodes)
 
     def _refresh_rns_nodes(self, button=None):
         """Refresh the RNS nodes list from node tracker"""

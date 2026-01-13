@@ -112,11 +112,30 @@ class MeshToolsPanel(Gtk.Box):
         # Bot process tracking
         self._bot_process = None
         self._log_timer_id = None
+        self._pending_timers = []  # Track timers for cleanup
 
         self._build_ui()
 
         # Initial status check
-        GLib.timeout_add(500, self._check_all_status)
+        self._schedule_timer(500, self._check_all_status)
+
+    def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
+
+    def _cancel_timers(self):
+        """Cancel all pending timers."""
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
 
     def _save_settings(self):
         """Save settings"""
@@ -1928,5 +1947,7 @@ class MeshToolsPanel(Gtk.Box):
 
     def cleanup(self):
         """Clean up resources"""
+        self._cancel_timers()
         if self._log_timer_id:
             GLib.source_remove(self._log_timer_id)
+            self._log_timer_id = None

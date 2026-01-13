@@ -119,6 +119,7 @@ class HamClockPanel(Gtk.Box):
         self._update_check_timer_id = None
         self._retry_count = 0
         self._max_retries = 3
+        self._pending_timers = []  # Track timers for cleanup
 
         # Use centralized settings manager
         if HAS_SETTINGS_MANAGER:
@@ -130,17 +131,35 @@ class HamClockPanel(Gtk.Box):
         self._build_ui()
 
         # Check service status on startup
-        GLib.timeout_add(500, self._check_service_status)
+        self._schedule_timer(500, self._check_service_status)
 
         # NOTE: Do NOT auto-connect - let user decide when to connect
         # HamClock can be resource-intensive, user should opt-in
 
         # Start auto-refresh if enabled (only refreshes data, doesn't connect)
         if self._settings.get("auto_refresh_enabled"):
-            GLib.timeout_add(2000, self._start_auto_refresh)
+            self._schedule_timer(2000, self._start_auto_refresh)
 
         # Start update time checker (updates "last updated" display)
-        self._update_check_timer_id = GLib.timeout_add(60000, self._check_data_freshness)
+        self._update_check_timer_id = self._schedule_timer(60000, self._check_data_freshness)
+
+    def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
+
+    def _cancel_timers(self):
+        """Cancel all pending timers."""
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
 
     def _load_settings_legacy(self):
         """Legacy settings load for fallback"""
@@ -1080,7 +1099,7 @@ class HamClockPanel(Gtk.Box):
         self.main_window.set_status_message(f"Service {action}ed successfully")
         logger.info(f"[HamClock] Service {action}ed: {service_name}")
         # Refresh status
-        GLib.timeout_add(1000, self._check_service_status)
+        self._schedule_timer(1000, self._check_service_status)
 
     def _on_service_control_failed(self, action, error):
         """Handle failed service control"""
@@ -1127,7 +1146,7 @@ class HamClockPanel(Gtk.Box):
             self.main_window.set_status_message(f"HamClock {action} successful")
         else:
             self.main_window.set_status_message(f"HamClock {action} failed: {error}")
-        GLib.timeout_add(500, self._check_service_status)
+        self._schedule_timer(500, self._check_service_status)
         return False
 
     def _install_hamclock_web(self, button):
@@ -1171,7 +1190,7 @@ class HamClockPanel(Gtk.Box):
         button.set_sensitive(True)
         if success:
             self.main_window.set_status_message(message)
-            GLib.timeout_add(2000, self._check_service_status)
+            self._schedule_timer(2000, self._check_service_status)
         else:
             self.main_window.set_status_message(f"Install info: {message}")
 
@@ -2131,7 +2150,7 @@ class HamClockPanel(Gtk.Box):
         self._retry_count = 0
 
         # Schedule periodic refresh
-        self._auto_refresh_timer_id = GLib.timeout_add(interval_ms, self._do_auto_refresh)
+        self._auto_refresh_timer_id = self._schedule_timer(interval_ms, self._do_auto_refresh)
 
         # Update UI
         self.status_label.set_label(f"Auto-refresh: every {interval_minutes} min")
@@ -2203,7 +2222,8 @@ class HamClockPanel(Gtk.Box):
                     # Schedule retry with exponential backoff (2s, 4s, 8s)
                     backoff_ms = 2000 * (2 ** (self._retry_count - 1))
                     logger.info(f"[HamClock] Auto-refresh failed, retry {self._retry_count}/{self._max_retries} in {backoff_ms}ms")
-                    GLib.timeout_add(backoff_ms, lambda: self._fetch_space_weather_with_retry() or False)
+                    retry_timer = GLib.timeout_add(backoff_ms, lambda: self._fetch_space_weather_with_retry() or False)
+                    self._pending_timers.append(retry_timer)
                 else:
                     logger.warning(f"[HamClock] Auto-refresh failed after {self._max_retries} retries")
                     GLib.idle_add(
@@ -2611,7 +2631,7 @@ class HamClockPanel(Gtk.Box):
     def cleanup(self):
         """Clean up resources when panel is destroyed"""
         logger.debug("[HamClock] Cleaning up panel resources")
+        self._cancel_timers()
         self._stop_auto_refresh()
-        if self._update_check_timer_id:
-            GLib.source_remove(self._update_check_timer_id)
-            self._update_check_timer_id = None
+        self._update_check_timer_id = None
+        self._auto_refresh_timer_id = None
