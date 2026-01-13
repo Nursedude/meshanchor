@@ -128,10 +128,12 @@ class HFPropagationMixin:
         self._open_url_in_browser(url, "Contest Calendar")
 
     def _open_url_in_browser(self, url: str, description: str = ""):
-        """Open URL in default browser (helper method)"""
-        try:
-            webbrowser.open(url)
-            if description:
-                GLib.idle_add(self._log, f"Opened {description} in browser")
-        except Exception as e:
-            GLib.idle_add(self._log, f"Error opening browser: {e}")
+        """Open URL in default browser (runs in background thread)"""
+        def do_open():
+            try:
+                webbrowser.open(url)
+                if description:
+                    GLib.idle_add(self._log, f"Opened {description} in browser")
+            except Exception as e:
+                GLib.idle_add(self._log, f"Error opening browser: {e}")
+        threading.Thread(target=do_open, daemon=True).start()

@@ -302,15 +302,17 @@ class MeshChatMixin:
         threading.Thread(target=stop, daemon=True).start()
 
     def _on_meshchat_browser(self, button):
-        """Open MeshChat in web browser"""
+        """Open MeshChat in web browser (runs in background thread)"""
         port = int(self.meshchat_port_entry.get_value())
         host_idx = self.meshchat_host_dropdown.get_selected()
 
         # Always use localhost for browser, even if bound to 0.0.0.0
         url = f"http://127.0.0.1:{port}"
 
-        try:
-            import webbrowser
-            webbrowser.open(url)
-        except Exception as e:
-            self._show_error(f"Failed to open browser: {e}")
+        def do_open():
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception as e:
+                GLib.idle_add(self._show_error, f"Failed to open browser: {e}")
+        threading.Thread(target=do_open, daemon=True).start()
