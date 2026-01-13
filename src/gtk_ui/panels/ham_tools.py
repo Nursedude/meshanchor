@@ -92,6 +92,9 @@ class HamToolsPanel(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.main_window = main_window
 
+        # Timer tracking for cleanup
+        self._pending_timers = []
+
         # Apply standard margins
         margin = UI.MARGIN_PANEL if HAS_UI_HELPERS else 20
         self.set_margin_start(margin)
@@ -109,7 +112,7 @@ class HamToolsPanel(Gtk.Box):
         self._build_ui()
 
         # Initial checks
-        GLib.timeout_add(500, self._check_hamclock_status)
+        self._schedule_timer(500, self._check_hamclock_status)
 
     def _save_settings(self):
         """Save settings"""
@@ -1146,7 +1149,7 @@ class HamToolsPanel(Gtk.Box):
             # Update URL to localhost
             self._hc_url_entry.set_text("http://localhost")
             # Check status
-            GLib.timeout_add(2000, self._check_hamclock_status)
+            self._schedule_timer(2000, self._check_hamclock_status)
 
     def _on_refresh_bands(self, button):
         """Refresh band conditions (uses auto-fallback API)"""
@@ -1670,6 +1673,24 @@ Class: {lic_class}
         except Exception as e:
             self._output_message(f"Error opening URL: {e}")
 
+    def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
+
+    def _cancel_timers(self):
+        """Cancel all pending timers."""
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
+
     def cleanup(self):
         """Clean up resources"""
-        pass
+        self._cancel_timers()
