@@ -493,11 +493,21 @@ class ComponentsMixin:
 
         def do_action():
             try:
+                # When running as root (via sudo), start rnsd as the real user
+                # so it uses the correct config path
+                real_user = os.environ.get('SUDO_USER')
+                run_as_user = real_user and real_user != 'root' and os.geteuid() == 0
+
                 if action == "start":
                     # Start rnsd as a background process
                     logger.debug("[RNS] Starting rnsd in background...")
+                    if run_as_user:
+                        cmd = ['sudo', '-H', '-u', real_user, 'rnsd']
+                        logger.debug(f"[RNS] Running as user {real_user}")
+                    else:
+                        cmd = ['rnsd']
                     process = subprocess.Popen(
-                        ['rnsd'],
+                        cmd,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         stdin=subprocess.DEVNULL,
@@ -530,8 +540,13 @@ class ComponentsMixin:
                     time.sleep(1)
                     # Start rnsd as a background process
                     logger.debug("[RNS] Starting rnsd in background...")
+                    if run_as_user:
+                        cmd = ['sudo', '-H', '-u', real_user, 'rnsd']
+                        logger.debug(f"[RNS] Running as user {real_user}")
+                    else:
+                        cmd = ['rnsd']
                     process = subprocess.Popen(
-                        ['rnsd'],
+                        cmd,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         stdin=subprocess.DEVNULL,
