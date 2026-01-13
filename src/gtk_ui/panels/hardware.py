@@ -309,14 +309,20 @@ class HardwarePanel(Gtk.Box):
 
                 # Check TCP port
                 if not is_running:
+                    sock = None
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.settimeout(1.0)
                         if sock.connect_ex(('localhost', 4403)) == 0:
                             is_running = True
-                        sock.close()
                     except Exception:
                         pass
+                    finally:
+                        if sock:
+                            try:
+                                sock.close()
+                            except Exception:
+                                pass
 
                 if is_running:
                     # Try to get hardware info from meshtastic CLI
