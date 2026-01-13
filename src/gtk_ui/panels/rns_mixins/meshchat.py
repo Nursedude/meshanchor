@@ -148,7 +148,7 @@ class MeshChatMixin:
         frame.set_child(box)
         parent.append(frame)
 
-        # Check status on load (use tracked timer)
+        # Check status on load (use tracked timer for cleanup)
         if hasattr(self, '_schedule_timer'):
             self._schedule_timer(600, self._check_meshchat_status)
         else:
