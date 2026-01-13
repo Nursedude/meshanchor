@@ -429,6 +429,7 @@ class MQTTDashboardPanel(Gtk.Box):
         self._log_message(f"Testing connection to {self.broker_entry.get_text()}...")
 
         def do_test():
+            sock = None
             try:
                 import socket
                 host = self.broker_entry.get_text()
@@ -437,7 +438,6 @@ class MQTTDashboardPanel(Gtk.Box):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
                 result = sock.connect_ex((host, port))
-                sock.close()
 
                 if result == 0:
                     self._log_message(f"SUCCESS: {host}:{port} is reachable")
@@ -446,6 +446,12 @@ class MQTTDashboardPanel(Gtk.Box):
 
             except Exception as e:
                 self._log_message(f"Test error: {e}")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
         threading.Thread(target=do_test, daemon=True).start()
 

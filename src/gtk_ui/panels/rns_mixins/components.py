@@ -144,7 +144,33 @@ class ComponentsMixin:
 
         When running as root, checks both the real user's packages and
         root's packages since packages could be installed in either location.
+        Uses multiple detection methods for reliability.
         """
+        # Method 1: Try direct Python import (fastest, most reliable)
+        # Map package names to import names
+        import_names = {
+            'rns': 'RNS',
+            'lxmf': 'LXMF',
+            'nomadnet': 'nomadnet',
+            'rnodeconf': 'rnodeconf',
+            'meshchat': 'meshchat',
+        }
+        import_name = import_names.get(package, package)
+
+        try:
+            # Use importlib to check if module exists and get version
+            import importlib
+            import importlib.metadata
+            try:
+                version = importlib.metadata.version(package)
+                if version:
+                    return version
+            except importlib.metadata.PackageNotFoundError:
+                pass
+        except Exception:
+            pass
+
+        # Method 2: Try pip show commands
         try:
             is_root = os.geteuid() == 0
             real_user = self._get_real_username()
@@ -163,7 +189,7 @@ class ComponentsMixin:
 
             for cmd in commands_to_try:
                 try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                     if result.returncode == 0:
                         for line in result.stdout.split('\n'):
                             if line.startswith('Version:'):

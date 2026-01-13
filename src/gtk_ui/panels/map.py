@@ -148,22 +148,27 @@ class MapPanel(Gtk.Box):
                 except ImportError:
                     return None, "NodeMonitor not available"
 
+            import socket
+            sock = None
             try:
-                import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(3.0)
                 if sock.connect_ex(('localhost', 4403)) != 0:
-                    sock.close()
                     error_msg = "meshtasticd not running (port 4403)"
                     if diag:
                         diag.log_connection("map", "meshtasticd:4403", False, error_msg)
                     return None, error_msg
-                sock.close()
             except Exception as e:
                 error_msg = f"Cannot check port: {e}"
                 if diag:
                     diag.log_connection("map", "meshtasticd:4403", False, str(e))
                 return None, error_msg
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             try:
                 monitor = NodeMonitor(host='localhost', port=4403)
