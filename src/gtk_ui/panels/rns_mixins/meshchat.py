@@ -149,10 +149,7 @@ class MeshChatMixin:
         parent.append(frame)
 
         # Check status on load (use tracked timer for cleanup)
-        if hasattr(self, '_schedule_timer'):
-            self._schedule_timer(600, self._check_meshchat_status)
-        else:
-            GLib.timeout_add(600, self._check_meshchat_status)
+        self._schedule_timer(600, self._check_meshchat_status)
 
     def _find_meshchat(self):
         """Find meshchat executable"""
