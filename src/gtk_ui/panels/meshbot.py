@@ -50,6 +50,7 @@ class MeshBotPanel(Gtk.Box):
         self.main_window = main_window
         self._process = None
         self._log_lines = []
+        self._pending_timers = []  # Track timers for cleanup
 
         self.set_margin_start(20)
         self.set_margin_end(20)
@@ -66,7 +67,25 @@ class MeshBotPanel(Gtk.Box):
         self._build_ui()
 
         # Check status on startup
-        GLib.timeout_add(500, self._check_status)
+        self._schedule_timer(500, self._check_status)
+
+    def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
+
+    def _cancel_timers(self):
+        """Cancel all pending timers."""
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
 
     def _save_settings(self):
         """Save settings"""
@@ -834,7 +853,7 @@ class MeshBotPanel(Gtk.Box):
             self.main_window.set_status_message(f"MeshBot: {message}")
             self._settings["install_path"] = self.path_entry.get_text().strip()
             self._save_settings()
-            GLib.timeout_add(1000, self._check_status)
+            self._schedule_timer(1000, self._check_status)
         else:
             self.status_label.set_label(f"Install failed: {message[:50]}")
             self.main_window.set_status_message(f"Install failed: {message}")
@@ -911,7 +930,7 @@ class MeshBotPanel(Gtk.Box):
         else:
             self.status_label.set_label(f"Start failed: {message}")
 
-        GLib.timeout_add(1000, self._check_status)
+        self._schedule_timer(1000, self._check_status)
 
     def _on_stop_bot(self, button):
         """Stop the MeshBot"""
@@ -946,7 +965,7 @@ class MeshBotPanel(Gtk.Box):
         if success:
             self.main_window.set_status_message("MeshBot stopped")
 
-        GLib.timeout_add(1000, self._check_status)
+        self._schedule_timer(1000, self._check_status)
 
     def _on_load_config(self, button):
         """Load config file into editor"""
@@ -1266,4 +1285,15 @@ class MeshBotPanel(Gtk.Box):
 
     def cleanup(self):
         """Clean up resources"""
-        pass
+        self._cancel_timers()
+        # Kill any running process
+        if self._process:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            self._process = None

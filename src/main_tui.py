@@ -21,16 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from utils.system import require_root
 
 
-def check_root():
-    """Check for root privileges"""
-    require_root(
-        exit_on_fail=True,
-        message="This application requires root/sudo privileges.\n"
-                "Please run with:\n"
-                "  sudo python3 src/main_tui.py"
-    )
-
-
 def check_textual():
     """Check if Textual is available and offer to install"""
     try:
@@ -132,7 +122,13 @@ def check_meshtastic_cli():
 
 def main():
     """Main entry point"""
-    check_root()
+    # Require root for hardware access
+    require_root(
+        exit_on_fail=True,
+        message="This application requires root/sudo privileges.\n"
+                "Please run with:\n"
+                "  sudo python3 src/main_tui.py"
+    )
     check_textual()
     check_meshtastic_cli()
 
