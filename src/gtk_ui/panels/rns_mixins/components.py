@@ -142,24 +142,35 @@ class ComponentsMixin:
     def _get_package_version(self, package):
         """Get installed version of a pip package.
 
-        When running as root, checks the real user's packages since
-        we install with --user to the real user's ~/.local/
+        When running as root, checks both the real user's packages and
+        root's packages since packages could be installed in either location.
         """
         try:
             is_root = os.geteuid() == 0
             real_user = self._get_real_username()
 
-            # Run pip show as the real user to find packages in their ~/.local/
-            if is_root and real_user != 'root':
-                cmd = ['sudo', '-H', '-u', real_user, 'python3', '-m', 'pip', 'show', package]
-            else:
-                cmd = ['python3', '-m', 'pip', 'show', package]
+            # Try to find the package in various locations
+            commands_to_try = []
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if line.startswith('Version:'):
-                        return line.split(':', 1)[1].strip()
+            # First try: run pip show as the real user (for --user installs)
+            if is_root and real_user and real_user != 'root':
+                commands_to_try.append(
+                    ['sudo', '-H', '-u', real_user, 'python3', '-m', 'pip', 'show', package]
+                )
+
+            # Second try: run pip show as current user (root or normal user)
+            commands_to_try.append(['python3', '-m', 'pip', 'show', package])
+
+            for cmd in commands_to_try:
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            if line.startswith('Version:'):
+                                return line.split(':', 1)[1].strip()
+                except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+                    continue
+
             return None
         except Exception:
             return None
