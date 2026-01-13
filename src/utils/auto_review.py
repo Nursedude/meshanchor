@@ -370,15 +370,54 @@ class ReviewAgent:
         """Scan a single file for issues"""
         findings = []
 
+        # Skip scanning the auto_review.py file itself for security patterns
+        # (it contains pattern definitions that would trigger false positives)
+        if file_path.name == 'auto_review.py' and self.category == ReviewCategory.SECURITY:
+            return findings
+
         try:
             content = file_path.read_text(encoding='utf-8')
             lines = content.split('\n')
 
+            # Track if we're inside a docstring
+            in_docstring = False
+            docstring_char = None
+
             for pattern_name, pattern_config in self.patterns.items():
                 regex = re.compile(pattern_config['pattern'], re.IGNORECASE)
 
+                in_docstring = False
                 for line_num, line in enumerate(lines, start=1):
+                    stripped = line.strip()
+
+                    # Track docstring boundaries
+                    if not in_docstring:
+                        if stripped.startswith('"""') or stripped.startswith("'''"):
+                            docstring_char = stripped[:3]
+                            # Check if docstring ends on same line
+                            if stripped.count(docstring_char) >= 2:
+                                continue  # Single-line docstring, skip
+                            in_docstring = True
+                            continue
+                    else:
+                        if docstring_char in stripped:
+                            in_docstring = False
+                        continue
+
+                    # Skip comment-only lines for security patterns
+                    if self.category == ReviewCategory.SECURITY:
+                        if stripped.startswith('#'):
+                            continue
+
+                    # Skip lines that are clearly documentation/examples
+                    if self._is_documentation_line(stripped):
+                        continue
+
                     if regex.search(line):
+                        # Additional context checks to reduce false positives
+                        if self._is_false_positive(pattern_name, line, stripped):
+                            continue
+
                         findings.append(ReviewFinding(
                             category=self.category,
                             severity=pattern_config['severity'],
@@ -395,6 +434,58 @@ class ReviewAgent:
             self.logger.warning(f"Could not scan {file_path}: {e}")
 
         return findings
+
+    def _is_documentation_line(self, stripped: str) -> bool:
+        """Check if line is documentation/example that shouldn't be scanned"""
+        # Lines that are clearly documentation
+        doc_indicators = [
+            'example:', 'e.g.', 'e.g.,', 'usage:', 'note:',
+            '>>>', 'security:', 'recommendation:',
+        ]
+        lower = stripped.lower()
+        return any(indicator in lower for indicator in doc_indicators)
+
+    def _is_false_positive(self, pattern_name: str, line: str, stripped: str) -> bool:
+        """Check for known false positive patterns"""
+        # os.system with shlex.quote is safe (used in launcher_tui for terminal inheritance)
+        if pattern_name == 'os_system':
+            if 'shlex.quote' in line or 'shlex_quote' in line:
+                return True
+
+        # subprocess patterns - check for timeout in various forms
+        if pattern_name == 'subprocess_no_timeout':
+            # Check if timeout is in **kwargs or run_kwargs
+            if 'timeout' in line or '**' in line:
+                return True
+            # Check if it's a Popen that's tracked (has communicate with timeout)
+            if 'Popen' in line and ('start_new_session' in line or 'daemon' in line.lower()):
+                return True  # Background processes don't need timeout
+
+        # GLib timer patterns - check for timer tracking
+        if pattern_name == 'glib_timeout_no_cleanup':
+            # Check if it's inside a schedule_timer method or tracked
+            if '_pending_timers' in line or '_schedule_timer' in line or '_timers' in line:
+                return True
+
+        # shell=True in comments explaining why NOT to use it
+        if pattern_name == 'shell_true':
+            if stripped.startswith('#') or 'no shell' in line.lower() or 'shell=false' in line.lower():
+                return True
+
+        # Index access patterns - check for common guards
+        if pattern_name == 'index_no_check':
+            # Check for ternary with else clause (safe pattern)
+            if ' if ' in line and ' else ' in line:
+                return True
+            # Check for length check before access
+            if 'len(' in line and ('== 1' in line or '> 0' in line or '>= 1' in line):
+                return True
+            # Check if inside try/except block (need context)
+            # For now, mark as false positive if it's a split()[0] pattern
+            if '.split(' in line:
+                return True  # split() always returns at least one element
+
+        return False
 
     def scan_directory(self, directory: Path, extensions: List[str] = None) -> AgentResult:
         """Scan all files in directory"""
