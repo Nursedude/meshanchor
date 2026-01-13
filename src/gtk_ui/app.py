@@ -485,6 +485,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             ("amateur", self._add_amateur_page),
             ("meshbot", self._add_meshbot_page),
             ("messaging", self._add_messaging_page),
+            ("message_routing", self._add_message_routing_page),
             ("eas_alerts", self._add_eas_alerts_page),
             ("settings", self._add_settings_page),
         ]
@@ -831,6 +832,13 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         panel = HamToolsPanel(self)
         self.content_stack.add_named(panel, "ham_tools")
         self.ham_tools_panel = panel
+
+    def _add_message_routing_page(self):
+        """Add the message routing visualization page"""
+        from .panels.message_routing import MessageRoutingPanel
+        panel = MessageRoutingPanel(self)
+        self.content_stack.add_named(panel, "message_routing")
+        self.message_routing_panel = panel
 
     def _add_eas_alerts_page(self):
         """Add the Emergency Alert System page"""
