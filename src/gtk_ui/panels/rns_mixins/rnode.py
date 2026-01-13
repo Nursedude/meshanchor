@@ -997,31 +997,54 @@ class RNodeMixin:
                 self._log_detection("Using RNode detection module...")
                 try:
                     detected = detect_devices(probe=True)
-                    for dev in detected:
-                        devices.append(dev)
-                        # Build display name
-                        name = f"{dev.port}"
-                        if dev.model and dev.model != "Unknown":
-                            name += f" ({dev.model})"
-                        if dev.is_rnode:
-                            name += " [RNode]"
-                        if dev.is_configured:
-                            name += " [Configured]"
-                        device_names.append(name)
+                    if detected:  # Only iterate if we got results
+                        for dev in detected:
+                            try:
+                                devices.append(dev)
+                                # Build display name
+                                name = f"{dev.port}"
+                                if dev.model and dev.model != "Unknown":
+                                    name += f" ({dev.model})"
+                                if dev.is_rnode:
+                                    name += " [RNode]"
+                                if dev.is_configured:
+                                    name += " [Configured]"
+                                device_names.append(name)
 
-                        # Log device details
-                        self._log_detection(f"\n✓ Found: {dev.port}")
-                        if dev.model and dev.model != "Unknown":
-                            self._log_detection(f"  Model: {dev.model}")
-                        if dev.vid and dev.pid:
-                            self._log_detection(f"  USB: VID={dev.vid} PID={dev.pid}")
-                        if dev.is_rnode:
-                            self._log_detection("  Type: RNode firmware detected")
-                        if dev.firmware_version:
-                            self._log_detection(f"  Firmware: {dev.firmware_version}")
-                        if dev.is_configured:
-                            self._log_detection("  Status: Configured in RNS")
+                                # Log device details
+                                self._log_detection(f"\n✓ Found: {dev.port}")
+                                if dev.model and dev.model != "Unknown":
+                                    self._log_detection(f"  Model: {dev.model}")
+                                if dev.vid and dev.pid:
+                                    self._log_detection(f"  USB: VID={dev.vid} PID={dev.pid}")
+                                if dev.is_rnode:
+                                    self._log_detection("  Type: RNode firmware detected")
+                                if dev.firmware_version:
+                                    self._log_detection(f"  Firmware: {dev.firmware_version}")
+                                if dev.is_configured:
+                                    self._log_detection("  Status: Configured in RNS")
+                            except Exception as dev_err:
+                                logger.error(f"Error processing device: {dev_err}")
+                                self._log_detection(f"  ⚠️ Error reading device: {dev_err}")
 
+                except OSError as e:
+                    # Handle errno 22 (EINVAL) and errno 24 (EMFILE) specifically
+                    import errno
+                    if hasattr(e, 'errno'):
+                        if e.errno == errno.EINVAL:
+                            logger.error(f"Invalid argument error during detection: {e}")
+                            self._log_detection(f"✗ Serial port error (EINVAL): {e}")
+                            self._log_detection("  This may indicate a device permission or configuration issue")
+                        elif e.errno == errno.EMFILE:
+                            logger.error(f"Too many open files during detection: {e}")
+                            self._log_detection(f"✗ File descriptor limit reached: {e}")
+                            self._log_detection("  Try: ulimit -n 4096 or restart MeshForge")
+                        else:
+                            logger.error(f"OS error during detection (errno {e.errno}): {e}")
+                            self._log_detection(f"✗ OS error: {e}")
+                    else:
+                        logger.error(f"Detection OS error: {e}")
+                        self._log_detection(f"✗ Detection error: {e}")
                 except Exception as e:
                     logger.error(f"Device detection error: {e}")
                     self._log_detection(f"✗ Detection error: {e}")
