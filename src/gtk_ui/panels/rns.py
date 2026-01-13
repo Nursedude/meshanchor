@@ -93,8 +93,14 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
         # Connect cleanup handler
         self.connect("unrealize", self._on_unrealize)
 
+        # Track last known service state
+        self._last_rnsd_running = None
+
         self._build_ui()
         self._refresh_all()
+
+        # Start periodic service status monitoring
+        self._start_status_monitor()
 
     def _on_unrealize(self, widget):
         """Clean up when panel is destroyed to prevent timer crashes."""
@@ -114,6 +120,66 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
             timer_id = GLib.timeout_add(delay_ms, callback)
         self._pending_timers.append(timer_id)
         return timer_id
+
+    def _start_status_monitor(self):
+        """Start periodic monitoring of rnsd service status."""
+        # Check every 5 seconds
+        self._schedule_timer(5000, self._check_service_status_periodic)
+
+    def _check_service_status_periodic(self):
+        """Lightweight periodic check of rnsd service status.
+
+        Only updates UI if status changed to avoid unnecessary redraws.
+        """
+        def do_check():
+            try:
+                is_running = self._check_rns_service()
+                # Only update UI if status changed
+                if is_running != self._last_rnsd_running:
+                    self._last_rnsd_running = is_running
+                    GLib.idle_add(self._update_service_status_only, is_running)
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=do_check, daemon=True)
+        thread.start()
+
+        # Return True to keep the timer running
+        return True
+
+    def _update_service_status_only(self, is_running):
+        """Update just the service status UI (lightweight update)."""
+        try:
+            if is_running:
+                self.rns_status_icon.set_from_icon_name("emblem-default")
+                self.rns_status_label.set_label("Running")
+                service_status = self._get_systemd_service_status()
+                if service_status == 'active':
+                    self.rns_status_detail.set_label("rnsd running (systemd service)")
+                else:
+                    self.rns_status_detail.set_label("rnsd running (process)")
+                self.rns_install_note.set_label("")
+                self.rns_start_btn.set_sensitive(False)
+                self.rns_stop_btn.set_sensitive(True)
+                self.rns_restart_btn.set_sensitive(True)
+            else:
+                self.rns_status_icon.set_from_icon_name("dialog-warning")
+                self.rns_status_label.set_label("Stopped")
+                service_status = self._get_systemd_service_status()
+                if service_status == 'inactive':
+                    self.rns_status_detail.set_label("rnsd stopped (systemd service installed)")
+                elif service_status == 'not-found':
+                    self.rns_status_detail.set_label("rnsd not running (no systemd service)")
+                else:
+                    self.rns_status_detail.set_label("Reticulum daemon is not running")
+                self.rns_install_note.set_label("Start with: rnsd")
+                self.rns_start_btn.set_sensitive(True)
+                self.rns_stop_btn.set_sensitive(False)
+                self.rns_restart_btn.set_sensitive(True)
+            logger.debug(f"RNS service status changed: running={is_running}")
+        except Exception as e:
+            logger.warning(f"Error updating service status UI: {e}")
+        return False
 
     def _build_ui(self):
         """Build the RNS panel UI"""
