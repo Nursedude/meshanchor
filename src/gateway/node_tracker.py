@@ -218,8 +218,8 @@ class UnifiedNode:
                     # First byte might be display name length
                     # This varies by application
                     pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not parse RNS app_data: {e}")
 
         node.last_seen = datetime.now()
         return node
@@ -682,8 +682,8 @@ class UnifiedNodeTracker:
                     display_name = app_data.decode('utf-8', errors='ignore').strip()
                     # Clean up - remove non-printable characters
                     display_name = ''.join(c for c in display_name if c.isprintable())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Could not decode RNS display name: {e}")
 
             # Create node from announce
             node = UnifiedNode.from_rns(dest_hash, name=display_name, app_data=app_data)
