@@ -170,12 +170,14 @@ class NetworkDiagnostics:
         # Ensure diagnostic directory exists
         self._ensure_dirs()
 
-        # Start background health monitor
-        self._monitor_running = True
-        self._monitor_thread = threading.Thread(target=self._health_monitor_loop, daemon=True)
-        self._monitor_thread.start()
+        # NOTE: Health monitor DISABLED - was contributing to resource exhaustion
+        # The monitor runs every 30 seconds and creates sockets for health checks
+        self._monitor_running = False
+        self._monitor_thread = None
+        # self._monitor_thread = threading.Thread(target=self._health_monitor_loop, daemon=True)
+        # self._monitor_thread.start()
 
-        logger.info("NetworkDiagnostics initialized")
+        logger.info("NetworkDiagnostics initialized (health monitor disabled)")
 
     def _ensure_dirs(self):
         """Create diagnostic directories with proper ownership."""
