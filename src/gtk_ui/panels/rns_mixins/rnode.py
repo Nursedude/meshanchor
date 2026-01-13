@@ -451,9 +451,13 @@ class RNodeMixin:
         parent.append(config_frame)
 
         # Load config preview after UI is built (use tracked timer for cleanup)
-        # _schedule_timer is always available from RNSPanel base class
-        self._schedule_timer(2000, self._load_config_preview)
-        self._schedule_timer(1500, self._load_rnode_config)
+        if hasattr(self, '_schedule_timer'):
+            self._schedule_timer(2000, self._load_config_preview)
+            self._schedule_timer(1500, self._load_rnode_config)
+        else:
+            # Fallback if timer tracking not available
+            GLib.timeout_add(2000, self._load_config_preview)
+            GLib.timeout_add(1500, self._load_rnode_config)
 
     def _load_rnode_config(self, button=None):
         """Load RNode config from ~/.reticulum/config"""

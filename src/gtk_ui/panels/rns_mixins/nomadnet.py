@@ -171,8 +171,11 @@ class NomadNetMixin:
         frame.set_child(box)
         parent.append(frame)
 
-        # Check status on load (use tracked timer from RNSPanel base class)
-        self._schedule_timer(500, self._check_nomadnet_status)
+        # Check status on load (use tracked timer for cleanup)
+        if hasattr(self, '_schedule_timer'):
+            self._schedule_timer(500, self._check_nomadnet_status)
+        else:
+            GLib.timeout_add(500, self._check_nomadnet_status)
 
     def _find_nomadnet(self):
         """Find nomadnet executable, checking user local bin if running as root"""
@@ -291,7 +294,10 @@ class NomadNetMixin:
                 if hasattr(self, 'nomadnet_textui_btn'):
                     self.nomadnet_textui_btn.set_sensitive(True)
                 return False
-            self._schedule_timer(2000, re_enable_btn)
+            if hasattr(self, '_schedule_timer'):
+                self._schedule_timer(2000, re_enable_btn)
+            else:
+                GLib.timeout_add(2000, re_enable_btn)
 
         nomadnet_path = self._find_nomadnet()
         if not nomadnet_path:
@@ -355,7 +361,10 @@ class NomadNetMixin:
                     def do_refresh():
                         self._refresh_all()
                         return False
-                    self._schedule_timer(3000, do_refresh)
+                    if hasattr(self, '_schedule_timer'):
+                        self._schedule_timer(3000, do_refresh)
+                    else:
+                        GLib.timeout_add(3000, do_refresh)
 
                 # Build the terminal command - wrap in bash to keep terminal open on exit
                 # Check for ~/CONFIG first (custom RNS setup), fallback to ~/.nomadnetwork
@@ -426,7 +435,10 @@ class NomadNetMixin:
                 self.main_window.set_status_message("NomadNet daemon started")
                 logger.debug(f"[RNS] NomadNet daemon started (user: {real_user})")
                 # Refresh status after a moment (use tracked timer)
-                self._schedule_timer(1000, self._check_nomadnet_status)
+                if hasattr(self, '_schedule_timer'):
+                    self._schedule_timer(1000, self._check_nomadnet_status)
+                else:
+                    GLib.timeout_add(1000, self._check_nomadnet_status)
         except Exception as e:
             logger.debug(f"[RNS] Failed to launch NomadNet: {e}")
             self.main_window.set_status_message(f"Failed: {e}")
@@ -440,7 +452,10 @@ class NomadNetMixin:
                 self.main_window.set_status_message("NomadNet daemon stopped")
                 logger.debug("[RNS] NomadNet stopped")
                 # Refresh status (use tracked timer)
-                self._schedule_timer(500, self._check_nomadnet_status)
+                if hasattr(self, '_schedule_timer'):
+                    self._schedule_timer(500, self._check_nomadnet_status)
+                else:
+                    GLib.timeout_add(500, self._check_nomadnet_status)
             else:
                 self.main_window.set_status_message("NomadNet was not running")
         except Exception as e:
