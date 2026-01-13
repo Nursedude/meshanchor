@@ -576,14 +576,20 @@ class GatewayDiagnostic:
 
     def check_tcp_port(self, host: str, port: int) -> bool:
         """Check if a TCP port is open."""
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
             result = sock.connect_ex((host, port))
-            sock.close()
             return result == 0
         except Exception:
             return False
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def check_rns_port_available(self, port: int = 29716) -> CheckResult:
         """Check if RNS AutoInterface UDP port is available for binding."""
@@ -714,12 +720,12 @@ def check_rns_port_available(port: int = 29716) -> Dict[str, any]:
     }
 
     # First try to bind to the port
+    sock = None
     try:
         # Try IPv6 first (covers IPv4 on most systems)
         sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('::', port))
-        sock.close()
     except OSError as e:
         if e.errno == 98:  # Address already in use
             result['available'] = False
@@ -743,11 +749,19 @@ def check_rns_port_available(port: int = 29716) -> Dict[str, any]:
                 )
         else:
             # Try IPv4 fallback
+            # First close any existing socket
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                sock = None
+
+            sock4 = None
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(('0.0.0.0', port))
-                sock.close()
+                sock4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock4.bind(('0.0.0.0', port))
             except OSError as e2:
                 if e2.errno == 98:
                     result['available'] = False
@@ -757,6 +771,18 @@ def check_rns_port_available(port: int = 29716) -> Dict[str, any]:
                     result['fix_hint'] = (
                         f"Kill existing RNS process or stop rnsd: pkill -f rnsd"
                     )
+            finally:
+                if sock4:
+                    try:
+                        sock4.close()
+                    except Exception:
+                        pass
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     return result
 
