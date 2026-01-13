@@ -1373,8 +1373,11 @@ class MeshToolsPanel(Gtk.Box):
                     except ImportError:
                         GLib.idle_add(self._log_message, "Meshtastic Python library not installed")
                         GLib.idle_add(self._log_message, "Install with: pip install meshtastic")
-                    except Exception as e:
-                        GLib.idle_add(self._log_message, f"TCP connection error: {e}")
+                    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+                        raise
+                    except BaseException as e:
+                        # Catch pyo3 PanicException and other crashes
+                        GLib.idle_add(self._log_message, f"Meshtastic error: {e}")
                     finally:
                         # Always close interface and release lock
                         if interface:

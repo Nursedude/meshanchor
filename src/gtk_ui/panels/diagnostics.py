@@ -773,6 +773,12 @@ class DiagnosticsPanel(Gtk.Box):
             results.append("[FAIL] RNS module not installed")
             results.append("  FIX: pip install rns")
             return results
+        except (SystemExit, KeyboardInterrupt, GeneratorExit):
+            raise
+        except BaseException as e:
+            results.append(f"[FAIL] RNS import error: {e}")
+            results.append("  FIX: pip install --upgrade rns cffi")
+            return results
 
         # Check rnsd
         try:

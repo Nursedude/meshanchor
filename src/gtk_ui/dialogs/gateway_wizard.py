@@ -533,6 +533,10 @@ class GatewaySetupWizard(Adw.Window):
                 results.append("✓ RNS library - Available")
             except ImportError:
                 results.append("✗ RNS library - Not installed")
+            except (SystemExit, KeyboardInterrupt, GeneratorExit):
+                raise
+            except BaseException as e:
+                results.append(f"✗ RNS library - Error: {e}")
 
             GLib.idle_add(self._update_connection_result, results)
 
