@@ -967,18 +967,19 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
     def _show_log_viewer_dialog(self):
         """Actually create and show the log viewer dialog"""
-        dialog = Adw.Window()
+        # Use Gtk.Window for simplicity - more reliable than Adw.Window
+        dialog = Gtk.Window()
         dialog.set_transient_for(self)
         dialog.set_modal(True)
         dialog.set_title("Application Logs")
         dialog.set_default_size(800, 500)
 
-        # Main layout
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        # Main layout with toolbar view for proper libadwaita styling
+        toolbar_view = Adw.ToolbarView()
 
         # Header bar
         header = Adw.HeaderBar()
-        header.set_show_end_title_buttons(True)
+        header.set_title_widget(Gtk.Label(label="Application Logs"))
 
         # Refresh button
         refresh_btn = Gtk.Button()
@@ -992,7 +993,10 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         open_btn.set_tooltip_text("Open Log Directory")
         header.pack_start(open_btn)
 
-        main_box.append(header)
+        toolbar_view.add_top_bar(header)
+
+        # Content box
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         # Log content area
         scrolled = Gtk.ScrolledWindow()
@@ -1009,7 +1013,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         text_view.set_bottom_margin(10)
         buffer = text_view.get_buffer()
         scrolled.set_child(text_view)
-        main_box.append(scrolled)
+        content_box.append(scrolled)
 
         # Status bar at bottom
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -1021,9 +1025,10 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         log_path_label.set_xalign(0)
         log_path_label.add_css_class("dim-label")
         status_box.append(log_path_label)
-        main_box.append(status_box)
+        content_box.append(status_box)
 
-        dialog.set_content(main_box)
+        toolbar_view.set_content(content_box)
+        dialog.set_child(toolbar_view)
 
         # Load log content
         def load_logs():
