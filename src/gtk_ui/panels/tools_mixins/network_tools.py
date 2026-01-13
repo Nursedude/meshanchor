@@ -121,11 +121,20 @@ class NetworkToolsMixin:
         try:
             # Get local network
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
-            s.close()
-            s = None  # Mark as closed
+        except Exception as e:
+            GLib.idle_add(self._log, f"Could not determine local network: {e}")
+            return
+        finally:
+            if s:
+                try:
+                    s.close()
+                except Exception:
+                    pass
 
+        try:
             base = '.'.join(local_ip.split('.')[:3])
             found = []
 
@@ -156,12 +165,6 @@ class NetworkToolsMixin:
                 GLib.idle_add(self._log, "No Meshtastic devices found on port 4403")
         except Exception as e:
             GLib.idle_add(self._log, f"Scan error: {e}")
-        finally:
-            if s:
-                try:
-                    s.close()
-                except Exception:
-                    pass
 
     def _refresh_status(self):
         """Refresh network status (can be overridden)"""
