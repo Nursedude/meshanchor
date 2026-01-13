@@ -954,17 +954,30 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             self.bottom_message.set_label(message)
 
     def _on_view_logs(self, button):
-        """Show log viewer dialog - simplified version"""
+        """Show log viewer dialog with scrollable content"""
         try:
-            # Get log content
             log_content = self._get_recent_logs()
 
-            # Use simple MessageDialog which works reliably
             dialog = Adw.MessageDialog(
                 transient_for=self,
                 heading="Application Logs",
-                body=log_content[:2000] if len(log_content) > 2000 else log_content
+                body=""  # Empty body - we use extra_child for scrollable content
             )
+
+            # Create scrollable text view for logs
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scrolled.set_min_content_height(400)
+            scrolled.set_min_content_width(600)
+
+            text_view = Gtk.TextView()
+            text_view.set_editable(False)
+            text_view.set_monospace(True)
+            text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            text_view.get_buffer().set_text(log_content)
+            scrolled.set_child(text_view)
+
+            dialog.set_extra_child(scrolled)
             dialog.add_response("ok", "Close")
             dialog.present()
         except Exception as e:
@@ -993,7 +1006,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         try:
             with open(log_files[0], 'r') as f:
                 lines = f.readlines()
-                recent = lines[-50:] if len(lines) > 50 else lines
+                recent = lines[-200:] if len(lines) > 200 else lines
                 return ''.join(recent)
         except Exception as e:
             return f"Error reading logs: {e}"
