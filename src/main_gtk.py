@@ -338,14 +338,21 @@ def daemonize():
     env['MESHTASTICD_DAEMON'] = '1'  # Mark as daemon
 
     # Start new process detached from terminal
-    proc = subprocess.Popen(
-        [sys.executable, script_path],
-        stdin=subprocess.DEVNULL,
-        stdout=open('/tmp/meshtasticd-manager.log', 'a'),
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        env=env
-    )
+    # Open log file and ensure it's closed in parent after fork
+    log_file = open('/tmp/meshtasticd-manager.log', 'a')
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, script_path],
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env
+        )
+    finally:
+        # Close the file handle in the parent process
+        # The child process inherits and keeps its own copy
+        log_file.close()
 
     print(f"MeshForge started in background (PID: {proc.pid})")
     print(f"Log: /tmp/meshtasticd-manager.log")
