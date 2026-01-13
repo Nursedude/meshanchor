@@ -424,30 +424,55 @@ def run_command(command, shell=False, capture_output=True, stream_output=False, 
 
         if stream_output:
             # Stream output in real-time for better user feedback
-            process = subprocess.Popen(
-                command,
-                shell=shell,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
+            process = None
             stdout_lines = []
-            for line in process.stdout:
-                print(line, end='')
-                stdout_lines.append(line)
+            try:
+                process = subprocess.Popen(
+                    command,
+                    shell=shell,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
 
-            process.wait(timeout=300)
-            stdout = ''.join(stdout_lines)
+                for line in process.stdout:
+                    print(line, end='')
+                    stdout_lines.append(line)
 
-            return {
-                'returncode': process.returncode,
-                'stdout': stdout,
-                'stderr': '',
-                'success': process.returncode == 0
-            }
+                process.wait(timeout=300)
+                stdout = ''.join(stdout_lines)
+
+                return {
+                    'returncode': process.returncode,
+                    'stdout': stdout,
+                    'stderr': '',
+                    'success': process.returncode == 0
+                }
+            except subprocess.TimeoutExpired:
+                if process:
+                    process.kill()
+                    process.wait()
+                return {
+                    'returncode': -1,
+                    'stdout': ''.join(stdout_lines),
+                    'stderr': 'Command timed out',
+                    'success': False
+                }
+            except Exception as e:
+                if process:
+                    try:
+                        process.kill()
+                        process.wait()
+                    except Exception:
+                        pass
+                return {
+                    'returncode': -1,
+                    'stdout': ''.join(stdout_lines),
+                    'stderr': str(e),
+                    'success': False
+                }
         else:
             # Build subprocess arguments
             run_kwargs = {

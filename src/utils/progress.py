@@ -103,6 +103,7 @@ def run_with_live_progress(command, description, shell=False, timeout=600):
     ) as progress:
         task = progress.add_task(description, total=100)
 
+        process = None
         try:
             process = subprocess.Popen(
                 command,
@@ -153,7 +154,9 @@ def run_with_live_progress(command, description, shell=False, timeout=600):
             }
 
         except subprocess.TimeoutExpired:
-            process.kill()
+            if process:
+                process.kill()
+                process.wait()  # Reap the process
             return {
                 'success': False,
                 'stdout': ''.join(stdout_lines),
@@ -161,6 +164,12 @@ def run_with_live_progress(command, description, shell=False, timeout=600):
                 'returncode': -1
             }
         except Exception as e:
+            if process:
+                try:
+                    process.kill()
+                    process.wait()
+                except Exception:
+                    pass
             return {
                 'success': False,
                 'stdout': ''.join(stdout_lines),
