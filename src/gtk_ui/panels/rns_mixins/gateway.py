@@ -364,7 +364,10 @@ class GatewayMixin:
             except ImportError as e:
                 logger.debug(f"[RNS] Gateway start failed - missing module: {e}")
                 GLib.idle_add(self._gateway_start_complete, False, f"Missing module: {e}")
-            except Exception as e:
+            except (SystemExit, KeyboardInterrupt, GeneratorExit):
+                raise
+            except BaseException as e:
+                # Catch pyo3 PanicException and other crashes
                 logger.debug(f"[RNS] Gateway start exception: {e}")
                 GLib.idle_add(self._gateway_start_complete, False, str(e))
 
