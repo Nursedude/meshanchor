@@ -1113,14 +1113,20 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
             # Method 3: Check TCP port 4403
             if not is_active:
+                sock = None
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(1.0)
                     if sock.connect_ex(('localhost', 4403)) == 0:
                         is_active = True
-                    sock.close()
                 except Exception:
                     pass
+                finally:
+                    if sock:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
 
             # Get uptime if active
             uptime = "--"
@@ -1164,12 +1170,23 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             return self._node_count_cache
 
         # Quick pre-check: is meshtasticd TCP port reachable?
+        sock = None
+        port_reachable = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1.0)
             sock.connect(("localhost", 4403))
-            sock.close()
+            port_reachable = True
         except (socket.timeout, socket.error, OSError):
+            pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+        if not port_reachable:
             # Port not reachable, skip node count
             return self._node_count_cache
 
