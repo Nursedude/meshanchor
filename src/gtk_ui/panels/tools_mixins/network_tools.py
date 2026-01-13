@@ -90,11 +90,11 @@ class NetworkToolsMixin:
     def _run_port_test(self, host, port):
         """Run port test in background"""
         GLib.idle_add(self._log, f"Testing TCP {host}:{port}...")
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             result = sock.connect_ex((host, port))
-            sock.close()
             if result == 0:
                 GLib.idle_add(self._log, f"Port {port} is OPEN on {host}")
             else:
@@ -103,6 +103,12 @@ class NetworkToolsMixin:
             GLib.idle_add(self._log, f"Connection to {host}:{port} timed out")
         except Exception as e:
             GLib.idle_add(self._log, f"Error: {e}")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     def _on_scan_devices(self, button):
         """Scan for Meshtastic devices"""
@@ -111,12 +117,14 @@ class NetworkToolsMixin:
 
     def _run_scan(self):
         """Run device scan in background"""
+        s = None
         try:
             # Get local network
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
             s.close()
+            s = None  # Mark as closed
 
             base = '.'.join(local_ip.split('.')[:3])
             found = []
@@ -125,16 +133,22 @@ class NetworkToolsMixin:
 
             for i in range(1, 255):
                 ip = f"{base}.{i}"
+                sock = None
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(0.3)
                     result = sock.connect_ex((ip, 4403))
-                    sock.close()
                     if result == 0:
                         found.append(ip)
                         GLib.idle_add(self._log, f"Found: {ip}:4403")
                 except Exception:
                     pass
+                finally:
+                    if sock:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
 
             if found:
                 GLib.idle_add(self._log, f"\nFound {len(found)} device(s)")
@@ -142,6 +156,12 @@ class NetworkToolsMixin:
                 GLib.idle_add(self._log, "No Meshtastic devices found on port 4403")
         except Exception as e:
             GLib.idle_add(self._log, f"Scan error: {e}")
+        finally:
+            if s:
+                try:
+                    s.close()
+                except Exception:
+                    pass
 
     def _refresh_status(self):
         """Refresh network status (can be overridden)"""
@@ -150,14 +170,20 @@ class NetworkToolsMixin:
     def _refresh_status_thread(self):
         """Check network status in background"""
         # Check meshtasticd port
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
             result = sock.connect_ex(('localhost', 4403))
-            sock.close()
             meshtastic_status = "Connected" if result == 0 else "Not Connected"
         except Exception:
             meshtastic_status = "Error"
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         if hasattr(self, 'mesh_status_label'):
             GLib.idle_add(self.mesh_status_label.set_label, meshtastic_status)

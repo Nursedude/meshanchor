@@ -439,17 +439,23 @@ class GatewayMixin:
             }
 
             # Test Meshtastic
+            import socket
+            sock = None
             try:
-                import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
                 result = sock.connect_ex(('localhost', 4403))
-                sock.close()
                 results['meshtastic']['connected'] = (result == 0)
                 if result != 0:
                     results['meshtastic']['error'] = "Cannot connect to port 4403"
             except Exception as e:
                 results['meshtastic']['error'] = str(e)
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             # Test RNS
             try:

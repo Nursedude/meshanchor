@@ -190,17 +190,23 @@ class NetworkDiagnosticsMixin:
 
         import socket
         for port, proto, name in rns_ports:
+            sock = None
             try:
                 sock_type = socket.SOCK_DGRAM if proto == 'UDP' else socket.SOCK_STREAM
                 sock = socket.socket(socket.AF_INET, sock_type)
                 sock.settimeout(1)
                 result = sock.connect_ex(('localhost', port))
-                sock.close()
 
                 status = "OPEN" if result == 0 else "CLOSED"
                 GLib.idle_add(self._log, f"  {name} ({proto} {port}): {status}")
             except Exception as e:
                 GLib.idle_add(self._log, f"  {name} ({proto} {port}): Error - {e}")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
     def _on_check_mesh_ports(self, button=None):
         """Check Meshtastic-related ports"""
@@ -217,16 +223,22 @@ class NetworkDiagnosticsMixin:
 
         import socket
         for port, proto, name in mesh_ports:
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)
                 result = sock.connect_ex(('localhost', port))
-                sock.close()
 
                 status = "OPEN" if result == 0 else "CLOSED"
                 GLib.idle_add(self._log, f"  {name} ({proto} {port}): {status}")
             except Exception as e:
                 GLib.idle_add(self._log, f"  {name} ({proto} {port}): Error - {e}")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
     def _on_full_network_diagnostics(self, button=None):
         """Run comprehensive network diagnostics"""
