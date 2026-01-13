@@ -133,12 +133,18 @@ def get_node_firmware_version() -> Optional[str]:
         import socket
 
         # Quick check if port is available
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2.0)
-        if sock.connect_ex(('localhost', 4403)) != 0:
-            sock.close()
-            return None
-        sock.close()
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2.0)
+            if sock.connect_ex(('localhost', 4403)) != 0:
+                return None
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         # Find CLI using centralized function
         try:

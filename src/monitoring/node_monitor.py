@@ -219,13 +219,19 @@ class NodeMonitor:
 
             # Pre-check: Test if port is reachable (fail fast)
             import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(min(timeout, 5.0))
+            sock = None
             try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(min(timeout, 5.0))
                 sock.connect((self.host, self.port))
-                sock.close()
             except (socket.timeout, socket.error, OSError) as e:
                 raise ConnectionError(f"Cannot reach {self.host}:{self.port} - {e}")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             # Connect
             logger.info(f"Connecting to {self.host}:{self.port}...")
