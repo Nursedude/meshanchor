@@ -134,14 +134,20 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
     port_open = False
     if check_port:
         import socket
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2.0)
             result = sock.connect_ex(('localhost', check_port))
-            sock.close()
             port_open = result == 0
         except (socket.error, OSError):
             pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     if not is_running:
         status_detail = "Stopped"

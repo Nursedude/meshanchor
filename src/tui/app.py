@@ -287,17 +287,23 @@ class DashboardPane(Container):
 
         # Check TCP port
         import socket
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
             result = sock.connect_ex(('127.0.0.1', 4403))
-            sock.close()
             if result == 0:
                 log.write("[green][OK][/green] TCP port 4403 open")
             else:
                 log.write("[red][X][/red] TCP port 4403 closed")
         except Exception:
             log.write("[red][X][/red] Could not check port 4403")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         # Check RNS
         try:
@@ -1189,15 +1195,21 @@ class ToolsPane(Container):
         import socket
         output.write("\n[cyan]Testing port 4403...[/cyan]")
         for host in ['127.0.0.1', 'localhost']:
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 result = sock.connect_ex((host, 4403))
-                sock.close()
                 status = "[green]OPEN[/green]" if result == 0 else "[red]CLOSED[/red]"
                 output.write(f"  {host}:4403 - {status}")
             except Exception as e:
                 output.write(f"  {host}:4403 - [red]Error: {e}[/red]")
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
     @work
     async def _show_interfaces(self, output: Log):
@@ -1362,6 +1374,7 @@ class ToolsPane(Container):
         import socket
         import struct
         output.write("\n[cyan]Testing multicast group 224.0.0.69...[/cyan]")
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1370,7 +1383,6 @@ class ToolsPane(Container):
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             output.write("  [green]Joined multicast group successfully[/green]")
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, mreq)
-            sock.close()
             output.write("  [green]Left multicast group[/green]")
         except OSError as e:
             if "Address already in use" in str(e):
@@ -1379,6 +1391,12 @@ class ToolsPane(Container):
                 output.write(f"  [red]Error: {e}[/red]")
         except Exception as e:
             output.write(f"  [red]Error: {e}[/red]")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     # Network Diagnostics Methods
     def _parse_proc_net(self, protocol: str) -> list:
