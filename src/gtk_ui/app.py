@@ -955,7 +955,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
     def _on_view_logs(self, button):
         """Show log viewer dialog"""
-        dialog = Adw.Window(transient_for=self, modal=True)
+        dialog = Adw.Window()
+        dialog.set_transient_for(self)
+        dialog.set_modal(True)
         dialog.set_title("Application Logs")
         dialog.set_default_size(800, 500)
 
@@ -1070,7 +1072,12 @@ class MeshForgeWindow(Adw.ApplicationWindow):
                     log_dir = get_real_user_home() / '.config' / 'meshforge' / 'logs'
 
             if log_dir.exists():
-                subprocess.Popen(['xdg-open', str(log_dir)])
+                def do_open():
+                    try:
+                        subprocess.run(['xdg-open', str(log_dir)], timeout=10)
+                    except Exception:
+                        pass
+                threading.Thread(target=do_open, daemon=True).start()
 
         refresh_btn.connect("clicked", on_refresh)
         open_btn.connect("clicked", on_open_dir)
