@@ -254,8 +254,11 @@ loglevel = 4
             logger.debug(f"[RNS] Created default RNS config: {config_path}")
             self.main_window.set_status_message("Created default RNS config")
 
-            # Refresh the panel to show the config exists now
-            GLib.timeout_add(500, self._refresh_panel)
+            # Refresh the panel to show the config exists now (use tracked timer)
+            if hasattr(self, '_schedule_timer'):
+                self._schedule_timer(500, self._refresh_panel)
+            else:
+                GLib.timeout_add(500, self._refresh_panel)
 
         except Exception as e:
             logger.debug(f"[RNS] Failed to create default config: {e}")
