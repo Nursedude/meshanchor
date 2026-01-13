@@ -1390,11 +1390,13 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         )
 
     def _perform_reboot(self):
-        """Perform the actual reboot"""
-        try:
-            subprocess.run(['systemctl', 'reboot'], check=True, timeout=10)
-        except Exception as e:
-            self._show_error_dialog("Reboot Failed", str(e))
+        """Perform the actual reboot - runs in background thread"""
+        def do_reboot():
+            try:
+                subprocess.run(['systemctl', 'reboot'], check=True, timeout=10)
+            except Exception as e:
+                GLib.idle_add(self._show_error_dialog, "Reboot Failed", str(e))
+        threading.Thread(target=do_reboot, daemon=True).start()
         return False
 
     def _save_resume_state(self, reason):
