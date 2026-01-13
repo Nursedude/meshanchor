@@ -954,171 +954,49 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             self.bottom_message.set_label(message)
 
     def _on_view_logs(self, button):
-        """Show log viewer dialog"""
+        """Show log viewer dialog - simplified version"""
         try:
-            self._show_log_viewer_dialog()
+            # Get log content
+            log_content = self._get_recent_logs()
+
+            # Use simple MessageDialog which works reliably
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                heading="Application Logs",
+                body=log_content[:2000] if len(log_content) > 2000 else log_content
+            )
+            dialog.add_response("ok", "Close")
+            dialog.present()
         except Exception as e:
             logger.error(f"Failed to show log viewer: {e}")
-            # Show simple error dialog
-            try:
-                self.set_status_message(f"Could not open logs: {e}")
-            except Exception:
-                pass
+            self.set_status_message(f"Could not open logs: {e}")
 
-    def _show_log_viewer_dialog(self):
-        """Actually create and show the log viewer dialog"""
-        # Use Gtk.Window for simplicity - more reliable than Adw.Window
-        dialog = Gtk.Window()
-        dialog.set_transient_for(self)
-        dialog.set_modal(True)
-        dialog.set_title("Application Logs")
-        dialog.set_default_size(800, 500)
+    def _get_recent_logs(self):
+        """Get recent log content as string"""
+        try:
+            from utils.logging_utils import LOG_DIR
+            log_dir = LOG_DIR
+        except ImportError:
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                log_dir = Path(f'/home/{sudo_user}/.config/meshforge/logs')
+            else:
+                log_dir = get_real_user_home() / '.config' / 'meshforge' / 'logs'
 
-        # Main layout with toolbar view for proper libadwaita styling
-        toolbar_view = Adw.ToolbarView()
+        if not log_dir.exists():
+            return f"Log directory not found: {log_dir}"
 
-        # Header bar
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Application Logs"))
+        log_files = sorted(log_dir.glob("meshforge_*.log"), reverse=True)
+        if not log_files:
+            return "No log files found yet."
 
-        # Refresh button
-        refresh_btn = Gtk.Button()
-        refresh_btn.set_icon_name("view-refresh-symbolic")
-        refresh_btn.set_tooltip_text("Refresh Logs")
-        header.pack_start(refresh_btn)
-
-        # Open in file manager button
-        open_btn = Gtk.Button()
-        open_btn.set_icon_name("folder-open-symbolic")
-        open_btn.set_tooltip_text("Open Log Directory")
-        header.pack_start(open_btn)
-
-        toolbar_view.add_top_bar(header)
-
-        # Content box
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-
-        # Log content area
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_vexpand(True)
-
-        text_view = Gtk.TextView()
-        text_view.set_editable(False)
-        text_view.set_monospace(True)
-        text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        text_view.set_left_margin(10)
-        text_view.set_right_margin(10)
-        text_view.set_top_margin(10)
-        text_view.set_bottom_margin(10)
-        buffer = text_view.get_buffer()
-        scrolled.set_child(text_view)
-        content_box.append(scrolled)
-
-        # Status bar at bottom
-        status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        status_box.set_margin_start(10)
-        status_box.set_margin_end(10)
-        status_box.set_margin_top(5)
-        status_box.set_margin_bottom(5)
-        log_path_label = Gtk.Label()
-        log_path_label.set_xalign(0)
-        log_path_label.add_css_class("dim-label")
-        status_box.append(log_path_label)
-        content_box.append(status_box)
-
-        toolbar_view.set_content(content_box)
-        dialog.set_child(toolbar_view)
-
-        # Load log content
-        def load_logs():
-            try:
-                _do_load_logs()
-            except Exception as e:
-                try:
-                    buffer.set_text(f"Error loading logs: {e}")
-                except Exception:
-                    pass
-
-        def _do_load_logs():
-            try:
-                from utils.logging_utils import LOG_DIR
-                log_dir = LOG_DIR
-            except ImportError:
-                # Fallback path
-                import os
-                sudo_user = os.environ.get('SUDO_USER')
-                if sudo_user and sudo_user != 'root':
-                    log_dir = Path(f'/home/{sudo_user}/.config/meshforge/logs')
-                else:
-                    log_dir = get_real_user_home() / '.config' / 'meshforge' / 'logs'
-
-            log_path_label.set_label(f"Log directory: {log_dir}")
-
-            if not log_dir.exists():
-                buffer.set_text(f"Log directory not found: {log_dir}\n\nLogs will appear here after the application is restarted.")
-                return
-
-            # Find most recent log file
-            log_files = sorted(log_dir.glob("meshforge_*.log"), reverse=True)
-            if not log_files:
-                buffer.set_text("No log files found yet.\n\nLogs will appear after application activity.")
-                return
-
-            log_file = log_files[0]
-            try:
-                # Read last 500 lines of log
-                with open(log_file, 'r') as f:
-                    lines = f.readlines()
-                    recent_lines = lines[-500:] if len(lines) > 500 else lines
-                    content = ''.join(recent_lines)
-                    if len(lines) > 500:
-                        content = f"[... showing last 500 of {len(lines)} lines ...]\n\n" + content
-                    buffer.set_text(content)
-
-                    # Scroll to end (defer to avoid crash if widget not realized)
-                    def scroll_to_end():
-                        try:
-                            end_iter = buffer.get_end_iter()
-                            text_view.scroll_to_iter(end_iter, 0.0, True, 0.0, 1.0)
-                        except Exception:
-                            pass
-                        return False
-                    GLib.idle_add(scroll_to_end)
-            except Exception as e:
-                try:
-                    buffer.set_text(f"Error reading log file: {e}")
-                except Exception:
-                    pass
-
-        def on_refresh(btn):
-            load_logs()
-
-        def on_open_dir(btn):
-            try:
-                from utils.logging_utils import LOG_DIR
-                log_dir = LOG_DIR
-            except ImportError:
-                import os
-                sudo_user = os.environ.get('SUDO_USER')
-                if sudo_user and sudo_user != 'root':
-                    log_dir = Path(f'/home/{sudo_user}/.config/meshforge/logs')
-                else:
-                    log_dir = get_real_user_home() / '.config' / 'meshforge' / 'logs'
-
-            if log_dir.exists():
-                def do_open():
-                    try:
-                        subprocess.run(['xdg-open', str(log_dir)], timeout=10)
-                    except Exception:
-                        pass
-                threading.Thread(target=do_open, daemon=True).start()
-
-        refresh_btn.connect("clicked", on_refresh)
-        open_btn.connect("clicked", on_open_dir)
-
-        load_logs()
-        dialog.present()
+        try:
+            with open(log_files[0], 'r') as f:
+                lines = f.readlines()
+                recent = lines[-50:] if len(lines) > 50 else lines
+                return ''.join(recent)
+        except Exception as e:
+            return f"Error reading logs: {e}"
 
     def _update_status(self):
         """Update status bar information"""
