@@ -72,9 +72,9 @@ class RNSMeshtasticBridge:
         self._connected_rns = False
         self._rns_init_failed_permanently = False  # True if RNS can't be initialized from this thread
 
-        # Message queues
-        self._mesh_to_rns_queue = Queue()
-        self._rns_to_mesh_queue = Queue()
+        # Message queues (bounded to prevent memory exhaustion)
+        self._mesh_to_rns_queue = Queue(maxsize=1000)
+        self._rns_to_mesh_queue = Queue(maxsize=1000)
 
         # Threads
         self._mesh_thread = None
@@ -869,8 +869,8 @@ class RNSMeshtasticBridge:
             if sock:
                 try:
                     sock.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Socket close during cleanup: {e}")
 
     def _test_meshtastic_cli(self) -> bool:
         """Test Meshtastic CLI availability"""
@@ -909,16 +909,18 @@ class RNSMeshtasticBridge:
             return False
 
     def _notify_message(self, msg: BridgedMessage):
-        """Notify message callbacks"""
-        for callback in self._message_callbacks:
+        """Notify message callbacks (thread-safe snapshot)"""
+        callbacks = list(self._message_callbacks)  # Snapshot to avoid race condition
+        for callback in callbacks:
             try:
                 callback(msg)
             except Exception as e:
                 logger.error(f"Message callback error: {e}")
 
     def _notify_status(self, status: str):
-        """Notify status callbacks"""
-        for callback in self._status_callbacks:
+        """Notify status callbacks (thread-safe snapshot)"""
+        callbacks = list(self._status_callbacks)  # Snapshot to avoid race condition
+        for callback in callbacks:
             try:
                 callback(status, self.get_status())
             except Exception as e:
