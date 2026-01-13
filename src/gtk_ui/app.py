@@ -955,6 +955,18 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
     def _on_view_logs(self, button):
         """Show log viewer dialog"""
+        try:
+            self._show_log_viewer_dialog()
+        except Exception as e:
+            logger.error(f"Failed to show log viewer: {e}")
+            # Show simple error dialog
+            try:
+                self.set_status_message(f"Could not open logs: {e}")
+            except Exception:
+                pass
+
+    def _show_log_viewer_dialog(self):
+        """Actually create and show the log viewer dialog"""
         dialog = Adw.Window()
         dialog.set_transient_for(self)
         dialog.set_modal(True)
@@ -1016,6 +1028,15 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         # Load log content
         def load_logs():
             try:
+                _do_load_logs()
+            except Exception as e:
+                try:
+                    buffer.set_text(f"Error loading logs: {e}")
+                except Exception:
+                    pass
+
+        def _do_load_logs():
+            try:
                 from utils.logging_utils import LOG_DIR
                 log_dir = LOG_DIR
             except ImportError:
@@ -1050,11 +1071,20 @@ class MeshForgeWindow(Adw.ApplicationWindow):
                         content = f"[... showing last 500 of {len(lines)} lines ...]\n\n" + content
                     buffer.set_text(content)
 
-                    # Scroll to end
-                    end_iter = buffer.get_end_iter()
-                    text_view.scroll_to_iter(end_iter, 0.0, True, 0.0, 1.0)
+                    # Scroll to end (defer to avoid crash if widget not realized)
+                    def scroll_to_end():
+                        try:
+                            end_iter = buffer.get_end_iter()
+                            text_view.scroll_to_iter(end_iter, 0.0, True, 0.0, 1.0)
+                        except Exception:
+                            pass
+                        return False
+                    GLib.idle_add(scroll_to_end)
             except Exception as e:
-                buffer.set_text(f"Error reading log file: {e}")
+                try:
+                    buffer.set_text(f"Error reading log file: {e}")
+                except Exception:
+                    pass
 
         def on_refresh(btn):
             load_logs()
