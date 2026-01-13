@@ -886,14 +886,20 @@ class RNodeMixin:
                 # Fallback: try socket
                 import socket
                 meshtasticd_method = "socket"
+                sock = None
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(1)
                     result = sock.connect_ex(('localhost', 4403))
-                    sock.close()
                     meshtasticd_running = result == 0
                 except (socket.error, OSError):
                     pass
+                finally:
+                    if sock:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
 
             # Check rnsd (use systemctl)
             rnsd_running = False

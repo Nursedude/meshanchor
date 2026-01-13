@@ -735,10 +735,19 @@ class DiagnosticsPanel(Gtk.Box):
 
         # Check port
         import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0)
-        result = sock.connect_ex(('localhost', 4403))
-        sock.close()
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3.0)
+            result = sock.connect_ex(('localhost', 4403))
+        except Exception:
+            result = -1
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         if result == 0:
             results.append("[PASS] Port 4403 is open")
@@ -816,10 +825,19 @@ class DiagnosticsPanel(Gtk.Box):
             results.append("  FIX: Check /etc/resolv.conf")
 
         # Connectivity test
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        result = sock.connect_ex(('8.8.8.8', 53))
-        sock.close()
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            result = sock.connect_ex(('8.8.8.8', 53))
+        except Exception:
+            result = -1
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         if result == 0:
             results.append("[PASS] Internet connectivity OK")
@@ -844,10 +862,19 @@ class DiagnosticsPanel(Gtk.Box):
 
         import socket
         for port, name in ports:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.0)
-            result = sock.connect_ex(('localhost', port))
-            sock.close()
+            sock = None
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                result = sock.connect_ex(('localhost', port))
+            except Exception:
+                result = -1
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
             if result == 0:
                 results.append(f"[OPEN] Port {port} ({name})")
