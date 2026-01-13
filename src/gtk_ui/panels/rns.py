@@ -86,8 +86,34 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
         self.set_margin_bottom(20)
 
         self._component_status = {}
+
+        # Track timer IDs for cleanup (prevents crashes on panel destruction)
+        self._pending_timers = []
+
+        # Connect cleanup handler
+        self.connect("unrealize", self._on_unrealize)
+
         self._build_ui()
         self._refresh_all()
+
+    def _on_unrealize(self, widget):
+        """Clean up when panel is destroyed to prevent timer crashes."""
+        # Cancel all pending timers
+        for timer_id in self._pending_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self._pending_timers.clear()
+
+    def _schedule_timer(self, delay_ms: int, callback, *args):
+        """Schedule a timer and track it for cleanup."""
+        if args:
+            timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        else:
+            timer_id = GLib.timeout_add(delay_ms, callback)
+        self._pending_timers.append(timer_id)
+        return timer_id
 
     def _build_ui(self):
         """Build the RNS panel UI"""
