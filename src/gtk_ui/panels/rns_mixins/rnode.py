@@ -451,13 +451,9 @@ class RNodeMixin:
         parent.append(config_frame)
 
         # Load config preview after UI is built (use tracked timer for cleanup)
-        if hasattr(self, '_schedule_timer'):
-            self._schedule_timer(2000, self._load_config_preview)
-            self._schedule_timer(1500, self._load_rnode_config)
-        else:
-            # Fallback for standalone use
-            GLib.timeout_add(2000, self._load_config_preview)
-            GLib.timeout_add(1500, self._load_rnode_config)
+        # _schedule_timer is always available from RNSPanel base class
+        self._schedule_timer(2000, self._load_config_preview)
+        self._schedule_timer(1500, self._load_rnode_config)
 
     def _load_rnode_config(self, button=None):
         """Load RNode config from ~/.reticulum/config"""
@@ -611,14 +607,22 @@ class RNodeMixin:
 
     def _apply_rnode_config(self, button):
         """Apply RNode configuration to ~/.reticulum/config"""
-        # Get values
+        # Get values with safe bounds checking
         port = self.rnode_port.get_text().strip()
         freq_mhz = self.rnode_freq.get_value()
         freq_hz = int(freq_mhz * 1000000)
         bw_values = [7800, 10400, 15600, 20800, 31250, 41700, 62500, 125000, 250000, 500000]
-        bw_hz = bw_values[self.rnode_bw.get_selected()]
+        bw_idx = self.rnode_bw.get_selected()
+        # Guard against -1 (GTK_INVALID_LIST_POSITION) or out of bounds
+        if bw_idx < 0 or bw_idx >= len(bw_values):
+            bw_idx = 8  # Default to 250 kHz
+        bw_hz = bw_values[bw_idx]
         sf = int(self.rnode_sf.get_value())
-        cr = int(self.rnode_cr.get_selected()) + 5  # 0->5, 1->6, 2->7, 3->8
+        cr_idx = self.rnode_cr.get_selected()
+        # Guard against invalid coding rate selection
+        if cr_idx < 0 or cr_idx > 3:
+            cr_idx = 0  # Default to 4/5
+        cr = cr_idx + 5  # 0->5, 1->6, 2->7, 3->8
         tx = int(self.rnode_tx.get_value())
 
         def do_apply():
@@ -1064,7 +1068,8 @@ class RNodeMixin:
         """Handle device selection from dropdown"""
         selected_idx = dropdown.get_selected()
 
-        if not self._detected_devices or selected_idx >= len(self._detected_devices):
+        # Guard against GTK_INVALID_LIST_POSITION (-1) and out of bounds
+        if selected_idx < 0 or not self._detected_devices or selected_idx >= len(self._detected_devices):
             return
 
         device = self._detected_devices[selected_idx]
