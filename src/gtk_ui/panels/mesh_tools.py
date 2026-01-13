@@ -751,14 +751,21 @@ class MeshToolsPanel(Gtk.Box):
 
     def _update_meshtasticd_status(self, running: bool):
         """Update meshtasticd status display"""
-        if running:
-            self._meshtasticd_status.set_label("Running (TCP available)")
-            self._meshtasticd_status.remove_css_class("error")
-            self._meshtasticd_status.add_css_class("success")
-        else:
-            self._meshtasticd_status.set_label("Not Running")
-            self._meshtasticd_status.remove_css_class("success")
-            self._meshtasticd_status.add_css_class("error")
+        # Guard: Panel might have been destroyed
+        if not hasattr(self, '_meshtasticd_status') or self._meshtasticd_status is None:
+            return False
+        try:
+            if running:
+                self._meshtasticd_status.set_label("Running (TCP available)")
+                self._meshtasticd_status.remove_css_class("error")
+                self._meshtasticd_status.add_css_class("success")
+            else:
+                self._meshtasticd_status.set_label("Not Running")
+                self._meshtasticd_status.remove_css_class("success")
+                self._meshtasticd_status.add_css_class("error")
+        except Exception:
+            pass
+        return False
 
     def _on_start_meshtasticd(self, button):
         """Start meshtasticd service"""

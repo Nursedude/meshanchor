@@ -49,6 +49,15 @@ class ServicePanel(Gtk.Box):
         self._build_ui()
         self._refresh_status()
 
+    def _safe_status_message(self, message):
+        """Safely set status message - handles case where main_window may be destroyed."""
+        try:
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.set_status_message(message)
+        except Exception:
+            pass
+        return False
+
     def _build_ui(self):
         """Build the service panel UI"""
         # Title
@@ -349,9 +358,9 @@ class ServicePanel(Gtk.Box):
             def do_reload():
                 try:
                     subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True, timeout=15)
-                    GLib.idle_add(self.main_window.set_status_message, "Daemon reloaded successfully")
+                    GLib.idle_add(self._safe_status_message, "Daemon reloaded successfully")
                 except Exception as e:
-                    GLib.idle_add(self.main_window.set_status_message, f"Failed to reload daemon: {e}")
+                    GLib.idle_add(self._safe_status_message, f"Failed to reload daemon: {e}")
 
             thread = threading.Thread(target=do_reload, daemon=True)
             thread.start()
@@ -374,9 +383,9 @@ class ServicePanel(Gtk.Box):
                 try:
                     subprocess.run(['sudo', 'systemctl', action, 'meshtasticd'], check=True, timeout=30)
                     GLib.idle_add(self._refresh_status)
-                    GLib.idle_add(self.main_window.set_status_message, f"Service {action}d on boot")
+                    GLib.idle_add(self._safe_status_message, f"Service {action}d on boot")
                 except Exception as e:
-                    GLib.idle_add(self.main_window.set_status_message, f"Failed to {action} service: {e}")
+                    GLib.idle_add(self._safe_status_message, f"Failed to {action} service: {e}")
 
             thread = threading.Thread(target=do_toggle, daemon=True)
             thread.start()

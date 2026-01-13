@@ -699,6 +699,17 @@ class MeshBotPanel(Gtk.Box):
 
     def _update_status_ui(self, status):
         """Update the status UI"""
+        # Guard: Panel might have been destroyed
+        if not hasattr(self, 'status_label') or self.status_label is None:
+            return False
+        try:
+            self._do_update_status_ui(status)
+        except Exception:
+            pass
+        return False
+
+    def _do_update_status_ui(self, status):
+        """Actually update the status UI (called by _update_status_ui)"""
         if status['installed']:
             self.install_status_icon.set_from_icon_name("emblem-default-symbolic")
             self.install_status_label.set_label("MeshBot Installed")
