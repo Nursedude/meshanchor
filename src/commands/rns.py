@@ -669,12 +669,18 @@ def check_connectivity() -> CommandResult:
         connectivity['issues'].append("rnsd daemon not running")
 
     # Check RNS import
+    # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
+    # from RNS's cryptography library when cffi backend is missing
     try:
         import RNS
         connectivity['can_import_rns'] = True
         connectivity['rns_version'] = RNS.__version__ if hasattr(RNS, '__version__') else 'unknown'
     except ImportError:
         connectivity['issues'].append("RNS Python module not installed")
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        connectivity['issues'].append(f"RNS import error: {e}")
 
     # Check config
     config_result = read_config()
@@ -726,15 +732,16 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
     Returns:
         CommandResult with path status
     """
+    # Note: Validate hash format before attempting RNS import to give
+    # better error messages when RNS has cryptography issues
+    if not re.match(r'^[0-9a-fA-F]{32}$', destination_hash):
+        return CommandResult.fail(
+            "Invalid hash format",
+            error="Hash must be 32 hex characters"
+        )
+
     try:
         import RNS
-
-        # Validate hash format
-        if not re.match(r'^[0-9a-fA-F]{32}$', destination_hash):
-            return CommandResult.fail(
-                "Invalid hash format",
-                error="Hash must be 32 hex characters"
-            )
 
         dest_bytes = bytes.fromhex(destination_hash)
 
@@ -783,6 +790,7 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
             fix_hint="pip install rns"
         )
     except Exception as e:
+        # Catch pyo3 PanicException and other RNS errors
         return CommandResult.fail(f"Path test failed: {e}")
 
 

@@ -396,23 +396,37 @@ def check_prerequisites() -> CommandResult:
         issues.append(f"rnsd: {rns_status.message}")
 
     # Check packages
+    # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
+    # from RNS's cryptography library when cffi backend is missing
     try:
         import RNS
         checks['rns_package'] = True
     except ImportError:
         issues.append("RNS package not installed (pip install rns)")
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        issues.append(f"RNS package error: {e}")
 
     try:
         import LXMF
         checks['lxmf_package'] = True
     except ImportError:
         issues.append("LXMF package not installed (pip install lxmf)")
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        issues.append(f"LXMF package error: {e}")
 
     try:
         import meshtastic
         checks['meshtastic_package'] = True
     except ImportError:
         issues.append("meshtastic package not installed (pip install meshtastic)")
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        issues.append(f"meshtastic package error: {e}")
 
     all_good = all(checks.values())
 
