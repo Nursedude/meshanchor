@@ -40,10 +40,10 @@ def print_status(name: str, status: bool, detail: str = ""):
     print(f"  {color_start}{icon}{color_end} {name}{detail_str}")
 
 
-def check_root() -> bool:
+def is_root() -> bool:
     """Check if running as root."""
-    from utils.system import check_root as _check_root
-    return _check_root()
+    from utils.system import check_root
+    return check_root()
 
 
 def check_services():
@@ -570,7 +570,7 @@ Examples:
     print("For RF engineers, network operators, and HAMs")
     print("\nTip: Use --gateway for RNS/Meshtastic setup wizard")
 
-    if not check_root():
+    if not is_root():
         print("\nNote: Running without root - some checks may be limited")
         print("      For full diagnostics, run: sudo python3 diagnose.py")
 
