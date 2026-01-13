@@ -379,15 +379,21 @@ def check_service_status():
 
     # Method 3: TCP port
     if not is_running:
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1.0)
             if sock.connect_ex(('localhost', 4403)) == 0:
                 is_running = True
                 status_detail = "Running (TCP 4403)"
-            sock.close()
         except Exception:
             pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     return is_running, status_detail
 
@@ -522,15 +528,21 @@ def get_radio_info(use_cache=True):
         return {'error': 'Meshtastic CLI not found. Install with: pipx install meshtastic'}
 
     # Check if port is reachable first (quick check)
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3.0)
         result = sock.connect_ex(('localhost', 4403))
-        sock.close()
         if result != 0:
             return {'error': 'meshtasticd not running (port 4403 closed)'}
     except Exception:
         return {'error': 'Cannot check meshtasticd port 4403'}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     try:
         # Increased timeout to 30 seconds - CLI can be slow
@@ -712,15 +724,20 @@ def get_nodes():
         return {'error': 'Meshtastic CLI not found', 'nodes': []}
 
     # Check if port is reachable
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3.0)
         if sock.connect_ex(('localhost', 4403)) != 0:
-            sock.close()
             return {'error': 'meshtasticd not running (port 4403)', 'nodes': []}
-        sock.close()
     except Exception:
         return {'error': 'Cannot connect to meshtasticd', 'nodes': []}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     try:
         result = run_subprocess(
@@ -793,15 +810,20 @@ def get_nodes_full():
     global _node_monitor
 
     # Check if port is reachable first
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3.0)
         if sock.connect_ex(('localhost', 4403)) != 0:
-            sock.close()
             return {'error': 'meshtasticd not running (port 4403)'}
-        sock.close()
     except Exception:
         return {'error': 'Cannot connect to meshtasticd'}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     try:
         with _node_monitor_lock:
@@ -959,15 +981,20 @@ def send_mesh_message(text, destination=None):
             return {'error': 'Invalid destination: must be hex node ID (e.g., !abc123 or abc123)'}
 
     # Check if port is reachable
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3.0)
         if sock.connect_ex(('localhost', 4403)) != 0:
-            sock.close()
             return {'error': 'meshtasticd not running'}
-        sock.close()
     except Exception:
         return {'error': 'Cannot connect to meshtasticd'}
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     try:
         cmd = [cli, '--host', 'localhost', '--sendtext', text]
