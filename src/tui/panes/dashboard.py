@@ -212,17 +212,23 @@ class DashboardPane(Container):
             log.write("[red][X][/red] Could not check meshtasticd")
 
         # Check TCP port
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
             result = sock.connect_ex(('127.0.0.1', 4403))
-            sock.close()
             if result == 0:
                 log.write("[green][OK][/green] TCP port 4403 open")
             else:
                 log.write("[red][X][/red] TCP port 4403 closed")
         except Exception:
             log.write("[red][X][/red] Could not check port 4403")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
         # Check RNS
         try:
