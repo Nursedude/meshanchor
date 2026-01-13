@@ -229,6 +229,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._node_count_timestamp = 0
         self._node_count_cache_ttl = 30  # Cache for 30 seconds
 
+        # Apply saved theme settings on startup
+        self._apply_saved_theme()
+
         # Create the main layout
         self._build_ui()
 
@@ -266,6 +269,45 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
         # Return False to allow the window to close
         return False
+
+    def _apply_saved_theme(self):
+        """Apply saved theme settings on startup."""
+        try:
+            import json
+            from utils.paths import get_real_user_home
+
+            settings_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
+            if settings_file.exists():
+                settings = json.loads(settings_file.read_text())
+
+                # Get theme setting (default to dark)
+                theme = settings.get("theme", "dark")
+                dark_mode = settings.get("dark_mode", True)
+
+                # Apply theme using Adw.StyleManager
+                style_manager = Adw.StyleManager.get_default()
+                if theme == "system":
+                    style_manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
+                elif theme == "dark" or dark_mode:
+                    style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+                else:
+                    style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+
+                logger.debug(f"Applied saved theme: {theme}")
+            else:
+                # Default to dark mode
+                style_manager = Adw.StyleManager.get_default()
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+                logger.debug("No settings file, defaulting to dark theme")
+
+        except Exception as e:
+            logger.warning(f"Could not apply saved theme: {e}")
+            # Default to dark mode on error
+            try:
+                style_manager = Adw.StyleManager.get_default()
+                style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            except Exception:
+                pass
 
     def _get_smart_default_size(self):
         """Calculate smart default window size based on monitor dimensions"""
