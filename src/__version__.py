@@ -576,3 +576,75 @@ def show_version_history():
         table.add_row(entry['version'], entry['date'], changes)
 
     console.print(table)
+
+
+def get_release_channel():
+    """Get current release channel (alpha, beta, stable)"""
+    return __status__
+
+
+def is_stable():
+    """Check if this is a stable release"""
+    return __status__ == "stable"
+
+
+def is_beta():
+    """Check if this is a beta release"""
+    return __status__ == "beta"
+
+
+def is_alpha():
+    """Check if this is an alpha release"""
+    return __status__ == "alpha"
+
+
+def get_channel_warning():
+    """Get warning message for non-stable releases"""
+    if __status__ == "alpha":
+        return "ALPHA: Experimental build - may be unstable"
+    elif __status__ == "beta":
+        return "BETA: Testing build - report issues at github.com/Nursedude/meshforge"
+    return None
+
+
+def parse_version(version_str: str) -> tuple:
+    """
+    Parse version string into comparable tuple.
+
+    Examples:
+        '0.4.7' -> (0, 4, 7, 'stable', 0)
+        '0.4.7-beta' -> (0, 4, 7, 'beta', 0)
+        '0.4.7-alpha.2' -> (0, 4, 7, 'alpha', 2)
+    """
+    import re
+
+    # Handle pre-release suffixes
+    match = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:-(\w+)(?:\.(\d+))?)?$', version_str)
+    if not match:
+        return (0, 0, 0, 'unknown', 0)
+
+    major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    channel = match.group(4) or 'stable'
+    build = int(match.group(5)) if match.group(5) else 0
+
+    # Channel ordering: stable > beta > alpha
+    channel_order = {'stable': 3, 'beta': 2, 'alpha': 1, 'unknown': 0}
+
+    return (major, minor, patch, channel_order.get(channel, 0), build)
+
+
+def compare_versions(v1: str, v2: str) -> int:
+    """
+    Compare two version strings.
+
+    Returns:
+        -1 if v1 < v2
+         0 if v1 == v2
+         1 if v1 > v2
+    """
+    t1, t2 = parse_version(v1), parse_version(v2)
+    if t1 < t2:
+        return -1
+    elif t1 > t2:
+        return 1
+    return 0
