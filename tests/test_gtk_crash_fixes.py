@@ -564,5 +564,65 @@ class TestTimerCleanupPatterns(unittest.TestCase):
         )
 
 
+class TestLazyPanelLoading(unittest.TestCase):
+    """Test lazy loading patterns to prevent startup thundering herd."""
+
+    def setUp(self):
+        """Load app.py source."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        self.source = app_path.read_text()
+
+    def test_panel_loaders_dict_exists(self):
+        """Verify _panel_loaders dict is used for lazy loading."""
+        self.assertIn('_panel_loaders', self.source)
+        self.assertIn('self._panel_loaders = {', self.source)
+
+    def test_loaded_panels_tracking(self):
+        """Verify _loaded_panels set tracks which panels are loaded."""
+        self.assertIn('_loaded_panels', self.source)
+        self.assertIn('self._loaded_panels = set()', self.source)
+
+    def test_load_panel_method_exists(self):
+        """Verify _load_panel method exists for on-demand loading."""
+        self.assertIn('def _load_panel(self, panel_name', self.source)
+
+    def test_nav_selected_triggers_lazy_load(self):
+        """Verify navigation triggers lazy loading."""
+        # Should check if panel is loaded before navigating
+        self.assertIn('if page_name not in self._loaded_panels', self.source)
+        self.assertIn('self._load_panel(page_name)', self.source)
+
+    def test_only_dashboard_loaded_at_startup(self):
+        """Verify only dashboard is loaded eagerly at startup."""
+        # Should see comment about only loading dashboard
+        self.assertIn('Only load dashboard', self.source)
+        # Should call _load_panel("dashboard") at startup
+        self.assertIn('self._load_panel("dashboard")', self.source)
+
+
+class TestDeferredInitialRefresh(unittest.TestCase):
+    """Test that panels defer initial refresh to let UI render first."""
+
+    def test_dashboard_defers_initial_refresh(self):
+        """Verify dashboard defers its initial data refresh."""
+        dashboard_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels' / 'dashboard.py'
+        source = dashboard_path.read_text()
+
+        # Should NOT call _refresh_data() directly in __init__
+        # Should use GLib.timeout_add for deferred loading
+        self.assertIn('GLib.timeout_add', source)
+        self.assertIn('_initial_refresh', source)
+
+    def test_status_timer_delayed_start(self):
+        """Verify status timer is delayed to let UI render first."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        source = app_path.read_text()
+
+        # Should delay first status update
+        self.assertIn('_delayed_status_start', source)
+        # Should have overlap prevention
+        self.assertIn('_status_update_running', source)
+
+
 if __name__ == '__main__':
     unittest.main()
