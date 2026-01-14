@@ -134,7 +134,7 @@ case "$1" in
         ;;
     tui)
         # raspi-config style whiptail/dialog TUI
-        launch_terminal "$MESHFORGE_DIR/src/launcher_tui.py"
+        launch_terminal "$MESHFORGE_DIR/src/launcher_tui/main.py"
         ;;
     tui-textual)
         # Textual TUI (deprecated)
@@ -148,6 +148,6 @@ case "$1" in
         ;;
     *)
         # Default: raspi-config style TUI
-        launch_terminal "$MESHFORGE_DIR/src/launcher_tui.py"
+        launch_terminal "$MESHFORGE_DIR/src/launcher_tui/main.py"
         ;;
 esac
