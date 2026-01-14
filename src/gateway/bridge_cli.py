@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gateway import RNSMeshtasticBridge, GatewayConfig
+from utils.service_check import check_service, check_port
 
 # Setup logging
 logging.basicConfig(
@@ -24,6 +25,57 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger('gateway.cli')
+
+
+def preflight_checks(config: GatewayConfig) -> bool:
+    """
+    Run pre-flight service checks before starting the bridge.
+    Returns True if all required services are available.
+    """
+    print("\n--- Pre-flight Checks ---")
+    all_ok = True
+
+    # Check Meshtastic daemon
+    mesh_host = config.meshtastic.host if config else "localhost"
+    mesh_port = config.meshtastic.port if config else 4403
+
+    print(f"Checking meshtasticd ({mesh_host}:{mesh_port})...", end=" ")
+    if check_port(mesh_port, mesh_host, timeout=2.0):
+        print("✓ Available")
+    else:
+        print("✗ NOT AVAILABLE")
+        status = check_service('meshtasticd')
+        print(f"  {status.message}")
+        print(f"  Fix: {status.fix_hint}")
+        all_ok = False
+
+    # Check RNS daemon (if RNS mode enabled)
+    bridge_mode = config.bridge_mode if config else "message_bridge"
+    if bridge_mode in ("message_bridge", "rns_transport"):
+        print("Checking rnsd...", end=" ")
+        rns_status = check_service('rnsd')
+        if rns_status.available:
+            print("✓ Available")
+        else:
+            print("✗ NOT AVAILABLE")
+            print(f"  {rns_status.message}")
+            print(f"  Fix: {rns_status.fix_hint}")
+            all_ok = False
+
+    # Check second Meshtastic if mesh_bridge mode
+    if bridge_mode == "mesh_bridge" and config and config.mesh_bridge.enabled:
+        sec = config.mesh_bridge.secondary
+        print(f"Checking secondary meshtasticd ({sec.host}:{sec.port})...", end=" ")
+        if check_port(sec.port, sec.host, timeout=2.0):
+            print("✓ Available")
+        else:
+            print("✗ NOT AVAILABLE")
+            print(f"  Secondary Meshtastic daemon not reachable")
+            print(f"  Fix: Start second meshtasticd on port {sec.port}")
+            all_ok = False
+
+    print("-------------------------\n")
+    return all_ok
 
 
 def print_status(status: dict):
@@ -72,7 +124,13 @@ def main():
         print(f"\nConfig loaded from: {GatewayConfig.get_config_path()}")
     except Exception as e:
         print(f"\nWarning: Could not load config, using defaults: {e}")
-        config = None
+        config = GatewayConfig()  # Use default config, not None
+
+    # Pre-flight service checks
+    if not preflight_checks(config):
+        print("Pre-flight checks FAILED")
+        print("Please start required services and try again.")
+        sys.exit(1)
 
     # Create bridge
     bridge = RNSMeshtasticBridge(config)
@@ -92,13 +150,13 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Start bridge
-    print("\nStarting gateway bridge...")
+    print("Starting gateway bridge...")
     bridge_started = False
     try:
         success = bridge.start()
         if not success:
             print("Failed to start gateway bridge")
-            print("Check that meshtasticd and rnsd are running")
+            print("Pre-flight passed but bridge failed - check logs for details")
             sys.exit(1)
 
         bridge_started = True
