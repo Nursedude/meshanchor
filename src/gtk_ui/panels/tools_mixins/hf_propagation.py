@@ -51,6 +51,19 @@ class HFPropagationMixin:
                     'protonflux': solar.findtext('protonflux', '--'),
                     'updated': solar.findtext('updated', '--'),
                 }
+
+                # Get band conditions (day/night)
+                calc = root.find('.//calculatedconditions')
+                if calc is not None:
+                    bands = calc.findall('band')
+                    for band in bands:
+                        name = band.get('name', '')
+                        time_attr = band.get('time', 'day')
+                        condition = band.text or '--'
+                        # Only use day conditions for simplicity
+                        if time_attr == 'day' and name:
+                            data[f'band_{name}'] = condition
+
                 GLib.idle_add(self._update_solar_display, data)
             else:
                 GLib.idle_add(self._log, "Could not parse solar data")
@@ -86,11 +99,29 @@ class HFPropagationMixin:
         except ValueError:
             pass
 
-        # Update labels if they exist
-        if hasattr(self, 'sfi_label'):
-            GLib.idle_add(self.sfi_label.set_label, str(data['sfi']))
-        if hasattr(self, 'kindex_label'):
-            GLib.idle_add(self.kindex_label.set_label, str(data['kindex']))
+        # Update inline labels if they exist (names must match tools.py UI)
+        if hasattr(self, 'solar_sfi_label'):
+            self.solar_sfi_label.set_label(str(data['sfi']))
+        if hasattr(self, 'solar_sn_label'):
+            self.solar_sn_label.set_label(str(data['sunspots']))
+        if hasattr(self, 'solar_a_label'):
+            self.solar_a_label.set_label(str(data['aindex']))
+        if hasattr(self, 'solar_k_label'):
+            self.solar_k_label.set_label(str(data['kindex']))
+        if hasattr(self, 'solar_status_label'):
+            self.solar_status_label.set_label(f"Updated: {data['updated']}")
+
+        # Update band condition labels
+        band_mapping = {
+            'band_80m-40m': 'band_80m_label',
+            'band_30m-20m': 'band_20m_label',
+            'band_17m-15m': 'band_15m_label',
+            'band_12m-10m': 'band_10m_label',
+        }
+        for xml_key, label_attr in band_mapping.items():
+            if xml_key in data and hasattr(self, label_attr):
+                band_name = xml_key.replace('band_', '').split('-')[0]
+                getattr(self, label_attr).set_label(f"{band_name}: {data[xml_key]}")
 
     def _on_voacap_online(self, button=None):
         """Open VOACAP Online propagation predictor"""
