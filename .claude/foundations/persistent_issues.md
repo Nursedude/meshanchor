@@ -610,4 +610,69 @@ This allows connecting to rnsd without trying to bind ports.
 
 ---
 
-*Last updated: 2026-01-13 - Added RNS client config fix*
+## Issue #13: Meshtastic CLI Auto-Detection Freezes GTK
+
+### Symptom
+GTK UI freezes when checking node count, especially if meshtasticd TCP is not running on port 4403.
+
+### Root Cause
+The `_get_node_count()` method in `src/gtk_ui/app.py` calls the meshtastic CLI. Without `--host localhost`, the CLI does USB/serial auto-detection which:
+1. Takes 10-15+ seconds per call
+2. Blocks threads
+3. Causes thread pile-up when status timer fires every 5 seconds
+4. Eventually exhausts resources and freezes GTK
+
+### Wrong Approach
+```python
+# WRONG - causes freeze
+result = subprocess.run(
+    [cli_path, '--nodes'],  # No --host = auto-detection
+    timeout=15  # Too long
+)
+```
+
+### Proper Fix
+1. **Quick port check FIRST** - Skip CLI entirely if port 4403 not reachable
+2. **Use --host localhost** - Prevents USB/serial scanning
+3. **Short timeout** - 10 seconds max
+4. **Cache results** - 30 second TTL prevents rapid CLI calls
+
+```python
+# CORRECT pattern
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(1.0)
+try:
+    sock.connect(("localhost", 4403))
+    port_reachable = True
+except:
+    port_reachable = False
+finally:
+    sock.close()
+
+if not port_reachable:
+    return cached_value  # Don't call CLI at all
+
+# Only call CLI if port is reachable
+result = subprocess.run(
+    [cli_path, '--host', 'localhost', '--nodes'],
+    timeout=10
+)
+```
+
+### Files Fixed (2026-01-14)
+- [x] `src/gtk_ui/app.py` - `_get_node_count()` method
+- [x] Added `import shutil` (was missing, caused NameError fallback)
+
+### Regression Tests
+- `tests/test_gtk_crash_fixes.py::TestNodeCountThreadSafety`
+- `tests/test_gtk_crash_fixes.py::TestNodeCountCodePattern`
+
+### Prevention
+- Always use `--host localhost` when calling meshtastic CLI in GUI contexts
+- Do quick port checks before expensive subprocess calls
+- Keep timeouts shorter than timer intervals to prevent thread pile-up
+- Run `test_gtk_crash_fixes.py` to verify patterns are correct
+
+---
+
+*Last updated: 2026-01-14 - Added meshtastic CLI auto-detect freeze fix*
