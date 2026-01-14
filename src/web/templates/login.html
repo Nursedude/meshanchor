@@ -1,0 +1,56 @@
+<html>
+<head>
+    <title>Meshtasticd Manager - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-box {
+            background: #fff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 { color: #333; margin-bottom: 30px; text-align: center; }
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover { background: #45a049; }
+        .error { color: #f44336; margin-bottom: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h1><svg viewBox="0 0 128 128" width="40" height="40" style="vertical-align: middle; margin-right: 10px;"><defs><linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#1a1a2e"/><stop offset="100%" style="stop-color:#16213e"/></linearGradient><linearGradient id="handGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#4CAF50"/><stop offset="100%" style="stop-color:#2E7D32"/></linearGradient></defs><circle cx="64" cy="64" r="60" fill="url(#bgGrad)"/><circle cx="64" cy="64" r="56" fill="none" stroke="#4CAF50" stroke-width="2" opacity="0.6"/><g fill="url(#handGrad)" stroke="#2E7D32" stroke-width="1.5"><path d="M64 92 C52 92 42 82 42 66 L42 56 C42 50 46 46 54 46 L74 46 C82 46 86 50 86 56 L86 66 C86 82 76 92 64 92 Z"/><path d="M42 60 C34 56 26 52 22 56 C18 60 18 68 22 72 C26 76 34 76 42 72"/><path d="M78 46 L82 28 C82 24 86 20 90 20 C94 20 98 24 98 28 L94 46"/></g></svg> MeshForge</h1>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="POST">
+            <input type="password" name="password" placeholder="Password" autofocus>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>
