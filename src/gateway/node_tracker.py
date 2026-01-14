@@ -290,9 +290,25 @@ class UnifiedNodeTracker:
             # rnsd is running - connect to existing instance as CLIENT ONLY
             logger.info(f"rnsd detected (PID: {rns_pids[0]}), connecting as client...")
             try:
-                # RNS.Reticulum will connect to existing rnsd via shared transport
-                # Because share_instance=Yes, this becomes a client connection
-                self._reticulum = RNS.Reticulum()
+                # Create a client-only config to avoid interface conflicts
+                # This prevents RNS from trying to bind ports that rnsd already owns
+                import tempfile
+                client_config_dir = Path(tempfile.gettempdir()) / "meshforge_rns_client"
+                client_config_dir.mkdir(exist_ok=True)
+                client_config_file = client_config_dir / "config"
+
+                # Write minimal client-only config (no interfaces, just shared transport)
+                client_config_file.write_text("""# MeshForge RNS Client Config (auto-generated)
+# This config connects to existing rnsd without creating interfaces
+
+[reticulum]
+share_instance = Yes
+shared_instance_port = 37428
+instance_control_port = 37429
+""")
+
+                # Connect using client-only config
+                self._reticulum = RNS.Reticulum(configdir=str(client_config_dir))
                 self._rns_connected = True
                 logger.info("Connected to existing rnsd instance")
 
