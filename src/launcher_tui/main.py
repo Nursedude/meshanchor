@@ -93,7 +93,7 @@ class MeshForgeLauncher:
         """Run the launcher."""
         if not self.env['is_root']:
             print("\nError: MeshForge requires root/sudo privileges")
-            print("Please run: sudo python3 src/launcher_tui.py")
+            print("Please run: sudo python3 src/launcher_tui/main.py")
             sys.exit(1)
 
         if not self.dialog.available:
