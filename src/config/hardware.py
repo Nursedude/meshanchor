@@ -32,10 +32,12 @@ class HardwareDetector:
         },
         '10c4:ea60': {
             'name': 'CP2102 USB-Serial',
-            'common_devices': ['Various LoRa modules'],
+            'common_devices': ['Station G2', 'Various LoRa modules'],
             'meshtastic_compatible': True,
-            'power_requirement': 'Standard USB',
-            'notes': 'Silicon Labs chipset'
+            'power_requirement': 'Standard USB (5V DC or PoE for Station G2)',
+            'notes': 'Silicon Labs chipset. Station G2 variant has Ethernet.',
+            'gateway_capable': True,
+            'flash_method': 'esptool'
         },
         '0403:6001': {
             'name': 'FT232 USB-Serial',
@@ -50,6 +52,54 @@ class HardwareDetector:
             'meshtastic_compatible': True,
             'power_requirement': 'Standard USB',
             'notes': 'Official Meshtastic USB device'
+        },
+        # Heltec devices (ESP32-S3 based)
+        '303a:1001': {
+            'name': 'Heltec ESP32-S3 (CDC)',
+            'common_devices': ['Heltec V3', 'Heltec V4', 'Station G2'],
+            'meshtastic_compatible': True,
+            'power_requirement': '500mA typical, 1A peak (V4 at max TX)',
+            'notes': 'ESP32-S3 native USB CDC. V4 supports 28dBm TX.',
+            'gateway_capable': True,
+            'flash_method': 'esptool'
+        },
+        '303a:4001': {
+            'name': 'Heltec ESP32-S3 (JTAG)',
+            'common_devices': ['Heltec V3', 'Heltec V4'],
+            'meshtastic_compatible': True,
+            'power_requirement': '500mA typical',
+            'notes': 'ESP32-S3 JTAG interface for debugging',
+            'gateway_capable': True,
+            'flash_method': 'esptool'
+        },
+        # RAK WisBlock devices (nRF52840 based)
+        '239a:8029': {
+            'name': 'RAK4631 (Adafruit nRF52840)',
+            'common_devices': ['RAK4631', 'RAK WisBlock Meshtastic Kit'],
+            'meshtastic_compatible': True,
+            'power_requirement': '100mA typical',
+            'notes': 'nRF52840 + SX1262. Low power, excellent for solar nodes.',
+            'gateway_capable': True,
+            'flash_method': 'uf2'
+        },
+        '239a:0029': {
+            'name': 'RAK4631 Bootloader',
+            'common_devices': ['RAK4631 in bootloader mode'],
+            'meshtastic_compatible': True,
+            'power_requirement': '100mA',
+            'notes': 'RAK4631 in UF2 bootloader mode - ready for flashing',
+            'gateway_capable': True,
+            'flash_method': 'uf2'
+        },
+        # LILYGO T-Beam
+        '1a86:55d3': {
+            'name': 'CH9102 USB-Serial',
+            'common_devices': ['LILYGO T-Beam S3', 'T-Beam Supreme'],
+            'meshtastic_compatible': True,
+            'power_requirement': '500mA typical',
+            'notes': 'ESP32-S3 based T-Beam with GPS',
+            'gateway_capable': True,
+            'flash_method': 'esptool'
         }
     }
 

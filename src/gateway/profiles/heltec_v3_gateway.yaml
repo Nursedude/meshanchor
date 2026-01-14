@@ -1,0 +1,94 @@
+# MeshForge Gateway Profile: Heltec V3 (ESP32-S3)
+# Optimized for gateway/router operation
+# Apply with: meshtastic --configure heltec_v3_gateway.yaml
+#
+# Features enabled:
+# - Router role for message forwarding
+# - WiFi enabled for API access
+# - Bluetooth disabled (headless operation)
+# - Power saving disabled (always listening)
+# - JSON API enabled for MeshForge
+# - Display disabled (headless)
+# - Store & Forward for offline message delivery
+
+device:
+  role: ROUTER_CLIENT
+  rebroadcast_mode: ALL
+  node_info_broadcast_secs: 900
+  serial_enabled: true
+
+lora:
+  region: US  # Change: US, EU_868, AU_915, etc.
+  modem_preset: LONG_FAST
+  hop_limit: 5
+  tx_enabled: true
+  tx_power: 20  # Heltec V3 max: 20dBm
+
+bluetooth:
+  enabled: false
+  fixed_pin: 123456
+
+power:
+  ls_secs: 0
+  min_wake_secs: 10
+  wait_bluetooth_secs: 0
+  mesh_sds_timeout_secs: 0
+  sds_secs: 0
+  on_battery_shutdown_after_secs: 0
+
+display:
+  screen_on_secs: 0  # Display off for headless
+  auto_screen_carousel_secs: 0
+  flip_screen: false
+  oled_type: OLED_AUTO
+  wake_on_tap_or_motion: false
+
+position:
+  gps_enabled: false  # V3 has no GPS, set true if external GPS
+  gps_update_interval: 120
+  position_broadcast_secs: 900
+  position_broadcast_smart_enabled: true
+  fixed_position: false  # Set true for fixed gateway location
+
+telemetry:
+  device_update_interval: 900
+  environment_update_interval: 900
+  environment_measurement_enabled: true
+  power_measurement_enabled: true
+
+modules:
+  serial:
+    enabled: true
+    echo: false
+    mode: PROTO
+    baud: BAUD_DEFAULT
+
+  store_forward:
+    enabled: true
+    heartbeat: false
+    records: 100
+    history_return_max: 50
+    history_return_window: 3600
+
+  neighbor_info:
+    enabled: true
+    update_interval: 900
+
+  range_test:
+    enabled: false
+
+  canned_message:
+    enabled: false
+
+  external_notification:
+    enabled: false
+
+# WiFi Configuration (ESP32-S3 has WiFi)
+network:
+  wifi_enabled: true
+  wifi_ssid: "YOUR_WIFI_SSID"  # CHANGE THIS
+  wifi_psk: "YOUR_WIFI_PASSWORD"  # CHANGE THIS
+  ntp_server: "pool.ntp.org"
+  eth_enabled: false
+  # API access settings
+  api_server_enabled: true  # Enable TCP API for meshtasticd

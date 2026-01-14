@@ -538,8 +538,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     </div>
 
     <div class="footer">
-        MeshForge v''' + __version__ + ''' |
-        <a href="https://github.com/Nursedude/meshforge" style="color: var(--accent);">GitHub</a>
+        MeshForge v''' + __version__ + '''
     </div>
 
     <script>
