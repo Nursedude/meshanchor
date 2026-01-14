@@ -11,6 +11,7 @@ gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import sys
 import os
+import shutil
 import subprocess
 import threading
 import logging
