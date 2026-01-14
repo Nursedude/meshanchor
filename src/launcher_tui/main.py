@@ -22,6 +22,12 @@ _src_dir = Path(__file__).parent.parent
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
+# Ensure launcher_tui directory is in path for direct backend import
+# This avoids the RuntimeWarning when run with python -m
+_launcher_dir = Path(__file__).parent
+if str(_launcher_dir) not in sys.path:
+    sys.path.insert(0, str(_launcher_dir))
+
 # Import version
 try:
     from __version__ import __version__
@@ -38,8 +44,8 @@ except ImportError:
             return Path(f'/home/{sudo_user}')
         return Path.home()
 
-# Import dialog backend - use absolute import for direct script execution
-from launcher_tui.backend import DialogBackend
+# Import dialog backend directly (not through package namespace)
+from backend import DialogBackend
 
 
 class MeshForgeLauncher:
