@@ -41,7 +41,7 @@ except ImportError:
     try:
         from src.utils.paths import get_real_user_home
     except ImportError:
-<        # Ultimate fallback - handle sudo case
+        # Ultimate fallback - handle sudo case
         def get_real_user_home():
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':
