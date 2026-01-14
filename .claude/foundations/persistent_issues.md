@@ -577,4 +577,37 @@ gtk-update-icon-cache -f /usr/share/icons/hicolor
 
 ---
 
-*Last updated: 2026-01-13 - Added fix instructions for taskbar icon*
+## Issue #12: RNS "Address Already in Use" When Connecting as Client
+
+### Symptom
+GTK crashes or shows errors like:
+```
+[Error] The interface "Default Interface" could not be created
+[Error] The contained exception was: [Errno 98] Address already in use
+```
+
+This happens when MeshForge tries to connect to an existing rnsd instance.
+
+### Root Cause
+`RNS.Reticulum()` reads the user's `~/.reticulum/config` which defines interfaces (like AutoInterface). Even when connecting to a shared instance, RNS tries to create these interfaces, which fails because rnsd already bound those ports.
+
+### Wrong Fix (documented but not implemented)
+The old workaround in `fresh_install_test.md` said to manually edit `~/.reticulum/config` to disable AutoInterface. This requires user intervention and doesn't scale.
+
+### Proper Fix (2026-01-13)
+MeshForge now creates a client-only config in `/tmp/meshforge_rns_client/` with:
+- `share_instance = Yes`
+- No interface definitions
+
+This allows connecting to rnsd without trying to bind ports.
+
+### Location
+`src/gateway/node_tracker.py` - `_init_rns_main_thread()` method
+
+### Prevention
+- When connecting to shared RNS instances, always use a client-only config
+- Never call `RNS.Reticulum()` without a configdir when rnsd is running
+
+---
+
+*Last updated: 2026-01-13 - Added RNS client config fix*
