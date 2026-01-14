@@ -772,4 +772,87 @@ class MyNewPanel(PanelBase):
 
 ---
 
-*Last updated: 2026-01-14 - Added panel lifecycle architecture fix*
+## Issue #15: GTK Startup Performance - Thundering Herd
+
+### Symptom
+- GTK app takes 5-10+ seconds to become responsive after launch
+- UI renders but feels sluggish immediately after startup
+- Multiple threads spawning simultaneously during initialization
+- CPU spikes on startup
+
+### Root Cause (Identified via scientific analysis 2026-01-14)
+**Thundering Herd Problem**: All 21+ panels instantiated at startup, each spawning threads:
+
+1. **Panel init triggers async work**: 12+ panels call `_refresh_data()`, `_check_status()`, `_load_*()` in `__init__`
+2. **Multiple concurrent timers**: 5+ timers running (1s, 2s, 3s, 5s, 30s intervals)
+3. **Status timer overhead**: app.py `_update_status` made 3-5 subprocess calls every 5 seconds
+4. **No lazy loading**: Panels instantiated whether user visits them or not
+
+### Quantified Impact
+- 21 panels loaded at startup
+- 12+ panels spawn threads immediately on `__init__`
+- 143 `threading.Thread` calls found in GTK UI code
+- 5+ recurring timers competing for CPU
+- Each status update: 3-5 subprocess calls with combined 15+ second timeout
+
+### Architectural Fix (2026-01-14)
+
+**1. Lazy Panel Loading** - Only instantiate panels on first navigation:
+```python
+# Store loaders but don't call them
+self._panel_loaders = {"service": self._add_service_page, ...}
+self._loaded_panels = set()
+
+# Create lightweight placeholders
+for name in self._panel_loaders.keys():
+    placeholder = self._create_loading_placeholder(name)
+    self.content_stack.add_named(placeholder, name)
+
+# Only load dashboard (default view) at startup
+self._load_panel("dashboard")
+
+# Lazy load on navigation
+def _on_nav_selected(self, listbox, row):
+    if page_name not in self._loaded_panels:
+        self._load_panel(page_name)
+    self.content_stack.set_visible_child_name(page_name)
+```
+
+**2. Deferred Initial Refresh** - Let UI render first:
+```python
+# WRONG - thread spawns immediately
+def __init__(self, main_window):
+    self._build_ui()
+    self._refresh_data()  # Spawns thread NOW
+
+# CORRECT - defer 500ms
+def __init__(self, main_window):
+    self._build_ui()
+    GLib.timeout_add(500, self._initial_refresh)
+```
+
+**3. Optimized Status Timer**:
+- Increased interval from 5s to 10s
+- Delayed first update by 2 seconds
+- Removed redundant subprocess calls (pgrep, socket check)
+- Added overlap prevention flag
+
+### Files Changed
+- [MOD] `src/gtk_ui/app.py` - Lazy loading, optimized timers
+- [MOD] `src/gtk_ui/panels/dashboard.py` - Deferred initial refresh
+
+### Expected Improvement
+- Startup time: 5-10s → <2s
+- Initial responsiveness: Immediate
+- Thread count at startup: 12+ → 1-2
+- Subprocess calls at startup: 10+ → 1-2
+
+### Prevention
+- New panels must NOT spawn threads in `__init__`
+- Use `GLib.timeout_add(500, self._initial_refresh)` for deferred loading
+- Prefer single comprehensive status calls over multiple subprocess invocations
+- Test startup performance: `time python3 src/launcher.py --gtk`
+
+---
+
+*Last updated: 2026-01-14 - Added startup performance / lazy loading fix*
