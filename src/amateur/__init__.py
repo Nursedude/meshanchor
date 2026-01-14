@@ -9,13 +9,14 @@ Provides ham radio specific functionality:
 - Contest/Field Day support
 """
 
-from .callsign import CallsignManager, CallsignInfo
+from .callsign import CallsignManager, CallsignInfo, StationIDTimer
 from .compliance import Part97Reference, ComplianceChecker
 from .ares_races import ARESRACESTools, NetChecklistItem, TrafficMessage
 
 __all__ = [
     'CallsignManager',
     'CallsignInfo',
+    'StationIDTimer',
     'Part97Reference',
     'ComplianceChecker',
     'ARESRACESTools',
