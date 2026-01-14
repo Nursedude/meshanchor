@@ -301,28 +301,56 @@ class MessageRoutingPanel(Gtk.Box):
         return True  # Continue timer
 
     def _get_bridge_stats(self) -> Optional[Dict]:
-        """Get statistics from the gateway bridge."""
-        # Try to import and get active bridge instance
+        """Get statistics from the gateway bridge.
+
+        Tries multiple methods to get bridge data:
+        1. Access bridge instance via main_window (if running in same process)
+        2. Return offline state if no bridge available
+        """
+        # Method 1: Try to get bridge from main window's RNS panel
+        if self.main_window:
+            try:
+                # The RNS panel's gateway mixin stores the bridge instance
+                rns_panel = getattr(self.main_window, 'rns_panel', None)
+                if rns_panel:
+                    bridge = getattr(rns_panel, '_gateway_bridge', None)
+                    if bridge and bridge.is_running:
+                        status = bridge.get_status()
+                        stats = status.get('statistics', {})
+                        uptime = status.get('uptime_seconds', 0) or 0
+
+                        return {
+                            'rns_to_mesh': stats.get('messages_rns_to_mesh', 0),
+                            'mesh_to_rns': stats.get('messages_mesh_to_rns', 0),
+                            'bounced': stats.get('bounced', 0),
+                            'errors': stats.get('errors', 0),
+                            'uptime': uptime,
+                            'rns_connected': status.get('rns_connected', False),
+                            'mesh_connected': status.get('meshtastic_connected', False),
+                            'bridge_active': status.get('running', False),
+                        }
+            except Exception as e:
+                logger.debug(f"Could not get bridge from main_window: {e}")
+
+        # Method 2: Check if services are at least running (for status indication)
         try:
-            # Check for running bridge via API or direct import
             from utils.service_check import check_port
-            if check_port(4403):
-                # meshtasticd running, bridge likely active
-                # For now, return mock stats - in production, query actual bridge
-                return {
-                    'rns_to_mesh': self._stats.get('rns_to_mesh', 0),
-                    'mesh_to_rns': self._stats.get('mesh_to_rns', 0),
-                    'bounced': self._stats.get('bounced', 0),
-                    'errors': self._stats.get('errors', 0),
-                    'uptime': self._stats.get('uptime', 0),
-                    'rns_connected': True,
-                    'mesh_connected': True,
-                    'bridge_active': True,
-                }
+            meshtastic_up = check_port(4403)  # meshtasticd API port
+
+            return {
+                'rns_to_mesh': 0,
+                'mesh_to_rns': 0,
+                'bounced': 0,
+                'errors': 0,
+                'uptime': 0,
+                'rns_connected': False,
+                'mesh_connected': meshtastic_up,
+                'bridge_active': False,  # Bridge not started via this UI
+            }
         except ImportError:
             pass
 
-        # Return simulated offline state
+        # Return offline state
         return {
             'rns_to_mesh': 0,
             'mesh_to_rns': 0,

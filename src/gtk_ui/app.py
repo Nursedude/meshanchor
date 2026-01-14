@@ -229,6 +229,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._node_count_timestamp = 0
         self._node_count_cache_ttl = 30  # Cache for 30 seconds
 
+        # Timer tracking for cleanup
+        self._status_timer = None
+
         # Apply saved theme settings on startup
         self._apply_saved_theme()
 
@@ -246,6 +249,11 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, window):
         """Handle window close - cleanup all panels with cleanup methods."""
+        # Stop the main status update timer
+        if self._status_timer:
+            GLib.source_remove(self._status_timer)
+            self._status_timer = None
+
         # List of panel attribute names that might have cleanup methods
         panel_attrs = [
             'diagnostics_panel',
@@ -559,8 +567,8 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self.bottom_status = self._create_bottom_status()
         main_box.append(self.bottom_status)
 
-        # Start status update timer
-        GLib.timeout_add_seconds(5, self._update_status)
+        # Start status update timer (store ID for cleanup)
+        self._status_timer = GLib.timeout_add_seconds(5, self._update_status)
         self._update_status()
 
         # Set up responsive layout handling

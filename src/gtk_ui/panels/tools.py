@@ -52,6 +52,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
     def __init__(self, main_window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         self.main_window = main_window
+        self._system_stats_timer = None  # Track timer for cleanup
 
         self.set_margin_start(20)
         self.set_margin_end(20)
@@ -166,8 +167,8 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         sys_frame.set_child(sys_box)
         content.append(sys_frame)
 
-        # Start system monitor update timer
-        GLib.timeout_add_seconds(2, self._update_system_stats)
+        # Start system monitor update timer (store ID for cleanup)
+        self._system_stats_timer = GLib.timeout_add_seconds(2, self._update_system_stats)
 
         # Network Tools Section
         net_frame = Gtk.Frame()
@@ -1796,3 +1797,14 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
                 GLib.idle_add(self._log, "  Port 29716 is free ✓")
         except Exception:
             pass
+
+    def cleanup(self):
+        """Cleanup resources when panel is destroyed.
+
+        Called by MainWindow._on_close_request() to stop timers and
+        prevent memory leaks from orphaned update loops.
+        """
+        if self._system_stats_timer:
+            GLib.source_remove(self._system_stats_timer)
+            self._system_stats_timer = None
+            logger.debug("Tools panel: system stats timer cleaned up")
