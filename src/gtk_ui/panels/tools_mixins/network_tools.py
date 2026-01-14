@@ -172,15 +172,16 @@ class NetworkToolsMixin:
 
     def _refresh_status_thread(self):
         """Check network status in background"""
-        # Check meshtasticd port
+        # Get local IP address
+        local_ip = "--"
         sock = None
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(2)
-            result = sock.connect_ex(('localhost', 4403))
-            meshtastic_status = "Connected" if result == 0 else "Not Connected"
+            sock.connect(("8.8.8.8", 80))
+            local_ip = sock.getsockname()[0]
         except Exception:
-            meshtastic_status = "Error"
+            local_ip = "No network"
         finally:
             if sock:
                 try:
@@ -188,5 +189,45 @@ class NetworkToolsMixin:
                 except Exception:
                     pass
 
-        if hasattr(self, 'mesh_status_label'):
-            GLib.idle_add(self.mesh_status_label.set_label, meshtastic_status)
+        if hasattr(self, 'local_ip_label'):
+            GLib.idle_add(self.local_ip_label.set_label, local_ip)
+
+        # Check meshtasticd port 4403
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('localhost', 4403))
+            port_status = "Open ✓" if result == 0 else "Closed"
+        except Exception:
+            port_status = "Error"
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+        if hasattr(self, 'port_status_label'):
+            GLib.idle_add(self.port_status_label.set_label, port_status)
+
+        # Check MUDP package status
+        try:
+            import importlib.util
+            mudp_installed = importlib.util.find_spec('mudp') is not None
+            mudp_status = "Installed ✓" if mudp_installed else "Not installed"
+        except Exception:
+            mudp_status = "Unknown"
+
+        if hasattr(self, 'mudp_status_label'):
+            GLib.idle_add(self.mudp_status_label.set_label, mudp_status)
+
+        # Check SDR tools status
+        import shutil
+        openwebrx_status = "Installed ✓" if shutil.which('openwebrx') else "Not installed"
+        rtlsdr_status = "Installed ✓" if shutil.which('rtl_test') else "Not installed"
+
+        if hasattr(self, 'openwebrx_status'):
+            GLib.idle_add(self.openwebrx_status.set_label, openwebrx_status)
+        if hasattr(self, 'rtlsdr_status'):
+            GLib.idle_add(self.rtlsdr_status.set_label, rtlsdr_status)
