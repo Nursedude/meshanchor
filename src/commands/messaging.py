@@ -198,21 +198,67 @@ def send_message(
 
         conn.commit()
         message_id = cursor.lastrowid
+
+        # Actually send via gateway bridge
+        send_success = False
+        send_error = None
+
+        try:
+            from commands import gateway
+
+            for chunk in chunks:
+                if network == "meshtastic":
+                    result = gateway.send_to_meshtastic(chunk, destination, channel)
+                elif network == "rns":
+                    # RNS expects bytes for destination hash
+                    dest_bytes = bytes.fromhex(destination) if destination else None
+                    result = gateway.send_to_rns(chunk, dest_bytes)
+                else:
+                    result = gateway.send_to_meshtastic(chunk, destination, channel)
+
+                if not result.success:
+                    send_error = result.message
+                    break
+            else:
+                # All chunks sent successfully
+                send_success = True
+                cursor = conn.cursor()
+                cursor.execute('UPDATE messages SET delivered = 1 WHERE id = ?', (message_id,))
+                conn.commit()
+
+        except ImportError as e:
+            send_error = f"Gateway module not available: {e}"
+        except Exception as e:
+            send_error = f"Send failed: {e}"
+            logger.error(f"Failed to send via gateway: {e}")
+
         conn.close()
 
-        # TODO: Actually send via bridge when available
-        # For now, just store and report
-
-        return CommandResult.ok(
-            f"Message queued ({len(chunks)} chunk(s))",
-            data={
-                'message_id': message_id,
-                'chunks': len(chunks),
-                'network': network,
-                'destination': destination,
-                'length': len(content),
-            }
-        )
+        if send_success:
+            return CommandResult.ok(
+                f"Message sent ({len(chunks)} chunk(s))",
+                data={
+                    'message_id': message_id,
+                    'chunks': len(chunks),
+                    'network': network,
+                    'destination': destination,
+                    'length': len(content),
+                    'delivered': True,
+                }
+            )
+        else:
+            return CommandResult.ok(
+                f"Message queued but not sent: {send_error}",
+                data={
+                    'message_id': message_id,
+                    'chunks': len(chunks),
+                    'network': network,
+                    'destination': destination,
+                    'length': len(content),
+                    'delivered': False,
+                    'error': send_error,
+                }
+            )
 
     except Exception as e:
         logger.error(f"Failed to send message: {e}")
