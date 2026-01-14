@@ -12,7 +12,7 @@
 MESHFORGE_DIR="/opt/meshforge"
 ICON_NAME="org.meshforge.app"
 TITLE="MeshForge"
-TUI_CMD="cd $MESHFORGE_DIR/src && sudo python3 -m launcher_tui.main"
+TUI_CMD="sudo python3 $MESHFORGE_DIR/src/launcher_tui/main.py"
 VTE_CMD="python3 $MESHFORGE_DIR/src/launcher_vte.py"
 
 # Log file for debugging launch issues
@@ -118,7 +118,7 @@ check_installation() {
         exit 1
     fi
 
-    if [ ! -d "$MESHFORGE_DIR/src/launcher_tui" ]; then
+    if [ ! -f "$MESHFORGE_DIR/src/launcher_tui/main.py" ]; then
         show_error "launcher_tui not found at $MESHFORGE_DIR/src/\n\nInstallation may be corrupted."
         exit 1
     fi
@@ -172,7 +172,7 @@ if has_display; then
 
     # Nothing worked - show error
     log_msg "No terminal emulator found!"
-    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  cd $MESHFORGE_DIR/src && sudo python3 -m launcher_tui.main"
+    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  sudo python3 $MESHFORGE_DIR/src/launcher_tui/main.py"
     exit 1
 else
     # No display (SSH session) - run TUI directly
