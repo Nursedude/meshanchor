@@ -1092,9 +1092,8 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._update_status_ui, False, "--", "--")
 
     def _get_node_count(self):
-        """Get the number of nodes from meshtastic TCP interface or CLI"""
+        """Get the number of nodes from meshtastic CLI (auto-detects connection)"""
         import time as time_module
-        import socket
 
         # Check for web client mode - don't connect if enabled
         try:
@@ -1110,28 +1109,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         if now - self._node_count_timestamp < self._node_count_cache_ttl:
             return self._node_count_cache
 
-        # Quick pre-check: is meshtasticd TCP port reachable?
-        sock = None
-        port_reachable = False
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.0)
-            sock.connect(("localhost", 4403))
-            port_reachable = True
-        except (socket.timeout, socket.error, OSError):
-            pass
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-
-        if not port_reachable:
-            # Port not reachable, skip node count
-            return self._node_count_cache
-
-        # Use CLI method (more reliable, avoids meshtastic library noise)
+        # Use CLI method - let meshtastic auto-detect connection (serial/USB/TCP)
         try:
             import re
             # Find meshtastic CLI using centralized function
@@ -1144,11 +1122,11 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             if not cli_path:
                 return self._node_count_cache
 
-            # Run meshtastic --nodes to get node info (suppress stderr)
+            # Run meshtastic --nodes without --host (auto-detect connection)
             result = subprocess.run(
-                [cli_path, '--host', 'localhost', '--nodes'],
+                [cli_path, '--nodes'],
                 capture_output=True, text=True,
-                timeout=10
+                timeout=15
             )
 
             if result.returncode == 0 and result.stdout:
