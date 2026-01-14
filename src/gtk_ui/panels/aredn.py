@@ -292,13 +292,6 @@ class AREDNPanel(Gtk.Box):
         tftp_btn.connect("clicked", self._on_check_tftp)
         btn_row.append(tftp_btn)
 
-        # Links
-        docs_link = Gtk.LinkButton.new_with_label(
-            "https://www.arednmesh.org/content/mikrotik-tutorial",
-            "MikroTik Tutorial"
-        )
-        btn_row.append(docs_link)
-
         box.append(btn_row)
 
         # TFTP status
@@ -329,30 +322,6 @@ class AREDNPanel(Gtk.Box):
         self.links_list.append(empty_links)
 
         box.append(self.links_list)
-
-        # Resources
-        resources_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        resources_row.set_margin_top(10)
-
-        aredn_link = Gtk.LinkButton.new_with_label(
-            "https://www.arednmesh.org/",
-            "AREDN Website"
-        )
-        resources_row.append(aredn_link)
-
-        docs_link = Gtk.LinkButton.new_with_label(
-            "https://docs.arednmesh.org/en/latest/",
-            "Documentation"
-        )
-        resources_row.append(docs_link)
-
-        github_link = Gtk.LinkButton.new_with_label(
-            "https://github.com/aredn/aredn",
-            "GitHub"
-        )
-        resources_row.append(github_link)
-
-        box.append(resources_row)
 
         frame.set_child(box)
         parent.append(frame)

@@ -1729,7 +1729,7 @@ MAIN_TEMPLATE = '''
                     <pre style="background: #111; padding: 10px; border-radius: 5px; overflow-x: auto;">pipx upgrade meshtastic</pre>
 
                     <h3 style="color: var(--text); margin: 15px 0 10px 0;">Node Firmware</h3>
-                    <p>Use the <a href="https://flasher.meshtastic.org/" target="_blank" style="color: var(--accent);">Meshtastic Web Flasher</a> or the meshtastic-flasher tool.</p>
+                    <p>Use the Meshtastic Web Flasher or the meshtastic-flasher CLI tool.</p>
                 </div>
             </div>
         </div>

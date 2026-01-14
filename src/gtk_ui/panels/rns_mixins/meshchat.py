@@ -127,24 +127,6 @@ class MeshChatMixin:
 
         box.append(port_row)
 
-        # Links row
-        links_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        links_row.set_halign(Gtk.Align.CENTER)
-
-        docs_link = Gtk.LinkButton.new_with_label(
-            "https://github.com/liamcottle/meshchat",
-            "MeshChat Docs"
-        )
-        links_row.append(docs_link)
-
-        lxmf_link = Gtk.LinkButton.new_with_label(
-            "https://github.com/markqvist/lxmf",
-            "LXMF Protocol"
-        )
-        links_row.append(lxmf_link)
-
-        box.append(links_row)
-
         frame.set_child(box)
         parent.append(frame)
 
