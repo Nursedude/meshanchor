@@ -104,6 +104,10 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
 
     def _on_unrealize(self, widget):
         """Clean up when panel is destroyed to prevent timer crashes."""
+        self.cleanup()
+
+    def cleanup(self):
+        """Clean up resources - called by main window on close."""
         # Cancel all pending timers
         for timer_id in self._pending_timers:
             try:
