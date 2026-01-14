@@ -1586,16 +1586,24 @@ Class: {lic_class}
             self._output_message(f"Unknown source: {source}")
 
     def _output_message(self, message: str):
-        """Add message to output"""
+        """Add message to output and auto-scroll to show it"""
         buffer = self._output_text.get_buffer()
         end_iter = buffer.get_end_iter()
         timestamp = datetime.now().strftime("%H:%M:%S")
         buffer.insert(end_iter, f"[{timestamp}] {message}\n")
+        # Auto-scroll to show new content
+        end_mark = buffer.create_mark(None, buffer.get_end_iter(), False)
+        self._output_text.scroll_to_mark(end_mark, 0.0, False, 0.0, 1.0)
+        buffer.delete_mark(end_mark)
 
     def _set_output(self, text: str):
-        """Replace entire output with text"""
+        """Replace entire output with text and scroll to top"""
         buffer = self._output_text.get_buffer()
         buffer.set_text(text)
+        # Scroll to top to show beginning of output
+        start_mark = buffer.create_mark(None, buffer.get_start_iter(), True)
+        self._output_text.scroll_to_mark(start_mark, 0.0, False, 0.0, 0.0)
+        buffer.delete_mark(start_mark)
 
     def _clear_output(self):
         """Clear output"""
