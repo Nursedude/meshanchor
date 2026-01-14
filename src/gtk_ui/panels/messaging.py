@@ -471,3 +471,8 @@ class MessagingPanel(Gtk.Box):
 
         thread = threading.Thread(target=clear, daemon=True)
         thread.start()
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

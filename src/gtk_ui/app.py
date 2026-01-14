@@ -249,32 +249,38 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._check_resume_state()
 
     def _on_close_request(self, window):
-        """Handle window close - cleanup all panels with cleanup methods."""
+        """Handle window close - cleanup all panels with cleanup methods.
+
+        Auto-discovers all panel attributes and calls cleanup() on any that have it.
+        This replaces the hard-coded list approach which was prone to missing panels.
+        """
+        logger.info("Window close requested, cleaning up panels...")
+
         # Stop the main status update timer
         if self._status_timer:
             GLib.source_remove(self._status_timer)
             self._status_timer = None
 
-        # List of panel attribute names that might have cleanup methods
-        panel_attrs = [
-            'diagnostics_panel',
-            'mesh_tools_panel',
-            'rns_panel',
-            'tools_panel',
-            'map_panel',
-            'radio_config_panel',
-            'ham_tools_panel',
-            'hamclock_panel',
-            'meshbot_panel',
-        ]
+        # Auto-discover all panels and clean them up
+        # Look for any attribute ending in '_panel' that has a cleanup method
+        cleaned_up = []
+        failed = []
 
-        for attr_name in panel_attrs:
-            panel = getattr(self, attr_name, None)
-            if panel and hasattr(panel, 'cleanup'):
-                try:
-                    panel.cleanup()
-                except Exception as e:
-                    logger.warning(f"Error cleaning up {attr_name}: {e}")
+        for attr_name in dir(self):
+            if attr_name.endswith('_panel'):
+                panel = getattr(self, attr_name, None)
+                if panel and hasattr(panel, 'cleanup') and callable(panel.cleanup):
+                    try:
+                        panel.cleanup()
+                        cleaned_up.append(attr_name)
+                    except Exception as e:
+                        failed.append(f"{attr_name}: {e}")
+                        logger.warning(f"Error cleaning up {attr_name}: {e}")
+
+        if cleaned_up:
+            logger.info(f"Cleaned up {len(cleaned_up)} panels: {', '.join(cleaned_up)}")
+        if failed:
+            logger.warning(f"Failed to cleanup {len(failed)} panels: {failed}")
 
         # Return False to allow the window to close
         return False

@@ -457,3 +457,10 @@ class ServicePanel(Gtk.Box):
         """Show error in UI"""
         self.status_label.set_label(f"Error: {message}")
         return False
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # Cancel follow timer if active
+        if hasattr(self, 'follow_timer') and self.follow_timer:
+            GLib.source_remove(self.follow_timer)
+            self.follow_timer = None

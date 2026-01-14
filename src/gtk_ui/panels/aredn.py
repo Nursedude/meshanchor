@@ -648,3 +648,15 @@ class AREDNPanel(Gtk.Box):
             self.tftp_status.set_markup(
                 f"<span foreground='orange'>✗ TFTP server not found</span>\n{instructions}"
             )
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # Stop any ongoing scan
+        if self._scanner:
+            try:
+                self._scanner.stop()
+            except Exception:
+                pass
+            self._scanner = None
+        self._scanning = False
+        logger.debug("AREDNPanel cleanup complete")
