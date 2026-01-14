@@ -24,6 +24,61 @@ class MeshtasticConfig:
     channel: int = 0  # Primary channel for gateway messages
     use_mqtt: bool = False
     mqtt_topic: str = ""
+    # LoRa preset identifier (for documentation/display)
+    # Values: LONG_FAST, LONG_SLOW, MEDIUM_FAST, MEDIUM_SLOW,
+    #         SHORT_FAST, SHORT_SLOW, SHORT_TURBO
+    preset: str = ""
+    # Friendly name for this connection
+    name: str = "primary"
+
+
+@dataclass
+class MeshtasticBridgeConfig:
+    """
+    Configuration for Meshtastic-to-Meshtastic preset bridging.
+
+    Bridges two separate Meshtastic networks with different LoRa presets.
+    Requires two radios/meshtasticd instances, one for each preset.
+
+    Use case: Bridge a LONG_FAST rural mesh with a SHORT_TURBO local mesh.
+    """
+    enabled: bool = False
+
+    # Primary interface (usually LONG_FAST for wider coverage)
+    primary: MeshtasticConfig = field(default_factory=lambda: MeshtasticConfig(
+        host="localhost",
+        port=4403,
+        preset="LONG_FAST",
+        name="longfast"
+    ))
+
+    # Secondary interface (usually SHORT_TURBO for local high-speed)
+    secondary: MeshtasticConfig = field(default_factory=lambda: MeshtasticConfig(
+        host="localhost",
+        port=4404,  # Different port for second meshtasticd
+        preset="SHORT_TURBO",
+        name="shortturbo"
+    ))
+
+    # Bridging direction
+    # "bidirectional" - Forward messages both ways
+    # "primary_to_secondary" - Only forward from primary to secondary
+    # "secondary_to_primary" - Only forward from secondary to primary
+    direction: str = "bidirectional"
+
+    # Message filtering
+    # Forward only messages matching these patterns (empty = all)
+    message_filter: str = ""
+    # Exclude messages matching these patterns
+    exclude_filter: str = ""
+
+    # Duplicate suppression (seconds)
+    # Prevent message loops by not re-forwarding recently seen messages
+    dedup_window_sec: int = 60
+
+    # Add prefix to forwarded messages (helps identify bridged messages)
+    add_prefix: bool = True
+    prefix_format: str = "[{source_preset}] "
 
 
 @dataclass
@@ -124,9 +179,10 @@ class GatewayConfig:
     enabled: bool = False
     auto_start: bool = False
 
-    # Bridge mode: "message_bridge" or "rns_transport"
+    # Bridge mode: "message_bridge", "rns_transport", or "mesh_bridge"
     # - message_bridge: Translates messages between RNS/LXMF and Meshtastic
     # - rns_transport: RNS uses Meshtastic as network transport layer
+    # - mesh_bridge: Bridges two Meshtastic networks with different presets
     bridge_mode: str = "message_bridge"
 
     # Network configurations
@@ -135,6 +191,10 @@ class GatewayConfig:
 
     # RNS Over Meshtastic transport (used when bridge_mode="rns_transport")
     rns_transport: RNSOverMeshtasticConfig = field(default_factory=RNSOverMeshtasticConfig)
+
+    # Meshtastic-to-Meshtastic bridge (used when bridge_mode="mesh_bridge")
+    # Bridges different LoRa presets (e.g., LONG_FAST <> SHORT_TURBO)
+    mesh_bridge: MeshtasticBridgeConfig = field(default_factory=MeshtasticBridgeConfig)
 
     # Routing (used when bridge_mode="message_bridge")
     routing_rules: List[RoutingRule] = field(default_factory=list)
@@ -188,6 +248,20 @@ class GatewayConfig:
                 latency_threshold_ms=rns_transport_data.get('latency_threshold_ms', 5000),
             )
 
+            # Handle MeshtasticBridgeConfig (has nested MeshtasticConfig objects)
+            mesh_bridge_data = data.get('mesh_bridge', {})
+            mesh_bridge = MeshtasticBridgeConfig(
+                enabled=mesh_bridge_data.get('enabled', False),
+                primary=MeshtasticConfig(**mesh_bridge_data.get('primary', {})) if mesh_bridge_data.get('primary') else MeshtasticConfig(port=4403, preset="LONG_FAST", name="longfast"),
+                secondary=MeshtasticConfig(**mesh_bridge_data.get('secondary', {})) if mesh_bridge_data.get('secondary') else MeshtasticConfig(port=4404, preset="SHORT_TURBO", name="shortturbo"),
+                direction=mesh_bridge_data.get('direction', 'bidirectional'),
+                message_filter=mesh_bridge_data.get('message_filter', ''),
+                exclude_filter=mesh_bridge_data.get('exclude_filter', ''),
+                dedup_window_sec=mesh_bridge_data.get('dedup_window_sec', 60),
+                add_prefix=mesh_bridge_data.get('add_prefix', True),
+                prefix_format=mesh_bridge_data.get('prefix_format', '[{source_preset}] '),
+            )
+
             # Reconstruct nested dataclasses
             config = cls(
                 enabled=data.get('enabled', False),
@@ -196,6 +270,7 @@ class GatewayConfig:
                 meshtastic=MeshtasticConfig(**data.get('meshtastic', {})),
                 rns=RNSConfig(**data.get('rns', {})),
                 rns_transport=rns_transport,
+                mesh_bridge=mesh_bridge,
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
                 default_route=data.get('default_route', 'bidirectional'),
                 telemetry=TelemetryConfig(**data.get('telemetry', {})),
@@ -233,6 +308,19 @@ class GatewayConfig:
                 'latency_threshold_ms': self.rns_transport.latency_threshold_ms,
             }
 
+            # Convert MeshtasticBridgeConfig manually (has nested dataclasses)
+            mesh_bridge_data = {
+                'enabled': self.mesh_bridge.enabled,
+                'primary': asdict(self.mesh_bridge.primary),
+                'secondary': asdict(self.mesh_bridge.secondary),
+                'direction': self.mesh_bridge.direction,
+                'message_filter': self.mesh_bridge.message_filter,
+                'exclude_filter': self.mesh_bridge.exclude_filter,
+                'dedup_window_sec': self.mesh_bridge.dedup_window_sec,
+                'add_prefix': self.mesh_bridge.add_prefix,
+                'prefix_format': self.mesh_bridge.prefix_format,
+            }
+
             # Convert to dict with nested dataclasses
             data = {
                 'enabled': self.enabled,
@@ -241,6 +329,7 @@ class GatewayConfig:
                 'meshtastic': asdict(self.meshtastic),
                 'rns': asdict(self.rns),
                 'rns_transport': rns_transport_data,
+                'mesh_bridge': mesh_bridge_data,
                 'routing_rules': [asdict(r) for r in self.routing_rules],
                 'default_route': self.default_route,
                 'telemetry': asdict(self.telemetry),
