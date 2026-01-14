@@ -516,3 +516,8 @@ class InstallPanel(Gtk.Box):
 
         self._check_installed()
         return False
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass
