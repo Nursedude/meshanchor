@@ -17,6 +17,11 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List
 
+# Ensure src directory is in path for imports when run directly
+_src_dir = Path(__file__).parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 # Import version
 try:
     from __version__ import __version__
@@ -33,8 +38,8 @@ except ImportError:
             return Path(f'/home/{sudo_user}')
         return Path.home()
 
-# Import dialog backend from module
-from .backend import DialogBackend
+# Import dialog backend - use absolute import for direct script execution
+from launcher_tui.backend import DialogBackend
 
 
 class MeshForgeLauncher:
