@@ -344,3 +344,8 @@ class DashboardPanel(Gtk.Box):
         buffer = self.log_view.get_buffer()
         buffer.set_text(text)
         return False
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

@@ -675,4 +675,101 @@ result = subprocess.run(
 
 ---
 
-*Last updated: 2026-01-14 - Added meshtastic CLI auto-detect freeze fix*
+## Issue #14: GTK Panel Lifecycle - Missing Cleanup Methods
+
+### Symptom
+- GTK freezes or crashes when closing window
+- Memory growth during extended use
+- Timers continue firing after panels are destroyed
+- Orphaned signal handlers causing callbacks on destroyed widgets
+
+### Root Cause
+Panel cleanup was fragmented:
+1. Only 9 of 24 panels had cleanup() methods
+2. app.py used a hard-coded list for cleanup (missed 15 panels)
+3. No standardized timer/signal tracking pattern
+4. Each panel reinvented resource management
+
+### Impact
+- Timer leaks: GLib.timeout_add() handlers never cancelled
+- Signal leaks: GTK signals never disconnected
+- Thread races: Callbacks firing after widget destruction
+- File descriptor exhaustion (errno 24)
+
+### Architectural Fix (2026-01-14)
+
+**1. Created PanelBase class** (`src/gtk_ui/panel_base.py`):
+```python
+class PanelBase(Gtk.Box):
+    def __init__(self, main_window):
+        self._pending_timers = []
+        self._signal_handlers = {}
+        self._is_destroyed = False
+        self.connect("unrealize", self._on_unrealize)
+
+    def _schedule_timer(self, delay_ms, callback, *args):
+        """Timer tracking with auto-cleanup"""
+        timer_id = GLib.timeout_add(delay_ms, callback, *args)
+        self._pending_timers.append(timer_id)
+        return timer_id
+
+    def _connect_signal(self, widget, signal_name, callback):
+        """Signal tracking with auto-cleanup"""
+        handler_id = widget.connect(signal_name, callback)
+        self._signal_handlers[widget].append(handler_id)
+        return handler_id
+
+    def cleanup(self):
+        """Auto-called on unrealize"""
+        self._cancel_all_timers()
+        self._disconnect_all_signals()
+```
+
+**2. Auto-discover panels in app.py** (replaces hard-coded list):
+```python
+def _on_close_request(self, window):
+    # Auto-discover ALL panels with cleanup()
+    for attr_name in dir(self):
+        if attr_name.endswith('_panel'):
+            panel = getattr(self, attr_name, None)
+            if panel and hasattr(panel, 'cleanup'):
+                panel.cleanup()
+```
+
+**3. Added cleanup() to all 24 panels**
+
+### Files Changed
+- [NEW] `src/gtk_ui/panel_base.py` - PanelBase class with resource management
+- [MOD] `src/gtk_ui/app.py` - Auto-discover cleanup
+- [MOD] All 24 panel files - Added cleanup() methods
+
+### Regression Tests
+- `tests/test_gtk_crash_fixes.py::TestPanelBaseResourceManagement`
+- `tests/test_gtk_crash_fixes.py::TestPanelCleanupCoverage`
+- `tests/test_gtk_crash_fixes.py::TestAppAutoDiscoverCleanup`
+- `tests/test_gtk_crash_fixes.py::TestTimerCleanupPatterns`
+
+### Migration Path for New Panels
+New panels should inherit from PanelBase:
+```python
+from gtk_ui.panel_base import PanelBase
+
+class MyNewPanel(PanelBase):
+    def __init__(self, main_window):
+        super().__init__(main_window)
+        # Use self._schedule_timer() instead of GLib.timeout_add()
+        # Use self._connect_signal() instead of widget.connect()
+
+    def cleanup(self):
+        # Your cleanup code here
+        super().cleanup()  # ALWAYS call parent cleanup
+```
+
+### Prevention
+- Run `python3 -m unittest tests/test_gtk_crash_fixes.py -v` before releasing
+- New panels must inherit from PanelBase or implement cleanup()
+- Use `_schedule_timer()` and `_connect_signal()` for resource tracking
+
+---
+
+*Last updated: 2026-01-14 - Added panel lifecycle architecture fix*

@@ -697,3 +697,8 @@ class HardwarePanel(Gtk.Box):
                 "Error",
                 f"Failed to activate configuration: {e}"
             )
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass
