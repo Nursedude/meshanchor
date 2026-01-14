@@ -53,7 +53,7 @@ class MeshForgeLauncher:
 
     def __init__(self):
         self.dialog = DialogBackend()
-        self.src_dir = Path(__file__).parent
+        self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
 
     def _detect_environment(self) -> dict:
