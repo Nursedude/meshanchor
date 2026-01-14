@@ -1,0 +1,101 @@
+{
+  "_comment": "MeshForge Gateway Template: Meshtastic Preset Bridge (LONG_FAST <> SHORT_TURBO)",
+  "_description": "Bridges two Meshtastic networks with different LoRa presets",
+  "_requirements": [
+    "Two Meshtastic radios (one per preset)",
+    "Two meshtasticd instances running on different ports",
+    "Or: one radio + one MQTT connection"
+  ],
+  "_usage": "Copy to ~/.config/meshforge/gateway.json and adjust settings",
+
+  "enabled": true,
+  "auto_start": false,
+  "bridge_mode": "mesh_bridge",
+
+  "meshtastic": {
+    "_comment": "Primary single-radio config (unused in mesh_bridge mode)",
+    "host": "localhost",
+    "port": 4403,
+    "channel": 0,
+    "use_mqtt": false,
+    "mqtt_topic": "",
+    "preset": "",
+    "name": "primary"
+  },
+
+  "rns": {
+    "_comment": "RNS config (unused in mesh_bridge mode)",
+    "config_dir": "",
+    "identity_name": "meshforge_gateway",
+    "announce_interval": 300,
+    "propagation_node": ""
+  },
+
+  "rns_transport": {
+    "enabled": false,
+    "connection_type": "tcp",
+    "device_path": "localhost:4403",
+    "data_speed": 8,
+    "hop_limit": 3,
+    "fragment_timeout_sec": 30,
+    "max_pending_fragments": 100,
+    "enable_stats": true,
+    "stats_interval_sec": 60,
+    "packet_loss_threshold": 0.1,
+    "latency_threshold_ms": 5000
+  },
+
+  "mesh_bridge": {
+    "_comment": "LONG_FAST <> SHORT_TURBO bridge configuration",
+    "enabled": true,
+
+    "primary": {
+      "_comment": "LONG_FAST radio - wider coverage, slower speed",
+      "host": "localhost",
+      "port": 4403,
+      "channel": 0,
+      "use_mqtt": false,
+      "mqtt_topic": "",
+      "preset": "LONG_FAST",
+      "name": "longfast"
+    },
+
+    "secondary": {
+      "_comment": "SHORT_TURBO radio - local coverage, high speed",
+      "host": "localhost",
+      "port": 4404,
+      "channel": 0,
+      "use_mqtt": false,
+      "mqtt_topic": "",
+      "preset": "SHORT_TURBO",
+      "name": "shortturbo"
+    },
+
+    "direction": "bidirectional",
+
+    "message_filter": "",
+    "exclude_filter": "",
+
+    "dedup_window_sec": 60,
+
+    "add_prefix": true,
+    "prefix_format": "[{source_preset}] "
+  },
+
+  "routing_rules": [],
+  "default_route": "bidirectional",
+
+  "telemetry": {
+    "share_position": true,
+    "share_battery": true,
+    "share_environment": true,
+    "position_precision": 5,
+    "update_interval": 60
+  },
+
+  "log_level": "INFO",
+  "log_messages": true,
+  "ai_diagnostics_enabled": false,
+  "snr_analysis": true,
+  "anomaly_detection": false
+}
