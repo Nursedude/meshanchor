@@ -40,8 +40,12 @@ except ImportError:
     try:
         from src.utils.paths import get_real_user_home
     except ImportError:
+        import os
         from pathlib import Path
         def get_real_user_home():
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                return Path(f'/home/{sudo_user}')
             return Path.home()
 
 
