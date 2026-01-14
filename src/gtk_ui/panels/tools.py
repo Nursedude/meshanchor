@@ -304,18 +304,6 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
 
         rf_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
-        # Site Planner button - prominent position
-        planner_btn = Gtk.Button(label="Site Planner")
-        planner_btn.add_css_class("suggested-action")
-        planner_btn.connect("clicked", self._on_site_planner)
-        rf_buttons.append(planner_btn)
-
-        # External Line of Sight tool (backup)
-        los_btn = Gtk.Button(label="External LOS Tool")
-        los_btn.set_tooltip_text("Open ScadaCore RF LOS tool in browser")
-        los_btn.connect("clicked", self._on_line_of_sight)
-        rf_buttons.append(los_btn)
-
         link_btn = Gtk.Button(label="Link Budget Calculator")
         link_btn.connect("clicked", self._on_link_budget)
         rf_buttons.append(link_btn)

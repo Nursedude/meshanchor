@@ -114,24 +114,6 @@ class NomadNetMixin:
 
         box.append(config_row)
 
-        # Links row
-        links_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        links_row.set_halign(Gtk.Align.CENTER)
-
-        docs_link = Gtk.LinkButton.new_with_label(
-            "https://github.com/markqvist/NomadNet",
-            "Documentation"
-        )
-        links_row.append(docs_link)
-
-        reticulum_link = Gtk.LinkButton.new_with_label(
-            "https://reticulum.network/",
-            "Reticulum Network"
-        )
-        links_row.append(reticulum_link)
-
-        box.append(links_row)
-
         # Testnet info (expandable)
         testnet_expander = Gtk.Expander(label="RNS Testnet Hubs")
         testnet_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
