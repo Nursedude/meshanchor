@@ -321,19 +321,6 @@ class MeshBotPanel(Gtk.Box):
         features_frame.set_child(features_box)
         box.append(features_frame)
 
-        # Links
-        links_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-
-        github_btn = Gtk.Button(label="GitHub Repository")
-        github_btn.connect("clicked", lambda b: self._open_url("https://github.com/SpudGunMan/meshing-around"))
-        links_box.append(github_btn)
-
-        docs_btn = Gtk.Button(label="Documentation")
-        docs_btn.connect("clicked", lambda b: self._open_url("https://github.com/SpudGunMan/meshing-around#readme"))
-        links_box.append(docs_btn)
-
-        box.append(links_box)
-
         scrolled.set_child(box)
         return scrolled
 
