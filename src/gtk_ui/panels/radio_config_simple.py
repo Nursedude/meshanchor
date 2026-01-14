@@ -108,6 +108,10 @@ class RadioConfigSimple(Gtk.Box):
 
     def _on_unrealize(self, widget):
         """Clean up when panel is destroyed."""
+        self.cleanup()
+
+    def cleanup(self):
+        """Clean up resources - called by main window on close."""
         for timer_id in self._pending_timers:
             try:
                 GLib.source_remove(timer_id)
