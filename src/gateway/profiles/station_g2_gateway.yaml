@@ -1,0 +1,119 @@
+# MeshForge Gateway Profile: Heltec Station G2
+# Optimized for fixed gateway/base station operation
+# Apply with: meshtastic --configure station_g2_gateway.yaml
+#
+# Station G2 Features:
+# - ESP32 + SX1262
+# - Ethernet support (ideal for fixed gateway)
+# - PoE capable
+# - External antenna connector
+# - No display (headless by design)
+#
+# Perfect for:
+# - Fixed location gateways
+# - MeshForge bridge nodes
+# - MQTT integration
+# - High-reliability deployments
+
+device:
+  role: ROUTER  # Pure router - maximum forwarding
+  rebroadcast_mode: ALL
+  node_info_broadcast_secs: 900
+  serial_enabled: true
+
+lora:
+  region: US  # Change: US, EU_868, AU_915, etc.
+  modem_preset: LONG_FAST
+  hop_limit: 7  # Maximum hops for base station
+  tx_enabled: true
+  tx_power: 22  # Station G2 typical max
+  # For infrastructure gateway, consider:
+  # modem_preset: MEDIUM_FAST  # Balance speed/reliability
+
+bluetooth:
+  enabled: false  # Not needed for fixed station
+  fixed_pin: 123456
+
+power:
+  ls_secs: 0  # Never sleep
+  min_wake_secs: 10
+  wait_bluetooth_secs: 0
+  mesh_sds_timeout_secs: 0
+  sds_secs: 0
+  on_battery_shutdown_after_secs: 0  # PoE powered, no battery concern
+
+display:
+  # Station G2 has no display
+  screen_on_secs: 0
+  auto_screen_carousel_secs: 0
+
+position:
+  gps_enabled: false  # Station G2 has no GPS
+  fixed_position: true  # REQUIRED: Set your gateway location
+  # Uncomment and set your coordinates:
+  # fixed_lat: 0.0
+  # fixed_lng: 0.0
+  # fixed_alt: 0
+  position_broadcast_secs: 3600  # Broadcast position hourly
+  position_broadcast_smart_enabled: false  # Fixed position, no smart needed
+
+telemetry:
+  device_update_interval: 900
+  environment_update_interval: 0  # No sensors
+  environment_measurement_enabled: false
+  power_measurement_enabled: true
+
+modules:
+  serial:
+    enabled: true
+    echo: false
+    mode: PROTO
+    baud: BAUD_DEFAULT
+
+  store_forward:
+    enabled: true
+    heartbeat: true  # Enable for base station
+    records: 200  # Large buffer for base station
+    history_return_max: 100
+    history_return_window: 14400  # 4 hour window
+
+  neighbor_info:
+    enabled: true
+    update_interval: 600  # More frequent for base station
+
+  mqtt:
+    enabled: false  # Enable if using MQTT bridge
+    # address: "mqtt.example.com"
+    # username: ""
+    # password: ""
+    # encryption_enabled: true
+    # json_enabled: true  # JSON for easy integration
+    # tls_enabled: true
+    # root_topic: "msh"
+
+  range_test:
+    enabled: false
+
+  canned_message:
+    enabled: false
+
+# Network Configuration (Ethernet primary)
+network:
+  wifi_enabled: false  # Use Ethernet instead
+  eth_enabled: true  # Primary connection method
+  # Static IP recommended for gateway:
+  # eth_mode: STATIC
+  # eth_config:
+  #   ip: 192.168.1.100
+  #   gateway: 192.168.1.1
+  #   subnet: 255.255.255.0
+  #   dns: 8.8.8.8
+  ntp_server: "pool.ntp.org"
+  api_server_enabled: true  # Enable API for meshtasticd
+
+# Note: Station G2 deployment tips:
+# - Use PoE for reliable power
+# - Mount with good antenna line-of-sight
+# - Set fixed_position with accurate coordinates
+# - Enable MQTT if bridging to home automation
+# - Consider MEDIUM_FAST preset for better reliability
