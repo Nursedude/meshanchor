@@ -416,13 +416,13 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         """Spawn the TUI launcher in the terminal"""
         # Find the TUI launcher
         src_dir = Path(__file__).parent
-        tui_path = src_dir / 'launcher_tui.py'
+        tui_path = src_dir / 'launcher_tui/main.py'
 
         if not tui_path.exists():
             # Try alternative locations
             for alt_path in [
-                Path('/opt/meshforge/src/launcher_tui.py'),
-                Path(__file__).parent.parent / 'src' / 'launcher_tui.py',
+                Path('/opt/meshforge/src/launcher_tui/main.py'),
+                Path(__file__).parent.parent / 'src' / 'launcher_tui/main.py',
             ]:
                 if alt_path.exists():
                     tui_path = alt_path
@@ -480,7 +480,7 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         """Fallback spawn method"""
         try:
             src_dir = Path(__file__).parent
-            tui_path = src_dir / 'launcher_tui.py'
+            tui_path = src_dir / 'launcher_tui/main.py'
 
             # Use simpler spawn
             self.terminal.spawn_async(
@@ -506,7 +506,7 @@ class MeshForgeVTEWindow(Adw.ApplicationWindow if GTK_VERSION == 4 else Gtk.Appl
         import shutil
 
         src_dir = Path(__file__).parent
-        tui_path = src_dir / 'launcher_tui.py'
+        tui_path = src_dir / 'launcher_tui/main.py'
 
         terminals = [
             ['gnome-terminal', '--', 'sudo', 'python3', str(tui_path)],
@@ -547,13 +547,13 @@ def main():
         import shutil
 
         src_dir = Path(__file__).parent
-        tui_path = src_dir / 'launcher_tui.py'
+        tui_path = src_dir / 'launcher_tui/main.py'
 
         if not tui_path.exists():
             # Try alternative paths
             for alt_path in [
-                Path('/opt/meshforge/src/launcher_tui.py'),
-                Path(__file__).parent.parent / 'src' / 'launcher_tui.py',
+                Path('/opt/meshforge/src/launcher_tui/main.py'),
+                Path(__file__).parent.parent / 'src' / 'launcher_tui/main.py',
             ]:
                 if alt_path.exists():
                     tui_path = alt_path
