@@ -713,3 +713,8 @@ Webserver:
             )
         else:
             self.main_window.set_status_message("No changes to revert")
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

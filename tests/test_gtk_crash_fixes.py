@@ -420,5 +420,149 @@ class TestNodeCountCodePattern(unittest.TestCase):
         self.assertIn('if not port_reachable:', self.source)
 
 
+class TestPanelBaseResourceManagement(unittest.TestCase):
+    """Test the PanelBase class resource management patterns."""
+
+    def test_panel_base_module_exists(self):
+        """Verify panel_base.py exists and is importable."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        self.assertTrue(panel_base_path.exists(), "panel_base.py should exist")
+
+    def test_panel_base_has_required_methods(self):
+        """Verify PanelBase has all required resource management methods."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Required methods for resource management
+        required_methods = [
+            'def _schedule_timer',
+            'def _schedule_timer_seconds',
+            'def _cancel_timer',
+            'def _cancel_all_timers',
+            'def _connect_signal',
+            'def _disconnect_all_signals',
+            'def _idle_add',
+            'def cleanup',
+        ]
+
+        for method in required_methods:
+            self.assertIn(method, source, f"PanelBase should have {method}")
+
+    def test_panel_base_has_resource_tracking(self):
+        """Verify PanelBase tracks resources properly."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Required tracking attributes
+        self.assertIn('_pending_timers', source)
+        self.assertIn('_signal_handlers', source)
+        self.assertIn('_is_destroyed', source)
+
+    def test_panel_base_unrealize_triggers_cleanup(self):
+        """Verify PanelBase connects unrealize signal to cleanup."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Should connect unrealize to cleanup
+        self.assertIn('"unrealize"', source)
+        self.assertIn('_on_unrealize', source)
+
+
+class TestPanelCleanupCoverage(unittest.TestCase):
+    """Test that all panels have cleanup() methods."""
+
+    def test_all_panels_have_cleanup(self):
+        """Verify all panel files have cleanup() methods."""
+        panels_dir = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels'
+
+        # Find all panel Python files (excluding __init__ and utilities)
+        panel_files = [
+            f for f in panels_dir.glob('*.py')
+            if not f.name.startswith('__')
+            and f.name not in ['rns_config.py', 'rns_gateway.py']  # These are utils, not panels
+        ]
+
+        panels_without_cleanup = []
+        for panel_file in panel_files:
+            source = panel_file.read_text()
+            # Check if it's actually a panel (has Panel class)
+            if 'class' in source and 'Panel' in source and 'Gtk.Box' in source:
+                if 'def cleanup' not in source:
+                    panels_without_cleanup.append(panel_file.name)
+
+        self.assertEqual(
+            panels_without_cleanup, [],
+            f"Panels missing cleanup(): {panels_without_cleanup}"
+        )
+
+
+class TestAppAutoDiscoverCleanup(unittest.TestCase):
+    """Test that app.py auto-discovers panels for cleanup."""
+
+    def setUp(self):
+        """Load the app.py source code."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        self.source = app_path.read_text()
+
+    def test_close_request_auto_discovers_panels(self):
+        """Verify _on_close_request doesn't use hardcoded panel list."""
+        # The old pattern had a hardcoded list like:
+        # panel_attrs = ['diagnostics_panel', 'mesh_tools_panel', ...]
+
+        # The new pattern should use dir(self) or similar to auto-discover
+        self.assertIn('dir(self)', self.source, "Should auto-discover panels with dir()")
+        self.assertIn('endswith(\'_panel\')', self.source, "Should find panels by suffix")
+
+    def test_cleanup_is_called_on_discovered_panels(self):
+        """Verify cleanup() is called on discovered panels."""
+        self.assertIn('panel.cleanup()', self.source)
+
+    def test_cleanup_errors_are_logged(self):
+        """Verify cleanup errors are properly logged."""
+        self.assertIn('Error cleaning up', self.source)
+
+
+class TestTimerCleanupPatterns(unittest.TestCase):
+    """Test timer cleanup pattern implementation across panels."""
+
+    def test_panels_with_timers_have_proper_cleanup(self):
+        """Verify panels that create timers also clean them up."""
+        panels_dir = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels'
+
+        # Patterns that indicate timer creation
+        timer_patterns = [
+            'GLib.timeout_add',
+            'GLib.timeout_add_seconds',
+            '_schedule_timer',
+        ]
+
+        panels_with_uncleaned_timers = []
+
+        for panel_file in panels_dir.glob('*.py'):
+            if panel_file.name.startswith('__'):
+                continue
+
+            source = panel_file.read_text()
+
+            # Check if this file creates timers
+            creates_timers = any(pattern in source for pattern in timer_patterns)
+
+            if creates_timers:
+                # Should have cleanup mechanism
+                has_cleanup = (
+                    'def cleanup' in source or
+                    '_pending_timers' in source or
+                    'GLib.source_remove' in source
+                )
+
+                if not has_cleanup:
+                    panels_with_uncleaned_timers.append(panel_file.name)
+
+        self.assertEqual(
+            panels_with_uncleaned_timers, [],
+            f"Panels creating timers without cleanup: {panels_with_uncleaned_timers}"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
