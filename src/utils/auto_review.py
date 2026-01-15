@@ -504,6 +504,10 @@ class ReviewAgent:
             # Check if stored in self. attribute
             if 'self.' in line and '=' in line and 'GLib.timeout' in line:
                 return True
+            # One-shot UI helper patterns (scroll, focus, etc.) - safe when returning False
+            ui_helper_patterns = ['scroll', 'focus', 'cursor', 'select', 'highlight']
+            if any(p in line.lower() for p in ui_helper_patterns):
+                return True
 
         # shell=True in comments explaining why NOT to use it
         if pattern_name == 'shell_true':
