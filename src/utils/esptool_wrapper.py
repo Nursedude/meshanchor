@@ -322,12 +322,18 @@ class EsptoolWrapper:
 
             try:
                 while True:
+                    # Check for timeout
+                    elapsed = time.time() - start_time
+                    if elapsed > self.FLASH_TIMEOUT:
+                        process.terminate()
+                        raise subprocess.TimeoutExpired(cmd, self.FLASH_TIMEOUT)
+
                     if self._abort_flag.is_set():
                         process.terminate()
                         return FlashResult(
                             success=False,
                             message="Flash aborted by user",
-                            duration_seconds=time.time() - start_time
+                            duration_seconds=elapsed
                         )
 
                     line = process.stdout.readline()

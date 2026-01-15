@@ -1724,7 +1724,12 @@ class MeshtasticdTUI(App):
                 from utils.paths import get_real_user_home
                 settings_dir = get_real_user_home() / ".config" / "meshforge"
             except ImportError:
-                settings_dir = Path.home() / ".config" / "meshforge"
+                import os
+                sudo_user = os.environ.get('SUDO_USER')
+                if sudo_user:
+                    settings_dir = Path(f"/home/{sudo_user}") / ".config" / "meshforge"
+                else:
+                    settings_dir = Path.home() / ".config" / "meshforge"
 
             settings_file = settings_dir / "settings.json"
             if settings_file.exists():
@@ -1745,7 +1750,12 @@ class MeshtasticdTUI(App):
                 from utils.paths import get_real_user_home
                 settings_dir = get_real_user_home() / ".config" / "meshforge"
             except ImportError:
-                settings_dir = Path.home() / ".config" / "meshforge"
+                import os
+                sudo_user = os.environ.get('SUDO_USER')
+                if sudo_user:
+                    settings_dir = Path(f"/home/{sudo_user}") / ".config" / "meshforge"
+                else:
+                    settings_dir = Path.home() / ".config" / "meshforge"
 
             settings_dir.mkdir(parents=True, exist_ok=True)
             settings_file = settings_dir / "settings.json"
