@@ -422,6 +422,14 @@ class GatewayMixin:
                 success = self._gateway_bridge.start()
                 logger.debug(f"[RNS] Gateway start: {'OK' if success else 'FAILED'}")
 
+                # Register bridge with commands module so messaging can use it
+                if success:
+                    try:
+                        from commands import gateway as gateway_cmd
+                        gateway_cmd.set_bridge(self._gateway_bridge)
+                    except Exception as e:
+                        logger.warning(f"[RNS] Could not register bridge: {e}")
+
                 GLib.idle_add(self._gateway_start_complete, success)
             except ImportError as e:
                 logger.debug(f"[RNS] Gateway start failed - missing module: {e}")
