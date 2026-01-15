@@ -1,0 +1,87 @@
+{
+  "_comment": "MeshForge Gateway Template: Meshtastic <> RNS Message Bridge",
+  "_description": "Bridges messages between Meshtastic LoRa mesh and Reticulum (RNS) networks",
+  "_usage": "Copy to ~/.config/meshforge/gateway.json and adjust settings",
+
+  "enabled": true,
+  "auto_start": false,
+  "bridge_mode": "message_bridge",
+
+  "meshtastic": {
+    "host": "localhost",
+    "port": 4403,
+    "channel": 0,
+    "use_mqtt": false,
+    "mqtt_topic": ""
+  },
+
+  "rns": {
+    "config_dir": "",
+    "identity_name": "meshforge_gateway",
+    "announce_interval": 300,
+    "propagation_node": ""
+  },
+
+  "rns_transport": {
+    "enabled": false,
+    "connection_type": "tcp",
+    "device_path": "localhost:4403",
+    "data_speed": 8,
+    "hop_limit": 3,
+    "fragment_timeout_sec": 30,
+    "max_pending_fragments": 100,
+    "enable_stats": true,
+    "stats_interval_sec": 60,
+    "packet_loss_threshold": 0.1,
+    "latency_threshold_ms": 5000
+  },
+
+  "routing_rules": [
+    {
+      "name": "broadcast_mesh_to_rns",
+      "enabled": true,
+      "direction": "mesh_to_rns",
+      "source_filter": "",
+      "dest_filter": "^!ffffffff$",
+      "message_filter": "",
+      "transform": "",
+      "priority": 10
+    },
+    {
+      "name": "broadcast_rns_to_mesh",
+      "enabled": true,
+      "direction": "rns_to_mesh",
+      "source_filter": "",
+      "dest_filter": "",
+      "message_filter": "",
+      "transform": "",
+      "priority": 10
+    },
+    {
+      "name": "direct_messages",
+      "enabled": true,
+      "direction": "bidirectional",
+      "source_filter": "",
+      "dest_filter": "^!(?!ffffffff)",
+      "message_filter": "",
+      "transform": "",
+      "priority": 5
+    }
+  ],
+
+  "default_route": "bidirectional",
+
+  "telemetry": {
+    "share_position": true,
+    "share_battery": true,
+    "share_environment": true,
+    "position_precision": 5,
+    "update_interval": 60
+  },
+
+  "log_level": "INFO",
+  "log_messages": true,
+  "ai_diagnostics_enabled": false,
+  "snr_analysis": true,
+  "anomaly_detection": false
+}

@@ -1,0 +1,105 @@
+# MeshForge Gateway Profile: Heltec V4 (ESP32-S3 High Power)
+# Optimized for gateway/router operation with maximum TX power
+# Apply with: meshtastic --configure heltec_v4_gateway.yaml
+#
+# Heltec V4 Features:
+# - 28dBm TX power (vs 20dBm on V3)
+# - Same pinout as V3
+# - Built-in WiFi/Bluetooth antenna
+# - ESP32-S3 + SX1262
+#
+# Gateway optimizations:
+# - Maximum TX power for range
+# - WiFi enabled for API access
+# - Display disabled (headless)
+# - Store & Forward enabled
+# - Longer packet queues via store_forward
+
+device:
+  role: ROUTER_CLIENT
+  rebroadcast_mode: ALL
+  node_info_broadcast_secs: 900
+  serial_enabled: true
+
+lora:
+  region: US  # Change: US, EU_868, AU_915, etc.
+  modem_preset: LONG_FAST
+  hop_limit: 5
+  tx_enabled: true
+  tx_power: 27  # Heltec V4 max: 28dBm (use 27 for safety margin)
+  # For maximum range gateway:
+  # modem_preset: LONG_SLOW  # Slower but longer range
+
+bluetooth:
+  enabled: false
+  fixed_pin: 123456
+
+power:
+  ls_secs: 0  # No sleep - always listening
+  min_wake_secs: 10
+  wait_bluetooth_secs: 0
+  mesh_sds_timeout_secs: 0
+  sds_secs: 0
+  on_battery_shutdown_after_secs: 0
+
+display:
+  screen_on_secs: 0
+  auto_screen_carousel_secs: 0
+  flip_screen: false
+  oled_type: OLED_AUTO
+  wake_on_tap_or_motion: false
+
+position:
+  gps_enabled: false  # Set true if external GPS connected
+  gps_update_interval: 120
+  position_broadcast_secs: 900
+  position_broadcast_smart_enabled: true
+  fixed_position: false  # Recommended: set true with lat/lon for fixed gateway
+
+telemetry:
+  device_update_interval: 900
+  environment_update_interval: 900
+  environment_measurement_enabled: true
+  power_measurement_enabled: true
+
+modules:
+  serial:
+    enabled: true
+    echo: false
+    mode: PROTO
+    baud: BAUD_DEFAULT
+
+  store_forward:
+    enabled: true
+    heartbeat: false
+    records: 150  # More records for high-traffic gateway
+    history_return_max: 75
+    history_return_window: 7200  # 2 hour window
+
+  neighbor_info:
+    enabled: true
+    update_interval: 900
+
+  range_test:
+    enabled: false
+
+  canned_message:
+    enabled: false
+
+  external_notification:
+    enabled: false
+
+# WiFi Configuration
+network:
+  wifi_enabled: true
+  wifi_ssid: "YOUR_WIFI_SSID"  # CHANGE THIS
+  wifi_psk: "YOUR_WIFI_PASSWORD"  # CHANGE THIS
+  ntp_server: "pool.ntp.org"
+  eth_enabled: false
+  api_server_enabled: true
+
+# Note: V4's higher TX power means:
+# - Better range as a gateway
+# - Higher power consumption
+# - Ensure adequate power supply (5V 2A recommended)
+# - Good antenna is essential

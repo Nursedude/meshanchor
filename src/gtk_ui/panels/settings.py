@@ -628,3 +628,8 @@ class SettingsPanel(Gtk.Box):
     def get_setting(self, key, default=None):
         """Get a setting value"""
         return self._settings.get(key, default)
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

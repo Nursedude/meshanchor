@@ -6,7 +6,7 @@
 [ -z "$PS1" ] && return
 
 # Check if MeshForge is installed
-if [ -x /usr/local/bin/meshforge ] || [ -f /opt/meshforge/src/launcher_tui.py ]; then
+if [ -x /usr/local/bin/meshforge ] || [ -f /opt/meshforge/src/launcher_tui/main.py ]; then
     # Show message on SSH login
     if [ -n "$SSH_TTY" ] || [ -n "$SSH_CLIENT" ]; then
         echo ""

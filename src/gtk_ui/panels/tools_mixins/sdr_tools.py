@@ -46,13 +46,15 @@ class SDRToolsMixin:
         return status
 
     def _on_open_webrx(self, button=None):
-        """Open OpenWebRX in browser"""
+        """Open OpenWebRX in browser (runs in background thread)"""
         url = "http://localhost:8073"
-        try:
-            webbrowser.open(url)
-            GLib.idle_add(self._log, "Opening OpenWebRX at http://localhost:8073")
-        except Exception as e:
-            GLib.idle_add(self._log, f"Error: {e}")
+        def do_open():
+            try:
+                webbrowser.open(url)
+                GLib.idle_add(self._log, "Opening OpenWebRX at http://localhost:8073")
+            except Exception as e:
+                GLib.idle_add(self._log, f"Error: {e}")
+        threading.Thread(target=do_open, daemon=True).start()
 
     def _on_install_openwebrx(self, button=None):
         """Show OpenWebRX installation instructions"""
