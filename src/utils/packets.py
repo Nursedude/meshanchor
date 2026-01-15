@@ -1,8 +1,8 @@
 """
 Packet handling utilities for mesh network fragmentation and reassembly.
 
-Version: 0.4.3-beta
-Updated: 2026-01-06
+Version: 0.4.6-beta
+Updated: 2026-01-15
 
 Adapted from RNS_Over_Meshtastic_Gateway's PacketHandler class.
 Original author: Mark Qvist (MIT License)
