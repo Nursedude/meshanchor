@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-01-12
+> **Last Updated:** 2026-01-15
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -17,10 +17,11 @@
 
 ### Code Quality
 - [x] **Consolidate `get_real_user_home()`** - Reviewed: try/except fallback pattern is intentional for robustness when utils.paths unavailable
-- [ ] **Split large files** (>1500 lines):
-  - `rns.py` (2953 lines) → Extract config editor, MeshChat to separate modules
-  - `main_web.py` (2911 lines) → Flask blueprints
-  - `tools.py` (2695 lines) → Split into rf_tools.py, network_diag.py
+- [x] **Split large files** (>1500 lines) - PARTIAL:
+  - [x] `rns.py` (673 lines now) - Successfully refactored
+  - [x] `main_web.py` (1314 lines now) - Successfully refactored
+  - [ ] `launcher_tui/main.py` (2822 lines) - Extract menu handlers
+  - [ ] `hamclock.py` (2625 lines) - Extract API client
 
 ### Testing
 - [x] **Install pytest** - Available in environment
@@ -133,11 +134,13 @@
 
 | File | Lines | Action |
 |------|-------|--------|
-| rns.py | 2953 | Split: config_editor.py, meshchat_panel.py |
-| main_web.py | 2911 | Split: Flask blueprints |
-| tools.py | 2695 | Split: rf_tools.py, network_diag.py |
-| hamclock.py | ~2400 | Monitor - approaching split threshold |
-| radio_config.py | 1839 | Consider splitting |
+| launcher_tui/main.py | 2822 | Split: extract menu handlers |
+| hamclock.py | 2625 | Split: extract API client |
+| mesh_tools.py | 1953 | Monitor |
+| tools.py | 1842 | Monitor |
+| tui/app.py | 1734 | Consider extracting panes |
+
+*Note: rns.py (673) and main_web.py (1314) successfully refactored.*
 
 ---
 
