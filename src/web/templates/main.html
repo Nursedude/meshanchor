@@ -3,33 +3,48 @@
 <head>
     <title>MeshForge</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Theme System -->
+    <link rel="stylesheet" href="/static/css/theme.css">
     <!-- Leaflet.js for maps -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        /* Map theme.css variables to existing variable names */
         :root {
-            --bg-dark: #1a1a2e;
-            --bg-card: #16213e;
-            --bg-card-hover: #1e2a4a;
-            --text: #eee;
-            --text-muted: #888;
-            --accent: #4CAF50;
-            --accent-hover: #45a049;
+            --bg-dark: var(--bg-primary, #1a1a2e);
+            --bg-card: var(--bg-card, #16213e);
+            --bg-card-hover: var(--bg-secondary, #1e2a4a);
+            --text: var(--text-primary, #eee);
+            --text-muted: var(--text-muted, #888);
+            --accent: var(--accent-primary, #4CAF50);
+            --accent-hover: var(--accent-hover, #45a049);
             --accent-glow: rgba(76, 175, 80, 0.3);
-            --danger: #f44336;
-            --warning: #ff9800;
-            --info: #2196F3;
+            --danger: var(--status-error, #f44336);
+            --warning: var(--status-warning, #ff9800);
+            --info: var(--accent-secondary, #2196F3);
             --shadow-sm: 0 2px 4px rgba(0,0,0,0.2);
             --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
             --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
             --transition-fast: 0.15s ease;
             --transition-normal: 0.25s ease;
         }
+        /* Light mode variable overrides */
+        [data-theme="light"] {
+            --bg-dark: var(--bg-primary);
+            --bg-card: var(--bg-card);
+            --bg-card-hover: var(--bg-secondary);
+            --text: var(--text-primary);
+            --text-muted: var(--text-muted);
+            --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.15);
+            --shadow-lg: 0 8px 24px rgba(0,0,0,0.2);
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, var(--bg-dark) 0%, #0f0f1a 100%);
+            background: var(--bg-primary);
             color: var(--text);
+            transition: background 0.3s ease, color 0.3s ease;
             min-height: 100vh;
         }
         .header {
@@ -377,6 +392,27 @@
             .tab { padding: 10px 15px; font-size: 0.85rem; }
             .radio-info { grid-template-columns: 1fr; }
         }
+
+        /* Theme toggle button */
+        .theme-toggle {
+            background: var(--bg-card);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .theme-toggle:hover {
+            background: var(--bg-card-hover);
+            transform: scale(1.05);
+        }
+        .theme-toggle:active {
+            transform: scale(0.95);
+        }
     </style>
 </head>
 <body>
@@ -386,6 +422,9 @@
             <span class="version">v{{ version }} | Mesh Network Operations Center</span>
         </div>
         <div class="nav">
+            <button class="theme-toggle" id="theme-toggle" title="Toggle theme (light/dark/system)">
+                <span id="theme-icon">🌙</span>
+            </button>
             {% if auth_enabled %}
             <a href="/logout">Logout</a>
             {% endif %}
@@ -1518,6 +1557,34 @@
                 }
             }, 100);
         });
+    </script>
+
+    <!-- Theme System -->
+    <script src="/static/js/theme.js"></script>
+    <script>
+        // Theme toggle button handler
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+
+        function updateThemeIcon() {
+            const theme = ThemeManager.getResolvedTheme();
+            if (theme === 'dark') {
+                themeIcon.textContent = '🌙';
+            } else {
+                themeIcon.textContent = '☀️';
+            }
+        }
+
+        themeToggle.addEventListener('click', () => {
+            ThemeManager.toggle();
+            updateThemeIcon();
+        });
+
+        // Listen for theme changes (from system preference or other tabs)
+        window.addEventListener('themechange', updateThemeIcon);
+
+        // Initialize icon on load
+        document.addEventListener('DOMContentLoaded', updateThemeIcon);
     </script>
 </body>
 </html>
