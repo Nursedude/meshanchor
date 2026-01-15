@@ -210,34 +210,94 @@ class GatewayMixin:
         mesh_iface_box.set_margin_bottom(5)
 
         mesh_desc = Gtk.Label(
-            label="Install the RNS-Meshtastic interface to bridge networks.\n"
-                  "Requires: pip install meshtastic"
+            label="Configure how RNS connects to your Meshtastic device.\n"
+                  "TCP recommended when using meshtasticd daemon."
         )
         mesh_desc.set_xalign(0)
         mesh_desc.add_css_class("dim-label")
         mesh_desc.set_wrap(True)
         mesh_iface_box.append(mesh_desc)
 
-        # Install button row
-        install_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # Connection type selection
+        conn_type_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        conn_type_label = Gtk.Label(label="Connection:")
+        conn_type_label.set_xalign(0)
+        conn_type_label.set_size_request(100, -1)
+        conn_type_row.append(conn_type_label)
+
+        self.mesh_conn_type = Gtk.DropDown.new_from_strings([
+            "TCP (meshtasticd)",
+            "Serial Port",
+            "Bluetooth LE"
+        ])
+        self.mesh_conn_type.set_tooltip_text("How to connect to Meshtastic device")
+        self.mesh_conn_type.connect("notify::selected", self._on_mesh_conn_type_changed)
+        conn_type_row.append(self.mesh_conn_type)
+
+        # Auto-detect button
+        detect_btn = Gtk.Button(label="Detect")
+        detect_btn.set_tooltip_text("Auto-detect meshtasticd or serial devices")
+        detect_btn.connect("clicked", self._on_detect_meshtastic_connection)
+        conn_type_row.append(detect_btn)
+
+        mesh_iface_box.append(conn_type_row)
+
+        # Connection details input (changes based on type)
+        self.mesh_conn_details_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        details_label = Gtk.Label(label="Address:")
+        details_label.set_xalign(0)
+        details_label.set_size_request(100, -1)
+        self.mesh_conn_details_box.append(details_label)
+
+        self.mesh_conn_entry = Gtk.Entry()
+        self.mesh_conn_entry.set_text("127.0.0.1:4403")
+        self.mesh_conn_entry.set_hexpand(True)
+        self.mesh_conn_entry.set_tooltip_text("TCP: host:port | Serial: /dev/ttyUSB0 | BLE: device_name")
+        self.mesh_conn_details_box.append(self.mesh_conn_entry)
+
+        mesh_iface_box.append(self.mesh_conn_details_box)
+
+        # Radio speed preset
+        speed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        speed_label = Gtk.Label(label="Speed:")
+        speed_label.set_xalign(0)
+        speed_label.set_size_request(100, -1)
+        speed_row.append(speed_label)
+
+        self.mesh_speed_dropdown = Gtk.DropDown.new_from_strings([
+            "8 - SHORT_TURBO (21875 bps, ~3km)",
+            "6 - SHORT_FAST (10937 bps, ~5km)",
+            "4 - MEDIUM_FAST (3516 bps, ~12km)",
+            "0 - LONG_FAST (1066 bps, ~30km)",
+            "7 - LONG_MODERATE (878 bps, ~40km)",
+            "1 - LONG_SLOW (293 bps, ~80km)",
+        ])
+        self.mesh_speed_dropdown.set_selected(0)  # Default to TURBO
+        speed_row.append(self.mesh_speed_dropdown)
+        mesh_iface_box.append(speed_row)
+
+        # Action buttons row
+        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        apply_config_btn = Gtk.Button(label="Apply Config")
+        apply_config_btn.set_tooltip_text("Write Meshtastic Interface config to ~/.reticulum/config")
+        apply_config_btn.add_css_class("suggested-action")
+        apply_config_btn.connect("clicked", self._on_apply_meshtastic_config)
+        action_row.append(apply_config_btn)
 
         install_iface_btn = Gtk.Button(label="Install Interface")
         install_iface_btn.set_tooltip_text("Download Meshtastic_Interface.py to ~/.reticulum/interfaces/")
         install_iface_btn.connect("clicked", self._install_meshtastic_interface)
-        install_row.append(install_iface_btn)
+        action_row.append(install_iface_btn)
 
-        add_config_btn = Gtk.Button(label="Add Config Template")
-        add_config_btn.set_tooltip_text("Add Meshtastic Interface config to RNS config file")
-        add_config_btn.connect("clicked", self._add_meshtastic_interface_config)
-        install_row.append(add_config_btn)
+        edit_manual_btn = Gtk.Button(label="Edit Manually")
+        edit_manual_btn.set_tooltip_text("Edit RNS config in terminal with nano")
+        edit_manual_btn.connect("clicked", lambda b: self._edit_config_terminal(
+            get_real_user_home() / ".reticulum" / "config"
+        ))
+        action_row.append(edit_manual_btn)
 
-        # Edit interface file button
-        edit_iface_btn = Gtk.Button(label="Edit Interface")
-        edit_iface_btn.set_tooltip_text("Edit Meshtastic_Interface.py in terminal (set speed, connection type)")
-        edit_iface_btn.connect("clicked", self._edit_meshtastic_interface)
-        install_row.append(edit_iface_btn)
-
-        mesh_iface_box.append(install_row)
+        mesh_iface_box.append(action_row)
 
         # Status label
         self.mesh_iface_status = Gtk.Label(label="")
@@ -245,13 +305,11 @@ class GatewayMixin:
         self.mesh_iface_status.add_css_class("dim-label")
         mesh_iface_box.append(self.mesh_iface_status)
 
-        # Check if already installed
-        iface_file = get_real_user_home() / ".reticulum" / "interfaces" / "Meshtastic_Interface.py"
-        if iface_file.exists():
-            self.mesh_iface_status.set_label("Meshtastic_Interface.py installed")
-
         mesh_iface_expander.set_child(mesh_iface_box)
         box.append(mesh_iface_expander)
+
+        # Auto-detect on startup
+        GLib.idle_add(self._on_detect_meshtastic_connection, None)
 
         frame.set_child(box)
         parent.append(frame)
@@ -662,3 +720,145 @@ class GatewayMixin:
         dialog.present()
 
         return False
+
+    def _on_mesh_conn_type_changed(self, dropdown, param):
+        """Handle connection type dropdown change"""
+        selected = dropdown.get_selected()
+        if selected == 0:  # TCP
+            self.mesh_conn_entry.set_text("127.0.0.1:4403")
+            self.mesh_conn_entry.set_placeholder_text("host:port (e.g., 127.0.0.1:4403)")
+        elif selected == 1:  # Serial
+            self.mesh_conn_entry.set_text("/dev/ttyUSB0")
+            self.mesh_conn_entry.set_placeholder_text("/dev/ttyUSB0 or /dev/ttyACM0")
+        elif selected == 2:  # BLE
+            self.mesh_conn_entry.set_text("")
+            self.mesh_conn_entry.set_placeholder_text("Bluetooth device name")
+
+    def _on_detect_meshtastic_connection(self, button):
+        """Auto-detect meshtasticd or serial devices"""
+        def do_detect():
+            detected_type = None
+            detected_value = None
+            status_msg = ""
+
+            # Check for meshtasticd on TCP port 4403
+            import socket
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('localhost', 4403))
+                sock.close()
+                if result == 0:
+                    detected_type = 0  # TCP
+                    detected_value = "127.0.0.1:4403"
+                    status_msg = "Detected meshtasticd on TCP port 4403"
+            except Exception:
+                pass
+
+            # If no TCP, check for serial devices
+            if detected_type is None:
+                serial_devices = []
+                for pattern in ['ttyUSB*', 'ttyACM*']:
+                    serial_devices.extend(Path('/dev').glob(pattern))
+                if serial_devices:
+                    detected_type = 1  # Serial
+                    detected_value = str(serial_devices[0])
+                    status_msg = f"Detected serial device: {detected_value}"
+
+            if detected_type is not None:
+                GLib.idle_add(self._apply_detected_connection, detected_type, detected_value, status_msg)
+            else:
+                GLib.idle_add(self._set_mesh_status, "No Meshtastic connection detected")
+
+        threading.Thread(target=do_detect, daemon=True).start()
+
+    def _apply_detected_connection(self, conn_type, conn_value, status_msg):
+        """Apply detected connection settings to UI"""
+        self.mesh_conn_type.set_selected(conn_type)
+        self.mesh_conn_entry.set_text(conn_value)
+        self.mesh_iface_status.set_label(status_msg)
+        logger.debug(f"[RNS] Auto-detected: {status_msg}")
+        return False
+
+    def _set_mesh_status(self, msg):
+        """Set mesh interface status label"""
+        self.mesh_iface_status.set_label(msg)
+        return False
+
+    def _on_apply_meshtastic_config(self, button):
+        """Apply Meshtastic Interface config to RNS config file"""
+        conn_type = self.mesh_conn_type.get_selected()
+        conn_value = self.mesh_conn_entry.get_text().strip()
+        speed_idx = self.mesh_speed_dropdown.get_selected()
+
+        # Map speed dropdown index to data_speed values
+        speed_map = {0: 8, 1: 6, 2: 4, 3: 0, 4: 7, 5: 1}
+        data_speed = speed_map.get(speed_idx, 8)
+
+        # Build connection line based on type
+        if conn_type == 0:  # TCP
+            conn_line = f"  tcp_port = {conn_value}"
+        elif conn_type == 1:  # Serial
+            conn_line = f"  port = {conn_value}"
+        elif conn_type == 2:  # BLE
+            conn_line = f"  ble_port = {conn_value}"
+        else:
+            conn_line = f"  tcp_port = 127.0.0.1:4403"
+
+        config_section = f'''
+# ===== MESHTASTIC INTERFACE =====
+# RNS over Meshtastic - configured by MeshForge
+# Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+
+[[Meshtastic Interface]]
+  type = Meshtastic_Interface
+  enabled = true
+  mode = gateway
+{conn_line}
+  data_speed = {data_speed}
+  hop_limit = 3
+  bitrate = 500
+'''
+
+        def do_apply():
+            try:
+                config_file = get_real_user_home() / ".reticulum" / "config"
+
+                if not config_file.exists():
+                    GLib.idle_add(self._set_mesh_status, "RNS config not found - run rnsd first")
+                    return
+
+                content = config_file.read_text()
+
+                # Check if Meshtastic Interface already exists
+                if 'Meshtastic Interface' in content:
+                    # Remove existing section and add new one
+                    import re
+                    # Pattern to match the entire Meshtastic Interface section
+                    pattern = r'\n*# =+ MESHTASTIC INTERFACE =+\n.*?\[\[Meshtastic Interface\]\].*?(?=\n\n\[\[|\n*$)'
+                    content = re.sub(pattern, '', content, flags=re.DOTALL)
+                    # Also try simpler pattern for legacy configs
+                    pattern2 = r'\[\[Meshtastic Interface\]\][^\[]*'
+                    content = re.sub(pattern2, '', content)
+
+                # Append new config
+                content = content.rstrip() + '\n' + config_section
+
+                # Create backup
+                backup_path = config_file.with_suffix('.config.bak')
+                config_file.rename(backup_path)
+
+                # Write new config
+                config_file.write_text(content)
+
+                GLib.idle_add(self._set_mesh_status,
+                    f"Config saved! Restart rnsd to apply. (backup: {backup_path.name})")
+                GLib.idle_add(lambda: self.main_window.set_status_message("Meshtastic Interface config applied"))
+                logger.info(f"[RNS] Meshtastic Interface config applied: {conn_line}")
+
+            except Exception as e:
+                logger.error(f"[RNS] Failed to apply config: {e}")
+                GLib.idle_add(self._set_mesh_status, f"Error: {e}")
+
+        self._set_mesh_status("Saving config...")
+        threading.Thread(target=do_apply, daemon=True).start()
