@@ -57,9 +57,13 @@ except ImportError:
     MeshtasticConnectionManager = None
     _meshtastic_mgr = None
 
-# Configure Flask with external templates
+# Configure Flask with external templates and static files
 _template_folder = Path(__file__).parent / 'web' / 'templates'
-app = Flask(__name__, template_folder=str(_template_folder))
+_static_folder = Path(__file__).parent / 'web' / 'static'
+app = Flask(__name__,
+            template_folder=str(_template_folder),
+            static_folder=str(_static_folder),
+            static_url_path='/static')
 app.secret_key = secrets.token_hex(32)
 
 # Register modular blueprints (new architecture)
