@@ -385,24 +385,16 @@ class GatewayMixin:
                         if meshtastic_status.fix_hint:
                             service_issues.append(f"  Fix: {meshtastic_status.fix_hint}")
 
-                    # Check rnsd service OR internal RNS instance
-                    rnsd_status = check_service('rnsd')
-                    rns_available = rnsd_status.available
-
-                    # Also check if RNS is already initialized internally (e.g., by MeshForge)
-                    if not rns_available:
-                        try:
-                            import RNS
-                            if RNS.Reticulum.get_instance() is not None:
-                                rns_available = True
-                                logger.debug("[RNS] Using internal RNS instance (no external rnsd needed)")
-                        except Exception:
-                            pass
-
-                    if not rns_available:
-                        service_issues.append(f"rnsd: {rnsd_status.message}")
-                        if rnsd_status.fix_hint:
-                            service_issues.append(f"  Fix: {rnsd_status.fix_hint}")
+                    # Check if RNS module is available (gateway will initialize it)
+                    # Don't require external rnsd - MeshForge can be the RNS instance
+                    rns_available = False
+                    try:
+                        import RNS
+                        rns_available = True
+                        logger.debug("[RNS] RNS module available - gateway will initialize")
+                    except ImportError:
+                        service_issues.append("RNS module not installed")
+                        service_issues.append("  Fix: pip install rns")
 
                 if service_issues:
                     logger.warning(f"[RNS] Gateway pre-checks failed: {service_issues}")
