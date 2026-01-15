@@ -1,8 +1,8 @@
 """
 System utilities for OS detection, cross-platform support, and security.
 
-Version: 0.4.3-beta
-Updated: 2026-01-06
+Version: 0.4.6-beta
+Updated: 2026-01-15
 
 Patterns adopted from RNS_Over_Meshtastic_Gateway for cross-platform reliability.
 """
