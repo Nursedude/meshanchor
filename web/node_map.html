@@ -150,10 +150,63 @@
             height: 12px;
             border-radius: 50%;
         }
+
+        /* Offline indicator */
+        .offline-indicator {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: #ff5722;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .offline-indicator.visible {
+            display: block;
+        }
+
+        /* Cache status in control panel */
+        .cache-status {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #333;
+            font-size: 12px;
+        }
+        .cache-status .label {
+            color: #888;
+        }
+        .btn-cache {
+            width: 100%;
+            margin-top: 8px;
+            padding: 6px;
+            background: #333;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-cache:hover {
+            background: #444;
+        }
+        .btn-cache:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+
+    <!-- Offline mode indicator -->
+    <div class="offline-indicator" id="offline-indicator">
+        Offline Mode - Using Cached Tiles
+    </div>
 
     <div class="control-panel">
         <h4>Node Statistics</h4>
@@ -190,6 +243,23 @@
         </div>
 
         <button class="btn-refresh" onclick="refreshNodes()">Refresh</button>
+
+        <div class="cache-status" id="cache-status">
+            <div class="stat-row">
+                <span class="label">Cached Tiles:</span>
+                <span id="cache-count">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="label">Cache Size:</span>
+                <span id="cache-size">--</span>
+            </div>
+            <button class="btn-cache" id="btn-download-tiles" onclick="downloadCurrentArea()">
+                Cache Current View
+            </button>
+            <button class="btn-cache" onclick="clearTileCache()">
+                Clear Tile Cache
+            </button>
+        </div>
     </div>
 
     <div class="legend">
@@ -220,13 +290,154 @@
     </div>
 
     <script>
+        // ============================================
+        // Service Worker Registration for Offline Tiles
+        // ============================================
+        let swRegistration = null;
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw-tiles.js')
+                .then(reg => {
+                    swRegistration = reg;
+                    console.log('[Map] Tile cache service worker registered');
+                    updateCacheStatus();
+                })
+                .catch(err => {
+                    console.warn('[Map] Service worker registration failed:', err);
+                    // Hide cache controls if SW not available
+                    document.getElementById('cache-status').style.display = 'none';
+                });
+        } else {
+            document.getElementById('cache-status').style.display = 'none';
+        }
+
+        // Offline detection
+        function updateOnlineStatus() {
+            const indicator = document.getElementById('offline-indicator');
+            if (!navigator.onLine) {
+                indicator.classList.add('visible');
+            } else {
+                indicator.classList.remove('visible');
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
+
+        // Update cache statistics
+        async function updateCacheStatus() {
+            if (!swRegistration || !navigator.serviceWorker.controller) {
+                // Wait for controller
+                setTimeout(updateCacheStatus, 1000);
+                return;
+            }
+
+            try {
+                const channel = new MessageChannel();
+                channel.port1.onmessage = (event) => {
+                    const stats = event.data;
+                    if (!stats.error) {
+                        document.getElementById('cache-count').textContent = stats.tileCount;
+                        document.getElementById('cache-size').textContent = stats.estimatedSizeMB + ' MB';
+                    }
+                };
+                navigator.serviceWorker.controller.postMessage(
+                    { action: 'getCacheStats' },
+                    [channel.port2]
+                );
+            } catch (e) {
+                console.warn('[Map] Failed to get cache stats:', e);
+            }
+        }
+
+        // Download tiles for current map view
+        async function downloadCurrentArea() {
+            if (!swRegistration || !navigator.serviceWorker.controller) {
+                alert('Tile caching not available');
+                return;
+            }
+
+            const btn = document.getElementById('btn-download-tiles');
+            btn.disabled = true;
+            btn.textContent = 'Downloading...';
+
+            const bounds = map.getBounds();
+            const zoom = map.getZoom();
+
+            try {
+                const channel = new MessageChannel();
+                channel.port1.onmessage = (event) => {
+                    const result = event.data;
+                    btn.disabled = false;
+                    btn.textContent = 'Cache Current View';
+
+                    if (result.error) {
+                        alert('Download failed: ' + result.error);
+                    } else {
+                        alert(`Downloaded ${result.downloaded} tiles (${result.failed} failed)`);
+                        updateCacheStatus();
+                    }
+                };
+
+                navigator.serviceWorker.controller.postMessage({
+                    action: 'downloadTiles',
+                    data: {
+                        bounds: {
+                            north: bounds.getNorth(),
+                            south: bounds.getSouth(),
+                            east: bounds.getEast(),
+                            west: bounds.getWest()
+                        },
+                        minZoom: Math.max(1, zoom - 2),
+                        maxZoom: Math.min(18, zoom + 2)
+                    }
+                }, [channel.port2]);
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = 'Cache Current View';
+                alert('Download failed: ' + e.message);
+            }
+        }
+
+        // Clear tile cache
+        async function clearTileCache() {
+            if (!swRegistration || !navigator.serviceWorker.controller) {
+                alert('Tile caching not available');
+                return;
+            }
+
+            if (!confirm('Clear all cached map tiles?')) return;
+
+            const channel = new MessageChannel();
+            channel.port1.onmessage = (event) => {
+                if (event.data.success) {
+                    alert('Tile cache cleared');
+                    updateCacheStatus();
+                }
+            };
+
+            navigator.serviceWorker.controller.postMessage(
+                { action: 'clearCache' },
+                [channel.port2]
+            );
+        }
+
+        // Periodically update cache status
+        setInterval(updateCacheStatus, 30000);
+
+        // ============================================
+        // Map Initialization
+        // ============================================
+
         // Initialize map
         const map = L.map('map').setView([20.0, -155.5], 8); // Default to Hawaii
 
-        // Add tile layer (dark mode)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        // Add tile layer (dark mode) with error handling for offline
+        const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-            maxZoom: 19
+            maxZoom: 19,
+            errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
         }).addTo(map);
 
         // Node markers layer group
