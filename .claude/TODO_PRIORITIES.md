@@ -5,6 +5,28 @@
 
 ---
 
+## Branch Strategy
+
+| Branch | Purpose | Merges To |
+|--------|---------|-----------|
+| `main` | Stable releases, fixes, safe improvements | - |
+| `beta-from-main` | UI polish, features being tested | → main |
+| `alpha-from-main` | Experimental (firmware, hardware) | → beta |
+
+### Feature → Branch Mapping
+
+| Feature | Branch | Risk Level |
+|---------|--------|------------|
+| Offline map tiles | main | Low |
+| Web UI dark mode | main | Low |
+| Custom markers | main | Low |
+| Device backup/restore | beta | Medium |
+| TUI dark mode + nav | beta | Low |
+| NanoVNA plugin | alpha | Medium |
+| Firmware flashing | alpha | **High** |
+
+---
+
 ## 🔴 Priority 1: Critical / Core Functionality
 
 ### Gateway Bridge (rns_over_meshtastic_gateway)
@@ -41,12 +63,12 @@
 ### Plugins
 - [x] `meshcore.py:81` - Implement actual MeshCore connection (2026-01-12)
 - [x] `meshcore.py:107` - Implement actual message sending (2026-01-12)
-- [ ] **MQTT dashboard** - Bridge to MQTT brokers
-- [ ] **NanoVNA plugin** - Antenna tuning integration
+- [ ] **MQTT dashboard** - Bridge to MQTT brokers → `main`
+- [ ] **NanoVNA plugin** - Antenna tuning integration → `alpha`
 
-### Node Firmware
-- [ ] **Firmware flashing from GTK** - Flash meshtastic firmware
-- [ ] **Device backup/restore** - Save and restore node configs
+### Node Firmware (→ `alpha` branch)
+- [ ] **Firmware flashing from GTK** - Flash meshtastic firmware ⚠️ HIGH RISK
+- [ ] **Device backup/restore** - Save and restore node configs → `beta`
 
 ---
 
@@ -55,19 +77,19 @@
 ### Dark Mode
 - [x] **CSS variable foundation** - Theme system with light/dark support (2026-01-12)
 - [x] GTK dark mode toggle - Settings panel with Force Dark Mode switch (verified 2026-01-15)
-- [ ] Web UI dark mode (integration)
-- [ ] TUI dark mode
-- [ ] Unified theme system
+- [ ] Web UI dark mode (integration) → `main`
+- [ ] TUI dark mode → `beta`
+- [ ] Unified theme system → `beta`
 
-### TUI Improvements
+### TUI Improvements (→ `beta` branch)
 - [ ] Better navigation
 - [ ] Keyboard shortcuts
 - [ ] Status bar with key info
 
 ### Map Panel
 - [x] Memory leak fix (timer cleanup)
-- [ ] Offline map tiles
-- [ ] Custom markers for node types
+- [ ] Offline map tiles → `main`
+- [ ] Custom markers for node types → `main`
 
 ---
 
