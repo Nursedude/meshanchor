@@ -222,9 +222,12 @@ class RNSMeshtasticBridge:
 
         try:
             if self._mesh_interface:
+                # For broadcasts, use ^all instead of None
+                dest = destination if destination else "^all"
+                logger.info(f"Sending to Meshtastic: dest={dest}, ch={channel}, msg={message[:50]}")
                 self._mesh_interface.sendText(
                     message,
-                    destinationId=destination,
+                    destinationId=dest,
                     channelIndex=channel
                 )
                 return True
