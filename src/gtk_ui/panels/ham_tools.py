@@ -506,49 +506,10 @@ class HamToolsPanel(Gtk.Box):
         fetch_psk_btn.set_tooltip_text("Fetch current PSKReporter statistics")
         psk_btn_row.append(fetch_psk_btn)
 
-        open_psk_btn = Gtk.Button(label="Open Map")
-        open_psk_btn.connect("clicked", lambda b: self._open_url("https://pskreporter.info/pskmap.html"))
-        open_psk_btn.set_tooltip_text("Open PSKReporter live map in browser")
-        psk_btn_row.append(open_psk_btn)
-
         psk_box.append(psk_btn_row)
 
         psk_frame.set_child(psk_box)
         box.append(psk_frame)
-
-        # External Resources
-        resources_frame = Gtk.Frame()
-        resources_frame.set_label("Propagation Resources")
-        resources_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        resources_box.set_margin_start(15)
-        resources_box.set_margin_end(15)
-        resources_box.set_margin_top(10)
-        resources_box.set_margin_bottom(10)
-
-        resources = [
-            ("VOACAP Online", "https://www.voacap.com/hf/", "Detailed HF propagation predictions"),
-            ("Solar Ham", "https://www.solarham.net/", "Real-time solar activity"),
-            ("DX Heat", "https://dxheat.com/", "DX cluster and propagation"),
-            ("PSK Reporter", "https://pskreporter.info/pskmap.html", "Live propagation map"),
-        ]
-
-        for name, url, desc in resources:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-
-            btn = Gtk.Button(label=name)
-            btn.connect("clicked", lambda b, u=url: self._open_url(u))
-            btn.set_tooltip_text(url)
-            row.append(btn)
-
-            desc_lbl = Gtk.Label(label=desc)
-            desc_lbl.add_css_class("dim-label")
-            desc_lbl.set_xalign(0)
-            row.append(desc_lbl)
-
-            resources_box.append(row)
-
-        resources_frame.set_child(resources_box)
-        box.append(resources_frame)
 
         scrolled.set_child(box)
 
@@ -683,10 +644,6 @@ class HamToolsPanel(Gtk.Box):
         self._hamqth_pass_entry.set_width_chars(12)
         hamqth_row.append(self._hamqth_pass_entry)
 
-        hamqth_link = Gtk.Button(label="Get Account")
-        hamqth_link.connect("clicked", lambda b: self._open_url("https://www.hamqth.com/register.php"))
-        hamqth_row.append(hamqth_link)
-
         creds_box.append(hamqth_row)
 
         # QRZ credentials
@@ -704,10 +661,6 @@ class HamToolsPanel(Gtk.Box):
         self._qrz_pass_entry.set_visibility(False)
         self._qrz_pass_entry.set_width_chars(12)
         qrz_row.append(self._qrz_pass_entry)
-
-        qrz_link = Gtk.Button(label="Get Account")
-        qrz_link.connect("clicked", lambda b: self._open_url("https://www.qrz.com/page/xml_data.html"))
-        qrz_row.append(qrz_link)
 
         creds_box.append(qrz_row)
 
@@ -1633,16 +1586,24 @@ Class: {lic_class}
             self._output_message(f"Unknown source: {source}")
 
     def _output_message(self, message: str):
-        """Add message to output"""
+        """Add message to output and auto-scroll to show it"""
         buffer = self._output_text.get_buffer()
         end_iter = buffer.get_end_iter()
         timestamp = datetime.now().strftime("%H:%M:%S")
         buffer.insert(end_iter, f"[{timestamp}] {message}\n")
+        # Auto-scroll to show new content
+        end_mark = buffer.create_mark(None, buffer.get_end_iter(), False)
+        self._output_text.scroll_to_mark(end_mark, 0.0, False, 0.0, 1.0)
+        buffer.delete_mark(end_mark)
 
     def _set_output(self, text: str):
-        """Replace entire output with text"""
+        """Replace entire output with text and scroll to top"""
         buffer = self._output_text.get_buffer()
         buffer.set_text(text)
+        # Scroll to top to show beginning of output
+        start_mark = buffer.create_mark(None, buffer.get_start_iter(), True)
+        self._output_text.scroll_to_mark(start_mark, 0.0, False, 0.0, 0.0)
+        buffer.delete_mark(start_mark)
 
     def _clear_output(self):
         """Clear output"""

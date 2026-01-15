@@ -52,6 +52,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
     def __init__(self, main_window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         self.main_window = main_window
+        self._system_stats_timer = None  # Track timer for cleanup
 
         self.set_margin_start(20)
         self.set_margin_end(20)
@@ -74,10 +75,16 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         subtitle.set_xalign(0)
         self.append(subtitle)
 
-        # Scrolled container for tools
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Use Paned layout: tools on top (scrollable), output always visible on bottom
+        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        paned.set_vexpand(True)
+        paned.set_shrink_start_child(False)
+        paned.set_shrink_end_child(False)
+
+        # Top pane: Scrolled container for tools
+        tools_scroll = Gtk.ScrolledWindow()
+        tools_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tools_scroll.set_vexpand(True)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         content.set_margin_top(15)
@@ -166,8 +173,8 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         sys_frame.set_child(sys_box)
         content.append(sys_frame)
 
-        # Start system monitor update timer
-        GLib.timeout_add_seconds(2, self._update_system_stats)
+        # Start system monitor update timer (store ID for cleanup)
+        self._system_stats_timer = GLib.timeout_add_seconds(2, self._update_system_stats)
 
         # Network Tools Section
         net_frame = Gtk.Frame()
@@ -303,18 +310,6 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         rf_box.set_margin_bottom(10)
 
         rf_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-
-        # Site Planner button - prominent position
-        planner_btn = Gtk.Button(label="Site Planner")
-        planner_btn.add_css_class("suggested-action")
-        planner_btn.connect("clicked", self._on_site_planner)
-        rf_buttons.append(planner_btn)
-
-        # External Line of Sight tool (backup)
-        los_btn = Gtk.Button(label="External LOS Tool")
-        los_btn.set_tooltip_text("Open ScadaCore RF LOS tool in browser")
-        los_btn.connect("clicked", self._on_line_of_sight)
-        rf_buttons.append(los_btn)
 
         link_btn = Gtk.Button(label="Link Budget Calculator")
         link_btn.connect("clicked", self._on_link_budget)
@@ -790,10 +785,14 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         mgr_frame.set_child(mgr_box)
         content.append(mgr_frame)
 
-        # Output log
+        # Set up top pane (tools in scrollable area)
+        tools_scroll.set_child(content)
+        paned.set_start_child(tools_scroll)
+
+        # Output log - always visible in bottom pane
         log_frame = Gtk.Frame()
-        log_frame.set_label("Output")
-        log_frame.set_vexpand(True)
+        log_frame.set_label("Output - Click any tool button to see results here")
+        log_frame.set_vexpand(False)
 
         self.output_view = Gtk.TextView()
         self.output_view.set_editable(False)
@@ -801,36 +800,58 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         self.output_view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.output_buffer = self.output_view.get_buffer()
 
-        log_scroll = Gtk.ScrolledWindow()
-        log_scroll.set_min_content_height(200)
-        log_scroll.set_child(self.output_view)
+        self.log_scroll = Gtk.ScrolledWindow()
+        self.log_scroll.set_min_content_height(150)
+        self.log_scroll.set_vexpand(True)
+        self.log_scroll.set_child(self.output_view)
 
         log_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         log_box.set_margin_start(10)
         log_box.set_margin_end(10)
         log_box.set_margin_top(10)
         log_box.set_margin_bottom(10)
-        log_box.append(log_scroll)
+        log_box.set_vexpand(True)
+        log_box.append(self.log_scroll)
 
+        # Button row for output controls
+        output_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         clear_btn = Gtk.Button(label="Clear Log")
         clear_btn.connect("clicked", lambda b: self.output_buffer.set_text(""))
-        log_box.append(clear_btn)
+        output_buttons.append(clear_btn)
 
-        log_frame.set_child(log_box)
-        content.append(log_frame)
-
-        scrolled.set_child(content)
-        self.append(scrolled)
-
-        # Refresh button
         refresh_btn = Gtk.Button(label="Refresh Status")
         refresh_btn.connect("clicked", lambda b: self._refresh_status())
-        self.append(refresh_btn)
+        output_buttons.append(refresh_btn)
+
+        log_box.append(output_buttons)
+
+        log_frame.set_child(log_box)
+        paned.set_end_child(log_frame)
+
+        # Set initial position - give output ~30% of vertical space
+        paned.set_position(400)
+
+        self.append(paned)
 
     def _log(self, message):
-        """Add message to log"""
+        """Add message to log and auto-scroll to show latest output.
+
+        This method is called from both main thread and via GLib.idle_add
+        from background threads. The insert happens immediately, then we
+        use a short timeout to scroll after GTK processes the text change.
+        """
         end_iter = self.output_buffer.get_end_iter()
         self.output_buffer.insert(end_iter, message + "\n")
+        # Use timeout to scroll after text is rendered (avoids nested idle_add issues)
+        GLib.timeout_add(50, self._scroll_to_end)
+
+    def _scroll_to_end(self):
+        """Scroll output view to the end"""
+        if hasattr(self, 'log_scroll') and self.log_scroll:
+            adj = self.log_scroll.get_vadjustment()
+            if adj:
+                adj.set_value(adj.get_upper() - adj.get_page_size())
+        return False  # Don't repeat timeout
 
     def _on_open_htop(self, button):
         """Open htop in a terminal"""
@@ -1808,3 +1829,14 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
                 GLib.idle_add(self._log, "  Port 29716 is free ✓")
         except Exception:
             pass
+
+    def cleanup(self):
+        """Cleanup resources when panel is destroyed.
+
+        Called by MainWindow._on_close_request() to stop timers and
+        prevent memory leaks from orphaned update loops.
+        """
+        if self._system_stats_timer:
+            GLib.source_remove(self._system_stats_timer)
+            self._system_stats_timer = None
+            logger.debug("Tools panel: system stats timer cleaned up")

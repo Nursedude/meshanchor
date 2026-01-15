@@ -375,7 +375,7 @@ class MessagingPanel(Gtk.Box):
                     pass
 
             from_id = msg.get('from_id', '?')
-            to_id = msg.get('to_id', 'broadcast')
+            to_id = msg.get('to_id') or 'broadcast'
             content = msg.get('content', '')
             network = msg.get('network', '')
 
@@ -471,3 +471,8 @@ class MessagingPanel(Gtk.Box):
 
         thread = threading.Thread(target=clear, daemon=True)
         thread.start()
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

@@ -131,7 +131,13 @@ class DiagnosticsPanel(Gtk.Box):
             Gtk.Label(label="Network Tests")
         )
 
-        # Tab 4: Reports
+        # Tab 4: System Logs (journalctl)
+        notebook.append_page(
+            self._create_system_logs_tab(),
+            Gtk.Label(label="System Logs")
+        )
+
+        # Tab 5: Reports
         notebook.append_page(
             self._create_reports_tab(),
             Gtk.Label(label="Reports")
@@ -396,6 +402,193 @@ class DiagnosticsPanel(Gtk.Box):
 
         scrolled.set_child(box)
         return scrolled
+
+    def _create_system_logs_tab(self) -> Gtk.Widget:
+        """Create system logs tab with journalctl integration."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Controls row
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        # Service filter
+        controls.append(Gtk.Label(label="Service:"))
+        self.log_service_dropdown = Gtk.DropDown.new_from_strings([
+            "meshforge", "meshtasticd", "rnsd", "All MeshForge Services"
+        ])
+        self.log_service_dropdown.set_selected(0)
+        controls.append(self.log_service_dropdown)
+
+        # Lines filter
+        controls.append(Gtk.Label(label="Lines:"))
+        self.log_lines_dropdown = Gtk.DropDown.new_from_strings([
+            "50", "100", "200", "500"
+        ])
+        self.log_lines_dropdown.set_selected(1)  # Default 100
+        controls.append(self.log_lines_dropdown)
+
+        # Priority filter
+        controls.append(Gtk.Label(label="Priority:"))
+        self.log_priority_dropdown = Gtk.DropDown.new_from_strings([
+            "All", "Error", "Warning", "Info", "Debug"
+        ])
+        self.log_priority_dropdown.set_selected(0)
+        controls.append(self.log_priority_dropdown)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        controls.append(spacer)
+
+        # Refresh button
+        refresh_btn = Gtk.Button()
+        refresh_btn.set_icon_name("view-refresh-symbolic")
+        refresh_btn.set_tooltip_text("Refresh Logs")
+        refresh_btn.connect("clicked", self._on_refresh_system_logs)
+        controls.append(refresh_btn)
+
+        # Follow toggle
+        self.log_follow_toggle = Gtk.ToggleButton()
+        self.log_follow_toggle.set_icon_name("media-playback-start-symbolic")
+        self.log_follow_toggle.set_tooltip_text("Auto-refresh logs")
+        self.log_follow_toggle.connect("toggled", self._on_log_follow_toggled)
+        controls.append(self.log_follow_toggle)
+
+        box.append(controls)
+
+        # Log output
+        self.system_log_view = Gtk.TextView()
+        self.system_log_view.set_editable(False)
+        self.system_log_view.set_monospace(True)
+        self.system_log_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.system_log_view.set_left_margin(10)
+        self.system_log_view.set_right_margin(10)
+        self.system_log_view.set_top_margin(10)
+        self.system_log_view.set_bottom_margin(10)
+
+        log_scroll = Gtk.ScrolledWindow()
+        log_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        log_scroll.set_vexpand(True)
+        log_scroll.set_child(self.system_log_view)
+        box.append(log_scroll)
+
+        # Help text
+        help_label = Gtk.Label()
+        help_label.set_markup(
+            '<small>View logs with journalctl: '
+            '<tt>journalctl -t meshforge -f</tt> | '
+            '<tt>journalctl -u meshtasticd --since today</tt></small>'
+        )
+        help_label.add_css_class("dim-label")
+        help_label.set_xalign(0)
+        box.append(help_label)
+
+        # Initialize log follow timer
+        self._log_follow_timer = None
+
+        # Load initial logs
+        GLib.idle_add(self._refresh_system_logs)
+
+        return box
+
+    def _on_refresh_system_logs(self, button=None):
+        """Refresh system logs from journalctl."""
+        def fetch_logs():
+            try:
+                # Get selected service
+                service_idx = self.log_service_dropdown.get_selected()
+                services = ["meshforge", "meshtasticd", "rnsd", None]
+                service = services[service_idx]
+
+                # Get line count
+                lines_idx = self.log_lines_dropdown.get_selected()
+                lines = ["50", "100", "200", "500"][lines_idx]
+
+                # Get priority
+                priority_idx = self.log_priority_dropdown.get_selected()
+                priorities = [None, "err", "warning", "info", "debug"]
+                priority = priorities[priority_idx]
+
+                # Build journalctl command
+                cmd = ["journalctl", "--no-pager", "-n", lines]
+
+                if service:
+                    cmd.extend(["-t", service])
+                else:
+                    # All MeshForge services
+                    cmd.extend(["-t", "meshforge", "-t", "meshtasticd", "-t", "rnsd"])
+
+                if priority:
+                    cmd.extend(["-p", priority])
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if result.returncode == 0:
+                    log_text = result.stdout or "(No logs found)"
+                else:
+                    log_text = f"Error: {result.stderr or 'Failed to fetch logs'}"
+
+                GLib.idle_add(self._update_system_log_view, log_text)
+
+            except subprocess.TimeoutExpired:
+                GLib.idle_add(self._update_system_log_view, "Error: Timeout fetching logs")
+            except FileNotFoundError:
+                GLib.idle_add(
+                    self._update_system_log_view,
+                    "journalctl not available (not a systemd system)\n\n"
+                    "On non-systemd systems, check:\n"
+                    "  /var/log/syslog\n"
+                    "  /var/log/messages\n"
+                    "  ~/.config/meshforge/logs/"
+                )
+            except Exception as e:
+                GLib.idle_add(self._update_system_log_view, f"Error: {e}")
+
+        threading.Thread(target=fetch_logs, daemon=True).start()
+
+    def _update_system_log_view(self, text: str):
+        """Update the system log view."""
+        buf = self.system_log_view.get_buffer()
+        buf.set_text(text)
+
+        # Scroll to bottom
+        mark = buf.get_mark("insert")
+        if mark:
+            self.system_log_view.scroll_to_mark(mark, 0, False, 0, 1)
+
+    def _on_log_follow_toggled(self, button):
+        """Toggle auto-refresh of logs."""
+        if button.get_active():
+            button.set_icon_name("media-playback-pause-symbolic")
+            button.set_tooltip_text("Stop auto-refresh")
+            # Start auto-refresh timer (every 3 seconds)
+            self._log_follow_timer = GLib.timeout_add_seconds(3, self._auto_refresh_logs)
+        else:
+            button.set_icon_name("media-playback-start-symbolic")
+            button.set_tooltip_text("Auto-refresh logs")
+            # Stop timer
+            if self._log_follow_timer:
+                GLib.source_remove(self._log_follow_timer)
+                self._log_follow_timer = None
+
+    def _auto_refresh_logs(self) -> bool:
+        """Auto-refresh callback."""
+        if self._is_destroyed:
+            return False
+        self._on_refresh_system_logs()
+        return True  # Continue timer
+
+    def _refresh_system_logs(self):
+        """Initial refresh of system logs."""
+        self._on_refresh_system_logs()
 
     def _create_reports_tab(self) -> Gtk.Widget:
         """Create reports tab."""

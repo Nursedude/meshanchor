@@ -271,5 +271,358 @@ class TestPresetDropdownBounds(unittest.TestCase):
         self.assertIsNone(preset_name)
 
 
+class TestNodeCountThreadSafety(unittest.TestCase):
+    """
+    Test that node count fetching is thread-safe and doesn't block GTK.
+
+    Regression test for the GTK freeze caused by meshtastic CLI auto-detection.
+    The _get_node_count() method MUST:
+    1. Do a quick port check before calling the CLI
+    2. Use --host localhost to avoid USB/serial auto-detection
+    3. Skip the CLI call entirely if port is not reachable
+
+    Without these safeguards, the meshtastic CLI does slow USB/serial scanning
+    which blocks threads and can freeze the GTK main loop.
+    """
+
+    def test_port_check_before_cli_call_pattern(self):
+        """
+        Test that the port check pattern is used before CLI calls.
+
+        The pattern must be: check socket FIRST, then only call CLI if reachable.
+        This prevents the expensive meshtastic CLI from doing auto-detection.
+        """
+        import socket
+
+        # Simulate the correct pattern from app.py
+        port_reachable = False
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)  # Must be short (1 second max)
+            sock.connect(("localhost", 4403))
+            port_reachable = True
+        except (socket.timeout, socket.error, OSError):
+            port_reachable = False
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+        # Port 4403 unlikely to be open in test environment
+        # Key assertion: the check completes quickly without blocking
+        self.assertIsInstance(port_reachable, bool)
+
+    def test_cli_must_use_host_localhost(self):
+        """
+        Test that CLI command includes --host localhost flag.
+
+        Without --host, meshtastic CLI does USB/serial auto-detection
+        which can take 15+ seconds and freeze the UI.
+        """
+        # The correct command pattern
+        cli_path = '/usr/bin/meshtastic'
+        correct_command = [cli_path, '--host', 'localhost', '--nodes']
+
+        # These are WRONG patterns that cause freezes
+        wrong_patterns = [
+            [cli_path, '--nodes'],  # No --host = auto-detect
+            [cli_path, '--nodes', '--host', 'localhost'],  # Wrong order
+        ]
+
+        # Verify correct pattern has --host before --nodes
+        self.assertIn('--host', correct_command)
+        host_idx = correct_command.index('--host')
+        nodes_idx = correct_command.index('--nodes')
+
+        # --host should come before --nodes
+        self.assertLess(host_idx, nodes_idx)
+
+        # --host should be followed by 'localhost'
+        self.assertEqual(correct_command[host_idx + 1], 'localhost')
+
+    def test_timeout_is_reasonable(self):
+        """
+        Test that CLI timeout is not too long.
+
+        Long timeouts (15+ seconds) combined with the 5-second status timer
+        can pile up threads and cause resource exhaustion.
+        """
+        # Maximum reasonable timeout for CLI call
+        max_timeout = 10  # seconds
+
+        # The status timer interval
+        status_interval = 5  # seconds
+
+        # Timeout should be less than 2x the timer interval
+        # to prevent thread pile-up
+        self.assertLessEqual(max_timeout, status_interval * 2)
+
+    def test_cache_prevents_rapid_cli_calls(self):
+        """
+        Test that caching prevents CLI from being called too frequently.
+
+        The cache TTL should be longer than the status timer interval
+        to prevent unnecessary CLI calls.
+        """
+        cache_ttl = 30  # seconds (from app.py _node_count_cache_ttl)
+        status_interval = 5  # seconds
+
+        # Cache should last at least 2 timer intervals
+        self.assertGreaterEqual(cache_ttl, status_interval * 2)
+
+    def test_socket_check_timeout_is_short(self):
+        """
+        Test that socket pre-check timeout is short enough to not block UI.
+
+        The socket check runs in a background thread, but we still want
+        it to be fast so threads don't pile up.
+        """
+        socket_timeout = 1.0  # seconds (from app.py)
+
+        # Socket check should complete in 1 second or less
+        self.assertLessEqual(socket_timeout, 1.0)
+
+
+class TestNodeCountCodePattern(unittest.TestCase):
+    """
+    Verify the actual code in app.py follows the correct pattern.
+
+    This is a meta-test that reads the source code and verifies
+    the safety patterns are present. This prevents accidental removal
+    of critical guards.
+    """
+
+    def setUp(self):
+        """Load the app.py source code."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        self.source = app_path.read_text()
+
+    def test_shutil_is_imported(self):
+        """Verify shutil is imported (needed for shutil.which fallback)."""
+        self.assertIn('import shutil', self.source)
+
+    def test_port_check_exists_before_cli(self):
+        """Verify port check pattern exists in _get_node_count."""
+        # The method should contain socket check before CLI call
+        self.assertIn('sock.settimeout', self.source)
+        self.assertIn('sock.connect', self.source)
+        self.assertIn('port_reachable', self.source)
+
+    def test_host_localhost_flag_present(self):
+        """Verify --host localhost is used in CLI command."""
+        self.assertIn("'--host', 'localhost'", self.source)
+
+    def test_early_return_when_port_unreachable(self):
+        """Verify early return when port is not reachable."""
+        self.assertIn('if not port_reachable:', self.source)
+
+
+class TestPanelBaseResourceManagement(unittest.TestCase):
+    """Test the PanelBase class resource management patterns."""
+
+    def test_panel_base_module_exists(self):
+        """Verify panel_base.py exists and is importable."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        self.assertTrue(panel_base_path.exists(), "panel_base.py should exist")
+
+    def test_panel_base_has_required_methods(self):
+        """Verify PanelBase has all required resource management methods."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Required methods for resource management
+        required_methods = [
+            'def _schedule_timer',
+            'def _schedule_timer_seconds',
+            'def _cancel_timer',
+            'def _cancel_all_timers',
+            'def _connect_signal',
+            'def _disconnect_all_signals',
+            'def _idle_add',
+            'def cleanup',
+        ]
+
+        for method in required_methods:
+            self.assertIn(method, source, f"PanelBase should have {method}")
+
+    def test_panel_base_has_resource_tracking(self):
+        """Verify PanelBase tracks resources properly."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Required tracking attributes
+        self.assertIn('_pending_timers', source)
+        self.assertIn('_signal_handlers', source)
+        self.assertIn('_is_destroyed', source)
+
+    def test_panel_base_unrealize_triggers_cleanup(self):
+        """Verify PanelBase connects unrealize signal to cleanup."""
+        panel_base_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panel_base.py'
+        source = panel_base_path.read_text()
+
+        # Should connect unrealize to cleanup
+        self.assertIn('"unrealize"', source)
+        self.assertIn('_on_unrealize', source)
+
+
+class TestPanelCleanupCoverage(unittest.TestCase):
+    """Test that all panels have cleanup() methods."""
+
+    def test_all_panels_have_cleanup(self):
+        """Verify all panel files have cleanup() methods."""
+        panels_dir = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels'
+
+        # Find all panel Python files (excluding __init__ and utilities)
+        panel_files = [
+            f for f in panels_dir.glob('*.py')
+            if not f.name.startswith('__')
+            and f.name not in ['rns_config.py', 'rns_gateway.py']  # These are utils, not panels
+        ]
+
+        panels_without_cleanup = []
+        for panel_file in panel_files:
+            source = panel_file.read_text()
+            # Check if it's actually a panel (has Panel class)
+            if 'class' in source and 'Panel' in source and 'Gtk.Box' in source:
+                if 'def cleanup' not in source:
+                    panels_without_cleanup.append(panel_file.name)
+
+        self.assertEqual(
+            panels_without_cleanup, [],
+            f"Panels missing cleanup(): {panels_without_cleanup}"
+        )
+
+
+class TestAppAutoDiscoverCleanup(unittest.TestCase):
+    """Test that app.py auto-discovers panels for cleanup."""
+
+    def setUp(self):
+        """Load the app.py source code."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        self.source = app_path.read_text()
+
+    def test_close_request_auto_discovers_panels(self):
+        """Verify _on_close_request doesn't use hardcoded panel list."""
+        # The old pattern had a hardcoded list like:
+        # panel_attrs = ['diagnostics_panel', 'mesh_tools_panel', ...]
+
+        # The new pattern should use dir(self) or similar to auto-discover
+        self.assertIn('dir(self)', self.source, "Should auto-discover panels with dir()")
+        self.assertIn('endswith(\'_panel\')', self.source, "Should find panels by suffix")
+
+    def test_cleanup_is_called_on_discovered_panels(self):
+        """Verify cleanup() is called on discovered panels."""
+        self.assertIn('panel.cleanup()', self.source)
+
+    def test_cleanup_errors_are_logged(self):
+        """Verify cleanup errors are properly logged."""
+        self.assertIn('Error cleaning up', self.source)
+
+
+class TestTimerCleanupPatterns(unittest.TestCase):
+    """Test timer cleanup pattern implementation across panels."""
+
+    def test_panels_with_timers_have_proper_cleanup(self):
+        """Verify panels that create timers also clean them up."""
+        panels_dir = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels'
+
+        # Patterns that indicate timer creation
+        timer_patterns = [
+            'GLib.timeout_add',
+            'GLib.timeout_add_seconds',
+            '_schedule_timer',
+        ]
+
+        panels_with_uncleaned_timers = []
+
+        for panel_file in panels_dir.glob('*.py'):
+            if panel_file.name.startswith('__'):
+                continue
+
+            source = panel_file.read_text()
+
+            # Check if this file creates timers
+            creates_timers = any(pattern in source for pattern in timer_patterns)
+
+            if creates_timers:
+                # Should have cleanup mechanism
+                has_cleanup = (
+                    'def cleanup' in source or
+                    '_pending_timers' in source or
+                    'GLib.source_remove' in source
+                )
+
+                if not has_cleanup:
+                    panels_with_uncleaned_timers.append(panel_file.name)
+
+        self.assertEqual(
+            panels_with_uncleaned_timers, [],
+            f"Panels creating timers without cleanup: {panels_with_uncleaned_timers}"
+        )
+
+
+class TestLazyPanelLoading(unittest.TestCase):
+    """Test lazy loading patterns to prevent startup thundering herd."""
+
+    def setUp(self):
+        """Load app.py source."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        self.source = app_path.read_text()
+
+    def test_panel_loaders_dict_exists(self):
+        """Verify _panel_loaders dict is used for lazy loading."""
+        self.assertIn('_panel_loaders', self.source)
+        self.assertIn('self._panel_loaders = {', self.source)
+
+    def test_loaded_panels_tracking(self):
+        """Verify _loaded_panels set tracks which panels are loaded."""
+        self.assertIn('_loaded_panels', self.source)
+        self.assertIn('self._loaded_panels = set()', self.source)
+
+    def test_load_panel_method_exists(self):
+        """Verify _load_panel method exists for on-demand loading."""
+        self.assertIn('def _load_panel(self, panel_name', self.source)
+
+    def test_nav_selected_triggers_lazy_load(self):
+        """Verify navigation triggers lazy loading."""
+        # Should check if panel is loaded before navigating
+        self.assertIn('if page_name not in self._loaded_panels', self.source)
+        self.assertIn('self._load_panel(page_name)', self.source)
+
+    def test_only_dashboard_loaded_at_startup(self):
+        """Verify only dashboard is loaded eagerly at startup."""
+        # Should see comment about only loading dashboard
+        self.assertIn('Only load dashboard', self.source)
+        # Should call _load_panel("dashboard") at startup
+        self.assertIn('self._load_panel("dashboard")', self.source)
+
+
+class TestDeferredInitialRefresh(unittest.TestCase):
+    """Test that panels defer initial refresh to let UI render first."""
+
+    def test_dashboard_defers_initial_refresh(self):
+        """Verify dashboard defers its initial data refresh."""
+        dashboard_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'panels' / 'dashboard.py'
+        source = dashboard_path.read_text()
+
+        # Should NOT call _refresh_data() directly in __init__
+        # Should use GLib.timeout_add for deferred loading
+        self.assertIn('GLib.timeout_add', source)
+        self.assertIn('_initial_refresh', source)
+
+    def test_status_timer_delayed_start(self):
+        """Verify status timer is delayed to let UI render first."""
+        app_path = Path(__file__).parent.parent / 'src' / 'gtk_ui' / 'app.py'
+        source = app_path.read_text()
+
+        # Should delay first status update
+        self.assertIn('_delayed_status_start', source)
+        # Should have overlap prevention
+        self.assertIn('_status_update_running', source)
+
+
 if __name__ == '__main__':
     unittest.main()

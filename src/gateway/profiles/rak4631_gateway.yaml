@@ -1,0 +1,105 @@
+# MeshForge Gateway Profile: RAK4631 (nRF52840)
+# Optimized for gateway/router operation
+# Apply with: meshtastic --configure rak4631_gateway.yaml
+#
+# Features enabled:
+# - Router role for message forwarding
+# - Bluetooth disabled (headless operation)
+# - Power saving disabled (always listening)
+# - Maximum hop limit for network reach
+# - JSON API for MeshForge integration
+
+device:
+  role: ROUTER_CLIENT  # Forward messages, also receive
+  rebroadcast_mode: ALL  # Rebroadcast all messages
+  node_info_broadcast_secs: 900  # Announce every 15 min
+  serial_enabled: true  # Keep serial for meshtasticd
+
+lora:
+  region: US  # Change to your region: US, EU_868, AU_915, etc.
+  modem_preset: LONG_FAST  # Good balance of range/speed
+  hop_limit: 5  # Maximum hops for wide coverage
+  tx_enabled: true
+  tx_power: 22  # Max for RAK4631 (+22dBm)
+  # Override for specific channel if needed:
+  # channel_num: 0
+  # frequency_offset: 0
+
+bluetooth:
+  enabled: false  # Disable for headless gateway
+  fixed_pin: 123456
+
+power:
+  ls_secs: 0  # Disable light sleep (always listening)
+  min_wake_secs: 10
+  wait_bluetooth_secs: 0  # Don't wait for BT connection
+  mesh_sds_timeout_secs: 0  # Disable sleep
+  sds_secs: 0
+  on_battery_shutdown_after_secs: 0  # Never shutdown
+
+display:
+  screen_on_secs: 0  # Display always off (save power)
+  auto_screen_carousel_secs: 0
+  compass_north_top: false
+  flip_screen: false
+  oled_type: OLED_AUTO
+  wake_on_tap_or_motion: false
+
+position:
+  gps_enabled: true  # Enable if GPS module present
+  gps_update_interval: 120  # Position update every 2 min
+  position_broadcast_secs: 900  # Broadcast position every 15 min
+  position_broadcast_smart_enabled: true
+  fixed_position: false  # Set true and configure lat/lon for fixed gateway
+
+telemetry:
+  device_update_interval: 900  # Device telemetry every 15 min
+  environment_update_interval: 900
+  environment_measurement_enabled: true
+  environment_screen_enabled: false
+  power_measurement_enabled: true
+  power_screen_enabled: false
+
+# Module-specific settings
+modules:
+  serial:
+    enabled: true
+    echo: false
+    mode: PROTO  # Protocol buffer mode for meshtasticd
+    rxd: 0
+    txd: 0
+    baud: BAUD_DEFAULT
+    timeout: 0
+    override_console_serial_port: false
+
+  range_test:
+    enabled: false  # Disable unless testing
+
+  store_forward:
+    enabled: true  # Enable for gateway
+    heartbeat: false
+    records: 100  # Store up to 100 messages
+    history_return_max: 50
+    history_return_window: 3600  # 1 hour window
+
+  neighbor_info:
+    enabled: true
+    update_interval: 900  # Update every 15 min
+
+  detection_sensor:
+    enabled: false
+
+  ambient_lighting:
+    enabled: false
+
+  canned_message:
+    enabled: false
+
+  external_notification:
+    enabled: false
+
+# Network/WiFi (if using WiFi variant)
+# network:
+#   wifi_enabled: false  # RAK4631 doesn't have WiFi
+#   wifi_ssid: ""
+#   wifi_psk: ""

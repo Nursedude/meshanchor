@@ -13,10 +13,20 @@ Falls back to basic terminal menu if neither available.
 
 import os
 import sys
-import shutil
 import subprocess
 from pathlib import Path
-from typing import Tuple, Optional, List
+from typing import Optional, List
+
+# Ensure src directory is in path for imports when run directly
+_src_dir = Path(__file__).parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
+# Ensure launcher_tui directory is in path for direct backend import
+# This avoids the RuntimeWarning when run with python -m
+_launcher_dir = Path(__file__).parent
+if str(_launcher_dir) not in sys.path:
+    sys.path.insert(0, str(_launcher_dir))
 
 # Import version
 try:
@@ -34,178 +44,8 @@ except ImportError:
             return Path(f'/home/{sudo_user}')
         return Path.home()
 
-
-class DialogBackend:
-    """Backend for whiptail/dialog TUI dialogs."""
-
-    def __init__(self):
-        self.backend = self._detect_backend()
-        self.width = 78
-        self.height = 22
-        self.list_height = 14
-
-    def _detect_backend(self) -> Optional[str]:
-        """Detect available dialog backend."""
-        # Prefer whiptail (Debian/Ubuntu default, like raspi-config)
-        if shutil.which('whiptail'):
-            return 'whiptail'
-        elif shutil.which('dialog'):
-            return 'dialog'
-        return None
-
-    @property
-    def available(self) -> bool:
-        return self.backend is not None
-
-    def _run(self, args: List[str]) -> Tuple[int, str]:
-        """
-        Run dialog/whiptail command and return (returncode, output).
-
-        whiptail uses stderr for returning selection.
-        newt library opens /dev/tty directly for ncurses display.
-        We use os.system for proper terminal inheritance and redirect
-        stderr to a temp file to capture the selection.
-        """
-        import tempfile
-        import shlex
-
-        # Create temp file to capture selection output
-        fd, tmp_path = tempfile.mkstemp(suffix='.txt', prefix='meshforge_')
-        os.close(fd)
-
-        try:
-            # Build command with proper shell quoting
-            cmd_parts = [self.backend] + [str(a) for a in args]
-            escaped_cmd = ' '.join(shlex.quote(p) for p in cmd_parts)
-
-            # Use os.system for proper terminal inheritance
-            # stderr redirected to file captures selection
-            # newt library opens /dev/tty directly for display
-            exit_code = os.system(f'{escaped_cmd} 2>{shlex.quote(tmp_path)}')
-
-            # Read the captured selection
-            with open(tmp_path, 'r') as f:
-                output = f.read().strip()
-
-            # os.system returns wait status, extract exit code
-            return os.waitstatus_to_exitcode(exit_code) if hasattr(os, 'waitstatus_to_exitcode') else (exit_code >> 8), output
-
-        except Exception as e:
-            return 1, str(e)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    def msgbox(self, title: str, text: str) -> None:
-        """Display a message box."""
-        self._run([
-            '--title', title,
-            '--msgbox', text,
-            str(self.height), str(self.width)
-        ])
-
-    def yesno(self, title: str, text: str, default_no: bool = False) -> bool:
-        """Display yes/no dialog. Returns True for yes."""
-        args = ['--title', title]
-        if default_no:
-            args.append('--defaultno')
-        args += ['--yesno', text, str(self.height), str(self.width)]
-        code, _ = self._run(args)
-        return code == 0
-
-    def menu(self, title: str, text: str, choices: List[Tuple[str, str]]) -> Optional[str]:
-        """
-        Display a menu and return selected tag.
-
-        Args:
-            title: Window title
-            text: Description text
-            choices: List of (tag, description) tuples
-
-        Returns:
-            Selected tag or None if cancelled
-        """
-        args = [
-            '--title', title,
-            '--menu', text,
-            str(self.height), str(self.width), str(self.list_height)
-        ]
-        for tag, desc in choices:
-            args.extend([tag, desc])
-
-        code, output = self._run(args)
-        if code == 0:
-            return output
-        return None
-
-    def inputbox(self, title: str, text: str, init: str = "") -> Optional[str]:
-        """Display input box and return text."""
-        args = [
-            '--title', title,
-            '--inputbox', text,
-            str(self.height), str(self.width),
-            init
-        ]
-        code, output = self._run(args)
-        if code == 0:
-            return output
-        return None
-
-    def infobox(self, title: str, text: str) -> None:
-        """Display info box (no wait for input)."""
-        self._run([
-            '--title', title,
-            '--infobox', text,
-            str(8), str(self.width)
-        ])
-
-    def gauge(self, title: str, text: str, percent: int) -> None:
-        """Display progress gauge."""
-        args = [
-            '--title', title,
-            '--gauge', text,
-            str(8), str(self.width), str(percent)
-        ]
-        # Gauge needs stdin for progress updates
-        try:
-            proc = subprocess.Popen(
-                [self.backend] + args,
-                stdin=subprocess.PIPE,
-                text=True
-            )
-            proc.communicate(input=str(percent), timeout=1)
-        except (subprocess.TimeoutExpired, OSError):
-            # Gauge timeout or display issue - non-critical
-            pass
-
-    def checklist(self, title: str, text: str,
-                  choices: List[Tuple[str, str, bool]]) -> Optional[List[str]]:
-        """
-        Display checklist dialog.
-
-        Args:
-            choices: List of (tag, description, selected) tuples
-
-        Returns:
-            List of selected tags or None if cancelled
-        """
-        args = [
-            '--title', title,
-            '--checklist', text,
-            str(self.height), str(self.width), str(self.list_height)
-        ]
-        for tag, desc, selected in choices:
-            status = 'ON' if selected else 'OFF'
-            args.extend([tag, desc, status])
-
-        code, output = self._run(args)
-        if code == 0:
-            # Parse quoted output (whiptail uses quotes)
-            selected = output.replace('"', '').split()
-            return selected
-        return None
+# Import dialog backend directly (not through package namespace)
+from backend import DialogBackend
 
 
 class MeshForgeLauncher:
@@ -213,7 +53,7 @@ class MeshForgeLauncher:
 
     def __init__(self):
         self.dialog = DialogBackend()
-        self.src_dir = Path(__file__).parent
+        self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
 
     def _detect_environment(self) -> dict:
@@ -253,7 +93,7 @@ class MeshForgeLauncher:
         """Run the launcher."""
         if not self.env['is_root']:
             print("\nError: MeshForge requires root/sudo privileges")
-            print("Please run: sudo python3 src/launcher_tui.py")
+            print("Please run: sudo python3 src/launcher_tui/main.py")
             sys.exit(1)
 
         if not self.dialog.available:

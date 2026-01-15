@@ -39,7 +39,8 @@ class DashboardPanel(Gtk.Box):
         self.set_margin_bottom(20)
 
         self._build_ui()
-        self._refresh_data()
+        # Defer initial data load by 500ms to let UI render first
+        GLib.timeout_add(500, self._initial_refresh)
 
     def _build_ui(self):
         """Build the dashboard UI"""
@@ -156,6 +157,11 @@ class DashboardPanel(Gtk.Box):
                     child.remove_css_class("warning")
                     child.add_css_class(css_class)
                 break
+
+    def _initial_refresh(self):
+        """Initial data refresh after UI renders."""
+        self._refresh_data()
+        return False  # Don't repeat timer
 
     def _refresh_data(self):
         """Refresh all dashboard data"""
@@ -344,3 +350,8 @@ class DashboardPanel(Gtk.Box):
         buffer = self.log_view.get_buffer()
         buffer.set_text(text)
         return False
+
+    def cleanup(self):
+        """Clean up panel resources."""
+        # No timers or persistent resources to clean up
+        pass

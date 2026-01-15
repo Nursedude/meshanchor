@@ -11,6 +11,7 @@ gi.require_version('Gdk', '4.0')
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import sys
 import os
+import shutil
 import subprocess
 import threading
 import logging
@@ -229,6 +230,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._node_count_timestamp = 0
         self._node_count_cache_ttl = 30  # Cache for 30 seconds
 
+        # Timer tracking for cleanup
+        self._status_timer = None
+
         # Apply saved theme settings on startup
         self._apply_saved_theme()
 
@@ -245,27 +249,38 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self._check_resume_state()
 
     def _on_close_request(self, window):
-        """Handle window close - cleanup all panels with cleanup methods."""
-        # List of panel attribute names that might have cleanup methods
-        panel_attrs = [
-            'diagnostics_panel',
-            'mesh_tools_panel',
-            'rns_panel',
-            'tools_panel',
-            'map_panel',
-            'radio_config_panel',
-            'ham_tools_panel',
-            'hamclock_panel',
-            'meshbot_panel',
-        ]
+        """Handle window close - cleanup all panels with cleanup methods.
 
-        for attr_name in panel_attrs:
-            panel = getattr(self, attr_name, None)
-            if panel and hasattr(panel, 'cleanup'):
-                try:
-                    panel.cleanup()
-                except Exception as e:
-                    logger.warning(f"Error cleaning up {attr_name}: {e}")
+        Auto-discovers all panel attributes and calls cleanup() on any that have it.
+        This replaces the hard-coded list approach which was prone to missing panels.
+        """
+        logger.info("Window close requested, cleaning up panels...")
+
+        # Stop the main status update timer
+        if self._status_timer:
+            GLib.source_remove(self._status_timer)
+            self._status_timer = None
+
+        # Auto-discover all panels and clean them up
+        # Look for any attribute ending in '_panel' that has a cleanup method
+        cleaned_up = []
+        failed = []
+
+        for attr_name in dir(self):
+            if attr_name.endswith('_panel'):
+                panel = getattr(self, attr_name, None)
+                if panel and hasattr(panel, 'cleanup') and callable(panel.cleanup):
+                    try:
+                        panel.cleanup()
+                        cleaned_up.append(attr_name)
+                    except Exception as e:
+                        failed.append(f"{attr_name}: {e}")
+                        logger.warning(f"Error cleaning up {attr_name}: {e}")
+
+        if cleaned_up:
+            logger.info(f"Cleaned up {len(cleaned_up)} panels: {', '.join(cleaned_up)}")
+        if failed:
+            logger.warning(f"Failed to cleanup {len(failed)} panels: {failed}")
 
         # Return False to allow the window to close
         return False
@@ -504,44 +519,50 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self.content_stack.set_hexpand(True)
         self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
 
-        # Add content pages BEFORE sidebar (so stack has pages when nav callback fires)
-        logger.info("Loading GTK panels...")
-        panel_loaders = [
-            ("dashboard", self._add_dashboard_page),
-            ("service", self._add_service_page),
-            ("install", self._add_install_page),
-            ("config", self._add_config_page),
-            ("radio_config", self._add_radio_config_page),
-            ("rns", self._add_rns_page),
+        # Lazy loading: Store panel loaders but only instantiate on first navigation
+        # This prevents the "thundering herd" problem where 20+ panels spawn threads at startup
+        logger.info("Setting up lazy panel loading...")
+        self._panel_loaders = {
+            "dashboard": self._add_dashboard_page,
+            "service": self._add_service_page,
+            "install": self._add_install_page,
+            "config": self._add_config_page,
+            "radio_config": self._add_radio_config_page,
+            "rns": self._add_rns_page,
             # Consolidated tool panels
-            ("mesh_tools", self._add_mesh_tools_page),
-            ("ham_tools", self._add_ham_tools_page),
+            "mesh_tools": self._add_mesh_tools_page,
+            "ham_tools": self._add_ham_tools_page,
             # Legacy panels (still available)
-            ("map", self._add_map_page),
-            ("hamclock", self._add_hamclock_page),
-            ("cli", self._add_cli_page),
-            ("hardware", self._add_hardware_page),
-            ("tools", self._add_tools_page),
-            ("diagnostics", self._add_diagnostics_page),
-            ("aredn", self._add_aredn_page),
-            ("amateur", self._add_amateur_page),
-            ("meshbot", self._add_meshbot_page),
-            ("messaging", self._add_messaging_page),
-            ("message_routing", self._add_message_routing_page),
-            ("mqtt_dashboard", self._add_mqtt_dashboard_page),
-            ("eas_alerts", self._add_eas_alerts_page),
-            ("settings", self._add_settings_page),
-        ]
+            "map": self._add_map_page,
+            "hamclock": self._add_hamclock_page,
+            "cli": self._add_cli_page,
+            "hardware": self._add_hardware_page,
+            "tools": self._add_tools_page,
+            "diagnostics": self._add_diagnostics_page,
+            "aredn": self._add_aredn_page,
+            "amateur": self._add_amateur_page,
+            "meshbot": self._add_meshbot_page,
+            "messaging": self._add_messaging_page,
+            "message_routing": self._add_message_routing_page,
+            "mqtt_dashboard": self._add_mqtt_dashboard_page,
+            "eas_alerts": self._add_eas_alerts_page,
+            "settings": self._add_settings_page,
+        }
+        self._loaded_panels = set()
 
-        for name, loader in panel_loaders:
-            try:
-                logger.debug(f"Loading panel: {name}")
-                loader()
-                logger.debug(f"Loaded panel: {name} OK")
-            except Exception as e:
-                logger.error(f"Failed to load panel {name}: {e}", exc_info=True)
-                # Create error placeholder
-                self._add_error_placeholder(name, str(e))
+        # Create lightweight placeholders for all panels (allows sidebar to work)
+        for name in self._panel_loaders.keys():
+            placeholder = self._create_loading_placeholder(name)
+            self.content_stack.add_named(placeholder, name)
+
+        # Only load dashboard immediately (it's the default view)
+        # Other panels load on-demand when navigated to
+        try:
+            logger.debug("Loading initial panel: dashboard")
+            self._load_panel("dashboard")
+            logger.debug("Dashboard loaded OK")
+        except Exception as e:
+            logger.error(f"Failed to load dashboard: {e}", exc_info=True)
 
         # Left sidebar navigation (after content_stack exists)
         sidebar = self._create_sidebar()
@@ -559,9 +580,11 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         self.bottom_status = self._create_bottom_status()
         main_box.append(self.bottom_status)
 
-        # Start status update timer
-        GLib.timeout_add_seconds(5, self._update_status)
-        self._update_status()
+        # Start status update timer (store ID for cleanup)
+        # Delay first update by 2 seconds to let UI render first
+        # Use 10 second interval (was 5s) to reduce subprocess overhead
+        self._status_update_running = False  # Prevent overlapping updates
+        GLib.timeout_add_seconds(2, self._delayed_status_start)
 
         # Set up responsive layout handling
         self._setup_responsive_layout()
@@ -727,10 +750,55 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         return scrolled
 
     def _on_nav_selected(self, listbox, row):
-        """Handle navigation selection"""
+        """Handle navigation selection with lazy loading"""
         if row:
             page_name = row.get_name()
+            # Lazy load the panel if not already loaded
+            if page_name not in self._loaded_panels and page_name in self._panel_loaders:
+                self._load_panel(page_name)
             self.content_stack.set_visible_child_name(page_name)
+
+    def _create_loading_placeholder(self, panel_name: str) -> Gtk.Box:
+        """Create a lightweight placeholder widget shown while panel loads."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_halign(Gtk.Align.CENTER)
+
+        spinner = Gtk.Spinner()
+        spinner.set_size_request(32, 32)
+        spinner.start()
+        box.append(spinner)
+
+        label = Gtk.Label(label=f"Loading {panel_name.replace('_', ' ').title()}...")
+        label.add_css_class("dim-label")
+        box.append(label)
+
+        return box
+
+    def _load_panel(self, panel_name: str):
+        """Load a panel, replacing its placeholder."""
+        if panel_name in self._loaded_panels:
+            return  # Already loaded
+
+        loader = self._panel_loaders.get(panel_name)
+        if not loader:
+            logger.warning(f"No loader for panel: {panel_name}")
+            return
+
+        # Remove placeholder
+        placeholder = self.content_stack.get_child_by_name(panel_name)
+        if placeholder:
+            self.content_stack.remove(placeholder)
+
+        # Load the actual panel
+        try:
+            logger.debug(f"Lazy loading panel: {panel_name}")
+            loader()
+            self._loaded_panels.add(panel_name)
+            logger.debug(f"Loaded panel: {panel_name} OK")
+        except Exception as e:
+            logger.error(f"Failed to load panel {panel_name}: {e}", exc_info=True)
+            self._add_error_placeholder(panel_name, str(e))
 
     def _add_dashboard_page(self):
         """Add the dashboard page"""
@@ -1011,70 +1079,54 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         except Exception as e:
             return f"Error reading logs: {e}"
 
+    def _delayed_status_start(self):
+        """Start the status timer after initial delay (lets UI render first)."""
+        self._status_timer = GLib.timeout_add_seconds(10, self._update_status)
+        self._update_status()
+        return False  # Don't repeat this one-shot timer
+
     def _update_status(self):
         """Update status bar information"""
-        # Run in thread to avoid blocking UI
+        # Prevent overlapping updates (previous one still running)
+        if self._status_update_running:
+            return True  # Continue timer but skip this tick
+
+        self._status_update_running = True
         thread = threading.Thread(target=self._update_status_thread)
         thread.daemon = True
         thread.start()
         return True  # Continue timer
 
     def _update_status_thread(self):
-        """Thread for updating status"""
+        """Thread for updating status - optimized to reduce subprocess overhead."""
         try:
             import socket
 
-            # Check service status - multiple methods
+            # Simplified check: just use systemctl is-active (most reliable)
+            # Removed redundant pgrep and socket checks that added latency
             is_active = False
+            uptime = "--"
 
-            # Method 1: systemctl is-active
             result = subprocess.run(
                 ['systemctl', 'is-active', 'meshtasticd'],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=3
             )
             if result.stdout.strip() == 'active':
                 is_active = True
 
-            # Method 2: Check if process is running
-            if not is_active:
-                result = subprocess.run(
-                    ['pgrep', '-f', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    is_active = True
-
-            # Method 3: Check TCP port 4403
-            if not is_active:
-                sock = None
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(1.0)
-                    if sock.connect_ex(('localhost', 4403)) == 0:
-                        is_active = True
-                except Exception:
-                    pass
-                finally:
-                    if sock:
-                        try:
-                            sock.close()
-                        except Exception:
-                            pass
-
-            # Get uptime if active
-            uptime = "--"
+            # Get uptime only if active (single combined call)
             node_count = "--"
             if is_active:
                 result = subprocess.run(
                     ['systemctl', 'show', 'meshtasticd', '--property=ActiveEnterTimestamp'],
-                    capture_output=True, text=True, timeout=5
+                    capture_output=True, text=True, timeout=3
                 )
                 if 'ActiveEnterTimestamp=' in result.stdout:
                     timestamp = result.stdout.split('=')[1].strip()
                     if timestamp:
                         uptime = self._calculate_uptime(timestamp)
 
-                # Try to get node count from meshtastic CLI
+                # Node count uses caching internally
                 node_count = self._get_node_count()
 
             # Update UI in main thread
@@ -1082,6 +1134,8 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
         except Exception as e:
             GLib.idle_add(self._update_status_ui, False, "--", "--")
+        finally:
+            self._status_update_running = False
 
     def _get_node_count(self):
         """Get the number of nodes from meshtastic TCP interface or CLI"""
@@ -1390,11 +1444,13 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         )
 
     def _perform_reboot(self):
-        """Perform the actual reboot"""
-        try:
-            subprocess.run(['systemctl', 'reboot'], check=True, timeout=10)
-        except Exception as e:
-            self._show_error_dialog("Reboot Failed", str(e))
+        """Perform the actual reboot - runs in background thread"""
+        def do_reboot():
+            try:
+                subprocess.run(['systemctl', 'reboot'], check=True, timeout=10)
+            except Exception as e:
+                GLib.idle_add(self._show_error_dialog, "Reboot Failed", str(e))
+        threading.Thread(target=do_reboot, daemon=True).start()
         return False
 
     def _save_resume_state(self, reason):
