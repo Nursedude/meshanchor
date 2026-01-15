@@ -20,13 +20,13 @@
 - [x] **Split large files** (>1500 lines) - PARTIAL:
   - [x] `rns.py` (673 lines now) - Successfully refactored
   - [x] `main_web.py` (1314 lines now) - Successfully refactored
-  - [ ] `launcher_tui/main.py` (2822 lines) - Extract menu handlers
+  - [x] `launcher_tui/main.py` (1845 lines now) - Extracted to mixins (2026-01-15)
   - [ ] `hamclock.py` (2625 lines) - Extract API client
 
 ### Testing
 - [x] **Install pytest** - Available in environment
 - [x] **Add tests for gateway transport** - 39 tests for transport layer
-- [ ] **Add tests for network diagnostics** - New feature needs tests
+- [x] **Add tests for network diagnostics** - 28 tests (2026-01-15)
 
 ---
 
@@ -54,7 +54,7 @@
 
 ### Dark Mode
 - [x] **CSS variable foundation** - Theme system with light/dark support (2026-01-12)
-- [ ] GTK dark mode toggle
+- [x] GTK dark mode toggle - Settings panel with Force Dark Mode switch (verified 2026-01-15)
 - [ ] Web UI dark mode (integration)
 - [ ] TUI dark mode
 - [ ] Unified theme system
