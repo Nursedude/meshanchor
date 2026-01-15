@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 try:
     from utils.paths import get_real_user_home
 except ImportError:
+    import os
     def get_real_user_home():
+        """Fallback for sudo-safe home directory."""
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            return Path(f"/home/{sudo_user}")
         return Path.home()
 
 
