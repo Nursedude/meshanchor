@@ -168,6 +168,33 @@ class MessagingPanel(Gtk.Box):
 
         compose_box.append(net_row)
 
+        # Channel selection row (for Meshtastic)
+        chan_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        chan_label = Gtk.Label(label="Channel:")
+        chan_label.set_xalign(1)
+        chan_label.set_size_request(60, -1)
+        chan_row.append(chan_label)
+
+        self.channel_dropdown = Gtk.DropDown.new_from_strings([
+            "0 - Primary",
+            "1 - Secondary",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7"
+        ])
+        self.channel_dropdown.set_selected(0)
+        chan_row.append(self.channel_dropdown)
+
+        chan_hint = Gtk.Label(label="(Meshtastic only)")
+        chan_hint.add_css_class("dim-label")
+        chan_row.append(chan_hint)
+
+        compose_box.append(chan_row)
+
         # Message input row
         msg_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
@@ -406,6 +433,7 @@ class MessagingPanel(Gtk.Box):
         network_idx = self.network_dropdown.get_selected()
         network_map = {0: "auto", 1: "meshtastic", 2: "rns"}
         network = network_map.get(network_idx, "auto")
+        channel = self.channel_dropdown.get_selected()  # 0-7
 
         def send():
             try:
@@ -413,7 +441,8 @@ class MessagingPanel(Gtk.Box):
                 result = messaging.send_message(
                     content=content,
                     destination=destination,
-                    network=network
+                    network=network,
+                    channel=channel
                 )
                 GLib.idle_add(self._on_send_complete, result)
             except Exception as e:
