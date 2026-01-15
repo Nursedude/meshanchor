@@ -17,11 +17,11 @@
 
 ### Code Quality
 - [x] **Consolidate `get_real_user_home()`** - Reviewed: try/except fallback pattern is intentional for robustness when utils.paths unavailable
-- [x] **Split large files** (>1500 lines) - PARTIAL:
+- [x] **Split large files** (>1500 lines) - COMPLETE:
   - [x] `rns.py` (673 lines now) - Successfully refactored
   - [x] `main_web.py` (1314 lines now) - Successfully refactored
   - [x] `launcher_tui/main.py` (1845 lines now) - Extracted to mixins (2026-01-15)
-  - [ ] `hamclock.py` (2625 lines) - Extract API client
+  - [x] `hamclock.py` (2107 lines now) - Extracted to mixins (2026-01-15)
 
 ### Testing
 - [x] **Install pytest** - Available in environment
@@ -134,13 +134,11 @@
 
 | File | Lines | Action |
 |------|-------|--------|
-| launcher_tui/main.py | 2822 | Split: extract menu handlers |
-| hamclock.py | 2625 | Split: extract API client |
 | mesh_tools.py | 1953 | Monitor |
 | tools.py | 1842 | Monitor |
 | tui/app.py | 1734 | Consider extracting panes |
 
-*Note: rns.py (673) and main_web.py (1314) successfully refactored.*
+*Note: rns.py (673), main_web.py (1314), launcher_tui/main.py (1845), and hamclock.py (2107) successfully refactored.*
 
 ---
 
