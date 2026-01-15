@@ -151,6 +151,28 @@
             border-radius: 50%;
         }
 
+        /* Custom node marker styles */
+        .node-marker {
+            background: transparent !important;
+            border: none !important;
+        }
+        .node-marker svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+        }
+
+        /* Legend shapes */
+        .legend-shape {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .legend-shape svg {
+            width: 14px;
+            height: 14px;
+        }
+
         /* Offline indicator */
         .offline-indicator {
             position: absolute;
@@ -263,29 +285,35 @@
     </div>
 
     <div class="legend">
+        <div style="font-weight: bold; margin-bottom: 5px; color: #4fc3f7; font-size: 12px;">Node Status</div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #4caf50;"></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#4caf50"/></svg></div>
             <span>Online</span>
         </div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #f44336;"></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#f44336"/></svg></div>
             <span>Offline</span>
         </div>
+        <div style="font-weight: bold; margin: 8px 0 5px 0; color: #4fc3f7; font-size: 12px;">Node Type</div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #ff9800;"></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9" fill="#ff9800"/></svg></div>
             <span>Gateway</span>
         </div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #9c27b0;"></div>
-            <span>Via MQTT</span>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#2196f3"/></svg></div>
+            <span>Router</span>
         </div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #00bcd4;"></div>
-            <span>RNS Node</span>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" fill="#9c27b0"/></svg></div>
+            <span>MQTT</span>
         </div>
         <div class="legend-item">
-            <div class="legend-marker" style="background: #2196f3; border: 2px solid white;"></div>
-            <span>Local Node</span>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,12 12,22 2,12" fill="#00bcd4"/></svg></div>
+            <span>RNS</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#4caf50" stroke="#fff" stroke-width="2"/></svg></div>
+            <span>Local</span>
         </div>
     </div>
 
@@ -444,7 +472,41 @@
         let nodeLayer = L.layerGroup().addTo(map);
         let currentGeoJSON = null;
 
-        // Create custom marker
+        // SVG marker icons for different node types
+        const markerIcons = {
+            // Gateway: Star shape
+            gateway: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9"
+                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`,
+            // Router: Triangle
+            router: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <polygon points="12,2 22,20 2,20"
+                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`,
+            // RNS Node: Diamond
+            rns: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <polygon points="12,2 22,12 12,22 2,12"
+                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`,
+            // MQTT Node: Square
+            mqtt: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <rect x="3" y="3" width="18" height="18" rx="2"
+                          fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`,
+            // Default: Circle (for regular end nodes)
+            default: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <circle cx="12" cy="12" r="9"
+                            fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`
+        };
+
+        // Create custom marker with shape based on node type
         function createNodeMarker(feature) {
             const props = feature.properties;
             const coords = feature.geometry.coordinates;
@@ -456,23 +518,28 @@
             if (props.via_mqtt) color = '#9c27b0';  // Purple for MQTT nodes
             if (props.network === 'rns') color = props.is_online ? '#00bcd4' : '#607d8b';  // Cyan for RNS
 
-            // Determine marker size and style
-            let radius = 8;
-            let weight = 2;
-            let fillOpacity = 0.8;
+            // Determine marker shape based on node type
+            let iconType = 'default';
+            if (props.is_gateway) iconType = 'gateway';
+            else if (props.network === 'rns') iconType = 'rns';
+            else if (props.via_mqtt) iconType = 'mqtt';
+            else if (props.role === 'ROUTER' || props.role === 'ROUTER_CLIENT') iconType = 'router';
 
-            if (props.is_local) {
-                radius = 12;
-                weight = 3;
-            }
+            // Get SVG icon
+            const iconFn = markerIcons[iconType] || markerIcons.default;
+            const svgHtml = iconFn(color, props.is_local);
+            const size = props.is_local ? 32 : 24;
 
-            const marker = L.circleMarker([coords[1], coords[0]], {
-                radius: radius,
-                fillColor: color,
-                color: props.is_local ? '#ffffff' : color,
-                weight: weight,
-                fillOpacity: fillOpacity
+            // Create div icon
+            const icon = L.divIcon({
+                html: svgHtml,
+                className: 'node-marker',
+                iconSize: [size, size],
+                iconAnchor: [size/2, size/2],
+                popupAnchor: [0, -size/2]
             });
+
+            const marker = L.marker([coords[1], coords[0]], { icon: icon });
 
             // Create popup content
             const networkClass = props.network === 'both' ? 'network-both' :
