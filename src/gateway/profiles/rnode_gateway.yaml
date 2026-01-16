@@ -1,0 +1,97 @@
+# MeshForge Gateway Profile: RNode (Heltec/T-Beam with RNode firmware)
+# For RNode devices acting as Meshtastic gateways
+# Apply with: meshtastic --configure rnode_gateway.yaml
+#
+# RNode-specific considerations:
+# - Higher TX power available (up to 22dBm on Heltec, 27dBm on T-Beam)
+# - No WiFi (RNode firmware is LoRa-only)
+# - Serial connection required for control
+# - Ideal for headless gateway operation
+#
+# Regional Configuration:
+#   Frequency: 903.625 MHz (slot 12)
+#   Modulation: SF7, BW250, CR5 (LONG_FAST equivalent)
+
+device:
+  role: ROUTER_CLIENT
+  rebroadcast_mode: ALL
+  node_info_broadcast_secs: 900
+  serial_enabled: true
+
+lora:
+  region: US  # Change for your region: US, EU_868, AU_915, etc.
+  modem_preset: LONG_FAST  # SF7/BW250 - matches RNode default
+  hop_limit: 5  # Adjust based on network size (1-7)
+  tx_enabled: true
+  tx_power: 22  # RNode max varies by hardware (17-27 dBm)
+  # For specific frequency slot, use channel_num:
+  # channel_num: 12  # 903.625 MHz for Regional
+
+bluetooth:
+  enabled: false  # RNode has no BLE
+
+power:
+  ls_secs: 0  # No light sleep - always listening
+  min_wake_secs: 10
+  wait_bluetooth_secs: 0
+  mesh_sds_timeout_secs: 0
+  sds_secs: 0
+  on_battery_shutdown_after_secs: 0
+
+display:
+  screen_on_secs: 0  # Headless operation
+  auto_screen_carousel_secs: 0
+  flip_screen: false
+  oled_type: OLED_AUTO
+  wake_on_tap_or_motion: false
+
+position:
+  gps_enabled: false  # Set true if T-Beam with GPS
+  gps_update_interval: 120
+  position_broadcast_secs: 900
+  position_broadcast_smart_enabled: true
+  fixed_position: true  # Gateway is fixed location
+
+telemetry:
+  device_update_interval: 900
+  environment_update_interval: 900
+  environment_measurement_enabled: true
+  power_measurement_enabled: true
+
+modules:
+  serial:
+    enabled: true
+    echo: false
+    mode: PROTO  # Protocol buffers for API
+    baud: BAUD_DEFAULT
+
+  store_forward:
+    enabled: true
+    heartbeat: false
+    records: 100
+    history_return_max: 50
+    history_return_window: 3600
+
+  neighbor_info:
+    enabled: true
+    update_interval: 900
+
+  range_test:
+    enabled: false
+
+  canned_message:
+    enabled: false
+
+  external_notification:
+    enabled: false
+
+# Network Configuration
+# RNode typically uses serial, not network
+network:
+  wifi_enabled: false
+  eth_enabled: false
+
+# For RNode + meshtasticd setup:
+# 1. Connect RNode via USB to Pi
+# 2. Start meshtasticd: meshtasticd --port /dev/ttyACM0
+# 3. MeshForge connects via TCP to localhost:4403
