@@ -856,4 +856,62 @@ def __init__(self, main_window):
 
 ---
 
-*Last updated: 2026-01-15 - Updated file size audit with current line counts*
+## Issue #16: Gateway Message Routing Reliability
+
+### Symptom
+- Messages sent via GTK panel may not reach destination
+- Delivery confirmation unreliable
+- No clear feedback when gateway is disconnected
+- Users report "messages lost" intermittently
+
+### Root Cause (Documented 2026-01-16)
+The RNS-Meshtastic gateway bridge has connection and routing limitations:
+
+1. **Gateway connectivity**: Gateway must be running AND connected to both networks
+2. **No delivery guarantees**: Meshtastic uses best-effort delivery over LoRa
+3. **Node unreachability**: Target nodes may be offline or out of range
+4. **Queue overflow**: High message volume can overwhelm limited bandwidth
+
+### Current State
+- Message transmission IS implemented (commit `935d37e`)
+- Gateway bridge connects RNS and Meshtastic networks
+- Delivery status tracking exists but reliability varies
+- User testing confirms intermittent failures
+
+### Proper Fix
+**Accept reliability limitations** - This is inherent to mesh networking:
+
+```python
+# Messaging panel should show clear status
+def _send_message(self):
+    result = messaging.send_message(dest, text)
+    if result.get("status") == "sent":
+        self._show_status("Sent (delivery not guaranteed)")
+    elif result.get("status") == "queued":
+        self._show_status("Queued - gateway not connected")
+    else:
+        self._show_status(f"Failed: {result.get('error')}")
+```
+
+### Files Involved
+- `src/commands/messaging.py` - Message sending logic
+- `src/gateway/rns_bridge.py` - RNS-Meshtastic bridge (lines 217-237)
+- `src/gateway/mesh_bridge.py` - Meshtastic packet handling
+- `src/gtk_ui/panels/messaging.py` - UI panel
+
+### Prevention
+- Document delivery as "best effort" in UI
+- Provide clear gateway status feedback
+- Implement retry logic for critical messages
+- Consider acknowledgment timeouts
+- Test with actual hardware under various conditions
+
+### Testing Gateway
+1. Connect Meshtastic node
+2. Start gateway bridge: `python3 -c "from gateway import start_gateway; start_gateway()"`
+3. Send test message from GTK panel
+4. Verify on target node/device
+
+---
+
+*Last updated: 2026-01-16 - Added Issue #16 Gateway Message Routing Reliability*
