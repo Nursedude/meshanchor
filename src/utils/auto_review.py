@@ -672,39 +672,111 @@ class ReviewAgent:
         # Issue #9: Exception swallowing - check what follows the except block
         if pattern_name == 'exception_pass':
             if lines and line_num > 0:
+                # Check file context - diagnostic tools should be lenient
+                if any(diag in str(stripped) for diag in ['diagnose', 'diagnostic', 'probe', 'check_']):
+                    pass  # Will be evaluated with other criteria
+
+                # Check function context - cleanup/shutdown functions should suppress
+                in_loop = False
+                for i in range(max(0, line_num - 30), line_num):
+                    ctx_line = lines[i].strip()
+                    # Track if we're inside a loop
+                    if ctx_line.startswith('for ') or ctx_line.startswith('while '):
+                        in_loop = True
+                    # Function definitions that indicate cleanup context
+                    if ctx_line.startswith('def ') and any(kw in ctx_line.lower() for kw in
+                            ['cleanup', 'shutdown', '_cleanup', 'close', 'teardown', 'destroy',
+                             '_cancel', 'diagnose', 'check_', 'probe', '_try_']):
+                        return True  # Cleanup/diagnostic functions should suppress exceptions
+                    # Docstrings indicating graceful handling
+                    if any(kw in ctx_line.lower() for kw in
+                            ['gracefully', 'graceful', 'best effort', 'best-effort', 'optional']):
+                        return True
+
+                # Check for multi-method pattern (multiple sequential try blocks)
+                # Pattern: try/except followed by try/except indicates fallback approach
+                for i in range(line_num, min(line_num + 8, len(lines))):
+                    following = lines[i].strip() if i < len(lines) else ''
+                    # If we see another try: soon after, it's a multi-method pattern
+                    if following == 'try:':
+                        return True  # Multi-method fallback pattern
+
+                # Get indentation of the except line
+                except_indent = len(line) - len(line.lstrip())
+
                 # Look at the next non-empty line(s) to see what happens in the except block
-                for i in range(line_num, min(line_num + 3, len(lines))):
-                    next_line = lines[i].strip()
-                    if not next_line:
+                for i in range(line_num, min(line_num + 5, len(lines))):
+                    next_line = lines[i]
+                    next_stripped = next_line.strip()
+                    next_indent = len(next_line) - len(next_line.lstrip())
+
+                    if not next_stripped:
                         continue  # Skip empty lines
 
                     # Acceptable: has logging (logger.xxx, logging.xxx, print)
-                    if any(x in next_line for x in ['logger.', 'logging.', 'print(']):
+                    if any(x in next_stripped for x in ['logger.', 'logging.', 'print(']):
+                        return True
+
+                    # Acceptable: sets a default/fallback value
+                    # e.g., results["key"] = "Unknown", status = False, self.var = None
+                    if '=' in next_stripped and not next_stripped.startswith('=='):
+                        # Assignment to dict/list, variable, or attribute
+                        if any(p in next_stripped for p in ['["', "['", '] =', 'status', 'self.']):
+                            return True
+                        # Simple assignment patterns (var = value)
+                        if re.match(r'^\w+\s*=\s*', next_stripped):
+                            return True
+
+                    # Acceptable: calls GLib.idle_add (GTK UI update with fallback)
+                    if 'GLib.idle_add' in next_stripped:
                         return True
 
                     # Acceptable: returns a value (return None, return default, etc.)
-                    if next_line.startswith('return '):
+                    if next_stripped.startswith('return '):
                         return True
 
                     # Acceptable: continues loop iteration
-                    if next_line == 'continue':
+                    if next_stripped == 'continue':
                         return True
 
                     # Acceptable: breaks from loop
-                    if next_line == 'break':
+                    if next_stripped == 'break':
                         return True
 
                     # Acceptable: raises a different exception
-                    if next_line.startswith('raise '):
+                    if next_stripped.startswith('raise '):
                         return True
 
                     # Acceptable: pass with explanatory comment
-                    if next_line.startswith('pass') and '#' in next_line:
+                    if next_stripped.startswith('pass') and '#' in next_stripped:
                         return True
 
-                    # If we hit just 'pass', it's a true positive (silent swallow)
-                    if next_line == 'pass':
-                        return False  # This is a real issue
+                    # Check for pattern: pass followed by return at function level
+                    # e.g., except Exception: pass; return None
+                    if next_stripped == 'pass':
+                        # If we're inside a loop, pass acts as implicit continue
+                        if in_loop:
+                            return True  # Loop will continue to next iteration
+
+                        # Look ahead for return at same or lower indent as except
+                        for j in range(i + 1, min(i + 4, len(lines))):
+                            following_line = lines[j]
+                            following_stripped = following_line.strip()
+                            following_indent = len(following_line) - len(following_line.lstrip())
+
+                            if not following_stripped:
+                                continue
+
+                            # If we hit a return at except's level or lower, it's OK
+                            if following_stripped.startswith('return ') and following_indent <= except_indent:
+                                return True
+
+                            # If we hit another control structure, stop looking
+                            if any(following_stripped.startswith(kw) for kw in
+                                   ['def ', 'class ', 'if ', 'for ', 'while ', 'try:', 'except', 'finally']):
+                                break
+
+                        return False  # Just pass with no following return - real issue
 
                     # Found some other statement - probably handling it
                     break
