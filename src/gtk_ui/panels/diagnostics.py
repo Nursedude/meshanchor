@@ -1023,13 +1023,13 @@ class DiagnosticsPanel(Gtk.Box):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             result = sock.connect_ex(('8.8.8.8', 53))
-        except Exception:
+        except Exception:  # Non-critical: connectivity check may fail
             result = -1
         finally:
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
         if result == 0:

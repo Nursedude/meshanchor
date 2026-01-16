@@ -242,7 +242,7 @@ class DashboardPane(Container):
                 log.write("[green][OK][/green] rnsd running")
             else:
                 log.write("[yellow][~][/yellow] rnsd not running")
-        except Exception:
+        except Exception:  # Error reported to user
             log.write("[yellow][~][/yellow] rnsd not found")
 
         # Check SPI

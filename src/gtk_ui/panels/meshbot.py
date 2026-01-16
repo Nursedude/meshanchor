@@ -856,7 +856,7 @@ class MeshBotPanel(Gtk.Box):
                 folder = dialog.select_folder_finish(result)
                 if folder:
                     self.path_entry.set_text(folder.get_path())
-            except Exception:
+            except Exception:  # Dialog may be cancelled or fail
                 pass
 
         dialog.select_folder(self.main_window, None, on_response)

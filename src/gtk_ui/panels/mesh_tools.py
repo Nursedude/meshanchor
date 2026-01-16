@@ -1357,7 +1357,7 @@ class MeshToolsPanel(Gtk.Box):
                 if sock:
                     try:
                         sock.close()
-                    except Exception:
+                    except Exception:  # Ignore errors during cleanup
                         pass
 
             if tcp_available:
@@ -1754,7 +1754,7 @@ class MeshToolsPanel(Gtk.Box):
             try:
                 uname = subprocess.run(['uname', '-a'], capture_output=True, text=True, timeout=5)
                 report_lines.append(f"  {uname.stdout.strip()}")
-            except Exception:
+            except Exception:  # Non-critical for report generation
                 pass
 
             # MeshBot status
@@ -1803,7 +1803,7 @@ class MeshToolsPanel(Gtk.Box):
                 if sock:
                     try:
                         sock.close()
-                    except Exception:
+                    except Exception:  # Ignore errors during cleanup
                         pass
 
             report_lines.append("\n" + "=" * 60)

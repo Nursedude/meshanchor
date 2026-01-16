@@ -1162,7 +1162,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
     def _on_check_updates(self, button):
@@ -1741,7 +1741,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
             )
             if result.returncode == 0:
                 killed.append('lxmf')
-        except Exception:
+        except Exception:  # Process may not exist - non-critical
             pass
 
         if killed:

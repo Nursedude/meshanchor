@@ -107,8 +107,7 @@ def scan_serial_ports() -> CommandResult:
             for line in result.stdout.strip().split('\n'):
                 if any(kw in line.lower() for kw in ['cp210', 'ch340', 'ftdi', 'silabs']):
                     usb_devices.append(line)
-    except Exception:
-        # USB enumeration may fail - non-critical for overall detection
+    except Exception:  # USB enumeration may fail - non-critical
         pass
 
     return CommandResult.ok(
@@ -163,8 +162,7 @@ def detect_lora_hardware() -> CommandResult:
             for line in content.split('\n'):
                 if 'dtoverlay=' in line and 'spi' in line.lower():
                     overlays.append(line.strip())
-        except Exception:
-            # Boot config may be unreadable - non-critical
+        except Exception:  # Boot config may be unreadable - non-critical
             pass
 
     has_lora = len(lora_configs) > 0 or len(overlays) > 0
@@ -263,8 +261,7 @@ def get_platform_info() -> CommandResult:
                     mem_kb = int(line.split()[1])
                     info['memory_mb'] = mem_kb // 1024
                     break
-    except Exception:
-        # meminfo may not be available on some systems
+    except Exception:  # meminfo may not be available on some systems
         info['memory_mb'] = 0
 
     return CommandResult.ok(

@@ -276,7 +276,7 @@ def run_fix_mode() -> None:
             if os.getlogin() not in dialout.gr_mem:
                 print_warn("User not in dialout group")
                 print_info(f"Run: sudo usermod -a -G dialout {os.getlogin()}")
-        except Exception:
+        except Exception:  # Non-critical: dialout group check may fail
             pass
 
     print_ok("Fix check complete")
