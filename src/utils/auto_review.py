@@ -419,9 +419,14 @@ class ReviewAgent:
             in_docstring = False
             docstring_char = None
 
+            # Check if this is an entry point file (needs standalone utilities)
+            entry_point_files = ['launcher.py', 'launcher_vte.py', 'launcher_tui',
+                                 'monitor.py', 'standalone.py', 'setup_wizard.py']
+            is_entry_point = any(ep in str(file_path) for ep in entry_point_files)
+
             for pattern_name, pattern_config in self.patterns.items():
-                # Skip duplicate_utility pattern for canonical utils/paths.py
-                if pattern_name == 'duplicate_utility' and is_canonical_paths:
+                # Skip duplicate_utility pattern for canonical utils/paths.py and entry points
+                if pattern_name == 'duplicate_utility' and (is_canonical_paths or is_entry_point):
                     continue
 
                 regex = re.compile(pattern_config['pattern'], re.IGNORECASE)
@@ -642,6 +647,7 @@ class ReviewAgent:
                 'grid[0]',           # Grid locator string
                 'versions[0]',       # Version lists
                 'serial_devices[0]', # Device lists
+                'releases[0]',       # Release lists (guarded by if releases:)
             ]
             if any(pattern in line for pattern in safe_patterns):
                 return True
@@ -665,7 +671,24 @@ class ReviewAgent:
             pass  # All Path.home() should be flagged unless in paths.py
 
         # Issue #5: Duplicate utility function - allow canonical in utils/paths.py
+        # and intentional fallbacks in try/except ImportError blocks
         if pattern_name == 'duplicate_utility':
+            # Check if this is inside a try/except ImportError block (intentional fallback)
+            if lines and line_num > 0:
+                for i in range(max(0, line_num - 10), line_num):
+                    ctx_line = lines[i].strip()
+                    if 'except ImportError' in ctx_line or 'except (ImportError' in ctx_line:
+                        return True  # This is an intentional fallback pattern
+
+            # Entry point scripts need standalone fallbacks
+            entry_points = ['launcher', 'monitor.py', 'standalone.py', 'setup_wizard']
+            if any(ep in str(stripped) for ep in entry_points):
+                return True
+
+            # Class methods (def _get_real_user_home(self)) are internal helpers
+            if 'def _get_real_user_home(self' in line:
+                return True  # Class method pattern
+
             # Will be filtered at file level - canonical file is allowed
             pass
 
