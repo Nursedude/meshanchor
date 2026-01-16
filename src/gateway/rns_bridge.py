@@ -222,9 +222,12 @@ class RNSMeshtasticBridge:
 
         try:
             if self._mesh_interface:
+                # For broadcasts, use ^all instead of None
+                dest = destination if destination else "^all"
+                logger.info(f"Sending to Meshtastic: dest={dest}, ch={channel}, msg={message[:50]}")
                 self._mesh_interface.sendText(
                     message,
-                    destinationId=destination,
+                    destinationId=dest,
                     channelIndex=channel
                 )
                 return True
@@ -586,6 +589,25 @@ class RNSMeshtasticBridge:
                     }
                 )
 
+                # Store incoming message for UI/history
+                try:
+                    from commands import messaging
+                    to_id = packet.get('toId')
+                    # Convert broadcast marker to None
+                    if to_id == '!ffffffff' or to_id == '^all':
+                        to_id = None
+                    messaging.store_incoming(
+                        from_id=from_id,
+                        content=text,
+                        network="meshtastic",
+                        to_id=to_id,
+                        channel=packet.get('channel', 0),
+                        snr=packet.get('rxSnr'),
+                        rssi=packet.get('rxRssi'),
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not store incoming message: {e}")
+
                 # Queue for bridging if enabled
                 if self._should_bridge(msg):
                     self._mesh_to_rns_queue.put(msg)
@@ -614,6 +636,22 @@ class RNSMeshtasticBridge:
                     'lxmf_stamp': message.stamp,
                 }
             )
+
+            # Store incoming message for UI/history
+            try:
+                from commands import messaging
+                # Combine title and content for RNS messages
+                content = message.content
+                if message.title:
+                    content = f"[{message.title}] {content}"
+                messaging.store_incoming(
+                    from_id=source_hash.hex(),
+                    content=content,
+                    network="rns",
+                    to_id=None,  # LXMF doesn't have destination in received messages
+                )
+            except Exception as e:
+                logger.debug(f"Could not store incoming RNS message: {e}")
 
             # Queue for bridging if enabled
             if self._should_bridge(msg):

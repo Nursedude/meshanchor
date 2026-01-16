@@ -256,8 +256,8 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
 
     def _run_full_diagnostics(self):
         """Run full diagnostics script."""
-        subprocess.run(['clear'], check=False)
-        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')])
+        subprocess.run(['clear'], check=False, timeout=5)
+        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')], timeout=600)  # 10min max
         input("\nPress Enter to continue...")
 
     def _check_services(self):
@@ -894,20 +894,20 @@ line-of-sight paths."""
             "This will bridge messages between Reticulum and Meshtastic networks.",
             default_no=True
         ):
-            subprocess.run(['clear'], check=False)
+            subprocess.run(['clear'], check=False, timeout=5)
             print("Starting Gateway Bridge...")
             print("Press Ctrl+C to stop\n")
             try:
-                subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')])
+                subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')])  # Interactive
             except KeyboardInterrupt:
                 print("\nBridge stopped.")
             input("\nPress Enter to continue...")
 
     def _run_monitor(self):
         """Run node monitor."""
-        subprocess.run(['clear'], check=False)
+        subprocess.run(['clear'], check=False, timeout=5)
         try:
-            subprocess.run([sys.executable, str(self.src_dir / 'monitor.py')])
+            subprocess.run([sys.executable, str(self.src_dir / 'monitor.py')])  # Interactive - user Ctrl+C
         except KeyboardInterrupt:
             print("\nMonitor stopped.")
         input("\nPress Enter to continue...")
@@ -1723,8 +1723,8 @@ Active Hardware Configs: {len(active_configs)}"""
             return
 
         # Clear screen and run nano
-        subprocess.run(['clear'], check=False)
-        subprocess.run(['nano', path])
+        subprocess.run(['clear'], check=False, timeout=5)
+        subprocess.run(['nano', path])  # Interactive editor - no timeout
 
         # Ask to restart service
         if self.dialog.yesno(

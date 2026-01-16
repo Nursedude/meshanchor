@@ -385,12 +385,16 @@ class GatewayMixin:
                         if meshtastic_status.fix_hint:
                             service_issues.append(f"  Fix: {meshtastic_status.fix_hint}")
 
-                    # Check rnsd service
-                    rnsd_status = check_service('rnsd')
-                    if not rnsd_status.available:
-                        service_issues.append(f"rnsd: {rnsd_status.message}")
-                        if rnsd_status.fix_hint:
-                            service_issues.append(f"  Fix: {rnsd_status.fix_hint}")
+                    # Check if RNS module is available (gateway will initialize it)
+                    # Don't require external rnsd - MeshForge can be the RNS instance
+                    rns_available = False
+                    try:
+                        import RNS
+                        rns_available = True
+                        logger.debug("[RNS] RNS module available - gateway will initialize")
+                    except ImportError:
+                        service_issues.append("RNS module not installed")
+                        service_issues.append("  Fix: pip install rns")
 
                 if service_issues:
                     logger.warning(f"[RNS] Gateway pre-checks failed: {service_issues}")
@@ -417,6 +421,14 @@ class GatewayMixin:
                 self._gateway_bridge = RNSMeshtasticBridge(config)
                 success = self._gateway_bridge.start()
                 logger.debug(f"[RNS] Gateway start: {'OK' if success else 'FAILED'}")
+
+                # Register bridge with commands module so messaging can use it
+                if success:
+                    try:
+                        from commands import gateway as gateway_cmd
+                        gateway_cmd.set_bridge(self._gateway_bridge)
+                    except Exception as e:
+                        logger.warning(f"[RNS] Could not register bridge: {e}")
 
                 GLib.idle_add(self._gateway_start_complete, success)
             except ImportError as e:
@@ -735,42 +747,121 @@ class GatewayMixin:
             self.mesh_conn_entry.set_placeholder_text("Bluetooth device name")
 
     def _on_detect_meshtastic_connection(self, button):
-        """Auto-detect meshtasticd or serial devices"""
+        """Auto-detect meshtasticd, Meshtastic devices, and RNodes"""
+        GLib.idle_add(self._set_mesh_status, "Detecting devices...")
+
         def do_detect():
             detected_type = None
             detected_value = None
-            status_msg = ""
+            status_lines = []
 
             # Check for meshtasticd on TCP port 4403
             import socket
+            meshtasticd_running = False
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 result = sock.connect_ex(('localhost', 4403))
                 sock.close()
                 if result == 0:
+                    meshtasticd_running = True
                     detected_type = 0  # TCP
                     detected_value = "127.0.0.1:4403"
-                    status_msg = "Detected meshtasticd on TCP port 4403"
+                    status_lines.append("Meshtastic: TCP (meshtasticd :4403)")
             except Exception:
                 pass
 
-            # If no TCP, check for serial devices
-            if detected_type is None:
-                serial_devices = []
-                for pattern in ['ttyUSB*', 'ttyACM*']:
-                    serial_devices.extend(Path('/dev').glob(pattern))
-                if serial_devices:
-                    detected_type = 1  # Serial
-                    detected_value = str(serial_devices[0])
-                    status_msg = f"Detected serial device: {detected_value}"
+            # Scan serial devices and identify them
+            serial_devices = []
+            for pattern in ['ttyUSB*', 'ttyACM*']:
+                serial_devices.extend(Path('/dev').glob(pattern))
+
+            for device in serial_devices:
+                device_str = str(device)
+                device_type = self._identify_serial_device(device_str)
+
+                if device_type == "rnode":
+                    status_lines.append(f"RNode: {device_str}")
+                elif device_type == "meshtastic":
+                    status_lines.append(f"Meshtastic: {device_str}")
+                    # Only use serial if no TCP detected
+                    if detected_type is None:
+                        detected_type = 1
+                        detected_value = device_str
+                else:
+                    status_lines.append(f"Serial: {device_str} (unknown)")
+                    if detected_type is None:
+                        detected_type = 1
+                        detected_value = device_str
+
+            if status_lines:
+                status_msg = "\n".join(status_lines)
+            else:
+                status_msg = "No Meshtastic or RNode devices detected"
 
             if detected_type is not None:
                 GLib.idle_add(self._apply_detected_connection, detected_type, detected_value, status_msg)
             else:
-                GLib.idle_add(self._set_mesh_status, "No Meshtastic connection detected")
+                GLib.idle_add(self._set_mesh_status, status_msg)
 
         threading.Thread(target=do_detect, daemon=True).start()
+
+    def _identify_serial_device(self, port: str) -> str:
+        """Identify if a serial device is Meshtastic or RNode.
+
+        Returns: 'meshtastic', 'rnode', or 'unknown'
+        """
+        # First check USB vendor/product IDs
+        try:
+            # Extract device name (e.g., ttyUSB0)
+            import os
+            device_name = os.path.basename(port)
+
+            # Check sysfs for USB info
+            usb_path = None
+            for p in Path('/sys/class/tty').glob(f'{device_name}/device/../../../'):
+                if (p / 'idVendor').exists():
+                    usb_path = p
+                    break
+
+            if usb_path:
+                vendor = (usb_path / 'idVendor').read_text().strip()
+                product = (usb_path / 'idProduct').read_text().strip()
+
+                # Known RNode devices (Heltec, LilyGo T-Beam with RNode firmware)
+                # CH341 (1a86:5512 or 1a86:7523) - often RNode
+                # CP210x (10c4:ea60) - could be either
+                if vendor == '1a86':  # QinHeng/CH341
+                    return 'rnode'  # CH341 is commonly used for RNode
+                elif vendor == '10c4' and product == 'ea60':  # Silicon Labs CP210x
+                    # Could be either - try to probe
+                    pass
+        except Exception:
+            pass
+
+        # Try quick probe with meshtastic CLI (only if not locked)
+        try:
+            result = subprocess.run(
+                ['meshtastic', '--port', port, '--info'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and 'Owner' in result.stdout:
+                return 'meshtastic'
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+
+        # Try rnodeconf probe
+        try:
+            result = subprocess.run(
+                ['rnodeconf', port, '-i'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and ('RNode' in result.stdout or 'firmware' in result.stdout.lower()):
+                return 'rnode'
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+
+        return 'unknown'
 
     def _apply_detected_connection(self, conn_type, conn_value, status_msg):
         """Apply detected connection settings to UI"""
