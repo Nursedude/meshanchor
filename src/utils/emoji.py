@@ -129,7 +129,7 @@ class EmojiHelper:
             encoding = getattr(sys.stdout, 'encoding', None)
             if encoding and 'utf' in encoding.lower():
                 has_utf8 = True
-        except Exception:
+        except Exception:  # Non-critical: encoding check may fail
             pass
 
         if not has_utf8:

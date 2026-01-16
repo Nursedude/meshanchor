@@ -847,7 +847,7 @@ def get_nodes_full():
                 if _node_monitor:
                     try:
                         _node_monitor.disconnect()
-                    except Exception:
+                    except Exception:  # Ignore errors during cleanup
                         pass
                 _node_monitor = NodeMonitor(host='localhost', port=4403)
                 if not _node_monitor.connect(timeout=10.0):

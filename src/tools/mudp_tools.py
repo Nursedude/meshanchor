@@ -228,7 +228,7 @@ class MUDPTools:
                 console.print(f"[green]Port {MUDP_PORT} is in use[/green]")
             else:
                 console.print(f"[yellow]Port {MUDP_PORT} is not in use[/yellow]")
-        except Exception:
+        except Exception:  # Non-critical: port check may fail
             pass
 
         input("\nPress Enter to continue...")
@@ -422,7 +422,7 @@ class MUDPTools:
                 console.print("  [green]Broadcast/multicast responses enabled[/green]")
             else:
                 console.print("  [yellow]Broadcast/multicast responses disabled[/yellow]")
-        except Exception:
+        except Exception:  # Non-critical: status check may fail
             pass
 
         input("\nPress Enter to continue...")

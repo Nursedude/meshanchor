@@ -513,7 +513,7 @@ class MapPanel(Gtk.Box):
                                 if MapPanel._monitor:
                                     MapPanel._monitor.disconnect()
                                     logger.debug("Disconnected monitor (non-persistent mode)")
-                            except Exception:
+                            except Exception:  # Ignore errors during cleanup
                                 pass
                             MapPanel._monitor = None
 
@@ -525,7 +525,7 @@ class MapPanel(Gtk.Box):
                         try:
                             if MapPanel._monitor:
                                 MapPanel._monitor.disconnect()
-                        except Exception:
+                        except Exception:  # Ignore errors during cleanup
                             pass
                         MapPanel._monitor = None
                     error_msg = "Connection lost - will retry"
@@ -612,7 +612,7 @@ class MapPanel(Gtk.Box):
             if self.node_tracker:
                 try:
                     rns_nodes_for_list = self.node_tracker.get_rns_nodes()
-                except Exception:
+                except Exception:  # Non-critical: continue without RNS nodes
                     pass
             self._update_node_list_raw(nodes, rns_nodes_for_list)
 

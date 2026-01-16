@@ -315,7 +315,7 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
             result = sock.connect_ex(('8.8.8.8', 53))
             sock.close()
             tests.append(f"Internet (DNS): {'OK' if result == 0 else 'FAIL'}")
-        except Exception:
+        except Exception:  # Error reported to user
             tests.append("Internet: ERROR")
 
         self.dialog.msgbox("Network Connectivity", "\n".join(tests))
@@ -371,7 +371,7 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
             )
             errors = [l for l in result.stdout.split('\n') if 'error' in l.lower()]
             logs.append(f"rnsd: {len(errors)} errors in last 20 lines")
-        except Exception:
+        except Exception:  # Error reported to user
             logs.append("rnsd: Unable to read logs")
 
         logs.append("")
@@ -425,7 +425,7 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
                 days = int(uptime_secs // 86400)
                 hours = int((uptime_secs % 86400) // 3600)
                 resources.append(f"Uptime: {days}d {hours}h")
-        except Exception:
+        except Exception:  # Error reported to user
             resources.append("Uptime: N/A")
 
         self.dialog.msgbox("System Resources", "\n".join(resources))
@@ -546,7 +546,7 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
                 sock.close()
                 status = "OPEN" if result == 0 else "closed"
                 results.append(f"{port:5d} {name:15s} {status}")
-            except Exception:
+            except Exception:  # Error reported to user
                 results.append(f"{port:5d} {name:15s} error")
 
         self.dialog.msgbox(f"Port Scan: {host}", "\n".join(results))

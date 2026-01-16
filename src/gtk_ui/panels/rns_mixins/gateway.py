@@ -768,7 +768,7 @@ class GatewayMixin:
                     detected_type = 0  # TCP
                     detected_value = "127.0.0.1:4403"
                     status_lines.append("Meshtastic: TCP (meshtasticd :4403)")
-            except Exception:
+            except Exception:  # Non-critical: port check may fail
                 pass
 
             # Scan serial devices and identify them

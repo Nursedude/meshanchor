@@ -624,7 +624,7 @@ class GatewayConfigDialog(Adw.Window):
                 folder = dialog.select_folder_finish(result)
                 if folder:
                     self.rns_config_dir.set_text(folder.get_path())
-            except Exception:
+            except Exception:  # Dialog may be cancelled or fail
                 pass
 
         dialog.select_folder(self, None, on_response)

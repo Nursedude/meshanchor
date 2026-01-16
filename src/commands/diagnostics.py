@@ -313,8 +313,7 @@ def check_dependencies() -> CommandResult:
                 'path': result.stdout.strip() if result.returncode == 0 else None,
                 'type': 'binary'
             }
-        except Exception:
-            # which command failed - assume binary not installed
+        except Exception:  # which command failed - assume binary not installed
             deps[binary] = {'installed': False, 'type': 'binary'}
 
     installed = sum(1 for d in deps.values() if d.get('installed'))
