@@ -392,7 +392,7 @@ def launch_interface(choice):
     elif choice == "5":
         # Diagnostics - run as subprocess so we return to menu
         print(f"\n{Colors.GREEN}Running Diagnostics...{Colors.NC}\n")
-        subprocess.run([sys.executable, str(src_dir / 'cli' / 'diagnose.py')])
+        subprocess.run([sys.executable, str(src_dir / 'cli' / 'diagnose.py')], timeout=600)  # 10min max
         return  # Return to menu loop
 
     elif choice == "6":
@@ -410,7 +410,7 @@ def launch_interface(choice):
         # Monitor Mode - run as subprocess
         print(f"\n{Colors.GREEN}Starting Monitor Mode...{Colors.NC}\n")
         try:
-            subprocess.run([sys.executable, str(src_dir / 'monitor.py')])
+            subprocess.run([sys.executable, str(src_dir / 'monitor.py')])  # Interactive - user Ctrl+C to exit
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}Monitor stopped.{Colors.NC}")
         return  # Return to menu loop
