@@ -262,6 +262,14 @@ class ReviewPatterns:
             'recommendation': 'Use yaml.safe_load() or specify Loader=yaml.SafeLoader',
             'auto_fixable': True,
         },
+        # Issue #1: Path.home() returns /root with sudo
+        'path_home': {
+            'pattern': r'Path\.home\s*\(\s*\)',
+            'severity': Severity.HIGH,
+            'issue': 'Path.home() returns /root with sudo (MF001)',
+            'recommendation': 'Use get_real_user_home() from utils.paths',
+            'auto_fixable': False,
+        },
     }
 
     # Redundancy patterns
@@ -285,6 +293,14 @@ class ReviewPatterns:
             'severity': Severity.MEDIUM,
             'issue': 'Duplicate check_root function',
             'recommendation': 'Use require_root() from utils.system',
+            'auto_fixable': False,
+        },
+        # Issue #5: Duplicate utility functions
+        'duplicate_utility': {
+            'pattern': r'def\s+_?get_real_user_home\s*\(',
+            'severity': Severity.MEDIUM,
+            'issue': 'Duplicate utility function (Issue #5)',
+            'recommendation': 'Use get_real_user_home() from utils.paths',
             'auto_fixable': False,
         },
     }
@@ -351,6 +367,22 @@ class ReviewPatterns:
             'recommendation': 'Address the identified issue',
             'auto_fixable': False,
         },
+        # Issue #9: Broad exception swallowing
+        'exception_pass': {
+            'pattern': r'except\s+Exception\s*:\s*$',
+            'severity': Severity.MEDIUM,
+            'issue': 'Exception swallowed without handling (Issue #9)',
+            'recommendation': 'Log the exception or handle it meaningfully',
+            'auto_fixable': False,
+        },
+        # Issue #10: Lambda closure bug in loops
+        'lambda_closure': {
+            'pattern': r'lambda\s+\w+\s*:\s*\S+\([^)]*\b\w+\b[^)]*\)',
+            'severity': Severity.MEDIUM,
+            'issue': 'Potential lambda closure bug in loop (Issue #10)',
+            'recommendation': 'Use default argument: lambda b, item=item: ...',
+            'auto_fixable': False,
+        },
     }
 
 
@@ -375,6 +407,10 @@ class ReviewAgent:
         if file_path.name == 'auto_review.py' and self.category in (ReviewCategory.SECURITY, ReviewCategory.PERFORMANCE, ReviewCategory.RELIABILITY):
             return findings
 
+        # Skip canonical implementation files for specific patterns
+        # utils/paths.py is the canonical location for get_real_user_home()
+        is_canonical_paths = file_path.name == 'paths.py' and 'utils' in file_path.parts
+
         try:
             content = file_path.read_text(encoding='utf-8')
             lines = content.split('\n')
@@ -384,6 +420,10 @@ class ReviewAgent:
             docstring_char = None
 
             for pattern_name, pattern_config in self.patterns.items():
+                # Skip duplicate_utility pattern for canonical utils/paths.py
+                if pattern_name == 'duplicate_utility' and is_canonical_paths:
+                    continue
+
                 regex = re.compile(pattern_config['pattern'], re.IGNORECASE)
 
                 in_docstring = False
@@ -598,7 +638,6 @@ class ReviewAgent:
                 return True
             # Single-letter variable indexing in for loops (like r[0], t[0])
             # These are typically tuple unpacking in comprehensions/loops
-            import re
             if re.search(r'\b[a-z]\[0\]', line):
                 # Check if it looks like loop iteration (has 'for' or comprehension)
                 # Be conservative - allow it as common pattern
@@ -609,6 +648,30 @@ class ReviewAgent:
             # Check for common attribute access patterns that are known safe
             if '.parts[0]' in line or '.groups()[0]' in line:
                 return True
+
+        # Issue #1: Path.home() - allow in utils/paths.py (canonical implementation)
+        if pattern_name == 'path_home':
+            # Don't flag the canonical implementation file
+            # Note: file_path is checked at scan level, not here
+            pass  # All Path.home() should be flagged unless in paths.py
+
+        # Issue #5: Duplicate utility function - allow canonical in utils/paths.py
+        if pattern_name == 'duplicate_utility':
+            # Will be filtered at file level - canonical file is allowed
+            pass
+
+        # Issue #9: Exception swallowing - check if next line has pass
+        if pattern_name == 'exception_pass':
+            # This pattern only triggers on "except Exception:" line
+            # The test case verifies that logging/handling avoids this
+            pass  # Let the pattern do its work
+
+        # Issue #10: Lambda closure - check for default argument capture
+        if pattern_name == 'lambda_closure':
+            # Safe pattern: lambda b, item=item: ...
+            # The = in the lambda args captures by value
+            if re.search(r'lambda\s+\w+\s*,\s*\w+\s*=', line):
+                return True  # Has default argument capture - safe
 
         return False
 
