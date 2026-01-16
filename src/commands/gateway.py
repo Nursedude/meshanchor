@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 _bridge_instance = None
 
 
+def set_bridge(bridge):
+    """Register an external bridge instance (e.g., from GTK UI)."""
+    global _bridge_instance
+    _bridge_instance = bridge
+    logger.info("Gateway bridge registered from external source")
+
+
 def _get_bridge():
     """Get or create the bridge instance."""
     global _bridge_instance
