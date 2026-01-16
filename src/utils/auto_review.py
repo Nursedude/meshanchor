@@ -455,7 +455,7 @@ class ReviewAgent:
 
                     if regex.search(line):
                         # Additional context checks to reduce false positives
-                        if self._is_false_positive(pattern_name, line, stripped):
+                        if self._is_false_positive(pattern_name, line, stripped, lines, line_num):
                             continue
 
                         findings.append(ReviewFinding(
@@ -485,8 +485,17 @@ class ReviewAgent:
         lower = stripped.lower()
         return any(indicator in lower for indicator in doc_indicators)
 
-    def _is_false_positive(self, pattern_name: str, line: str, stripped: str) -> bool:
-        """Check for known false positive patterns"""
+    def _is_false_positive(self, pattern_name: str, line: str, stripped: str,
+                           lines: list = None, line_num: int = 0) -> bool:
+        """Check for known false positive patterns
+
+        Args:
+            pattern_name: The pattern that matched
+            line: The full line content
+            stripped: The stripped line content
+            lines: Optional list of all lines in file (for context checking)
+            line_num: Current line number (1-indexed)
+        """
         # os.system with shlex.quote is safe (used in launcher_tui for terminal inheritance)
         if pattern_name == 'os_system':
             if 'shlex.quote' in line or 'shlex_quote' in line:
@@ -660,11 +669,117 @@ class ReviewAgent:
             # Will be filtered at file level - canonical file is allowed
             pass
 
-        # Issue #9: Exception swallowing - check if next line has pass
+        # Issue #9: Exception swallowing - check what follows the except block
         if pattern_name == 'exception_pass':
-            # This pattern only triggers on "except Exception:" line
-            # The test case verifies that logging/handling avoids this
-            pass  # Let the pattern do its work
+            if lines and line_num > 0:
+                # Check file context - diagnostic tools should be lenient
+                if any(diag in str(stripped) for diag in ['diagnose', 'diagnostic', 'probe', 'check_']):
+                    pass  # Will be evaluated with other criteria
+
+                # Check function context - cleanup/shutdown functions should suppress
+                in_loop = False
+                for i in range(max(0, line_num - 30), line_num):
+                    ctx_line = lines[i].strip()
+                    # Track if we're inside a loop
+                    if ctx_line.startswith('for ') or ctx_line.startswith('while '):
+                        in_loop = True
+                    # Function definitions that indicate cleanup context
+                    if ctx_line.startswith('def ') and any(kw in ctx_line.lower() for kw in
+                            ['cleanup', 'shutdown', '_cleanup', 'close', 'teardown', 'destroy',
+                             '_cancel', 'diagnose', 'check_', 'probe', '_try_']):
+                        return True  # Cleanup/diagnostic functions should suppress exceptions
+                    # Docstrings indicating graceful handling
+                    if any(kw in ctx_line.lower() for kw in
+                            ['gracefully', 'graceful', 'best effort', 'best-effort', 'optional']):
+                        return True
+
+                # Check for multi-method pattern (multiple sequential try blocks)
+                # Pattern: try/except followed by try/except indicates fallback approach
+                for i in range(line_num, min(line_num + 8, len(lines))):
+                    following = lines[i].strip() if i < len(lines) else ''
+                    # If we see another try: soon after, it's a multi-method pattern
+                    if following == 'try:':
+                        return True  # Multi-method fallback pattern
+
+                # Get indentation of the except line
+                except_indent = len(line) - len(line.lstrip())
+
+                # Look at the next non-empty line(s) to see what happens in the except block
+                for i in range(line_num, min(line_num + 5, len(lines))):
+                    next_line = lines[i]
+                    next_stripped = next_line.strip()
+                    next_indent = len(next_line) - len(next_line.lstrip())
+
+                    if not next_stripped:
+                        continue  # Skip empty lines
+
+                    # Acceptable: has logging (logger.xxx, logging.xxx, print)
+                    if any(x in next_stripped for x in ['logger.', 'logging.', 'print(']):
+                        return True
+
+                    # Acceptable: sets a default/fallback value
+                    # e.g., results["key"] = "Unknown", status = False, self.var = None
+                    if '=' in next_stripped and not next_stripped.startswith('=='):
+                        # Assignment to dict/list, variable, or attribute
+                        if any(p in next_stripped for p in ['["', "['", '] =', 'status', 'self.']):
+                            return True
+                        # Simple assignment patterns (var = value)
+                        if re.match(r'^\w+\s*=\s*', next_stripped):
+                            return True
+
+                    # Acceptable: calls GLib.idle_add (GTK UI update with fallback)
+                    if 'GLib.idle_add' in next_stripped:
+                        return True
+
+                    # Acceptable: returns a value (return None, return default, etc.)
+                    if next_stripped.startswith('return '):
+                        return True
+
+                    # Acceptable: continues loop iteration
+                    if next_stripped == 'continue':
+                        return True
+
+                    # Acceptable: breaks from loop
+                    if next_stripped == 'break':
+                        return True
+
+                    # Acceptable: raises a different exception
+                    if next_stripped.startswith('raise '):
+                        return True
+
+                    # Acceptable: pass with explanatory comment
+                    if next_stripped.startswith('pass') and '#' in next_stripped:
+                        return True
+
+                    # Check for pattern: pass followed by return at function level
+                    # e.g., except Exception: pass; return None
+                    if next_stripped == 'pass':
+                        # If we're inside a loop, pass acts as implicit continue
+                        if in_loop:
+                            return True  # Loop will continue to next iteration
+
+                        # Look ahead for return at same or lower indent as except
+                        for j in range(i + 1, min(i + 4, len(lines))):
+                            following_line = lines[j]
+                            following_stripped = following_line.strip()
+                            following_indent = len(following_line) - len(following_line.lstrip())
+
+                            if not following_stripped:
+                                continue
+
+                            # If we hit a return at except's level or lower, it's OK
+                            if following_stripped.startswith('return ') and following_indent <= except_indent:
+                                return True
+
+                            # If we hit another control structure, stop looking
+                            if any(following_stripped.startswith(kw) for kw in
+                                   ['def ', 'class ', 'if ', 'for ', 'while ', 'try:', 'except', 'finally']):
+                                break
+
+                        return False  # Just pass with no following return - real issue
+
+                    # Found some other statement - probably handling it
+                    break
 
         # Issue #10: Lambda closure - check for default argument capture
         if pattern_name == 'lambda_closure':
@@ -678,6 +793,11 @@ class ReviewAgent:
             if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(["\'][^"\']*["\']\)', line):
                 return True
 
+            # Safe: Lambda calling attribute method with string literal
+            # e.g., lambda b: self.entry.set_text("default")
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\.\w+\(["\'][^"\']*["\']\)', line):
+                return True
+
             # Safe: Lambda with only self method calls (no external vars)
             # e.g., lambda b: self._check_status()
             if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(\s*\)', line):
@@ -686,6 +806,11 @@ class ReviewAgent:
             # Safe: Lambda calling method with self attributes
             # e.g., lambda b: self._method(self.something)
             if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(self\.', line):
+                return True
+
+            # Safe: Lambda with conditional using method parameters (not loop vars)
+            # e.g., lambda confirmed: self._do_edit(config_path) if confirmed else None
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(\w+\)\s+if\s+\w+\s+else', line):
                 return True
 
             # Safe: Lambda in sorting key - common pattern
@@ -697,6 +822,42 @@ class ReviewAgent:
             # e.g., lambda b: self._edit_config("/etc/config")
             if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(["\']/', line):
                 return True
+
+            # Safe: Lambda only referencing self expressions throughout
+            # Extract the lambda body and check if it only uses self.xxx
+            lambda_match = re.search(r'lambda\s+\w+\s*:\s*(.+)', line)
+            if lambda_match:
+                body = lambda_match.group(1)
+                # Remove string literals to avoid false matches
+                body_no_strings = re.sub(r'["\'][^"\']*["\']', '', body)
+                # Check if all identifiers are self.xxx or the lambda param
+                # If there are bare identifiers (not self.xxx), might be closure
+                identifiers = re.findall(r'\b([a-zA-Z_]\w*)\b', body_no_strings)
+                # Filter out common safe identifiers
+                safe_ids = {'self', 'True', 'False', 'None', 'if', 'else', 'and', 'or', 'not'}
+                # Get the lambda parameter name
+                param_match = re.search(r'lambda\s+(\w+)', line)
+                if param_match:
+                    safe_ids.add(param_match.group(1))
+                # Check for potentially captured variables
+                risky = [i for i in identifiers if i not in safe_ids and not i.startswith('_')]
+                if not risky:
+                    return True  # All identifiers are safe
+
+            # Only flag if we're inside a loop (check previous lines for 'for' or 'while')
+            # This reduces false positives from lambdas capturing local variables
+            # that aren't actually changing in a loop
+            if lines and line_num > 0:
+                # Look at previous 10 lines for loop keywords
+                start = max(0, line_num - 11)  # line_num is 1-indexed
+                has_loop = False
+                for i in range(start, line_num - 1):
+                    prev_line = lines[i].strip()
+                    if prev_line.startswith('for ') or prev_line.startswith('while '):
+                        has_loop = True
+                        break
+                if not has_loop:
+                    return True  # Not in a loop context - likely safe
 
         # Issue #1: Path.home() - allow inside get_real_user_home fallback functions
         if pattern_name == 'path_home':
