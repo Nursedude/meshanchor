@@ -169,7 +169,7 @@ class NetworkTools:
             local_ip = s.getsockname()[0]
             s.close()
             hosts.append(local_ip)
-        except Exception:
+        except Exception:  # Non-critical: local IP detection may fail
             pass
 
         console.print("[cyan]Testing Meshtastic TCP port 4403...[/cyan]\n")
@@ -190,7 +190,7 @@ class NetworkTools:
                     table.add_row(host, "4403", "[green]OPEN[/green]")
                 else:
                     table.add_row(host, "4403", "[red]CLOSED[/red]")
-            except Exception:
+            except Exception:  # Error reported to user
                 table.add_row(host, "4403", "[yellow]ERROR[/yellow]")
 
         console.print(table)
@@ -363,7 +363,7 @@ class NetworkTools:
                 console.print("[green]Meshtastic TCP port 4403 is listening![/green]")
             else:
                 console.print("[yellow]Meshtastic TCP port 4403 is not listening[/yellow]")
-        except Exception:
+        except Exception:  # Non-critical: port check may fail
             pass
 
         input("\nPress Enter to continue...")

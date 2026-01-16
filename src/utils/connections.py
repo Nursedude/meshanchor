@@ -102,7 +102,7 @@ class SerialConnection(DeviceConnection):
         if self._interface:
             try:
                 self._interface.close()
-            except Exception:
+            except Exception:  # Ignore errors during cleanup
                 pass
             self._interface = None
 
@@ -136,7 +136,7 @@ class BLEConnection(DeviceConnection):
         if self._interface:
             try:
                 self._interface.close()
-            except Exception:
+            except Exception:  # Ignore errors during cleanup
                 pass
             self._interface = None
 
@@ -171,7 +171,7 @@ class TCPConnection(DeviceConnection):
         if self._interface:
             try:
                 self._interface.close()
-            except Exception:
+            except Exception:  # Ignore errors during cleanup
                 pass
             self._interface = None
 

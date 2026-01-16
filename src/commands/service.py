@@ -146,7 +146,7 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
     if not is_running:

@@ -454,7 +454,7 @@ class MQTTDashboardPanel(Gtk.Box):
                 if sock:
                     try:
                         sock.close()
-                    except Exception:
+                    except Exception:  # Ignore errors during cleanup
                         pass
 
         threading.Thread(target=do_test, daemon=True).start()

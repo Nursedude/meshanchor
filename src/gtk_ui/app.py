@@ -1148,7 +1148,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             settings = SettingsManager()
             if settings.get("web_client_mode", False):
                 return "--"  # Return placeholder when web client mode is on
-        except Exception:
+        except Exception:  # Non-critical: settings check may fail
             pass
 
         # Check cache first
@@ -1170,7 +1170,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
         if not port_reachable:

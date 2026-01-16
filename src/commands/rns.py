@@ -535,8 +535,7 @@ def get_status() -> CommandResult:
             timeout=5
         )
         status['systemd_status'] = result.stdout.strip()
-    except Exception:
-        # systemctl may not be available on non-systemd systems
+    except Exception:  # systemctl may not be available on non-systemd systems
         status['systemd_status'] = 'unknown'
 
     # Get interface count

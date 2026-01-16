@@ -107,7 +107,7 @@ class NetworkToolsMixin:
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
     def _on_scan_devices(self, button):
@@ -131,7 +131,7 @@ class NetworkToolsMixin:
             if s:
                 try:
                     s.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
         try:

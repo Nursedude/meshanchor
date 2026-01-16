@@ -390,7 +390,7 @@ def check_network_interfaces():
         result = sock.connect_ex(('8.8.8.8', 53))
         sock.close()
         print_status("Internet", result == 0, "connected" if result == 0 else "no connectivity")
-    except Exception:
+    except Exception:  # Error reported to user
         print_status("Internet", False, "unable to check")
 
 

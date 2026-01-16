@@ -104,7 +104,7 @@ class SettingsManager:
                     backup = self._settings_file.with_suffix('.json.bak')
                     self._settings_file.rename(backup)
                     logger.info(f"Corrupted file backed up to {backup}")
-                except Exception:
+                except Exception:  # Non-critical: backup may fail
                     pass
             except IOError as e:
                 logger.error(f"Error reading {self._settings_file}: {e}")

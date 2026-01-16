@@ -307,13 +307,13 @@ class DashboardPane(Container):
                 log.write("[green][OK][/green] TCP port 4403 open")
             else:
                 log.write("[red][X][/red] TCP port 4403 closed")
-        except Exception:
+        except Exception:  # Error reported to user
             log.write("[red][X][/red] Could not check port 4403")
         finally:
             if sock:
                 try:
                     sock.close()
-                except Exception:
+                except Exception:  # Ignore errors during cleanup
                     pass
 
         # Check RNS
@@ -328,7 +328,7 @@ class DashboardPane(Container):
                 log.write("[green][OK][/green] rnsd running")
             else:
                 log.write("[yellow][~][/yellow] rnsd not running")
-        except Exception:
+        except Exception:  # Error reported to user
             log.write("[yellow][~][/yellow] rnsd not found")
 
         # Check SPI
@@ -524,7 +524,7 @@ class DashboardPane(Container):
             else:
                 hw_widget.update("[yellow]Check config[/yellow]")
                 hw_detail.update("Enable in raspi-config")
-        except Exception:
+        except Exception:  # Error reported to user
             hw_widget.update("[yellow]Unknown[/yellow]")
             hw_detail.update("Check failed")
 
