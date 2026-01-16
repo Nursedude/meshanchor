@@ -845,3 +845,159 @@ x = 1
 
         shell_findings = [f for f in findings if f.pattern_matched and 'shell' in f.pattern_matched.lower()]
         assert len(shell_findings) == 0
+
+
+class TestPersistentIssuePatterns:
+    """Tests for patterns that detect documented persistent issues."""
+
+    def test_detects_path_home(self, security_agent, temp_dir):
+        """Test detection of Path.home() - Issue #1."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+from pathlib import Path
+config_dir = Path.home() / ".config" / "meshforge"
+""")
+        findings = security_agent.scan_file(test_file)
+
+        path_home_findings = [f for f in findings if f.pattern_matched and 'path_home' in f.pattern_matched]
+        assert len(path_home_findings) >= 1
+        assert path_home_findings[0].severity.value in ['critical', 'high']
+
+    def test_path_home_with_spaces(self, security_agent, temp_dir):
+        """Test detection of Path.home() with various spacing."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+from pathlib import Path
+a = Path.home()
+b = Path.home( )
+""")
+        findings = security_agent.scan_file(test_file)
+
+        path_home_findings = [f for f in findings if f.pattern_matched and 'path_home' in f.pattern_matched]
+        assert len(path_home_findings) >= 2
+
+    def test_allows_get_real_user_home(self, security_agent, temp_dir):
+        """Test that get_real_user_home() is not flagged."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+from utils.paths import get_real_user_home
+config_dir = get_real_user_home() / ".config" / "meshforge"
+""")
+        findings = security_agent.scan_file(test_file)
+
+        path_home_findings = [f for f in findings if f.pattern_matched and 'path_home' in f.pattern_matched]
+        assert len(path_home_findings) == 0
+
+    def test_detects_lambda_closure_in_loop(self, reliability_agent, temp_dir):
+        """Test detection of lambda closure bug in loops - Issue #10."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+for item in items:
+    btn.connect("clicked", lambda b: self._handle(item))
+""")
+        findings = reliability_agent.scan_file(test_file)
+
+        lambda_findings = [f for f in findings if f.pattern_matched and 'lambda_closure' in f.pattern_matched]
+        assert len(lambda_findings) >= 1
+        assert lambda_findings[0].severity.value in ['medium', 'high']
+
+    def test_allows_lambda_with_default_arg(self, reliability_agent, temp_dir):
+        """Test that lambda with default argument (correct pattern) is not flagged."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+for item in items:
+    btn.connect("clicked", lambda b, i=item: self._handle(i))
+""")
+        findings = reliability_agent.scan_file(test_file)
+
+        lambda_findings = [f for f in findings if f.pattern_matched and 'lambda_closure' in f.pattern_matched]
+        assert len(lambda_findings) == 0
+
+    def test_detects_exception_pass_pattern(self, reliability_agent, temp_dir):
+        """Test detection of broad exception swallowing - Issue #9."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+try:
+    risky_operation()
+except Exception:
+    pass
+""")
+        findings = reliability_agent.scan_file(test_file)
+
+        exception_findings = [f for f in findings if f.pattern_matched and 'exception_pass' in f.pattern_matched]
+        assert len(exception_findings) >= 1
+
+    def test_allows_exception_with_logging(self, reliability_agent, temp_dir):
+        """Test that exception with logging is not flagged."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+try:
+    risky_operation()
+except Exception as e:
+    logger.error(f"Operation failed: {e}")
+""")
+        findings = reliability_agent.scan_file(test_file)
+
+        exception_findings = [f for f in findings if f.pattern_matched and 'exception_pass' in f.pattern_matched]
+        assert len(exception_findings) == 0
+
+    def test_detects_duplicate_utility_function(self, redundancy_agent, temp_dir):
+        """Test detection of duplicate utility functions - Issue #5."""
+        test_file = temp_dir / "test.py"
+        test_file.write_text("""
+def _get_real_user_home():
+    '''Local copy of utility function - should use utils.paths'''
+    return Path.home()
+""")
+        findings = redundancy_agent.scan_file(test_file)
+
+        dup_findings = [f for f in findings if f.pattern_matched and 'duplicate_utility' in f.pattern_matched]
+        assert len(dup_findings) >= 1
+
+    def test_allows_canonical_utility_in_utils(self, redundancy_agent, temp_dir):
+        """Test that canonical implementation in utils module is not flagged."""
+        # Simulate the utils/paths.py file - should NOT be flagged
+        utils_dir = temp_dir / "utils"
+        utils_dir.mkdir()
+        test_file = utils_dir / "paths.py"
+        test_file.write_text("""
+def get_real_user_home():
+    '''Canonical implementation for the project.'''
+    return Path(os.environ.get('HOME', '/'))
+""")
+        findings = redundancy_agent.scan_file(test_file)
+
+        # The canonical definition shouldn't be flagged as duplicate
+        dup_findings = [f for f in findings if f.pattern_matched and 'duplicate_utility' in f.pattern_matched]
+        assert len(dup_findings) == 0
+
+
+class TestNewPatternConfiguration:
+    """Tests to verify new patterns are properly configured."""
+
+    def test_path_home_pattern_exists_in_security(self):
+        """Verify path_home pattern is defined in SECURITY patterns."""
+        assert 'path_home' in ReviewPatterns.SECURITY
+        config = ReviewPatterns.SECURITY['path_home']
+        assert 'pattern' in config
+        assert 'severity' in config
+        assert config['severity'] in [Severity.CRITICAL, Severity.HIGH]
+
+    def test_lambda_closure_pattern_exists_in_reliability(self):
+        """Verify lambda_closure pattern is defined in RELIABILITY patterns."""
+        assert 'lambda_closure' in ReviewPatterns.RELIABILITY
+        config = ReviewPatterns.RELIABILITY['lambda_closure']
+        assert 'pattern' in config
+        assert 'severity' in config
+
+    def test_exception_pass_pattern_exists_in_reliability(self):
+        """Verify exception_pass pattern is defined in RELIABILITY patterns."""
+        assert 'exception_pass' in ReviewPatterns.RELIABILITY
+        config = ReviewPatterns.RELIABILITY['exception_pass']
+        assert 'pattern' in config
+
+    def test_duplicate_utility_pattern_exists_in_redundancy(self):
+        """Verify duplicate_utility pattern is defined in REDUNDANCY patterns."""
+        assert 'duplicate_utility' in ReviewPatterns.REDUNDANCY
+        config = ReviewPatterns.REDUNDANCY['duplicate_utility']
+        assert 'pattern' in config
