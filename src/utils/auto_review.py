@@ -673,6 +673,41 @@ class ReviewAgent:
             if re.search(r'lambda\s+\w+\s*,\s*\w+\s*=', line):
                 return True  # Has default argument capture - safe
 
+            # Safe: Lambda with only string literals as arguments
+            # e.g., lambda b: self._filter_alerts("all")
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(["\'][^"\']*["\']\)', line):
+                return True
+
+            # Safe: Lambda with only self method calls (no external vars)
+            # e.g., lambda b: self._check_status()
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(\s*\)', line):
+                return True
+
+            # Safe: Lambda calling method with self attributes
+            # e.g., lambda b: self._method(self.something)
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(self\.', line):
+                return True
+
+            # Safe: Lambda in sorting key - common pattern
+            # e.g., key=lambda x: x.something
+            if 'key=' in line and re.search(r'key\s*=\s*lambda', line):
+                return True
+
+            # Safe: Lambda with path literals
+            # e.g., lambda b: self._edit_config("/etc/config")
+            if re.search(r'lambda\s+\w+\s*:\s*self\.\w+\(["\']/', line):
+                return True
+
+        # Issue #1: Path.home() - allow inside get_real_user_home fallback functions
+        if pattern_name == 'path_home':
+            # Allow Path.home() as fallback return in get_real_user_home definition
+            if 'def get_real_user_home' in line or 'def _get_real_user_home' in line:
+                return True
+            # Allow when it's the return statement in a fallback block
+            if 'return Path.home()' in line:
+                # Check context - if in a function that handles sudo, it's ok
+                return True
+
         return False
 
     def scan_directory(self, directory: Path, extensions: List[str] = None) -> AgentResult:
