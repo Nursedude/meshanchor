@@ -18,7 +18,7 @@ from pathlib import Path
 try:
     from __version__ import __version__
 except ImportError:
-    __version__ = "3.0.3"
+    __version__ = "0.4.6-beta"
 
 # Import centralized path utility for sudo compatibility
 try:

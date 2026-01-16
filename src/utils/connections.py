@@ -1,8 +1,8 @@
 """
 Multi-mode device connection abstraction for Meshtastic devices.
 
-Version: 0.4.3-beta
-Updated: 2026-01-06
+Version: 0.4.6-beta
+Updated: 2026-01-15
 
 Provides unified interface for connecting to Meshtastic devices via:
 - USB Serial (most common)

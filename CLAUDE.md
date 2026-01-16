@@ -27,7 +27,7 @@ python3 src/standalone.py         # Zero-dependency mode
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
-# Version is in src/__version__.py (currently 0.4.3-beta)
+# Version is in src/__version__.py (currently 0.4.6-beta)
 ```
 
 ## Architecture Overview
@@ -86,7 +86,7 @@ Deep documentation in `.claude/`:
 - `foundations/ai_principles.md` - Human-centered design philosophy
 - `foundations/persistent_issues.md` - **CRITICAL: Known issues & fixes**
 - `foundations/documentation_audit.md` - Doc structure & conflicts
-- `research/` - Technical deep dives (RNS, AREDN, HamClock)
+- `research/README.md` - Index of technical deep dives (RNS, AREDN, HamClock, etc.)
 
 ## Architecture Model
 
@@ -123,10 +123,12 @@ Always check if services (rnsd, HamClock, meshtasticd) are running before using.
 
 ## File Size Guidelines
 
-Split files exceeding 1,500 lines:
-- `main_web.py` (2,478) → Flask blueprints
-- `rns.py` (2,195) → Extract config editor
-- `tools.py` (1,770) → Split into panels/
+Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
+- `launcher_tui/main.py` (2,822) → Extract menu handlers
+- `hamclock.py` (2,625) → Extract API client
+- `mesh_tools.py` (1,953) → Monitor
+
+*Note: rns.py (673) and main_web.py (1,314) successfully refactored.*
 
 ## Commit Style
 
