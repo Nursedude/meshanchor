@@ -1663,6 +1663,7 @@ class MeshtasticdTUI(App):
         Binding("m", "switch_tab('cli')", "CLI"),
         Binding("t", "switch_tab('tools')", "Tools"),
         Binding("r", "refresh", "Refresh"),
+        Binding("T", "toggle_theme", "Theme"),
     ]
 
     TITLE = f"Meshtasticd Manager v{__version__}"
@@ -1707,9 +1708,80 @@ class MeshtasticdTUI(App):
         if event.button.id == "refresh-dashboard":
             self.query_one(DashboardPane).refresh_data()
 
+    def action_toggle_theme(self) -> None:
+        """Toggle between dark and light theme"""
+        self.dark = not self.dark
+        theme_name = "dark" if self.dark else "light"
+        logger.info(f"[App] Theme switched to: {theme_name}")
+        # Save preference to settings
+        self._save_theme_preference(theme_name)
+
+    def _load_theme_preference(self) -> None:
+        """Load theme preference from settings file"""
+        try:
+            # Import path utility
+            try:
+                from utils.paths import get_real_user_home
+                settings_dir = get_real_user_home() / ".config" / "meshforge"
+            except ImportError:
+                import os
+                sudo_user = os.environ.get('SUDO_USER')
+                if sudo_user:
+                    settings_dir = Path(f"/home/{sudo_user}") / ".config" / "meshforge"
+                else:
+                    settings_dir = Path.home() / ".config" / "meshforge"
+
+            settings_file = settings_dir / "settings.json"
+            if settings_file.exists():
+                import json
+                with open(settings_file) as f:
+                    settings = json.load(f)
+                theme = settings.get("theme", "dark")
+                self.dark = theme != "light"
+                logger.info(f"[App] Loaded theme preference: {theme}")
+        except Exception as e:
+            logger.debug(f"[App] Could not load theme preference: {e}")
+            self.dark = True  # Default to dark
+
+    def _save_theme_preference(self, theme: str) -> None:
+        """Save theme preference to settings file"""
+        try:
+            try:
+                from utils.paths import get_real_user_home
+                settings_dir = get_real_user_home() / ".config" / "meshforge"
+            except ImportError:
+                import os
+                sudo_user = os.environ.get('SUDO_USER')
+                if sudo_user:
+                    settings_dir = Path(f"/home/{sudo_user}") / ".config" / "meshforge"
+                else:
+                    settings_dir = Path.home() / ".config" / "meshforge"
+
+            settings_dir.mkdir(parents=True, exist_ok=True)
+            settings_file = settings_dir / "settings.json"
+
+            # Load existing settings or create new
+            import json
+            settings = {}
+            if settings_file.exists():
+                with open(settings_file) as f:
+                    settings = json.load(f)
+
+            settings["theme"] = theme
+            settings["dark_mode"] = theme == "dark"  # For GTK compatibility
+
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+
+            logger.info(f"[App] Saved theme preference: {theme}")
+        except Exception as e:
+            logger.debug(f"[App] Could not save theme preference: {e}")
+
     async def on_mount(self) -> None:
         """Called when app is mounted"""
         logger.info("MeshForge TUI started - logging to /tmp/meshforge-tui.log")
+        # Load and apply theme preference
+        self._load_theme_preference()
 
 
 def main():

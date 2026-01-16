@@ -2,8 +2,8 @@
 """
 MeshForge Quick Diagnostic Tool
 
-Version: 0.4.3-beta
-Updated: 2026-01-06
+Version: 0.4.6-beta
+Updated: 2026-01-15
 
 A fast diagnostic tool for troubleshooting Meshtastic and RNS gateway issues.
 Inspired by RNS Gateway's supervisor pattern but integrated with MeshForge.

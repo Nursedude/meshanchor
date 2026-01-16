@@ -232,21 +232,22 @@ from utils.service_check import check_service, check_port, ServiceState
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-01-10)
+### Current Status (2026-01-15)
 
 **Python files over 1,500 lines:**
 
 | File | Lines | Priority | Suggested Split |
 |------|-------|----------|-----------------|
-| `src/main_web.py` | 3,524 | HIGH | Flask blueprints |
-| `src/gtk_ui/panels/rns.py` | 3,162 | HIGH | Extract config editor |
-| `src/gtk_ui/panels/tools.py` | 2,869 | MEDIUM | Split by tool category |
-| `src/gtk_ui/panels/radio_config.py` | 2,496 | MEDIUM | Extract channel config |
-| `src/gtk_ui/panels/mesh_tools.py` | 1,921 | LOW | Extract RF calculations |
-| `src/gtk_ui/panels/hamclock.py` | 1,894 | LOW | Extract API client |
-| `src/core/diagnostics/engine.py` | 1,685 | LOW | Extract rules |
-| `src/tui/app.py` | 1,650 | LOW | Extract panes to modules |
-| `src/gtk_ui/panels/ham_tools.py` | 1,611 | LOW | Extract tool groups |
+| `src/launcher_tui/main.py` | 2,822 | HIGH | Extract menu handlers |
+| `src/gtk_ui/panels/hamclock.py` | 2,625 | HIGH | Extract API client |
+| `src/gtk_ui/panels/mesh_tools.py` | 1,953 | MEDIUM | Extract RF calculations |
+| `src/gtk_ui/panels/tools.py` | 1,842 | MEDIUM | Split by tool category |
+| `src/tui/app.py` | 1,734 | LOW | Extract panes to modules |
+| `src/core/diagnostics/engine.py` | 1,677 | LOW | Extract rules |
+| `src/gtk_ui/panels/ham_tools.py` | 1,657 | LOW | Extract tool groups |
+| `src/gtk_ui/app.py` | 1,532 | LOW | Monitor |
+
+*Note: rns.py (673), main_web.py (1,314) successfully refactored.*
 
 **Markdown files over 1,000 lines:**
 
@@ -855,4 +856,4 @@ def __init__(self, main_window):
 
 ---
 
-*Last updated: 2026-01-14 - Added startup performance / lazy loading fix*
+*Last updated: 2026-01-15 - Updated file size audit with current line counts*

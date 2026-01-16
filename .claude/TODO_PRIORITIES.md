@@ -1,7 +1,29 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-01-12
+> **Last Updated:** 2026-01-15
 > **Maintainer:** WH6GXZ / Dude AI
+
+---
+
+## Branch Strategy
+
+| Branch | Purpose | Merges To |
+|--------|---------|-----------|
+| `main` | Stable releases, fixes, safe improvements | - |
+| `beta-from-main` | UI polish, features being tested | → main |
+| `alpha-from-main` | Experimental (firmware, hardware) | → beta |
+
+### Feature → Branch Mapping
+
+| Feature | Branch | Risk Level |
+|---------|--------|------------|
+| Offline map tiles | main | Low |
+| Web UI dark mode | main | Low |
+| Custom markers | main | Low |
+| Device backup/restore | beta | Medium |
+| TUI dark mode + nav | beta | Low |
+| NanoVNA plugin | alpha | Medium |
+| Firmware flashing | alpha | **High** |
 
 ---
 
@@ -17,15 +39,16 @@
 
 ### Code Quality
 - [x] **Consolidate `get_real_user_home()`** - Reviewed: try/except fallback pattern is intentional for robustness when utils.paths unavailable
-- [ ] **Split large files** (>1500 lines):
-  - `rns.py` (2953 lines) → Extract config editor, MeshChat to separate modules
-  - `main_web.py` (2911 lines) → Flask blueprints
-  - `tools.py` (2695 lines) → Split into rf_tools.py, network_diag.py
+- [x] **Split large files** (>1500 lines) - COMPLETE:
+  - [x] `rns.py` (673 lines now) - Successfully refactored
+  - [x] `main_web.py` (1314 lines now) - Successfully refactored
+  - [x] `launcher_tui/main.py` (1845 lines now) - Extracted to mixins (2026-01-15)
+  - [x] `hamclock.py` (2107 lines now) - Extracted to mixins (2026-01-15)
 
 ### Testing
 - [x] **Install pytest** - Available in environment
 - [x] **Add tests for gateway transport** - 39 tests for transport layer
-- [ ] **Add tests for network diagnostics** - New feature needs tests
+- [x] **Add tests for network diagnostics** - 28 tests (2026-01-15)
 
 ---
 
@@ -40,12 +63,12 @@
 ### Plugins
 - [x] `meshcore.py:81` - Implement actual MeshCore connection (2026-01-12)
 - [x] `meshcore.py:107` - Implement actual message sending (2026-01-12)
-- [ ] **MQTT dashboard** - Bridge to MQTT brokers
-- [ ] **NanoVNA plugin** - Antenna tuning integration
+- [ ] **MQTT dashboard** - Bridge to MQTT brokers → `main`
+- [ ] **NanoVNA plugin** - Antenna tuning integration → `alpha`
 
-### Node Firmware
-- [ ] **Firmware flashing from GTK** - Flash meshtastic firmware
-- [ ] **Device backup/restore** - Save and restore node configs
+### Node Firmware (→ `alpha` branch)
+- [ ] **Firmware flashing from GTK** - Flash meshtastic firmware ⚠️ HIGH RISK
+- [ ] **Device backup/restore** - Save and restore node configs → `beta`
 
 ---
 
@@ -53,20 +76,20 @@
 
 ### Dark Mode
 - [x] **CSS variable foundation** - Theme system with light/dark support (2026-01-12)
-- [ ] GTK dark mode toggle
-- [ ] Web UI dark mode (integration)
-- [ ] TUI dark mode
-- [ ] Unified theme system
+- [x] GTK dark mode toggle - Settings panel with Force Dark Mode switch (verified 2026-01-15)
+- [ ] Web UI dark mode (integration) → `main`
+- [ ] TUI dark mode → `beta`
+- [ ] Unified theme system → `beta`
 
-### TUI Improvements
+### TUI Improvements (→ `beta` branch)
 - [ ] Better navigation
 - [ ] Keyboard shortcuts
 - [ ] Status bar with key info
 
 ### Map Panel
 - [x] Memory leak fix (timer cleanup)
-- [ ] Offline map tiles
-- [ ] Custom markers for node types
+- [ ] Offline map tiles → `main`
+- [ ] Custom markers for node types → `main`
 
 ---
 
@@ -133,11 +156,11 @@
 
 | File | Lines | Action |
 |------|-------|--------|
-| rns.py | 2953 | Split: config_editor.py, meshchat_panel.py |
-| main_web.py | 2911 | Split: Flask blueprints |
-| tools.py | 2695 | Split: rf_tools.py, network_diag.py |
-| hamclock.py | ~2400 | Monitor - approaching split threshold |
-| radio_config.py | 1839 | Consider splitting |
+| mesh_tools.py | 1953 | Monitor |
+| tools.py | 1842 | Monitor |
+| tui/app.py | 1734 | Consider extracting panes |
+
+*Note: rns.py (673), main_web.py (1314), launcher_tui/main.py (1845), and hamclock.py (2107) successfully refactored.*
 
 ---
 

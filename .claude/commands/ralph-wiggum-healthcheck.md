@@ -49,10 +49,8 @@ cd src && python3 -c "
 from utils.auto_review import ReviewOrchestrator
 r = ReviewOrchestrator()
 report = r.run_full_review()
-print(f'Security: {report.security_issues}')
-print(f'Redundancy: {report.redundancy_issues}')
-print(f'Performance: {report.performance_issues}')
-print(f'Reliability: {report.reliability_issues}')
+for cat, result in report.agent_results.items():
+    print(f'{cat.value.title()}: {result.total_issues}')
 print(f'Total: {report.total_issues}')
 "
 ```
@@ -69,12 +67,17 @@ python3 -m pytest tests/ -v --tb=no -q 2>&1 | tail -20
 - Map information dependencies
 
 ### 7. File Size Audit
-Flag files over 1,500 lines:
-| File | Threshold | Action |
-|------|-----------|--------|
-| rns.py | 2900+ | Split: config_editor, meshchat_panel |
-| main_web.py | 2900+ | Flask blueprints |
-| tools.py | 2600+ | rf_tools, network_diag |
+Flag files over 1,500 lines (run: `find src -name "*.py" -exec wc -l {} \; | sort -rn | head -10`):
+
+| File | Lines | Status |
+|------|-------|--------|
+| launcher_tui/main.py | 2800+ | Consider splitting |
+| gtk_ui/panels/hamclock.py | 2600+ | Extract API client |
+| gtk_ui/panels/mesh_tools.py | 1900+ | Monitor |
+| gtk_ui/panels/tools.py | 1800+ | Monitor |
+| tui/app.py | 1700+ | Extract panes |
+
+*Note: rns.py, main_web.py have been successfully refactored.*
 
 ---
 

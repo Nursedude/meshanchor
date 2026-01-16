@@ -32,6 +32,7 @@ class DashboardPanel(Gtk.Box):
     def __init__(self, main_window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.main_window = main_window
+        self._init_timer_id = None
 
         self.set_margin_start(20)
         self.set_margin_end(20)
@@ -40,7 +41,14 @@ class DashboardPanel(Gtk.Box):
 
         self._build_ui()
         # Defer initial data load by 500ms to let UI render first
-        GLib.timeout_add(500, self._initial_refresh)
+        self._init_timer_id = GLib.timeout_add(500, self._initial_refresh)
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Clean up timers when panel is destroyed"""
+        if self._init_timer_id:
+            GLib.source_remove(self._init_timer_id)
+            self._init_timer_id = None
 
     def _build_ui(self):
         """Build the dashboard UI"""
