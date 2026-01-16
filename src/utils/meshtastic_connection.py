@@ -115,6 +115,9 @@ class MeshtasticConnectionManager:
         self._lock = threading.Lock()
         self._interface = None
         self._last_close_time = 0.0
+        # Persistent connection for long-running services (like gateway bridge)
+        self._persistent_interface = None
+        self._persistent_owner: Optional[str] = None
 
     def is_available(self, timeout: float = 2.0) -> bool:
         """
@@ -152,6 +155,76 @@ class MeshtasticConnectionManager:
             self._lock.release()
         except RuntimeError:
             pass  # Lock not held
+
+    def acquire_persistent(self, owner: str = "bridge") -> bool:
+        """
+        Acquire a persistent connection for long-running services.
+
+        The persistent connection stays open until release_persistent() is called.
+        While a persistent connection exists, other code should use get_interface()
+        to access it instead of creating new connections.
+
+        Args:
+            owner: Identifier for the owner (for debugging)
+
+        Returns:
+            True if persistent connection acquired, False if failed
+        """
+        if not self.acquire_lock(timeout=10.0):
+            logger.warning(f"Could not acquire lock for persistent connection (owner={owner})")
+            return False
+
+        try:
+            if self._persistent_interface is not None:
+                logger.warning(f"Persistent connection already held by {self._persistent_owner}")
+                return False
+
+            self._wait_for_cooldown()
+            self._persistent_interface = self._create_interface()
+            self._persistent_owner = owner
+            logger.info(f"Persistent connection acquired by {owner}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create persistent connection: {e}")
+            return False
+        finally:
+            self.release_lock()
+
+    def release_persistent(self):
+        """
+        Release the persistent connection.
+
+        Safe to call even if no persistent connection exists.
+        """
+        if self._persistent_interface is not None:
+            owner = self._persistent_owner
+            try:
+                safe_close_interface(self._persistent_interface)
+            except Exception as e:
+                logger.debug(f"Error closing persistent interface: {e}")
+            self._persistent_interface = None
+            self._persistent_owner = None
+            self._last_close_time = time.time()
+            logger.info(f"Persistent connection released (was owned by {owner})")
+
+    def get_interface(self):
+        """
+        Get the current interface (persistent if available).
+
+        Returns:
+            The persistent interface if one exists, None otherwise.
+            Other code should use this to check for an existing connection
+            before creating a new one.
+        """
+        return self._persistent_interface
+
+    def has_persistent(self) -> bool:
+        """Check if a persistent connection exists."""
+        return self._persistent_interface is not None
+
+    def get_persistent_owner(self) -> Optional[str]:
+        """Get the owner of the persistent connection, if any."""
+        return self._persistent_owner
 
     def _create_interface(self):
         """
