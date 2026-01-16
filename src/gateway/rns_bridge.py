@@ -91,8 +91,9 @@ class RNSMeshtasticBridge:
         self._identity = None
         self._lxmf_source = None
 
-        # Meshtastic interface
+        # Meshtastic interface and connection manager
         self._mesh_interface = None
+        self._conn_manager = None
 
         # Statistics
         self.stats = {
@@ -389,20 +390,33 @@ class RNSMeshtasticBridge:
                 time.sleep(1)
 
     def _connect_meshtastic(self):
-        """Connect to Meshtastic via TCP or CLI"""
+        """Connect to Meshtastic via TCP using singleton connection manager"""
         try:
-            import meshtastic
-            import meshtastic.tcp_interface
             from pubsub import pub
+            from utils.meshtastic_connection import get_connection_manager
 
             host = self.config.meshtastic.host
             port = self.config.meshtastic.port
 
             logger.info(f"Connecting to Meshtastic at {host}:{port}")
 
-            self._mesh_interface = meshtastic.tcp_interface.TCPInterface(
-                hostname=host
-            )
+            # Use singleton connection manager to prevent connection conflicts
+            # meshtasticd only allows ONE TCP client - this ensures we share
+            self._conn_manager = get_connection_manager(host, port)
+
+            # Acquire persistent connection (stays open for message receiving)
+            if not self._conn_manager.acquire_persistent(owner="gateway_bridge"):
+                logger.error("Could not acquire persistent Meshtastic connection")
+                self._connected_mesh = False
+                return
+
+            # Get the interface for operations
+            self._mesh_interface = self._conn_manager.get_interface()
+
+            if self._mesh_interface is None:
+                logger.error("Failed to get Meshtastic interface from connection manager")
+                self._connected_mesh = False
+                return
 
             # Subscribe to messages
             def on_receive(packet, interface):
@@ -414,24 +428,25 @@ class RNSMeshtasticBridge:
             self._update_meshtastic_nodes()
 
             self._connected_mesh = True
-            logger.info("Connected to Meshtastic")
+            logger.info("Connected to Meshtastic via connection manager")
             self._notify_status("meshtastic_connected")
 
-        except ImportError:
-            logger.warning("Meshtastic library not installed, using CLI fallback")
+        except ImportError as e:
+            logger.warning(f"Meshtastic/connection manager not available: {e}, using CLI fallback")
             self._connected_mesh = self._test_meshtastic_cli()
         except Exception as e:
             logger.error(f"Failed to connect to Meshtastic: {e}")
             self._connected_mesh = False
 
     def _disconnect_meshtastic(self):
-        """Disconnect from Meshtastic"""
-        if self._mesh_interface:
+        """Disconnect from Meshtastic via connection manager"""
+        # Release persistent connection through the manager
+        if hasattr(self, '_conn_manager') and self._conn_manager:
             try:
-                self._mesh_interface.close()
-            except (OSError, Exception) as e:
-                logger.debug(f"Error closing Meshtastic interface: {e}")
-            self._mesh_interface = None
+                self._conn_manager.release_persistent()
+            except Exception as e:
+                logger.debug(f"Error releasing persistent connection: {e}")
+        self._mesh_interface = None
         self._connected_mesh = False
 
     def _connect_rns(self):
