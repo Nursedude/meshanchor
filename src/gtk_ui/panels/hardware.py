@@ -350,7 +350,7 @@ class HardwarePanel(Gtk.Box):
                                 fw_match = re.search(r'"firmwareVersion":\s*"([^"]+)"', output)
                                 if fw_match:
                                     firmware = f" (v{fw_match.group(1)})"
-                        except Exception:
+                        except Exception:  # Non-critical: continue without detailed info
                             pass
 
                     detected.append({
@@ -364,7 +364,7 @@ class HardwarePanel(Gtk.Box):
                         "device": "meshtasticd",
                         "description": "Service not running"
                     })
-            except Exception:
+            except Exception:  # Non-critical: continue hardware detection
                 pass
 
             # Check active configs in config.d

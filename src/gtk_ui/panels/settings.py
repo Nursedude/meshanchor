@@ -479,7 +479,7 @@ class SettingsPanel(Gtk.Box):
                     if MapPanel._monitor:
                         MapPanel._monitor.disconnect()
                         MapPanel._monitor = None
-            except Exception:
+            except Exception:  # Ignore errors during cleanup
                 pass
         else:
             self.main_window.set_status_message("Web Client Mode OFF - normal operation")

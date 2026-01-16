@@ -138,5 +138,5 @@ class SystemMonitorMixin:
                 uptime_str = f"{mins}m"
             if hasattr(self, 'uptime_label'):
                 GLib.idle_add(self.uptime_label.set_label, uptime_str)
-        except Exception:
+        except Exception:  # Non-critical: uptime fetch may fail
             pass

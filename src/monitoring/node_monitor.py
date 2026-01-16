@@ -230,7 +230,7 @@ class NodeMonitor:
                 if sock:
                     try:
                         sock.close()
-                    except Exception:
+                    except Exception:  # Ignore errors during cleanup
                         pass
 
             # Connect
@@ -311,7 +311,7 @@ class NodeMonitor:
                 if hasattr(self.interface, '_heartbeatTimer') and self.interface._heartbeatTimer:
                     self.interface._heartbeatTimer.cancel()
                     self.interface._heartbeatTimer = None
-            except Exception:
+            except Exception:  # Ignore errors during cleanup
                 pass
 
             # Close the interface safely (handles BrokenPipeError)
