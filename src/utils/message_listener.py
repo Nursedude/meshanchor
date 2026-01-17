@@ -229,84 +229,217 @@ class MessageListener:
         try:
             decoded = packet.get('decoded', {})
             portnum = decoded.get('portnum')
-
-            # Only handle text messages
-            if portnum != 'TEXT_MESSAGE_APP':
-                return
-
             from_id = packet.get('fromId', packet.get('from'))
-            to_id = packet.get('toId', packet.get('to'))
-            channel = packet.get('channel', 0)
 
-            # Extract text content
-            payload = decoded.get('payload', b'')
-            if isinstance(payload, bytes):
-                content = payload.decode('utf-8', errors='ignore')
-            else:
-                content = str(payload)
-
-            if not content:
-                return
-
-            # Signal quality
-            snr = packet.get('rxSnr')
-            rssi = packet.get('rxRssi')
-
-            # Hop info
-            hop_start = packet.get('hopStart', 0)
-            hop_limit = packet.get('hopLimit', 0)
-            hops_away = hop_start - hop_limit if hop_start else 0
-
-            # Update status
-            self._status.messages_received += 1
-            self._status.last_message_time = datetime.now()
-
-            # Build message dict
-            msg_data = {
-                'from_id': from_id,
-                'to_id': to_id if to_id not in ('!ffffffff', '^all') else None,
-                'content': content,
-                'channel': channel,
-                'snr': snr,
-                'rssi': rssi,
-                'hops_away': hops_away,
-                'hop_start': hop_start,
-                'hop_limit': hop_limit,
-                'timestamp': datetime.now().isoformat(),
-                'is_broadcast': to_id in ('!ffffffff', '^all', None),
-            }
-
-            logger.info(
-                f"RX: {from_id} -> {to_id or 'broadcast'} "
-                f"[ch={channel}, hops={hops_away}, SNR={snr}]: {content[:50]}..."
-            )
-
-            # Store message if enabled
-            if self.store_messages:
-                try:
-                    from commands import messaging
-                    messaging.store_incoming(
-                        from_id=from_id,
-                        content=content,
-                        network="meshtastic",
-                        to_id=msg_data['to_id'],
-                        channel=channel,
-                        snr=snr,
-                        rssi=rssi,
-                    )
-                except Exception as e:
-                    logger.debug(f"Could not store message: {e}")
-
-            # Notify callbacks
-            with self._lock:
-                for callback in self._callbacks:
-                    try:
-                        callback(msg_data)
-                    except Exception as e:
-                        logger.error(f"Callback error: {e}")
+            # Handle different packet types
+            if portnum == 'TEXT_MESSAGE_APP':
+                self._handle_text_message(packet, decoded, from_id)
+            elif portnum == 'TELEMETRY_APP':
+                self._handle_telemetry(packet, decoded, from_id)
+            elif portnum == 'POSITION_APP':
+                self._handle_position(packet, decoded, from_id)
+            # Silently ignore other packet types (NODEINFO, ROUTING, etc.)
 
         except Exception as e:
             logger.error(f"Error processing received packet: {e}")
+
+    def _handle_text_message(self, packet, decoded, from_id):
+        """Handle TEXT_MESSAGE_APP packets."""
+        to_id = packet.get('toId', packet.get('to'))
+        channel = packet.get('channel', 0)
+
+        # Extract text content
+        payload = decoded.get('payload', b'')
+        if isinstance(payload, bytes):
+            content = payload.decode('utf-8', errors='ignore')
+        else:
+            content = str(payload)
+
+        if not content:
+            return
+
+        # Signal quality
+        snr = packet.get('rxSnr')
+        rssi = packet.get('rxRssi')
+
+        # Hop info
+        hop_start = packet.get('hopStart', 0)
+        hop_limit = packet.get('hopLimit', 0)
+        hops_away = hop_start - hop_limit if hop_start else 0
+
+        # Update status
+        self._status.messages_received += 1
+        self._status.last_message_time = datetime.now()
+
+        # Build message dict
+        msg_data = {
+            'from_id': from_id,
+            'to_id': to_id if to_id not in ('!ffffffff', '^all') else None,
+            'content': content,
+            'channel': channel,
+            'snr': snr,
+            'rssi': rssi,
+            'hops_away': hops_away,
+            'hop_start': hop_start,
+            'hop_limit': hop_limit,
+            'timestamp': datetime.now().isoformat(),
+            'is_broadcast': to_id in ('!ffffffff', '^all', None),
+        }
+
+        logger.info(
+            f"RX: {from_id} -> {to_id or 'broadcast'} "
+            f"[ch={channel}, hops={hops_away}, SNR={snr}]: {content[:50]}..."
+        )
+
+        # Store message if enabled
+        if self.store_messages:
+            try:
+                from commands import messaging
+                messaging.store_incoming(
+                    from_id=from_id,
+                    content=content,
+                    network="meshtastic",
+                    to_id=msg_data['to_id'],
+                    channel=channel,
+                    snr=snr,
+                    rssi=rssi,
+                )
+            except Exception as e:
+                logger.debug(f"Could not store message: {e}")
+
+        # Notify callbacks
+        with self._lock:
+            for callback in self._callbacks:
+                try:
+                    callback(msg_data)
+                except Exception as e:
+                    logger.error(f"Callback error: {e}")
+
+    def _handle_telemetry(self, packet, decoded, from_id):
+        """Handle TELEMETRY_APP packets - sensor data."""
+        try:
+            telemetry = decoded.get('telemetry', {})
+
+            # Environment metrics (BME280, BME680, etc.)
+            env_metrics = telemetry.get('environmentMetrics', {})
+            if env_metrics:
+                temp = env_metrics.get('temperature')
+                humidity = env_metrics.get('relativeHumidity')
+                pressure = env_metrics.get('barometricPressure')
+
+                if temp or humidity or pressure:
+                    logger.info(
+                        f"SENSOR [{from_id}]: Temp={temp}°C, "
+                        f"Humidity={humidity}%, Pressure={pressure}hPa"
+                    )
+
+                    # Update node tracker if available
+                    try:
+                        from gateway.node_tracker import get_node_tracker, Telemetry
+                        tracker = get_node_tracker()
+                        node = tracker.get_node(from_id)
+                        if node:
+                            if not node.telemetry:
+                                node.telemetry = Telemetry()
+                            node.telemetry.temperature = temp
+                            node.telemetry.humidity = humidity
+                            node.telemetry.barometric_pressure = pressure
+                            tracker.add_node(node)
+                    except ImportError:
+                        pass
+
+            # Air quality metrics (PMSA003I, SCD4X, etc.)
+            aq_metrics = telemetry.get('airQualityMetrics', {})
+            if aq_metrics:
+                pm25 = aq_metrics.get('pm25Standard')
+                pm10 = aq_metrics.get('pm10Standard')
+                co2 = aq_metrics.get('co2')
+                iaq = aq_metrics.get('iaq')
+
+                if pm25 or pm10 or co2:
+                    logger.info(
+                        f"AIR QUALITY [{from_id}]: PM2.5={pm25}, "
+                        f"PM10={pm10}, CO2={co2}ppm, IAQ={iaq}"
+                    )
+
+                    # Update node tracker
+                    try:
+                        from gateway.node_tracker import (
+                            get_node_tracker, AirQualityMetrics
+                        )
+                        tracker = get_node_tracker()
+                        node = tracker.get_node(from_id)
+                        if node and node.telemetry:
+                            node.telemetry.air_quality = AirQualityMetrics(
+                                pm10_standard=pm10,
+                                pm25_standard=pm25,
+                                co2=co2,
+                                iaq=iaq,
+                            )
+                            tracker.add_node(node)
+                    except ImportError:
+                        pass
+
+            # Device metrics (battery, voltage, channel utilization)
+            device_metrics = telemetry.get('deviceMetrics', {})
+            if device_metrics:
+                battery = device_metrics.get('batteryLevel')
+                voltage = device_metrics.get('voltage')
+                ch_util = device_metrics.get('channelUtilization')
+                air_util = device_metrics.get('airUtilTx')
+
+                if battery is not None:
+                    logger.debug(
+                        f"DEVICE [{from_id}]: Battery={battery}%, "
+                        f"Voltage={voltage}V, ChUtil={ch_util}%"
+                    )
+
+                    try:
+                        from gateway.node_tracker import get_node_tracker, Telemetry
+                        tracker = get_node_tracker()
+                        node = tracker.get_node(from_id)
+                        if node:
+                            if not node.telemetry:
+                                node.telemetry = Telemetry()
+                            node.telemetry.battery_level = battery
+                            node.telemetry.voltage = voltage
+                            node.telemetry.channel_utilization = ch_util
+                            node.telemetry.air_util_tx = air_util
+                            tracker.add_node(node)
+                    except ImportError:
+                        pass
+
+        except Exception as e:
+            logger.debug(f"Error processing telemetry: {e}")
+
+    def _handle_position(self, packet, decoded, from_id):
+        """Handle POSITION_APP packets."""
+        try:
+            position = decoded.get('position', {})
+            lat = position.get('latitudeI', 0) / 1e7 if position.get('latitudeI') else None
+            lon = position.get('longitudeI', 0) / 1e7 if position.get('longitudeI') else None
+            alt = position.get('altitude')
+
+            if lat and lon:
+                logger.debug(f"POSITION [{from_id}]: {lat:.4f}, {lon:.4f}, alt={alt}m")
+
+                # Update node tracker
+                try:
+                    from gateway.node_tracker import get_node_tracker, Position
+                    tracker = get_node_tracker()
+                    node = tracker.get_node(from_id)
+                    if node:
+                        node.position = Position(
+                            latitude=lat,
+                            longitude=lon,
+                            altitude=alt or 0,
+                        )
+                        tracker.add_node(node)
+                except ImportError:
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Error processing position: {e}")
 
 
 # Singleton instance
