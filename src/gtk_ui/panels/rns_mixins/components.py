@@ -16,6 +16,13 @@ import os
 from pathlib import Path
 import logging
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    HAS_SERVICE_CHECK = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,69 +134,41 @@ class ComponentsMixin:
         except Exception:
             return False
 
-    def _check_rns_service(self):
+    def _check_rns_service(self) -> bool:
         """Check if rnsd service is running.
 
-        Uses multiple detection methods for reliability:
-        1. UDP port 37428 check (RNS shared instance port)
-        2. Process check (pgrep)
-        3. Systemd status
-        """
-        import socket
+        Delegates to centralized service_check.check_service() for consistency.
+        This ensures all UI components report the same status.
 
-        # Method 1: Check if UDP 37428 (RNS shared instance port) is in use
-        # This is the most reliable indicator since rnsd MUST bind to this port
+        Returns:
+            bool: True if rnsd is running, False otherwise
+        """
+        if HAS_SERVICE_CHECK:
+            # Use centralized checker - SINGLE SOURCE OF TRUTH
+            status = check_service('rnsd')
+            logger.debug(f"[RNS] rnsd status via check_service: {status.state.value}")
+            return status.available
+        else:
+            # Fallback if service_check not available (shouldn't happen)
+            logger.warning("[RNS] service_check not available, using fallback")
+            return self._check_rns_service_fallback()
+
+    def _check_rns_service_fallback(self) -> bool:
+        """Fallback rnsd check if service_check module unavailable."""
+        import socket
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(1)
             try:
                 sock.bind(('127.0.0.1', 37428))
-                # If we can bind, rnsd is NOT running
                 sock.close()
+                return False  # Could bind, so rnsd NOT running
             except OSError as e:
                 sock.close()
-                # EADDRINUSE means rnsd IS running
-                if e.errno in (98, 48, 10048):  # Linux, macOS, Windows
-                    logger.debug("[RNS] rnsd detected via UDP 37428 port check")
+                if e.errno in (98, 48, 10048):  # EADDRINUSE
                     return True
-        except Exception as e:
-            logger.debug(f"[RNS] UDP port check failed: {e}")
-
-        # Method 2: Check for rnsd process with pgrep
-        try:
-            # Check with -f to match full command line
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                logger.debug("[RNS] rnsd detected via pgrep -f")
-                return True
-
-            # Also try without -f (just process name)
-            result = subprocess.run(
-                ['pgrep', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                logger.debug("[RNS] rnsd detected via pgrep")
-                return True
-        except Exception as e:
-            logger.debug(f"[RNS] pgrep check failed: {e}")
-
-        # Method 3: Check systemd service status
-        try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip() == 'active':
-                logger.debug("[RNS] rnsd detected via systemd")
-                return True
-        except Exception as e:
-            logger.debug(f"[RNS] systemd check failed: {e}")
-
-        logger.debug("[RNS] rnsd not detected by any method")
+        except Exception:
+            pass
         return False
 
     def _get_package_version(self, package):
