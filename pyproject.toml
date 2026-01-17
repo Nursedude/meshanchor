@@ -1,0 +1,159 @@
+# MeshForge Project Configuration
+# ================================
+# Centralized configuration for Python tooling.
+#
+# Tools configured:
+# - pytest: Testing framework
+# - mypy: Type checking (see mypy.ini for full config)
+# - black: Code formatting (optional)
+# - isort: Import sorting (optional)
+
+[project]
+name = "meshforge"
+version = "0.4.6-beta"
+description = "Network Operations Center bridging Meshtastic and Reticulum mesh networks"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "WH6GXZ (Nursedude)", email = "meshforge@example.com"}
+]
+keywords = ["meshtastic", "reticulum", "mesh", "ham-radio", "lora", "networking"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Telecommunications Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/Nursedude/meshforge"
+Repository = "https://github.com/Nursedude/meshforge"
+Issues = "https://github.com/Nursedude/meshforge/issues"
+
+# ============================================================================
+# PYTEST CONFIGURATION
+# ============================================================================
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Useful options
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+
+# Custom markers
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring external services",
+    "hardware: marks tests requiring physical hardware",
+]
+
+# Filter warnings
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ============================================================================
+# COVERAGE CONFIGURATION
+# ============================================================================
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/gtk_ui/*",  # GTK code is hard to test
+    "*/tui/*",     # TUI code is hard to test
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+fail_under = 40  # Minimum coverage percentage
+
+# ============================================================================
+# BLACK CONFIGURATION (Optional formatter)
+# ============================================================================
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.mypy_cache
+    | \.pytest_cache
+    | __pycache__
+    | build
+    | dist
+)/
+'''
+
+# ============================================================================
+# ISORT CONFIGURATION (Import sorting)
+# ============================================================================
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+skip_gitignore = true
+known_first_party = ["src", "utils", "gateway", "gtk_ui", "tui", "web", "commands"]
+
+# ============================================================================
+# RUFF CONFIGURATION (Fast linter - optional)
+# ============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "S",   # flake8-bandit (security)
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "S101",  # assert used (OK in tests)
+    "S603",  # subprocess without shell=True check (we handle this)
+    "S607",  # partial path for subprocess (we validate paths)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # Allow asserts in tests

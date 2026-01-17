@@ -301,6 +301,14 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
 
     Returns:
         ServiceStatus with availability info and fix hints
+
+    API Contract:
+        - ALWAYS returns a ServiceStatus (never None)
+        - ServiceStatus.available: bool indicating if service is ready
+        - ServiceStatus.state: ServiceState enum (AVAILABLE, UNAVAILABLE, DEGRADED, UNKNOWN)
+        - ServiceStatus.fix_hint: Actionable command to fix the issue
+        - Known services: meshtasticd, rnsd, hamclock, mosquitto
+        - Tests: tests/test_service_check.py::TestCheckService
     """
     # Get known service config
     config = KNOWN_SERVICES.get(name, {})
