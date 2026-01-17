@@ -199,38 +199,84 @@ def send_message(
         conn.commit()
         message_id = cursor.lastrowid
 
-        # Actually send via gateway bridge
+        # Actually send the message
+        # Priority: 1) Gateway bridge (if running) 2) Direct meshtastic CLI
         send_success = False
         send_error = None
 
-        try:
-            from commands import gateway
+        if network == "meshtastic":
+            # Try gateway first, then fall back to direct CLI
+            gateway_available = False
+            try:
+                from commands import gateway
+                status = gateway.get_status()
+                if status.success and status.data.get('running') and status.data.get('meshtastic_connected'):
+                    gateway_available = True
+            except Exception:
+                pass
 
-            for chunk in chunks:
-                if network == "meshtastic":
-                    result = gateway.send_to_meshtastic(chunk, destination, channel)
-                elif network == "rns":
-                    # RNS expects bytes for destination hash
+            if gateway_available:
+                # Use gateway bridge
+                try:
+                    for chunk in chunks:
+                        result = gateway.send_to_meshtastic(chunk, destination, channel)
+                        if not result.success:
+                            send_error = result.message
+                            break
+                    else:
+                        send_success = True
+                except Exception as e:
+                    send_error = f"Gateway send failed: {e}"
+                    logger.debug(f"Gateway send failed, will try direct: {e}")
+            else:
+                logger.debug("Gateway not available, using direct meshtastic command")
+
+            # Fallback to direct meshtastic CLI if gateway failed
+            if not send_success:
+                try:
+                    from commands import meshtastic as mesh_cmd
+
+                    for chunk in chunks:
+                        result = mesh_cmd.send_message(
+                            text=chunk,
+                            dest=destination,
+                            channel_index=channel,
+                            ack=False  # Don't wait for ack to avoid blocking
+                        )
+                        if not result.success:
+                            send_error = result.message
+                            break
+                    else:
+                        send_success = True
+                        send_error = None  # Clear any previous error
+                except Exception as e:
+                    if not send_error:  # Don't overwrite gateway error
+                        send_error = f"Direct send failed: {e}"
+                    logger.error(f"Failed to send via direct meshtastic: {e}")
+
+        elif network == "rns":
+            # RNS messages go through gateway only
+            try:
+                from commands import gateway
+                for chunk in chunks:
                     dest_bytes = bytes.fromhex(destination) if destination else None
                     result = gateway.send_to_rns(chunk, dest_bytes)
+                    if not result.success:
+                        send_error = result.message
+                        break
                 else:
-                    result = gateway.send_to_meshtastic(chunk, destination, channel)
+                    send_success = True
+            except ImportError as e:
+                send_error = f"Gateway module not available: {e}"
+            except Exception as e:
+                send_error = f"RNS send failed: {e}"
+                logger.error(f"Failed to send via RNS: {e}")
 
-                if not result.success:
-                    send_error = result.message
-                    break
-            else:
-                # All chunks sent successfully
-                send_success = True
-                cursor = conn.cursor()
-                cursor.execute('UPDATE messages SET delivered = 1 WHERE id = ?', (message_id,))
-                conn.commit()
-
-        except ImportError as e:
-            send_error = f"Gateway module not available: {e}"
-        except Exception as e:
-            send_error = f"Send failed: {e}"
-            logger.error(f"Failed to send via gateway: {e}")
+        # Update delivery status
+        if send_success:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE messages SET delivered = 1 WHERE id = ?', (message_id,))
+            conn.commit()
 
         conn.close()
 

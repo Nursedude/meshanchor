@@ -140,9 +140,73 @@ class DeviceScanner:
         '2e8a:0005': {
             'name': 'Raspberry Pi Pico',
             'type': DeviceType.SERIAL_ADAPTER,
+            'meshtastic': True,  # RP2040 now supports Meshtastic
+            'devices': ['RP2040 boards', 'Pico W'],
+            'notes': 'RP2040 USB. Meshtastic support added recently.',
+        },
+        # Additional common Meshtastic device chips
+        '1a86:7522': {
+            'name': 'CH340K',
+            'type': DeviceType.SERIAL_ADAPTER,
+            'meshtastic': True,
+            'devices': ['MeshToad', 'Generic LoRa modules'],
+            'notes': 'CH340K variant - common in newer Chinese modules.',
+        },
+        '2341:0043': {
+            'name': 'Arduino Uno',
+            'type': DeviceType.SERIAL_ADAPTER,
             'meshtastic': False,
-            'devices': ['RP2040 boards'],
-            'notes': 'RP2040 USB. Not commonly used for Meshtastic.',
+            'devices': ['Arduino Uno'],
+            'notes': 'Arduino - usually not Meshtastic.',
+        },
+        '2341:0001': {
+            'name': 'Arduino Mega',
+            'type': DeviceType.SERIAL_ADAPTER,
+            'meshtastic': False,
+            'devices': ['Arduino Mega'],
+            'notes': 'Arduino - usually not Meshtastic.',
+        },
+        '303a:4001': {
+            'name': 'ESP32-C3 Native USB',
+            'type': DeviceType.LORA_USB,
+            'meshtastic': True,
+            'devices': ['ESP32-C3 DevKit', 'XIAO ESP32-C3'],
+            'notes': 'ESP32-C3 native USB CDC.',
+        },
+        '303a:80d1': {
+            'name': 'ESP32-S3 (boot mode)',
+            'type': DeviceType.LORA_USB,
+            'meshtastic': True,
+            'devices': ['ESP32-S3 in bootloader'],
+            'notes': 'ESP32-S3 USB bootloader mode.',
+        },
+        '19d2:0016': {
+            'name': 'RAK WisBlock',
+            'type': DeviceType.LORA_USB,
+            'meshtastic': True,
+            'devices': ['RAK4631', 'RAK WisBlock'],
+            'notes': 'RAKwireless WisBlock USB.',
+        },
+        '239a:800c': {
+            'name': 'Adafruit nRF52840 Feather',
+            'type': DeviceType.LORA_USB,
+            'meshtastic': True,
+            'devices': ['Feather nRF52840 Express'],
+            'notes': 'Adafruit nRF52840 board.',
+        },
+        '1915:520f': {
+            'name': 'Nordic nRF52840 Dongle',
+            'type': DeviceType.LORA_USB,
+            'meshtastic': True,
+            'devices': ['nRF52840 Dongle'],
+            'notes': 'Nordic nRF52840 development dongle.',
+        },
+        '0483:5740': {
+            'name': 'STM32 Virtual COM',
+            'type': DeviceType.SERIAL_ADAPTER,
+            'meshtastic': True,
+            'devices': ['STM32 boards', 'B-L072Z-LRWAN1'],
+            'notes': 'STM32 USB CDC. Used in some LoRa boards.',
         },
         # SDR devices
         '0bda:2832': {
@@ -340,9 +404,20 @@ class DeviceScanner:
 
     def _enrich_serial_port(self, port: SerialPort):
         """Add details from udev/sysfs"""
-        try:
-            device_name = os.path.basename(port.device)
+        device_name = os.path.basename(port.device)
 
+        # Handle ttyAMA (Raspberry Pi hardware UART) specially
+        if device_name.startswith('ttyAMA'):
+            port.subsystem = 'platform'
+            # Check if meshtasticd is configured to use this port
+            port.description = self._identify_ttyama_device(port.device)
+            # ttyAMA ports can be used for Meshtastic (e.g., direct GPIO connection)
+            if self._is_meshtastic_port(port.device):
+                port.meshtastic_compatible = True
+                port.recommended_for = ['Meshtastic (hardware UART)']
+            return
+
+        try:
             # Use udevadm to get device info
             result = subprocess.run(
                 ['udevadm', 'info', '--query=all', '--name', port.device],
@@ -351,6 +426,7 @@ class DeviceScanner:
                 timeout=5
             )
 
+            generic_model = None
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
                     if 'ID_VENDOR_ID=' in line:
@@ -360,15 +436,29 @@ class DeviceScanner:
                     elif 'ID_USB_DRIVER=' in line:
                         port.driver = line.split('=')[1].strip()
                     elif 'ID_MODEL=' in line:
-                        port.description = line.split('=')[1].strip().replace('_', ' ')
+                        generic_model = line.split('=')[1].strip().replace('_', ' ')
                     elif 'SUBSYSTEM=' in line:
                         port.subsystem = line.split('=')[1].strip()
 
-                # Check if Meshtastic compatible
+                # Check if Meshtastic compatible and get friendly name from KNOWN_DEVICES
                 usb_id = f"{port.usb_vendor}:{port.usb_product}"
                 known = self.KNOWN_DEVICES.get(usb_id, {})
                 port.meshtastic_compatible = known.get('meshtastic', False)
                 port.recommended_for = known.get('devices', [])
+
+                # Use friendly name from KNOWN_DEVICES, not generic udev model
+                if known:
+                    chip_name = known.get('name', '')
+                    device_list = known.get('devices', [])
+                    if device_list:
+                        # Show device names (e.g., "CH340 (MeshToad, Heltec V2)")
+                        port.description = f"{chip_name} ({', '.join(device_list[:2])})"
+                    else:
+                        port.description = chip_name
+                elif generic_model:
+                    port.description = generic_model
+                else:
+                    port.description = "Unknown USB Serial"
 
         except subprocess.TimeoutExpired:
             pass
@@ -377,6 +467,76 @@ class DeviceScanner:
             pass
         except Exception:
             pass
+
+    def _identify_ttyama_device(self, device_path: str) -> str:
+        """Try to identify what's connected to a ttyAMA port"""
+        # Check if meshtasticd is configured to use this port
+        config_paths = [
+            Path('/etc/meshtasticd/config.yaml'),
+            Path('/etc/meshtasticd/config.d'),
+        ]
+
+        for cfg_path in config_paths:
+            if cfg_path.is_file():
+                try:
+                    content = cfg_path.read_text()
+                    if device_path in content:
+                        return "Meshtastic (meshtasticd config)"
+                except Exception:
+                    pass
+            elif cfg_path.is_dir():
+                try:
+                    for yaml_file in cfg_path.glob('*.yaml'):
+                        content = yaml_file.read_text()
+                        if device_path in content:
+                            return "Meshtastic (meshtasticd config)"
+                except Exception:
+                    pass
+
+        # Check if it looks like a serial console
+        if 'console' in device_path.lower():
+            return "Serial Console"
+
+        # Check device tree for hints
+        device_name = os.path.basename(device_path)
+        device_num = device_name.replace('ttyAMA', '')
+        overlay_hints = {
+            '0': 'Pi UART0 (GPIO 14/15)',
+            '10': 'Pi UART via overlay (likely HAT/module)',
+        }
+        hint = overlay_hints.get(device_num, 'Raspberry Pi UART')
+        return hint
+
+    def _is_meshtastic_port(self, device_path: str) -> bool:
+        """Check if a port appears to be used by Meshtastic"""
+        # Check if meshtasticd config references this port
+        config_paths = [
+            Path('/etc/meshtasticd/config.yaml'),
+        ]
+
+        for cfg_path in config_paths:
+            if cfg_path.exists():
+                try:
+                    content = cfg_path.read_text()
+                    if device_path in content:
+                        return True
+                except Exception:
+                    pass
+
+        # Check if meshtastic process has this port open
+        try:
+            result = subprocess.run(
+                ['lsof', device_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if 'meshtastic' in result.stdout.lower():
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def _add_persistent_names(self, ports: List[SerialPort]):
         """Add persistent /dev/serial/by-id and by-path names"""

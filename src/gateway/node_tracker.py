@@ -9,7 +9,7 @@ import logging
 import os
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 from pathlib import Path
 import json
 
@@ -43,28 +43,166 @@ class Position:
 
 
 @dataclass
-class Telemetry:
-    """Node telemetry data"""
-    battery_level: Optional[int] = None  # 0-100
-    voltage: Optional[float] = None
-    temperature: Optional[float] = None  # Celsius
-    humidity: Optional[float] = None  # 0-100%
-    pressure: Optional[float] = None  # hPa
-    air_quality: Optional[int] = None
-    uptime: Optional[int] = None  # seconds
+class AirQualityMetrics:
+    """Air quality sensor data (e.g., PMSA003I, SCD4X)"""
+    pm10_standard: Optional[int] = None   # PM1.0 standard (µg/m³)
+    pm25_standard: Optional[int] = None   # PM2.5 standard (µg/m³)
+    pm100_standard: Optional[int] = None  # PM10 standard (µg/m³)
+    pm10_environmental: Optional[int] = None
+    pm25_environmental: Optional[int] = None
+    pm100_environmental: Optional[int] = None
+    co2: Optional[int] = None             # CO2 in ppm (SCD4X)
+    iaq: Optional[int] = None             # Indoor Air Quality index
+    gas_resistance: Optional[float] = None  # BME680 gas sensor
     timestamp: Optional[datetime] = None
 
     def to_dict(self) -> dict:
         return {k: v for k, v in {
+            "pm10_standard": self.pm10_standard,
+            "pm25_standard": self.pm25_standard,
+            "pm100_standard": self.pm100_standard,
+            "pm10_environmental": self.pm10_environmental,
+            "pm25_environmental": self.pm25_environmental,
+            "pm100_environmental": self.pm100_environmental,
+            "co2": self.co2,
+            "iaq": self.iaq,
+            "gas_resistance": self.gas_resistance,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None
+        }.items() if v is not None}
+
+    def has_data(self) -> bool:
+        """Check if any air quality data is present"""
+        return any([self.pm25_standard, self.co2, self.iaq, self.gas_resistance])
+
+
+@dataclass
+class HealthMetrics:
+    """Health sensor data (heart rate, SpO2, temperature)"""
+    heart_rate: Optional[int] = None      # BPM
+    spo2: Optional[int] = None            # Blood oxygen saturation %
+    body_temperature: Optional[float] = None  # Celsius
+    timestamp: Optional[datetime] = None
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in {
+            "heart_rate": self.heart_rate,
+            "spo2": self.spo2,
+            "body_temperature": self.body_temperature,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None
+        }.items() if v is not None}
+
+
+@dataclass
+class DetectionSensor:
+    """Detection sensor state (motion, reed switch, etc.)"""
+    name: str = ""                        # Sensor name (e.g., "Motion", "Door")
+    triggered: bool = False               # Current state
+    gpio_pin: Optional[int] = None        # Monitored GPIO pin
+    triggered_high: bool = True           # Whether HIGH means triggered
+    last_triggered: Optional[datetime] = None
+    trigger_count: int = 0                # Number of triggers since reset
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "triggered": self.triggered,
+            "gpio_pin": self.gpio_pin,
+            "triggered_high": self.triggered_high,
+            "last_triggered": self.last_triggered.isoformat() if self.last_triggered else None,
+            "trigger_count": self.trigger_count
+        }
+
+
+@dataclass
+class Telemetry:
+    """
+    Complete node telemetry data.
+
+    Supports all Meshtastic telemetry types:
+    - Device metrics (battery, voltage, channel utilization, airtime)
+    - Environment metrics (temperature, humidity, pressure from BME280/BME680)
+    - Air quality metrics (PM2.5, CO2 from PMSA003I, SCD4X)
+    - Health metrics (heart rate, SpO2)
+    - Detection sensors (motion, door sensors)
+
+    Reference: https://meshtastic.org/docs/configuration/module/telemetry/
+    """
+    # Device Metrics
+    battery_level: Optional[int] = None   # 0-100%
+    voltage: Optional[float] = None       # Battery voltage
+    channel_utilization: Optional[float] = None  # 0-100% (how busy the channel is)
+    air_util_tx: Optional[float] = None   # TX airtime utilization %
+    uptime: Optional[int] = None          # Uptime in seconds
+
+    # Environment Metrics (BME280, BME680, BMP280, etc.)
+    temperature: Optional[float] = None   # Celsius
+    humidity: Optional[float] = None      # 0-100%
+    pressure: Optional[float] = None      # hPa (barometric pressure)
+    gas_resistance: Optional[float] = None  # Ohms (BME680 VOC sensor)
+
+    # Air Quality (PMSA003I, SCD4X)
+    air_quality: Optional[AirQualityMetrics] = None
+
+    # Health Metrics
+    health: Optional[HealthMetrics] = None
+
+    # Detection Sensors
+    detection_sensors: List[DetectionSensor] = field(default_factory=list)
+
+    timestamp: Optional[datetime] = None
+
+    def to_dict(self) -> dict:
+        result = {k: v for k, v in {
             "battery_level": self.battery_level,
             "voltage": self.voltage,
+            "channel_utilization": self.channel_utilization,
+            "air_util_tx": self.air_util_tx,
+            "uptime": self.uptime,
             "temperature": self.temperature,
             "humidity": self.humidity,
             "pressure": self.pressure,
-            "air_quality": self.air_quality,
-            "uptime": self.uptime,
+            "gas_resistance": self.gas_resistance,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None
         }.items() if v is not None}
+
+        if self.air_quality and self.air_quality.has_data():
+            result["air_quality"] = self.air_quality.to_dict()
+
+        if self.health:
+            result["health"] = self.health.to_dict()
+
+        if self.detection_sensors:
+            result["detection_sensors"] = [s.to_dict() for s in self.detection_sensors]
+
+        return result
+
+    def has_environment_sensors(self) -> bool:
+        """Check if node has environment sensors"""
+        return any([self.temperature, self.humidity, self.pressure, self.gas_resistance])
+
+    def has_air_quality_sensors(self) -> bool:
+        """Check if node has air quality sensors"""
+        return self.air_quality is not None and self.air_quality.has_data()
+
+    def has_detection_sensors(self) -> bool:
+        """Check if node has detection sensors"""
+        return len(self.detection_sensors) > 0
+
+    def get_sensor_summary(self) -> str:
+        """Get a summary of available sensor data"""
+        parts = []
+        if self.battery_level is not None:
+            parts.append(f"🔋{self.battery_level}%")
+        if self.temperature is not None:
+            parts.append(f"🌡️{self.temperature:.1f}°C")
+        if self.humidity is not None:
+            parts.append(f"💧{self.humidity:.0f}%")
+        if self.air_quality and self.air_quality.pm25_standard:
+            parts.append(f"AQI:{self.air_quality.pm25_standard}")
+        if self.detection_sensors:
+            triggered = sum(1 for s in self.detection_sensors if s.triggered)
+            parts.append(f"📡{triggered}/{len(self.detection_sensors)}")
+        return " ".join(parts) if parts else "No data"
 
 
 @dataclass

@@ -49,22 +49,65 @@ except ImportError:
 
 # Common USB vendor/product IDs for RNode-compatible devices
 RNODE_USB_IDS = [
-    # Official RNode devices
+    # ============================================================================
+    # Official/Common RNode USB Chips
+    # ============================================================================
     {'vid': '1a86', 'pid': '55d4', 'name': 'RNode (CH340)'},
+    {'vid': '1a86', 'pid': '7523', 'name': 'RNode (CH340G)'},
+    {'vid': '1a86', 'pid': '5523', 'name': 'RNode (CH341)'},
     {'vid': '10c4', 'pid': 'ea60', 'name': 'RNode (CP210x)'},
-    {'vid': '0403', 'pid': '6001', 'name': 'RNode (FTDI)'},
+    {'vid': '10c4', 'pid': 'ea61', 'name': 'RNode (CP2102N)'},
+    {'vid': '0403', 'pid': '6001', 'name': 'RNode (FTDI FT232)'},
+    {'vid': '0403', 'pid': '6010', 'name': 'RNode (FTDI FT2232)'},
+    {'vid': '0403', 'pid': '6015', 'name': 'RNode (FTDI FT231X)'},
 
+    # ============================================================================
     # Lilygo T-Beam (common RNode platform)
-    {'vid': '1a86', 'pid': '7523', 'name': 'T-Beam (CH340)'},
+    # ============================================================================
     {'vid': '303a', 'pid': '1001', 'name': 'T-Beam (ESP32-S3)'},
+    {'vid': '303a', 'pid': '0002', 'name': 'T-Beam (ESP32-S2)'},
+    {'vid': '303a', 'pid': '80d1', 'name': 'T-Beam (ESP32-C6)'},
+    {'vid': '1a86', 'pid': '55d4', 'name': 'T-Beam v1.x (CH340)'},
 
-    # Heltec LoRa32 (also used for RNode)
+    # ============================================================================
+    # Heltec LoRa32 Boards
+    # ============================================================================
     {'vid': '10c4', 'pid': 'ea60', 'name': 'Heltec LoRa32'},
+    {'vid': '303a', 'pid': '1001', 'name': 'Heltec WiFi LoRa 32 V3'},
 
-    # Generic ESP32 with LoRa
+    # ============================================================================
+    # RAK Wireless Boards (used for RNode)
+    # ============================================================================
+    {'vid': '239a', 'pid': '8029', 'name': 'RAK4631 (nRF52840)'},
+    {'vid': '239a', 'pid': '0029', 'name': 'RAK WisBlock (nRF52840)'},
+    {'vid': '1915', 'pid': '520f', 'name': 'RAK nRF52840'},
+
+    # ============================================================================
+    # Adafruit Feather LoRa Boards
+    # ============================================================================
+    {'vid': '239a', 'pid': '800b', 'name': 'Feather M0 LoRa'},
+    {'vid': '239a', 'pid': '8023', 'name': 'Feather nRF52840'},
+    {'vid': '239a', 'pid': '80cd', 'name': 'Feather ESP32-S3'},
+
+    # ============================================================================
+    # Generic ESP32/LoRa Modules
+    # ============================================================================
     {'vid': '303a', 'pid': '0002', 'name': 'ESP32-S2'},
     {'vid': '303a', 'pid': '1001', 'name': 'ESP32-S3'},
+    {'vid': '303a', 'pid': '80c6', 'name': 'ESP32-C3'},
+    {'vid': '303a', 'pid': '80d1', 'name': 'ESP32-C6'},
+    {'vid': '10c4', 'pid': 'ea70', 'name': 'ESP32 DevKit'},
 ]
+
+# RNode-specific identification - boards that often have RNode firmware
+RNODE_LIKELY_DEVICES = {
+    'T-Beam': True,
+    'Heltec': True,
+    'LoRa32': True,
+    'RNode': True,
+    'RAK4631': True,
+    'Feather': True,
+}
 
 # Serial port patterns to scan
 SERIAL_PATTERNS = [
@@ -222,7 +265,7 @@ def get_usb_info(port: str) -> Dict[str, str]:
     return info
 
 
-def identify_device_model(vid: str, pid: str, product: str = '') -> str:
+def identify_device_model(vid: str, pid: str, product: str = '', manufacturer: str = '') -> str:
     """
     Identify device model from USB IDs.
 
@@ -230,6 +273,7 @@ def identify_device_model(vid: str, pid: str, product: str = '') -> str:
         vid: USB vendor ID (hex string)
         pid: USB product ID (hex string)
         product: USB product string
+        manufacturer: USB manufacturer string
 
     Returns:
         Device model name
@@ -242,11 +286,61 @@ def identify_device_model(vid: str, pid: str, product: str = '') -> str:
         if known['vid'] == vid_lower and known['pid'] == pid_lower:
             return known['name']
 
-    # Fallback to product string
+    # Check product string for RNode-likely keywords
     if product:
+        product_upper = product.upper()
+        for keyword in RNODE_LIKELY_DEVICES:
+            if keyword.upper() in product_upper:
+                return f"{product} (RNode compatible)"
         return product
 
+    # Check manufacturer for hints
+    if manufacturer:
+        mfr_upper = manufacturer.upper()
+        if 'LILYGO' in mfr_upper:
+            return "Lilygo Device (RNode compatible)"
+        if 'HELTEC' in mfr_upper:
+            return "Heltec Device (RNode compatible)"
+        if 'RAK' in mfr_upper:
+            return "RAK Wireless (RNode compatible)"
+        if 'ESPRESSIF' in mfr_upper or 'ESP' in mfr_upper:
+            return "ESP32 Device (RNode compatible)"
+
     return "Unknown USB Serial"
+
+
+def is_likely_rnode(model: str, product: str = '', manufacturer: str = '') -> bool:
+    """
+    Check if a device is likely an RNode based on identification.
+
+    Args:
+        model: Identified device model
+        product: USB product string
+        manufacturer: USB manufacturer string
+
+    Returns:
+        True if device is likely an RNode
+    """
+    # Check model name
+    model_upper = model.upper()
+    for keyword in RNODE_LIKELY_DEVICES:
+        if keyword.upper() in model_upper:
+            return True
+
+    # Check product string
+    if product:
+        product_upper = product.upper()
+        for keyword in RNODE_LIKELY_DEVICES:
+            if keyword.upper() in product_upper:
+                return True
+
+    # Check manufacturer
+    if manufacturer:
+        mfr_upper = manufacturer.upper()
+        if any(x in mfr_upper for x in ['LILYGO', 'HELTEC', 'RAK', 'RNODE']):
+            return True
+
+    return False
 
 
 def probe_rnode(port: str, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
@@ -351,11 +445,12 @@ def detect_devices(probe: bool = False) -> List[RNodeDevice]:
         # Get USB info
         usb_info = get_usb_info(port)
 
-        # Identify model
+        # Identify model (now includes manufacturer)
         model = identify_device_model(
             usb_info['vid'],
             usb_info['pid'],
-            usb_info['product']
+            usb_info['product'],
+            usb_info['manufacturer']
         )
 
         device = RNodeDevice(
@@ -369,6 +464,13 @@ def detect_devices(probe: bool = False) -> List[RNodeDevice]:
         # Check if configured in RNS
         device.is_configured = check_rns_config(port)
 
+        # Check if device is likely an RNode based on identification
+        likely_rnode = is_likely_rnode(
+            model,
+            usb_info['product'],
+            usb_info['manufacturer']
+        )
+
         # Probe for RNode firmware if requested
         if probe:
             probe_result = probe_rnode(port)
@@ -376,6 +478,9 @@ def detect_devices(probe: bool = False) -> List[RNodeDevice]:
                 device.is_rnode = probe_result['is_rnode']
                 device.firmware_version = probe_result['firmware_version']
                 device.details = probe_result['details']
+        elif likely_rnode:
+            # Mark as likely RNode even without probing
+            device.details = {'likely_rnode': True, 'hint': 'Based on USB identification'}
 
         devices.append(device)
 

@@ -253,6 +253,96 @@ even with "clear" line of sight.
             expertise_level="expert",
         ))
 
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Signal Quality Classification",
+            content="""
+Signal quality is classified based on both SNR and RSSI together:
+
+EXCELLENT (reliable, high margin):
+- SNR >= -3 dB AND RSSI >= -100 dBm
+- Strong signal, well above noise floor
+- Expect near 100% packet delivery
+
+GOOD (normal operation):
+- SNR >= -7 dB AND RSSI >= -115 dBm
+- Standard quality for reliable mesh operation
+- Occasional retransmits may occur
+
+FAIR (usable but weak):
+- SNR >= -15 dB AND RSSI >= -126 dBm
+- May experience packet loss
+- Consider improving antenna/position
+
+BAD (unreliable):
+- Below FAIR thresholds
+- High packet loss expected
+- Link may drop frequently
+
+Link Margin:
+The difference between received signal and receiver sensitivity.
+- SF11 sensitivity: -134.5 dBm
+- SF12 sensitivity: -137 dBm
+- 10+ dB margin recommended for reliability
+
+These thresholds are based on the meshtastic-go library and MeshTenna
+antenna testing tool.
+""",
+            keywords=["signal quality", "classification", "good", "bad", "fair", "threshold", "link margin"],
+            related_entries=["SNR (Signal-to-Noise Ratio)", "RSSI (Received Signal Strength Indicator)"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Antenna Testing",
+            content="""
+Proper antenna testing ensures your system performs optimally.
+
+Equipment:
+- VNA (Vector Network Analyzer) for SWR/impedance
+- NanoVNA is affordable (~$50) for hobbyists
+- Alternatively: SWR meter inline during TX
+
+Key Measurements:
+
+SWR (Standing Wave Ratio):
+- 1.0:1 = Perfect (impossible in practice)
+- <1.5:1 = Excellent
+- <2.0:1 = Good
+- >3.0:1 = Poor, significant power loss
+
+Return Loss:
+- >20 dB = Excellent (<1% reflected)
+- >14 dB = Good (<4% reflected)
+- <10 dB = Poor (>10% reflected)
+
+Resonant Frequency:
+- Antenna should resonate at your operating frequency
+- Off-resonance = higher SWR, reduced efficiency
+- Many cheap antennas are mis-labeled
+
+Cable and Connector Losses (at 915 MHz):
+- RG174: ~0.9 dB/m (high loss, avoid for runs >1m)
+- RG58: ~0.5 dB/m
+- LMR400: ~0.15 dB/m (low loss, recommended)
+- SMA connector: ~0.1 dB each
+- Every connector/meter of cable reduces your signal
+
+Best Practices:
+- Keep cable runs as short as possible
+- Use quality low-loss coax for longer runs
+- Never close a window on coax cable
+- Waterproof outdoor connections
+- Mount antenna vertically for LoRa (vertical polarization)
+
+Reference: MeshTenna antenna testing tool
+""",
+            keywords=["antenna", "testing", "vna", "swr", "return loss", "cable", "connector", "impedance"],
+            related_entries=["Fresnel Zone"],
+            expertise_level="expert",
+        ))
+
     def _load_meshtastic_knowledge(self) -> None:
         """Load Meshtastic-specific knowledge."""
 
@@ -368,6 +458,88 @@ Commands:
             expertise_level="intermediate",
         ))
 
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.MESHTASTIC,
+            title="Meshtastic Telemetry Sensors",
+            content="""
+Meshtastic supports various telemetry sensors via I2C bus:
+
+Device Metrics (built-in):
+- Battery level and voltage
+- Channel utilization (how busy the RF channel is)
+- TX airtime (transmit duty cycle)
+- Uptime
+
+Environment Sensors (I2C):
+- BME280: Temperature, humidity, barometric pressure (~$5-10)
+- BME680: Same as BME280 + VOC gas sensor (~$15)
+- BMP280: Temperature and pressure only (~$3)
+- SHT31: High-accuracy temperature and humidity
+- Sensors auto-detected on I2C bus at startup
+
+Air Quality Sensors:
+- PMSA003I: Particulate matter (PM1.0, PM2.5, PM10) (~$40)
+- SCD4X: CO2 concentration (~$50)
+- Good for environmental monitoring stations
+
+Health Sensors:
+- MAX30102: Heart rate and SpO2 (blood oxygen)
+- Body temperature sensors
+
+Configuration:
+- Enable in Meshtastic app: Settings > Module Configuration > Telemetry
+- Default broadcast interval: 30 minutes
+- Can adjust interval for more/less frequent updates
+
+Use Cases:
+- Weather stations at remote locations
+- Air quality monitoring network
+- Solar-powered environmental sensors
+- Garden/greenhouse monitoring
+""",
+            keywords=["telemetry", "sensor", "bme280", "temperature", "humidity", "air quality", "pm2.5", "environment"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.MESHTASTIC,
+            title="Meshtastic Detection Sensor Module",
+            content="""
+The Detection Sensor module monitors GPIO pins for state changes and sends
+alerts over the mesh network.
+
+Use Cases:
+- Motion detection (PIR sensors like HC-SR501)
+- Door/window sensors (reed switches)
+- Water leak detection
+- Intrusion alerts for remote locations
+- Tripwire-style security
+
+Configuration Options:
+- Monitor Pin: GPIO pin to watch
+- Detection Triggered High: Is HIGH (1) the triggered state?
+- Use Pull-up: Enable internal pull-up resistor
+- Name: Alert name (e.g., "Motion" -> "Motion detected")
+- Min Broadcast Interval: Minimum seconds between alerts
+- State Broadcast Interval: Heartbeat interval (0 = only on change)
+
+Hardware Notes:
+- HC-SR501 PIR: Requires 5V, may not work on battery
+- Reed switches: Work with 3.3V, very low power
+- Choose GPIO pins not used by other functions
+- Check your board's available GPIO pins
+
+Alert Format:
+When triggered, sends message: "{Name} detected" or "{Name} clear"
+Example: "Motion detected" or "Door clear"
+
+Requires firmware 2.2.2 or higher.
+""",
+            keywords=["detection", "sensor", "gpio", "motion", "pir", "reed", "switch", "alert", "security"],
+            related_entries=["Meshtastic Telemetry Sensors"],
+            expertise_level="intermediate",
+        ))
+
     def _load_reticulum_knowledge(self) -> None:
         """Load Reticulum-specific knowledge."""
 
@@ -434,6 +606,86 @@ AutoInterface:
 Configuration in: ~/.reticulum/config
 """,
             keywords=["interface", "tcp", "serial", "rnode", "transport", "config"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RETICULUM,
+            title="RNS Cryptography",
+            content="""
+Reticulum uses strong, well-established cryptographic primitives:
+
+Identity & Addressing:
+- 512-bit Curve25519 keysets (Ed25519 + X25519)
+- No source addresses on packets (initiator anonymity)
+- Destination addresses are cryptographic hashes
+- Globally unique without central coordination
+
+Encryption:
+- AES-256-CBC encryption with PKCS7 padding
+- HMAC-SHA256 for authentication
+- Forward secrecy via ephemeral ECDH exchanges
+- Per-packet keys for privacy
+
+Link Establishment:
+- Only 3 packets (297 bytes) to establish encrypted link
+- Link overhead: 0.44 bits per second
+- Unforgeable delivery confirmations
+
+This means:
+- Messages are encrypted end-to-end by default
+- No trust in network infrastructure required
+- Even relay nodes cannot read message contents
+- Identity is provable via cryptographic signatures
+
+For MeshForge gateway:
+- Each side maintains its own identity
+- Bridge must have valid RNS identity to participate
+- Messages re-encrypted across network boundary
+""",
+            keywords=["cryptography", "encryption", "aes", "curve25519", "ed25519", "identity", "security"],
+            related_entries=["Reticulum Network Stack"],
+            expertise_level="expert",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RETICULUM,
+            title="RNS Node Discovery",
+            content="""
+Reticulum uses an announce-based discovery system:
+
+Announces:
+- Nodes broadcast their identity and destination hash
+- Public key shared for others to route to you
+- App data can include display name, capabilities
+- Without announcing, you are invisible on the network
+
+Path Discovery:
+- Automatic multi-hop path finding
+- Transport layer maintains path table
+- Paths expire and refresh automatically
+- No central routing authority
+
+Network Visualizer (like MeshChat):
+- Shows announced nodes and their connectivity
+- Tracks path hops to each destination
+- Displays announce timestamps
+- Helps understand network topology
+
+Bootstrap:
+- New nodes connect to known peers
+- Temporary bootstrap links discover local infrastructure
+- System automatically forms stronger direct links
+- Bootstrap connections can be discarded after discovery
+
+For MeshForge:
+- Use list_known_destinations() to see known nodes
+- Use discover_nodes() for active discovery
+- Monitor Transport.path_table for topology
+- Check Identity.known_destinations for all seen nodes
+""",
+            keywords=["discovery", "announce", "path", "routing", "bootstrap", "visualizer", "topology"],
+            related_entries=["RNS Interfaces"],
             expertise_level="intermediate",
         ))
 

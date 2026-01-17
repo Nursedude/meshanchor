@@ -898,3 +898,240 @@ def apply_template(template_name: str, interface_name: str, overrides: Dict[str,
         settings.update(overrides)
 
     return add_interface(interface_name, template['type'], settings)
+
+
+# ============================================================================
+# RNS NODE DISCOVERY
+# ============================================================================
+
+def list_known_destinations() -> CommandResult:
+    """
+    List known RNS destinations from the running rnsd instance.
+
+    This queries the rnsd daemon for all destinations it has heard about
+    via announces or path requests.
+
+    Returns:
+        CommandResult with list of known destinations
+    """
+    # First check if rnsd is running (using improved detection)
+    status = get_status()
+    if not status.data.get('rnsd_running'):
+        # Also check UDP port as fallback
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1)
+            try:
+                sock.bind(('127.0.0.1', 37428))
+                sock.close()
+                # If we can bind, rnsd is NOT running
+                return CommandResult.fail(
+                    "rnsd not running",
+                    fix_hint="Start with: rnsd or sudo systemctl start rnsd"
+                )
+            except OSError as e:
+                sock.close()
+                if e.errno in (98, 48, 10048):  # EADDRINUSE
+                    pass  # rnsd is running, continue
+                else:
+                    return CommandResult.fail(
+                        "rnsd not running",
+                        fix_hint="Start with: rnsd or sudo systemctl start rnsd"
+                    )
+        except Exception:
+            pass
+
+    try:
+        import RNS
+
+        # Try to connect to the running rnsd instance
+        # This will use the shared instance if one is running
+        reticulum = RNS.Reticulum()
+
+        nodes = []
+
+        # Method 1: Check Transport path table
+        if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
+            for dest_hash, path_data in RNS.Transport.path_table.items():
+                try:
+                    hash_hex = dest_hash.hex() if isinstance(dest_hash, bytes) else str(dest_hash)
+                    # Path data format varies by RNS version
+                    hops = 0
+                    if isinstance(path_data, tuple) and len(path_data) > 1:
+                        hops = path_data[1] if isinstance(path_data[1], int) else 0
+
+                    nodes.append({
+                        'hash': hash_hex,
+                        'short_hash': hash_hex[:8],
+                        'hops': hops,
+                        'source': 'path_table'
+                    })
+                except Exception as e:
+                    logger.debug(f"Error parsing path entry: {e}")
+
+        # Method 2: Check known destinations
+        if hasattr(RNS.Identity, 'known_destinations') and RNS.Identity.known_destinations:
+            known_dests = RNS.Identity.known_destinations
+            if isinstance(known_dests, dict):
+                for dest_hash, identity in known_dests.items():
+                    try:
+                        hash_hex = dest_hash.hex() if isinstance(dest_hash, bytes) else str(dest_hash)
+                        # Check if already added from path_table
+                        if not any(n['hash'] == hash_hex for n in nodes):
+                            nodes.append({
+                                'hash': hash_hex,
+                                'short_hash': hash_hex[:8],
+                                'hops': -1,  # Unknown
+                                'source': 'known_destinations'
+                            })
+                    except Exception as e:
+                        logger.debug(f"Error parsing known destination: {e}")
+
+        # Method 3: Check destination table
+        if hasattr(RNS.Transport, 'destinations') and RNS.Transport.destinations:
+            for dest in RNS.Transport.destinations:
+                try:
+                    if hasattr(dest, 'hash'):
+                        hash_hex = dest.hash.hex() if isinstance(dest.hash, bytes) else str(dest.hash)
+                        if not any(n['hash'] == hash_hex for n in nodes):
+                            name = dest.name if hasattr(dest, 'name') else ''
+                            nodes.append({
+                                'hash': hash_hex,
+                                'short_hash': hash_hex[:8],
+                                'name': name,
+                                'hops': -1,
+                                'source': 'destinations'
+                            })
+                except Exception as e:
+                    logger.debug(f"Error parsing destination: {e}")
+
+        if nodes:
+            return CommandResult.ok(
+                f"Found {len(nodes)} RNS destinations",
+                data={
+                    'nodes': nodes,
+                    'count': len(nodes)
+                }
+            )
+        else:
+            return CommandResult.ok(
+                "No known RNS destinations",
+                data={
+                    'nodes': [],
+                    'count': 0,
+                    'note': "Nodes appear when they announce or when you request paths"
+                }
+            )
+
+    except ImportError:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pip install rns"
+        )
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        return CommandResult.fail(
+            f"Failed to query RNS: {e}",
+            error=str(e)
+        )
+
+
+def discover_nodes(timeout: int = 30) -> CommandResult:
+    """
+    Actively discover RNS nodes on the network.
+
+    This sends out path requests and waits for announces to discover
+    new nodes on the network.
+
+    Args:
+        timeout: How long to wait for discoveries (seconds)
+
+    Returns:
+        CommandResult with discovered nodes
+    """
+    try:
+        import RNS
+        import time
+
+        # Connect to rnsd
+        reticulum = RNS.Reticulum()
+
+        initial_count = 0
+        if hasattr(RNS.Identity, 'known_destinations'):
+            initial_count = len(RNS.Identity.known_destinations or {})
+
+        discovered = []
+
+        # Set up a simple announce handler to catch new nodes
+        class DiscoveryHandler:
+            def __init__(self):
+                self.aspect_filter = None  # All aspects
+                self.nodes = []
+
+            def received_announce(self, dest_hash, announced_identity, app_data):
+                try:
+                    hash_hex = dest_hash.hex()
+                    name = ""
+                    if app_data:
+                        try:
+                            name = app_data.decode('utf-8', errors='ignore').strip()
+                            name = ''.join(c for c in name if c.isprintable())
+                        except Exception:
+                            pass
+
+                    self.nodes.append({
+                        'hash': hash_hex,
+                        'short_hash': hash_hex[:8],
+                        'name': name,
+                        'source': 'announce'
+                    })
+                except Exception as e:
+                    logger.debug(f"Error processing announce: {e}")
+
+        handler = DiscoveryHandler()
+        RNS.Transport.register_announce_handler(handler)
+
+        logger.info(f"Listening for RNS announces for {timeout} seconds...")
+
+        # Wait for timeout
+        start = time.time()
+        while time.time() - start < timeout:
+            time.sleep(0.5)
+
+            # Check for new discoveries
+            if handler.nodes:
+                for node in handler.nodes:
+                    if not any(d['hash'] == node['hash'] for d in discovered):
+                        discovered.append(node)
+                        logger.info(f"Discovered: {node['short_hash']} ({node.get('name', 'unnamed')})")
+                handler.nodes = []
+
+        if discovered:
+            return CommandResult.ok(
+                f"Discovered {len(discovered)} nodes",
+                data={
+                    'nodes': discovered,
+                    'count': len(discovered),
+                    'duration': timeout
+                }
+            )
+        else:
+            return CommandResult.ok(
+                "No new nodes discovered",
+                data={
+                    'nodes': [],
+                    'count': 0,
+                    'duration': timeout,
+                    'note': "Try longer timeout or check if other RNS nodes are announcing"
+                }
+            )
+
+    except ImportError:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pip install rns"
+        )
+    except Exception as e:
+        return CommandResult.fail(f"Discovery failed: {e}")
