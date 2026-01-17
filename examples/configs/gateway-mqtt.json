@@ -1,0 +1,60 @@
+{
+  "_name": "MQTT-Enabled Gateway",
+  "_description": "Bridge messages and publish to MQTT broker for monitoring/logging.",
+  "_usage": "Copy to ~/.config/meshforge/gateway.json and set mqtt_server",
+
+  "enabled": true,
+  "auto_start": false,
+  "bridge_mode": "message_bridge",
+
+  "meshtastic": {
+    "host": "localhost",
+    "port": 4403,
+    "channel": 0,
+    "use_mqtt": true,
+    "mqtt_server": "localhost",
+    "mqtt_port": 1883,
+    "mqtt_topic": "meshforge/messages",
+    "mqtt_username": "",
+    "mqtt_password": ""
+  },
+
+  "rns": {
+    "config_dir": "",
+    "identity_name": "meshforge_gateway",
+    "announce_interval": 300,
+    "propagation_node": ""
+  },
+
+  "routing_rules": [
+    {
+      "name": "broadcast_messages",
+      "enabled": true,
+      "direction": "bidirectional",
+      "source_filter": "",
+      "dest_filter": "^!ffffffff$",
+      "message_filter": "",
+      "priority": 10
+    },
+    {
+      "name": "direct_messages",
+      "enabled": true,
+      "direction": "bidirectional",
+      "source_filter": "",
+      "dest_filter": "^!(?!ffffffff)",
+      "message_filter": "",
+      "priority": 5
+    }
+  ],
+
+  "telemetry": {
+    "share_position": true,
+    "share_battery": true,
+    "share_environment": true,
+    "update_interval": 60
+  },
+
+  "log_level": "INFO",
+  "log_messages": true,
+  "ai_diagnostics_enabled": false
+}
