@@ -35,12 +35,21 @@ python3 -c "from src.__version__ import __version__; print(__version__)"
 ```
 src/
 ├── gateway/           # RNS-Meshtastic bridge
+│   ├── rns_bridge.py  # Main gateway bridge
+│   └── message_queue.py # Persistent message queue (SQLite)
+├── monitoring/        # Network monitoring
+│   └── mqtt_subscriber.py # Nodeless MQTT monitoring
 ├── gtk_ui/            # GTK4 Desktop (panels/)
+│   └── panels/        # UI panels (map, mqtt_dashboard, diagnostics)
 ├── utils/             # RF tools, common utilities
 │   ├── rf.py          # RF calculations (tested)
 │   ├── rf_fast.pyx    # Cython optimization
 │   ├── common.py      # SettingsManager
-│   └── auto_review.py # Self-audit system
+│   ├── auto_review.py # Self-audit system
+│   ├── diagnostic_engine.py # Intelligent diagnostics
+│   ├── knowledge_base.py    # Mesh networking knowledge
+│   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
+│   └── coverage_map.py      # Folium map generator
 ├── standalone.py      # Zero-dependency boot
 └── __version__.py     # Version and changelog
 ```
@@ -139,6 +148,50 @@ docs: Documentation
 refactor: Code restructure
 test: Add tests
 security: Security fix
+```
+
+## Intelligent Diagnostics System
+
+MeshForge includes an AI-native diagnostics system:
+
+### Standalone Mode (Offline)
+```python
+from utils.diagnostic_engine import diagnose, Category, Severity
+
+# Report a symptom
+diagnosis = diagnose(
+    "Connection refused to meshtasticd",
+    category=Category.CONNECTIVITY,
+    severity=Severity.ERROR
+)
+if diagnosis:
+    print(diagnosis.likely_cause)
+    print(diagnosis.suggestions)
+```
+
+### Knowledge Base Query
+```python
+from utils.knowledge_base import get_knowledge_base
+
+kb = get_knowledge_base()
+results = kb.query("What is SNR?")
+```
+
+### AI Assistant
+```python
+from utils.claude_assistant import ClaudeAssistant
+
+assistant = ClaudeAssistant()  # Standalone mode
+response = assistant.ask("Why is my node offline?")
+```
+
+### Coverage Map Generation
+```python
+from utils.coverage_map import CoverageMapGenerator
+
+gen = CoverageMapGenerator()
+gen.add_nodes_from_geojson(geojson_data)
+gen.generate("coverage_map.html")
 ```
 
 ## Contact

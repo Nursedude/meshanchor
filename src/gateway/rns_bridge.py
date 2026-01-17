@@ -18,6 +18,15 @@ from pathlib import Path
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 
+# Import persistent message queue for reliable delivery
+try:
+    from .message_queue import PersistentMessageQueue, MessagePriority
+    HAS_PERSISTENT_QUEUE = True
+except ImportError:
+    HAS_PERSISTENT_QUEUE = False
+    PersistentMessageQueue = None
+    MessagePriority = None
+
 # Import routing classifier with confidence scoring
 try:
     from utils.classifier import (
@@ -104,6 +113,22 @@ class RNSMeshtasticBridge:
             'start_time': None,
         }
 
+        # Persistent message queue for reliable delivery
+        self._persistent_queue = None
+        if HAS_PERSISTENT_QUEUE:
+            try:
+                self._persistent_queue = PersistentMessageQueue()
+                # Register send handlers for each destination
+                self._persistent_queue.register_sender(
+                    "meshtastic", self._queue_send_meshtastic
+                )
+                self._persistent_queue.register_sender(
+                    "rns", self._queue_send_rns
+                )
+                logger.info("Persistent message queue initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize persistent queue: {e}")
+
         # Routing classifier with confidence scoring
         self._classifier = None
         self._last_classification: Optional[ClassificationResult] = None
@@ -172,6 +197,11 @@ class RNSMeshtasticBridge:
             )
             self._bridge_thread.start()
 
+        # Start persistent queue processing
+        if self._persistent_queue:
+            self._persistent_queue.start_processing(interval=2.0)
+            logger.info("Persistent message queue processing started")
+
         logger.info("Bridge started")
         self._notify_status("started")
         return True
@@ -183,6 +213,10 @@ class RNSMeshtasticBridge:
 
         logger.info("Stopping bridge...")
         self._running = False
+
+        # Stop persistent queue processing
+        if self._persistent_queue:
+            self._persistent_queue.stop_processing()
 
         # Stop node tracker
         self.node_tracker.stop()
@@ -291,6 +325,119 @@ class RNSMeshtasticBridge:
             logger.error(f"Failed to send to RNS: {e}")
             self.stats['errors'] += 1
             return False
+
+    def _queue_send_meshtastic(self, payload: Dict) -> bool:
+        """Send handler for persistent queue - Meshtastic destination."""
+        message = payload.get('message', '')
+        destination = payload.get('destination')
+        channel = payload.get('channel', 0)
+
+        if not self._connected_mesh:
+            return False
+
+        try:
+            if self._mesh_interface:
+                dest = destination if destination else "^all"
+                self._mesh_interface.sendText(message, destinationId=dest, channelIndex=channel)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Queue send to Meshtastic failed: {e}")
+            return False
+
+    def _queue_send_rns(self, payload: Dict) -> bool:
+        """Send handler for persistent queue - RNS destination."""
+        message = payload.get('message', '')
+        destination_hash = payload.get('destination_hash')
+
+        if not self._connected_rns:
+            return False
+
+        try:
+            import RNS
+            import LXMF
+
+            if not destination_hash:
+                return False
+
+            if isinstance(destination_hash, str):
+                destination_hash = bytes.fromhex(destination_hash)
+
+            if not RNS.Transport.has_path(destination_hash):
+                RNS.Transport.request_path(destination_hash)
+                for _ in range(30):
+                    if RNS.Transport.has_path(destination_hash):
+                        break
+                    time.sleep(0.1)
+
+            if not RNS.Transport.has_path(destination_hash):
+                return False
+
+            dest_identity = RNS.Identity.recall(destination_hash)
+            destination = RNS.Destination(
+                dest_identity, RNS.Destination.OUT,
+                RNS.Destination.SINGLE, "lxmf", "delivery"
+            )
+
+            lxm = LXMF.LXMessage(destination, self._lxmf_source, message, "MeshForge Gateway")
+            self._lxmf_router.handle_outbound(lxm)
+            return True
+
+        except Exception as e:
+            logger.error(f"Queue send to RNS failed: {e}")
+            return False
+
+    def enqueue_message(self, message: str, destination: str, dest_type: str = "meshtastic",
+                        priority: str = "normal", **kwargs) -> Optional[str]:
+        """
+        Enqueue a message for reliable delivery.
+
+        Args:
+            message: Message content
+            destination: Destination ID/hash
+            dest_type: "meshtastic" or "rns"
+            priority: "low", "normal", "high", or "urgent"
+            **kwargs: Additional parameters (channel, etc.)
+
+        Returns:
+            Message ID if enqueued, None if queue unavailable
+        """
+        if not self._persistent_queue:
+            # Fall back to direct send
+            if dest_type == "meshtastic":
+                return "direct" if self.send_to_meshtastic(message, destination, kwargs.get('channel', 0)) else None
+            else:
+                dest_hash = kwargs.get('destination_hash')
+                if isinstance(dest_hash, str):
+                    dest_hash = bytes.fromhex(dest_hash)
+                return "direct" if self.send_to_rns(message, dest_hash) else None
+
+        # Map priority string to enum
+        priority_map = {
+            "low": MessagePriority.LOW,
+            "normal": MessagePriority.NORMAL,
+            "high": MessagePriority.HIGH,
+            "urgent": MessagePriority.URGENT,
+        }
+        msg_priority = priority_map.get(priority, MessagePriority.NORMAL)
+
+        payload = {
+            'message': message,
+            'destination': destination,
+            **kwargs
+        }
+
+        return self._persistent_queue.enqueue(
+            payload=payload,
+            destination=dest_type,
+            priority=msg_priority
+        )
+
+    def get_queue_stats(self) -> Dict:
+        """Get persistent queue statistics."""
+        if self._persistent_queue:
+            return self._persistent_queue.get_stats()
+        return {}
 
     def register_message_callback(self, callback: Callable):
         """Register callback for bridged messages"""
