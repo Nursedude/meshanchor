@@ -537,3 +537,450 @@ def get_coverage_analyzer() -> CoverageAnalyzer:
     except NameError:
         _coverage_analyzer = CoverageAnalyzer(get_analytics_store())
         return _coverage_analyzer
+
+
+# =============================================================================
+# PREDICTIVE ANALYTICS (Sprint B: Predictive Network Health)
+# =============================================================================
+
+@dataclass
+class PredictiveAlert:
+    """A predictive alert for upcoming network issues."""
+    alert_type: str  # 'snr_degradation', 'node_offline', 'link_failure'
+    severity: str  # 'info', 'warning', 'critical'
+    message: str
+    predicted_time_hours: Optional[float]  # Hours until predicted event
+    confidence: float  # 0.0 to 1.0
+    evidence: List[str]
+    suggestions: List[str]
+    affected_nodes: List[str]
+    timestamp: str = ""
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
+
+
+class PredictiveAnalyzer:
+    """
+    Predictive analytics for proactive network health monitoring.
+
+    Analyzes historical trends to predict:
+    - Node failures (based on SNR/RSSI degradation)
+    - Link degradation (based on packet loss patterns)
+    - Network health decline (based on aggregate metrics)
+
+    Usage:
+        analyzer = PredictiveAnalyzer()
+        alerts = analyzer.analyze_all()
+        for alert in alerts:
+            if alert.severity == 'critical':
+                print(f"CRITICAL: {alert.message}")
+
+    API Contract:
+        - analyze_all() returns List[PredictiveAlert] (may be empty)
+        - Thread-safe (uses underlying AnalyticsStore lock)
+        - Does not modify analytics data
+        - Tests: tests/test_predictive_analytics.py
+    """
+
+    # Thresholds for predictions
+    SNR_DEGRADATION_THRESHOLD = -3.0  # dB drop to trigger warning
+    SNR_CRITICAL_THRESHOLD = -10.0  # dB absolute value = critical
+    RSSI_DEGRADATION_THRESHOLD = -6.0  # dB drop to trigger warning
+    PACKET_LOSS_WARNING = 10.0  # % packet loss
+    PACKET_LOSS_CRITICAL = 25.0  # % packet loss
+    MIN_SAMPLES_FOR_PREDICTION = 5  # Need at least this many data points
+
+    def __init__(self, store: Optional[AnalyticsStore] = None):
+        self.store = store or get_analytics_store()
+
+    def analyze_all(self) -> List[PredictiveAlert]:
+        """
+        Run all predictive analyses and return alerts.
+
+        Returns:
+            List of PredictiveAlert objects, sorted by severity
+        """
+        alerts: List[PredictiveAlert] = []
+
+        # Analyze network health trends
+        alerts.extend(self._analyze_network_health_trends())
+
+        # Analyze link-specific degradation
+        alerts.extend(self._analyze_link_degradation())
+
+        # Sort by severity (critical first)
+        severity_order = {'critical': 0, 'warning': 1, 'info': 2}
+        alerts.sort(key=lambda a: severity_order.get(a.severity, 3))
+
+        return alerts
+
+    def _analyze_network_health_trends(self) -> List[PredictiveAlert]:
+        """Analyze aggregate network health for degradation patterns."""
+        alerts: List[PredictiveAlert] = []
+
+        # Get 48 hours of health data for trend analysis
+        history = self.store.get_network_health_history(hours=48)
+
+        if len(history) < self.MIN_SAMPLES_FOR_PREDICTION:
+            return alerts
+
+        # Analyze SNR trend
+        snr_values = [h.avg_snr_db for h in history if h.avg_snr_db is not None]
+        if len(snr_values) >= self.MIN_SAMPLES_FOR_PREDICTION:
+            snr_alert = self._check_metric_degradation(
+                values=snr_values,
+                metric_name="Average SNR",
+                unit="dB",
+                warning_drop=abs(self.SNR_DEGRADATION_THRESHOLD),
+                critical_absolute=self.SNR_CRITICAL_THRESHOLD,
+                higher_is_better=True
+            )
+            if snr_alert:
+                alerts.append(snr_alert)
+
+        # Analyze RSSI trend
+        rssi_values = [h.avg_rssi_dbm for h in history if h.avg_rssi_dbm is not None]
+        if len(rssi_values) >= self.MIN_SAMPLES_FOR_PREDICTION:
+            rssi_alert = self._check_metric_degradation(
+                values=rssi_values,
+                metric_name="Average RSSI",
+                unit="dBm",
+                warning_drop=abs(self.RSSI_DEGRADATION_THRESHOLD),
+                critical_absolute=-100.0,  # Very weak signal
+                higher_is_better=True
+            )
+            if rssi_alert:
+                alerts.append(rssi_alert)
+
+        # Analyze node count trend (nodes going offline)
+        online_counts = [h.online_nodes for h in history if h.online_nodes is not None]
+        if len(online_counts) >= self.MIN_SAMPLES_FOR_PREDICTION:
+            node_alert = self._check_node_count_decline(online_counts)
+            if node_alert:
+                alerts.append(node_alert)
+
+        return alerts
+
+    def _analyze_link_degradation(self) -> List[PredictiveAlert]:
+        """Analyze individual link health for degradation."""
+        alerts: List[PredictiveAlert] = []
+
+        # Get recent link budget data
+        history = self.store.get_link_budget_history(hours=168)  # 1 week
+
+        if len(history) < self.MIN_SAMPLES_FOR_PREDICTION:
+            return alerts
+
+        # Group by link (source -> dest)
+        links: Dict[Tuple[str, str], List[LinkBudgetSample]] = {}
+        for sample in history:
+            key = (sample.source_node, sample.dest_node)
+            if key not in links:
+                links[key] = []
+            links[key].append(sample)
+
+        # Analyze each link
+        for (source, dest), samples in links.items():
+            if len(samples) < self.MIN_SAMPLES_FOR_PREDICTION:
+                continue
+
+            # Check SNR degradation for this link
+            snr_values = [s.snr_db for s in samples if s.snr_db is not None]
+            if snr_values:
+                trend = self._calculate_trend_slope(snr_values)
+                recent_avg = sum(snr_values[:min(5, len(snr_values))]) / min(5, len(snr_values))
+
+                if trend < -0.5:  # Degrading more than 0.5 dB per sample period
+                    # Estimate time to critical
+                    if recent_avg > self.SNR_CRITICAL_THRESHOLD:
+                        samples_to_critical = (recent_avg - self.SNR_CRITICAL_THRESHOLD) / abs(trend)
+                        hours_to_critical = samples_to_critical * 4  # Assume ~4 hour sample rate
+
+                        severity = 'warning' if hours_to_critical > 24 else 'critical'
+
+                        alerts.append(PredictiveAlert(
+                            alert_type='link_snr_degradation',
+                            severity=severity,
+                            message=f"Link {source} → {dest} SNR degrading at {trend:.1f} dB/day",
+                            predicted_time_hours=hours_to_critical,
+                            confidence=min(0.9, 0.5 + len(samples) * 0.05),
+                            evidence=[
+                                f"Current SNR: {recent_avg:.1f} dB",
+                                f"Trend: {trend:.2f} dB/sample",
+                                f"Samples analyzed: {len(samples)}",
+                            ],
+                            suggestions=[
+                                "Check antenna alignment between nodes",
+                                "Investigate new RF interference sources",
+                                "Consider adding relay node",
+                            ],
+                            affected_nodes=[source, dest],
+                        ))
+
+            # Check packet loss increase
+            loss_values = [s.packet_loss_pct for s in samples if s.packet_loss_pct is not None]
+            if loss_values and len(loss_values) >= 3:
+                recent_loss = sum(loss_values[:min(3, len(loss_values))]) / min(3, len(loss_values))
+
+                if recent_loss > self.PACKET_LOSS_CRITICAL:
+                    alerts.append(PredictiveAlert(
+                        alert_type='link_packet_loss',
+                        severity='critical',
+                        message=f"Link {source} → {dest} has {recent_loss:.1f}% packet loss",
+                        predicted_time_hours=None,  # Already happening
+                        confidence=0.9,
+                        evidence=[
+                            f"Recent packet loss: {recent_loss:.1f}%",
+                            f"Threshold: {self.PACKET_LOSS_CRITICAL}%",
+                        ],
+                        suggestions=[
+                            "Check for interference or obstructions",
+                            "Verify node is still powered on",
+                            "Consider switching channels",
+                        ],
+                        affected_nodes=[source, dest],
+                    ))
+                elif recent_loss > self.PACKET_LOSS_WARNING:
+                    alerts.append(PredictiveAlert(
+                        alert_type='link_packet_loss',
+                        severity='warning',
+                        message=f"Link {source} → {dest} packet loss increasing ({recent_loss:.1f}%)",
+                        predicted_time_hours=None,
+                        confidence=0.75,
+                        evidence=[
+                            f"Recent packet loss: {recent_loss:.1f}%",
+                            f"Warning threshold: {self.PACKET_LOSS_WARNING}%",
+                        ],
+                        suggestions=[
+                            "Monitor link closely",
+                            "Check for new sources of interference",
+                        ],
+                        affected_nodes=[source, dest],
+                    ))
+
+        return alerts
+
+    def _check_metric_degradation(
+        self,
+        values: List[float],
+        metric_name: str,
+        unit: str,
+        warning_drop: float,
+        critical_absolute: float,
+        higher_is_better: bool = True
+    ) -> Optional[PredictiveAlert]:
+        """Check if a metric is degrading over time."""
+        if len(values) < self.MIN_SAMPLES_FOR_PREDICTION:
+            return None
+
+        # Calculate trend (compare recent vs older)
+        third = len(values) // 3
+        if third < 1:
+            return None
+
+        recent_avg = sum(values[:third]) / third
+        old_avg = sum(values[-third:]) / third
+
+        if higher_is_better:
+            drop = old_avg - recent_avg  # Positive = degradation
+        else:
+            drop = recent_avg - old_avg  # Positive = degradation
+
+        # Check for critical absolute value
+        is_critical_absolute = (
+            (higher_is_better and recent_avg < critical_absolute) or
+            (not higher_is_better and recent_avg > critical_absolute)
+        )
+
+        if is_critical_absolute:
+            return PredictiveAlert(
+                alert_type='metric_critical',
+                severity='critical',
+                message=f"{metric_name} is at critical level: {recent_avg:.1f} {unit}",
+                predicted_time_hours=None,
+                confidence=0.9,
+                evidence=[
+                    f"Current {metric_name}: {recent_avg:.1f} {unit}",
+                    f"Critical threshold: {critical_absolute} {unit}",
+                ],
+                suggestions=[
+                    "Immediate investigation recommended",
+                    "Check hardware and environmental factors",
+                ],
+                affected_nodes=[],
+            )
+
+        # Check for degradation trend
+        if drop > warning_drop:
+            # Estimate time to critical
+            samples_to_critical = None
+            if drop > 0:
+                remaining = recent_avg - critical_absolute if higher_is_better else critical_absolute - recent_avg
+                if remaining > 0:
+                    rate_per_sample = drop / (len(values) - third)
+                    if rate_per_sample > 0:
+                        samples_to_critical = remaining / rate_per_sample
+
+            hours_estimate = samples_to_critical * 4 if samples_to_critical else None
+
+            return PredictiveAlert(
+                alert_type='metric_degradation',
+                severity='warning',
+                message=f"{metric_name} degrading: dropped {drop:.1f} {unit} over analysis period",
+                predicted_time_hours=hours_estimate,
+                confidence=min(0.85, 0.5 + len(values) * 0.03),
+                evidence=[
+                    f"Recent avg: {recent_avg:.1f} {unit}",
+                    f"Historical avg: {old_avg:.1f} {unit}",
+                    f"Change: -{drop:.1f} {unit}",
+                ],
+                suggestions=[
+                    "Monitor trend closely",
+                    "Investigate potential causes of degradation",
+                ],
+                affected_nodes=[],
+            )
+
+        return None
+
+    def _check_node_count_decline(self, counts: List[int]) -> Optional[PredictiveAlert]:
+        """Check if online node count is declining."""
+        if len(counts) < self.MIN_SAMPLES_FOR_PREDICTION:
+            return None
+
+        recent = counts[:min(5, len(counts))]
+        older = counts[-min(5, len(counts)):]
+
+        recent_avg = sum(recent) / len(recent)
+        older_avg = sum(older) / len(older)
+
+        if older_avg > 0:
+            decline_pct = ((older_avg - recent_avg) / older_avg) * 100
+
+            if decline_pct > 20:  # More than 20% node decline
+                return PredictiveAlert(
+                    alert_type='node_count_decline',
+                    severity='warning' if decline_pct < 40 else 'critical',
+                    message=f"Network node count declining: {decline_pct:.0f}% fewer nodes online",
+                    predicted_time_hours=None,
+                    confidence=0.8,
+                    evidence=[
+                        f"Current online nodes: {recent_avg:.0f}",
+                        f"Previous period: {older_avg:.0f}",
+                        f"Decline: {decline_pct:.1f}%",
+                    ],
+                    suggestions=[
+                        "Check power status of offline nodes",
+                        "Verify network connectivity",
+                        "Check for environmental changes (weather, obstructions)",
+                    ],
+                    affected_nodes=[],
+                )
+
+        return None
+
+    def _calculate_trend_slope(self, values: List[float]) -> float:
+        """
+        Calculate simple linear trend slope.
+
+        Returns:
+            Slope value (positive = increasing, negative = decreasing)
+        """
+        if len(values) < 2:
+            return 0.0
+
+        n = len(values)
+        # Simple linear regression
+        x_mean = (n - 1) / 2
+        y_mean = sum(values) / n
+
+        numerator = sum((i - x_mean) * (values[i] - y_mean) for i in range(n))
+        denominator = sum((i - x_mean) ** 2 for i in range(n))
+
+        if denominator == 0:
+            return 0.0
+
+        return numerator / denominator
+
+    def get_network_forecast(self, hours_ahead: int = 24) -> Dict[str, Any]:
+        """
+        Generate a network health forecast.
+
+        Args:
+            hours_ahead: How many hours to forecast
+
+        Returns:
+            Dict with forecast metrics and confidence
+        """
+        history = self.store.get_network_health_history(hours=72)
+
+        if len(history) < self.MIN_SAMPLES_FOR_PREDICTION:
+            return {
+                'has_forecast': False,
+                'reason': 'Insufficient historical data',
+            }
+
+        # Calculate trends
+        snr_values = [h.avg_snr_db for h in history if h.avg_snr_db]
+        rssi_values = [h.avg_rssi_dbm for h in history if h.avg_rssi_dbm]
+        node_counts = [h.online_nodes for h in history if h.online_nodes]
+
+        snr_slope = self._calculate_trend_slope(snr_values) if snr_values else 0
+        rssi_slope = self._calculate_trend_slope(rssi_values) if rssi_values else 0
+        node_slope = self._calculate_trend_slope([float(n) for n in node_counts]) if node_counts else 0
+
+        # Estimate samples per hour (rough approximation)
+        samples_per_hour = len(history) / 72 if history else 0.25
+
+        # Project forward
+        projected_samples = int(hours_ahead * samples_per_hour)
+
+        current_snr = snr_values[0] if snr_values else 0
+        current_rssi = rssi_values[0] if rssi_values else 0
+        current_nodes = node_counts[0] if node_counts else 0
+
+        forecast_snr = current_snr + (snr_slope * projected_samples)
+        forecast_rssi = current_rssi + (rssi_slope * projected_samples)
+        forecast_nodes = max(0, current_nodes + int(node_slope * projected_samples))
+
+        # Determine health outlook
+        if forecast_snr < self.SNR_CRITICAL_THRESHOLD or forecast_nodes < current_nodes * 0.5:
+            outlook = 'degrading'
+        elif snr_slope > 0.1 or node_slope > 0:
+            outlook = 'improving'
+        else:
+            outlook = 'stable'
+
+        return {
+            'has_forecast': True,
+            'hours_ahead': hours_ahead,
+            'current': {
+                'avg_snr_db': round(current_snr, 1),
+                'avg_rssi_dbm': round(current_rssi, 1),
+                'online_nodes': current_nodes,
+            },
+            'forecast': {
+                'avg_snr_db': round(forecast_snr, 1),
+                'avg_rssi_dbm': round(forecast_rssi, 1),
+                'online_nodes': forecast_nodes,
+            },
+            'trends': {
+                'snr_per_hour': round(snr_slope * samples_per_hour, 2),
+                'rssi_per_hour': round(rssi_slope * samples_per_hour, 2),
+                'nodes_per_hour': round(node_slope * samples_per_hour, 2),
+            },
+            'outlook': outlook,
+            'confidence': min(0.9, 0.4 + len(history) * 0.01),
+        }
+
+
+def get_predictive_analyzer() -> PredictiveAnalyzer:
+    """Get singleton predictive analyzer instance."""
+    global _predictive_analyzer
+    try:
+        return _predictive_analyzer
+    except NameError:
+        _predictive_analyzer = PredictiveAnalyzer(get_analytics_store())
+        return _predictive_analyzer

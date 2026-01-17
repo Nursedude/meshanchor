@@ -12,7 +12,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="tests/"><img src="https://img.shields.io/badge/tests-1252%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="tests/"><img src="https://img.shields.io/badge/tests-1297%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 ---
@@ -100,7 +100,7 @@ MeshForge is built for dependable mesh network operations:
 
 **Quality Gates** - Pre-commit hooks run security linting, critical tests, and type checking before every commit.
 
-**Test Coverage** - 1252 tests including regression tests that prevent status drift across UIs.
+**Test Coverage** - 1297 tests including regression tests that prevent status drift across UIs.
 
 **API Contracts** - Core functions document their guarantees, callers, and breaking change impacts.
 

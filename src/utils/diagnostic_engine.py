@@ -260,6 +260,7 @@ class Category(Enum):
     SECURITY = "security"
     CONFIGURATION = "configuration"
     RESOURCE = "resource"
+    PREDICTIVE = "predictive"  # Sprint B: Proactive alerts from trend analysis
 
 
 @dataclass
@@ -1065,6 +1066,116 @@ class DiagnosticEngine:
     def get_stats(self) -> Dict[str, int]:
         """Get diagnostic engine statistics."""
         return dict(self._stats)
+
+    def check_predictive_alerts(self) -> List[Diagnosis]:
+        """
+        Check for predictive alerts from analytics data.
+
+        This integrates the PredictiveAnalyzer to proactively detect
+        network health issues before they become critical.
+
+        Returns:
+            List of Diagnosis objects for any predicted issues
+
+        API Contract:
+            - Returns list (may be empty if no predictions or insufficient data)
+            - Thread-safe
+            - Does not raise exceptions (logs failures)
+            - Tests: tests/test_predictive_analytics.py
+        """
+        diagnoses: List[Diagnosis] = []
+
+        try:
+            # Import here to avoid circular imports
+            from utils.analytics import get_predictive_analyzer, PredictiveAlert
+            analyzer = get_predictive_analyzer()
+            alerts = analyzer.analyze_all()
+
+            for alert in alerts:
+                # Convert PredictiveAlert to Diagnosis
+                severity = {
+                    'info': Severity.INFO,
+                    'warning': Severity.WARNING,
+                    'critical': Severity.CRITICAL,
+                }.get(alert.severity, Severity.WARNING)
+
+                symptom = Symptom(
+                    message=alert.message,
+                    category=Category.PREDICTIVE,
+                    severity=severity,
+                    context={
+                        'alert_type': alert.alert_type,
+                        'predicted_time_hours': alert.predicted_time_hours,
+                        'affected_nodes': alert.affected_nodes,
+                    },
+                    source='predictive_analyzer',
+                )
+
+                # Build cause based on alert type
+                cause_map = {
+                    'link_snr_degradation': "Link signal quality is degrading over time",
+                    'link_packet_loss': "Link experiencing significant packet loss",
+                    'metric_critical': "Network metric has reached critical threshold",
+                    'metric_degradation': "Network metric showing degradation trend",
+                    'node_count_decline': "Network losing active nodes",
+                }
+                cause = cause_map.get(alert.alert_type, "Predicted network issue detected")
+
+                # Add time prediction to explanation if available
+                explanation = f"PREDICTIVE ALERT: {alert.message}"
+                if alert.predicted_time_hours:
+                    if alert.predicted_time_hours < 24:
+                        explanation += f" Expected to reach critical in ~{alert.predicted_time_hours:.0f} hours."
+                    else:
+                        days = alert.predicted_time_hours / 24
+                        explanation += f" Expected to reach critical in ~{days:.1f} days."
+
+                diagnosis = Diagnosis(
+                    symptom=symptom,
+                    likely_cause=cause,
+                    confidence=alert.confidence,
+                    evidence=alert.evidence,
+                    suggestions=alert.suggestions,
+                    related_symptoms=[],
+                    auto_recoverable=False,
+                    recovery_action=None,
+                    explanation=explanation,
+                    expertise_level="intermediate",
+                )
+
+                diagnoses.append(diagnosis)
+
+                # Save to persistent history
+                self._save_diagnosis(symptom, diagnosis, rule_name=f"predictive_{alert.alert_type}")
+
+                # Log the predictive alert
+                logger.info(f"[PREDICTIVE] {diagnosis.to_log_format()}")
+
+        except ImportError:
+            logger.debug("Predictive analytics not available")
+        except Exception as e:
+            logger.warning(f"Failed to check predictive alerts: {e}")
+
+        return diagnoses
+
+    def get_network_forecast(self, hours_ahead: int = 24) -> Dict[str, Any]:
+        """
+        Get a network health forecast.
+
+        Args:
+            hours_ahead: How many hours to forecast
+
+        Returns:
+            Dict with forecast data or error info
+        """
+        try:
+            from utils.analytics import get_predictive_analyzer
+            analyzer = get_predictive_analyzer()
+            return analyzer.get_network_forecast(hours_ahead)
+        except ImportError:
+            return {'has_forecast': False, 'reason': 'Analytics module not available'}
+        except Exception as e:
+            return {'has_forecast': False, 'reason': str(e)}
 
 
 # Singleton instance

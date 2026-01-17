@@ -8,6 +8,7 @@ from .cli import CLIPanel
 from .hardware import HardwarePanel
 from .rns import RNSPanel
 from .map import MapPanel
+from .health_dashboard import HealthDashboardPanel
 
 __all__ = [
     'DashboardPanel',
@@ -17,5 +18,6 @@ __all__ = [
     'CLIPanel',
     'HardwarePanel',
     'RNSPanel',
-    'MapPanel'
+    'MapPanel',
+    'HealthDashboardPanel',
 ]
