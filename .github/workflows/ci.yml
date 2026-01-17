@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Security Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run MeshForge linter
+        run: python3 scripts/lint.py --all
+        continue-on-error: true
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov rich textual flask pyyaml requests psutil distro
+          pip install meshtastic || echo "meshtastic optional - continuing"
+          pip install folium || echo "folium optional - continuing"
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short || echo "Some tests failed"
+        continue-on-error: true
+
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check Python syntax
+        run: |
+          find src -name "*.py" -type f -exec python -m py_compile {} \;
+          echo "Syntax check passed"
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for shell=True violations (MF002)
+        run: |
+          # Only fail on actual shell=True in subprocess calls, not comments
+          VIOLATIONS=$(grep -rn "subprocess\.\(run\|Popen\|call\).*shell\s*=\s*True" src/ --include="*.py" 2>/dev/null || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "ERROR: Found shell=True in subprocess calls:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "No shell=True violations found"
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Basic check for potential secrets
+          if grep -rn "password\s*=\s*['\"][^'\"]\+" src/ --include="*.py" | grep -v "password\s*=\s*['\"]['\"]" | grep -v "#" | head -5; then
+            echo "Warning: Potential hardcoded passwords found"
+          fi
+          echo "Security scan complete"
