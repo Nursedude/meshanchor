@@ -1,0 +1,26 @@
+[Unit]
+Description=MeshForge Mesh Network Operations Center
+Documentation=https://github.com/Nursedude/meshforge
+After=network.target meshtasticd.service
+Wants=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshforge
+ExecStart=/usr/bin/python3 /opt/meshforge/src/main_web.py --host 0.0.0.0 --port 8880
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /tmp /home
+PrivateTmp=true
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

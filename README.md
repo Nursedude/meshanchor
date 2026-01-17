@@ -47,6 +47,12 @@ Meshtastic  <------>  MeshForge Gateway  <------>  Reticulum
 
 ## Quick Start
 
+**One-liner install:**
+```bash
+curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo bash
+```
+
+**Or manual install:**
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
@@ -54,7 +60,7 @@ pip3 install rich textual flask --break-system-packages
 sudo python3 src/launcher.py
 ```
 
-That's it. The launcher auto-detects your environment and picks the best interface.
+The launcher auto-detects your environment and picks the best interface.
 
 ---
 
