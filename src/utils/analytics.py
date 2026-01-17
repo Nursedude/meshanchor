@@ -264,7 +264,22 @@ class AnalyticsStore:
                 conn.close()
 
     def get_network_health_history(self, hours: int = 24) -> List[NetworkHealthMetrics]:
-        """Get network health history for time period."""
+        """
+        Get network health history for time period.
+
+        Args:
+            hours: Number of hours to look back (default 24)
+
+        Returns:
+            List of NetworkHealthMetrics objects
+
+        API Contract:
+            - ALWAYS returns a list (never None)
+            - Empty list if no data in time period
+            - Results ordered by timestamp descending (newest first)
+            - Thread-safe (uses internal lock)
+            - Tests: tests/test_analytics.py::TestAnalyticsStore
+        """
         cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
         with self._lock:
