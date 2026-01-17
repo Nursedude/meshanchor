@@ -97,8 +97,11 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
 | `gtk_ui/panels/dashboard.py` | Service status display | Line 195 |
 | `gtk_ui/panels/service.py` | Service panel | Line 242 |
 | `gtk_ui/panels/rns_mixins/gateway.py` | Gateway panel | Line 390 |
-| `tui/panes/dashboard.py` | TUI dashboard | Line 304 |
+| `gtk_ui/panels/rns_mixins/components.py` | RNS panel status | Sprint 1.1 consolidation |
+| `tui/panes/dashboard.py` | TUI dashboard | Sprint 1.2 consolidation |
 | `tui/app.py` | TUI main app | Line 387 |
+| `commands/rns.py` | CLI get_status() | Sprint 1.3 consolidation |
+| `commands/service.py` | CLI check_status() | Sprint 1.4 consolidation |
 | `main_web.py` | Web interface | Line 367 |
 | `gateway/bridge_cli.py` | Bridge CLI | Lines 47, 56 |
 | `tests/test_service_check.py` | Multiple tests | Tests mock patterns |
