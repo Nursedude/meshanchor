@@ -21,6 +21,14 @@ from .base import CommandResult
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checker (SINGLE SOURCE OF TRUTH)
+try:
+    from utils.service_check import check_service
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    check_service = None
+    HAS_SERVICE_CHECK = False
+
 
 # ============================================================================
 # PATH UTILITIES
@@ -500,6 +508,9 @@ def get_status() -> CommandResult:
     """
     Get RNS daemon status.
 
+    Uses centralized service_check.check_service() for consistency across
+    all MeshForge UIs (GTK, TUI, CLI).
+
     Returns:
         CommandResult with daemon status
     """
@@ -510,33 +521,47 @@ def get_status() -> CommandResult:
         'identity_exists': get_identity_path().exists(),
     }
 
-    # Check for running rnsd
-    try:
-        result = subprocess.run(
-            ['pgrep', '-f', 'rnsd'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            pids = result.stdout.strip().split('\n')
-            status['rnsd_running'] = True
-            status['rnsd_pid'] = int(pids[0])
-    except Exception:
-        # pgrep may not be available - fall back to systemd check
-        pass
+    # Use centralized service checker (SINGLE SOURCE OF TRUTH)
+    # This checks: UDP port 37428 → pgrep → systemd for consistency
+    if HAS_SERVICE_CHECK:
+        service_status = check_service('rnsd')
+        status['rnsd_running'] = service_status.available
+        status['service_state'] = service_status.state.value if hasattr(service_status.state, 'value') else str(service_status.state)
+        status['service_message'] = service_status.message
+        logger.debug(f"[RNS] rnsd status via check_service: {service_status.state}")
+    else:
+        # Fallback if service_check unavailable (shouldn't happen in normal use)
+        logger.warning("[RNS] service_check not available, using fallback detection")
 
-    # Check systemd service
-    try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', 'rnsd'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        status['systemd_status'] = result.stdout.strip()
-    except Exception:  # systemctl may not be available on non-systemd systems
-        status['systemd_status'] = 'unknown'
+        # Check for running rnsd via pgrep
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'rnsd'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                status['rnsd_running'] = True
+                status['rnsd_pid'] = int(pids[0])
+        except Exception as e:
+            logger.debug(f"pgrep check failed: {e}")
+
+        # Check systemd service
+        try:
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'rnsd'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            status['systemd_status'] = result.stdout.strip()
+            if result.stdout.strip() == 'active':
+                status['rnsd_running'] = True
+        except Exception as e:
+            logger.debug(f"systemctl check failed: {e}")
+            status['systemd_status'] = 'unknown'
 
     # Get interface count
     if status['config_exists']:
