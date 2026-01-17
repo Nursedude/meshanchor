@@ -27,6 +27,18 @@ try:
 except ImportError:
     diag = None
 
+# Import coverage map generator
+try:
+    from utils.coverage_map import CoverageMapGenerator
+    HAS_COVERAGE_MAP = True
+except ImportError:
+    try:
+        from src.utils.coverage_map import CoverageMapGenerator
+        HAS_COVERAGE_MAP = True
+    except ImportError:
+        HAS_COVERAGE_MAP = False
+        CoverageMapGenerator = None
+
 # Try to import WebKit for embedded map
 # Note: WebKit doesn't work when running as root (sandbox issues)
 import os
@@ -240,6 +252,13 @@ class MapPanel(Gtk.Box):
         browser_btn = Gtk.Button(label="Open in Browser")
         browser_btn.connect("clicked", self._on_open_browser)
         header_box.append(browser_btn)
+
+        # Export coverage map button
+        if HAS_COVERAGE_MAP:
+            export_btn = Gtk.Button(label="Export Coverage Map")
+            export_btn.set_tooltip_text("Generate interactive Folium coverage map")
+            export_btn.connect("clicked", self._on_export_coverage_map)
+            header_box.append(export_btn)
 
         self.append(header_box)
 
@@ -860,6 +879,52 @@ class MapPanel(Gtk.Box):
     def _on_refresh(self, button):
         """Handle refresh button click"""
         self._refresh_data()
+
+    def _on_export_coverage_map(self, button):
+        """Export coverage map using Folium generator."""
+        self.status_label.set_label("Generating coverage map...")
+
+        def do_export():
+            try:
+                # Use current GeoJSON data
+                geojson = self._current_geojson
+                node_count = len(geojson.get('features', []))
+
+                if node_count == 0:
+                    GLib.idle_add(
+                        self.status_label.set_label,
+                        "No nodes with position data to map"
+                    )
+                    return
+
+                # Generate map
+                generator = CoverageMapGenerator()
+                generator.add_nodes_from_geojson(geojson)
+                output_path = generator.generate(show_coverage=True)
+
+                GLib.idle_add(
+                    self.status_label.set_label,
+                    f"Coverage map saved: {output_path}"
+                )
+
+                # Try to open in browser
+                user = os.environ.get('SUDO_USER', os.environ.get('USER', 'pi'))
+                try:
+                    subprocess.run(
+                        ['sudo', '-u', user, 'xdg-open', output_path],
+                        capture_output=True, timeout=10
+                    )
+                except Exception:
+                    pass  # User can open manually
+
+            except Exception as e:
+                logger.error(f"Coverage map export error: {e}")
+                GLib.idle_add(
+                    self.status_label.set_label,
+                    f"Export error: {e}"
+                )
+
+        threading.Thread(target=do_export, daemon=True).start()
 
     def _auto_refresh(self):
         """Auto-refresh timer callback"""
