@@ -131,9 +131,10 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
         self._schedule_timer(5000, self._check_service_status_periodic)
 
     def _check_service_status_periodic(self):
-        """Lightweight periodic check of rnsd service status.
+        """Lightweight periodic check of rnsd service and gateway status.
 
         Only updates UI if status changed to avoid unnecessary redraws.
+        Also updates gateway connection status to prevent "false lights".
         """
         def do_check():
             try:
@@ -142,6 +143,10 @@ class RNSPanel(ComponentsMixin, ConfigMixin, GatewayMixin,
                 if is_running != self._last_rnsd_running:
                     self._last_rnsd_running = is_running
                     GLib.idle_add(self._update_service_status_only, is_running)
+
+                # Also update gateway status to keep connection indicators in sync
+                # This prevents "false lights" where UI shows stale connection state
+                GLib.idle_add(self._update_gateway_status)
             except Exception:
                 pass
 
