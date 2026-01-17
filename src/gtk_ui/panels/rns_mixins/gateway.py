@@ -319,8 +319,16 @@ class GatewayMixin:
         self._update_gateway_status()
 
     def _update_gateway_status(self):
-        """Update gateway status display"""
-        if self._gateway_bridge and self._gateway_bridge.is_running:
+        """Update gateway status display and sync enable switch"""
+        is_running = self._gateway_bridge and self._gateway_bridge.is_running
+
+        # Sync the enable switch to actual gateway state (prevents "false lights")
+        # Block the signal handler to avoid triggering start/stop
+        self.gateway_enable_switch.handler_block_by_func(self._on_gateway_enable_changed)
+        self.gateway_enable_switch.set_active(is_running)
+        self.gateway_enable_switch.handler_unblock_by_func(self._on_gateway_enable_changed)
+
+        if is_running:
             status = self._gateway_bridge.get_status()
             self.gateway_status_icon.set_from_icon_name("network-transmit-receive-symbolic")
             self.gateway_status_label.set_label("Gateway: Running")
@@ -464,9 +472,12 @@ class GatewayMixin:
         """Handle gateway start completion"""
         if success:
             self.main_window.set_status_message("Gateway started successfully")
-            self.gateway_enable_switch.set_active(True)
         else:
             self.main_window.set_status_message(f"Failed to start gateway: {error}")
+            # Ensure switch reflects failure state (gateway not running)
+            self.gateway_enable_switch.handler_block_by_func(self._on_gateway_enable_changed)
+            self.gateway_enable_switch.set_active(False)
+            self.gateway_enable_switch.handler_unblock_by_func(self._on_gateway_enable_changed)
 
         self._update_gateway_status()
         return False
@@ -487,7 +498,8 @@ class GatewayMixin:
         self._update_gateway_status()
 
     def _on_gateway_enable_changed(self, switch, state):
-        """Handle gateway enable switch toggle"""
+        """Handle gateway enable switch toggle - starts or stops gateway"""
+        # Update config
         try:
             from gateway.config import GatewayConfig
             config = GatewayConfig.load()
@@ -495,6 +507,18 @@ class GatewayMixin:
             config.save()
         except ImportError:
             pass
+
+        # Actually start/stop the gateway based on switch state
+        is_running = self._gateway_bridge and self._gateway_bridge.is_running
+        if state and not is_running:
+            # User turned switch ON, start gateway
+            logger.debug("[RNS] Enable switch ON - starting gateway")
+            self._on_gateway_start(None)
+        elif not state and is_running:
+            # User turned switch OFF, stop gateway
+            logger.debug("[RNS] Enable switch OFF - stopping gateway")
+            self._on_gateway_stop(None)
+
         return False
 
     def _on_test_gateway(self, button):
