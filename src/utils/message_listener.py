@@ -1,0 +1,418 @@
+"""
+MeshForge Lightweight Message Listener
+
+Standalone message receiver that doesn't require the full gateway bridge.
+Uses Meshtastic pubsub to receive messages and store them for the UI.
+
+Usage:
+    from utils.message_listener import MessageListener
+
+    listener = MessageListener()
+    listener.start()
+
+    # Messages automatically stored via messaging.store_incoming()
+
+    listener.stop()
+"""
+
+import logging
+import threading
+import time
+from dataclasses import dataclass
+from typing import Optional, Callable, List, Dict, Any
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Connection states
+DISCONNECTED = "disconnected"
+CONNECTING = "connecting"
+CONNECTED = "connected"
+ERROR = "error"
+
+
+@dataclass
+class ListenerStatus:
+    """Current listener status."""
+    state: str
+    connected_since: Optional[datetime] = None
+    messages_received: int = 0
+    last_message_time: Optional[datetime] = None
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            'state': self.state,
+            'connected_since': self.connected_since.isoformat() if self.connected_since else None,
+            'messages_received': self.messages_received,
+            'last_message_time': self.last_message_time.isoformat() if self.last_message_time else None,
+            'error': self.error,
+        }
+
+
+class MessageListener:
+    """
+    Lightweight Meshtastic message listener.
+
+    Subscribes to meshtastic.receive pubsub events and stores incoming
+    messages without requiring the full RNS bridge.
+    """
+
+    def __init__(self, host: str = "localhost", store_messages: bool = True):
+        """
+        Initialize the listener.
+
+        Args:
+            host: Meshtastic host (localhost for meshtasticd)
+            store_messages: Whether to store messages via messaging.store_incoming()
+        """
+        self.host = host
+        self.store_messages = store_messages
+        self._status = ListenerStatus(state=DISCONNECTED)
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._interface = None
+        self._callbacks: List[Callable] = []
+        self._lock = threading.Lock()
+
+    def add_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """
+        Register a callback for incoming messages.
+
+        Callback receives dict with: from_id, to_id, content, channel, snr, rssi, timestamp
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable):
+        """Remove a registered callback."""
+        with self._lock:
+            if callback in self._callbacks:
+                self._callbacks.remove(callback)
+
+    def get_status(self) -> ListenerStatus:
+        """Get current listener status."""
+        return self._status
+
+    def start(self) -> bool:
+        """
+        Start listening for messages.
+
+        Returns:
+            True if started successfully
+        """
+        if self._running:
+            logger.warning("Listener already running")
+            return True
+
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="meshforge-message-listener"
+        )
+        self._thread.start()
+
+        # Wait briefly for connection
+        time.sleep(1)
+        return self._status.state == CONNECTED
+
+    def stop(self):
+        """Stop listening for messages."""
+        self._running = False
+
+        # Unsubscribe from pubsub
+        try:
+            from pubsub import pub
+            pub.unsubscribe(self._on_receive, "meshtastic.receive")
+        except Exception:
+            pass
+
+        # Close interface
+        if self._interface:
+            try:
+                self._interface.close()
+            except Exception:
+                pass
+            self._interface = None
+
+        self._status.state = DISCONNECTED
+        logger.info("Message listener stopped")
+
+    def _run(self):
+        """Main listener loop."""
+        self._status.state = CONNECTING
+
+        try:
+            # Import meshtastic
+            try:
+                import meshtastic
+                import meshtastic.tcp_interface
+                from pubsub import pub
+            except ImportError as e:
+                self._status.state = ERROR
+                self._status.error = f"Missing dependency: {e}"
+                logger.error(f"Cannot start listener: {e}")
+                return
+
+            # Connect to meshtastic
+            logger.info(f"Connecting to meshtastic at {self.host}...")
+            try:
+                self._interface = meshtastic.tcp_interface.TCPInterface(
+                    hostname=self.host,
+                    noProto=False
+                )
+            except Exception as e:
+                self._status.state = ERROR
+                self._status.error = f"Connection failed: {e}"
+                logger.error(f"Failed to connect to meshtastic: {e}")
+                return
+
+            # Subscribe to messages
+            pub.subscribe(self._on_receive, "meshtastic.receive")
+
+            self._status.state = CONNECTED
+            self._status.connected_since = datetime.now()
+            self._status.error = None
+            logger.info("Message listener connected and subscribed")
+
+            # Keep thread alive while running
+            while self._running:
+                time.sleep(1)
+
+                # Check connection health
+                if self._interface and not self._interface.isConnected:
+                    logger.warning("Connection lost, attempting reconnect...")
+                    self._reconnect()
+
+        except Exception as e:
+            self._status.state = ERROR
+            self._status.error = str(e)
+            logger.error(f"Listener error: {e}")
+
+    def _reconnect(self):
+        """Attempt to reconnect after connection loss."""
+        self._status.state = CONNECTING
+
+        # Close old interface
+        if self._interface:
+            try:
+                self._interface.close()
+            except Exception:
+                pass
+
+        # Exponential backoff
+        for attempt in range(5):
+            if not self._running:
+                return
+
+            try:
+                import meshtastic.tcp_interface
+                self._interface = meshtastic.tcp_interface.TCPInterface(
+                    hostname=self.host,
+                    noProto=False
+                )
+                self._status.state = CONNECTED
+                self._status.connected_since = datetime.now()
+                logger.info("Reconnected to meshtastic")
+                return
+            except Exception as e:
+                wait_time = 2 ** attempt
+                logger.warning(f"Reconnect attempt {attempt + 1} failed: {e}, waiting {wait_time}s")
+                time.sleep(wait_time)
+
+        self._status.state = ERROR
+        self._status.error = "Failed to reconnect after 5 attempts"
+
+    def _on_receive(self, packet, interface=None):
+        """Handle incoming meshtastic packet."""
+        try:
+            decoded = packet.get('decoded', {})
+            portnum = decoded.get('portnum')
+
+            # Only handle text messages
+            if portnum != 'TEXT_MESSAGE_APP':
+                return
+
+            from_id = packet.get('fromId', packet.get('from'))
+            to_id = packet.get('toId', packet.get('to'))
+            channel = packet.get('channel', 0)
+
+            # Extract text content
+            payload = decoded.get('payload', b'')
+            if isinstance(payload, bytes):
+                content = payload.decode('utf-8', errors='ignore')
+            else:
+                content = str(payload)
+
+            if not content:
+                return
+
+            # Signal quality
+            snr = packet.get('rxSnr')
+            rssi = packet.get('rxRssi')
+
+            # Hop info
+            hop_start = packet.get('hopStart', 0)
+            hop_limit = packet.get('hopLimit', 0)
+            hops_away = hop_start - hop_limit if hop_start else 0
+
+            # Update status
+            self._status.messages_received += 1
+            self._status.last_message_time = datetime.now()
+
+            # Build message dict
+            msg_data = {
+                'from_id': from_id,
+                'to_id': to_id if to_id not in ('!ffffffff', '^all') else None,
+                'content': content,
+                'channel': channel,
+                'snr': snr,
+                'rssi': rssi,
+                'hops_away': hops_away,
+                'hop_start': hop_start,
+                'hop_limit': hop_limit,
+                'timestamp': datetime.now().isoformat(),
+                'is_broadcast': to_id in ('!ffffffff', '^all', None),
+            }
+
+            logger.info(
+                f"RX: {from_id} -> {to_id or 'broadcast'} "
+                f"[ch={channel}, hops={hops_away}, SNR={snr}]: {content[:50]}..."
+            )
+
+            # Store message if enabled
+            if self.store_messages:
+                try:
+                    from commands import messaging
+                    messaging.store_incoming(
+                        from_id=from_id,
+                        content=content,
+                        network="meshtastic",
+                        to_id=msg_data['to_id'],
+                        channel=channel,
+                        snr=snr,
+                        rssi=rssi,
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not store message: {e}")
+
+            # Notify callbacks
+            with self._lock:
+                for callback in self._callbacks:
+                    try:
+                        callback(msg_data)
+                    except Exception as e:
+                        logger.error(f"Callback error: {e}")
+
+        except Exception as e:
+            logger.error(f"Error processing received packet: {e}")
+
+
+# Singleton instance
+_listener: Optional[MessageListener] = None
+
+
+def get_listener() -> MessageListener:
+    """Get or create the global message listener."""
+    global _listener
+    if _listener is None:
+        _listener = MessageListener()
+    return _listener
+
+
+def start_listener(host: str = "localhost") -> bool:
+    """
+    Start the global message listener.
+
+    Returns:
+        True if started successfully
+    """
+    listener = get_listener()
+    if listener.host != host:
+        listener.stop()
+        global _listener
+        _listener = MessageListener(host=host)
+        listener = _listener
+    return listener.start()
+
+
+def stop_listener():
+    """Stop the global message listener."""
+    if _listener:
+        _listener.stop()
+
+
+def get_listener_status() -> dict:
+    """Get status of the global listener."""
+    if _listener:
+        return _listener.get_status().to_dict()
+    return {'state': DISCONNECTED, 'error': 'Listener not initialized'}
+
+
+def diagnose_pubsub() -> dict:
+    """
+    Diagnose pubsub connection status.
+
+    Returns:
+        Dict with diagnostic info
+    """
+    result = {
+        'pubsub_available': False,
+        'meshtastic_available': False,
+        'subscriptions': [],
+        'errors': [],
+    }
+
+    # Check pubsub
+    try:
+        from pubsub import pub
+        result['pubsub_available'] = True
+
+        # Get current subscriptions for meshtastic topics
+        try:
+            # pubsub.core gives access to topic tree
+            from pubsub.core import TopicManager
+            tm = pub.getDefaultTopicMgr()
+
+            # Check if meshtastic.receive topic exists
+            if tm.getTopic('meshtastic.receive', okIfNone=True):
+                topic = tm.getTopic('meshtastic.receive')
+                listeners = topic.getListeners()
+                result['subscriptions'].append({
+                    'topic': 'meshtastic.receive',
+                    'listener_count': len(listeners),
+                })
+            else:
+                result['subscriptions'].append({
+                    'topic': 'meshtastic.receive',
+                    'listener_count': 0,
+                    'note': 'Topic not created yet'
+                })
+        except Exception as e:
+            result['errors'].append(f"Could not inspect topics: {e}")
+
+    except ImportError as e:
+        result['errors'].append(f"pubsub not available: {e}")
+
+    # Check meshtastic
+    try:
+        import meshtastic
+        result['meshtastic_available'] = True
+        result['meshtastic_version'] = getattr(meshtastic, '__version__', 'unknown')
+    except ImportError as e:
+        result['errors'].append(f"meshtastic not available: {e}")
+
+    # Check if meshtasticd is reachable
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        sock_result = sock.connect_ex(('localhost', 4403))
+        sock.close()
+        result['meshtasticd_port_open'] = sock_result == 0
+    except Exception as e:
+        result['meshtasticd_port_open'] = False
+        result['errors'].append(f"Port check failed: {e}")
+
+    return result

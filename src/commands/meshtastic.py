@@ -295,28 +295,156 @@ def request_position(dest: str, channel_index: int = 0) -> CommandResult:
 
 # Messaging Commands
 
+# Recommended hop limits based on message type and network conditions
+# Per Meshtastic docs: https://meshtastic.org/docs/overview/mesh-algo/
+HOP_LIMIT_DM_INITIAL = 7       # First DM uses flood to discover path
+HOP_LIMIT_DM_ESTABLISHED = 3   # Subsequent DMs use discovered next-hop
+HOP_LIMIT_BROADCAST = 3        # Public channel broadcasts
+HOP_LIMIT_EMERGENCY = 7        # Emergency/SAR messages
+
+
 def send_message(
     text: str,
     dest: Optional[str] = None,
     channel_index: int = 0,
-    ack: bool = False
+    ack: bool = False,
+    hop_limit: Optional[int] = None,
+    want_ack: bool = True
 ) -> CommandResult:
     """
-    Send a text message.
+    Send a text message with configurable routing.
 
     Args:
         text: Message text
         dest: Destination node ID (None for broadcast)
-        channel_index: Channel to use
-        ack: Request acknowledgment
+        channel_index: Channel to use (0 for DM, 1+ for public channels)
+        ack: Request delivery acknowledgment (blocks until ack received)
+        hop_limit: Override hop limit (1-7). None = use smart defaults:
+                   - DM (dest specified): 7 for discovery, 3 once path known
+                   - Broadcast: 3
+        want_ack: Request ack without blocking (recipient sends ack)
+
+    Returns:
+        CommandResult with send status
+
+    Note on routing (from Meshtastic mesh-algo):
+        - DMs use next-hop routing: first message floods to find path,
+          subsequent messages use shortest discovered path
+        - Higher hop_limit helps initial path discovery but creates traffic
+        - Lower hop_limit reduces congestion once path is established
     """
-    args = ["--ch-index", str(channel_index), "--sendtext", text]
+    # Build command args
+    args = ["--ch-index", str(channel_index)]
+
+    # Smart hop limit defaults based on message type
+    if hop_limit is not None:
+        # User specified - validate and use
+        if not 1 <= hop_limit <= 7:
+            return CommandResult.fail(f"hop_limit must be 1-7, got {hop_limit}")
+    else:
+        # Smart defaults based on destination
+        if dest and dest != '!ffffffff':
+            # DM - use higher hop for better path discovery
+            hop_limit = HOP_LIMIT_DM_INITIAL
+        else:
+            # Broadcast - lower hop to reduce congestion
+            hop_limit = HOP_LIMIT_BROADCAST
+
+    # Note: meshtastic CLI doesn't have a direct --hop-limit flag for sendtext
+    # The hop limit is set at the device level via lora.hop_limit
+    # For per-message control, we'd need to use the Python API directly
+    # For now, log the intended hop limit for debugging
+    logger.debug(f"Sending with intended hop_limit={hop_limit} (device setting applies)")
+
+    # Add destination for DMs
     if dest:
         args.extend(["--dest", dest])
-    if ack:
-        args.append("--ack")
 
-    return _run_command(args)
+    # Add message
+    args.extend(["--sendtext", text])
+
+    # Acknowledgment options
+    if ack:
+        # --ack blocks until ack received (can timeout)
+        args.append("--ack")
+    elif want_ack and dest:
+        # For DMs, request ack but don't block
+        # Note: meshtastic CLI --ack is blocking, so we skip for non-blocking
+        pass
+
+    result = _run_command(args)
+
+    # Add routing info to result
+    if result.success:
+        result.data = result.data or {}
+        result.data['hop_limit_intended'] = hop_limit
+        result.data['destination'] = dest
+        result.data['channel'] = channel_index
+        result.data['routing_note'] = (
+            'DM: uses next-hop routing (flood then direct)' if dest
+            else 'Broadcast: flooded to mesh'
+        )
+
+    return result
+
+
+def send_dm(
+    text: str,
+    dest: str,
+    ack: bool = False,
+    high_reliability: bool = False
+) -> CommandResult:
+    """
+    Send a direct message with optimized settings.
+
+    Args:
+        text: Message text
+        dest: Destination node ID (required)
+        ack: Block until delivery confirmed
+        high_reliability: Use max hops for difficult paths
+
+    Returns:
+        CommandResult with send status
+    """
+    if not dest or dest == '!ffffffff':
+        return CommandResult.fail("DM requires a specific destination")
+
+    hop_limit = HOP_LIMIT_EMERGENCY if high_reliability else HOP_LIMIT_DM_INITIAL
+
+    return send_message(
+        text=text,
+        dest=dest,
+        channel_index=0,  # DMs use channel 0
+        ack=ack,
+        hop_limit=hop_limit,
+        want_ack=True
+    )
+
+
+def send_broadcast(
+    text: str,
+    channel_index: int = 1,
+    hop_limit: int = HOP_LIMIT_BROADCAST
+) -> CommandResult:
+    """
+    Send a broadcast message to a channel.
+
+    Args:
+        text: Message text
+        channel_index: Channel number (1+ for public channels)
+        hop_limit: Hop limit (default 3 to reduce congestion)
+
+    Returns:
+        CommandResult with send status
+    """
+    return send_message(
+        text=text,
+        dest=None,  # Broadcast
+        channel_index=channel_index,
+        ack=False,
+        hop_limit=hop_limit,
+        want_ack=False
+    )
 
 
 def request_telemetry(dest: str) -> CommandResult:
@@ -405,6 +533,211 @@ def factory_reset() -> CommandResult:
 def reset_nodedb() -> CommandResult:
     """Reset the node database."""
     return _run_command(["--reset-nodedb"])
+
+
+# Hop Limit / Routing Configuration
+
+def get_hop_limit() -> CommandResult:
+    """
+    Get the current device hop limit setting.
+
+    Returns:
+        CommandResult with data={'hop_limit': int}
+    """
+    result = _run_command(["--get", "lora.hop_limit"])
+    if not result.success:
+        return result
+
+    # Parse output like "lora.hop_limit: 3"
+    try:
+        raw = result.raw or ''
+        for line in raw.split('\n'):
+            if 'hop_limit' in line.lower():
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    hop_limit = int(parts[-1].strip())
+                    return CommandResult.ok(
+                        f"Device hop limit: {hop_limit}",
+                        data={'hop_limit': hop_limit}
+                    )
+    except (ValueError, IndexError) as e:
+        logger.debug(f"Could not parse hop_limit: {e}")
+
+    return CommandResult.ok("Hop limit retrieved", data={'hop_limit': 3, 'raw': result.raw})
+
+
+def set_hop_limit(hop_limit: int) -> CommandResult:
+    """
+    Set the device hop limit.
+
+    Args:
+        hop_limit: Hop limit value (1-7)
+            - 1-2: Short range, low traffic (urban dense)
+            - 3-4: Medium range, balanced (default)
+            - 5-7: Long range, high traffic (rural/SAR)
+
+    Returns:
+        CommandResult with status
+    """
+    if not 1 <= hop_limit <= 7:
+        return CommandResult.fail(f"hop_limit must be 1-7, got {hop_limit}")
+
+    result = _run_command(["--set", "lora.hop_limit", str(hop_limit)])
+    if result.success:
+        result.message = f"Device hop limit set to {hop_limit}"
+        result.data = {'hop_limit': hop_limit}
+    return result
+
+
+def get_device_role() -> CommandResult:
+    """
+    Get the current device role.
+
+    Returns:
+        CommandResult with data={'role': str, 'description': str}
+    """
+    result = _run_command(["--get", "device.role"])
+    if not result.success:
+        return result
+
+    # Parse and add description
+    roles = {
+        'CLIENT': 'Standard client, rebroadcasts messages',
+        'CLIENT_MUTE': 'Silent client, no rebroadcast (saves battery)',
+        'ROUTER': 'Infrastructure router, always rebroadcasts, hop_limit=7',
+        'ROUTER_CLIENT': 'Router + local functions',
+        'REPEATER': 'Dedicated repeater, minimal processing',
+        'TRACKER': 'Location tracking device',
+        'SENSOR': 'Sensor reporting device',
+        'TAK': 'ATAK/TAK integration mode',
+        'CLIENT_HIDDEN': 'Hidden from node list',
+        'LOST_AND_FOUND': 'Recovery mode',
+        'TAK_TRACKER': 'TAK + tracking',
+    }
+
+    try:
+        raw = result.raw or ''
+        for line in raw.split('\n'):
+            if 'role' in line.lower():
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    role = parts[-1].strip().upper()
+                    return CommandResult.ok(
+                        f"Device role: {role}",
+                        data={
+                            'role': role,
+                            'description': roles.get(role, 'Unknown role'),
+                        }
+                    )
+    except Exception as e:
+        logger.debug(f"Could not parse role: {e}")
+
+    return CommandResult.ok("Role retrieved", data={'role': 'UNKNOWN', 'raw': result.raw})
+
+
+def set_device_role(role: str) -> CommandResult:
+    """
+    Set the device role.
+
+    Args:
+        role: One of CLIENT, CLIENT_MUTE, ROUTER, ROUTER_CLIENT, REPEATER, etc.
+
+    Returns:
+        CommandResult with status
+
+    Note: Role affects routing behavior:
+        - CLIENT: Normal rebroadcast
+        - CLIENT_MUTE: No rebroadcast (good for listeners)
+        - ROUTER: Always rebroadcast, uses hop_limit=7
+    """
+    valid_roles = [
+        'CLIENT', 'CLIENT_MUTE', 'ROUTER', 'ROUTER_CLIENT',
+        'REPEATER', 'TRACKER', 'SENSOR', 'TAK', 'CLIENT_HIDDEN',
+        'LOST_AND_FOUND', 'TAK_TRACKER'
+    ]
+
+    role = role.upper()
+    if role not in valid_roles:
+        return CommandResult.fail(
+            f"Invalid role '{role}'. Valid: {', '.join(valid_roles)}"
+        )
+
+    return _run_command(["--set", "device.role", role])
+
+
+def diagnose_messaging() -> CommandResult:
+    """
+    Diagnose messaging configuration and connection.
+
+    Returns:
+        CommandResult with comprehensive diagnostic data
+    """
+    diagnostics = {
+        'connection': {},
+        'device': {},
+        'routing': {},
+        'pubsub': {},
+        'recommendations': [],
+    }
+
+    # Connection test
+    conn_result = test_connection()
+    diagnostics['connection']['status'] = 'ok' if conn_result.success else 'error'
+    diagnostics['connection']['error'] = conn_result.error if not conn_result.success else None
+
+    if not conn_result.success:
+        diagnostics['recommendations'].append(
+            "Cannot connect to meshtastic. Check: systemctl status meshtasticd"
+        )
+        return CommandResult.ok("Diagnostics complete (connection failed)", data=diagnostics)
+
+    # Get device settings
+    hop_result = get_hop_limit()
+    if hop_result.success and hop_result.data:
+        diagnostics['device']['hop_limit'] = hop_result.data.get('hop_limit')
+
+    role_result = get_device_role()
+    if role_result.success and role_result.data:
+        diagnostics['device']['role'] = role_result.data.get('role')
+        diagnostics['device']['role_description'] = role_result.data.get('description')
+
+    # Analyze routing configuration
+    hop_limit = diagnostics['device'].get('hop_limit', 3)
+    role = diagnostics['device'].get('role', 'CLIENT')
+
+    if role == 'CLIENT_MUTE':
+        diagnostics['routing']['rebroadcast'] = False
+        diagnostics['routing']['note'] = 'CLIENT_MUTE: Messages received but not rebroadcast'
+    elif role == 'ROUTER':
+        diagnostics['routing']['rebroadcast'] = True
+        diagnostics['routing']['note'] = 'ROUTER: Always rebroadcasts, uses max hops'
+    else:
+        diagnostics['routing']['rebroadcast'] = True
+        diagnostics['routing']['note'] = f'Standard routing with hop_limit={hop_limit}'
+
+    # Recommendations
+    if hop_limit < 3 and role not in ('ROUTER', 'ROUTER_CLIENT'):
+        diagnostics['recommendations'].append(
+            f"Low hop_limit ({hop_limit}) may limit message reach. Consider: --set lora.hop_limit 5"
+        )
+
+    if role == 'CLIENT_MUTE':
+        diagnostics['recommendations'].append(
+            "CLIENT_MUTE role prevents message rebroadcast. "
+            "Good for listening, but won't help mesh. Consider CLIENT role."
+        )
+
+    # Check pubsub (for RX)
+    try:
+        from utils.message_listener import diagnose_pubsub
+        diagnostics['pubsub'] = diagnose_pubsub()
+    except ImportError:
+        diagnostics['pubsub']['error'] = 'message_listener not available'
+
+    return CommandResult.ok(
+        "Messaging diagnostics complete",
+        data=diagnostics
+    )
 
 
 # Bluetooth

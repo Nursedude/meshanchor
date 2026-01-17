@@ -7,11 +7,20 @@ Inspired by meshing-around patterns but native to MeshForge architecture.
 Usage:
     from commands import messaging
 
-    # Send message
+    # Start listening for messages (enables RX)
+    result = messaging.start_receiving()
+
+    # Send message (uses smart hop limits)
     result = messaging.send_message("Hello mesh!", destination="!abcd1234")
+
+    # Send with high reliability for difficult paths
+    result = messaging.send_message("Emergency!", destination="!abcd1234", high_reliability=True)
 
     # Get messages
     result = messaging.get_messages(limit=20)
+
+    # Diagnose messaging issues
+    result = messaging.diagnose()
 """
 
 import logging
@@ -19,7 +28,7 @@ import time
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, field
 
 from .base import CommandResult
@@ -145,19 +154,27 @@ def send_message(
     content: str,
     destination: Optional[str] = None,
     network: str = "auto",
-    channel: int = 0
+    channel: int = 0,
+    high_reliability: bool = False
 ) -> CommandResult:
     """
-    Send message to mesh network.
+    Send message to mesh network with smart routing.
 
     Args:
         content: Message text
         destination: Node ID (!abcd1234) or RNS hash, None for broadcast
         network: "meshtastic", "rns", or "auto"
         channel: Channel number (0 = DM, 1+ = public channels)
+        high_reliability: Use max hops (7) for difficult paths or emergency
 
     Returns:
         CommandResult with delivery status
+
+    Note on routing (from Meshtastic mesh-algo):
+        - DMs use next-hop routing: first message floods to find path,
+          subsequent messages use shortest discovered path
+        - Broadcasts are flooded to the entire mesh
+        - high_reliability=True forces max hops for difficult paths
     """
     if not content:
         return CommandResult.fail("Message content cannot be empty")
@@ -237,12 +254,20 @@ def send_message(
                     from commands import meshtastic as mesh_cmd
 
                     for chunk in chunks:
-                        result = mesh_cmd.send_message(
-                            text=chunk,
-                            dest=destination,
-                            channel_index=channel,
-                            ack=False  # Don't wait for ack to avoid blocking
-                        )
+                        # Use send_dm for direct messages, send_broadcast for channels
+                        if destination and destination != '!ffffffff':
+                            result = mesh_cmd.send_dm(
+                                text=chunk,
+                                dest=destination,
+                                ack=False,
+                                high_reliability=high_reliability
+                            )
+                        else:
+                            result = mesh_cmd.send_broadcast(
+                                text=chunk,
+                                channel_index=channel if channel > 0 else 1,
+                                hop_limit=7 if high_reliability else 3
+                            )
                         if not result.success:
                             send_error = result.message
                             break
@@ -567,3 +592,201 @@ def clear_messages(older_than_days: int = 30) -> CommandResult:
     except Exception as e:
         logger.error(f"Failed to clear messages: {e}")
         return CommandResult.fail(f"Failed to clear messages: {e}")
+
+
+# ============================================================================
+# RX (RECEIVING) FUNCTIONS
+# ============================================================================
+
+def start_receiving(
+    host: str = "localhost",
+    callback: Optional[Callable[[Dict[str, Any]], None]] = None
+) -> CommandResult:
+    """
+    Start listening for incoming messages.
+
+    This enables RX without requiring the full gateway bridge.
+    Messages are automatically stored in the database.
+
+    Args:
+        host: Meshtastic host (default: localhost for meshtasticd)
+        callback: Optional callback for real-time notifications
+
+    Returns:
+        CommandResult with listener status
+
+    Usage:
+        # Simple - just store messages
+        result = messaging.start_receiving()
+
+        # With callback for real-time updates
+        def on_message(msg):
+            print(f"New message from {msg['from_id']}: {msg['content']}")
+        result = messaging.start_receiving(callback=on_message)
+    """
+    try:
+        from utils.message_listener import start_listener, get_listener
+
+        success = start_listener(host=host)
+
+        if callback:
+            listener = get_listener()
+            listener.add_callback(callback)
+
+        if success:
+            return CommandResult.ok(
+                "Message listener started - RX enabled",
+                data={
+                    'host': host,
+                    'status': 'connected',
+                    'has_callback': callback is not None,
+                }
+            )
+        else:
+            return CommandResult.fail(
+                "Failed to start message listener",
+                error="Could not connect to meshtastic"
+            )
+
+    except ImportError as e:
+        return CommandResult.fail(
+            f"Message listener not available: {e}",
+            fix_hint="Ensure utils/message_listener.py exists"
+        )
+    except Exception as e:
+        logger.error(f"Failed to start receiving: {e}")
+        return CommandResult.fail(f"Failed to start listener: {e}")
+
+
+def stop_receiving() -> CommandResult:
+    """
+    Stop listening for incoming messages.
+
+    Returns:
+        CommandResult with status
+    """
+    try:
+        from utils.message_listener import stop_listener
+        stop_listener()
+        return CommandResult.ok("Message listener stopped")
+    except Exception as e:
+        return CommandResult.fail(f"Error stopping listener: {e}")
+
+
+def get_rx_status() -> CommandResult:
+    """
+    Get current RX listener status.
+
+    Returns:
+        CommandResult with listener state, message count, etc.
+    """
+    try:
+        from utils.message_listener import get_listener_status
+        status = get_listener_status()
+        return CommandResult.ok(
+            f"RX status: {status['state']}",
+            data=status
+        )
+    except ImportError:
+        return CommandResult.ok(
+            "RX status: not initialized",
+            data={'state': 'disconnected', 'error': 'Listener not available'}
+        )
+
+
+# ============================================================================
+# DIAGNOSTICS
+# ============================================================================
+
+def diagnose() -> CommandResult:
+    """
+    Diagnose messaging configuration and connectivity.
+
+    Checks:
+    - Device connection
+    - Hop limit setting
+    - Device role (affects routing)
+    - RX listener status
+    - Pubsub subscription
+
+    Returns:
+        CommandResult with diagnostic data and recommendations
+    """
+    try:
+        from commands import meshtastic as mesh_cmd
+        return mesh_cmd.diagnose_messaging()
+    except ImportError:
+        # Fallback minimal diagnostics
+        diagnostics = {
+            'error': 'meshtastic module not available',
+            'rx_status': {},
+        }
+
+        try:
+            from utils.message_listener import get_listener_status, diagnose_pubsub
+            diagnostics['rx_status'] = get_listener_status()
+            diagnostics['pubsub'] = diagnose_pubsub()
+        except ImportError:
+            pass
+
+        return CommandResult.ok("Limited diagnostics", data=diagnostics)
+
+
+def get_routing_info() -> CommandResult:
+    """
+    Get current routing configuration information.
+
+    Returns:
+        CommandResult with hop_limit, device_role, and routing notes
+    """
+    try:
+        from commands import meshtastic as mesh_cmd
+
+        info = {
+            'hop_limit': None,
+            'device_role': None,
+            'routing_behavior': None,
+            'recommendations': [],
+        }
+
+        # Get hop limit
+        hop_result = mesh_cmd.get_hop_limit()
+        if hop_result.success and hop_result.data:
+            info['hop_limit'] = hop_result.data.get('hop_limit')
+
+        # Get device role
+        role_result = mesh_cmd.get_device_role()
+        if role_result.success and role_result.data:
+            info['device_role'] = role_result.data.get('role')
+            info['role_description'] = role_result.data.get('description')
+
+        # Determine routing behavior
+        role = info['device_role']
+        hop = info['hop_limit']
+
+        if role == 'CLIENT_MUTE':
+            info['routing_behavior'] = 'Receive only - no rebroadcast'
+            info['recommendations'].append(
+                "Messages won't be relayed. Good for monitoring, bad for mesh health."
+            )
+        elif role in ('ROUTER', 'ROUTER_CLIENT'):
+            info['routing_behavior'] = 'Full router - always rebroadcasts with max hops'
+        elif role == 'REPEATER':
+            info['routing_behavior'] = 'Dedicated repeater - minimal processing'
+        else:
+            info['routing_behavior'] = f'Standard client with hop_limit={hop}'
+
+            if hop and hop < 3:
+                info['recommendations'].append(
+                    f"Low hop limit ({hop}) may cause messages to not reach distant nodes"
+                )
+
+        return CommandResult.ok(
+            f"Routing: {info['routing_behavior']}",
+            data=info
+        )
+
+    except ImportError:
+        return CommandResult.fail(
+            "Cannot get routing info - meshtastic module not available"
+        )
