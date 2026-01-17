@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 class ServiceState(Enum):
     """Service availability states."""
     AVAILABLE = "available"
+    DEGRADED = "degraded"       # Port open but not responsive
     PORT_CLOSED = "port_closed"
     NOT_RUNNING = "not_running"
     NOT_INSTALLED = "not_installed"
@@ -64,6 +65,7 @@ KNOWN_SERVICES = {
         'systemd_name': 'meshtasticd',
         'description': 'Meshtastic daemon',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd',
+        'verify_func': 'check_meshtasticd_responsive',  # Extra verification
     },
     'rnsd': {
         'port': RNS_SHARED_INSTANCE_PORT,  # UDP 37428 - shared instance port
@@ -85,6 +87,62 @@ KNOWN_SERVICES = {
         'fix_hint': 'Start with: sudo systemctl start mosquitto',
     },
 }
+
+
+def check_meshtasticd_responsive(timeout: float = 5.0) -> tuple:
+    """
+    Verify meshtasticd is actually responsive, not just that port is open.
+
+    Sometimes meshtasticd hangs with port open but not responding.
+
+    Args:
+        timeout: How long to wait for response
+
+    Returns:
+        Tuple of (is_responsive: bool, message: str)
+    """
+    import subprocess
+
+    # First check if port is even open
+    if not check_port(MESHTASTICD_PORT, timeout=2.0):
+        return False, "Port 4403 not open"
+
+    # Try a quick meshtastic CLI command to verify responsiveness
+    try:
+        result = subprocess.run(
+            ['meshtastic', '--host', 'localhost', '--info'],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+
+        if result.returncode == 0:
+            # Check for actual device info in output
+            if 'Owner:' in result.stdout or 'Nodes' in result.stdout:
+                return True, "Responsive (device info received)"
+            elif 'Connected to' in result.stdout:
+                return True, "Responsive (connected)"
+            else:
+                return True, "Responsive"
+
+        # Non-zero return but process completed
+        stderr = result.stderr.lower()
+        if 'timed out' in stderr or 'timeout' in stderr:
+            return False, "Port open but not responding (try: sudo systemctl restart meshtasticd)"
+        elif 'connection refused' in stderr:
+            return False, "Connection refused"
+        elif 'error' in stderr:
+            return False, f"Error: {result.stderr[:100]}"
+        else:
+            return False, "Command failed"
+
+    except subprocess.TimeoutExpired:
+        return False, "Port open but unresponsive (hung?) - try: sudo systemctl restart meshtasticd"
+    except FileNotFoundError:
+        # meshtastic CLI not installed, fall back to port check only
+        return True, "Port open (CLI not available for verification)"
+    except Exception as e:
+        return False, f"Check failed: {e}"
 
 
 def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool:
@@ -251,6 +309,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     systemd_name = config.get('systemd_name', name)
     description = config.get('description', name)
     fix_hint = config.get('fix_hint', f'Start {name} service')
+    verify_func_name = config.get('verify_func')
 
     # Check port if applicable (TCP or UDP)
     port_is_open = False
@@ -261,6 +320,29 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
             port_is_open = check_port(check_port_num, host)
 
         if port_is_open:
+            # For services with verification function, verify actual responsiveness
+            if verify_func_name and verify_func_name == 'check_meshtasticd_responsive':
+                is_responsive, verify_msg = check_meshtasticd_responsive()
+                if is_responsive:
+                    return ServiceStatus(
+                        name=name,
+                        available=True,
+                        state=ServiceState.AVAILABLE,
+                        message=f"{description}: {verify_msg}",
+                        port=check_port_num
+                    )
+                else:
+                    # Port open but service not responding properly
+                    return ServiceStatus(
+                        name=name,
+                        available=False,
+                        state=ServiceState.DEGRADED,
+                        message=f"{description}: {verify_msg}",
+                        fix_hint="Try: sudo systemctl restart meshtasticd",
+                        port=check_port_num
+                    )
+
+            # Standard port check without verification
             proto = 'UDP' if port_type == 'udp' else 'TCP'
             return ServiceStatus(
                 name=name,

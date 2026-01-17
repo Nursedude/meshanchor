@@ -958,23 +958,50 @@ class RNodeMixin:
             self._log_detection("--- Service Status Check ---", clear=True)
             self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
-            # Check meshtasticd (port 4403)
-            meshtasticd_running = False
-            meshtasticd_method = "port check"
-            if HAS_SERVICE_CHECK and check_port:
-                meshtasticd_running = check_port(4403)
-            else:
-                # Fallback: try socket
+            # Check meshtasticd - use responsive check if available
+            meshtasticd_status = "stopped"
+            meshtasticd_msg = "not running"
+            meshtasticd_css = "warning"
+
+            try:
+                from utils.service_check import check_meshtasticd_responsive, check_port
+                port_open = check_port(4403)
+
+                if port_open:
+                    # Port is open, verify responsiveness
+                    is_responsive, verify_msg = check_meshtasticd_responsive(timeout=5.0)
+                    if is_responsive:
+                        meshtasticd_status = "running"
+                        meshtasticd_msg = verify_msg
+                        meshtasticd_css = "success"
+                        self._log_detection(f"✓ meshtasticd: {verify_msg}")
+                    else:
+                        # Port open but not responding!
+                        meshtasticd_status = "unresponsive"
+                        meshtasticd_msg = verify_msg
+                        meshtasticd_css = "error"
+                        self._log_detection(f"⚠️ meshtasticd: {verify_msg}")
+                        self._log_detection("   Restart suggested: sudo systemctl restart meshtasticd")
+                else:
+                    self._log_detection("✗ meshtasticd: not running (port 4403 closed)")
+
+            except ImportError:
+                # Fallback: basic port check only
                 import socket
-                meshtasticd_method = "socket"
                 sock = None
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(1)
                     result = sock.connect_ex(('localhost', 4403))
-                    meshtasticd_running = result == 0
+                    if result == 0:
+                        meshtasticd_status = "running"
+                        meshtasticd_msg = "port open (unverified)"
+                        meshtasticd_css = "success"
+                        self._log_detection("✓ meshtasticd: running (TCP :4403)")
+                    else:
+                        self._log_detection("✗ meshtasticd: not running (port 4403 closed)")
                 except (socket.error, OSError):
-                    pass
+                    self._log_detection("✗ meshtasticd: not running (connection failed)")
                 finally:
                     if sock:
                         try:
@@ -982,26 +1009,44 @@ class RNodeMixin:
                         except Exception:
                             pass
 
-            # Check rnsd (use systemctl)
+            # Check rnsd (use UDP port check first, then systemctl)
             rnsd_running = False
+            rnsd_method = "unknown"
+
+            # Method 1: UDP port 37428 check
             try:
-                import subprocess
-                result = subprocess.run(
-                    ['systemctl', 'is-active', 'rnsd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                rnsd_running = result.returncode == 0
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(1)
+                try:
+                    sock.bind(('127.0.0.1', 37428))
+                    sock.close()
+                    # Port NOT in use
+                except OSError as e:
+                    sock.close()
+                    if e.errno in (98, 48, 10048):  # EADDRINUSE
+                        rnsd_running = True
+                        rnsd_method = "UDP port"
+            except Exception:
                 pass
 
-            # Log results
-            if meshtasticd_running:
-                self._log_detection(f"✓ meshtasticd: running (TCP :4403 via {meshtasticd_method})")
-            else:
-                self._log_detection(f"✗ meshtasticd: not running (checked :4403)")
+            # Method 2: systemctl fallback
+            if not rnsd_running:
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', 'rnsd'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        rnsd_running = True
+                        rnsd_method = "systemctl"
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    pass
 
+            # Log rnsd results
             if rnsd_running:
-                self._log_detection("✓ rnsd: running (systemctl)")
+                self._log_detection(f"✓ rnsd: running ({rnsd_method})")
             else:
                 self._log_detection("✗ rnsd: not running")
 
@@ -1009,25 +1054,22 @@ class RNodeMixin:
             self._log_detection("Click 'Detect Meshtastic' to read radio settings.")
 
             # Update UI indicators
-            if meshtasticd_running:
-                GLib.idle_add(
-                    self.meshtasticd_status.set_label,
-                    "● meshtasticd: running"
-                )
-                GLib.idle_add(
-                    self.meshtasticd_status.remove_css_class, "error"
-                )
-                GLib.idle_add(
-                    self.meshtasticd_status.add_css_class, "success"
-                )
-            else:
-                GLib.idle_add(
-                    self.meshtasticd_status.set_label,
-                    "● meshtasticd: stopped"
-                )
-                GLib.idle_add(
-                    self.meshtasticd_status.add_css_class, "warning"
-                )
+            GLib.idle_add(
+                self.meshtasticd_status.set_label,
+                f"● meshtasticd: {meshtasticd_status}"
+            )
+            GLib.idle_add(
+                self.meshtasticd_status.remove_css_class, "error"
+            )
+            GLib.idle_add(
+                self.meshtasticd_status.remove_css_class, "success"
+            )
+            GLib.idle_add(
+                self.meshtasticd_status.remove_css_class, "warning"
+            )
+            GLib.idle_add(
+                self.meshtasticd_status.add_css_class, meshtasticd_css
+            )
 
             if rnsd_running:
                 GLib.idle_add(
