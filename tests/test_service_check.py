@@ -119,14 +119,16 @@ class TestCheckService:
     def test_meshtasticd_available(self):
         """Test detection of available meshtasticd."""
         with patch('src.utils.service_check.check_port') as mock_port:
-            mock_port.return_value = True
+            with patch('src.utils.service_check.check_meshtasticd_responsive') as mock_responsive:
+                mock_port.return_value = True
+                mock_responsive.return_value = (True, "Responsive")
 
-            status = check_service('meshtasticd')
+                status = check_service('meshtasticd')
 
-            assert status.available is True
-            assert status.state == ServiceState.AVAILABLE
-            assert status.port == 4403
-            mock_port.assert_called_once_with(4403, 'localhost')
+                assert status.available is True
+                assert status.state == ServiceState.AVAILABLE
+                assert status.port == 4403
+                mock_port.assert_called_once_with(4403, 'localhost')
 
     def test_hamclock_not_running(self):
         """Test detection of stopped hamclock."""
@@ -214,5 +216,6 @@ class TestKnownServices:
         """Test rnsd configuration."""
         assert 'rnsd' in KNOWN_SERVICES
         config = KNOWN_SERVICES['rnsd']
-        # rnsd doesn't use TCP port by default
-        assert config['port'] is None
+        # rnsd uses UDP shared instance port (37428)
+        assert config['port'] == 37428
+        assert config['port_type'] == 'udp'
