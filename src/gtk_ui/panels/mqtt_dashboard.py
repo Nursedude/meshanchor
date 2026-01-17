@@ -297,7 +297,8 @@ class MQTTDashboardPanel(Gtk.Box):
                         ['sudo', '-u', user, 'xdg-open', output_path],
                         capture_output=True, timeout=10
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"xdg-open failed: {e}")
                     self._log_message(f"Open map manually: {output_path}")
 
             except Exception as e:
