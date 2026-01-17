@@ -171,7 +171,7 @@ def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool
             try:
                 sock.close()
             except Exception:
-                pass
+                pass  # Socket close errors are non-critical
 
 
 def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> bool:
@@ -210,7 +210,7 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
             try:
                 sock.close()
             except Exception:
-                pass
+                pass  # Socket close errors are non-critical
 
 
 def check_process_running(process_name: str) -> bool:
