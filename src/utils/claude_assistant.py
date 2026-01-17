@@ -251,6 +251,10 @@ Always prioritize safety - never suggest actions that could damage hardware
                 messages=messages
             )
 
+            # Safely extract response text
+            if not response.content:
+                logger.warning("Empty response from Claude API")
+                return None
             answer = response.content[0].text
 
             # Add to conversation history
@@ -420,7 +424,7 @@ Always prioritize safety - never suggest actions that could damage hardware
         answer_parts = ["**Issues Detected:**\n"]
         answer_parts.extend(issues[:5])
         answer_parts.append("\n**Recommendations:**")
-        answer_parts.extend(f"• {r}" for r in set(recommendations)[:5])
+        answer_parts.extend(f"• {r}" for r in list(set(recommendations))[:5])
 
         return AssistantResponse(
             answer="\n".join(answer_parts),
