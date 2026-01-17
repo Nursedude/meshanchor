@@ -434,6 +434,14 @@ class RNodeMixin:
         config_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         config_btn_row.set_halign(Gtk.Align.END)
 
+        # Add RNode Template button (shown when no RNode is configured)
+        self.add_rnode_template_btn = Gtk.Button(label="Add RNode Template")
+        self.add_rnode_template_btn.add_css_class("suggested-action")
+        self.add_rnode_template_btn.set_tooltip_text("Insert RNode interface template into config")
+        self.add_rnode_template_btn.connect("clicked", self._on_add_rnode_template)
+        self.add_rnode_template_btn.set_visible(False)  # Hidden until no RNode found
+        config_btn_row.append(self.add_rnode_template_btn)
+
         refresh_config_btn = Gtk.Button(label="Refresh")
         refresh_config_btn.set_tooltip_text("Reload config from file")
         refresh_config_btn.connect("clicked", lambda b: self._load_config_preview())
@@ -563,11 +571,14 @@ class RNodeMixin:
         def do_load():
             try:
                 config_path = get_real_user_home() / ".reticulum" / "config"
+                has_rnode = False
+
                 if not config_path.exists():
-                    GLib.idle_add(
-                        self.config_preview_buffer.set_text,
-                        f"Config file not found: {config_path}\n\nCreate one by running: rnsd"
-                    )
+                    preview = f"# Config file not found: {config_path}\n\n"
+                    preview += "# Create config by running: rnsd\n"
+                    preview += "# Then click 'Add RNode Template' to add an interface."
+                    GLib.idle_add(self.config_preview_buffer.set_text, preview)
+                    GLib.idle_add(self._show_add_template_button, True)
                     return
 
                 content = config_path.read_text()
@@ -585,14 +596,33 @@ class RNodeMixin:
                         rnode_section.append(line)
 
                 if rnode_section:
+                    has_rnode = True
                     preview = f"# RNode Interface Configuration\n# File: {config_path}\n\n"
                     preview += '\n'.join(rnode_section)
                 else:
+                    # Show a helpful template when no RNode is configured
                     preview = f"# No RNode interface found in config\n# File: {config_path}\n\n"
-                    preview += "# Add an RNode interface using the form above,\n"
-                    preview += "# or click 'Edit in Terminal' to manually configure."
+                    preview += "# ═══════════════════════════════════════════════════════════\n"
+                    preview += "# EXAMPLE RNode TEMPLATE (click 'Add RNode Template' to add):\n"
+                    preview += "# ═══════════════════════════════════════════════════════════\n\n"
+                    preview += "[[RNode LoRa Interface]]\n"
+                    preview += "  type = RNodeInterface\n"
+                    preview += "  interface_enabled = True\n"
+                    preview += "  port = /dev/ttyUSB0        # Your RNode port\n"
+                    preview += "  frequency = 906000000      # 906 MHz (US)\n"
+                    preview += "  bandwidth = 250000         # 250 kHz\n"
+                    preview += "  txpower = 17               # dBm\n"
+                    preview += "  spreadingfactor = 11       # SF11\n"
+                    preview += "  codingrate = 6             # 4/6\n\n"
+                    preview += "# ───────────────────────────────────────────────────────────\n"
+                    preview += "# Options:\n"
+                    preview += "#   1. Click 'Add RNode Template' to auto-add this template\n"
+                    preview += "#   2. Use 'Apply' above to apply form settings\n"
+                    preview += "#   3. Click 'Edit in Terminal' for manual editing\n"
+                    preview += "# ───────────────────────────────────────────────────────────"
 
                 GLib.idle_add(self.config_preview_buffer.set_text, preview)
+                GLib.idle_add(self._show_add_template_button, not has_rnode)
 
             except Exception as e:
                 logger.error(f"Load config preview error: {e}")
@@ -603,6 +633,51 @@ class RNodeMixin:
 
         threading.Thread(target=do_load, daemon=True).start()
         return False  # Don't repeat timeout
+
+    def _show_add_template_button(self, show: bool):
+        """Show or hide the Add RNode Template button"""
+        if hasattr(self, 'add_rnode_template_btn'):
+            self.add_rnode_template_btn.set_visible(show)
+
+    def _on_add_rnode_template(self, button):
+        """Add RNode template to the RNS config file"""
+        button.set_sensitive(False)
+
+        def do_add():
+            try:
+                from ..utils.rns_config import get_rns_config_path, add_interface_to_config
+
+                config_path = get_rns_config_path()
+
+                # Default RNode template - US frequency, MEDIUM_FAST compatible
+                rnode_template = """[[RNode LoRa Interface]]
+  type = RNodeInterface
+  interface_enabled = True
+  port = /dev/ttyUSB0
+  frequency = 906000000
+  bandwidth = 250000
+  txpower = 17
+  spreadingfactor = 11
+  codingrate = 6
+"""
+
+                result = add_interface_to_config(config_path, rnode_template, "RNode")
+
+                if result['success']:
+                    GLib.idle_add(self._set_rnode_status, "RNode template added! Edit port as needed.")
+                    # Reload the config preview and form
+                    GLib.idle_add(self._load_config_preview)
+                    GLib.idle_add(self._load_rnode_config)
+                else:
+                    GLib.idle_add(self._set_rnode_status, f"Failed: {result.get('error', 'Unknown error')}")
+
+            except Exception as e:
+                logger.error(f"Add RNode template error: {e}")
+                GLib.idle_add(self._set_rnode_status, f"Error: {e}")
+            finally:
+                GLib.idle_add(button.set_sensitive, True)
+
+        threading.Thread(target=do_add, daemon=True).start()
 
     def _apply_rnode_config(self, button):
         """Apply RNode configuration to ~/.reticulum/config"""
