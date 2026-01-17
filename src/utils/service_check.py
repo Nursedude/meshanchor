@@ -32,6 +32,23 @@ from utils.ports import MESHTASTICD_PORT, HAMCLOCK_PORT, MQTT_PORT, RNS_SHARED_I
 
 logger = logging.getLogger(__name__)
 
+# Public API - these are the functions/classes intended for external use
+__all__ = [
+    # Main entry points
+    'check_service',        # Primary status checker (SINGLE SOURCE OF TRUTH)
+    'require_service',      # Check with exception on failure
+    'check_port',           # TCP port check
+    'check_udp_port',       # UDP port check
+    'check_process_running', # Process check via pgrep
+    'check_systemd_service', # Systemd status check
+    'check_meshtasticd_responsive',  # Meshtasticd-specific verification
+    # Data classes
+    'ServiceStatus',        # Return type from check_service
+    'ServiceState',         # Status enum (AVAILABLE, DEGRADED, etc.)
+    # Configuration
+    'KNOWN_SERVICES',       # Service configuration dict
+]
+
 
 class ServiceState(Enum):
     """Service availability states."""

@@ -1,0 +1,30 @@
+# MeshForge Code Owners
+# These owners will be requested for review when changes are made to these files.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @Nursedude
+
+# Critical infrastructure - require careful review
+/src/utils/service_check.py @Nursedude
+/src/utils/paths.py @Nursedude
+/src/utils/ports.py @Nursedude
+
+# Security-sensitive files
+/src/commands/base.py @Nursedude
+/scripts/lint.py @Nursedude
+/.claude/rules/security.md @Nursedude
+
+# Gateway bridge - core functionality
+/src/gateway/ @Nursedude
+
+# Configuration files that affect all developers
+/pyproject.toml @Nursedude
+/mypy.ini @Nursedude
+/.github/ @Nursedude
+/CLAUDE.md @Nursedude
+
+# Test infrastructure
+/tests/conftest.py @Nursedude
+/tests/test_security.py @Nursedude
+/tests/test_status_consistency.py @Nursedude
