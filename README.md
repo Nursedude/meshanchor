@@ -1,9 +1,11 @@
 # MeshForge
 
-**LoRa Mesh Network Operations Center**
-
 <p align="center">
   <img src="assets/shaka-simple.svg" alt="Shaka" width="64" height="64"/>
+</p>
+
+<p align="center">
+  <strong>The first Network Operations Center bridging Meshtastic and Reticulum mesh networks.</strong>
 </p>
 
 <p align="center">
@@ -13,35 +15,40 @@
   <a href="tests/"><img src="https://img.shields.io/badge/tests-1037%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
-<p align="center">
-  <strong>Open-source Network Operations Center for LoRa mesh networks.</strong>
-</p>
-
 ---
 
-## Why MeshForge?
+## The Problem
 
-**MeshForge is a Mesh NOC (Network Operations Center)** — a unified platform for managing, monitoring, and bridging LoRa mesh networks.
+**Meshtastic and Reticulum can't talk to each other.**
 
-### The Vision
+Both are excellent LoRa mesh networks, but they operate in complete isolation:
+- Different protocols, different node databases, different ecosystems
+- No way to route messages between them
+- Managing both requires separate tools
 
-Mesh networks like Meshtastic, Reticulum (RNS), and AREDN each excel at different things, but they operate in isolation. MeshForge unifies them under one roof:
+```
+┌─────────────────┐         ╳         ┌─────────────────┐
+│   Meshtastic    │ ──── BLOCKED ──── │   Reticulum     │
+│   (LoRa mesh)   │                   │   (RNS/LXMF)    │
+└─────────────────┘                   └─────────────────┘
+```
 
-- **Today**: Reliable Meshtastic ↔ RNS gateway with full configuration control
-- **Tomorrow**: Extensible connectivity to additional mesh protocols and services
+## The Solution
 
-### Current Focus: Meshtastic-RNS Gateway
+**MeshForge bridges them.**
 
-Our proof-of-concept milestone: a **100% reliable** bidirectional gateway between Meshtastic and Reticulum, where users have **complete control** over all configuration files.
-
-| Challenge | MeshForge Solution |
-|-----------|-------------------|
-| Meshtastic and RNS can't communicate | Gateway bridge routes messages bidirectionally |
-| Two separate node databases | Unified tracker shows all nodes together |
-| Complex YAML/config files | GUI editors with templates + direct file access |
-| "Will my link work?" | RF tools: line-of-sight, Fresnel zones, path loss |
-| Service management headaches | One-click start/stop/restart with live logs |
-| Setup troubleshooting | Diagnostics identify issues with actionable fixes |
+```
+┌─────────────────┐                   ┌─────────────────┐
+│   Meshtastic    │◄────────────────►│   Reticulum     │
+│   (LoRa mesh)   │    MeshForge     │   (RNS/LXMF)    │
+└─────────────────┘    Gateway       └─────────────────┘
+                           │
+                    ┌──────┴──────┐
+                    │   Unified   │
+                    │  Node View  │
+                    │ + AI Diag   │
+                    └─────────────┘
+```
 
 ---
 
@@ -54,7 +61,62 @@ pip3 install rich textual flask --break-system-packages
 sudo python3 src/launcher.py
 ```
 
-The launcher auto-detects your environment and picks the best interface.
+That's it. The launcher auto-detects your environment and picks the best interface.
+
+---
+
+## Who Is This For?
+
+- **HAM radio operators** building resilient off-grid networks
+- **Emergency communications teams** needing mesh interoperability
+- **Off-grid communities** connecting disparate mesh systems
+- **Mesh networking enthusiasts** exploring protocol bridging
+
+---
+
+## Features
+
+| Feature | Standalone | PRO |
+|---------|:----------:|:---:|
+| Gateway bridge (Meshtastic ↔ RNS) | ✓ | ✓ |
+| Unified node tracking | ✓ | ✓ |
+| Nodeless MQTT monitoring | ✓ | ✓ |
+| Coverage map generation | ✓ | ✓ |
+| RF calculations (FSPL, Fresnel, link budget) | ✓ | ✓ |
+| Service management (start/stop/logs) | ✓ | ✓ |
+| Full radio configuration | ✓ | ✓ |
+| AI diagnostics | Rule-based | Claude-powered |
+| Knowledge base | ✓ | ✓ |
+| Natural language queries | — | ✓ |
+
+**PRO mode** requires an Anthropic API key (`ANTHROPIC_API_KEY` env var).
+
+---
+
+## Intelligent Diagnostics
+
+Ask MeshForge why your node is offline:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  SYMPTOM: Connection refused to meshtasticd        │
+│                                                     │
+│  LIKELY CAUSE: Service not running                  │
+│  CONFIDENCE: 85%                                    │
+│                                                     │
+│  EVIDENCE:                                          │
+│    - Port 4403 not listening                        │
+│    - systemctl shows inactive                       │
+│                                                     │
+│  SUGGESTIONS:                                       │
+│    1. sudo systemctl start meshtasticd             │
+│    2. Check /var/log/meshtasticd.log               │
+│    3. Verify USB device is connected               │
+└─────────────────────────────────────────────────────┘
+```
+
+**Standalone mode**: Rule-based diagnostics + knowledge base (works offline)
+**PRO mode**: Claude AI for natural language questions and complex analysis
 
 ---
 
@@ -62,48 +124,47 @@ The launcher auto-detects your environment and picks the best interface.
 
 | Interface | Command | Best For |
 |-----------|---------|----------|
-| Auto | `sudo python3 src/launcher.py` | Let MeshForge decide |
-| TUI (raspi-config style) | `sudo python3 src/launcher_tui.py` | SSH / headless (recommended) |
-| VTE Wrapper | `python3 src/launcher_vte.py` | Desktop with proper taskbar icon |
-| GTK Desktop | `sudo python3 src/main_gtk.py` | Full graphical interface |
-| Web UI | `sudo python3 src/main_web.py` | Browser access |
-| Standalone | `python3 src/standalone.py` | Zero dependencies |
+| **Auto** | `sudo python3 src/launcher.py` | Let MeshForge decide |
+| **TUI** | `sudo python3 src/launcher_tui.py` | SSH / headless (recommended) |
+| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical interface |
+| **Web UI** | `sudo python3 src/main_web.py` | Browser access |
+| **Standalone** | `python3 src/standalone.py` | Zero dependencies |
 
-**Desktop Integration**: After install, run `meshforge vte` for best taskbar icon support.
+All interfaces share the same AI features and gateway capabilities.
 
 ---
 
-## Features
+## Architecture
 
-**Core Tools**
-- Service management for meshtasticd (start/stop/restart, logs)
-- Full radio configuration (presets, channels, hardware profiles)
-- YAML config editor with templates
-- Hardware detection (USB, SPI HAT, I2C)
-- Real-time node monitoring
-- RF calculations (Haversine, Fresnel, FSPL, earth bulge)
+MeshForge connects to services — it doesn't embed them.
 
-**Radio Configuration (TUI)**
-- Radio presets (SHORT_TURBO → LONG_SLOW)
-- Full 8-channel configuration with individual editing
-- Frequency Slot Calculator (djb2 hash algorithm)
-- Gateway templates (Standard, Turbo, MtnMesh)
-- Hardware config selection from available.d/
+```
+┌───────────────────────────────────────────────────────────┐
+│                      UI LAYER                              │
+│   GTK4 Desktop  │  TUI (SSH)  │  Web  │  CLI  │ Standalone│
+└───────────────────────────┬───────────────────────────────┘
+                            │
+┌───────────────────────────┴───────────────────────────────┐
+│                   COMMANDS LAYER                           │
+│   meshtastic.py │ gateway.py │ rns.py │ service.py        │
+└───────────────────────────┬───────────────────────────────┘
+                            │
+┌───────────────────────────┴───────────────────────────────┐
+│                    UTILS LAYER                             │
+│ diagnostic_engine │ knowledge_base │ coverage_map │ rf.py │
+└───────────────────────────┬───────────────────────────────┘
+                            │
+┌───────────────────────────┴───────────────────────────────┐
+│                 EXTERNAL SERVICES                          │
+│   meshtasticd  │  rnsd  │  HamClock  │  MQTT broker       │
+└───────────────────────────────────────────────────────────┘
+```
 
-**Network & Diagnostics (TUI)**
-- System diagnostics (services, hardware, logs, resources)
-- Network tools (ping, port scan, device discovery)
-- Site planner (range estimator, antenna guidelines)
-
-**Gateway Bridge**
-- Bidirectional Meshtastic-to-RNS messaging
-- Position sharing across networks
-- Unified node tracking
-
-**Integrations**
-- AREDN hardware database
-- HamClock solar/propagation data
-- MQTT connectivity
+**Design Principles**
+- Services run independently — MeshForge monitors and configures
+- Viewer mode (no sudo) vs Admin mode (sudo required)
+- Graceful degradation when dependencies are missing
+- All operations go through `src/commands/` for consistency
 
 ---
 
@@ -120,49 +181,29 @@ The launcher auto-detects your environment and picks the best interface.
 
 ---
 
-## Architecture
-
-MeshForge follows a **configuration over installation** philosophy. It connects to services - it doesn't embed them.
-
-**Layers**
-
-- **UI Layer** - GTK4, Web, TUI, CLI (all share the commands layer)
-- **Commands Layer** - Unified API: `meshtastic.py`, `gateway.py`, `rns.py`, `service.py`, `hardware.py`
-- **Gateway Layer** - Bridge logic: `rns_bridge.py`, `node_tracker.py`, `config.py`
-- **External Services** - meshtasticd, rnsd, HamClock, MQTT (run independently)
-
-**Design Principles**
-- All operations go through `src/commands/` for consistency
-- Services run independently - MeshForge monitors and configures
-- Viewer mode (no sudo) vs Admin mode (sudo required)
-- Graceful degradation when dependencies are missing
-
----
-
-## Installation
+## Full Installation
 
 ```bash
 # Raspberry Pi / Debian
 sudo apt update
 sudo apt install -y python3-pip python3-gi python3-gi-cairo \
-    gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1 \
-    gir1.2-vte-2.91 libvte-2.91-gtk4-0  # For VTE taskbar icon
+    gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1
 
-pip3 install rich textual flask meshtastic --break-system-packages
+pip3 install rich textual flask meshtastic folium --break-system-packages
 
 # Enable SPI/I2C for HATs
 sudo raspi-config nonint do_spi 0
 sudo raspi-config nonint do_i2c 0
 
-# Run
+# Clone and run
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
-sudo python3 src/launcher_tui.py  # Recommended: raspi-config style TUI
+sudo python3 src/launcher_tui.py
 ```
 
 **Desktop Integration**
 ```bash
-sudo ./scripts/install-desktop.sh  # Installs icons, menu entries, VTE dependencies
+sudo ./scripts/install-desktop.sh
 meshforge vte  # Launch with proper taskbar icon
 ```
 
@@ -177,7 +218,7 @@ We welcome contributions! Before submitting:
 3. Add tests for new features
 4. Use the commands layer for new operations
 
-See `CLAUDE.md` for development guidelines and `.claude/foundations/persistent_issues.md` for common pitfalls.
+See `CLAUDE.md` for development guidelines.
 
 ---
 

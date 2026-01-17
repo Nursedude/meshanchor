@@ -50,9 +50,10 @@ from backend import DialogBackend
 # Import mixins to reduce file size
 from rf_tools_mixin import RFToolsMixin
 from channel_config_mixin import ChannelConfigMixin
+from ai_tools_mixin import AIToolsMixin
 
 
-class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
+class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin, AIToolsMixin):
     """MeshForge launcher with raspi-config style interface."""
 
     def __init__(self):
@@ -122,6 +123,7 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
 
             # Tools section
             choices.append(("---", "──────────── Tools ────────────"))
+            choices.append(("ai", "AI Tools"))
             choices.append(("diag", "System Diagnostics"))
             choices.append(("network", "Network Tools"))
             choices.append(("rf", "RF Tools"))
@@ -166,6 +168,8 @@ class MeshForgeLauncher(RFToolsMixin, ChannelConfigMixin):
             self._launch_cli()
         elif choice == "web":
             self._launch_web()
+        elif choice == "ai":
+            self._ai_tools_menu()
         elif choice == "diag":
             self._diagnostics_menu()
         elif choice == "network":
