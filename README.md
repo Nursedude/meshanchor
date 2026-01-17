@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.6--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="tests/"><img src="https://img.shields.io/badge/tests-1037%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="tests/"><img src="https://img.shields.io/badge/tests-1252%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 ---
@@ -89,6 +89,20 @@ The launcher auto-detects your environment and picks the best interface.
 | Natural language queries | — | ✓ |
 
 **PRO mode** requires an Anthropic API key (`ANTHROPIC_API_KEY` env var).
+
+---
+
+## Reliability (v0.4.7)
+
+MeshForge is built for dependable mesh network operations:
+
+**Single Source of Truth** - All service status checks (GTK, TUI, CLI) use one canonical implementation. No more conflicting status displays.
+
+**Quality Gates** - Pre-commit hooks run security linting, critical tests, and type checking before every commit.
+
+**Test Coverage** - 1252 tests including regression tests that prevent status drift across UIs.
+
+**API Contracts** - Core functions document their guarantees, callers, and breaking change impacts.
 
 ---
 
@@ -203,10 +217,13 @@ meshforge vte  # Launch with proper taskbar icon
 
 We welcome contributions! Before submitting:
 
-1. Run tests: `python3 -m pytest tests/ -v`
-2. Use `get_real_user_home()` instead of `Path.home()` for user paths
-3. Add tests for new features
-4. Use the commands layer for new operations
+1. Install git hooks: `cp scripts/hooks/pre-commit .git/hooks/ && chmod +x .git/hooks/pre-commit`
+2. Run tests: `python3 -m pytest tests/ -v`
+3. Use `get_real_user_home()` instead of `Path.home()` for user paths
+4. Add tests for new features
+5. Use the commands layer for new operations
+
+Pre-commit hooks automatically run security linting and critical tests.
 
 See `CLAUDE.md` for development guidelines.
 
