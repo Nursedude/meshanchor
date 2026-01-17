@@ -1,0 +1,225 @@
+# MeshForge Configuration Examples
+
+This directory contains example configurations to help you get started with MeshForge.
+
+## Quick Setup
+
+```bash
+# 1. Copy gateway config to user directory
+mkdir -p ~/.config/meshforge
+cp examples/configs/gateway-basic.json ~/.config/meshforge/gateway.json
+
+# 2. Copy hardware config (requires sudo)
+sudo cp examples/configs/meshtasticd-usb.yaml /etc/meshtasticd/config.d/
+
+# 3. Start MeshForge
+sudo python3 src/launcher.py
+```
+
+---
+
+## Configuration Files Overview
+
+### User Configs (`~/.config/meshforge/`)
+
+| File | Purpose |
+|------|---------|
+| `gateway.json` | Gateway bridge settings (Meshtastic ↔ RNS) |
+| `settings.json` | UI preferences (auto-created) |
+
+### System Configs (`/etc/meshtasticd/`)
+
+| File | Purpose |
+|------|---------|
+| `config.yaml` | Main meshtasticd config |
+| `config.d/*.yaml` | Enabled hardware configs |
+| `available.d/*.yaml` | Available hardware templates |
+
+---
+
+## Gateway Configurations
+
+### `gateway-basic.json` - Simple Message Bridge
+The minimal setup for bridging Meshtastic and RNS messages.
+
+```
+Meshtastic (localhost:4403) <---> MeshForge <---> Reticulum
+```
+
+**Use when:**
+- You have meshtasticd running locally
+- You want basic message bridging
+- You're just getting started
+
+### `gateway-mqtt.json` - MQTT-Enabled Gateway
+Bridge messages while also publishing to an MQTT broker.
+
+```
+Meshtastic <---> MeshForge <---> RNS
+                    |
+                    v
+                MQTT Broker
+```
+
+**Use when:**
+- You want to monitor messages via MQTT
+- You're integrating with Home Assistant or similar
+- You need message logging/archival
+
+### `gateway-rns-transport.json` - RNS Over Meshtastic
+Use the Meshtastic mesh as a transport layer for RNS.
+
+```
+RNS App <---> MeshForge <---> Meshtastic LoRa <---> Remote Node
+```
+
+**Use when:**
+- You want to run RNS applications over LoRa
+- You need end-to-end encryption (RNS provides this)
+- You're building a hybrid mesh network
+
+---
+
+## Hardware Configurations
+
+### `meshtasticd-usb.yaml` - USB LoRa Device
+For USB-connected devices like Heltec V3, T-Beam, RAK4631.
+
+**Supported devices:**
+- Heltec V3 / V4
+- LilyGo T-Beam
+- RAK4631 (MeshStick)
+- Any USB-serial Meshtastic device
+
+### `meshtasticd-spi-hat.yaml` - Raspberry Pi SPI HAT
+For SPI-connected LoRa HATs on Raspberry Pi GPIO.
+
+**Supported HATs:**
+- MeshAdv-Pi-Hat (recommended)
+- Waveshare SX1262
+- Adafruit RFM9x
+
+**Required setup:**
+```bash
+# Enable SPI on Raspberry Pi
+sudo raspi-config nonint do_spi 0
+sudo reboot
+```
+
+---
+
+## Configuration Reference
+
+### Gateway Settings
+
+```json
+{
+  "enabled": true,              // Enable the gateway
+  "auto_start": false,          // Start on launch
+  "bridge_mode": "message_bridge", // message_bridge | rns_transport | mesh_bridge
+
+  "meshtastic": {
+    "host": "localhost",        // meshtasticd host
+    "port": 4403,               // meshtasticd port
+    "channel": 0,               // Channel to bridge (0 = primary)
+    "use_mqtt": false,          // Also publish to MQTT
+    "mqtt_topic": ""            // MQTT topic prefix
+  },
+
+  "rns": {
+    "config_dir": "",           // RNS config (empty = default ~/.reticulum)
+    "identity_name": "meshforge_gateway",
+    "announce_interval": 300    // Announce every 5 minutes
+  },
+
+  "telemetry": {
+    "share_position": true,     // Share GPS between networks
+    "share_battery": true,      // Share battery status
+    "share_environment": true   // Share temperature/humidity
+  },
+
+  "log_level": "INFO",          // DEBUG | INFO | WARNING | ERROR
+  "ai_diagnostics_enabled": false // Enable AI-powered diagnostics
+}
+```
+
+### Meshtasticd Hardware Settings
+
+```yaml
+Lora:
+  CS: 21          # SPI Chip Select GPIO
+  IRQ: 16         # Interrupt GPIO
+  Busy: 20        # Busy signal GPIO
+  Reset: 18       # Reset GPIO
+  # Optional radio parameters
+  # Bandwidth: 250      # kHz (125, 250, 500)
+  # SpreadFactor: 11    # 7-12
+  # TXpower: 20         # dBm (0-22 typical)
+
+GPS:
+  SerialPath: /dev/ttyS0   # GPS serial port
+
+I2C:
+  I2CDevice: /dev/i2c-1    # I2C bus for sensors
+
+Webserver:
+  Port: 443                # Web interface port
+```
+
+---
+
+## Troubleshooting
+
+### Gateway won't connect to meshtasticd
+
+1. Check meshtasticd is running:
+   ```bash
+   sudo systemctl status meshtasticd
+   ```
+
+2. Verify port is listening:
+   ```bash
+   ss -tlnp | grep 4403
+   ```
+
+3. Check logs:
+   ```bash
+   journalctl -u meshtasticd -f
+   ```
+
+### SPI HAT not detected
+
+1. Verify SPI is enabled:
+   ```bash
+   ls /dev/spidev*
+   # Should show: /dev/spidev0.0 /dev/spidev0.1
+   ```
+
+2. Check GPIO permissions:
+   ```bash
+   sudo python3 -c "import spidev; s=spidev.SpiDev(); s.open(0,0); print('SPI OK')"
+   ```
+
+3. Verify wiring matches your config GPIO pins
+
+### RNS not connecting
+
+1. Check rnsd is running:
+   ```bash
+   rnsd --version
+   rnstatus
+   ```
+
+2. Verify RNS config exists:
+   ```bash
+   ls ~/.reticulum/config
+   ```
+
+---
+
+## More Examples
+
+See the full template library:
+- Gateway templates: `src/gateway/templates/`
+- Hardware templates: `templates/available.d/`
+- Device profiles: `src/gateway/profiles/`
