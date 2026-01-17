@@ -201,6 +201,15 @@ def check_port_available(host: str, port: int) -> tuple:
         return (False, process_info)
 
 
+def _get_version() -> str:
+    """Get the application version safely."""
+    try:
+        from __version__ import __version__
+        return __version__
+    except ImportError:
+        return "unknown"
+
+
 def find_available_port(host: str, preferred_port: int, max_tries: int = 10) -> int:
     """
     Find an available port, starting with the preferred port.
@@ -1032,6 +1041,52 @@ def send_mesh_message(text, destination=None):
 def favicon():
     """Return empty favicon to avoid 404"""
     return '', 204
+
+
+@app.route('/health')
+@app.route('/api/health')
+def health_check():
+    """
+    Health check endpoint for load balancers and monitoring.
+
+    Returns JSON with:
+    - status: "healthy", "degraded", or "unhealthy"
+    - services: Status of key services
+    - timestamp: Current server time
+    """
+    import time
+
+    health_status = "healthy"
+    services = {}
+
+    # Check meshtasticd
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(('localhost', 4403))
+        sock.close()
+        services['meshtasticd'] = 'up' if result == 0 else 'down'
+        if result != 0:
+            health_status = "degraded"
+    except Exception:
+        services['meshtasticd'] = 'unknown'
+
+    # Check rnsd (port 37428 default)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(('localhost', 37428))
+        sock.close()
+        services['rnsd'] = 'up' if result == 0 else 'down'
+    except Exception:
+        services['rnsd'] = 'unknown'
+
+    return jsonify({
+        'status': health_status,
+        'services': services,
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'version': _get_version()
+    })
 
 
 @app.route('/')
