@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.4.6-beta"
-__version_info__ = (0, 4, 6, 'beta')
-__release_date__ = "2026-01-11"
+__version__ = "0.4.7-beta"
+__version_info__ = (0, 4, 7, 'beta')
+__release_date__ = "2026-01-17"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
@@ -14,6 +14,25 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.4.7-beta",
+        "date": "2026-01-17",
+        "status": "beta",
+        "changes": [
+            "FIX: Status consistency - eliminated conflicting rnsd status displays",
+            "REFACTOR: All UIs (GTK, TUI, CLI) now use single check_service() for status",
+            "NEW: UDP port 37428 check for reliable rnsd detection",
+            "NEW: 13 regression tests to prevent status drift across UIs",
+            "NEW: Pre-commit hooks (security lint, critical tests, type checking)",
+            "NEW: API dependencies documentation (.claude/foundations/api_dependencies.md)",
+            "NEW: Auto-review allowlist for known false positives",
+            "NEW: CODEOWNERS file for critical file review requirements",
+            "NEW: mypy.ini and pyproject.toml for gradual type checking",
+            "IMPROVED: Exception handlers now log instead of silently swallowing",
+            "IMPROVED: service_check.py exports public API via __all__",
+            "IMPROVED: commands/service.py correctly handles UDP vs TCP ports",
+        ]
+    },
     {
         "version": "0.4.6-beta",
         "date": "2026-01-11",
