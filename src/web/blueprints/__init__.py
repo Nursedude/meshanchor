@@ -11,6 +11,7 @@ from .network import network_bp
 from .service import service_bp
 from .gateway import gateway_bp
 from .tools import tools_bp
+from .analytics import bp as analytics_bp
 
 __all__ = [
     'system_bp',
@@ -20,6 +21,7 @@ __all__ = [
     'service_bp',
     'gateway_bp',
     'tools_bp',
+    'analytics_bp',
 ]
 
 
@@ -32,3 +34,4 @@ def register_blueprints(app):
     app.register_blueprint(service_bp, url_prefix='/api')
     app.register_blueprint(gateway_bp, url_prefix='/api')
     app.register_blueprint(tools_bp, url_prefix='/api')
+    app.register_blueprint(analytics_bp)  # Has own url_prefix='/api/analytics'
