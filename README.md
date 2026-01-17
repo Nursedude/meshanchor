@@ -27,10 +27,8 @@ Both are excellent LoRa mesh networks, but they operate in complete isolation:
 - Managing both requires separate tools
 
 ```
-┌─────────────────┐         ╳         ┌─────────────────┐
-│   Meshtastic    │ ──── BLOCKED ──── │   Reticulum     │
-│   (LoRa mesh)   │                   │   (RNS/LXMF)    │
-└─────────────────┘                   └─────────────────┘
+Meshtastic (LoRa)  ---X---  Reticulum (RNS)
+     BLOCKED - incompatible protocols
 ```
 
 ## The Solution
@@ -38,16 +36,11 @@ Both are excellent LoRa mesh networks, but they operate in complete isolation:
 **MeshForge bridges them.**
 
 ```
-┌─────────────────┐                   ┌─────────────────┐
-│   Meshtastic    │◄────────────────►│   Reticulum     │
-│   (LoRa mesh)   │    MeshForge     │   (RNS/LXMF)    │
-└─────────────────┘    Gateway       └─────────────────┘
-                           │
-                    ┌──────┴──────┐
-                    │   Unified   │
-                    │  Node View  │
-                    │ + AI Diag   │
-                    └─────────────┘
+Meshtastic  <------>  MeshForge Gateway  <------>  Reticulum
+   (LoRa)                   |                       (RNS)
+                            v
+                    Unified Node View
+                    + AI Diagnostics
 ```
 
 ---
@@ -98,24 +91,23 @@ That's it. The launcher auto-detects your environment and picks the best interfa
 Ask MeshForge why your node is offline:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  SYMPTOM: Connection refused to meshtasticd        │
-│                                                     │
-│  LIKELY CAUSE: Service not running                  │
-│  CONFIDENCE: 85%                                    │
-│                                                     │
-│  EVIDENCE:                                          │
-│    - Port 4403 not listening                        │
-│    - systemctl shows inactive                       │
-│                                                     │
-│  SUGGESTIONS:                                       │
-│    1. sudo systemctl start meshtasticd             │
-│    2. Check /var/log/meshtasticd.log               │
-│    3. Verify USB device is connected               │
-└─────────────────────────────────────────────────────┘
+SYMPTOM: Connection refused to meshtasticd
+
+LIKELY CAUSE: Service not running
+CONFIDENCE: 85%
+
+EVIDENCE:
+  - Port 4403 not listening
+  - systemctl shows inactive
+
+SUGGESTIONS:
+  1. sudo systemctl start meshtasticd
+  2. Check /var/log/meshtasticd.log
+  3. Verify USB device is connected
 ```
 
 **Standalone mode**: Rule-based diagnostics + knowledge base (works offline)
+
 **PRO mode**: Claude AI for natural language questions and complex analysis
 
 ---
@@ -139,25 +131,17 @@ All interfaces share the same AI features and gateway capabilities.
 MeshForge connects to services — it doesn't embed them.
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│                      UI LAYER                              │
-│   GTK4 Desktop  │  TUI (SSH)  │  Web  │  CLI  │ Standalone│
-└───────────────────────────┬───────────────────────────────┘
-                            │
-┌───────────────────────────┴───────────────────────────────┐
-│                   COMMANDS LAYER                           │
-│   meshtastic.py │ gateway.py │ rns.py │ service.py        │
-└───────────────────────────┬───────────────────────────────┘
-                            │
-┌───────────────────────────┴───────────────────────────────┐
-│                    UTILS LAYER                             │
-│ diagnostic_engine │ knowledge_base │ coverage_map │ rf.py │
-└───────────────────────────┬───────────────────────────────┘
-                            │
-┌───────────────────────────┴───────────────────────────────┐
-│                 EXTERNAL SERVICES                          │
-│   meshtasticd  │  rnsd  │  HamClock  │  MQTT broker       │
-└───────────────────────────────────────────────────────────┘
+USER INTERFACES
+  GTK4 Desktop | TUI (SSH) | Web | CLI | Standalone
+                      |
+               COMMANDS LAYER
+  meshtastic.py | gateway.py | rns.py | service.py
+                      |
+                UTILS LAYER
+  diagnostic_engine | knowledge_base | coverage_map | rf.py
+                      |
+             EXTERNAL SERVICES
+  meshtasticd | rnsd | HamClock | MQTT broker
 ```
 
 **Design Principles**
