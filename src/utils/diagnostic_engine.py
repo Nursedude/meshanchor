@@ -26,14 +26,220 @@ Usage:
 import logging
 import re
 import time
+import socket
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Any, Callable, Tuple
 from collections import deque
+from pathlib import Path
 import threading
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# EVIDENCE CHECK FUNCTIONS
+# These functions verify actual system state and return evidence strings
+# =============================================================================
+
+def check_port_open(host: str, port: int, timeout: float = 2.0) -> Optional[str]:
+    """Check if a TCP port is open. Returns evidence string or None."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            if result == 0:
+                return f"Port {port} on {host} is open and accepting connections"
+            else:
+                return None  # Port closed - no positive evidence
+    except (socket.error, OSError):
+        return None
+
+
+def check_port_closed(host: str, port: int, timeout: float = 2.0) -> Optional[str]:
+    """Check if a TCP port is closed. Returns evidence string or None."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            if result != 0:
+                return f"Port {port} on {host} is NOT accepting connections"
+            else:
+                return None  # Port open - no evidence of problem
+    except (socket.error, OSError):
+        return f"Port {port} on {host} is unreachable"
+
+
+def check_process_running(process_name: str) -> Optional[str]:
+    """Check if a process is running. Returns evidence string or None."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", process_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            pids = result.stdout.strip().split('\n')
+            return f"Process '{process_name}' is running (PID: {', '.join(pids)})"
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def check_process_not_running(process_name: str) -> Optional[str]:
+    """Check if a process is NOT running. Returns evidence string or None."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", process_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return f"Process '{process_name}' is NOT running"
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return f"Could not verify process '{process_name}' status"
+
+
+def check_systemd_service_active(service_name: str) -> Optional[str]:
+    """Check if a systemd service is active. Returns evidence string or None."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", service_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and "active" in result.stdout:
+            return f"Systemd service '{service_name}' is active"
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def check_systemd_service_inactive(service_name: str) -> Optional[str]:
+    """Check if a systemd service is inactive. Returns evidence string or None."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", service_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0 or "inactive" in result.stdout:
+            return f"Systemd service '{service_name}' is NOT active"
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return f"Systemd service '{service_name}' status unknown"
+
+
+def check_file_exists(file_path: str) -> Optional[str]:
+    """Check if a file exists. Returns evidence string or None."""
+    path = Path(file_path)
+    if path.exists():
+        return f"Config file exists: {file_path}"
+    return None
+
+
+def check_file_missing(file_path: str) -> Optional[str]:
+    """Check if a file is missing. Returns evidence string or None."""
+    path = Path(file_path)
+    if not path.exists():
+        return f"Config file missing: {file_path}"
+    return None
+
+
+def check_serial_device_exists(device_pattern: str = "/dev/ttyUSB*") -> Optional[str]:
+    """Check if any serial device exists. Returns evidence string or None."""
+    from pathlib import Path
+    devices = list(Path("/dev").glob(device_pattern.replace("/dev/", "")))
+    devices.extend(list(Path("/dev").glob("ttyACM*")))
+    if devices:
+        return f"Serial devices found: {', '.join(str(d) for d in devices[:3])}"
+    return None
+
+
+def check_no_serial_device() -> Optional[str]:
+    """Check if NO serial devices exist. Returns evidence string or None."""
+    from pathlib import Path
+    devices = list(Path("/dev").glob("ttyUSB*"))
+    devices.extend(list(Path("/dev").glob("ttyACM*")))
+    if not devices:
+        return "No serial devices (/dev/ttyUSB*, /dev/ttyACM*) found"
+    return None
+
+
+def check_meshtasticd_clients() -> Optional[str]:
+    """Check for other meshtastic clients that might be blocking connection."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-af", "meshtastic|nomadnet"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            clients = result.stdout.strip().split('\n')
+            return f"Found {len(clients)} potential Meshtastic client(s) running"
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def check_rns_config_exists() -> Optional[str]:
+    """Check if RNS config exists at standard location."""
+    from utils.paths import get_real_user_home
+    config_path = get_real_user_home() / ".reticulum" / "config"
+    if config_path.exists():
+        return f"RNS config exists at {config_path}"
+    return None
+
+
+def check_rns_config_missing() -> Optional[str]:
+    """Check if RNS config is missing."""
+    from utils.paths import get_real_user_home
+    config_path = get_real_user_home() / ".reticulum" / "config"
+    if not config_path.exists():
+        return f"RNS config missing at {config_path}"
+    return None
+
+
+# Evidence check factory functions (create checks with parameters)
+
+def make_port_check(host: str, port: int) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a port open check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_port_open(host, port)
+    return check
+
+
+def make_port_closed_check(host: str, port: int) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a port closed check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_port_closed(host, port)
+    return check
+
+
+def make_process_check(process_name: str) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a process running check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_process_running(process_name)
+    return check
+
+
+def make_process_not_running_check(process_name: str) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a process NOT running check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_process_not_running(process_name)
+    return check
+
+
+def make_service_active_check(service_name: str) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a systemd service active check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_systemd_service_active(service_name)
+    return check
+
+
+def make_service_inactive_check(service_name: str) -> Callable[[Dict], Optional[str]]:
+    """Factory: create a systemd service inactive check function."""
+    def check(ctx: Dict) -> Optional[str]:
+        return check_systemd_service_inactive(service_name)
+    return check
 
 
 class Severity(Enum):
@@ -126,6 +332,7 @@ class DiagnosticEngine:
     - Context-aware diagnosis
     - Auto-recovery suggestions
     - Expertise-level explanations
+    - Persistent diagnostic history (SQLite)
     """
 
     # Symptom history retention
@@ -135,18 +342,27 @@ class DiagnosticEngine:
     # Correlation window for related symptoms
     CORRELATION_WINDOW = timedelta(minutes=5)
 
-    def __init__(self):
-        """Initialize the diagnostic engine."""
+    def __init__(self, persist_history: bool = True):
+        """Initialize the diagnostic engine.
+
+        Args:
+            persist_history: If True, save diagnoses to SQLite for history tracking
+        """
         self._rules: List[DiagnosticRule] = []
         self._symptom_history: deque = deque(maxlen=self.HISTORY_MAX_SIZE)
         self._diagnosis_history: deque = deque(maxlen=500)
         self._lock = threading.Lock()
+        self._persist_history = persist_history
 
         # Callbacks for auto-recovery
         self._recovery_handlers: Dict[str, Callable] = {}
 
         # Load built-in rules
         self._load_mesh_rules()
+
+        # Initialize persistent storage
+        if self._persist_history:
+            self._init_db()
 
         # Stats
         self._stats = {
@@ -155,6 +371,219 @@ class DiagnosticEngine:
             "auto_recoveries": 0,
             "correlations_found": 0,
         }
+
+    def _get_db_path(self) -> Path:
+        """Get path to diagnostic history database."""
+        from utils.paths import get_real_user_home
+        db_dir = get_real_user_home() / ".config" / "meshforge"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return db_dir / "diagnostic_history.db"
+
+    def _init_db(self):
+        """Initialize SQLite database for persistent history."""
+        import sqlite3
+        try:
+            db_path = self._get_db_path()
+            conn = sqlite3.connect(str(db_path))
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS diagnoses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    symptom_message TEXT NOT NULL,
+                    symptom_category TEXT NOT NULL,
+                    symptom_severity TEXT NOT NULL,
+                    symptom_source TEXT,
+                    likely_cause TEXT NOT NULL,
+                    confidence REAL,
+                    evidence TEXT,
+                    suggestions TEXT,
+                    auto_recoverable BOOLEAN,
+                    rule_name TEXT
+                )
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_diagnoses_timestamp
+                ON diagnoses(timestamp DESC)
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_diagnoses_category
+                ON diagnoses(symptom_category)
+            ''')
+            conn.commit()
+            conn.close()
+            logger.debug(f"Diagnostic history DB initialized at {db_path}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize diagnostic history DB: {e}")
+            self._persist_history = False
+
+    def _save_diagnosis(self, symptom: 'Symptom', diagnosis: 'Diagnosis', rule_name: str = ""):
+        """Save a diagnosis to persistent storage."""
+        if not self._persist_history:
+            return
+
+        import sqlite3
+        import json
+        try:
+            conn = sqlite3.connect(str(self._get_db_path()))
+            conn.execute('''
+                INSERT INTO diagnoses
+                (symptom_message, symptom_category, symptom_severity, symptom_source,
+                 likely_cause, confidence, evidence, suggestions, auto_recoverable, rule_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                symptom.message,
+                symptom.category.value,
+                symptom.severity.value,
+                symptom.source,
+                diagnosis.likely_cause,
+                diagnosis.confidence,
+                json.dumps(diagnosis.evidence),
+                json.dumps(diagnosis.suggestions),
+                diagnosis.auto_recoverable,
+                rule_name,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"Failed to save diagnosis: {e}")
+
+    def get_history(self, limit: int = 50, category: Optional[Category] = None,
+                    since_hours: int = 24) -> List[Dict]:
+        """
+        Get recent diagnostic history.
+
+        Args:
+            limit: Maximum number of diagnoses to return
+            category: Filter by category (None = all)
+            since_hours: Only return diagnoses from last N hours
+
+        Returns:
+            List of diagnosis records as dicts
+        """
+        if not self._persist_history:
+            return []
+
+        import sqlite3
+        import json
+        try:
+            conn = sqlite3.connect(str(self._get_db_path()))
+            conn.row_factory = sqlite3.Row
+
+            query = '''
+                SELECT * FROM diagnoses
+                WHERE timestamp > datetime('now', ? || ' hours')
+            '''
+            params = [f'-{since_hours}']
+
+            if category:
+                query += " AND symptom_category = ?"
+                params.append(category.value)
+
+            query += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+
+            results = []
+            for row in rows:
+                results.append({
+                    'id': row['id'],
+                    'timestamp': row['timestamp'],
+                    'symptom_message': row['symptom_message'],
+                    'symptom_category': row['symptom_category'],
+                    'symptom_severity': row['symptom_severity'],
+                    'symptom_source': row['symptom_source'],
+                    'likely_cause': row['likely_cause'],
+                    'confidence': row['confidence'],
+                    'evidence': json.loads(row['evidence']) if row['evidence'] else [],
+                    'suggestions': json.loads(row['suggestions']) if row['suggestions'] else [],
+                    'auto_recoverable': bool(row['auto_recoverable']),
+                    'rule_name': row['rule_name'],
+                })
+            return results
+        except Exception as e:
+            logger.warning(f"Failed to get diagnostic history: {e}")
+            return []
+
+    def get_recurring_issues(self, threshold: int = 3, hours: int = 24) -> List[Dict]:
+        """
+        Find recurring issues (same symptom/cause appearing multiple times).
+
+        Args:
+            threshold: Minimum occurrences to be considered recurring
+            hours: Time window to search
+
+        Returns:
+            List of recurring issues with count
+        """
+        if not self._persist_history:
+            return []
+
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(self._get_db_path()))
+            conn.row_factory = sqlite3.Row
+
+            cursor = conn.execute('''
+                SELECT
+                    likely_cause,
+                    symptom_category,
+                    COUNT(*) as occurrence_count,
+                    MAX(timestamp) as last_seen,
+                    MIN(timestamp) as first_seen
+                FROM diagnoses
+                WHERE timestamp > datetime('now', ? || ' hours')
+                GROUP BY likely_cause, symptom_category
+                HAVING COUNT(*) >= ?
+                ORDER BY occurrence_count DESC
+            ''', (f'-{hours}', threshold))
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [
+                {
+                    'likely_cause': row['likely_cause'],
+                    'category': row['symptom_category'],
+                    'count': row['occurrence_count'],
+                    'first_seen': row['first_seen'],
+                    'last_seen': row['last_seen'],
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get recurring issues: {e}")
+            return []
+
+    def clear_history(self, older_than_days: int = 30) -> int:
+        """
+        Clear old diagnostic history.
+
+        Args:
+            older_than_days: Delete records older than this
+
+        Returns:
+            Number of records deleted
+        """
+        if not self._persist_history:
+            return 0
+
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(self._get_db_path()))
+            cursor = conn.execute('''
+                DELETE FROM diagnoses
+                WHERE timestamp < datetime('now', ? || ' days')
+            ''', (f'-{older_than_days}',))
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return deleted
+        except Exception as e:
+            logger.warning(f"Failed to clear history: {e}")
+            return 0
 
     def _load_mesh_rules(self) -> None:
         """Load built-in diagnostic rules for mesh networking."""
@@ -166,6 +595,11 @@ class DiagnosticEngine:
             pattern=r"(?i)connection\s+(refused|rejected).*meshtastic",
             category=Category.CONNECTIVITY,
             cause_template="Another client is likely connected to meshtasticd (single-client limitation)",
+            evidence_checks=[
+                make_port_check("localhost", 4403),  # Verify port is actually open
+                lambda ctx: check_meshtasticd_clients(),  # Check for other clients
+                make_service_active_check("meshtasticd"),  # Verify service running
+            ],
             suggestions=[
                 "Check for other Meshtastic clients: ps aux | grep -E 'nomadnet|meshing|meshtastic'",
                 "Restart meshtasticd: sudo systemctl restart meshtasticd",
@@ -181,6 +615,11 @@ class DiagnosticEngine:
             pattern=r"(?i)(meshtasticd|4403).*(not running|refused|unavailable)",
             category=Category.CONNECTIVITY,
             cause_template="meshtasticd service is not running or not listening on port 4403",
+            evidence_checks=[
+                make_port_closed_check("localhost", 4403),  # Confirm port is closed
+                make_service_inactive_check("meshtasticd"),  # Confirm service not running
+                make_process_not_running_check("meshtasticd"),  # Confirm process not running
+            ],
             suggestions=[
                 "Check service status: sudo systemctl status meshtasticd",
                 "Start the service: sudo systemctl start meshtasticd",
@@ -194,6 +633,11 @@ class DiagnosticEngine:
             pattern=r"(?i)(rns|reticulum).*(transport|interface).*(unavailable|failed|error)",
             category=Category.CONNECTIVITY,
             cause_template="RNS transport interface failed to initialize",
+            evidence_checks=[
+                make_service_inactive_check("rnsd"),  # Check rnsd not running
+                lambda ctx: check_rns_config_missing(),  # Check config missing
+                lambda ctx: check_no_serial_device(),  # Check for serial devices
+            ],
             suggestions=[
                 "Check rnsd status: sudo systemctl status rnsd",
                 "Verify config: cat ~/.reticulum/config",
@@ -239,6 +683,10 @@ class DiagnosticEngine:
             pattern=r"(?i)(serial|tty|usb).*(busy|in use|locked|permission)",
             category=Category.HARDWARE,
             cause_template="Serial port is in use by another process or has permission issues",
+            evidence_checks=[
+                lambda ctx: check_serial_device_exists(),  # Verify device exists
+                make_process_check("meshtasticd"),  # meshtasticd might be using it
+            ],
             suggestions=[
                 "Find process using port: sudo lsof /dev/ttyUSB0",
                 "Kill blocking process or use different port",
@@ -253,6 +701,9 @@ class DiagnosticEngine:
             pattern=r"(?i)(device|radio|hardware).*(disconnect|removed|not found|missing)",
             category=Category.HARDWARE,
             cause_template="Hardware device was disconnected or not detected",
+            evidence_checks=[
+                lambda ctx: check_no_serial_device(),  # Verify no serial devices
+            ],
             suggestions=[
                 "Check USB connection: lsusb",
                 "Check dmesg for device events: dmesg | tail -20",
@@ -508,6 +959,9 @@ class DiagnosticEngine:
         with self._lock:
             self._diagnosis_history.append(diagnosis)
             self._stats["diagnoses_made"] += 1
+
+        # Save to persistent history
+        self._save_diagnosis(symptom, diagnosis, rule_name=best_rule.name)
 
         # Log the diagnosis
         logger.info(diagnosis.to_log_format())
