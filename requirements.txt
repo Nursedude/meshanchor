@@ -22,6 +22,9 @@ textual>=0.45.0
 # Web UI Framework
 flask>=2.3.0
 
+# Coverage maps
+folium>=0.15.0
+
 # Testing
 pytest>=7.0.0
 
