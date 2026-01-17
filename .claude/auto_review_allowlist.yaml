@@ -1,0 +1,148 @@
+# MeshForge Auto-Review Allowlist
+# ================================
+# Documents known false positives in the auto-review system.
+# Each entry explains WHY the pattern is safe, preventing fix-break cycles.
+#
+# Format:
+#   - file: relative path from src/
+#     line: approximate line number (may drift with edits)
+#     pattern: the auto-review pattern that matched
+#     reason: clear explanation of why this is safe
+#     guard: the actual guard that protects this code
+#     reviewed: date of last review
+#
+# Patterns:
+#   - index_no_check: Index access without apparent bounds check
+#   - exception_pass: Exception caught with pass/no logging
+#
+# Maintainer: Review this file when auto-review issues change significantly
+# Last updated: 2026-01-17
+
+allowlist:
+
+  # ===========================================================================
+  # RELIABILITY: Index Access Patterns (with guards)
+  # ===========================================================================
+
+  - file: utils/diagnostic_engine.py
+    line: 302
+    pattern: index_no_check
+    reason: "Access to self.suggestions[0] is guarded"
+    guard: "if self.suggestions: (line ~300)"
+    reviewed: "2026-01-17"
+
+  - file: utils/coverage_map.py
+    line: 257
+    pattern: index_no_check
+    reason: "coords has default value [0, 0] ensuring 2 elements"
+    guard: "Default assignment: coords = node.get('position', {}).get('coords', [0, 0])"
+    reviewed: "2026-01-17"
+
+  - file: utils/claude_assistant.py
+    line: 258
+    pattern: index_no_check
+    reason: "API response.content access - Anthropic API always returns content array"
+    guard: "API contract guarantees content array on successful response"
+    reviewed: "2026-01-17"
+
+  - file: utils/claude_assistant.py
+    line: 297
+    pattern: index_no_check
+    reason: "results[0] access is guarded by early return"
+    guard: "if not results: return AssistantResponse(...) (line ~284)"
+    reviewed: "2026-01-17"
+
+  - file: utils/claude_assistant.py
+    line: 331
+    pattern: index_no_check
+    reason: "paragraphs[0] access is guarded"
+    guard: "if paragraphs: (line ~329)"
+    reviewed: "2026-01-17"
+
+  - file: utils/claude_assistant.py
+    line: 511
+    pattern: index_no_check
+    reason: "top_category[0] comes from max() on non-empty dict"
+    guard: "if by_category: (line ~508) ensures dict is non-empty before max()"
+    reviewed: "2026-01-17"
+
+  - file: commands/device_backup.py
+    line: 297
+    pattern: index_no_check
+    reason: "matches[0] access is guarded"
+    guard: "if matches: (line ~295)"
+    reviewed: "2026-01-17"
+
+  - file: commands/device_backup.py
+    line: 396
+    pattern: index_no_check
+    reason: "matches[0] access is guarded"
+    guard: "if matches: (line ~394)"
+    reviewed: "2026-01-17"
+
+  - file: commands/device_backup.py
+    line: 427
+    pattern: index_no_check
+    reason: "matches[0] access is guarded"
+    guard: "if matches: (line ~425)"
+    reviewed: "2026-01-17"
+
+  - file: gtk_ui/panels/diagnostics.py
+    line: 1374
+    pattern: index_no_check
+    reason: "d.suggestions[0] access is guarded"
+    guard: "if d.suggestions: (line ~1372)"
+    reviewed: "2026-01-17"
+
+  - file: monitoring/mqtt_subscriber.py
+    line: 298
+    pattern: index_no_check
+    reason: "rsplit('/', 1)[0] always returns at least 1 element"
+    guard: "str.rsplit(sep, 1) returns [original] if sep not found, so [0] is always valid"
+    reviewed: "2026-01-17"
+
+  # ===========================================================================
+  # RELIABILITY: Exception Handling Patterns (intentional)
+  # ===========================================================================
+
+  - file: utils/service_check.py
+    line: 174
+    pattern: exception_pass
+    reason: "Socket close in finally block - close errors are non-critical"
+    guard: "Main operation already completed; socket cleanup failure doesn't affect result"
+    reviewed: "2026-01-17"
+
+  - file: utils/service_check.py
+    line: 213
+    pattern: exception_pass
+    reason: "UDP socket close in finally block - close errors are non-critical"
+    guard: "Main operation already completed; socket cleanup failure doesn't affect result"
+    reviewed: "2026-01-17"
+
+  - file: gateway/message_queue.py
+    line: 168
+    pattern: exception_pass
+    reason: "FALSE POSITIVE - exception IS re-raised after rollback"
+    guard: "raise statement on line 170 re-raises the exception"
+    reviewed: "2026-01-17"
+
+
+# ===========================================================================
+# GUIDANCE FOR REVIEWERS
+# ===========================================================================
+#
+# When adding new entries:
+# 1. Verify the guard actually exists at the specified location
+# 2. Explain WHY the pattern is safe, not just WHAT the guard is
+# 3. Update the 'reviewed' date
+# 4. Consider if the code could be refactored to avoid the pattern entirely
+#
+# When auto-review flags new issues:
+# 1. First check if it's a real issue that needs fixing
+# 2. If it's a false positive, add it here with full documentation
+# 3. Consider improving the auto-review patterns to detect the guard
+#
+# Periodic review:
+# - Review this file quarterly to ensure entries are still valid
+# - Remove entries for code that has been refactored
+# - Update line numbers if they've drifted significantly

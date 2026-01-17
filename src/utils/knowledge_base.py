@@ -929,6 +929,14 @@ RELIABILITY:
 
         Returns:
             List of (entry, relevance_score) tuples
+
+        API Contract:
+            - ALWAYS returns a list (never None)
+            - Empty list if no matches found
+            - Each element is a 2-tuple: (KnowledgeEntry, float)
+            - Results sorted by relevance (highest first)
+            - Callers MUST check 'if results:' before accessing results[0]
+            - Tests: tests/test_ai_tools.py::TestKnowledgeBase
         """
         # Extract keywords from question
         words = re.findall(r'\b\w+\b', question.lower())

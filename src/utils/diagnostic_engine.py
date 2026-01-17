@@ -1097,6 +1097,15 @@ def diagnose(message: str, category: Category = Category.CONNECTIVITY,
         )
         if diagnosis:
             print(diagnosis.explanation)
+
+    API Contract:
+        - Returns Diagnosis object if symptom matched, None otherwise
+        - Callers MUST check 'if diagnosis:' before accessing attributes
+        - Diagnosis.likely_cause: str explaining the probable cause
+        - Diagnosis.suggestions: List[str] of actionable fixes (may be empty)
+        - Diagnosis.auto_recovery: Optional[str] recovery action
+        - Thread-safe (uses singleton engine)
+        - Tests: tests/test_diagnostics.py
     """
     engine = get_diagnostic_engine()
     return engine.report_symptom(message, category, severity, context, source)
