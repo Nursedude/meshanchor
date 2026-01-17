@@ -1,0 +1,86 @@
+# MeshForge Example: Raspberry Pi SPI HAT Configuration
+#
+# For SPI-connected LoRa HATs (MeshAdv-Pi-Hat, Waveshare, etc.)
+# Copy to: /etc/meshtasticd/config.d/spi-hat.yaml
+#
+# IMPORTANT: Enable SPI first!
+#   sudo raspi-config nonint do_spi 0
+#   sudo reboot
+
+# === LoRa Radio Configuration ===
+Lora:
+  # --- GPIO Pin Mapping ---
+  # These must match your HAT's wiring. Common configurations:
+  #
+  # MeshAdv-Pi-Hat:     CS=21, IRQ=16, Busy=20, Reset=18
+  # Waveshare SX1262:   CS=21, IRQ=16, Busy=20, Reset=18
+  # Adafruit RFM9x:     CS=25, IRQ=22, Reset=17 (no Busy)
+
+  CS: 21              # SPI Chip Select (NSS)
+  IRQ: 16             # Interrupt (DIO1)
+  Busy: 20            # Busy signal (SX1262 only)
+  Reset: 18           # Reset pin
+
+  # --- RF Switch (SX1262/SX1268 only) ---
+  # Some HATs have TX/RX enable pins
+  # RXen: 12          # RX enable GPIO
+  # TXen: 13          # TX enable GPIO
+
+  # Use DIO2 as RF switch (most SX1262 modules)
+  DIO2_AS_RF_SWITCH: true
+
+  # Enable TCXO voltage control (temperature stability)
+  DIO3_TCXO_VOLTAGE: true
+
+  # --- Radio Parameters (Optional) ---
+  # Uncomment to override defaults. Usually set via Meshtastic app/CLI instead.
+  #
+  # Bandwidth: 250        # kHz: 125, 250, 500
+  # SpreadFactor: 11      # 7-12 (higher = longer range, slower)
+  # CodingRate: 8         # 5-8 (4/5 to 4/8)
+  # TXpower: 20           # dBm (check your hardware max)
+  # HopLimit: 3           # 0-7
+  # ChannelNum: 20        # Frequency slot
+
+# === GPS Configuration (Optional) ===
+GPS:
+  # Serial port for GPS module
+  # Pi 3/4/5: /dev/ttyS0
+  # Older Pi:  /dev/ttyAMA0
+  SerialPath: /dev/ttyS0
+
+  # PPS pin for precise timing (optional)
+  # PPSGpio: 23
+
+# === I2C Sensors (Optional) ===
+I2C:
+  # I2C bus for BME280, OLED displays, etc.
+  I2CDevice: /dev/i2c-1
+
+# === TCP Interface ===
+TCP:
+  Port: 4403              # MeshForge connects here
+
+# === Web Interface ===
+Webserver:
+  Port: 443
+
+# === Logging ===
+Logging:
+  LogLevel: info
+
+# === Common HAT GPIO Mappings ===
+#
+# MeshAdv-Pi-Hat (SX1262):
+#   CS=21, IRQ=16, Busy=20, Reset=18, RXen=12, TXen=13
+#   GPS: /dev/ttyS0, PPS=23
+#
+# Waveshare SX1262 HAT:
+#   CS=21, IRQ=16, Busy=20, Reset=18
+#   DIO2_AS_RF_SWITCH: true
+#
+# Adafruit RFM95W:
+#   CS=25, IRQ=22, Reset=17
+#   (No Busy pin - older SX127x chip)
+#
+# Verify your HAT's pinout before using!
