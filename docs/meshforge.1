@@ -1,0 +1,98 @@
+.TH MESHFORGE 1 "January 2026" "MeshForge 0.4.6-beta" "User Commands"
+.SH NAME
+meshforge \- Mesh Network Operations Center for Meshtastic and Reticulum
+.SH SYNOPSIS
+.B meshforge
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B MeshForge
+is a Network Operations Center that bridges Meshtastic and Reticulum (RNS) mesh networks. It provides unified monitoring, configuration, and AI-powered diagnostics for LoRa mesh networks.
+.SH COMMANDS
+.TP
+.B meshforge
+Launch the interface wizard (auto-detects best UI)
+.TP
+.B meshforge-gtk
+Launch GTK4 desktop interface
+.TP
+.B meshforge-web
+Launch web dashboard (default: http://localhost:8880)
+.TP
+.B meshforge-cli
+Launch rich CLI interface
+.SH OPTIONS
+.TP
+.B \-\-help
+Show help message and exit
+.TP
+.B \-\-version
+Show version number and exit
+.SH INTERFACES
+.TP
+.B TUI (Terminal User Interface)
+Best for SSH and headless systems. Uses whiptail/dialog for raspi-config style menus.
+.TP
+.B GTK4 Desktop
+Full graphical interface with panels for gateway, nodes, maps, and configuration.
+.TP
+.B Web Dashboard
+Browser-based interface accessible at http://localhost:8880. Supports authentication.
+.TP
+.B Standalone
+Zero-dependency mode for minimal installations.
+.SH FEATURES
+.TP
+.B Gateway Bridge
+Bidirectional message routing between Meshtastic and Reticulum networks.
+.TP
+.B AI Diagnostics
+Intelligent symptom analysis with rule-based (standalone) or Claude-powered (PRO) diagnostics.
+.TP
+.B RF Tools
+Free space path loss, Fresnel zone, link budget calculations.
+.TP
+.B Coverage Maps
+Generate interactive HTML maps with node positions and coverage estimation.
+.TP
+.B Service Management
+Start, stop, restart meshtasticd with live log viewing.
+.SH FILES
+.TP
+.I ~/.config/meshforge/gateway.json
+User gateway configuration
+.TP
+.I /etc/meshtasticd/config.d/
+Active hardware configurations
+.TP
+.I /etc/meshtasticd/available.d/
+Available hardware templates
+.TP
+.I /opt/meshforge/
+Installation directory (when installed via install.sh)
+.SH ENVIRONMENT
+.TP
+.B ANTHROPIC_API_KEY
+Set to enable PRO mode with Claude AI diagnostics
+.TP
+.B SUDO_USER
+Used to determine real user home directory when running with sudo
+.SH EXAMPLES
+.TP
+Launch with auto-detection:
+.B sudo meshforge
+.TP
+Start web dashboard on all interfaces:
+.B sudo python3 src/main_web.py --host 0.0.0.0
+.TP
+Run as systemd service:
+.B sudo systemctl enable meshforge
+.B sudo systemctl start meshforge
+.SH BUGS
+Report bugs at: https://github.com/Nursedude/meshforge/issues
+.SH AUTHOR
+WH6GXZ (Nursedude)
+.SH SEE ALSO
+.BR meshtastic (1),
+.BR rnsd (1)
+.SH LICENSE
+GPL-3.0

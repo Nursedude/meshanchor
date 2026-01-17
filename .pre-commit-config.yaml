@@ -1,0 +1,47 @@
+# Pre-commit hooks for MeshForge
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # Standard hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Python syntax check
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-ast
+
+  # MeshForge custom linter
+  - repo: local
+    hooks:
+      - id: meshforge-lint
+        name: MeshForge Security Linter
+        entry: python3 scripts/lint.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ['--all']
+
+      - id: no-shell-true
+        name: Check for shell=True (MF002)
+        entry: bash -c 'grep -rn "shell=True" src/ --include="*.py" && exit 1 || exit 0'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: no-bare-except
+        name: Check for bare except (MF003)
+        entry: bash -c '! grep -rn "^[[:space:]]*except:[[:space:]]*$" src/ --include="*.py"'
+        language: system
+        types: [python]
+        pass_filenames: false
