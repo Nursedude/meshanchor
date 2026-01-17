@@ -128,16 +128,69 @@ class ComponentsMixin:
             return False
 
     def _check_rns_service(self):
-        """Check if rnsd service is running"""
+        """Check if rnsd service is running.
+
+        Uses multiple detection methods for reliability:
+        1. UDP port 37428 check (RNS shared instance port)
+        2. Process check (pgrep)
+        3. Systemd status
+        """
+        import socket
+
+        # Method 1: Check if UDP 37428 (RNS shared instance port) is in use
+        # This is the most reliable indicator since rnsd MUST bind to this port
         try:
-            # Check for rnsd process
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1)
+            try:
+                sock.bind(('127.0.0.1', 37428))
+                # If we can bind, rnsd is NOT running
+                sock.close()
+            except OSError as e:
+                sock.close()
+                # EADDRINUSE means rnsd IS running
+                if e.errno in (98, 48, 10048):  # Linux, macOS, Windows
+                    logger.debug("[RNS] rnsd detected via UDP 37428 port check")
+                    return True
+        except Exception as e:
+            logger.debug(f"[RNS] UDP port check failed: {e}")
+
+        # Method 2: Check for rnsd process with pgrep
+        try:
+            # Check with -f to match full command line
             result = subprocess.run(
                 ['pgrep', '-f', 'rnsd'],
                 capture_output=True, text=True, timeout=5
             )
-            return result.returncode == 0
-        except Exception:
-            return False
+            if result.returncode == 0 and result.stdout.strip():
+                logger.debug("[RNS] rnsd detected via pgrep -f")
+                return True
+
+            # Also try without -f (just process name)
+            result = subprocess.run(
+                ['pgrep', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                logger.debug("[RNS] rnsd detected via pgrep")
+                return True
+        except Exception as e:
+            logger.debug(f"[RNS] pgrep check failed: {e}")
+
+        # Method 3: Check systemd service status
+        try:
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip() == 'active':
+                logger.debug("[RNS] rnsd detected via systemd")
+                return True
+        except Exception as e:
+            logger.debug(f"[RNS] systemd check failed: {e}")
+
+        logger.debug("[RNS] rnsd not detected by any method")
+        return False
 
     def _get_package_version(self, package):
         """Get installed version of a pip package.

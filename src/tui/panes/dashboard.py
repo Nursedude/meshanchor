@@ -230,20 +230,41 @@ class DashboardPane(Container):
                 except Exception:
                     pass
 
-        # Check RNS
+        # Check RNS - use UDP port check first (most reliable)
+        rnsd_running = False
         try:
-            result = await asyncio.create_subprocess_exec(
-                'systemctl', 'is-active', 'rnsd',
-                stdout=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await result.communicate()
-            status = stdout.decode().strip()
-            if status == "active":
-                log.write("[green][OK][/green] rnsd running")
-            else:
-                log.write("[yellow][~][/yellow] rnsd not running")
-        except Exception:  # Error reported to user
-            log.write("[yellow][~][/yellow] rnsd not found")
+            # Check if UDP 37428 is in use (rnsd shared instance port)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1)
+            try:
+                sock.bind(('127.0.0.1', 37428))
+                sock.close()
+                # If we can bind, rnsd is NOT running
+            except OSError as e:
+                sock.close()
+                if e.errno in (98, 48, 10048):  # EADDRINUSE
+                    rnsd_running = True
+        except Exception:
+            pass
+
+        # Fallback to systemctl if UDP check didn't confirm running
+        if not rnsd_running:
+            try:
+                result = await asyncio.create_subprocess_exec(
+                    'systemctl', 'is-active', 'rnsd',
+                    stdout=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await result.communicate()
+                status = stdout.decode().strip()
+                if status == "active":
+                    rnsd_running = True
+            except Exception:
+                pass
+
+        if rnsd_running:
+            log.write("[green][OK][/green] rnsd running")
+        else:
+            log.write("[yellow][~][/yellow] rnsd not running")
 
         # Check SPI
         if Path('/dev/spidev0.0').exists() or Path('/dev/spidev0.1').exists():
@@ -332,18 +353,42 @@ class DashboardPane(Container):
         except Exception as e:
             logger.debug(f"Node fetch error: {e}")
 
-        # RNS Status
+        # RNS Status - use UDP port check first (most reliable)
         try:
             rns_widget = self.query_one("#rns-status", Static)
             rns_detail = self.query_one("#rns-detail", Static)
-            result = await asyncio.create_subprocess_exec(
-                'systemctl', 'is-active', 'rnsd',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await result.communicate()
-            status = stdout.decode().strip()
-            if status == "active":
+
+            # Check if UDP 37428 is in use (rnsd shared instance port)
+            rnsd_running = False
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(1)
+                try:
+                    sock.bind(('127.0.0.1', 37428))
+                    sock.close()
+                except OSError as e:
+                    sock.close()
+                    if e.errno in (98, 48, 10048):  # EADDRINUSE
+                        rnsd_running = True
+            except Exception:
+                pass
+
+            # Fallback to systemctl
+            if not rnsd_running:
+                try:
+                    result = await asyncio.create_subprocess_exec(
+                        'systemctl', 'is-active', 'rnsd',
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, _ = await result.communicate()
+                    status = stdout.decode().strip()
+                    if status == "active":
+                        rnsd_running = True
+                except Exception:
+                    pass
+
+            if rnsd_running:
                 rns_widget.update("[green]● Running[/green]")
                 rns_detail.update("rnsd active")
             else:

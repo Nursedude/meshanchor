@@ -11,6 +11,8 @@ To compile fast version:
 """
 
 import math
+from enum import Enum
+from typing import Dict, Tuple, Optional, NamedTuple
 
 # Try to import Cython-optimized versions
 _USE_FAST = False
@@ -28,6 +30,248 @@ try:
     _USE_FAST = True
 except ImportError:
     pass  # Fall back to pure Python
+
+
+# ============================================================================
+# Signal Quality Classification (based on meshtastic-go/MeshTenna research)
+# Reference: https://github.com/OE3JGW/MeshTenna
+# ============================================================================
+
+class SignalQuality(Enum):
+    """Signal quality classification based on SNR and RSSI thresholds."""
+    EXCELLENT = "excellent"  # Strong signal, well above noise
+    GOOD = "good"            # Reliable communication expected
+    FAIR = "fair"            # May experience occasional packet loss
+    BAD = "bad"              # Unreliable, high packet loss expected
+    NONE = "none"            # No signal or below receiver sensitivity
+
+
+class SignalMetrics(NamedTuple):
+    """Complete signal analysis metrics."""
+    rssi_dbm: float
+    snr_db: float
+    quality: SignalQuality
+    quality_percent: int
+    link_margin_db: float
+    description: str
+
+
+# Signal quality thresholds (from meshtastic-go library)
+# https://github.com/crypto-smoke/meshtastic-go/lora
+SIGNAL_THRESHOLDS = {
+    # (min_snr, min_rssi) for each quality level
+    'excellent': (-3.0, -100.0),   # Strong, reliable link
+    'good': (-7.0, -115.0),        # Normal operation
+    'fair': (-15.0, -126.0),       # Weak but usable
+    # Anything below fair is BAD
+}
+
+# LoRa receiver sensitivity by spreading factor (typical values)
+# Lower SF = less sensitive, Higher SF = more sensitive
+LORA_SENSITIVITY_DBM = {
+    7: -123.0,
+    8: -126.0,
+    9: -129.0,
+    10: -132.0,
+    11: -134.5,
+    12: -137.0,
+}
+
+# Default noise floor for LoRa (can vary with environment)
+DEFAULT_NOISE_FLOOR_DBM = -120.0
+
+
+def classify_signal(snr_db: float, rssi_dbm: float) -> SignalQuality:
+    """
+    Classify signal quality based on SNR and RSSI.
+
+    Based on thresholds from meshtastic-go library used by MeshTenna.
+
+    Args:
+        snr_db: Signal-to-noise ratio in dB
+        rssi_dbm: Received signal strength in dBm
+
+    Returns:
+        SignalQuality enum value
+
+    Example:
+        >>> classify_signal(-5.0, -110.0)
+        SignalQuality.GOOD
+    """
+    if rssi_dbm < -137.0:  # Below SF12 sensitivity
+        return SignalQuality.NONE
+
+    if snr_db >= SIGNAL_THRESHOLDS['excellent'][0] and rssi_dbm >= SIGNAL_THRESHOLDS['excellent'][1]:
+        return SignalQuality.EXCELLENT
+    if snr_db >= SIGNAL_THRESHOLDS['good'][0] and rssi_dbm >= SIGNAL_THRESHOLDS['good'][1]:
+        return SignalQuality.GOOD
+    if snr_db >= SIGNAL_THRESHOLDS['fair'][0] and rssi_dbm >= SIGNAL_THRESHOLDS['fair'][1]:
+        return SignalQuality.FAIR
+
+    return SignalQuality.BAD
+
+
+def signal_quality_percent(snr_db: float, rssi_dbm: float) -> int:
+    """
+    Convert signal metrics to a percentage (0-100).
+
+    Uses a weighted combination of SNR and RSSI normalized to typical ranges.
+
+    Args:
+        snr_db: Signal-to-noise ratio in dB
+        rssi_dbm: Received signal strength in dBm
+
+    Returns:
+        Signal quality as percentage (0-100)
+    """
+    # Normalize SNR: -20 dB to +10 dB range -> 0-100
+    snr_normalized = max(0, min(100, (snr_db + 20) * (100 / 30)))
+
+    # Normalize RSSI: -137 dBm to -70 dBm range -> 0-100
+    rssi_normalized = max(0, min(100, (rssi_dbm + 137) * (100 / 67)))
+
+    # Weight SNR more heavily as it's more indicative of link quality
+    return int(snr_normalized * 0.6 + rssi_normalized * 0.4)
+
+
+def analyze_signal(rssi_dbm: float, snr_db: float,
+                   spreading_factor: int = 11) -> SignalMetrics:
+    """
+    Comprehensive signal analysis with quality classification.
+
+    Args:
+        rssi_dbm: Received signal strength in dBm
+        snr_db: Signal-to-noise ratio in dB
+        spreading_factor: LoRa SF (7-12), affects sensitivity
+
+    Returns:
+        SignalMetrics with complete analysis
+
+    Example:
+        >>> metrics = analyze_signal(-105.0, -3.0, 11)
+        >>> print(f"{metrics.quality.value}: {metrics.description}")
+        excellent: Strong signal with 29.5 dB link margin
+    """
+    quality = classify_signal(snr_db, rssi_dbm)
+    quality_pct = signal_quality_percent(snr_db, rssi_dbm)
+
+    # Calculate link margin (how much above sensitivity)
+    sensitivity = LORA_SENSITIVITY_DBM.get(spreading_factor, -134.5)
+    link_margin = rssi_dbm - sensitivity
+
+    # Generate description
+    descriptions = {
+        SignalQuality.EXCELLENT: f"Strong signal with {link_margin:.1f} dB link margin",
+        SignalQuality.GOOD: f"Good signal, {link_margin:.1f} dB above sensitivity",
+        SignalQuality.FAIR: f"Weak signal, only {link_margin:.1f} dB margin - may have packet loss",
+        SignalQuality.BAD: f"Very weak signal ({link_margin:.1f} dB margin) - unreliable link",
+        SignalQuality.NONE: "No signal detected or below receiver sensitivity",
+    }
+
+    return SignalMetrics(
+        rssi_dbm=rssi_dbm,
+        snr_db=snr_db,
+        quality=quality,
+        quality_percent=quality_pct,
+        link_margin_db=link_margin,
+        description=descriptions[quality]
+    )
+
+
+# ============================================================================
+# Antenna Testing Calculations
+# Reference: https://meshtastic.org/docs/hardware/antennas/antenna-testing/
+# ============================================================================
+
+# Typical connector/cable losses at 915 MHz
+CONNECTOR_LOSS_DB = {
+    'sma': 0.1,      # SMA connector
+    'n_type': 0.05,  # N-type connector
+    'u_fl': 0.2,     # U.FL (small board connector)
+    'bnc': 0.1,      # BNC connector
+}
+
+# Coax cable loss per meter at 915 MHz (dB/m)
+CABLE_LOSS_DB_PER_M = {
+    'rg174': 0.9,    # Thin, flexible, high loss
+    'rg58': 0.5,     # Common, moderate loss
+    'rg8x': 0.3,     # Better, thicker
+    'lmr195': 0.35,  # Good quality thin
+    'lmr240': 0.25,  # Better quality
+    'lmr400': 0.15,  # Low loss, thick
+    'lmr600': 0.10,  # Very low loss
+}
+
+
+def calculate_cable_loss(cable_type: str, length_m: float,
+                         connectors: int = 2) -> float:
+    """
+    Calculate total loss from coax cable and connectors.
+
+    Important for antenna testing - excessive cable loss can mask
+    a good antenna's performance.
+
+    Args:
+        cable_type: Type of coax (e.g., 'rg58', 'lmr400')
+        length_m: Cable length in meters
+        connectors: Number of connectors (default 2 for both ends)
+
+    Returns:
+        Total loss in dB
+
+    Example:
+        >>> calculate_cable_loss('rg58', 3.0, connectors=2)
+        1.7  # 1.5 dB from cable + 0.2 dB from connectors
+    """
+    cable_loss_per_m = CABLE_LOSS_DB_PER_M.get(cable_type.lower(), 0.5)
+    connector_loss = CONNECTOR_LOSS_DB.get('sma', 0.1)  # Assume SMA
+
+    return (cable_loss_per_m * length_m) + (connector_loss * connectors)
+
+
+def effective_radiated_power(tx_power_dbm: float, antenna_gain_dbi: float,
+                             cable_loss_db: float = 0.0) -> float:
+    """
+    Calculate Effective Radiated Power (ERP).
+
+    ERP = TX Power + Antenna Gain - Cable/Connector Losses
+
+    Args:
+        tx_power_dbm: Transmitter output power in dBm
+        antenna_gain_dbi: Antenna gain in dBi
+        cable_loss_db: Total cable and connector loss in dB
+
+    Returns:
+        ERP in dBm
+
+    Note:
+        ERP is regulated. US Part 15 allows 1W (30 dBm) ERP for 915 MHz ISM.
+    """
+    return tx_power_dbm + antenna_gain_dbi - cable_loss_db
+
+
+def required_antenna_height(distance_km: float, freq_mhz: float = 915.0,
+                            clearance_percent: float = 0.6) -> float:
+    """
+    Calculate minimum antenna height for Fresnel zone clearance.
+
+    For reliable links, at least 60% of the first Fresnel zone should be clear.
+
+    Args:
+        distance_km: Link distance in kilometers
+        freq_mhz: Frequency in MHz (default 915 for US LoRa)
+        clearance_percent: Fraction of Fresnel zone to clear (default 0.6)
+
+    Returns:
+        Minimum height above midpoint obstacles in meters
+
+    Example:
+        >>> required_antenna_height(5.0)  # 5 km link
+        12.5  # Need ~12.5m clearance at midpoint
+    """
+    freq_ghz = freq_mhz / 1000.0
+    fresnel_r = fresnel_radius(distance_km, freq_ghz)
+    return fresnel_r * clearance_percent
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

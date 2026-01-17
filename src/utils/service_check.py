@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 from enum import Enum
 
-from utils.ports import MESHTASTICD_PORT, HAMCLOCK_PORT, MQTT_PORT
+from utils.ports import MESHTASTICD_PORT, HAMCLOCK_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,8 @@ KNOWN_SERVICES = {
         'fix_hint': 'Start with: sudo systemctl start meshtasticd',
     },
     'rnsd': {
-        'port': None,  # Uses socket, not TCP
+        'port': RNS_SHARED_INSTANCE_PORT,  # UDP 37428 - shared instance port
+        'port_type': 'udp',  # rnsd uses UDP, not TCP
         'systemd_name': 'rnsd',
         'description': 'Reticulum Network Stack daemon',
         'fix_hint': 'Start with: rnsd or sudo systemctl start rnsd',
@@ -115,6 +116,79 @@ def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool
                 pass
 
 
+def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> bool:
+    """
+    Check if a UDP port is in use by trying to bind to it.
+
+    For services like rnsd that use UDP, we can check if the port is already
+    bound by attempting to bind ourselves - if it fails with EADDRINUSE, the
+    service is running.
+
+    Args:
+        port: UDP port number
+        host: Host address to check (default 127.0.0.1)
+        timeout: Socket timeout in seconds
+
+    Returns:
+        True if port appears to be in use (service running), False otherwise
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        # Try to bind to the port - if it fails, port is in use
+        sock.bind((host, port))
+        # If we successfully bound, port was NOT in use
+        return False
+    except OSError as e:
+        # EADDRINUSE (98 on Linux) means the port is already bound
+        # This indicates the service IS running
+        if e.errno in (98, 48, 10048):  # Linux, macOS, Windows EADDRINUSE
+            return True
+        logger.debug(f"UDP port check error for {host}:{port}: {e}")
+        return False
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def check_process_running(process_name: str) -> bool:
+    """
+    Check if a process is running by name.
+
+    Args:
+        process_name: Name of the process to check (e.g., 'rnsd')
+
+    Returns:
+        True if process is running, False otherwise
+    """
+    try:
+        # Use pgrep with multiple patterns to catch different invocation methods
+        # -f matches the full command line
+        result = subprocess.run(
+            ['pgrep', '-f', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+
+        # Also check with just the process name (no -f)
+        result = subprocess.run(
+            ['pgrep', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0 and result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def check_systemd_service(service_name: str) -> Tuple[bool, bool]:
     """
     Check if a systemd service is running and enabled.
@@ -157,8 +231,13 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     """
     Check if a service is available and provide actionable feedback.
 
+    Uses multiple detection methods for reliability:
+    1. Port check (TCP or UDP based on service config)
+    2. Process check (pgrep)
+    3. Systemd status
+
     Args:
-        name: Service name (e.g., 'meshtasticd', 'hamclock')
+        name: Service name (e.g., 'meshtasticd', 'hamclock', 'rnsd')
         port: Override port to check (uses known default if not specified)
         host: Host to check (default localhost)
 
@@ -168,42 +247,61 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     # Get known service config
     config = KNOWN_SERVICES.get(name, {})
     check_port_num = port or config.get('port')
+    port_type = config.get('port_type', 'tcp')  # Default to TCP
     systemd_name = config.get('systemd_name', name)
     description = config.get('description', name)
     fix_hint = config.get('fix_hint', f'Start {name} service')
 
-    # Check port if applicable
+    # Check port if applicable (TCP or UDP)
+    port_is_open = False
     if check_port_num:
-        if check_port(check_port_num, host):
+        if port_type == 'udp':
+            port_is_open = check_udp_port(check_port_num, host)
+        else:
+            port_is_open = check_port(check_port_num, host)
+
+        if port_is_open:
+            proto = 'UDP' if port_type == 'udp' else 'TCP'
             return ServiceStatus(
                 name=name,
                 available=True,
                 state=ServiceState.AVAILABLE,
-                message=f"{description} is running on port {check_port_num}",
+                message=f"{description} is running ({proto} {check_port_num})",
                 port=check_port_num
             )
+
+    # Check if process is running (catches non-systemd starts)
+    if check_process_running(systemd_name):
+        # Process is running - if we have a port and it's not open,
+        # it might be starting up or using a different port
+        if check_port_num and not port_is_open:
+            # Service running but port not responding - might be starting
+            return ServiceStatus(
+                name=name,
+                available=True,  # Mark as available since process IS running
+                state=ServiceState.AVAILABLE,
+                message=f"{description} is running (process detected)",
+                port=check_port_num
+            )
+        return ServiceStatus(
+            name=name,
+            available=True,
+            state=ServiceState.AVAILABLE,
+            message=f"{description} is running (process detected)"
+        )
 
     # Check systemd service
     is_running, is_enabled = check_systemd_service(systemd_name)
 
     if is_running:
-        # Service running but port not open (maybe wrong port?)
-        if check_port_num:
-            return ServiceStatus(
-                name=name,
-                available=False,
-                state=ServiceState.PORT_CLOSED,
-                message=f"{description} is running but port {check_port_num} is not responding",
-                fix_hint=f"Check if {name} is configured for port {check_port_num}",
-                port=check_port_num
-            )
-        else:
-            return ServiceStatus(
-                name=name,
-                available=True,
-                state=ServiceState.AVAILABLE,
-                message=f"{description} is running"
-            )
+        # Systemd says running but port not open and process not found
+        # Trust systemd in this case
+        return ServiceStatus(
+            name=name,
+            available=True,
+            state=ServiceState.AVAILABLE,
+            message=f"{description} is running (systemd)"
+        )
 
     if is_enabled:
         return ServiceStatus(
@@ -228,8 +326,8 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 name=name,
                 available=False,
                 state=ServiceState.NOT_INSTALLED,
-                message=f"{description} is not installed",
-                fix_hint=f"Install {name} first",
+                message=f"{description} is not installed (no systemd service)",
+                fix_hint=f"Install {name} first or start manually",
                 port=check_port_num
             )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

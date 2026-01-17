@@ -776,16 +776,16 @@ class RadioConfigSimple(Gtk.Box):
 
                 # Get channel info (all 8 slots)
                 channels = iface.localNode.channels
-                channel_info = []  # List of dicts for each active channel
+                channel_info = []  # List of dicts for ALL channels (not just active)
+                active_count = 0
                 if channels:
                     for idx, ch in enumerate(channels):
                         if idx >= 8:  # Max 8 channels
                             break
-                        # Check if channel is active (has PRIMARY or SECONDARY role)
+                        # Get channel role (0=DISABLED, 1=PRIMARY, 2=SECONDARY)
                         ch_role_int = int(ch.role) if hasattr(ch, 'role') else 0
-                        # Role 0 = DISABLED, 1 = PRIMARY, 2 = SECONDARY
-                        if ch_role_int == 0:
-                            continue  # Skip disabled channels
+                        if ch_role_int != 0:
+                            active_count += 1
 
                         ch_data = {
                             'index': idx,
@@ -793,7 +793,8 @@ class RadioConfigSimple(Gtk.Box):
                             'psk_status': 'Unknown',
                             'uplink': False,
                             'downlink': False,
-                            'role': CHANNEL_ROLES[ch_role_int] if ch_role_int < len(CHANNEL_ROLES) else str(ch_role_int)
+                            'role': CHANNEL_ROLES[ch_role_int] if ch_role_int < len(CHANNEL_ROLES) else str(ch_role_int),
+                            'is_active': ch_role_int != 0
                         }
 
                         if hasattr(ch, 'settings'):
@@ -813,6 +814,7 @@ class RadioConfigSimple(Gtk.Box):
                                 else:
                                     ch_data['psk_status'] = 'None (Open)'
 
+                        # Include ALL channels, not just active ones
                         channel_info.append(ch_data)
 
                 # For backward compatibility, extract ch0 data
@@ -858,20 +860,28 @@ class RadioConfigSimple(Gtk.Box):
                 if ntp_server:
                     info += f"NTP: {ntp_server}\n"
 
-                # Display all active channels
+                # Display all 8 channels (active and disabled)
+                info += f"\n=== Channels ({active_count} active of {len(channel_info)}) ===\n"
                 if channel_info:
-                    info += f"\n=== Channels ({len(channel_info)} active) ===\n"
                     for ch_data in channel_info:
                         ch_idx = ch_data['index']
-                        ch_name = ch_data['name'] or '(default)' if ch_idx == 0 else ch_data['name'] or f'(ch{ch_idx})'
-                        info += f"\n[{ch_idx}] {ch_name}\n"
+                        is_active = ch_data.get('is_active', False)
+                        status_marker = '*' if is_active else '-'
+
+                        if ch_idx == 0:
+                            ch_name = ch_data['name'] or '(LongFast)'
+                        else:
+                            ch_name = ch_data['name'] or f'(empty)'
+
+                        info += f"\n[{ch_idx}]{status_marker} {ch_name}\n"
                         info += f"    Role: {ch_data['role']}\n"
-                        info += f"    PSK: {ch_data['psk_status']}\n"
-                        if ch_data['uplink'] or ch_data['downlink']:
-                            info += f"    MQTT: {'↑' if ch_data['uplink'] else ''}{'↓' if ch_data['downlink'] else ''}\n"
+                        if is_active:
+                            info += f"    PSK: {ch_data['psk_status']}\n"
+                            if ch_data['uplink'] or ch_data['downlink']:
+                                info += f"    MQTT: {'↑' if ch_data['uplink'] else ''}{'↓' if ch_data['downlink'] else ''}\n"
                 else:
-                    info += f"\n=== Channels ===\n"
-                    info += f"No active channels found\n"
+                    info += f"No channel data available\n"
+                info += f"\n* = active channel, - = disabled\n"
 
                 info += f"\n=== Power ===\n"
                 info += f"Power Saving: {'Yes' if power_saving else 'No'}"
