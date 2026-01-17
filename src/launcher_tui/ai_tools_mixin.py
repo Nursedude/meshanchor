@@ -440,7 +440,7 @@ class AIToolsMixin:
             # parse the actual meshtastic output format
             return nodes
 
-        except Exception:
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
             return []
 
     def _get_nodes_from_mqtt(self):
@@ -460,10 +460,10 @@ class AIToolsMixin:
                     capture_output=True,
                     timeout=10
                 )
-            except Exception:
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 try:
                     webbrowser.open(url)
-                except Exception:
+                except (webbrowser.Error, OSError):
                     pass
 
         threading.Thread(target=do_open, daemon=True).start()

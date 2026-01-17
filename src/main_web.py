@@ -1043,6 +1043,17 @@ def favicon():
     return '', 204
 
 
+def _check_port_health(host: str, port: int) -> str:
+    """Check if a port is listening with proper socket cleanup."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            result = sock.connect_ex((host, port))
+            return 'up' if result == 0 else 'down'
+    except (socket.error, OSError):
+        return 'unknown'
+
+
 @app.route('/health')
 @app.route('/api/health')
 def health_check():
@@ -1054,32 +1065,18 @@ def health_check():
     - services: Status of key services
     - timestamp: Current server time
     """
-    import time
+    services = {
+        'meshtasticd': _check_port_health('localhost', 4403),
+        'rnsd': _check_port_health('localhost', 37428),
+    }
 
-    health_status = "healthy"
-    services = {}
-
-    # Check meshtasticd
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('localhost', 4403))
-        sock.close()
-        services['meshtasticd'] = 'up' if result == 0 else 'down'
-        if result != 0:
-            health_status = "degraded"
-    except Exception:
-        services['meshtasticd'] = 'unknown'
-
-    # Check rnsd (port 37428 default)
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('localhost', 37428))
-        sock.close()
-        services['rnsd'] = 'up' if result == 0 else 'down'
-    except Exception:
-        services['rnsd'] = 'unknown'
+    # Determine overall health status
+    if services['meshtasticd'] == 'down':
+        health_status = "degraded"
+    elif 'unknown' in services.values():
+        health_status = "degraded"
+    else:
+        health_status = "healthy"
 
     return jsonify({
         'status': health_status,
