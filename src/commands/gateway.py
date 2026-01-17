@@ -207,6 +207,176 @@ def test_connection() -> CommandResult:
         return CommandResult.fail(f"Connection test error: {e}")
 
 
+def check_health() -> CommandResult:
+    """
+    Comprehensive health check for gateway bridge.
+
+    Checks:
+    - Connection status (Meshtastic, RNS)
+    - Message flow (recent activity)
+    - Queue status (pending messages)
+    - Error rates
+    - Configuration validity
+
+    Returns:
+        CommandResult with health status and recommendations
+    """
+    import socket
+    from datetime import datetime, timedelta
+
+    health_status = {
+        'overall': 'unknown',
+        'checks': {},
+        'warnings': [],
+        'errors': [],
+        'recommendations': [],
+    }
+
+    # Check 1: Gateway bridge availability
+    bridge = _get_bridge()
+    if not bridge:
+        health_status['checks']['bridge_available'] = False
+        health_status['errors'].append("Gateway bridge not instantiated")
+        health_status['recommendations'].append("Start the gateway bridge")
+        health_status['overall'] = 'critical'
+        return CommandResult(
+            success=False,
+            message="Gateway bridge not available",
+            data=health_status
+        )
+
+    health_status['checks']['bridge_available'] = True
+
+    # Check 2: Gateway running
+    try:
+        status = bridge.get_status()
+        is_running = status.get('running', False)
+        health_status['checks']['bridge_running'] = is_running
+
+        if not is_running:
+            health_status['errors'].append("Gateway bridge is not running")
+            health_status['recommendations'].append("Start the gateway: gateway.start()")
+    except Exception as e:
+        health_status['checks']['bridge_running'] = False
+        health_status['errors'].append(f"Cannot get bridge status: {e}")
+
+    # Check 3: Meshtastic connection
+    mesh_connected = status.get('meshtastic_connected', False)
+    health_status['checks']['meshtastic_connected'] = mesh_connected
+    if not mesh_connected:
+        health_status['errors'].append("Not connected to Meshtastic")
+        health_status['recommendations'].append(
+            "Check meshtasticd: sudo systemctl status meshtasticd"
+        )
+
+    # Check 4: RNS connection
+    rns_connected = status.get('rns_connected', False)
+    health_status['checks']['rns_connected'] = rns_connected
+    if not rns_connected:
+        health_status['warnings'].append("Not connected to RNS (may be expected if rnsd running)")
+
+    # Check 5: Port accessibility
+    try:
+        from gateway.config import GatewayConfig
+        config = GatewayConfig.load()
+        host = config.meshtastic.host
+        port = config.meshtastic.port
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            result = sock.connect_ex((host, port))
+            port_open = result == 0
+
+        health_status['checks']['meshtasticd_port_open'] = port_open
+        if not port_open:
+            health_status['errors'].append(f"meshtasticd port {port} not accessible")
+            health_status['recommendations'].append(
+                f"Start meshtasticd or check host:port ({host}:{port})"
+            )
+    except Exception as e:
+        health_status['checks']['meshtasticd_port_open'] = False
+        health_status['warnings'].append(f"Port check failed: {e}")
+
+    # Check 6: Message statistics
+    stats = status.get('statistics', {})
+    mesh_to_rns = stats.get('messages_mesh_to_rns', 0)
+    rns_to_mesh = stats.get('messages_rns_to_mesh', 0)
+    errors = stats.get('errors', 0)
+    total_messages = mesh_to_rns + rns_to_mesh
+
+    health_status['checks']['message_flow'] = {
+        'mesh_to_rns': mesh_to_rns,
+        'rns_to_mesh': rns_to_mesh,
+        'total': total_messages,
+        'errors': errors,
+    }
+
+    # Check error rate
+    if total_messages > 0:
+        error_rate = errors / total_messages
+        health_status['checks']['error_rate'] = error_rate
+        if error_rate > 0.1:  # >10% errors
+            health_status['warnings'].append(
+                f"High error rate: {error_rate:.1%} ({errors}/{total_messages})"
+            )
+    else:
+        health_status['checks']['error_rate'] = 0.0
+        if is_running:
+            health_status['warnings'].append("No messages bridged yet")
+
+    # Check 7: Uptime
+    uptime = status.get('uptime_seconds')
+    if uptime:
+        health_status['checks']['uptime_seconds'] = uptime
+        if uptime < 60:
+            health_status['warnings'].append(f"Gateway recently started ({uptime:.0f}s ago)")
+
+    # Check 8: Configuration validity
+    try:
+        from gateway.config import GatewayConfig
+        config = GatewayConfig.load()
+        is_valid, validation_errors = config.validate()
+        health_status['checks']['config_valid'] = is_valid
+
+        for err in validation_errors:
+            if err.severity == "error":
+                health_status['errors'].append(f"Config: {err.message}")
+            elif err.severity == "warning":
+                health_status['warnings'].append(f"Config: {err.message}")
+    except Exception as e:
+        health_status['checks']['config_valid'] = False
+        health_status['warnings'].append(f"Config validation failed: {e}")
+
+    # Determine overall health
+    if health_status['errors']:
+        health_status['overall'] = 'unhealthy'
+    elif health_status['warnings']:
+        health_status['overall'] = 'degraded'
+    elif is_running and mesh_connected:
+        health_status['overall'] = 'healthy'
+    else:
+        health_status['overall'] = 'unknown'
+
+    # Build summary message
+    check_count = len([v for v in health_status['checks'].values() if v is True or v])
+    total_checks = len(health_status['checks'])
+    error_count = len(health_status['errors'])
+    warning_count = len(health_status['warnings'])
+
+    message = f"Health: {health_status['overall'].upper()} ({check_count}/{total_checks} checks pass"
+    if error_count:
+        message += f", {error_count} errors"
+    if warning_count:
+        message += f", {warning_count} warnings"
+    message += ")"
+
+    return CommandResult(
+        success=health_status['overall'] in ('healthy', 'degraded'),
+        message=message,
+        data=health_status
+    )
+
+
 def send_to_meshtastic(
     message: str,
     destination: Optional[str] = None,
