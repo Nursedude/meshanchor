@@ -125,15 +125,15 @@ class MessageListener:
         try:
             from pubsub import pub
             pub.unsubscribe(self._on_receive, "meshtastic.receive")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Cleanup: pubsub unsubscribe: {e}")
 
         # Close interface
         if self._interface:
             try:
                 self._interface.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Cleanup: interface close: {e}")
             self._interface = None
 
         self._status.state = DISCONNECTED
