@@ -5,12 +5,112 @@ Handles persistent configuration for RNS-Meshtastic bridge
 
 import json
 import os
+import re
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CONFIGURATION VALIDATION
+# =============================================================================
+
+class ConfigValidationError:
+    """Represents a configuration validation error or warning."""
+    def __init__(self, field: str, message: str, severity: str = "error"):
+        self.field = field
+        self.message = message
+        self.severity = severity  # "error", "warning", "info"
+
+    def __str__(self):
+        return f"[{self.severity.upper()}] {self.field}: {self.message}"
+
+
+def validate_regex(pattern: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate that a string is a valid regex pattern."""
+    if not pattern:
+        return None  # Empty is valid (means "match all")
+    try:
+        re.compile(pattern)
+        return None
+    except re.error as e:
+        return ConfigValidationError(field_name, f"Invalid regex: {e}")
+
+
+def validate_port(port: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate that a port number is in valid range."""
+    if not 1 <= port <= 65535:
+        return ConfigValidationError(field_name, f"Port {port} out of range (1-65535)")
+    return None
+
+
+def validate_hop_limit(hop_limit: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate hop limit is in Meshtastic range."""
+    if not 1 <= hop_limit <= 7:
+        return ConfigValidationError(field_name, f"Hop limit {hop_limit} out of range (1-7)")
+    return None
+
+
+def validate_data_speed(speed: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate data speed preset."""
+    if not 0 <= speed <= 8:
+        return ConfigValidationError(field_name, f"Data speed {speed} out of range (0-8)")
+    return None
+
+
+def validate_bridge_mode(mode: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate bridge mode."""
+    valid_modes = ["message_bridge", "rns_transport", "mesh_bridge"]
+    if mode not in valid_modes:
+        return ConfigValidationError(field_name, f"Invalid bridge mode '{mode}'. Valid: {valid_modes}")
+    return None
+
+
+def validate_direction(direction: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate routing direction."""
+    valid = ["bidirectional", "mesh_to_rns", "rns_to_mesh", "primary_to_secondary", "secondary_to_primary"]
+    if direction not in valid:
+        return ConfigValidationError(field_name, f"Invalid direction '{direction}'. Valid: {valid}")
+    return None
+
+
+def validate_dedup_window(seconds: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate dedup window is reasonable."""
+    if seconds < 10:
+        return ConfigValidationError(
+            field_name,
+            f"Dedup window {seconds}s is very short (may miss duplicates)",
+            severity="warning"
+        )
+    if seconds > 600:
+        return ConfigValidationError(
+            field_name,
+            f"Dedup window {seconds}s is very long (may block legitimate messages)",
+            severity="warning"
+        )
+    return None
+
+
+def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[ConfigValidationError]:
+    """Check for incompatible speed/hop combinations."""
+    # High speed + high hops = likely packet loss due to timing
+    if speed >= 7 and hop_limit >= 5:
+        return ConfigValidationError(
+            "rns_transport",
+            f"Speed {speed} with hop_limit {hop_limit} may cause reliability issues (fast speed + many hops)",
+            severity="warning"
+        )
+    # Low speed + low hops = underutilizing range
+    if speed <= 2 and hop_limit <= 2:
+        return ConfigValidationError(
+            "rns_transport",
+            f"Speed {speed} with hop_limit {hop_limit} may underutilize range capability",
+            severity="info"
+        )
+    return None
 
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
@@ -387,3 +487,288 @@ class GatewayConfig:
                 priority=5,
             ),
         ]
+
+    def validate(self) -> Tuple[bool, List[ConfigValidationError]]:
+        """
+        Validate the entire configuration.
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+            is_valid is False only if there are severity="error" issues
+        """
+        errors: List[ConfigValidationError] = []
+
+        # Validate bridge mode
+        err = validate_bridge_mode(self.bridge_mode, "bridge_mode")
+        if err:
+            errors.append(err)
+
+        # Validate meshtastic config
+        err = validate_port(self.meshtastic.port, "meshtastic.port")
+        if err:
+            errors.append(err)
+
+        # Validate RNS transport config
+        err = validate_data_speed(self.rns_transport.data_speed, "rns_transport.data_speed")
+        if err:
+            errors.append(err)
+
+        err = validate_hop_limit(self.rns_transport.hop_limit, "rns_transport.hop_limit")
+        if err:
+            errors.append(err)
+
+        # Check speed/hop combination
+        err = validate_speed_hop_combination(
+            self.rns_transport.data_speed,
+            self.rns_transport.hop_limit
+        )
+        if err:
+            errors.append(err)
+
+        # Validate mesh bridge config
+        if self.bridge_mode == "mesh_bridge":
+            err = validate_port(self.mesh_bridge.primary.port, "mesh_bridge.primary.port")
+            if err:
+                errors.append(err)
+
+            err = validate_port(self.mesh_bridge.secondary.port, "mesh_bridge.secondary.port")
+            if err:
+                errors.append(err)
+
+            # Check for same port (would conflict)
+            if self.mesh_bridge.primary.port == self.mesh_bridge.secondary.port:
+                errors.append(ConfigValidationError(
+                    "mesh_bridge",
+                    f"Primary and secondary cannot use same port ({self.mesh_bridge.primary.port})"
+                ))
+
+            err = validate_direction(self.mesh_bridge.direction, "mesh_bridge.direction")
+            if err:
+                errors.append(err)
+
+            err = validate_dedup_window(self.mesh_bridge.dedup_window_sec, "mesh_bridge.dedup_window_sec")
+            if err:
+                errors.append(err)
+
+            # Validate message filters
+            err = validate_regex(self.mesh_bridge.message_filter, "mesh_bridge.message_filter")
+            if err:
+                errors.append(err)
+
+            err = validate_regex(self.mesh_bridge.exclude_filter, "mesh_bridge.exclude_filter")
+            if err:
+                errors.append(err)
+
+        # Validate routing rules
+        for i, rule in enumerate(self.routing_rules):
+            prefix = f"routing_rules[{i}]"
+
+            err = validate_direction(rule.direction, f"{prefix}.direction")
+            if err:
+                errors.append(err)
+
+            err = validate_regex(rule.source_filter, f"{prefix}.source_filter")
+            if err:
+                errors.append(err)
+
+            err = validate_regex(rule.dest_filter, f"{prefix}.dest_filter")
+            if err:
+                errors.append(err)
+
+            err = validate_regex(rule.message_filter, f"{prefix}.message_filter")
+            if err:
+                errors.append(err)
+
+        # Check for duplicate rule names
+        rule_names = [r.name for r in self.routing_rules]
+        seen = set()
+        for name in rule_names:
+            if name in seen:
+                errors.append(ConfigValidationError(
+                    "routing_rules",
+                    f"Duplicate rule name: '{name}'"
+                ))
+            seen.add(name)
+
+        # Determine if valid (only errors count, not warnings/info)
+        is_valid = not any(e.severity == "error" for e in errors)
+
+        return is_valid, errors
+
+    def validate_and_log(self) -> bool:
+        """Validate config and log any issues. Returns True if valid."""
+        is_valid, errors = self.validate()
+
+        for err in errors:
+            if err.severity == "error":
+                logger.error(str(err))
+            elif err.severity == "warning":
+                logger.warning(str(err))
+            else:
+                logger.info(str(err))
+
+        return is_valid
+
+    # =========================================================================
+    # CONFIGURATION TEMPLATES
+    # Pre-configured setups for common use cases
+    # =========================================================================
+
+    @classmethod
+    def template_basic_bridge(cls) -> 'GatewayConfig':
+        """
+        Basic message bridge between Meshtastic and RNS.
+
+        Use case: Simple bidirectional message forwarding
+        Requirements: meshtasticd running on localhost:4403, rnsd running
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "message_bridge"
+        config.meshtastic.host = "localhost"
+        config.meshtastic.port = 4403
+        config.default_route = "bidirectional"
+        config.routing_rules = config.get_default_rules()
+        return config
+
+    @classmethod
+    def template_rns_over_mesh(cls, speed: int = 8, hop_limit: int = 3) -> 'GatewayConfig':
+        """
+        RNS transport over Meshtastic (RNS uses LoRa as network layer).
+
+        Use case: Run RNS apps (NomadNet, Sideband) over LoRa mesh
+        Requirements: meshtasticd on localhost:4403 with radio
+
+        Args:
+            speed: LoRa speed preset (0-8, higher=faster/shorter range)
+            hop_limit: Mesh hop limit (1-7)
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "rns_transport"
+        config.rns_transport.enabled = True
+        config.rns_transport.connection_type = "tcp"
+        config.rns_transport.device_path = "localhost:4403"
+        config.rns_transport.data_speed = speed
+        config.rns_transport.hop_limit = hop_limit
+        return config
+
+    @classmethod
+    def template_dual_preset_bridge(cls,
+                                     primary_port: int = 4403,
+                                     secondary_port: int = 4404,
+                                     primary_preset: str = "LONG_FAST",
+                                     secondary_preset: str = "SHORT_TURBO") -> 'GatewayConfig':
+        """
+        Bridge two Meshtastic networks with different LoRa presets.
+
+        Use case: Connect a long-range mesh to a high-speed local mesh
+        Requirements: Two meshtasticd instances on different ports
+
+        Args:
+            primary_port: Port for primary (usually long-range) meshtasticd
+            secondary_port: Port for secondary (usually fast) meshtasticd
+            primary_preset: LoRa preset for primary network
+            secondary_preset: LoRa preset for secondary network
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "mesh_bridge"
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.primary = MeshtasticConfig(
+            host="localhost",
+            port=primary_port,
+            preset=primary_preset,
+            name="longrange"
+        )
+        config.mesh_bridge.secondary = MeshtasticConfig(
+            host="localhost",
+            port=secondary_port,
+            preset=secondary_preset,
+            name="highspeed"
+        )
+        config.mesh_bridge.direction = "bidirectional"
+        config.mesh_bridge.dedup_window_sec = 60
+        config.mesh_bridge.add_prefix = True
+        return config
+
+    @classmethod
+    def template_mqtt_monitor(cls, mqtt_topic: str = "msh/+/json/+") -> 'GatewayConfig':
+        """
+        Meshtastic MQTT monitoring (receive-only, no radio needed).
+
+        Use case: Monitor a Meshtastic network via public MQTT
+        Requirements: Network connection to MQTT broker
+
+        Args:
+            mqtt_topic: MQTT topic pattern to subscribe
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "message_bridge"
+        config.meshtastic.use_mqtt = True
+        config.meshtastic.mqtt_topic = mqtt_topic
+        config.default_route = "mesh_to_rns"  # Receive only
+        return config
+
+    @classmethod
+    def template_relay_node(cls) -> 'GatewayConfig':
+        """
+        Relay node configuration (optimized for forwarding).
+
+        Use case: Dedicated relay/repeater node
+        Requirements: meshtasticd with radio
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "message_bridge"
+        config.meshtastic.host = "localhost"
+        config.meshtastic.port = 4403
+        config.default_route = "bidirectional"
+        config.telemetry.share_position = True
+        config.telemetry.share_battery = True
+        config.telemetry.update_interval = 300  # Less frequent for relay
+        config.log_messages = True
+        config.ai_diagnostics_enabled = True
+        config.snr_analysis = True
+        return config
+
+    @classmethod
+    def get_available_templates(cls) -> Dict[str, str]:
+        """Get list of available configuration templates with descriptions."""
+        return {
+            "basic_bridge": "Simple bidirectional Meshtastic ↔ RNS message bridge",
+            "rns_over_mesh": "Run RNS apps over LoRa mesh (transport mode)",
+            "dual_preset_bridge": "Bridge two Meshtastic networks with different presets",
+            "mqtt_monitor": "Monitor Meshtastic network via MQTT (no radio needed)",
+            "relay_node": "Dedicated relay/repeater node configuration",
+        }
+
+    @classmethod
+    def from_template(cls, template_name: str, **kwargs) -> Optional['GatewayConfig']:
+        """
+        Create a configuration from a template name.
+
+        Args:
+            template_name: One of the template names from get_available_templates()
+            **kwargs: Optional overrides for template parameters
+
+        Returns:
+            GatewayConfig or None if template not found
+        """
+        templates = {
+            "basic_bridge": cls.template_basic_bridge,
+            "rns_over_mesh": cls.template_rns_over_mesh,
+            "dual_preset_bridge": cls.template_dual_preset_bridge,
+            "mqtt_monitor": cls.template_mqtt_monitor,
+            "relay_node": cls.template_relay_node,
+        }
+
+        factory = templates.get(template_name)
+        if factory:
+            try:
+                return factory(**kwargs)
+            except TypeError:
+                # kwargs not supported by this template
+                return factory()
+        return None
