@@ -230,41 +230,18 @@ class DashboardPane(Container):
                 except Exception:
                     pass
 
-        # Check RNS - use UDP port check first (most reliable)
-        rnsd_running = False
-        try:
-            # Check if UDP 37428 is in use (rnsd shared instance port)
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(1)
-            try:
-                sock.bind(('127.0.0.1', 37428))
-                sock.close()
-                # If we can bind, rnsd is NOT running
-            except OSError as e:
-                sock.close()
-                if e.errno in (98, 48, 10048):  # EADDRINUSE
-                    rnsd_running = True
-        except Exception:
-            pass
-
-        # Fallback to systemctl if UDP check didn't confirm running
-        if not rnsd_running:
-            try:
-                result = await asyncio.create_subprocess_exec(
-                    'systemctl', 'is-active', 'rnsd',
-                    stdout=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await result.communicate()
-                status = stdout.decode().strip()
-                if status == "active":
-                    rnsd_running = True
-            except Exception as e:
-                logger.debug(f"rnsd status check failed: {e}")
-
-        if rnsd_running:
-            log.write("[green][OK][/green] rnsd running")
+        # Check RNS - use centralized service checker (SINGLE SOURCE OF TRUTH)
+        if check_service:
+            loop = asyncio.get_event_loop()
+            rns_status = await loop.run_in_executor(
+                None, lambda: check_service('rnsd')
+            )
+            if rns_status.available:
+                log.write("[green][OK][/green] rnsd running")
+            else:
+                log.write("[yellow][~][/yellow] rnsd not running")
         else:
-            log.write("[yellow][~][/yellow] rnsd not running")
+            log.write("[yellow][~][/yellow] rnsd check unavailable")
 
         # Check SPI
         if Path('/dev/spidev0.0').exists() or Path('/dev/spidev0.1').exists():
@@ -353,48 +330,28 @@ class DashboardPane(Container):
         except Exception as e:
             logger.debug(f"Node fetch error: {e}")
 
-        # RNS Status - use UDP port check first (most reliable)
+        # RNS Status - use centralized service checker (SINGLE SOURCE OF TRUTH)
         try:
             rns_widget = self.query_one("#rns-status", Static)
             rns_detail = self.query_one("#rns-detail", Static)
 
-            # Check if UDP 37428 is in use (rnsd shared instance port)
-            rnsd_running = False
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.settimeout(1)
-                try:
-                    sock.bind(('127.0.0.1', 37428))
-                    sock.close()
-                except OSError as e:
-                    sock.close()
-                    if e.errno in (98, 48, 10048):  # EADDRINUSE
-                        rnsd_running = True
-            except Exception:
-                pass
-
-            # Fallback to systemctl
-            if not rnsd_running:
-                try:
-                    result = await asyncio.create_subprocess_exec(
-                        'systemctl', 'is-active', 'rnsd',
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, _ = await result.communicate()
-                    status = stdout.decode().strip()
-                    if status == "active":
-                        rnsd_running = True
-                except Exception as e:
-                    logger.debug(f"rnsd widget status check failed: {e}")
-
-            if rnsd_running:
-                rns_widget.update("[green]● Running[/green]")
-                rns_detail.update("rnsd active")
+            if check_service:
+                # Use centralized checker for consistency across all UIs
+                loop = asyncio.get_event_loop()
+                rns_status = await loop.run_in_executor(
+                    None, lambda: check_service('rnsd')
+                )
+                if rns_status.available:
+                    rns_widget.update("[green]● Running[/green]")
+                    rns_detail.update(rns_status.message or "rnsd active")
+                else:
+                    rns_widget.update("[yellow]○ Inactive[/yellow]")
+                    rns_detail.update("Optional")
             else:
-                rns_widget.update("[yellow]○ Inactive[/yellow]")
-                rns_detail.update("Optional")
-        except Exception:
+                rns_widget.update("[yellow]N/A[/yellow]")
+                rns_detail.update("No checker")
+        except Exception as e:
+            logger.debug(f"RNS status check error: {e}")
             self.query_one("#rns-status", Static).update("[yellow]N/A[/yellow]")
 
         # Version
