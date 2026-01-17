@@ -19,6 +19,14 @@ from .base import CommandResult
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checker (SINGLE SOURCE OF TRUTH)
+try:
+    from utils.service_check import check_service as _check_service
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    _check_service = None
+    HAS_SERVICE_CHECK = False
+
 
 # Security: Regex for validating service names (alphanumeric, underscore, hyphen, @, .)
 _VALID_SERVICE_NAME = re.compile(r'^[a-zA-Z0-9_\-@.]+$')
@@ -46,7 +54,8 @@ KNOWN_SERVICES = {
         'stop_cmd': 'sudo systemctl stop meshtasticd',
     },
     'rnsd': {
-        'port': None,
+        'port': 37428,  # UDP port - use centralized check_service for proper detection
+        'port_type': 'udp',  # Flag to indicate UDP port check needed
         'description': 'Reticulum Network Stack daemon',
         'start_cmd': 'rnsd',  # or sudo systemctl start rnsd
         'stop_cmd': 'sudo systemctl stop rnsd',
@@ -70,6 +79,9 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
     """
     Check service status.
 
+    Uses centralized service_check.check_service() for services with specialized
+    detection methods (e.g., rnsd with UDP port, meshtasticd with TCP).
+
     Args:
         name: Service name
         port: Optional port to check
@@ -88,37 +100,69 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
     is_running = False
     is_enabled = False
     status_detail = "Unknown"
+    port_open = False
 
-    # Check systemd status
-    try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', name],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        if result.stdout.strip() == 'active':
-            is_running = True
-            status_detail = "Running (systemd)"
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    # Check if running as process
-    if not is_running:
+    # Use centralized service checker for consistent detection (SINGLE SOURCE OF TRUTH)
+    # This handles UDP/TCP port checks, pgrep, and systemd properly
+    if HAS_SERVICE_CHECK and name in ('rnsd', 'meshtasticd'):
+        service_status = _check_service(name)
+        is_running = service_status.available
+        status_detail = service_status.message or ("Running" if is_running else "Stopped")
+        port_open = is_running  # If service responds, port is effectively "open"
+        logger.debug(f"[SERVICE] {name} status via check_service: {service_status.state}")
+    else:
+        # Fallback for services without specialized detection
+        # Check systemd status
         try:
             result = subprocess.run(
-                ['pgrep', '-f', name],
+                ['systemctl', 'is-active', name],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=10
             )
-            if result.returncode == 0 and result.stdout.strip():
+            if result.stdout.strip() == 'active':
                 is_running = True
-                status_detail = "Running (process)"
+                status_detail = "Running (systemd)"
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
-    # Check if enabled
+        # Check if running as process
+        if not is_running:
+            try:
+                result = subprocess.run(
+                    ['pgrep', '-f', name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    is_running = True
+                    status_detail = "Running (process)"
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        # Check port if applicable (TCP only for non-specialized services)
+        if check_port and config.get('port_type') != 'udp':
+            import socket
+            sock = None
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2.0)
+                result = sock.connect_ex(('localhost', check_port))
+                port_open = result == 0
+            except (socket.error, OSError):
+                pass
+            finally:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:  # Ignore errors during cleanup
+                        pass
+
+        if not is_running:
+            status_detail = "Stopped"
+
+    # Check if enabled (always check systemd for this)
     try:
         result = subprocess.run(
             ['systemctl', 'is-enabled', name],
@@ -129,28 +173,6 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
         is_enabled = result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
-
-    # Check port if applicable
-    port_open = False
-    if check_port:
-        import socket
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            result = sock.connect_ex(('localhost', check_port))
-            port_open = result == 0
-        except (socket.error, OSError):
-            pass
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:  # Ignore errors during cleanup
-                    pass
-
-    if not is_running:
-        status_detail = "Stopped"
 
     return CommandResult(
         success=is_running,
