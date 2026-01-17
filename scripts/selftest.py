@@ -180,7 +180,19 @@ def main():
 
     # 6. Configuration files
     print(f"\n{CYAN}Configuration{NC}")
-    home = Path.home()
+
+    # Get real user home (handles sudo correctly)
+    try:
+        from utils.paths import get_real_user_home
+        home = get_real_user_home()
+    except ImportError:
+        # Fallback with SUDO_USER handling
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            home = Path(f'/home/{sudo_user}')
+        else:
+            home = Path.home()
+
     config_checks = [
         (home / '.config' / 'meshforge', 'User config directory'),
         (Path('/etc/meshtasticd'), 'meshtasticd config'),
