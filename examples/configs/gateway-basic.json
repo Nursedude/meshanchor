@@ -1,0 +1,47 @@
+{
+  "_name": "Basic Gateway",
+  "_description": "Simple Meshtastic <-> RNS message bridge. The minimal setup to get started.",
+  "_usage": "Copy to ~/.config/meshforge/gateway.json",
+
+  "enabled": true,
+  "auto_start": false,
+  "bridge_mode": "message_bridge",
+
+  "meshtastic": {
+    "host": "localhost",
+    "port": 4403,
+    "channel": 0,
+    "use_mqtt": false,
+    "mqtt_topic": ""
+  },
+
+  "rns": {
+    "config_dir": "",
+    "identity_name": "meshforge_gateway",
+    "announce_interval": 300,
+    "propagation_node": ""
+  },
+
+  "routing_rules": [
+    {
+      "name": "all_traffic",
+      "enabled": true,
+      "direction": "bidirectional",
+      "source_filter": "",
+      "dest_filter": "",
+      "message_filter": "",
+      "priority": 10
+    }
+  ],
+
+  "telemetry": {
+    "share_position": true,
+    "share_battery": true,
+    "share_environment": false,
+    "update_interval": 60
+  },
+
+  "log_level": "INFO",
+  "log_messages": true,
+  "ai_diagnostics_enabled": false
+}
