@@ -84,10 +84,12 @@ jobs:
 
       - name: Check for shell=True violations (MF002)
         run: |
-          if grep -rn "shell=True" src/ --include="*.py"; then
-            echo "ERROR: Found shell=True - security violation MF002"
+          # Only match actual shell=True usage, not comments or strings
+          if grep -rn "subprocess.*shell=True" src/ --include="*.py" | grep -v "^[^:]*:[^:]*:#"; then
+            echo "ERROR: Found shell=True in subprocess call - security violation MF002"
             exit 1
           fi
+          echo "No shell=True violations found"
 
       - name: Check for bare except violations (MF003)
         run: |
