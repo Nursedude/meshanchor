@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-01-15
+> **Last Updated:** 2026-01-17
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -32,7 +32,7 @@
 ### Gateway Bridge (rns_over_meshtastic_gateway)
 - [x] **RNS-Meshtastic bidirectional messaging** - Core bridge functionality
 - [x] **RNS Over Meshtastic transport layer** - Packet transport via LoRa
-- [ ] **Message routing visualization** - See message flow between networks
+- [x] **Message routing visualization** - See message flow between networks (2026-01-17)
 - [x] **Gateway setup wizard** - Guided configuration for new users (2026-01-12)
 - [x] **Bridge status monitoring** - Real-time health checks (API endpoints)
 - [x] `rns_bridge.py:624` - Implement regex matching for filters (2026-01-11)
@@ -63,12 +63,12 @@
 ### Plugins
 - [x] `meshcore.py:81` - Implement actual MeshCore connection (2026-01-12)
 - [x] `meshcore.py:107` - Implement actual message sending (2026-01-12)
-- [ ] **MQTT dashboard** - Bridge to MQTT brokers → `main`
+- [x] **MQTT dashboard** - Bridge to MQTT brokers (2026-01-17)
 - [ ] **NanoVNA plugin** - Antenna tuning integration → `alpha`
 
 ### Node Firmware (→ `alpha` branch)
 - [ ] **Firmware flashing from GTK** - Flash meshtastic firmware ⚠️ HIGH RISK
-- [ ] **Device backup/restore** - Save and restore node configs → `beta`
+- [x] **Device backup/restore** - Save and restore node configs (2026-01-17)
 
 ---
 
@@ -77,33 +77,33 @@
 ### Dark Mode
 - [x] **CSS variable foundation** - Theme system with light/dark support (2026-01-12)
 - [x] GTK dark mode toggle - Settings panel with Force Dark Mode switch (verified 2026-01-15)
-- [ ] Web UI dark mode (integration) → `main`
-- [ ] TUI dark mode → `beta`
-- [ ] Unified theme system → `beta`
+- [x] Web UI dark mode (integration) - data-theme attribute support (2026-01-17)
+- [x] TUI dark mode - Toggle with T key (2026-01-17)
+- [x] Unified theme system - Settings persist across UI (2026-01-17)
 
 ### TUI Improvements (→ `beta` branch)
-- [ ] Better navigation
-- [ ] Keyboard shortcuts
-- [ ] Status bar with key info
+- [x] Better navigation - Tab switching with hotkeys (2026-01-17)
+- [x] Keyboard shortcuts - q, d, s, c, m, t, r, T (2026-01-17)
+- [x] Status bar with key info - Footer with bindings (2026-01-17)
 
 ### Map Panel
 - [x] Memory leak fix (timer cleanup)
-- [ ] Offline map tiles → `main`
-- [ ] Custom markers for node types → `main`
+- [x] Offline map tiles - OFFLINE_TILE_PROVIDERS added (2026-01-17)
+- [x] Custom markers for node types - NODE_ICONS by role (2026-01-17)
 
 ---
 
 ## 🟢 Priority 4: Nice to Have
 
 ### Analytics
-- [ ] Coverage analytics
+- [x] Coverage analytics - CoverageAnalyzer class (2026-01-17)
 - [x] VOACAP propagation predictions (2026-01-12)
-- [ ] Link budget history/trends
+- [x] Link budget history/trends - AnalyticsStore with SQLite (2026-01-17)
 
 ### API
-- [ ] Local REST API documentation
-- [ ] Webhook support for events
-- [ ] Integration with external tools
+- [x] Local REST API documentation - docs/REST_API.md (2026-01-17)
+- [x] Webhook support for events - WebhookManager class (2026-01-17)
+- [x] Integration with external tools - via webhooks (2026-01-17)
 
 ### Documentation
 - [ ] Video tutorials
@@ -140,6 +140,18 @@
 - [x] **HamClock DX Spots integration** (2026-01-12)
 - [x] **HamClock Satellite tracking** (2026-01-12)
 - [x] **HamClock DE/DX location display** (2026-01-12)
+- [x] **meshtasticd responsive detection** (2026-01-17)
+- [x] **Sensors tab in Mesh Tools** (2026-01-17)
+- [x] **Message routing visualization** (2026-01-17)
+- [x] **MQTT dashboard improvements** (2026-01-17)
+- [x] **Device backup/restore** (2026-01-17)
+- [x] **Offline map tiles** (2026-01-17)
+- [x] **Custom node markers** (2026-01-17)
+- [x] **TUI dark mode + navigation + shortcuts** (2026-01-17)
+- [x] **Coverage analytics** (2026-01-17)
+- [x] **Link budget history/trends** (2026-01-17)
+- [x] **REST API documentation** (2026-01-17)
+- [x] **Webhook support** (2026-01-17)
 
 ---
 

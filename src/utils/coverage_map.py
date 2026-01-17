@@ -9,17 +9,26 @@ Generates interactive Folium-based maps showing:
 
 Output: Self-contained HTML files viewable in any browser.
 
+Supports offline operation with local tile caching.
+
 Usage:
     from utils.coverage_map import CoverageMapGenerator
 
     generator = CoverageMapGenerator()
     generator.add_nodes(nodes)
     generator.generate("coverage_map.html")
+
+    # Offline mode
+    generator = CoverageMapGenerator(offline=True)
+    generator.generate("offline_map.html")
 """
 
 import json
 import logging
 import math
+import os
+import hashlib
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +38,119 @@ from typing import Dict, List, Optional, Tuple, Any
 from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
+
+
+# Offline tile providers that don't require API keys
+OFFLINE_TILE_PROVIDERS = {
+    'openstreetmap': {
+        'url': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'attr': '© OpenStreetMap contributors',
+        'name': 'OpenStreetMap',
+    },
+    'opentopomap': {
+        'url': 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+        'attr': '© OpenTopoMap (CC-BY-SA)',
+        'name': 'OpenTopoMap',
+    },
+    'stamen_terrain': {
+        'url': 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.png',
+        'attr': '© Stadia Maps, Stamen Design, OpenStreetMap',
+        'name': 'Terrain',
+    },
+}
+
+
+def get_tile_cache_dir() -> Path:
+    """Get the tile cache directory."""
+    cache_dir = get_real_user_home() / ".cache" / "meshforge" / "tiles"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def download_tile(url: str, cache_path: Path) -> bool:
+    """Download a tile to cache."""
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(url, str(cache_path))
+        return True
+    except Exception as e:
+        logger.debug(f"Failed to download tile: {e}")
+        return False
+
+
+def cache_tiles_for_area(lat: float, lon: float, radius_km: float = 10,
+                         zoom_levels: List[int] = None,
+                         provider: str = 'openstreetmap') -> Dict:
+    """
+    Pre-cache tiles for an area for offline use.
+
+    Args:
+        lat: Center latitude
+        lon: Center longitude
+        radius_km: Radius in kilometers to cache
+        zoom_levels: List of zoom levels to cache (default: [8, 10, 12, 14])
+        provider: Tile provider name
+
+    Returns:
+        Dict with 'tiles_cached', 'tiles_failed', 'total_size' keys
+    """
+    if zoom_levels is None:
+        zoom_levels = [8, 10, 12, 14]
+
+    provider_info = OFFLINE_TILE_PROVIDERS.get(provider, OFFLINE_TILE_PROVIDERS['openstreetmap'])
+    url_template = provider_info['url']
+    cache_dir = get_tile_cache_dir() / provider
+
+    result = {'tiles_cached': 0, 'tiles_failed': 0, 'total_size': 0}
+
+    for zoom in zoom_levels:
+        # Calculate tile range for this zoom level
+        tiles = _get_tiles_for_area(lat, lon, radius_km, zoom)
+
+        for x, y in tiles:
+            tile_path = cache_dir / str(zoom) / str(x) / f"{y}.png"
+
+            if tile_path.exists():
+                result['tiles_cached'] += 1
+                continue
+
+            url = url_template.format(z=zoom, x=x, y=y)
+            if download_tile(url, tile_path):
+                result['tiles_cached'] += 1
+                if tile_path.exists():
+                    result['total_size'] += tile_path.stat().st_size
+            else:
+                result['tiles_failed'] += 1
+
+    return result
+
+
+def _get_tiles_for_area(lat: float, lon: float, radius_km: float, zoom: int) -> List[Tuple[int, int]]:
+    """Get list of tile coordinates covering an area."""
+    # Convert radius to degrees (approximate)
+    lat_deg = radius_km / 111.0
+    lon_deg = radius_km / (111.0 * math.cos(math.radians(lat)))
+
+    min_lat, max_lat = lat - lat_deg, lat + lat_deg
+    min_lon, max_lon = lon - lon_deg, lon + lon_deg
+
+    tiles = []
+    for tile_lat in [min_lat, lat, max_lat]:
+        for tile_lon in [min_lon, lon, max_lon]:
+            x, y = _latlon_to_tile(tile_lat, tile_lon, zoom)
+            if (x, y) not in tiles:
+                tiles.append((x, y))
+
+    return tiles
+
+
+def _latlon_to_tile(lat: float, lon: float, zoom: int) -> Tuple[int, int]:
+    """Convert lat/lon to tile coordinates."""
+    n = 2 ** zoom
+    x = int((lon + 180) / 360 * n)
+    lat_rad = math.radians(lat)
+    y = int((1 - math.log(math.tan(lat_rad) + 1/math.cos(lat_rad)) / math.pi) / 2 * n)
+    return x, y
 
 
 @dataclass
@@ -75,17 +197,44 @@ class CoverageMapGenerator:
         "DEFAULT": 5000,         # Default assumption
     }
 
-    def __init__(self, lora_preset: str = "DEFAULT"):
+    # Custom node marker icons by role
+    NODE_ICONS = {
+        'ROUTER': {'icon': 'tower-broadcast', 'color': 'red', 'prefix': 'fa'},
+        'ROUTER_CLIENT': {'icon': 'tower-broadcast', 'color': 'orange', 'prefix': 'fa'},
+        'REPEATER': {'icon': 'arrows-repeat', 'color': 'purple', 'prefix': 'fa'},
+        'CLIENT': {'icon': 'mobile', 'color': 'blue', 'prefix': 'fa'},
+        'CLIENT_MUTE': {'icon': 'mobile', 'color': 'gray', 'prefix': 'fa'},
+        'TRACKER': {'icon': 'location-dot', 'color': 'green', 'prefix': 'fa'},
+        'SENSOR': {'icon': 'thermometer', 'color': 'cadetblue', 'prefix': 'fa'},
+        'TAK': {'icon': 'crosshairs', 'color': 'darkred', 'prefix': 'fa'},
+        'TAK_TRACKER': {'icon': 'crosshairs', 'color': 'darkgreen', 'prefix': 'fa'},
+        'LOST_AND_FOUND': {'icon': 'magnifying-glass', 'color': 'darkblue', 'prefix': 'fa'},
+        'DEFAULT': {'icon': 'circle', 'color': 'blue', 'prefix': 'fa'},
+    }
+
+    # Network-specific colors
+    NETWORK_COLORS = {
+        'meshtastic': '#4A90D9',  # Blue
+        'rns': '#50C878',          # Green
+        'both': '#9B59B6',         # Purple
+    }
+
+    def __init__(self, lora_preset: str = "DEFAULT", offline: bool = False,
+                 custom_markers: bool = True):
         """
         Initialize the map generator.
 
         Args:
             lora_preset: LoRa preset for coverage estimation
+            offline: Use offline/cached tiles only
+            custom_markers: Use custom markers based on node role
         """
         self._nodes: List[MapNode] = []
         self._links: List[Tuple[str, str, Dict]] = []  # (from_id, to_id, props)
         self._lora_preset = lora_preset
         self._coverage_radius = self.PRESET_RANGES.get(lora_preset, 5000)
+        self._offline = offline
+        self._custom_markers = custom_markers
 
     def add_node(self, node: MapNode) -> None:
         """Add a single node to the map."""
@@ -221,8 +370,34 @@ class CoverageMapGenerator:
             # Create popup content
             popup_html = self._create_popup(node)
 
-            # Determine marker style
-            if node.is_gateway:
+            # Determine marker style based on role (if custom markers enabled)
+            if self._custom_markers and node.role:
+                role_upper = node.role.upper().replace(' ', '_')
+                icon_config = self.NODE_ICONS.get(role_upper, self.NODE_ICONS['DEFAULT'])
+
+                # Adjust color for offline nodes
+                color = icon_config['color']
+                if not node.is_online:
+                    color = 'gray'
+                elif node.is_gateway:
+                    color = 'purple'
+
+                icon = folium.Icon(
+                    color=color,
+                    icon=icon_config['icon'],
+                    prefix=icon_config['prefix']
+                )
+
+                # Determine group
+                if node.is_gateway:
+                    group = gateway_group
+                elif node.is_online:
+                    group = online_group
+                else:
+                    group = offline_group
+
+            # Fallback: original style
+            elif node.is_gateway:
                 icon = folium.Icon(color='purple', icon='tower-broadcast', prefix='fa')
                 group = gateway_group
             elif node.is_online:
