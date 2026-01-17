@@ -32,6 +32,25 @@ try:
 except ImportError:
     HAS_DIAGNOSTICS = False
 
+# Import intelligent diagnostic engine
+try:
+    from utils.diagnostic_engine import (
+        get_diagnostic_engine, diagnose,
+        Category as DiagCategory, Severity as DiagSeverity
+    )
+    HAS_DIAG_ENGINE = True
+except ImportError:
+    HAS_DIAG_ENGINE = False
+    get_diagnostic_engine = None
+
+# Import Claude Assistant for AI-powered help
+try:
+    from utils.claude_assistant import ClaudeAssistant, ExpertiseLevel
+    HAS_ASSISTANT = True
+except ImportError:
+    HAS_ASSISTANT = False
+    ClaudeAssistant = None
+
 # Import logging
 try:
     from utils.logging_utils import get_logger
@@ -76,6 +95,16 @@ class DiagnosticsPanel(Gtk.Box):
             self.diag.register_health_callback(self._on_health_change)
         else:
             self.diag = None
+
+        # Initialize intelligent diagnostic engine
+        self.diag_engine = None
+        if HAS_DIAG_ENGINE:
+            self.diag_engine = get_diagnostic_engine()
+
+        # Initialize Claude Assistant (standalone mode - no API key required)
+        self.assistant = None
+        if HAS_ASSISTANT:
+            self.assistant = ClaudeAssistant()
 
         self._build_ui()
 
@@ -142,6 +171,13 @@ class DiagnosticsPanel(Gtk.Box):
             self._create_reports_tab(),
             Gtk.Label(label="Reports")
         )
+
+        # Tab 6: AI Assistant (intelligent help)
+        if HAS_ASSISTANT or HAS_DIAG_ENGINE:
+            notebook.append_page(
+                self._create_assistant_tab(),
+                Gtk.Label(label="AI Assistant")
+            )
 
         self.append(notebook)
 
@@ -1123,6 +1159,266 @@ class DiagnosticsPanel(Gtk.Box):
             label.set_margin_bottom(5)
             label.report_path = report_file
             self.reports_list.append(label)
+
+    # ==================== AI Assistant Tab ====================
+
+    def _create_assistant_tab(self) -> Gtk.Widget:
+        """Create AI assistant tab for intelligent help."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # Header with mode indicator
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        title = Gtk.Label(label="AI-Powered Diagnostics")
+        title.add_css_class("title-3")
+        title.set_xalign(0)
+        header.append(title)
+
+        mode_label = Gtk.Label()
+        if self.assistant and self.assistant.is_pro_enabled():
+            mode_label.set_label("PRO Mode (Claude API)")
+            mode_label.add_css_class("success")
+        else:
+            mode_label.set_label("Standalone Mode")
+            mode_label.add_css_class("dim-label")
+        header.append(mode_label)
+
+        box.append(header)
+
+        # Description
+        desc = Gtk.Label(
+            label="Ask questions about your mesh network, get troubleshooting help, and analyze issues."
+        )
+        desc.set_xalign(0)
+        desc.add_css_class("dim-label")
+        desc.set_wrap(True)
+        box.append(desc)
+
+        # Query input
+        query_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        self.assistant_query = Gtk.Entry()
+        self.assistant_query.set_hexpand(True)
+        self.assistant_query.set_placeholder_text("Ask a question (e.g., 'What causes low SNR?' or 'Why is my node offline?')")
+        self.assistant_query.connect("activate", self._on_assistant_query)
+        query_box.append(self.assistant_query)
+
+        ask_btn = Gtk.Button(label="Ask")
+        ask_btn.add_css_class("suggested-action")
+        ask_btn.connect("clicked", self._on_assistant_query)
+        query_box.append(ask_btn)
+
+        box.append(query_box)
+
+        # Quick actions
+        quick_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        quick_label = Gtk.Label(label="Quick:")
+        quick_label.add_css_class("dim-label")
+        quick_box.append(quick_label)
+
+        quick_actions = [
+            ("Health Summary", self._on_quick_health),
+            ("Recent Issues", self._on_quick_issues),
+            ("Analyze Logs", self._on_quick_analyze),
+        ]
+
+        for label, callback in quick_actions:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("flat")
+            btn.connect("clicked", callback)
+            quick_box.append(btn)
+
+        box.append(quick_box)
+
+        # Response area
+        response_frame = Gtk.Frame()
+        response_frame.set_label("Response")
+        response_frame.set_vexpand(True)
+
+        response_scroll = Gtk.ScrolledWindow()
+        response_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        self.assistant_response = Gtk.TextView()
+        self.assistant_response.set_editable(False)
+        self.assistant_response.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.assistant_response.set_left_margin(10)
+        self.assistant_response.set_right_margin(10)
+        self.assistant_response.set_top_margin(10)
+        self.assistant_response.set_bottom_margin(10)
+        self.assistant_response.get_buffer().set_text(
+            "Welcome to MeshForge AI Assistant!\n\n"
+            "I can help you with:\n"
+            "- Understanding mesh networking concepts (SNR, RSSI, LoRa)\n"
+            "- Troubleshooting connection issues\n"
+            "- Analyzing diagnostic logs\n"
+            "- Explaining MeshForge features\n\n"
+            "Type a question above or click a quick action to get started."
+        )
+
+        response_scroll.set_child(self.assistant_response)
+        response_frame.set_child(response_scroll)
+        box.append(response_frame)
+
+        # Suggestions area
+        suggest_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        suggest_label = Gtk.Label(label="Suggested:")
+        suggest_label.add_css_class("dim-label")
+        suggest_box.append(suggest_label)
+
+        self.assistant_suggestions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        suggest_box.append(self.assistant_suggestions)
+
+        box.append(suggest_box)
+
+        return box
+
+    def _on_assistant_query(self, widget):
+        """Handle assistant query."""
+        query = self.assistant_query.get_text().strip()
+        if not query:
+            return
+
+        self.assistant_query.set_sensitive(False)
+        self._set_assistant_response("Thinking...")
+
+        def do_query():
+            try:
+                if self.assistant:
+                    response = self.assistant.ask(query)
+                    GLib.idle_add(self._show_assistant_response, response)
+                else:
+                    GLib.idle_add(
+                        self._set_assistant_response,
+                        "Assistant not available. Check if utils/claude_assistant.py is installed."
+                    )
+            except Exception as e:
+                GLib.idle_add(self._set_assistant_response, f"Error: {e}")
+            finally:
+                GLib.idle_add(self.assistant_query.set_sensitive, True)
+
+        threading.Thread(target=do_query, daemon=True).start()
+
+    def _show_assistant_response(self, response):
+        """Display assistant response."""
+        self._set_assistant_response(response.answer)
+
+        # Update suggestions
+        self._clear_suggestions()
+        for topic in response.related_topics[:3]:
+            btn = Gtk.Button(label=topic)
+            btn.add_css_class("flat")
+            btn.connect("clicked", lambda b, t=topic: self._ask_topic(t))
+            self.assistant_suggestions.append(btn)
+
+    def _set_assistant_response(self, text: str):
+        """Set the assistant response text."""
+        self.assistant_response.get_buffer().set_text(text)
+
+    def _clear_suggestions(self):
+        """Clear suggestion buttons."""
+        while True:
+            child = self.assistant_suggestions.get_first_child()
+            if child:
+                self.assistant_suggestions.remove(child)
+            else:
+                break
+
+    def _ask_topic(self, topic: str):
+        """Ask about a suggested topic."""
+        self.assistant_query.set_text(f"Tell me about {topic}")
+        self._on_assistant_query(None)
+
+    def _on_quick_health(self, button):
+        """Quick action: get health summary."""
+        self._set_assistant_response("Analyzing system health...")
+
+        def do_health():
+            try:
+                if self.diag_engine:
+                    summary = self.diag_engine.get_health_summary()
+                    if self.assistant:
+                        explanation = self.assistant.get_health_explanation(summary)
+                        text = f"System Health: {summary.get('overall_health', 'unknown').upper()}\n\n"
+                        text += explanation
+                        text += f"\n\nSymptoms in last hour: {summary.get('symptoms_last_hour', 0)}"
+                        text += f"\nDiagnoses made: {summary.get('stats', {}).get('diagnoses_made', 0)}"
+                    else:
+                        text = f"Health: {summary}"
+                else:
+                    text = "Diagnostic engine not available"
+
+                GLib.idle_add(self._set_assistant_response, text)
+            except Exception as e:
+                GLib.idle_add(self._set_assistant_response, f"Error: {e}")
+
+        threading.Thread(target=do_health, daemon=True).start()
+
+    def _on_quick_issues(self, button):
+        """Quick action: show recent issues."""
+        self._set_assistant_response("Fetching recent diagnoses...")
+
+        def do_issues():
+            try:
+                if self.diag_engine:
+                    diagnoses = self.diag_engine.get_recent_diagnoses(limit=5)
+                    if diagnoses:
+                        lines = ["Recent Diagnoses:\n"]
+                        for d in diagnoses:
+                            lines.append(f"- {d.symptom.message}")
+                            lines.append(f"  Cause: {d.likely_cause}")
+                            if d.suggestions:
+                                lines.append(f"  Fix: {d.suggestions[0]}")
+                            lines.append("")
+                        text = "\n".join(lines)
+                    else:
+                        text = "No recent issues detected. System appears healthy."
+                else:
+                    text = "Diagnostic engine not available"
+
+                GLib.idle_add(self._set_assistant_response, text)
+            except Exception as e:
+                GLib.idle_add(self._set_assistant_response, f"Error: {e}")
+
+        threading.Thread(target=do_issues, daemon=True).start()
+
+    def _on_quick_analyze(self, button):
+        """Quick action: analyze recent logs."""
+        self._set_assistant_response("Analyzing recent logs...")
+
+        def do_analyze():
+            try:
+                # Get recent logs from journalctl
+                result = subprocess.run(
+                    ["journalctl", "-t", "meshforge", "-t", "meshtasticd",
+                     "-n", "50", "--no-pager", "-p", "warning"],
+                    capture_output=True, text=True, timeout=10
+                )
+
+                if result.returncode == 0 and result.stdout.strip():
+                    logs = result.stdout.strip().split('\n')
+
+                    if self.assistant:
+                        response = self.assistant.analyze_logs(logs)
+                        text = response.answer
+                    else:
+                        text = f"Found {len(logs)} log entries with warnings/errors:\n\n"
+                        text += "\n".join(logs[:10])
+                else:
+                    text = "No warning or error logs found. System appears healthy."
+
+                GLib.idle_add(self._set_assistant_response, text)
+            except subprocess.TimeoutExpired:
+                GLib.idle_add(self._set_assistant_response, "Timeout reading logs")
+            except FileNotFoundError:
+                GLib.idle_add(self._set_assistant_response, "journalctl not available")
+            except Exception as e:
+                GLib.idle_add(self._set_assistant_response, f"Error: {e}")
+
+        threading.Thread(target=do_analyze, daemon=True).start()
 
     def cleanup(self):
         """Clean up resources when panel is destroyed."""

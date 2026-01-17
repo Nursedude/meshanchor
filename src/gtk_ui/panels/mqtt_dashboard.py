@@ -6,6 +6,7 @@ GTK4 interface for MQTT bridge plugin management:
 - Message monitoring (published/received)
 - Topic subscription management
 - Broker connection settings
+- Nodeless monitoring mode (no hardware required)
 """
 
 import gi
@@ -32,6 +33,18 @@ except ImportError:
         MQTTBridgePlugin = None
         DEFAULT_MQTT_BROKER = "mqtt.meshtastic.org"
         DEFAULT_MQTT_PORT_TLS = 8883
+
+# Import nodeless subscriber for hardware-free monitoring
+try:
+    from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
+    HAS_NODELESS = True
+except ImportError:
+    try:
+        from src.monitoring.mqtt_subscriber import MQTTNodelessSubscriber
+        HAS_NODELESS = True
+    except ImportError:
+        HAS_NODELESS = False
+        MQTTNodelessSubscriber = None
 
 # Import path utility
 try:
@@ -61,7 +74,9 @@ class MQTTDashboardPanel(Gtk.Box):
         self.set_margin_bottom(10)
 
         self._plugin: Optional[MQTTBridgePlugin] = None
+        self._nodeless: Optional[MQTTNodelessSubscriber] = None
         self._message_count = 0
+        self._nodeless_node_count = 0
         self._update_timer = None
 
         self._build_ui()
@@ -83,6 +98,10 @@ class MQTTDashboardPanel(Gtk.Box):
         if not HAS_MQTT_PLUGIN:
             self._show_plugin_missing()
             return
+
+        # Nodeless monitoring section (P1 feature)
+        if HAS_NODELESS:
+            self._build_nodeless_section()
 
         # Connection section
         self._build_connection_section()
@@ -107,6 +126,184 @@ class MQTTDashboardPanel(Gtk.Box):
         msg_box.append(info)
 
         self.append(msg_box)
+
+    def _build_nodeless_section(self):
+        """Build nodeless monitoring section - monitor mesh without hardware."""
+        frame = Gtk.Frame()
+        frame.set_label("Nodeless Monitoring (No Hardware Required)")
+
+        nodeless_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        nodeless_box.set_margin_start(15)
+        nodeless_box.set_margin_end(15)
+        nodeless_box.set_margin_top(10)
+        nodeless_box.set_margin_bottom(10)
+
+        # Info label
+        info = Gtk.Label(label="Monitor the mesh network via MQTT without local Meshtastic hardware")
+        info.set_xalign(0)
+        info.add_css_class("dim-label")
+        nodeless_box.append(info)
+
+        # Status row
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+
+        self.nodeless_status = Gtk.Label(label="● Inactive")
+        self.nodeless_status.set_xalign(0)
+        self.nodeless_status.add_css_class("dim-label")
+        status_row.append(self.nodeless_status)
+
+        self.nodeless_nodes = Gtk.Label(label="Nodes: 0")
+        self.nodeless_nodes.set_xalign(0)
+        status_row.append(self.nodeless_nodes)
+
+        self.nodeless_online = Gtk.Label(label="Online: 0")
+        self.nodeless_online.set_xalign(0)
+        status_row.append(self.nodeless_online)
+
+        self.nodeless_msgs = Gtk.Label(label="Messages: 0")
+        self.nodeless_msgs.set_xalign(0)
+        self.nodeless_msgs.set_hexpand(True)
+        status_row.append(self.nodeless_msgs)
+
+        nodeless_box.append(status_row)
+
+        # Control buttons
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        self.nodeless_start_btn = Gtk.Button(label="Start Monitoring")
+        self.nodeless_start_btn.add_css_class("suggested-action")
+        self.nodeless_start_btn.connect("clicked", self._on_nodeless_start)
+        btn_row.append(self.nodeless_start_btn)
+
+        self.nodeless_stop_btn = Gtk.Button(label="Stop")
+        self.nodeless_stop_btn.set_sensitive(False)
+        self.nodeless_stop_btn.connect("clicked", self._on_nodeless_stop)
+        btn_row.append(self.nodeless_stop_btn)
+
+        export_btn = Gtk.Button(label="Export Map")
+        export_btn.set_tooltip_text("Generate coverage map from discovered nodes")
+        export_btn.connect("clicked", self._on_export_nodeless_map)
+        btn_row.append(export_btn)
+
+        nodeless_box.append(btn_row)
+
+        frame.set_child(nodeless_box)
+        self.append(frame)
+
+    def _on_nodeless_start(self, button):
+        """Start nodeless MQTT monitoring."""
+        self._log_message("Starting nodeless monitoring...")
+        button.set_sensitive(False)
+
+        def do_start():
+            try:
+                self._nodeless = MQTTNodelessSubscriber()
+
+                # Register callbacks
+                self._nodeless.register_node_callback(self._on_nodeless_node)
+                self._nodeless.register_message_callback(self._on_nodeless_message)
+
+                if self._nodeless.start():
+                    self._log_message("Nodeless monitoring started - discovering nodes...")
+                    GLib.idle_add(self._update_nodeless_status, True)
+                else:
+                    self._log_message("Failed to start nodeless monitoring")
+                    GLib.idle_add(button.set_sensitive, True)
+
+            except Exception as e:
+                self._log_message(f"Nodeless start error: {e}")
+                GLib.idle_add(button.set_sensitive, True)
+
+        threading.Thread(target=do_start, daemon=True).start()
+
+    def _on_nodeless_stop(self, button):
+        """Stop nodeless monitoring."""
+        if self._nodeless:
+            self._nodeless.stop()
+            self._nodeless = None
+            self._log_message("Nodeless monitoring stopped")
+            self._update_nodeless_status(False)
+
+    def _update_nodeless_status(self, active: bool):
+        """Update nodeless monitoring status UI."""
+        if active:
+            self.nodeless_status.set_label("● Active")
+            self.nodeless_status.remove_css_class("dim-label")
+            self.nodeless_status.add_css_class("success")
+            self.nodeless_start_btn.set_sensitive(False)
+            self.nodeless_stop_btn.set_sensitive(True)
+        else:
+            self.nodeless_status.set_label("● Inactive")
+            self.nodeless_status.remove_css_class("success")
+            self.nodeless_status.add_css_class("dim-label")
+            self.nodeless_start_btn.set_sensitive(True)
+            self.nodeless_stop_btn.set_sensitive(False)
+
+    def _on_nodeless_node(self, node):
+        """Handle node discovered via nodeless monitoring."""
+        self._nodeless_node_count += 1
+        if self._nodeless:
+            stats = self._nodeless.get_stats()
+            GLib.idle_add(self._update_nodeless_stats, stats)
+
+    def _on_nodeless_message(self, message):
+        """Handle message received via nodeless monitoring."""
+        self._log_message(f"[MQTT] {message.from_id}: {message.text[:100]}")
+        if self._nodeless:
+            stats = self._nodeless.get_stats()
+            GLib.idle_add(self._update_nodeless_stats, stats)
+
+    def _update_nodeless_stats(self, stats: Dict):
+        """Update nodeless statistics display."""
+        self.nodeless_nodes.set_label(f"Nodes: {stats.get('node_count', 0)}")
+        self.nodeless_online.set_label(f"Online: {stats.get('online_count', 0)}")
+        self.nodeless_msgs.set_label(f"Messages: {stats.get('message_count', 0)}")
+
+    def _on_export_nodeless_map(self, button):
+        """Export coverage map from nodeless discovered nodes."""
+        if not self._nodeless:
+            self._log_message("Start nodeless monitoring first to discover nodes")
+            return
+
+        def do_export():
+            try:
+                # Import coverage map generator
+                try:
+                    from utils.coverage_map import CoverageMapGenerator
+                except ImportError:
+                    from src.utils.coverage_map import CoverageMapGenerator
+
+                # Get GeoJSON from nodeless subscriber
+                geojson = self._nodeless.get_geojson()
+                node_count = len(geojson.get('features', []))
+
+                if node_count == 0:
+                    self._log_message("No nodes with position data to map")
+                    return
+
+                # Generate map
+                generator = CoverageMapGenerator()
+                generator.add_nodes_from_geojson(geojson)
+                output_path = generator.generate()
+
+                self._log_message(f"Coverage map generated: {output_path}")
+
+                # Try to open in browser
+                import subprocess
+                import os
+                user = os.environ.get('SUDO_USER', os.environ.get('USER', 'pi'))
+                try:
+                    subprocess.run(
+                        ['sudo', '-u', user, 'xdg-open', output_path],
+                        capture_output=True, timeout=10
+                    )
+                except Exception:
+                    self._log_message(f"Open map manually: {output_path}")
+
+            except Exception as e:
+                self._log_message(f"Map export error: {e}")
+
+        threading.Thread(target=do_export, daemon=True).start()
 
     def _build_connection_section(self):
         """Build connection status and controls."""
@@ -501,6 +698,9 @@ class MQTTDashboardPanel(Gtk.Box):
             self._update_timer = None
         if self._plugin:
             self._plugin.disconnect()
+        if self._nodeless:
+            self._nodeless.stop()
+            self._nodeless = None
 
 
 __all__ = ['MQTTDashboardPanel']
