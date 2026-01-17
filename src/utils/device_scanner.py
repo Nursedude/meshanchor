@@ -9,11 +9,14 @@ Provides easy hardware detection for Meshtastic, LoRa, and RF devices.
 Safety: Core utility with no external dependencies beyond standard library.
 """
 
+import logging
 import os
 import subprocess
 import glob
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
@@ -461,12 +464,12 @@ class DeviceScanner:
                     port.description = "Unknown USB Serial"
 
         except subprocess.TimeoutExpired:
-            pass
+            logger.debug("udevadm timed out during device enrichment")
         except FileNotFoundError:
             # udevadm not available
-            pass
-        except Exception:
-            pass
+            logger.debug("udevadm not found - device enrichment skipped")
+        except Exception as e:
+            logger.debug(f"Device enrichment failed: {e}")
 
     def _identify_ttyama_device(self, device_path: str) -> str:
         """Try to identify what's connected to a ttyAMA port"""

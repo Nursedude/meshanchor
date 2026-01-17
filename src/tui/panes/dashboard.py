@@ -258,8 +258,8 @@ class DashboardPane(Container):
                 status = stdout.decode().strip()
                 if status == "active":
                     rnsd_running = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"rnsd status check failed: {e}")
 
         if rnsd_running:
             log.write("[green][OK][/green] rnsd running")
@@ -385,8 +385,8 @@ class DashboardPane(Container):
                     status = stdout.decode().strip()
                     if status == "active":
                         rnsd_running = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"rnsd widget status check failed: {e}")
 
             if rnsd_running:
                 rns_widget.update("[green]● Running[/green]")

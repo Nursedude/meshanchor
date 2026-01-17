@@ -167,7 +167,7 @@ class PersistentMessageQueue:
             conn.commit()
         except Exception:
             conn.rollback()
-            raise
+            raise  # Re-raise after rollback - exception is handled by caller
         finally:
             conn.close()
 

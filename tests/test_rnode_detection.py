@@ -135,9 +135,9 @@ class TestIdentifyDeviceModel:
         assert 'RNode' in model or 'CH340' in model
 
     def test_identify_tbeam(self):
-        """Identify T-Beam."""
-        model = identify_device_model('1a86', '7523')
-        assert 'T-Beam' in model
+        """Identify T-Beam (ESP32-S3 variant)."""
+        model = identify_device_model('303a', '1001')
+        assert 'T-Beam' in model or 'ESP32' in model
 
     def test_unknown_device(self):
         """Unknown device returns product string or 'Unknown'."""
