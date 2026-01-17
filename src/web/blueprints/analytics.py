@@ -75,13 +75,17 @@ def get_coverage():
 
         stats = analyzer.analyze_coverage(nodes)
 
+        # Safely extract center point with bounds checking
+        center_lat = stats.center_point[0] if stats.center_point and len(stats.center_point) >= 1 else 0.0
+        center_lon = stats.center_point[1] if stats.center_point and len(stats.center_point) >= 2 else 0.0
+
         return jsonify({
             'total_nodes': stats.total_nodes,
             'nodes_with_position': stats.nodes_with_position,
             'bounding_box': stats.bounding_box,
             'center_point': {
-                'latitude': stats.center_point[0],
-                'longitude': stats.center_point[1],
+                'latitude': center_lat,
+                'longitude': center_lon,
             },
             'estimated_area_km2': stats.estimated_area_km2,
             'average_node_spacing_km': stats.average_node_spacing_km,

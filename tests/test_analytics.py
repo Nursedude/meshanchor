@@ -149,7 +149,7 @@ class TestAnalyticsStore:
         store.record_network_health(metrics)
 
         # Retrieve
-        health = store.get_health_history(hours=1)
+        health = store.get_network_health_history(hours=1)
         assert len(health) == 1
         assert health[0].online_nodes == 15
 

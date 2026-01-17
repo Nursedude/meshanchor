@@ -1078,8 +1078,8 @@ def discover_nodes(timeout: int = 30) -> CommandResult:
                         try:
                             name = app_data.decode('utf-8', errors='ignore').strip()
                             name = ''.join(c for c in name if c.isprintable())
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Failed to decode announce app_data: {e}")
 
                     self.nodes.append({
                         'hash': hash_hex,

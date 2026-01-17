@@ -222,9 +222,9 @@ class TestKnowledgeBase:
         """Test querying for SNR information."""
         results = knowledge_base.query("What is SNR?")
         assert len(results) > 0
-        # Should find SNR-related entry
-        assert any("snr" in r.title.lower() or "signal" in r.title.lower()
-                   for r in results)
+        # Should find SNR-related entry (results are (entry, score) tuples)
+        assert any("snr" in entry.title.lower() or "signal" in entry.title.lower()
+                   for entry, score in results)
 
     def test_query_no_results(self, knowledge_base):
         """Test query with no matching results."""
