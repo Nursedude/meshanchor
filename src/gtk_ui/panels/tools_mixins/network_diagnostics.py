@@ -264,3 +264,284 @@ class NetworkDiagnosticsMixin:
 
         GLib.idle_add(self._log, "\n" + "=" * 50)
         GLib.idle_add(self._log, "Diagnostics complete")
+
+    def _on_show_multicast(self, button=None):
+        """Show multicast group memberships"""
+        self._log("\n=== Multicast Group Memberships ===")
+        threading.Thread(target=self._fetch_multicast, daemon=True).start()
+
+    def _fetch_multicast(self):
+        """Fetch multicast groups in background"""
+        # Method 1: Parse /proc/net/igmp
+        GLib.idle_add(self._log, "\n-- IGMP Groups (/proc/net/igmp) --")
+        try:
+            with open('/proc/net/igmp', 'r') as f:
+                lines = f.readlines()
+
+            current_device = None
+            for line in lines[1:]:  # Skip header
+                if line[0].isdigit():
+                    # Device line
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        current_device = parts[1].rstrip(':')
+                        GLib.idle_add(self._log, f"\n{current_device}:")
+                elif line.strip().startswith(('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F')):
+                    # Group line - hex address (little-endian)
+                    parts = line.split()
+                    if parts:
+                        hex_group = parts[0]
+                        try:
+                            # Convert hex to IP (multicast addresses)
+                            group_int = int(hex_group, 16)
+                            group_bytes = [
+                                (group_int >> 0) & 0xFF,
+                                (group_int >> 8) & 0xFF,
+                                (group_int >> 16) & 0xFF,
+                                (group_int >> 24) & 0xFF,
+                            ]
+                            group_ip = '.'.join(str(b) for b in group_bytes)
+                            GLib.idle_add(self._log, f"  {group_ip}")
+                        except ValueError:
+                            GLib.idle_add(self._log, f"  {hex_group}")
+
+        except FileNotFoundError:
+            GLib.idle_add(self._log, "  /proc/net/igmp not found")
+        except PermissionError:
+            GLib.idle_add(self._log, "  Permission denied")
+
+        # Method 2: Use ip maddr command
+        GLib.idle_add(self._log, "\n-- IP Multicast Addresses (ip maddr) --")
+        try:
+            result = subprocess.run(
+                ['ip', 'maddr', 'show'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    GLib.idle_add(self._log, line)
+            else:
+                GLib.idle_add(self._log, "  ip maddr command failed")
+        except FileNotFoundError:
+            GLib.idle_add(self._log, "  ip command not found")
+        except Exception as e:
+            GLib.idle_add(self._log, f"  Error: {e}")
+
+    def _on_show_process_ports(self, button=None):
+        """Show process to port mapping"""
+        self._log("\n=== Process → Port Mapping ===")
+        threading.Thread(target=self._fetch_process_ports, daemon=True).start()
+
+    def _fetch_process_ports(self):
+        """Fetch process-port mapping using ss"""
+        # Try ss first (faster), fall back to netstat
+        try:
+            result = subprocess.run(
+                ['ss', '-tulnp'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                GLib.idle_add(self._log, "Using: ss -tulnp")
+                GLib.idle_add(self._log, "-" * 80)
+                for line in result.stdout.strip().split('\n'):
+                    GLib.idle_add(self._log, line[:100])
+                return
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+        # Fall back to netstat
+        try:
+            result = subprocess.run(
+                ['netstat', '-tulnp'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                GLib.idle_add(self._log, "Using: netstat -tulnp")
+                GLib.idle_add(self._log, "-" * 80)
+                for line in result.stdout.strip().split('\n'):
+                    GLib.idle_add(self._log, line[:100])
+                return
+        except FileNotFoundError:
+            GLib.idle_add(self._log, "Neither ss nor netstat found. Install: sudo apt install iproute2")
+        except Exception as e:
+            GLib.idle_add(self._log, f"Error: {e}")
+
+    def _on_watch_api_connections(self, button=None):
+        """Watch connections to meshtasticd API port"""
+        self._log("\n=== Watching API Connections (port 4403) ===")
+        self._log("Refreshing every 2 seconds... Click again to refresh.\n")
+        threading.Thread(target=self._watch_api_connections_thread, daemon=True).start()
+
+    def _watch_api_connections_thread(self):
+        """Show current connections to port 4403"""
+        try:
+            # Use ss to show connections
+            result = subprocess.run(
+                ['ss', '-tnp', 'sport', '=', ':4403', 'or', 'dport', '=', ':4403'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines = result.stdout.strip().split('\n')
+                GLib.idle_add(self._log, f"Active connections to meshtasticd:")
+                for line in lines:
+                    GLib.idle_add(self._log, f"  {line[:90]}")
+            else:
+                # Fallback - check who has the port open
+                result = subprocess.run(
+                    ['ss', '-tlnp'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if '4403' in line:
+                            GLib.idle_add(self._log, line[:90])
+
+            # Also show established connections
+            tcp_entries = self._parse_proc_net('tcp')
+            inode_map = self._get_inode_to_process()
+
+            connected = []
+            for entry in tcp_entries:
+                if entry['local_port'] == 4403 and entry['state'] == 'ESTABLISHED':
+                    pid, proc = inode_map.get(entry['inode'], ('?', 'unknown'))
+                    connected.append(f":{entry['local_port']} - {proc} (PID: {pid})")
+
+            if connected:
+                GLib.idle_add(self._log, f"\nEstablished connections:")
+                for c in connected:
+                    GLib.idle_add(self._log, f"  {c}")
+            else:
+                GLib.idle_add(self._log, "\nNo active client connections to port 4403")
+
+        except Exception as e:
+            GLib.idle_add(self._log, f"Error: {e}")
+
+    def _on_kill_competing_clients(self, button=None):
+        """Kill processes that compete for meshtasticd connection"""
+        self._log("\n=== Killing Competing Clients ===")
+        threading.Thread(target=self._kill_competing_clients_thread, daemon=True).start()
+
+    def _kill_competing_clients_thread(self):
+        """Kill nomadnet and python meshtastic clients"""
+        killed = []
+
+        # Kill nomadnet
+        try:
+            result = subprocess.run(
+                ['pkill', '-9', '-f', 'nomadnet'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                killed.append('nomadnet')
+        except Exception:
+            pass
+
+        # Kill python meshtastic clients (but not meshtasticd itself)
+        try:
+            result = subprocess.run(
+                ['pkill', '-9', '-f', 'python.*meshtastic'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                killed.append('python meshtastic')
+        except Exception:
+            pass
+
+        # Kill any lxmf processes
+        try:
+            result = subprocess.run(
+                ['pkill', '-9', '-f', 'lxmf'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                killed.append('lxmf')
+        except Exception:  # Process may not exist - non-critical
+            pass
+
+        if killed:
+            GLib.idle_add(self._log, f"Killed: {', '.join(killed)}")
+        else:
+            GLib.idle_add(self._log, "No competing clients found to kill")
+
+        # Verify
+        GLib.idle_add(self._log, "\nRemaining processes:")
+        try:
+            result = subprocess.run(
+                ['pgrep', '-a', '-f', 'nomadnet|lxmf|meshtastic'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    # Filter out meshtasticd itself
+                    if 'meshtasticd' not in line:
+                        GLib.idle_add(self._log, f"  {line}")
+                    else:
+                        GLib.idle_add(self._log, f"  {line} (daemon - OK)")
+            else:
+                GLib.idle_add(self._log, "  None (clean)")
+        except Exception:
+            pass
+
+    def _on_stop_all_rns(self, button=None):
+        """Stop all RNS-related processes"""
+        self._log("\n=== Stopping All RNS Processes ===")
+        threading.Thread(target=self._stop_all_rns_thread, daemon=True).start()
+
+    def _stop_all_rns_thread(self):
+        """Kill all RNS processes"""
+        import time
+        killed = []
+
+        processes = ['rnsd', 'nomadnet', 'lxmf', 'RNS']
+        for proc in processes:
+            try:
+                result = subprocess.run(
+                    ['pkill', '-9', '-f', proc],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    killed.append(proc)
+            except Exception:
+                pass
+
+        if killed:
+            GLib.idle_add(self._log, f"Killed: {', '.join(killed)}")
+        else:
+            GLib.idle_add(self._log, "No RNS processes found")
+
+        # Check what's left
+        GLib.idle_add(self._log, "\nVerifying...")
+        time.sleep(0.5)
+
+        try:
+            result = subprocess.run(
+                ['pgrep', '-a', '-f', 'rnsd|nomadnet|lxmf|RNS'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                GLib.idle_add(self._log, "Still running:")
+                for line in result.stdout.strip().split('\n'):
+                    GLib.idle_add(self._log, f"  {line}")
+            else:
+                GLib.idle_add(self._log, "All RNS processes stopped ✓")
+        except Exception:
+            GLib.idle_add(self._log, "Verification complete")
+
+        # Check port 29716
+        GLib.idle_add(self._log, "\nChecking port 29716...")
+        try:
+            result = subprocess.run(
+                ['ss', '-ulnp'],
+                capture_output=True, text=True, timeout=5
+            )
+            found = False
+            for line in result.stdout.split('\n'):
+                if '29716' in line:
+                    found = True
+                    GLib.idle_add(self._log, f"  Still bound: {line[:80]}")
+            if not found:
+                GLib.idle_add(self._log, "  Port 29716 is free ✓")
+        except Exception:
+            pass
