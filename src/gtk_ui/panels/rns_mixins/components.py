@@ -309,6 +309,11 @@ class ComponentsMixin:
 
         self._component_status = component_status
         self.main_window.set_status_message("RNS status updated")
+
+        # Also update gateway status to ensure connection indicators are current
+        if hasattr(self, '_update_gateway_status'):
+            self._update_gateway_status()
+
         return False
 
     def _install_component(self, component):
