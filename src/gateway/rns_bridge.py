@@ -483,21 +483,41 @@ class RNSMeshtasticBridge:
     # ========================================
 
     def _meshtastic_loop(self):
-        """Main loop for Meshtastic connection"""
+        """Main loop for Meshtastic connection with auto-reconnect"""
+        reconnect_delay = 1  # Start with 1 second delay
+        max_reconnect_delay = 30  # Max 30 seconds between retries
+
         while self._running:
             try:
                 if not self._connected_mesh:
+                    logger.info(f"Attempting Meshtastic reconnection (delay was {reconnect_delay}s)...")
                     self._connect_meshtastic()
 
+                    if self._connected_mesh:
+                        reconnect_delay = 1  # Reset delay on successful connect
+                        logger.info("Meshtastic reconnection successful")
+                    else:
+                        # Exponential backoff for failed reconnects
+                        logger.debug(f"Reconnection failed, waiting {reconnect_delay}s before retry")
+                        time.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                        continue
+
                 if self._connected_mesh:
-                    # Process incoming messages
+                    # Health check and process updates
                     self._poll_meshtastic()
 
                 time.sleep(1)
 
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                logger.warning(f"Meshtastic connection error: {e}")
+                self._handle_connection_lost()
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
             except Exception as e:
                 logger.error(f"Meshtastic loop error: {e}")
                 self._connected_mesh = False
+                time.sleep(5)
                 time.sleep(5)
 
     def _rns_loop(self):
@@ -1053,10 +1073,54 @@ class RNSMeshtasticBridge:
             logger.error(f"Error updating Meshtastic nodes: {e}")
 
     def _poll_meshtastic(self):
-        """Poll Meshtastic for updates (when not using pub/sub)"""
-        # The pub/sub handles real-time messages
-        # Periodically refresh node list
-        pass
+        """Poll Meshtastic for health check and updates"""
+        # Check connection health - detect dropped connections early
+        if self._mesh_interface:
+            try:
+                # Check if interface is still connected
+                if hasattr(self._mesh_interface, 'isConnected'):
+                    if not self._mesh_interface.isConnected:
+                        logger.warning("Meshtastic connection lost (isConnected=False)")
+                        self._handle_connection_lost()
+                        return
+                # Also check if we can access basic properties (catches broken pipes)
+                if hasattr(self._mesh_interface, 'nodes'):
+                    _ = len(self._mesh_interface.nodes)  # Triggers exception if dead
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                logger.warning(f"Meshtastic connection lost: {e}")
+                self._handle_connection_lost()
+                return
+            except Exception as e:
+                logger.debug(f"Meshtastic health check error: {e}")
+
+    def _handle_connection_lost(self):
+        """Handle lost meshtastic connection - cleanup and prepare for reconnect"""
+        logger.info("Handling lost Meshtastic connection...")
+        self._connected_mesh = False
+
+        # Release the persistent connection properly
+        if hasattr(self, '_conn_manager') and self._conn_manager:
+            try:
+                self._conn_manager.release_persistent()
+            except Exception as e:
+                logger.debug(f"Error releasing connection after loss: {e}")
+
+        # Unsubscribe from pub/sub to avoid stale callbacks
+        try:
+            from pubsub import pub
+            pub.unsubscribe(self._on_meshtastic_receive, "meshtastic.receive")
+        except Exception:
+            pass
+
+        self._mesh_interface = None
+        self._notify_status("meshtastic_disconnected")
+
+        # Wait for cooldown before reconnect attempt
+        try:
+            from utils.meshtastic_connection import wait_for_cooldown
+            wait_for_cooldown()
+        except ImportError:
+            time.sleep(2)  # Fallback cooldown
 
     def _test_meshtastic(self) -> bool:
         """Test Meshtastic connection"""
