@@ -26,6 +26,12 @@ class InstallPanel(Gtk.Box):
         self._build_ui()
         self._check_installed()
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         """Build the install panel UI"""
         # Title

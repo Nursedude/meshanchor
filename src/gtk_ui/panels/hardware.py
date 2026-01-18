@@ -25,6 +25,13 @@ class HardwarePanel(Gtk.Box):
 
         self._build_ui()
 
+        # Connect unrealize signal for cleanup
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         """Build the hardware panel UI"""
         # Title

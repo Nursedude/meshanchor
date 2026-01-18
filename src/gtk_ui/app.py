@@ -232,6 +232,8 @@ class MeshForgeWindow(Adw.ApplicationWindow):
 
         # Timer tracking for cleanup
         self._status_timer = None
+        self._init_timer = None  # Track initial delay timer
+        self._reboot_timer = None  # Track reboot timer (if scheduled)
 
         # Apply saved theme settings on startup
         self._apply_saved_theme()
@@ -256,10 +258,15 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         """
         logger.info("Window close requested, cleaning up panels...")
 
-        # Stop the main status update timer
-        if self._status_timer:
-            GLib.source_remove(self._status_timer)
-            self._status_timer = None
+        # Stop all tracked timers
+        for timer_attr in ('_status_timer', '_init_timer', '_reboot_timer'):
+            timer_id = getattr(self, timer_attr, None)
+            if timer_id:
+                try:
+                    GLib.source_remove(timer_id)
+                except Exception:
+                    pass  # Timer may have already fired
+                setattr(self, timer_attr, None)
 
         # Auto-discover all panels and clean them up
         # Look for any attribute ending in '_panel' that has a cleanup method
@@ -584,7 +591,7 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         # Delay first update by 2 seconds to let UI render first
         # Use 10 second interval (was 5s) to reduce subprocess overhead
         self._status_update_running = False  # Prevent overlapping updates
-        GLib.timeout_add_seconds(2, self._delayed_status_start)
+        self._init_timer = GLib.timeout_add_seconds(2, self._delayed_status_start)
 
         # Set up responsive layout handling
         self._setup_responsive_layout()
@@ -1432,9 +1439,9 @@ class MeshForgeWindow(Adw.ApplicationWindow):
                 # Enable autostart
                 self._enable_autostart()
 
-                # Schedule reboot
+                # Schedule reboot (track timer for potential cancellation)
                 self.set_status_message("Rebooting in 5 seconds...")
-                GLib.timeout_add_seconds(5, self._perform_reboot)
+                self._reboot_timer = GLib.timeout_add_seconds(5, self._perform_reboot)
 
         self.show_confirm_dialog(
             "Reboot Required",

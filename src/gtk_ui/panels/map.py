@@ -107,6 +107,13 @@ class MapPanel(Gtk.Box):
         # Store timer ID for cleanup - refresh every 30 seconds to reduce memory pressure
         self._refresh_timer_id = GLib.timeout_add_seconds(30, self._auto_refresh)
 
+        # Connect cleanup handler for when panel is destroyed
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _init_node_tracker(self):
         """Initialize the node tracker for RNS discovery"""
         try:

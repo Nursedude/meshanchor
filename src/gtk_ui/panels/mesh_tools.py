@@ -121,6 +121,12 @@ class MeshToolsPanel(
         # Initial status check
         self._schedule_timer(500, self._check_all_status)
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     # =========================================================================
     # Timer Management
     # =========================================================================
