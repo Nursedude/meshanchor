@@ -16,7 +16,7 @@ import socket
 import logging
 import threading
 import subprocess
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -111,6 +111,18 @@ class AREDNNode:
     services: List[AREDNService] = field(default_factory=list)
     api_version: str = ""
     last_update: float = 0.0
+    # Location data (may be configured on node)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    grid_square: str = ""  # Maidenhead grid locator
+
+    def has_location(self) -> bool:
+        """Check if node has valid location data"""
+        return (
+            self.latitude is not None and
+            self.longitude is not None and
+            not (self.latitude == 0 and self.longitude == 0)
+        )
 
     @property
     def base_url(self) -> str:
@@ -136,7 +148,10 @@ class AREDNNode:
             'tunnel_count': self.tunnel_count,
             'links': [l.to_dict() for l in self.links],
             'services': [s.to_dict() for s in self.services],
-            'api_version': self.api_version
+            'api_version': self.api_version,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'grid_square': self.grid_square,
         }
 
 
@@ -265,6 +280,36 @@ class AREDNClient:
             node.model = details.get('model', '')
             node.board_id = details.get('board_id', '')
             node.description = details.get('description', '')
+            # Location may be in node_details
+            if 'lat' in details:
+                try:
+                    node.latitude = float(details['lat'])
+                except (ValueError, TypeError):
+                    pass
+            if 'lon' in details:
+                try:
+                    node.longitude = float(details['lon'])
+                except (ValueError, TypeError):
+                    pass
+            if 'grid_square' in details:
+                node.grid_square = details.get('grid_square', '')
+
+        # Parse location if provided separately
+        if 'location' in data:
+            loc = data['location']
+            if isinstance(loc, dict):
+                if 'lat' in loc:
+                    try:
+                        node.latitude = float(loc['lat'])
+                    except (ValueError, TypeError):
+                        pass
+                if 'lon' in loc:
+                    try:
+                        node.longitude = float(loc['lon'])
+                    except (ValueError, TypeError):
+                        pass
+                if 'gridsquare' in loc:
+                    node.grid_square = loc.get('gridsquare', '')
 
         # Parse sysinfo
         if 'sysinfo' in data:
