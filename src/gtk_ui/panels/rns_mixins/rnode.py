@@ -807,8 +807,8 @@ class RNodeMixin:
             return
 
         button.set_sensitive(False)
-        self._set_rnode_status("Detecting Meshtastic settings...")
-        self.detected_settings_label.set_label("Scanning...")
+        self._set_rnode_status("Checking meshtasticd service...")
+        self.detected_settings_label.set_label("Checking service...")
 
         # Clear and start fresh log
         self._log_detection("--- Meshtastic Detection Started ---", clear=True)
@@ -816,57 +816,141 @@ class RNodeMixin:
         self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
         def do_detect():
-            # Use verbose mode to get detailed logging
-            settings = detect_meshtastic_settings(verbose=True)
+            import subprocess
 
-            # Log all attempts to the log viewer (copyable!)
-            attempts = settings.get('attempts_log', []) if settings else []
-            for attempt in attempts:
-                self._log_detection(attempt)
+            # Step 1: Check if meshtasticd service is running (most reliable method)
+            service_running = False
+            service_status = "unknown"
+            service_uptime = ""
 
-            if settings and settings.get('preset'):
-                # Update UI with detected settings
-                preset = settings.get('preset', 'Unknown')
-                region = settings.get('region', 'US')
-                bw = settings.get('bandwidth', 0) / 1000  # Hz to kHz
-                sf = settings.get('spreading_factor', 0)
-                cr = settings.get('coding_rate', 0)
-                method = settings.get('detection_method', 'unknown')
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.stdout.strip() == 'active':
+                    service_running = True
+                    service_status = "active"
 
-                # Short summary in label
-                info = f"✓ {preset} ({region}) via {method}"
-                GLib.idle_add(self.detected_settings_label.set_label, info)
+                    # Get uptime info
+                    try:
+                        status_result = subprocess.run(
+                            ['systemctl', 'show', 'meshtasticd', '--property=ActiveEnterTimestamp'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if status_result.returncode == 0:
+                            timestamp = status_result.stdout.strip().split('=')[1] if '=' in status_result.stdout else ''
+                            if timestamp:
+                                service_uptime = f" (since {timestamp[:19]})"
+                    except Exception:
+                        pass
 
-                # Detailed info in log
-                self._log_detection(f"\n✓ SUCCESS: Detected {preset}")
-                self._log_detection(f"  Region: {region}")
-                self._log_detection(f"  Bandwidth: {bw:.0f} kHz")
-                self._log_detection(f"  Spreading Factor: {sf}")
-                self._log_detection(f"  Coding Rate: 4/{cr}")
-                self._log_detection(f"  Method: {method}")
+                    self._log_detection(f"✓ meshtasticd service: RUNNING{service_uptime}")
+                else:
+                    service_status = result.stdout.strip() or "inactive"
+                    self._log_detection(f"✗ meshtasticd service: {service_status}")
+            except subprocess.TimeoutExpired:
+                self._log_detection("⚠️ meshtasticd service: check timed out")
+            except FileNotFoundError:
+                self._log_detection("⚠️ systemctl not found (non-systemd system?)")
+            except Exception as e:
+                self._log_detection(f"⚠️ Error checking service: {e}")
 
-                # Select the detected preset in dropdown
-                preset_names = list(MESHTASTIC_PRESETS.keys())
-                try:
-                    idx = preset_names.index(preset)
-                    GLib.idle_add(self.meshtastic_preset_dropdown.set_selected, idx)
-                except ValueError:
-                    pass
+            # Step 2: Check TCP port 4403 (API port)
+            port_open = False
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('localhost', 4403))
+                port_open = (result == 0)
+                sock.close()
 
-                GLib.idle_add(self._set_rnode_status, f"Detected: {preset} via {method}")
+                if port_open:
+                    self._log_detection("✓ API port 4403: open (TCP)")
+                else:
+                    self._log_detection("✗ API port 4403: closed")
+            except Exception as e:
+                self._log_detection(f"⚠️ Port check error: {e}")
+
+            # Step 3: If service is running, try to detect preset settings
+            if service_running:
+                GLib.idle_add(self.detected_settings_label.set_label, "✓ Service running - detecting preset...")
+                GLib.idle_add(self._set_rnode_status, "Service OK - detecting preset...")
+
+                self._log_detection("\n--- Preset Detection ---")
+
+                # Use verbose mode to get detailed logging
+                settings = detect_meshtastic_settings(verbose=True)
+
+                # Log all attempts
+                attempts = settings.get('attempts_log', []) if settings else []
+                for attempt in attempts:
+                    self._log_detection(attempt)
+
+                if settings and settings.get('preset'):
+                    # Update UI with detected settings
+                    preset = settings.get('preset', 'Unknown')
+                    region = settings.get('region', 'US')
+                    bw = settings.get('bandwidth', 0) / 1000  # Hz to kHz
+                    sf = settings.get('spreading_factor', 0)
+                    cr = settings.get('coding_rate', 0)
+                    method = settings.get('detection_method', 'unknown')
+
+                    # Short summary in label
+                    info = f"✓ {preset} ({region}) via {method}"
+                    GLib.idle_add(self.detected_settings_label.set_label, info)
+
+                    # Detailed info in log
+                    self._log_detection(f"\n✓ SUCCESS: Detected {preset}")
+                    self._log_detection(f"  Region: {region}")
+                    self._log_detection(f"  Bandwidth: {bw:.0f} kHz")
+                    self._log_detection(f"  Spreading Factor: {sf}")
+                    self._log_detection(f"  Coding Rate: 4/{cr}")
+                    self._log_detection(f"  Method: {method}")
+
+                    # Select the detected preset in dropdown
+                    preset_names = list(MESHTASTIC_PRESETS.keys())
+                    try:
+                        idx = preset_names.index(preset)
+                        GLib.idle_add(self.meshtastic_preset_dropdown.set_selected, idx)
+                    except ValueError:
+                        pass
+
+                    GLib.idle_add(self._set_rnode_status, f"Detected: {preset} via {method}")
+                else:
+                    # Service running but preset auto-detect failed - this is OK!
+                    GLib.idle_add(self.detected_settings_label.set_label, "✓ Service OK - select preset manually")
+
+                    self._log_detection("\n⚠️ Preset auto-detection unavailable")
+                    self._log_detection("This is normal if meshtastic CLI is not installed.")
+                    self._log_detection("")
+                    self._log_detection("✓ meshtasticd IS RUNNING - your node is working!")
+                    self._log_detection("")
+                    self._log_detection("To use this panel:")
+                    self._log_detection("  1. Select your preset from the dropdown above")
+                    self._log_detection("  2. Click 'Apply Preset' to configure RNode")
+                    self._log_detection("")
+                    self._log_detection("Common presets: LONG_FAST, MEDIUM_FAST, SHORT_FAST")
+
+                    GLib.idle_add(self._set_rnode_status, "Service OK - select preset from dropdown")
             else:
-                # Short error in label
-                GLib.idle_add(self.detected_settings_label.set_label, "⚠️ Not detected - see log")
+                # Service NOT running - this is the real problem
+                GLib.idle_add(self.detected_settings_label.set_label, "✗ Service not running")
 
-                # Detailed troubleshooting in log
-                self._log_detection("\n⚠️ DETECTION FAILED")
-                self._log_detection("Troubleshooting steps:")
-                self._log_detection("  1. Check meshtasticd: systemctl status meshtasticd")
-                self._log_detection("  2. Check USB devices: ls /dev/ttyUSB* /dev/ttyACM*")
-                self._log_detection("  3. Check CLI: meshtastic --version")
-                self._log_detection("\nNote: Copy this log for debugging (use 'Copy All' button)")
+                self._log_detection("\n✗ MESHTASTICD NOT RUNNING")
+                self._log_detection("")
+                self._log_detection("To start the service:")
+                self._log_detection("  sudo systemctl start meshtasticd")
+                self._log_detection("")
+                self._log_detection("To enable on boot:")
+                self._log_detection("  sudo systemctl enable meshtasticd")
+                self._log_detection("")
+                self._log_detection("Check configuration:")
+                self._log_detection("  sudo systemctl status meshtasticd")
+                self._log_detection("  journalctl -u meshtasticd -f")
 
-                GLib.idle_add(self._set_rnode_status, "Detection failed - check log below")
+                GLib.idle_add(self._set_rnode_status, "Service not running - start with systemctl")
 
             GLib.idle_add(button.set_sensitive, True)
 
