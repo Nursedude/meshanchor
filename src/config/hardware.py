@@ -257,6 +257,99 @@ class HardwareDetector:
             },
             'notes': 'PiTx LoRa HAT for Raspberry Pi'
         },
+        'FemtoFox': {
+            'name': 'FemtoFox',
+            'manufacturer': 'FemtoFox',
+            'description': 'FemtoFox LoRa board with SX1262',
+            'radio_module': 'SX1262',
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 8,
+                'IRQ': 16,
+                'Busy': 20,
+                'Reset': 24,
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+                'DIO3_TCXO_VOLTAGE': True,
+            },
+            'notes': 'FemtoFox LoRa board - compact SX1262 module'
+        },
+        'Ebyte E22-900M30S': {
+            'name': 'Ebyte E22-900M30S',
+            'manufacturer': 'Ebyte',
+            'description': '1W High-Power SX1262 Module (915MHz)',
+            'radio_module': 'SX1262',
+            'power_output': '+30dBm (1W)',
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 21,
+                'IRQ': 16,
+                'Busy': 20,
+                'Reset': 18,
+                'RXen': 12,
+                'TXen': 13,
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+                'DIO3_TCXO_VOLTAGE': True,
+            },
+            'notes': 'High-power 1W module - requires adequate power supply'
+        },
+        'Ebyte E22-400M30S': {
+            'name': 'Ebyte E22-400M30S',
+            'manufacturer': 'Ebyte',
+            'description': '1W High-Power SX1268 Module (433MHz)',
+            'radio_module': 'SX1268',
+            'power_output': '+30dBm (1W)',
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 21,
+                'IRQ': 16,
+                'Busy': 20,
+                'Reset': 18,
+                'RXen': 12,
+                'TXen': 13,
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+                'DIO3_TCXO_VOLTAGE': True,
+            },
+            'notes': '433MHz variant for EU/Asia - High-power 1W module'
+        },
+        'Seeed SenseCAP E5': {
+            'name': 'Seeed SenseCAP E5',
+            'manufacturer': 'Seeed Studio',
+            'description': 'SenseCAP LoRa HAT with SX1262',
+            'radio_module': 'SX1262',
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 8,
+                'IRQ': 25,
+                'Reset': 22,
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+            },
+            'notes': 'Seeed SenseCAP LoRa module'
+        },
+        'RAKwireless RAK2287': {
+            'name': 'RAKwireless RAK2287',
+            'manufacturer': 'RAKwireless',
+            'description': 'RAK2287 Pi HAT with SX1262',
+            'radio_module': 'SX1262',
+            'meshtastic_compatible': True,
+            'gpio_config': {
+                'CS': 8,
+                'IRQ': 25,
+                'Busy': 24,
+                'Reset': 17,
+            },
+            'lora_options': {
+                'DIO2_AS_RF_SWITCH': True,
+            },
+            'notes': 'RAKwireless Pi HAT module'
+        },
     }
 
     def __init__(self):

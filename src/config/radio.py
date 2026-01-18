@@ -164,6 +164,126 @@ class RadioConfigurator:
 
         return hop_limit
 
+    def configure_gps_position(self):
+        """Configure GPS position manually or via GPS module"""
+        console.print("\n[bold cyan]GPS Position Configuration[/bold cyan]\n")
+
+        console.print("[cyan]Position Options:[/cyan]")
+        console.print("  1. Auto-detect from GPS module")
+        console.print("  2. Set coordinates manually")
+        console.print("  3. Disable position broadcasting")
+        console.print("  0. Skip/Cancel")
+
+        choice = Prompt.ask("\nSelect option", choices=["0", "1", "2", "3"], default="0")
+
+        if choice == "0":
+            return None
+
+        config = {}
+
+        if choice == "1":
+            console.print("\n[green]GPS auto-detection enabled[/green]")
+            console.print("[dim]Make sure GPS module is configured in config.yaml[/dim]")
+            config['gps_mode'] = 'auto'
+            config['position_broadcast_enabled'] = True
+
+        elif choice == "2":
+            console.print("\n[yellow]Enter your coordinates in decimal degrees[/yellow]")
+            console.print("[dim]Example: Latitude 19.435175, Longitude -155.213842[/dim]")
+            console.print("[dim]Find coordinates at: maps.google.com (right-click → What's here?)[/dim]\n")
+
+            # Latitude input
+            while True:
+                lat_str = Prompt.ask("Latitude (-90 to 90)", default="0.0")
+                try:
+                    latitude = float(lat_str)
+                    if -90 <= latitude <= 90:
+                        break
+                    console.print("[red]Latitude must be between -90 and 90[/red]")
+                except ValueError:
+                    console.print("[red]Invalid number. Use decimal format (e.g., 19.435175)[/red]")
+
+            # Longitude input
+            while True:
+                lon_str = Prompt.ask("Longitude (-180 to 180)", default="0.0")
+                try:
+                    longitude = float(lon_str)
+                    if -180 <= longitude <= 180:
+                        break
+                    console.print("[red]Longitude must be between -180 and 180[/red]")
+                except ValueError:
+                    console.print("[red]Invalid number. Use decimal format (e.g., -155.213842)[/red]")
+
+            # Altitude (optional)
+            if Confirm.ask("\nSet altitude?", default=False):
+                alt_str = Prompt.ask("Altitude in meters", default="0")
+                try:
+                    altitude = int(float(alt_str))
+                except ValueError:
+                    altitude = 0
+                config['altitude'] = altitude
+
+            config['latitude'] = latitude
+            config['longitude'] = longitude
+            config['gps_mode'] = 'fixed'
+            config['position_broadcast_enabled'] = True
+
+            console.print(f"\n[green]Position set to:[/green]")
+            console.print(f"  Latitude:  {latitude}")
+            console.print(f"  Longitude: {longitude}")
+            if 'altitude' in config:
+                console.print(f"  Altitude:  {config['altitude']}m")
+
+            # Show meshtastic CLI command for reference
+            console.print(f"\n[dim]CLI equivalent:[/dim]")
+            console.print(f"[cyan]meshtastic --host localhost --setlat {latitude} --setlon {longitude}[/cyan]")
+
+        elif choice == "3":
+            config['gps_mode'] = 'disabled'
+            config['position_broadcast_enabled'] = False
+            console.print("\n[yellow]Position broadcasting disabled[/yellow]")
+
+        return config
+
+    def apply_gps_position(self, config, host='localhost'):
+        """Apply GPS position using meshtastic CLI"""
+        import subprocess
+
+        if not config or config.get('gps_mode') != 'fixed':
+            return False
+
+        lat = config.get('latitude')
+        lon = config.get('longitude')
+
+        if lat is None or lon is None:
+            console.print("[red]No coordinates to apply[/red]")
+            return False
+
+        console.print(f"\n[cyan]Setting position to {lat}, {lon}...[/cyan]")
+
+        try:
+            cmd = ['meshtastic', '--host', host, '--setlat', str(lat), '--setlon', str(lon)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                console.print("[green]Position set successfully![/green]")
+                return True
+            else:
+                console.print(f"[red]Error: {result.stderr}[/red]")
+                console.print("[dim]Make sure meshtasticd is running and accessible[/dim]")
+                return False
+
+        except FileNotFoundError:
+            console.print("[red]meshtastic CLI not found[/red]")
+            console.print("[dim]Install with: pip install meshtastic[/dim]")
+            return False
+        except subprocess.TimeoutExpired:
+            console.print("[red]Command timed out[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return False
+
     def configure_mesh_settings(self):
         """Configure mesh network settings"""
         console.print("\n[bold cyan]Mesh Network Settings[/bold cyan]\n")
@@ -181,16 +301,11 @@ class RadioConfigurator:
         )
         settings['node_info_broadcast_secs'] = interval
 
-        # Position broadcast
-        if Confirm.ask("\nBroadcast GPS position?", default=False):
-            settings['position_broadcast_enabled'] = True
-
-            pos_interval = IntPrompt.ask(
-                "Position broadcast interval (seconds)",
-                default=900,
-                show_default=True
-            )
-            settings['position_broadcast_secs'] = pos_interval
+        # Position configuration
+        console.print("\n[cyan]Position Settings:[/cyan]")
+        gps_config = self.configure_gps_position()
+        if gps_config:
+            settings.update(gps_config)
         else:
             settings['position_broadcast_enabled'] = False
 
