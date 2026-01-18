@@ -292,12 +292,9 @@ class ComponentsMixin:
         elif rns_running:
             self.rns_status_icon.set_from_icon_name("emblem-default")
             self.rns_status_label.set_label("Running")
-            # Check if running via systemd
-            service_status = self._get_systemd_service_status()
-            if service_status == 'active':
-                self.rns_status_detail.set_label("rnsd running (systemd service)")
-            else:
-                self.rns_status_detail.set_label("rnsd running (process)")
+            # rnsd is a user-space daemon, not a systemd service
+            # Detection is via UDP port 37428
+            self.rns_status_detail.set_label("rnsd running (detected via port 37428)")
             self.rns_install_note.set_label("")
             self.rns_start_btn.set_sensitive(False)
             self.rns_stop_btn.set_sensitive(True)
@@ -305,14 +302,9 @@ class ComponentsMixin:
         else:
             self.rns_status_icon.set_from_icon_name("dialog-warning")
             self.rns_status_label.set_label("Stopped")
-            service_status = self._get_systemd_service_status()
-            if service_status == 'inactive':
-                self.rns_status_detail.set_label("rnsd stopped (systemd service installed)")
-            elif service_status == 'not-found':
-                self.rns_status_detail.set_label("rnsd not running (no systemd service)")
-            else:
-                self.rns_status_detail.set_label("Reticulum daemon is not running")
-            self.rns_install_note.set_label("Start with: rnsd")
+            # rnsd is a user-space daemon - don't check systemctl
+            self.rns_status_detail.set_label("rnsd not running")
+            self.rns_install_note.set_label("Start with: rnsd (as user, not root)")
             self.rns_start_btn.set_sensitive(True)
             self.rns_stop_btn.set_sensitive(False)
             self.rns_restart_btn.set_sensitive(True)
