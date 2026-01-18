@@ -112,6 +112,12 @@ class DiagnosticsPanel(Gtk.Box):
         self._update_timer_id = GLib.timeout_add_seconds(5, self._update_health_display)
         self._is_destroyed = False
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         """Build the diagnostics panel UI."""
         # Header

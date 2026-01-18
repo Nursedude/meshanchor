@@ -414,7 +414,12 @@ class UnifiedNodeTracker:
         """
         # Check if we're in the main thread - RNS signal handlers require it
         import threading as _threading
-        if _threading.current_thread() is not _threading.main_thread():
+        current = _threading.current_thread()
+        main = _threading.main_thread()
+        is_main = current is main
+        logger.debug(f"Thread check: current={current.name}, main={main.name}, is_main={is_main}")
+
+        if not is_main:
             logger.warning("RNS initialization must be in main thread - skipping node discovery")
             logger.info("RNS node discovery disabled (call start() from main thread to enable)")
             self._rns_connected = False

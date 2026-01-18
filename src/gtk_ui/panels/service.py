@@ -49,6 +49,12 @@ class ServicePanel(Gtk.Box):
         self._build_ui()
         self._refresh_status()
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _safe_status_message(self, message):
         """Safely set status message - handles case where main_window may be destroyed."""
         try:

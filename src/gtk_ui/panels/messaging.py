@@ -47,12 +47,19 @@ class MessagingPanel(Gtk.Box):
         GLib.idle_add(self._load_messages)
         GLib.idle_add(self._load_stats)
 
+        # Connect cleanup handler for when panel is destroyed
+        self.connect("unrealize", self._on_unrealize)
+
         # Subscribe to event bus for real-time RX messages (Issue #17 Phase 3)
         self._event_handler = None
         if HAS_EVENT_BUS and event_bus:
             self._event_handler = self._on_message_event
             event_bus.subscribe('message', self._event_handler)
             logger.debug("MessagingPanel subscribed to message events")
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
 
     def _build_ui(self):
         """Build the messaging panel UI"""

@@ -76,6 +76,12 @@ class SettingsPanel(Gtk.Box):
         self._build_ui()
         self._apply_settings()
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _load_settings_legacy(self):
         """Legacy settings load for fallback"""
         import json
