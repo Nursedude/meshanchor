@@ -207,8 +207,20 @@ class SensorsTabMixin:
 
             try:
                 # Try to get data from node tracker
-                from gateway.node_tracker import NodeTracker
-                tracker = NodeTracker.get_instance() if hasattr(NodeTracker, 'get_instance') else None
+                # First check if main_window has a tracker
+                tracker = None
+                if hasattr(self, 'main_window') and hasattr(self.main_window, 'node_tracker'):
+                    tracker = self.main_window.node_tracker
+
+                # Fall back to creating/importing tracker
+                if not tracker:
+                    try:
+                        from gateway.node_tracker import UnifiedNodeTracker
+                        tracker = UnifiedNodeTracker()
+                        tracker.load_cache()  # Load cached nodes
+                    except ImportError:
+                        logger.warning("UnifiedNodeTracker not available")
+                        tracker = None
 
                 if tracker and hasattr(tracker, 'get_all_nodes'):
                     for node in tracker.get_all_nodes():
