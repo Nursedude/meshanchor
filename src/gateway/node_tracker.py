@@ -482,12 +482,25 @@ instance_control_port = 37429
                 RNS.Transport.register_announce_handler(NodeAnnounceHandler(self))
                 logger.info("Registered announce handler with rnsd")
 
-                # Load known destinations from rnsd
+                # Load known destinations from rnsd (may be empty initially)
                 self._load_known_rns_destinations(RNS)
 
-                # Start background loop
+                # Store RNS module reference for background loop
+                self._rns_module = RNS
+
+                # Start background loop (will re-check path_table periodically)
                 self._rns_thread = threading.Thread(target=self._rns_loop, daemon=True)
                 self._rns_thread.start()
+
+                # Schedule delayed re-check after 5 seconds for sync'd data
+                def delayed_check():
+                    import time
+                    time.sleep(5)
+                    if self._running and self._rns_connected:
+                        logger.debug("Running delayed RNS destination check...")
+                        self._load_known_rns_destinations(RNS)
+
+                threading.Thread(target=delayed_check, daemon=True).start()
 
             except Exception as e:
                 logger.warning(f"Could not connect to rnsd: {e}")
@@ -504,10 +517,49 @@ instance_control_port = 37429
             self._rns_connected = False
 
     def _rns_loop(self):
-        """Background loop to keep RNS connection alive"""
+        """Background loop for RNS - periodically check for new destinations.
+
+        When connected as a shared instance client, the path_table may not
+        be populated immediately. This loop periodically checks for new
+        destinations that rnsd has discovered.
+        """
         import time
+        import RNS
+
+        check_interval = 30  # Check every 30 seconds
+        last_check = 0
+
         while self._running:
             time.sleep(1)
+
+            # Periodic check for new RNS destinations
+            current_time = time.time()
+            if current_time - last_check >= check_interval:
+                last_check = current_time
+                try:
+                    # Re-check path_table for newly discovered routes
+                    new_count = 0
+                    if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
+                        for dest_hash, path_data in RNS.Transport.path_table.items():
+                            try:
+                                if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
+                                    node_id = f"rns_{dest_hash.hex()[:16]}"
+                                    if node_id not in self._nodes:
+                                        hops = 0
+                                        if isinstance(path_data, tuple) and len(path_data) > 1:
+                                            hops = path_data[1]
+                                        node = UnifiedNode.from_rns(dest_hash, name="", app_data=None)
+                                        self.add_node(node)
+                                        new_count += 1
+                                        logger.debug(f"Discovered RNS destination: {dest_hash.hex()[:8]} ({hops} hops)")
+                            except Exception as e:
+                                logger.debug(f"Error processing path_table entry: {e}")
+
+                    if new_count > 0:
+                        logger.info(f"Discovered {new_count} new RNS destinations from path_table")
+
+                except Exception as e:
+                    logger.debug(f"Error checking path_table: {e}")
 
     def stop(self, timeout: float = 5.0):
         """Stop the node tracker and wait for threads to finish

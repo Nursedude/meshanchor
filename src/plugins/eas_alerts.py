@@ -818,8 +818,15 @@ class EASAlertsPlugin(IntegrationPlugin):
         # Calculate date filter
         since_date = (datetime.now() - timedelta(days=history_days)).strftime('%Y-%m-%d')
 
-        url = f"https://www.fema.gov/api/open/v1/IpawsArchivedAlerts"
-        url += f"?$filter=sent ge '{since_date}'"
+        # Build URL with properly encoded parameters
+        # Spaces in OData queries must be URL-encoded
+        import urllib.parse
+        base_url = "https://www.fema.gov/api/open/v1/IpawsArchivedAlerts"
+        params = {
+            '$filter': f"sent ge '{since_date}'",
+            '$top': '50',
+            '$orderby': 'sent desc'
+        }
 
         # Add FIPS filter if configured
         if fips_codes:
@@ -827,7 +834,8 @@ class EASAlertsPlugin(IntegrationPlugin):
             # Note: FEMA API may have different filter syntax
             # This is a simplified example
 
-        url += "&$top=50&$orderby=sent desc"
+        safe_chars = "'"
+        url = f"{base_url}?{urllib.parse.urlencode(params, safe=safe_chars)}"
 
         try:
             user_agent = self._config.get('general', 'user_agent', fallback='MeshForge-EAS/1.0')
