@@ -207,27 +207,35 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
     Returns:
         True if port appears to be in use (service running), False otherwise
     """
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(timeout)
-        # Try to bind to the port - if it fails, port is in use
-        sock.bind((host, port))
-        # If we successfully bound, port was NOT in use
-        return False
-    except OSError as e:
-        # EADDRINUSE (98 on Linux) means the port is already bound
-        # This indicates the service IS running
-        if e.errno in (98, 48, 10048):  # Linux, macOS, Windows EADDRINUSE
-            return True
-        logger.debug(f"UDP port check error for {host}:{port}: {e}")
-        return False
-    finally:
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass  # Socket close errors are non-critical
+    # Try multiple addresses since service might bind to different interfaces
+    hosts_to_check = [host]
+    if host == '127.0.0.1':
+        hosts_to_check.append('0.0.0.0')  # Also check wildcard
+
+    for check_host in hosts_to_check:
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            # Try to bind to the port - if it fails, port is in use
+            sock.bind((check_host, port))
+            # If we successfully bound, port was NOT in use on this address
+            sock.close()
+            continue  # Try next address
+        except OSError as e:
+            # EADDRINUSE (98 on Linux) means the port is already bound
+            # This indicates the service IS running
+            if e.errno in (98, 48, 10048):  # Linux, macOS, Windows EADDRINUSE
+                return True
+            logger.debug(f"UDP port check error for {check_host}:{port}: {e}")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass  # Socket close errors are non-critical
+
+    return False
 
 
 def check_process_running(process_name: str) -> bool:
@@ -241,10 +249,9 @@ def check_process_running(process_name: str) -> bool:
         True if process is running, False otherwise
     """
     try:
-        # Use pgrep with multiple patterns to catch different invocation methods
-        # -f matches the full command line
+        # First try exact process name match (most reliable)
         result = subprocess.run(
-            ['pgrep', '-f', process_name],
+            ['pgrep', '-x', process_name],  # -x = exact match
             capture_output=True,
             text=True,
             timeout=5
@@ -252,14 +259,28 @@ def check_process_running(process_name: str) -> bool:
         if result.returncode == 0 and result.stdout.strip():
             return True
 
-        # Also check with just the process name (no -f)
+        # Also check with -f but use word boundaries to avoid partial matches
+        # e.g., match "rnsd" but not "myrnsd_wrapper"
         result = subprocess.run(
-            ['pgrep', process_name],
+            ['pgrep', '-f', f'(^|/)({process_name})(\\s|$)'],
             capture_output=True,
             text=True,
             timeout=5
         )
-        return result.returncode == 0 and result.stdout.strip()
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+
+        # Fallback: Check via ps for python-based services (e.g., python3 -m rnsd)
+        if process_name in ('rnsd', 'nomadnet', 'meshchat'):
+            result = subprocess.run(
+                ['pgrep', '-f', f'python.*{process_name}'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0 and result.stdout.strip()
+
+        return False
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
 

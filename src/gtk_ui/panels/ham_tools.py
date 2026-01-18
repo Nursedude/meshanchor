@@ -65,7 +65,7 @@ except ImportError:
     HAS_SERVICE_CHECK = False
 
 # Import mixins for modular functionality
-from ham_tools_mixins import CallsignLookupMixin, PropagationMixin
+from .ham_tools_mixins import CallsignLookupMixin, PropagationMixin
 
 
 class HamToolsPanel(CallsignLookupMixin, PropagationMixin, Gtk.Box):
