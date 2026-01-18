@@ -915,3 +915,154 @@ def _send_message(self):
 ---
 
 *Last updated: 2026-01-16 - Added Issue #16 Gateway Message Routing Reliability*
+
+---
+
+## Issue #17: Service Detection & Status Display Redesign Required
+
+### Symptom
+After multiple fix attempts, these issues persist:
+1. **RNS panel shows wrong status** - Lights/indicators show running/stopped incorrectly
+2. **Meshtastic detection shows "FAILED"** - Even when meshtasticd service is running and functional
+3. **TX works but RX doesn't display** - Messages sent successfully, received messages not shown in UI
+
+### Root Cause Analysis
+
+**Problem 1: Too Many Detection Methods**
+Current `service_check.py` uses 3+ fallback methods with conflicting results:
+```
+UDP port check → pgrep → systemctl is-active → systemctl status
+```
+Each method can give different answers. When they conflict, UI shows wrong state.
+
+**Problem 2: Conflating "Service Running" with "CLI Detection"**
+The meshtastic detection treats CLI failures as service failures:
+```
+Service: RUNNING (systemctl says active)
+CLI:     FAILS (can't connect via meshtastic --export-config)
+UI:      Shows "DETECTION FAILED" ← Misleading
+```
+
+**Problem 3: No Event System for RX Messages**
+Messages flow: `meshtasticd → gateway → logs` but NOT to UI
+- TX: User action → API call → works
+- RX: Incoming packet → log entry → UI never updated
+
+### Failed Fix Attempts (2026-01-17)
+1. Added UDP port check for 0.0.0.0 in addition to 127.0.0.1 - Still fails
+2. Improved pgrep with exact match and word boundaries - Still matches incorrectly
+3. Added service_running flag to detection result - UI still shows "FAILED"
+4. Fixed NodeTracker import (was wrong class name) - Telemetry still doesn't show
+
+### Redesign Specification
+
+#### Component 1: Service Detection (service_check.py)
+
+**Current Architecture (BROKEN):**
+```
+check_service() {
+  if check_udp_port() → return running
+  if check_process_running() → return running
+  if check_systemd_service() → return running
+  return not_running
+}
+```
+
+**Proposed Architecture:**
+```
+check_service() {
+  # SINGLE SOURCE OF TRUTH for systemd services
+  if is_systemd_service(name):
+    return systemctl_is_active(name)  # That's it. No fallbacks.
+
+  # Only use port/process for non-systemd services
+  return check_port_or_process(name)
+}
+```
+
+**Rationale:**
+- If rnsd/meshtasticd are managed by systemd, trust systemd
+- Fallback methods (port check, pgrep) are unreliable
+- "Unknown" state is better than wrong state
+
+#### Component 2: Status Display (UI panels)
+
+**Current Architecture (BROKEN):**
+```
+detection = detect_meshtastic_settings()
+if detection is None or detection['preset'] is None:
+    show "DETECTION FAILED"  ← Wrong when service runs but CLI unavailable
+```
+
+**Proposed Architecture:**
+```
+# Separate service status from detection capability
+service_status = check_service('meshtasticd')
+detection = detect_meshtastic_settings()
+
+# Show BOTH states clearly
+"Service: Running" or "Service: Stopped"
+"Preset: MEDIUM_FAST" or "Preset: Unknown (select manually)"
+
+# Never show "FAILED" when service is running
+```
+
+#### Component 3: RX Message Display
+
+**Current Architecture (BROKEN):**
+```
+gateway.rns_bridge receives packet → logger.info("Received...")
+                                   → No UI notification
+```
+
+**Proposed Architecture:**
+```
+# Event-based message notification
+class MessageEvent:
+    direction: "tx" | "rx"
+    content: str
+    timestamp: datetime
+    node_id: str
+
+# Gateway emits events
+gateway.on_message_received(packet):
+    event = MessageEvent(direction="rx", ...)
+    event_bus.emit("message", event)
+
+# UI subscribes to events
+panel.on_init():
+    event_bus.subscribe("message", self._on_message)
+
+def _on_message(self, event):
+    GLib.idle_add(self._add_message_to_list, event)
+```
+
+### Implementation Priority
+
+| Component | Effort | Impact | Priority |
+|-----------|--------|--------|----------|
+| Service Detection Simplification | LOW | HIGH | 1 - Do first |
+| Status Display Separation | MEDIUM | HIGH | 2 |
+| RX Message Events | HIGH | MEDIUM | 3 - Requires event bus |
+
+### Files to Modify
+
+**Phase 1: Service Detection**
+- `src/utils/service_check.py` - Simplify to systemctl-only for systemd services
+- `src/gtk_ui/panels/rns_mixins/components.py` - Use simplified check
+
+**Phase 2: Status Display**
+- `src/gtk_ui/panels/rns_mixins/rnode.py` - Separate service/detection display
+- `src/utils/lora_presets.py` - Return service_status separately from preset
+
+**Phase 3: RX Messages**
+- `src/utils/event_bus.py` - NEW: Simple pub/sub event system
+- `src/gateway/rns_bridge.py` - Emit message events
+- `src/gtk_ui/panels/messaging.py` - Subscribe to message events
+
+### Prevention
+- Don't add more detection fallback methods - simplify instead
+- Test with actual hardware in various states (running, stopped, misconfigured)
+- UI should always distinguish "service state" from "detection capability"
+
+---
