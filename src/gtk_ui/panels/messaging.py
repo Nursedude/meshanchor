@@ -1,6 +1,9 @@
 """
 MeshForge Native Messaging Panel - GTK4 Interface
 
+⚠️ EXPERIMENTAL - This panel is under development and may not work reliably.
+For reliable messaging, use the Meshtastic Web Client at http://localhost:4403
+
 Send and receive messages across Meshtastic and RNS networks.
 Integrates with commands/messaging.py for SQLite storage.
 
@@ -13,6 +16,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 import threading
 import logging
+import subprocess
 from datetime import datetime
 
 # Import event bus for real-time message updates (Issue #17 Phase 3)
@@ -52,16 +56,43 @@ class MessagingPanel(Gtk.Box):
 
     def _build_ui(self):
         """Build the messaging panel UI"""
-        # Title
+        # Title with experimental warning
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
         title = Gtk.Label(label="Mesh Messaging")
         title.add_css_class("title-1")
         title.set_xalign(0)
-        self.append(title)
+        title_box.append(title)
 
+        exp_badge = Gtk.Label(label="⚠️ EXPERIMENTAL")
+        exp_badge.add_css_class("warning")
+        exp_badge.set_tooltip_text("This panel is under development and may not work reliably")
+        title_box.append(exp_badge)
+
+        self.append(title_box)
+
+        # Subtitle with web client recommendation
         subtitle = Gtk.Label(label="Send and receive messages across Meshtastic and RNS networks")
         subtitle.add_css_class("dim-label")
         subtitle.set_xalign(0)
         self.append(subtitle)
+
+        # Web client recommendation box
+        web_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        web_box.set_margin_top(5)
+        web_box.set_margin_bottom(10)
+
+        web_label = Gtk.Label(label="For reliable messaging:")
+        web_label.add_css_class("dim-label")
+        web_box.append(web_label)
+
+        web_btn = Gtk.Button(label="Open Meshtastic Web Client")
+        web_btn.add_css_class("suggested-action")
+        web_btn.set_tooltip_text("Opens http://localhost:4403 in your browser")
+        web_btn.connect("clicked", self._open_web_client)
+        web_box.append(web_btn)
+
+        self.append(web_box)
 
         # Main paned container (conversations list | messages)
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -566,6 +597,22 @@ class MessagingPanel(Gtk.Box):
         # Visual feedback
         if hasattr(self.main_window, 'set_status_message'):
             self.main_window.set_status_message(f"New message from {from_id}")
+
+    def _open_web_client(self, button):
+        """Open Meshtastic web client in browser"""
+        def do_open():
+            try:
+                subprocess.run(
+                    ['xdg-open', 'http://localhost:4403'],
+                    timeout=10,
+                    capture_output=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to open web client: {e}")
+
+        # Run in background thread to not block UI
+        threading.Thread(target=do_open, daemon=True).start()
+        self.main_window.set_status_message("Opening Meshtastic Web Client...")
 
     def cleanup(self):
         """Clean up panel resources."""
