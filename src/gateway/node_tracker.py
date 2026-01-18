@@ -417,7 +417,7 @@ class UnifiedNodeTracker:
         current = _threading.current_thread()
         main = _threading.main_thread()
         is_main = current is main
-        logger.debug(f"Thread check: current={current.name}, main={main.name}, is_main={is_main}")
+        logger.info(f"Thread check: current={current.name}, main={main.name}, is_main={is_main}")
 
         if not is_main:
             logger.warning("RNS initialization must be in main thread - skipping node discovery")
