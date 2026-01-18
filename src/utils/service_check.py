@@ -425,9 +425,25 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
 
     # =========================================================================
     # NON-SYSTEMD SERVICES: Fall back to port/process check
+    # Race condition fix: Process may start before binding port, so check
+    # process FIRST, then port. Also add retry for startup race condition.
     # =========================================================================
     port_type = config.get('port_type', 'tcp')
 
+    # Check process FIRST (more reliable during startup)
+    # This helps with the race condition where process starts but hasn't
+    # bound to port yet (e.g., rnsd shows PID but port check fails)
+    if check_process_running(systemd_name):
+        return ServiceStatus(
+            name=name,
+            available=True,
+            state=ServiceState.AVAILABLE,
+            message=f"{description} is running (process detected)",
+            port=check_port_num,
+            detection_method="process"
+        )
+
+    # Fall back to port check
     if check_port_num:
         if port_type == 'udp':
             port_open = check_udp_port(check_port_num, host)
@@ -443,17 +459,6 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 port=check_port_num,
                 detection_method="port"
             )
-
-    # Try process check as fallback
-    if check_process_running(systemd_name):
-        return ServiceStatus(
-            name=name,
-            available=True,
-            state=ServiceState.AVAILABLE,
-            message=f"{description} is running (process detected)",
-            port=check_port_num,
-            detection_method="process"
-        )
 
     return ServiceStatus(
         name=name,
