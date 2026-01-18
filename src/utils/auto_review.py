@@ -727,7 +727,27 @@ class ReviewAgent:
                 # Get indentation of the except line
                 except_indent = len(line) - len(line.lstrip())
 
-                # Look at the next non-empty line(s) to see what happens in the except block
+                # FIRST PASS: Look for 'raise' anywhere in the except block
+                # This handles patterns like: rollback(); raise
+                for i in range(line_num, min(line_num + 10, len(lines))):
+                    next_line = lines[i]
+                    next_stripped = next_line.strip()
+                    next_indent = len(next_line) - len(next_line.lstrip())
+
+                    if not next_stripped:
+                        continue  # Skip empty lines
+
+                    # Stop if we've exited the except block (dedented to except level or below)
+                    if next_indent <= except_indent and i > line_num:
+                        # Check for finally/except at same level (still in try block)
+                        if not (next_stripped.startswith('finally') or next_stripped.startswith('except')):
+                            break
+
+                    # Found raise anywhere in except block - it re-raises, so OK
+                    if next_stripped == 'raise' or next_stripped.startswith('raise ') or next_stripped.startswith('raise#'):
+                        return True
+
+                # SECOND PASS: Look at the immediate handling pattern
                 for i in range(line_num, min(line_num + 5, len(lines))):
                     next_line = lines[i]
                     next_stripped = next_line.strip()
@@ -764,10 +784,6 @@ class ReviewAgent:
 
                     # Acceptable: breaks from loop
                     if next_stripped == 'break':
-                        return True
-
-                    # Acceptable: raises a different exception
-                    if next_stripped.startswith('raise '):
                         return True
 
                     # Acceptable: pass with explanatory comment
