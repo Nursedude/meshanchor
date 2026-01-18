@@ -59,7 +59,7 @@ except ImportError:
         return Path.home()
 
 # Import modular pane classes
-from panes import DashboardPane, ServicePane, ConfigPane, CLIPane, ToolsPane
+from panes import DashboardPane, ServicePane, ConfigPane, CLIPane, ToolsPane, HardwarePane
 
 
 class StatusWidget(Static):
@@ -200,14 +200,17 @@ class MeshtasticdTUI(App):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        Binding("q", "quit", "Quit", priority=True),
+        Binding("escape", "quit", "Quit", show=False, priority=True),
         Binding("d", "switch_tab('dashboard')", "Dashboard"),
         Binding("s", "switch_tab('service')", "Service"),
         Binding("c", "switch_tab('config')", "Config"),
         Binding("m", "switch_tab('cli')", "CLI"),
         Binding("t", "switch_tab('tools')", "Tools"),
+        Binding("h", "switch_tab('hardware')", "Hardware"),
         Binding("r", "refresh", "Refresh"),
         Binding("T", "toggle_theme", "Theme"),
+        Binding("?", "show_help", "Help"),
     ]
 
     TITLE = f"Meshtasticd Manager v{__version__}"
@@ -222,6 +225,8 @@ class MeshtasticdTUI(App):
                 yield ServicePane()
             with TabPane("Config", id="config"):
                 yield ConfigPane()
+            with TabPane("Hardware", id="hardware"):
+                yield HardwarePane()
             with TabPane("CLI", id="cli"):
                 yield CLIPane()
             with TabPane("Tools", id="tools"):
@@ -245,6 +250,34 @@ class MeshtasticdTUI(App):
             self.query_one(ServicePane).refresh_status()
         elif active == "config":
             await self.query_one(ConfigPane).refresh_lists()
+        elif active == "hardware":
+            self.query_one(HardwarePane).refresh_status()
+
+    def action_show_help(self):
+        """Show help screen"""
+        help_text = """
+[bold cyan]MeshForge TUI - Keyboard Shortcuts[/bold cyan]
+
+[bold]Navigation[/bold]
+  [green]d[/green]  Dashboard    [green]s[/green]  Service     [green]c[/green]  Config
+  [green]h[/green]  Hardware     [green]m[/green]  CLI         [green]t[/green]  Tools
+  [green]Tab[/green]  Next tab   [green]Shift+Tab[/green]  Previous tab
+
+[bold]Actions[/bold]
+  [green]r[/green]  Refresh current view
+  [green]T[/green]  Toggle dark/light theme
+  [green]?[/green]  Show this help
+
+[bold]Exit[/bold]
+  [green]q[/green]  or  [green]Escape[/green]  Quit application
+
+[bold]In Lists[/bold]
+  [green]↑/↓[/green]  Navigate items
+  [green]Enter[/green]  Select/Preview
+
+Press any key to close this help.
+"""
+        self.notify(help_text, title="Help", timeout=15)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Global button handler"""
