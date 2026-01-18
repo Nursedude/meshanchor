@@ -789,32 +789,40 @@ instance_control_port = 37429
         }
 
     def _load_known_rns_destinations(self, RNS):
-        """Load known destinations from RNS identity/destination cache"""
+        """Load known destinations from RNS path table and identity cache.
+
+        Priority order (most complete first):
+        1. RNS.Transport.path_table - complete routing table from rnsd
+        2. RNS.Identity.known_destinations - cached identities
+        3. RNS.Transport.destinations - local destinations only (fallback)
+        """
         try:
-            # Check for known destinations in the transport layer
             known_count = 0
 
-            # Try to access known destinations from Transport
-            if hasattr(RNS.Transport, 'destinations') and RNS.Transport.destinations:
-                destinations = RNS.Transport.destinations
-                # Handle both dict and list types (RNS API varies by version)
-                if isinstance(destinations, dict):
-                    dest_items = destinations.items()
-                elif isinstance(destinations, list):
-                    dest_items = enumerate(destinations)
-                else:
-                    dest_items = []
-
-                for _, dest in dest_items:
+            # PRIMARY: Check path_table - contains ALL destinations rnsd knows about
+            # This is the complete routing table, updated in real-time
+            if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
+                for dest_hash, path_data in RNS.Transport.path_table.items():
                     try:
-                        if hasattr(dest, 'hash'):
-                            node = UnifiedNode.from_rns(dest.hash, name="", app_data=None)
-                            self.add_node(node)
-                            known_count += 1
-                    except Exception as e:
-                        logger.debug(f"Error loading destination: {e}")
+                        if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
+                            node_id = f"rns_{dest_hash.hex()[:16]}"
+                            if node_id not in self._nodes:
+                                # Extract hop count from path tuple if available
+                                hops = 0
+                                if isinstance(path_data, tuple) and len(path_data) > 1:
+                                    hops = path_data[1]
 
-            # Also check the identity known destinations
+                                node = UnifiedNode.from_rns(dest_hash, name="", app_data=None)
+                                # Store hop count for later use
+                                if hasattr(node, 'hops'):
+                                    node.hops = hops
+                                self.add_node(node)
+                                known_count += 1
+                                logger.debug(f"Loaded from path_table: {dest_hash.hex()[:8]} ({hops} hops)")
+                    except Exception as e:
+                        logger.debug(f"Error loading from path_table: {e}")
+
+            # SECONDARY: Check identity known destinations (for any missed in path_table)
             if hasattr(RNS.Identity, 'known_destinations') and RNS.Identity.known_destinations:
                 known_dests = RNS.Identity.known_destinations
                 # Handle both dict (hash->identity) and list (hashes) formats
@@ -826,17 +834,40 @@ instance_control_port = 37429
                 for dest_hash in dest_hashes:
                     try:
                         if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
-                            # Check if we already have this node
                             node_id = f"rns_{dest_hash.hex()[:16]}"
                             if node_id not in self._nodes:
                                 node = UnifiedNode.from_rns(dest_hash, name="", app_data=None)
                                 self.add_node(node)
                                 known_count += 1
+                                logger.debug(f"Loaded from known_destinations: {dest_hash.hex()[:8]}")
                     except Exception as e:
                         logger.debug(f"Error loading known identity: {e}")
 
+            # TERTIARY: Check Transport.destinations (local only - least useful)
+            if hasattr(RNS.Transport, 'destinations') and RNS.Transport.destinations:
+                destinations = RNS.Transport.destinations
+                if isinstance(destinations, dict):
+                    dest_items = destinations.values()
+                elif isinstance(destinations, list):
+                    dest_items = destinations
+                else:
+                    dest_items = []
+
+                for dest in dest_items:
+                    try:
+                        if hasattr(dest, 'hash'):
+                            node_id = f"rns_{dest.hash.hex()[:16]}"
+                            if node_id not in self._nodes:
+                                node = UnifiedNode.from_rns(dest.hash, name="", app_data=None)
+                                self.add_node(node)
+                                known_count += 1
+                    except Exception as e:
+                        logger.debug(f"Error loading destination: {e}")
+
             if known_count > 0:
                 logger.info(f"Loaded {known_count} known RNS destinations")
+            else:
+                logger.debug("No known RNS destinations found (path_table may be empty)")
 
         except Exception as e:
             logger.debug(f"Could not load known RNS destinations: {e}")
