@@ -160,20 +160,47 @@ Configure custom channel slot? [y/n/c] (n):
 | Textual TUI | Works but lower priority |
 | GTK Desktop | Maintenance only |
 
+### Nice-to-Have (Revised)
+
+| Feature | Notes |
+|---------|-------|
+| AREDN Panel | **KEEP** - User is part of AREDN network |
+| AI Assistant | **KEEP** - Differentiator, future of mesh NOC |
+| Message Queue | SQLite queue exists, works |
+| Webhooks | Implemented, low maintenance |
+| Textual TUI | Works but lower priority than Launcher TUI |
+
 ### Cut/Deferred
 
 | Feature | Reason |
 |---------|--------|
 | Web UI | Not used, adds complexity |
-| HamClock Integration | Nice but not core NOC |
-| AREDN Panel | Nice but not core NOC |
-| AI Assistant | Nice but not core NOC |
+| HamClock Integration | Nice but not core NOC (defer) |
 
 ---
 
 ## Maps Strategy
 
-Maps are **Core** - essential for NOC visualization.
+Maps are **Core** - essential for NOC visualization. Must be DYNAMIC, showing all networks.
+
+### Unified Map Vision
+```
+┌─────────────────────────────────────────────────────────────┐
+│  🗺️ MeshForge Network Map                                   │
+│                                                             │
+│  Legend:                                                    │
+│    ◉ Meshtastic Node (from meshtasticd)                    │
+│    ◆ RNS Destination (from rnsd)                           │
+│    ■ AREDN Node (from AREDN API)                           │
+│    ── RF Link                                               │
+│    -- Tunnel/IP Link                                        │
+│                                                             │
+│  Data Sources:                                              │
+│    - meshtasticd (localhost:4403)                          │
+│    - rnsd (UDP 37428)                                       │
+│    - AREDN sysinfo API (*.local.mesh)                      │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ### Current Implementation
 - Folium generates HTML with Leaflet.js
@@ -186,10 +213,17 @@ Maps are **Core** - essential for NOC visualization.
 3. **Headless:** Generate HTML file, user opens on another device
 
 ### Map Features (Priority Order)
-1. Node positions with icons
-2. Link lines between nodes (if data available)
-3. Coverage circles (optional, can be toggled)
-4. Terrain/elevation (future, if data available)
+1. Node positions with icons (per-network type)
+2. Link lines between nodes (RF, tunnel, IP)
+3. AREDN integration (query *.local.mesh nodes)
+4. Coverage circles (optional, can be toggled)
+5. Real-time updates (poll every 30s)
+
+### AREDN Map Integration
+Reference: https://worldmap.arednmesh.org/
+- AREDN nodes report location to AREDN servers
+- MeshForge can query local AREDN nodes via API
+- See `.claude/research/aredn_integration.md` for API details
 
 ---
 
