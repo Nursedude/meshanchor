@@ -2,7 +2,7 @@
 MeshForge Native Messaging Panel - GTK4 Interface
 
 ⚠️ EXPERIMENTAL - This panel is under development and may not work reliably.
-For reliable messaging, use the Meshtastic Web Client at http://localhost:4403
+For reliable messaging, use the Meshtastic Web Client at https://localhost:9443
 
 Send and receive messages across Meshtastic and RNS networks.
 Integrates with commands/messaging.py for SQLite storage.
@@ -88,7 +88,7 @@ class MessagingPanel(Gtk.Box):
 
         web_btn = Gtk.Button(label="Open Meshtastic Web Client")
         web_btn.add_css_class("suggested-action")
-        web_btn.set_tooltip_text("Opens http://localhost:4403 in your browser")
+        web_btn.set_tooltip_text("Opens https://localhost:9443 in your browser")
         web_btn.connect("clicked", self._open_web_client)
         web_box.append(web_btn)
 
@@ -603,7 +603,7 @@ class MessagingPanel(Gtk.Box):
         def do_open():
             try:
                 subprocess.run(
-                    ['xdg-open', 'http://localhost:4403'],
+                    ['xdg-open', 'https://localhost:9443'],
                     timeout=10,
                     capture_output=True
                 )
