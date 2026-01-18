@@ -43,11 +43,13 @@ except ImportError:
 
 # Import service check for meshtasticd
 try:
-    from utils.service_check import check_port
+    from utils.service_check import check_service, check_port, ServiceState
     HAS_SERVICE_CHECK = True
 except ImportError:
     HAS_SERVICE_CHECK = False
+    check_service = None
     check_port = None
+    ServiceState = None
 
 
 class RNodeMixin:
@@ -801,7 +803,12 @@ class RNodeMixin:
             self.preset_description.set_label(desc)
 
     def _on_detect_meshtastic(self, button):
-        """Detect Meshtastic LoRa settings from connected device"""
+        """Detect Meshtastic LoRa settings from connected device.
+
+        PHASE 2 (Issue #17): Clearly separates service status from preset detection.
+        - Service status: from check_service() (systemctl-only)
+        - Preset detection: from meshtastic CLI (optional, not required)
+        """
         if not HAS_LORA_PRESETS:
             self._set_rnode_status("Preset module not available")
             return
@@ -816,100 +823,72 @@ class RNodeMixin:
         self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
         def do_detect():
-            import subprocess
-
-            # Step 1: Check if meshtasticd service is running (most reliable method)
+            # =================================================================
+            # STEP 1: Service Status (via check_service - systemctl only)
+            # =================================================================
             service_running = False
-            service_status = "unknown"
-            service_uptime = ""
+            service_msg = "unknown"
 
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.stdout.strip() == 'active':
-                    service_running = True
-                    service_status = "active"
+            self._log_detection("\n--- SERVICE STATUS ---")
 
-                    # Get uptime info
-                    try:
-                        status_result = subprocess.run(
-                            ['systemctl', 'show', 'meshtasticd', '--property=ActiveEnterTimestamp'],
-                            capture_output=True, text=True, timeout=5
-                        )
-                        if status_result.returncode == 0:
-                            timestamp = status_result.stdout.strip().split('=')[1] if '=' in status_result.stdout else ''
-                            if timestamp:
-                                service_uptime = f" (since {timestamp[:19]})"
-                    except Exception:
-                        pass
+            if HAS_SERVICE_CHECK and check_service:
+                status = check_service('meshtasticd')
+                service_running = status.available
+                service_msg = status.message
 
-                    self._log_detection(f"✓ meshtasticd service: RUNNING{service_uptime}")
+                if status.available:
+                    self._log_detection(f"✓ Service: {status.message}")
+                    self._log_detection(f"  Method: {status.detection_method}")
+                elif status.state == ServiceState.DEGRADED:
+                    self._log_detection(f"⚠️ Service: {status.message}")
+                    self._log_detection(f"  {status.fix_hint}")
                 else:
-                    service_status = result.stdout.strip() or "inactive"
-                    self._log_detection(f"✗ meshtasticd service: {service_status}")
-            except subprocess.TimeoutExpired:
-                self._log_detection("⚠️ meshtasticd service: check timed out")
-            except FileNotFoundError:
-                self._log_detection("⚠️ systemctl not found (non-systemd system?)")
-            except Exception as e:
-                self._log_detection(f"⚠️ Error checking service: {e}")
+                    self._log_detection(f"✗ Service: {status.message}")
+                    if status.fix_hint:
+                        self._log_detection(f"  {status.fix_hint}")
+            else:
+                self._log_detection("⚠️ service_check module not available")
 
-            # Step 2: Check TCP port 4403 (API port)
-            port_open = False
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)
-                result = sock.connect_ex(('localhost', 4403))
-                port_open = (result == 0)
-                sock.close()
+            # =================================================================
+            # STEP 2: Preset Detection (via meshtastic CLI - OPTIONAL)
+            # This is SEPARATE from service status!
+            # =================================================================
+            self._log_detection("\n--- PRESET DETECTION ---")
 
-                if port_open:
-                    self._log_detection("✓ API port 4403: open (TCP)")
-                else:
-                    self._log_detection("✗ API port 4403: closed")
-            except Exception as e:
-                self._log_detection(f"⚠️ Port check error: {e}")
+            # Use verbose mode to get detailed logging
+            settings = detect_meshtastic_settings(verbose=True)
 
-            # Step 3: If service is running, try to detect preset settings
+            # Log all attempts
+            attempts = settings.get('attempts_log', []) if settings else []
+            for attempt in attempts:
+                self._log_detection(attempt)
+
+            preset_detected = settings and settings.get('preset')
+
+            # =================================================================
+            # STEP 3: Update UI with BOTH statuses clearly shown
+            # =================================================================
             if service_running:
-                GLib.idle_add(self.detected_settings_label.set_label, "✓ Service running - detecting preset...")
-                GLib.idle_add(self._set_rnode_status, "Service OK - detecting preset...")
-
-                self._log_detection("\n--- Preset Detection ---")
-
-                # Use verbose mode to get detailed logging
-                settings = detect_meshtastic_settings(verbose=True)
-
-                # Log all attempts
-                attempts = settings.get('attempts_log', []) if settings else []
-                for attempt in attempts:
-                    self._log_detection(attempt)
-
-                if settings and settings.get('preset'):
-                    # Update UI with detected settings
+                if preset_detected:
+                    # Service OK + Preset detected = Full success
                     preset = settings.get('preset', 'Unknown')
                     region = settings.get('region', 'US')
-                    bw = settings.get('bandwidth', 0) / 1000  # Hz to kHz
+                    bw = settings.get('bandwidth', 0) / 1000
                     sf = settings.get('spreading_factor', 0)
                     cr = settings.get('coding_rate', 0)
                     method = settings.get('detection_method', 'unknown')
 
-                    # Short summary in label
-                    info = f"✓ {preset} ({region}) via {method}"
+                    # Summary label shows BOTH statuses
+                    info = f"Service: ✓ Running | Preset: ✓ {preset}"
                     GLib.idle_add(self.detected_settings_label.set_label, info)
 
-                    # Detailed info in log
+                    # Detailed log
                     self._log_detection(f"\n✓ SUCCESS: Detected {preset}")
                     self._log_detection(f"  Region: {region}")
-                    self._log_detection(f"  Bandwidth: {bw:.0f} kHz")
-                    self._log_detection(f"  Spreading Factor: {sf}")
-                    self._log_detection(f"  Coding Rate: 4/{cr}")
+                    self._log_detection(f"  BW: {bw:.0f} kHz, SF: {sf}, CR: 4/{cr}")
                     self._log_detection(f"  Method: {method}")
 
-                    # Select the detected preset in dropdown
+                    # Select preset in dropdown
                     preset_names = list(MESHTASTIC_PRESETS.keys())
                     try:
                         idx = preset_names.index(preset)
@@ -917,40 +896,34 @@ class RNodeMixin:
                     except ValueError:
                         pass
 
-                    GLib.idle_add(self._set_rnode_status, f"Detected: {preset} via {method}")
+                    GLib.idle_add(self._set_rnode_status, f"Service OK, preset: {preset}")
                 else:
-                    # Service running but preset auto-detect failed - this is OK!
-                    GLib.idle_add(self.detected_settings_label.set_label, "✓ Service OK - select preset manually")
+                    # Service OK but preset not detected - this is FINE!
+                    # UI clearly shows service is working
+                    info = "Service: ✓ Running | Preset: Select manually"
+                    GLib.idle_add(self.detected_settings_label.set_label, info)
 
-                    self._log_detection("\n⚠️ Preset auto-detection unavailable")
-                    self._log_detection("This is normal if meshtastic CLI is not installed.")
+                    self._log_detection("\n✓ SERVICE IS RUNNING")
+                    self._log_detection("Preset auto-detection unavailable (CLI issue)")
                     self._log_detection("")
-                    self._log_detection("✓ meshtasticd IS RUNNING - your node is working!")
-                    self._log_detection("")
-                    self._log_detection("To use this panel:")
-                    self._log_detection("  1. Select your preset from the dropdown above")
-                    self._log_detection("  2. Click 'Apply Preset' to configure RNode")
-                    self._log_detection("")
-                    self._log_detection("Common presets: LONG_FAST, MEDIUM_FAST, SHORT_FAST")
+                    self._log_detection("This is normal - your node IS working!")
+                    self._log_detection("Select preset manually from dropdown above.")
 
-                    GLib.idle_add(self._set_rnode_status, "Service OK - select preset from dropdown")
+                    GLib.idle_add(self._set_rnode_status, "Service OK - select preset manually")
             else:
-                # Service NOT running - this is the real problem
-                GLib.idle_add(self.detected_settings_label.set_label, "✗ Service not running")
+                # Service NOT running
+                info = "Service: ✗ Not running | Preset: N/A"
+                GLib.idle_add(self.detected_settings_label.set_label, info)
 
-                self._log_detection("\n✗ MESHTASTICD NOT RUNNING")
+                self._log_detection("\n✗ SERVICE NOT RUNNING")
                 self._log_detection("")
-                self._log_detection("To start the service:")
+                self._log_detection("Start the service:")
                 self._log_detection("  sudo systemctl start meshtasticd")
                 self._log_detection("")
-                self._log_detection("To enable on boot:")
-                self._log_detection("  sudo systemctl enable meshtasticd")
-                self._log_detection("")
-                self._log_detection("Check configuration:")
-                self._log_detection("  sudo systemctl status meshtasticd")
-                self._log_detection("  journalctl -u meshtasticd -f")
+                self._log_detection("Check status:")
+                self._log_detection("  systemctl status meshtasticd")
 
-                GLib.idle_add(self._set_rnode_status, "Service not running - start with systemctl")
+                GLib.idle_add(self._set_rnode_status, "Service not running")
 
             GLib.idle_add(button.set_sensitive, True)
 
@@ -1034,7 +1007,11 @@ class RNodeMixin:
     # =========================================================================
 
     def _check_radio_services(self):
-        """Check status of meshtasticd and rnsd services"""
+        """Check status of meshtasticd and rnsd services.
+
+        SIMPLIFIED (Issue #17): Uses systemctl-only detection via check_service().
+        No more conflicting port/process/systemctl methods.
+        """
         def do_check():
             import datetime
 
@@ -1042,97 +1019,59 @@ class RNodeMixin:
             self._log_detection("--- Service Status Check ---", clear=True)
             self._log_detection(f"Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
-            # Check meshtasticd - use responsive check if available
+            # ===================================================================
+            # Check meshtasticd via check_service() - systemctl only
+            # ===================================================================
             meshtasticd_status = "stopped"
-            meshtasticd_msg = "not running"
             meshtasticd_css = "warning"
 
-            try:
-                from utils.service_check import check_meshtasticd_responsive, check_port
-                port_open = check_port(4403)
-
-                if port_open:
-                    # Port is open, verify responsiveness
-                    is_responsive, verify_msg = check_meshtasticd_responsive(timeout=5.0)
-                    if is_responsive:
-                        meshtasticd_status = "running"
-                        meshtasticd_msg = verify_msg
-                        meshtasticd_css = "success"
-                        self._log_detection(f"✓ meshtasticd: {verify_msg}")
-                    else:
-                        # Port open but not responding!
-                        meshtasticd_status = "unresponsive"
-                        meshtasticd_msg = verify_msg
-                        meshtasticd_css = "error"
-                        self._log_detection(f"⚠️ meshtasticd: {verify_msg}")
-                        self._log_detection("   Restart suggested: sudo systemctl restart meshtasticd")
+            if HAS_SERVICE_CHECK and check_service:
+                status = check_service('meshtasticd')
+                if status.available:
+                    meshtasticd_status = "running"
+                    meshtasticd_css = "success"
+                    self._log_detection(f"✓ meshtasticd: {status.message}")
+                    self._log_detection(f"  (via {status.detection_method})")
+                elif status.state == ServiceState.DEGRADED:
+                    meshtasticd_status = "failed"
+                    meshtasticd_css = "error"
+                    self._log_detection(f"⚠️ meshtasticd: {status.message}")
+                    self._log_detection(f"  {status.fix_hint}")
+                elif status.state == ServiceState.NOT_INSTALLED:
+                    meshtasticd_status = "not installed"
+                    meshtasticd_css = "warning"
+                    self._log_detection(f"✗ meshtasticd: {status.message}")
                 else:
-                    self._log_detection("✗ meshtasticd: not running (port 4403 closed)")
-
-            except ImportError:
-                # Fallback: basic port check only
-                import socket
-                sock = None
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(1)
-                    result = sock.connect_ex(('localhost', 4403))
-                    if result == 0:
-                        meshtasticd_status = "running"
-                        meshtasticd_msg = "port open (unverified)"
-                        meshtasticd_css = "success"
-                        self._log_detection("✓ meshtasticd: running (TCP :4403)")
-                    else:
-                        self._log_detection("✗ meshtasticd: not running (port 4403 closed)")
-                except (socket.error, OSError):
-                    self._log_detection("✗ meshtasticd: not running (connection failed)")
-                finally:
-                    if sock:
-                        try:
-                            sock.close()
-                        except Exception:
-                            pass
-
-            # Check rnsd (use UDP port check first, then systemctl)
-            rnsd_running = False
-            rnsd_method = "unknown"
-
-            # Method 1: UDP port 37428 check
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.settimeout(1)
-                try:
-                    sock.bind(('127.0.0.1', 37428))
-                    sock.close()
-                    # Port NOT in use
-                except OSError as e:
-                    sock.close()
-                    if e.errno in (98, 48, 10048):  # EADDRINUSE
-                        rnsd_running = True
-                        rnsd_method = "UDP port"
-            except Exception:
-                pass
-
-            # Method 2: systemctl fallback
-            if not rnsd_running:
-                try:
-                    import subprocess
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', 'rnsd'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if result.returncode == 0:
-                        rnsd_running = True
-                        rnsd_method = "systemctl"
-                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                    pass
-
-            # Log rnsd results
-            if rnsd_running:
-                self._log_detection(f"✓ rnsd: running ({rnsd_method})")
+                    self._log_detection(f"✗ meshtasticd: {status.message}")
+                    if status.fix_hint:
+                        self._log_detection(f"  {status.fix_hint}")
             else:
-                self._log_detection("✗ rnsd: not running")
+                # Fallback if service_check not available
+                self._log_detection("⚠️ service_check module not available")
+
+            # ===================================================================
+            # Check rnsd via check_service() - systemctl only
+            # ===================================================================
+            rnsd_status = "stopped"
+            rnsd_css = "warning"
+
+            if HAS_SERVICE_CHECK and check_service:
+                status = check_service('rnsd')
+                if status.available:
+                    rnsd_status = "running"
+                    rnsd_css = "success"
+                    self._log_detection(f"✓ rnsd: {status.message}")
+                    self._log_detection(f"  (via {status.detection_method})")
+                elif status.state == ServiceState.NOT_INSTALLED:
+                    rnsd_status = "not installed"
+                    rnsd_css = "warning"
+                    self._log_detection(f"✗ rnsd: {status.message}")
+                else:
+                    self._log_detection(f"✗ rnsd: {status.message}")
+                    if status.fix_hint:
+                        self._log_detection(f"  {status.fix_hint}")
+            else:
+                self._log_detection("⚠️ Cannot check rnsd (service_check not available)")
 
             self._log_detection("\nClick 'Detect' to scan for hardware devices.")
             self._log_detection("Click 'Detect Meshtastic' to read radio settings.")
@@ -1142,35 +1081,18 @@ class RNodeMixin:
                 self.meshtasticd_status.set_label,
                 f"● meshtasticd: {meshtasticd_status}"
             )
-            GLib.idle_add(
-                self.meshtasticd_status.remove_css_class, "error"
-            )
-            GLib.idle_add(
-                self.meshtasticd_status.remove_css_class, "success"
-            )
-            GLib.idle_add(
-                self.meshtasticd_status.remove_css_class, "warning"
-            )
-            GLib.idle_add(
-                self.meshtasticd_status.add_css_class, meshtasticd_css
-            )
+            # Clear old CSS classes
+            for css in ["error", "success", "warning"]:
+                GLib.idle_add(self.meshtasticd_status.remove_css_class, css)
+            GLib.idle_add(self.meshtasticd_status.add_css_class, meshtasticd_css)
 
-            if rnsd_running:
-                GLib.idle_add(
-                    self.rnsd_status.set_label,
-                    "● rnsd: running"
-                )
-                GLib.idle_add(
-                    self.rnsd_status.add_css_class, "success"
-                )
-            else:
-                GLib.idle_add(
-                    self.rnsd_status.set_label,
-                    "● rnsd: stopped"
-                )
-                GLib.idle_add(
-                    self.rnsd_status.add_css_class, "warning"
-                )
+            GLib.idle_add(
+                self.rnsd_status.set_label,
+                f"● rnsd: {rnsd_status}"
+            )
+            for css in ["error", "success", "warning"]:
+                GLib.idle_add(self.rnsd_status.remove_css_class, css)
+            GLib.idle_add(self.rnsd_status.add_css_class, rnsd_css)
 
         threading.Thread(target=do_check, daemon=True).start()
 

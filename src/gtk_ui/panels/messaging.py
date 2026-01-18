@@ -3,6 +3,8 @@ MeshForge Native Messaging Panel - GTK4 Interface
 
 Send and receive messages across Meshtastic and RNS networks.
 Integrates with commands/messaging.py for SQLite storage.
+
+Issue #17 Phase 3: Subscribes to event bus for real-time RX message display.
 """
 
 import gi
@@ -10,7 +12,19 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 import threading
+import logging
 from datetime import datetime
+
+# Import event bus for real-time message updates (Issue #17 Phase 3)
+try:
+    from utils.event_bus import event_bus, MessageEvent
+    HAS_EVENT_BUS = True
+except ImportError:
+    HAS_EVENT_BUS = False
+    event_bus = None
+    MessageEvent = None
+
+logger = logging.getLogger(__name__)
 
 
 class MessagingPanel(Gtk.Box):
@@ -28,6 +42,13 @@ class MessagingPanel(Gtk.Box):
         self._build_ui()
         GLib.idle_add(self._load_messages)
         GLib.idle_add(self._load_stats)
+
+        # Subscribe to event bus for real-time RX messages (Issue #17 Phase 3)
+        self._event_handler = None
+        if HAS_EVENT_BUS and event_bus:
+            self._event_handler = self._on_message_event
+            event_bus.subscribe('message', self._event_handler)
+            logger.debug("MessagingPanel subscribed to message events")
 
     def _build_ui(self):
         """Build the messaging panel UI"""
@@ -501,7 +522,54 @@ class MessagingPanel(Gtk.Box):
         thread = threading.Thread(target=clear, daemon=True)
         thread.start()
 
+    def _on_message_event(self, event: 'MessageEvent'):
+        """Handle incoming message from event bus (Issue #17 Phase 3).
+
+        This is called from a background thread, so use GLib.idle_add for UI updates.
+        """
+        if event.direction != 'rx':
+            return  # Only handle RX messages
+
+        # Update UI on main thread
+        def update_ui():
+            # Add the message to the display
+            self._append_message(event)
+            # Update stats
+            self._load_stats()
+            # Update conversations
+            self._load_conversations()
+            return False
+
+        GLib.idle_add(update_ui)
+
+    def _append_message(self, event: 'MessageEvent'):
+        """Append a single message to the display (called on main thread)."""
+        buffer = self.msg_text.get_buffer()
+
+        # Format the message
+        timestamp = event.timestamp.strftime("%Y-%m-%d %H:%M") if event.timestamp else "now"
+        from_id = event.node_name or event.node_id or "unknown"
+        network = event.network or "mesh"
+        content = event.content
+
+        # Build the message line
+        direction = f"← {from_id}"
+        new_line = f"[{timestamp}] [{network}] {direction}\n  {content}\n\n"
+
+        # Append to end
+        end_iter = buffer.get_end_iter()
+        buffer.insert(end_iter, new_line)
+
+        # Scroll to show new message
+        self.msg_text.scroll_to_iter(buffer.get_end_iter(), 0, False, 0, 0)
+
+        # Visual feedback
+        if hasattr(self.main_window, 'set_status_message'):
+            self.main_window.set_status_message(f"New message from {from_id}")
+
     def cleanup(self):
         """Clean up panel resources."""
-        # No timers or persistent resources to clean up
-        pass
+        # Unsubscribe from event bus (Issue #17 Phase 3)
+        if HAS_EVENT_BUS and event_bus and self._event_handler:
+            event_bus.unsubscribe('message', self._event_handler)
+            logger.debug("MessagingPanel unsubscribed from message events")
