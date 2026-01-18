@@ -450,12 +450,21 @@ class DiagnosticsPanel(Gtk.Box):
         # Controls row
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
-        # Service filter
+        # Service filter - expanded list with all MeshForge-related services
         controls.append(Gtk.Label(label="Service:"))
         self.log_service_dropdown = Gtk.DropDown.new_from_strings([
-            "meshforge", "meshtasticd", "rnsd", "All MeshForge Services"
+            "All MeshForge",     # 0 - All mesh-related logs
+            "meshforge",         # 1 - MeshForge app logs
+            "meshtasticd",       # 2 - Meshtastic daemon
+            "rnsd",              # 3 - Reticulum daemon
+            "nomadnet",          # 4 - NomadNet client
+            "meshchat",          # 5 - MeshChat web interface
+            "hamclock",          # 6 - HamClock service
+            "mosquitto",         # 7 - MQTT broker
+            "Gateway Bridge",    # 8 - Gateway/bridge logs (grep filter)
+            "MeshForge Files",   # 9 - File-based logs in ~/.config/meshforge/logs/
         ])
-        self.log_service_dropdown.set_selected(0)
+        self.log_service_dropdown.set_selected(0)  # Default to All MeshForge
         controls.append(self.log_service_dropdown)
 
         # Lines filter
@@ -514,12 +523,13 @@ class DiagnosticsPanel(Gtk.Box):
         # Help text
         help_label = Gtk.Label()
         help_label.set_markup(
-            '<small>View logs with journalctl: '
-            '<tt>journalctl -t meshforge -f</tt> | '
+            '<small>Logs: journalctl (systemd) or ~/.config/meshforge/logs/ (file-based)\n'
+            'CLI: <tt>journalctl -t meshforge -f</tt> | '
             '<tt>journalctl -u meshtasticd --since today</tt></small>'
         )
         help_label.add_css_class("dim-label")
         help_label.set_xalign(0)
+        help_label.set_wrap(True)
         box.append(help_label)
 
         # Initialize log follow timer
@@ -531,13 +541,11 @@ class DiagnosticsPanel(Gtk.Box):
         return box
 
     def _on_refresh_system_logs(self, button=None):
-        """Refresh system logs from journalctl."""
+        """Refresh system logs from journalctl or file-based logs."""
         def fetch_logs():
             try:
                 # Get selected service
                 service_idx = self.log_service_dropdown.get_selected()
-                services = ["meshforge", "meshtasticd", "rnsd", None]
-                service = services[service_idx]
 
                 # Get line count
                 lines_idx = self.log_lines_dropdown.get_selected()
@@ -548,14 +556,46 @@ class DiagnosticsPanel(Gtk.Box):
                 priorities = [None, "err", "warning", "info", "debug"]
                 priority = priorities[priority_idx]
 
+                # Handle file-based logs (MeshForge Files option)
+                if service_idx == 9:  # MeshForge Files
+                    log_text = self._fetch_file_logs(int(lines))
+                    GLib.idle_add(self._update_system_log_view, log_text)
+                    return
+
+                # Handle Gateway Bridge logs (grep filter on journalctl)
+                if service_idx == 8:  # Gateway Bridge
+                    log_text = self._fetch_gateway_logs(int(lines), priority)
+                    GLib.idle_add(self._update_system_log_view, log_text)
+                    return
+
+                # Map dropdown index to service name(s)
+                service_map = {
+                    0: None,  # All MeshForge
+                    1: "meshforge",
+                    2: "meshtasticd",
+                    3: "rnsd",
+                    4: "nomadnet",
+                    5: "meshchat",
+                    6: "hamclock",
+                    7: "mosquitto",
+                }
+                service = service_map.get(service_idx)
+
                 # Build journalctl command
                 cmd = ["journalctl", "--no-pager", "-n", lines]
 
                 if service:
                     cmd.extend(["-t", service])
                 else:
-                    # All MeshForge services
-                    cmd.extend(["-t", "meshforge", "-t", "meshtasticd", "-t", "rnsd"])
+                    # All MeshForge services (index 0)
+                    cmd.extend([
+                        "-t", "meshforge",
+                        "-t", "meshtasticd",
+                        "-t", "rnsd",
+                        "-t", "nomadnet",
+                        "-t", "meshchat",
+                        "-t", "hamclock",
+                    ])
 
                 if priority:
                     cmd.extend(["-p", priority])
@@ -568,7 +608,7 @@ class DiagnosticsPanel(Gtk.Box):
                 )
 
                 if result.returncode == 0:
-                    log_text = result.stdout or "(No logs found)"
+                    log_text = result.stdout or "(No logs found for this service)"
                 else:
                     log_text = f"Error: {result.stderr or 'Failed to fetch logs'}"
 
@@ -583,12 +623,91 @@ class DiagnosticsPanel(Gtk.Box):
                     "On non-systemd systems, check:\n"
                     "  /var/log/syslog\n"
                     "  /var/log/messages\n"
-                    "  ~/.config/meshforge/logs/"
+                    "  ~/.config/meshforge/logs/\n\n"
+                    "Or select 'MeshForge Files' from the dropdown."
                 )
             except Exception as e:
                 GLib.idle_add(self._update_system_log_view, f"Error: {e}")
 
         threading.Thread(target=fetch_logs, daemon=True).start()
+
+    def _fetch_file_logs(self, lines: int) -> str:
+        """Fetch logs from MeshForge file-based logging directory."""
+        log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+
+        if not log_dir.exists():
+            return (
+                f"No log directory found at: {log_dir}\n\n"
+                "MeshForge file logging may not be configured.\n"
+                "Try selecting a systemd service from the dropdown instead."
+            )
+
+        # Find all log files
+        log_files = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        if not log_files:
+            return f"No .log files found in: {log_dir}"
+
+        # Read from the most recent log file
+        latest_log = log_files[0]
+        all_logs = []
+
+        try:
+            with open(latest_log, 'r') as f:
+                # Read last N lines efficiently
+                all_lines = f.readlines()
+                recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                all_logs.extend(recent_lines)
+        except Exception as e:
+            return f"Error reading {latest_log}: {e}"
+
+        if not all_logs:
+            return f"Log file is empty: {latest_log}"
+
+        header = f"=== {latest_log.name} (last {len(all_logs)} lines) ===\n\n"
+        return header + "".join(all_logs)
+
+    def _fetch_gateway_logs(self, lines: int, priority: str) -> str:
+        """Fetch gateway/bridge related logs using grep filter."""
+        try:
+            # Build journalctl command for all services, then grep for gateway/bridge
+            cmd = ["journalctl", "--no-pager", "-n", str(lines * 3)]  # Get more to filter
+            cmd.extend(["-t", "meshforge", "-t", "meshtasticd", "-t", "rnsd"])
+
+            if priority:
+                cmd.extend(["-p", priority])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode != 0:
+                return f"Error: {result.stderr or 'Failed to fetch logs'}"
+
+            # Filter for gateway-related entries
+            gateway_keywords = ["gateway", "bridge", "rns_bridge", "node_tracker", "RNS"]
+            filtered_lines = []
+
+            for line in result.stdout.split('\n'):
+                line_lower = line.lower()
+                if any(kw.lower() in line_lower for kw in gateway_keywords):
+                    filtered_lines.append(line)
+
+            if not filtered_lines:
+                return (
+                    "(No gateway/bridge logs found)\n\n"
+                    "Gateway logs appear when:\n"
+                    "- Gateway bridge is started\n"
+                    "- RNS node discovery runs\n"
+                    "- Messages are bridged between networks\n\n"
+                    "Try starting the gateway from the RNS panel."
+                )
+
+            # Return last N lines
+            return "\n".join(filtered_lines[-lines:])
+
+        except FileNotFoundError:
+            return "journalctl not available"
+        except Exception as e:
+            return f"Error: {e}"
 
     def _update_system_log_view(self, text: str):
         """Update the system log view."""
