@@ -676,8 +676,24 @@ class RadioConfigSimple(Gtk.Box):
         return btn
 
     def _get_interface(self):
-        """Get a meshtastic TCP interface."""
+        """Get a meshtastic TCP interface.
+
+        Note: Radio config needs exclusive access to read device settings.
+        If the gateway is running, it will temporarily lose connection.
+        """
         try:
+            # Check if gateway has a persistent connection
+            # Warn but proceed - config operations need exclusive access
+            try:
+                from utils.meshtastic_connection import get_connection_manager
+                conn_mgr = get_connection_manager()
+                if conn_mgr.has_persistent():
+                    owner = conn_mgr.get_persistent_owner()
+                    logger.warning(f"Gateway ({owner}) has active connection - config read may disrupt it")
+                    # Don't use the existing connection - we need fresh access for config
+            except ImportError:
+                pass
+
             from meshtastic.tcp_interface import TCPInterface
             import time
             iface = TCPInterface(hostname='localhost', noProto=False)
