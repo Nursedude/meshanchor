@@ -53,6 +53,10 @@
             background: #9c27b0;
             color: white;
         }
+        .network-aredn {
+            background: #ff5722;
+            color: white;
+        }
         .network-both {
             background: linear-gradient(90deg, #2196f3 50%, #9c27b0 50%);
             color: white;
@@ -245,6 +249,10 @@
             <span id="stat-rns">0</span>
         </div>
         <div class="stat-row">
+            <span>AREDN:</span>
+            <span id="stat-aredn">0</span>
+        </div>
+        <div class="stat-row">
             <span>Online:</span>
             <span id="stat-online" class="status-online">0</span>
         </div>
@@ -257,6 +265,10 @@
             <label>
                 <input type="checkbox" id="filter-rns" checked>
                 Show RNS
+            </label>
+            <label>
+                <input type="checkbox" id="filter-aredn" checked>
+                Show AREDN
             </label>
             <label>
                 <input type="checkbox" id="filter-online-only">
@@ -310,6 +322,10 @@
         <div class="legend-item">
             <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,12 12,22 2,12" fill="#00bcd4"/></svg></div>
             <span>RNS</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 20,6 20,18 12,22 4,18 4,6" fill="#ff5722"/></svg></div>
+            <span>AREDN</span>
         </div>
         <div class="legend-item">
             <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#4caf50" stroke="#fff" stroke-width="2"/></svg></div>
@@ -498,6 +514,12 @@
                     <rect x="3" y="3" width="18" height="18" rx="2"
                           fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
                 </svg>`,
+            // AREDN Node: Hexagon (represents mesh network topology)
+            aredn: (color, isLocal) => `
+                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
+                    <polygon points="12,2 20,6 20,18 12,22 4,18 4,6"
+                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
+                </svg>`,
             // Default: Circle (for regular end nodes)
             default: (color, isLocal) => `
                 <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
@@ -512,15 +534,17 @@
             const coords = feature.geometry.coordinates;
 
             // Determine marker color
-            // Green=online, Red=offline, Orange=gateway, Purple=MQTT, Cyan=RNS
+            // Green=online, Red=offline, Orange=gateway, Purple=MQTT, Cyan=RNS, Deep Orange=AREDN
             let color = props.is_online ? '#4caf50' : '#f44336';
             if (props.is_gateway) color = '#ff9800';
             if (props.via_mqtt) color = '#9c27b0';  // Purple for MQTT nodes
             if (props.network === 'rns') color = props.is_online ? '#00bcd4' : '#607d8b';  // Cyan for RNS
+            if (props.network === 'aredn') color = props.is_online ? '#ff5722' : '#bf360c';  // Deep orange for AREDN
 
             // Determine marker shape based on node type
             let iconType = 'default';
             if (props.is_gateway) iconType = 'gateway';
+            else if (props.network === 'aredn') iconType = 'aredn';
             else if (props.network === 'rns') iconType = 'rns';
             else if (props.via_mqtt) iconType = 'mqtt';
             else if (props.role === 'ROUTER' || props.role === 'ROUTER_CLIENT') iconType = 'router';
@@ -543,7 +567,8 @@
 
             // Create popup content
             const networkClass = props.network === 'both' ? 'network-both' :
-                                props.network === 'rns' ? 'network-rns' : 'network-meshtastic';
+                                props.network === 'rns' ? 'network-rns' :
+                                props.network === 'aredn' ? 'network-aredn' : 'network-meshtastic';
 
             const popupContent = `
                 <div class="node-popup">
@@ -587,13 +612,14 @@
 
             const showMeshtastic = document.getElementById('filter-meshtastic').checked;
             const showRNS = document.getElementById('filter-rns').checked;
+            const showAREDN = document.getElementById('filter-aredn').checked;
             const onlineOnly = document.getElementById('filter-online-only').checked;
 
             // Clear existing markers
             nodeLayer.clearLayers();
 
             // Stats
-            let total = 0, meshtastic = 0, rns = 0, online = 0;
+            let total = 0, meshtastic = 0, rns = 0, aredn = 0, online = 0;
 
             // Add filtered markers
             currentGeoJSON.features.forEach(feature => {
@@ -603,12 +629,14 @@
                 total++;
                 if (props.network === 'meshtastic' || props.network === 'both') meshtastic++;
                 if (props.network === 'rns' || props.network === 'both') rns++;
+                if (props.network === 'aredn') aredn++;
                 if (props.is_online) online++;
 
                 // Apply filters
                 if (onlineOnly && !props.is_online) return;
                 if (props.network === 'meshtastic' && !showMeshtastic) return;
                 if (props.network === 'rns' && !showRNS) return;
+                if (props.network === 'aredn' && !showAREDN) return;
                 if (props.network === 'both' && !showMeshtastic && !showRNS) return;
 
                 const marker = createNodeMarker(feature);
@@ -619,6 +647,7 @@
             document.getElementById('stat-total').textContent = total;
             document.getElementById('stat-meshtastic').textContent = meshtastic;
             document.getElementById('stat-rns').textContent = rns;
+            document.getElementById('stat-aredn').textContent = aredn;
             document.getElementById('stat-online').textContent = online;
 
             // Fit bounds if we have nodes
@@ -737,6 +766,7 @@
         // Event listeners for filters
         document.getElementById('filter-meshtastic').addEventListener('change', updateDisplay);
         document.getElementById('filter-rns').addEventListener('change', updateDisplay);
+        document.getElementById('filter-aredn').addEventListener('change', updateDisplay);
         document.getElementById('filter-online-only').addEventListener('change', updateDisplay);
 
         // Initial load

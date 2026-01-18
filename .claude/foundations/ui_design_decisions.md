@@ -195,11 +195,12 @@ Maps are **Core** - essential for NOC visualization. Must be DYNAMIC, showing al
 │  🗺️ MeshForge Network Map                                   │
 │                                                             │
 │  Legend:                                                    │
-│    ◉ Meshtastic Node (from meshtasticd)                    │
-│    ◆ RNS Destination (from rnsd)                           │
-│    ■ AREDN Node (from AREDN API)                           │
-│    ── RF Link                                               │
-│    -- Tunnel/IP Link                                        │
+│    ● Meshtastic Node (circle) - from meshtasticd           │
+│    ◆ RNS Destination (diamond) - from rnsd                 │
+│    ⬡ AREDN Node (hexagon) - from AREDN API                 │
+│    ★ Gateway/Repeater (star)                               │
+│    ▲ Router (triangle)                                      │
+│    ■ MQTT Node (square)                                     │
 │                                                             │
 │  Data Sources:                                              │
 │    - meshtasticd (localhost:4403)                          │
@@ -207,6 +208,12 @@ Maps are **Core** - essential for NOC visualization. Must be DYNAMIC, showing al
 │    - AREDN sysinfo API (*.local.mesh)                      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Implementation Status:** COMPLETE (P2)
+- GTK panel shows unified statistics for all three networks
+- Web map (Leaflet) displays nodes with network-specific icons
+- Each network type has distinct color and shape for easy identification
+- Filter controls to show/hide specific network types
 
 ### Current Implementation
 - Folium generates HTML with Leaflet.js
