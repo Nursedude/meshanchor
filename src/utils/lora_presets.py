@@ -460,8 +460,22 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     except Exception as e:
         log_attempt("meshtasticd systemd service", False, str(e))
 
-    def run_meshtastic_cmd(args: list, timeout: int = 10) -> Optional[subprocess.CompletedProcess]:
-        """Run meshtastic CLI with error handling (no retries)"""
+    # Check if meshtastic CLI is available
+    meshtastic_cli_available = True
+    try:
+        subprocess.run(['which', 'meshtastic'], capture_output=True, timeout=5)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        meshtastic_cli_available = False
+
+    def run_meshtastic_cmd(args: list, timeout: int = 10) -> tuple:
+        """Run meshtastic CLI with detailed error handling.
+
+        Returns:
+            Tuple of (CompletedProcess or None, error_reason: str)
+        """
+        if not meshtastic_cli_available:
+            return None, "CLI not installed"
+
         try:
             result = subprocess.run(
                 ['meshtastic'] + args,
@@ -470,14 +484,18 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
                 timeout=timeout
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result
+                return result, None
+            elif result.returncode != 0:
+                stderr = result.stderr.strip()[:50] if result.stderr else "unknown error"
+                return None, f"exit code {result.returncode}: {stderr}"
+            else:
+                return None, "empty response"
         except subprocess.TimeoutExpired:
-            pass
+            return None, f"timed out ({timeout}s)"
         except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        return None
+            return None, "CLI not found"
+        except Exception as e:
+            return None, str(e)[:50]
 
     def parse_meshtastic_output(output: str) -> Optional[Dict]:
         """Parse meshtastic --export-config output"""
@@ -503,7 +521,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     # =========================================================================
     for port in MESHTASTICD_PORTS:
         method = f"meshtasticd TCP :{port}"
-        result = run_meshtastic_cmd(['--host', 'localhost', '--port', str(port), '--export-config'])
+        result, err = run_meshtastic_cmd(['--host', 'localhost', '--port', str(port), '--export-config'])
         if result:
             settings = parse_meshtastic_output(result.stdout)
             if settings:
@@ -511,7 +529,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
                 result_data = settings
                 result_data['detection_method'] = method
                 break
-        log_attempt(method, False, "No response")
+        log_attempt(method, False, err or "No response")
 
     # =========================================================================
     # Method 2: Try direct serial/USB connection
@@ -524,7 +542,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
         if serial_ports:
             for port in sorted(set(serial_ports))[:2]:  # Try up to 2 ports
                 method = f"USB {port}"
-                result = run_meshtastic_cmd(['--port', port, '--export-config'], timeout=15)
+                result, err = run_meshtastic_cmd(['--port', port, '--export-config'], timeout=15)
                 if result:
                     settings = parse_meshtastic_output(result.stdout)
                     if settings:
@@ -532,7 +550,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
                         result_data = settings
                         result_data['detection_method'] = method
                         break
-                log_attempt(method, False, "No response")
+                log_attempt(method, False, err or "No response")
         else:
             log_attempt("USB serial", False, "No devices found")
 
@@ -541,7 +559,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     # =========================================================================
     if not result_data:
         method = "CLI auto-detect"
-        result = run_meshtastic_cmd(['--export-config'], timeout=15)
+        result, err = run_meshtastic_cmd(['--export-config'], timeout=15)
         if result:
             settings = parse_meshtastic_output(result.stdout)
             if settings:
@@ -549,7 +567,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
                 result_data = settings
                 result_data['detection_method'] = method
         if not result_data:
-            log_attempt(method, False, "No device found")
+            log_attempt(method, False, err or "No device found")
 
     # =========================================================================
     # Build final result
