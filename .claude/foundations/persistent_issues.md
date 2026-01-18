@@ -914,11 +914,181 @@ def _send_message(self):
 
 ---
 
-*Last updated: 2026-01-16 - Added Issue #16 Gateway Message Routing Reliability*
+## Issue #17: Meshtastic Connection Contention (meshtasticd Single-Client)
+
+### Symptom
+- Recurring "Connection reset by peer" and "Broken pipe" errors
+- meshtasticd logs show "Force close previous TCP connection" every second
+- Gateway connection drops intermittently
+- Multiple components competing for TCP connection
+
+### Root Cause (Identified 2026-01-18)
+**meshtasticd only supports ONE TCP client at a time.** When multiple components create independent TCP connections:
+```
+Component A connects → OK
+Component B connects → A disconnected by meshtasticd
+Component A reconnects → B disconnected
+... cycle continues
+```
+
+### Impact
+- Connection thrashing every 1-2 seconds
+- Messages may be lost during reconnection
+- Gateway stability compromised
+- External tools (Meshtastic Web UI on port 9443) also compete
+
+### Proper Fix (Implemented 2026-01-18)
+**Shared connection manager** - All components share ONE persistent connection:
+
+```python
+# message_listener.py - Check for existing connection BEFORE creating new one
+def _run(self):
+    conn_mgr = get_connection_manager(host=self.host)
+    if conn_mgr.has_persistent():
+        # Another component owns the connection - just subscribe to pub/sub
+        self._interface = conn_mgr.get_interface()
+        self._owns_connection = False
+        logger.info(f"Using existing connection from {conn_mgr.get_persistent_owner()}")
+    else:
+        # No existing connection - we need to create one
+        if conn_mgr.acquire_persistent(owner="message_listener"):
+            self._interface = conn_mgr.get_interface()
+            self._owns_connection = True
+```
+
+### Files Changed
+- `src/utils/message_listener.py` - Check for existing persistent connection
+- `src/gtk_ui/panels/mesh_tools_nodemap.py` - Use existing gateway connection
+- `src/gtk_ui/panels/radio_config_simple.py` - Warning for config operations
+
+### External Interference
+**Meshtastic Web UI** on port 9443 can also cause connection spam:
+```bash
+netstat -tlnp | grep 9443  # Check if Web UI is running
+```
+User should disable Web UI if not needed, or accept that MeshForge will compete for the connection.
+
+### Prevention
+- Always use `get_connection_manager()` instead of creating `TCPInterface` directly
+- Check `has_persistent()` before creating connections
+- Use `acquire_persistent(owner="component_name")` for long-lived connections
+- For short operations, use the existing interface without taking ownership
 
 ---
 
-## Issue #17: Service Detection & Status Display Redesign Required
+## Issue #18: Meshtastic Auto-Reconnect on Connection Drop
+
+### Symptom
+- Gateway stops working after meshtasticd restart
+- No automatic recovery from network issues
+- User must manually restart MeshForge
+
+### Root Cause
+Original implementation had no reconnection logic - once connection dropped, it stayed dropped.
+
+### Proper Fix (Implemented 2026-01-18)
+**Health monitoring + exponential backoff reconnect**:
+
+```python
+# rns_bridge.py
+def _poll_meshtastic(self):
+    """Poll Meshtastic for health check"""
+    if self._mesh_interface:
+        try:
+            if hasattr(self._mesh_interface, 'isConnected'):
+                if not self._mesh_interface.isConnected:
+                    self._handle_connection_lost()
+                    return
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Meshtastic connection lost: {e}")
+            self._handle_connection_lost()
+
+def _handle_connection_lost(self):
+    """Cleanup and prepare for reconnect"""
+    self._connected_mesh = False
+    if hasattr(self, '_conn_manager') and self._conn_manager:
+        self._conn_manager.release_persistent()
+    # Clear subscriptions, wait for cooldown
+
+def _meshtastic_loop(self):
+    """Main loop with auto-reconnect"""
+    reconnect_delay = 1
+    max_reconnect_delay = 30
+    while self._running:
+        if not self._connected_mesh:
+            self._connect_meshtastic()
+            if self._connected_mesh:
+                reconnect_delay = 1  # Reset on success
+            else:
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+```
+
+### Files Changed
+- `src/gateway/rns_bridge.py` - Health monitoring, auto-reconnect, exponential backoff
+
+### Prevention
+- All persistent connections should have health monitoring
+- Use exponential backoff (1s → 2s → 4s → ... → 30s max) to avoid hammering
+- Release connection manager resources on disconnect
+
+---
+
+## Issue #19: RNS Node Discovery from path_table
+
+### Symptom
+- RNS gateway only discovers 2 of 6+ nodes on network
+- Nodes visible in `rnstatus` but not in MeshForge
+- Node count doesn't match actual network
+
+### Root Cause (Identified 2026-01-18)
+MeshForge was only checking `RNS.Transport.destinations` which is limited. The complete routing table is in `RNS.Transport.path_table` which contains ALL destinations rnsd knows about.
+
+### Proper Fix (Implemented 2026-01-18)
+**Check path_table first** for complete routing information:
+
+```python
+# node_tracker.py
+def _load_known_rns_destinations(self, RNS):
+    # PRIMARY: Check path_table - contains ALL destinations rnsd knows about
+    if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
+        for dest_hash, path_data in RNS.Transport.path_table.items():
+            if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
+                node_id = f"rns_{dest_hash.hex()[:16]}"
+                if node_id not in self._nodes:
+                    hops = path_data[1] if isinstance(path_data, tuple) and len(path_data) > 1 else 0
+                    node = UnifiedNode.from_rns(dest_hash, name="", app_data=None)
+                    self.add_node(node)
+                    logger.info(f"[RNS] Discovered node from path_table: {node_id} ({hops} hops)")
+```
+
+### Timing Issue
+**path_table may be empty immediately after connect** - rnsd syncs data asynchronously:
+
+```python
+# Delayed check 5 seconds after connection
+GLib.timeout_add(5000, self._delayed_path_table_check)
+
+# Periodic check every 30 seconds in _rns_loop()
+if current_time - last_check >= 30:
+    self._check_path_table_for_new_nodes()
+```
+
+### Files Changed
+- `src/gateway/node_tracker.py` - path_table discovery + delayed/periodic checks
+
+### Prevention
+- When connecting to shared RNS instances, always check path_table
+- Allow time for data sync before assuming empty
+- Implement periodic re-checks for dynamic networks
+
+---
+
+*Last updated: 2026-01-18 - Added Issues #17-19 (Connection Contention, Auto-Reconnect, path_table Discovery)*
+
+---
+
+## Issue #20: Service Detection & Status Display Redesign Required
 
 ### Symptom
 After multiple fix attempts, these issues persist:
