@@ -503,13 +503,29 @@ def set_channel_psk(channel_index: int, psk: str) -> CommandResult:
 
 def set_owner(name: str, dest: Optional[str] = None) -> CommandResult:
     """
-    Set node owner name.
+    Set node owner name (long name).
 
     Args:
-        name: Owner name
+        name: Owner name (max 40 chars)
         dest: Remote node ID (None for local node)
     """
     args = ["--set-owner", name]
+    if dest:
+        args = ["--dest", dest] + args
+    return _run_command(args)
+
+
+def set_owner_short(name: str, dest: Optional[str] = None) -> CommandResult:
+    """
+    Set node owner short name (4 characters).
+
+    Args:
+        name: Short name (max 4 chars, will be uppercase)
+        dest: Remote node ID (None for local node)
+    """
+    # Ensure short name is max 4 chars and uppercase
+    short_name = name[:4].upper()
+    args = ["--set-owner-short", short_name]
     if dest:
         args = ["--dest", dest] + args
     return _run_command(args)

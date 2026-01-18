@@ -19,6 +19,7 @@ class MeshtasticdConfigMixin:
         while True:
             choices = [
                 ("status", "Service Status"),
+                ("owner", "Set Owner/Node Name"),
                 ("presets", "Radio Presets (LoRa)"),
                 ("hardware", "Hardware Config"),
                 ("channels", "Channel Config"),
@@ -39,6 +40,8 @@ class MeshtasticdConfigMixin:
 
             if choice == "status":
                 self._meshtasticd_status()
+            elif choice == "owner":
+                self._set_owner_name()
             elif choice == "presets":
                 self._radio_presets_menu()
             elif choice == "hardware":
@@ -100,6 +103,100 @@ Active Hardware Configs: {len(active_configs)}"""
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to get status:\n{e}")
+
+    def _set_owner_name(self):
+        """Set node owner name (long name and short name)."""
+        self.dialog.infobox("Owner", "Getting current owner info...")
+
+        try:
+            sys.path.insert(0, str(self.src_dir))
+            from commands import meshtastic as mesh_cmd
+
+            # Try to get current owner info
+            result = mesh_cmd.get_node_info()
+            current_long = ""
+            current_short = ""
+
+            if result.success and result.raw:
+                # Parse owner info from output
+                for line in result.raw.split('\n'):
+                    if 'longName' in line or 'long_name' in line:
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            current_long = parts[1].strip().strip('"')
+                    elif 'shortName' in line or 'short_name' in line:
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            current_short = parts[1].strip().strip('"')
+
+            # Show current info and get new values
+            text = f"""Set your node's identity:
+
+Current Long Name: {current_long or '(not set)'}
+Current Short Name: {current_short or '(not set)'}
+
+Long Name: Your node's full name (max 40 chars)
+           Shown on other devices, maps, etc.
+
+Short Name: 4-character abbreviation
+           Shown in compact views
+
+Press Cancel to keep current values."""
+
+            # Get long name
+            long_name = self.dialog.inputbox(
+                "Set Long Name",
+                f"Enter node name (current: {current_long or 'none'}):",
+                current_long or ""
+            )
+
+            if long_name is None:  # Cancelled
+                return
+
+            # Get short name
+            short_name = self.dialog.inputbox(
+                "Set Short Name",
+                f"Enter 4-char short name (current: {current_short or 'none'}):",
+                current_short or ""
+            )
+
+            if short_name is None:  # Cancelled
+                return
+
+            # Validate
+            if long_name:
+                long_name = long_name[:40]
+            if short_name:
+                short_name = short_name[:4].upper()
+
+            # Apply changes
+            changes_made = []
+
+            if long_name:
+                self.dialog.infobox("Setting", f"Setting long name to: {long_name}")
+                result = mesh_cmd.set_owner(long_name)
+                if result.success:
+                    changes_made.append(f"Long name: {long_name}")
+                else:
+                    self.dialog.msgbox("Error", f"Failed to set long name:\n{result.message}")
+                    return
+
+            if short_name:
+                self.dialog.infobox("Setting", f"Setting short name to: {short_name}")
+                result = mesh_cmd.set_owner_short(short_name)
+                if result.success:
+                    changes_made.append(f"Short name: {short_name}")
+                else:
+                    self.dialog.msgbox("Error", f"Failed to set short name:\n{result.message}")
+                    return
+
+            if changes_made:
+                self.dialog.msgbox("Success", f"Owner settings updated:\n\n" + "\n".join(changes_made))
+            else:
+                self.dialog.msgbox("Info", "No changes made.")
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to set owner name:\n{e}")
 
     def _radio_presets_menu(self):
         """Radio/LoRa preset selection."""

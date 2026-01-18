@@ -2,11 +2,41 @@
 
 from rich.console import Console
 from rich.prompt import Prompt, Confirm, IntPrompt
-from rich.table import Table
 
 from utils.logger import log
 
 console = Console()
+
+
+def ask_yes_no_cancel(prompt: str, default: bool = False) -> bool | None:
+    """
+    Ask a yes/no question with cancel option.
+
+    Args:
+        prompt: The question to ask
+        default: Default value if user just presses Enter (y/n)
+
+    Returns:
+        True for yes, False for no, None for cancel
+    """
+    default_str = "y" if default else "n"
+    hint = f"[y/n/c] ({default_str})" if default else "[y/n/c] (n)"
+
+    while True:
+        response = Prompt.ask(
+            f"{prompt} {hint}",
+            default=default_str,
+            show_default=False
+        ).lower().strip()
+
+        if response in ('y', 'yes'):
+            return True
+        elif response in ('n', 'no', ''):
+            return False
+        elif response in ('c', 'cancel', 'q', 'quit', 'back'):
+            return None
+        else:
+            console.print("[yellow]Enter y (yes), n (no), or c (cancel)[/yellow]")
 
 
 class RadioConfigurator:
@@ -74,7 +104,12 @@ class RadioConfigurator:
 
         console.print(f"\n[dim]Available slots: 0-{max_slots-1}[/dim]")
 
-        use_custom = Confirm.ask("\nConfigure custom channel slot?", default=False)
+        use_custom = ask_yes_no_cancel("\nConfigure custom channel slot?", default=False)
+
+        if use_custom is None:
+            # User cancelled
+            console.print("[yellow]Cancelled - using default slot[/yellow]")
+            return {'channel_slot': 20 if preset_name == 'LongFast' else 0, 'slot_info': 'Default (cancelled)'}
 
         if use_custom:
             slot = IntPrompt.ask(
