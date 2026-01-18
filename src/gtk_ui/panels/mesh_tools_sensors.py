@@ -217,7 +217,7 @@ class SensorsTabMixin:
                     try:
                         from gateway.node_tracker import UnifiedNodeTracker
                         tracker = UnifiedNodeTracker()
-                        tracker.load_cache()  # Load cached nodes
+                        # Cache is auto-loaded in __init__
                     except ImportError:
                         logger.warning("UnifiedNodeTracker not available")
                         tracker = None
