@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 # Import centralized path utility
 from utils.paths import get_real_user_home
 
+# Import event bus for RX message notifications (Issue #17 Phase 3)
+try:
+    from utils.event_bus import emit_message
+    HAS_EVENT_BUS = True
+except ImportError:
+    HAS_EVENT_BUS = False
+    emit_message = None
+
 
 @dataclass
 class BridgedMessage:
@@ -1109,13 +1117,38 @@ class RNSMeshtasticBridge:
             return False
 
     def _notify_message(self, msg: BridgedMessage):
-        """Notify message callbacks (thread-safe snapshot)"""
+        """Notify message callbacks and emit to event bus (thread-safe snapshot).
+
+        Issue #17 Phase 3: Emit messages to event bus so UI panels can subscribe
+        and display RX messages without being directly coupled to the bridge.
+        """
         callbacks = list(self._message_callbacks)  # Snapshot to avoid race condition
         for callback in callbacks:
             try:
                 callback(msg)
             except Exception as e:
                 logger.error(f"Message callback error: {e}")
+
+        # Emit to event bus for UI panels (Issue #17 Phase 3)
+        if HAS_EVENT_BUS and emit_message:
+            try:
+                emit_message(
+                    direction='rx',
+                    content=msg.content,
+                    node_id=msg.source_id or "",
+                    node_name="",  # Could be enhanced with node lookup
+                    channel=msg.metadata.get('channel', 0) if msg.metadata else 0,
+                    network=msg.source_network,
+                    raw_data={
+                        'destination_id': msg.destination_id,
+                        'is_broadcast': msg.is_broadcast,
+                        'title': msg.title,
+                        'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
+                        'metadata': msg.metadata
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"Event bus emit failed: {e}")
 
     def _notify_status(self, status: str):
         """Notify status callbacks (thread-safe snapshot)"""

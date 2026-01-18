@@ -4,17 +4,20 @@ Service Availability Utilities for MeshForge
 Provides standardized service checking before connecting to external services.
 Use these instead of assuming services are running.
 
+ARCHITECTURE (Issue #17 redesign):
+    - For systemd services: Trust systemctl ONLY (single source of truth)
+    - Port/process checks kept for utilities but NOT used in check_service()
+    - "Unknown" state is better than wrong state from conflicting methods
+
 Usage:
     from utils.service_check import check_port, check_service, ServiceStatus
     from utils.ports import MESHTASTICD_PORT
 
-    # Quick port check
+    # Quick port check (utility function)
     if check_port(MESHTASTICD_PORT):
         connect_to_meshtasticd()
-    else:
-        show_error(f"meshtasticd not running on port {MESHTASTICD_PORT}")
 
-    # Full service check with actionable feedback
+    # Full service check - trusts systemctl for systemd services
     status = check_service('meshtasticd')
     if not status.available:
         show_error(status.message)
@@ -24,7 +27,7 @@ Usage:
 import socket
 import subprocess
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from enum import Enum
 
@@ -37,11 +40,10 @@ __all__ = [
     # Main entry points
     'check_service',        # Primary status checker (SINGLE SOURCE OF TRUTH)
     'require_service',      # Check with exception on failure
-    'check_port',           # TCP port check
-    'check_udp_port',       # UDP port check
-    'check_process_running', # Process check via pgrep
+    'check_port',           # TCP port check (utility)
+    'check_udp_port',       # UDP port check (utility)
+    'check_process_running', # Process check via pgrep (utility)
     'check_systemd_service', # Systemd status check
-    'check_meshtasticd_responsive',  # Meshtasticd-specific verification
     # Data classes
     'ServiceStatus',        # Return type from check_service
     'ServiceState',         # Status enum (AVAILABLE, DEGRADED, etc.)
@@ -53,11 +55,10 @@ __all__ = [
 class ServiceState(Enum):
     """Service availability states."""
     AVAILABLE = "available"
-    DEGRADED = "degraded"       # Port open but not responsive
-    PORT_CLOSED = "port_closed"
+    DEGRADED = "degraded"       # Running but with issues
     NOT_RUNNING = "not_running"
     NOT_INSTALLED = "not_installed"
-    UNKNOWN = "unknown"
+    UNKNOWN = "unknown"         # Cannot determine state
 
 
 @dataclass
@@ -69,6 +70,8 @@ class ServiceStatus:
     message: str
     fix_hint: str = ""
     port: Optional[int] = None
+    # Additional context (Phase 2: separate service state from detection)
+    detection_method: str = ""  # How was this determined
 
     def __bool__(self) -> bool:
         return self.available
@@ -76,90 +79,45 @@ class ServiceStatus:
 
 # Known services and their configurations
 # Port numbers imported from utils.ports for centralization
+# NOTE: is_systemd=True means we ONLY trust systemctl for status
 KNOWN_SERVICES = {
     'meshtasticd': {
         'port': MESHTASTICD_PORT,
         'systemd_name': 'meshtasticd',
+        'is_systemd': True,  # Trust systemctl only
         'description': 'Meshtastic daemon',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd',
-        'verify_func': 'check_meshtasticd_responsive',  # Extra verification
     },
     'rnsd': {
-        'port': RNS_SHARED_INSTANCE_PORT,  # UDP 37428 - shared instance port
-        'port_type': 'udp',  # rnsd uses UDP, not TCP
+        'port': RNS_SHARED_INSTANCE_PORT,
+        'port_type': 'udp',
         'systemd_name': 'rnsd',
+        'is_systemd': True,  # Trust systemctl only
         'description': 'Reticulum Network Stack daemon',
-        'fix_hint': 'Start with: rnsd or sudo systemctl start rnsd',
+        'fix_hint': 'Start with: sudo systemctl start rnsd',
     },
     'hamclock': {
         'port': HAMCLOCK_PORT,
         'systemd_name': 'hamclock',
+        'is_systemd': True,
         'description': 'HamClock space weather display',
         'fix_hint': 'Start with: sudo systemctl start hamclock',
     },
     'mosquitto': {
         'port': MQTT_PORT,
         'systemd_name': 'mosquitto',
+        'is_systemd': True,
         'description': 'MQTT broker',
         'fix_hint': 'Start with: sudo systemctl start mosquitto',
     },
 }
 
 
-def check_meshtasticd_responsive(timeout: float = 5.0) -> tuple:
-    """
-    Verify meshtasticd is actually responsive, not just that port is open.
-
-    Sometimes meshtasticd hangs with port open but not responding.
-
-    Args:
-        timeout: How long to wait for response
-
-    Returns:
-        Tuple of (is_responsive: bool, message: str)
-    """
-    import subprocess
-
-    # First check if port is even open
-    if not check_port(MESHTASTICD_PORT, timeout=2.0):
-        return False, "Port 4403 not open"
-
-    # Try a quick meshtastic CLI command to verify responsiveness
-    try:
-        result = subprocess.run(
-            ['meshtastic', '--host', 'localhost', '--info'],
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-
-        if result.returncode == 0:
-            # Check for actual device info in output
-            if 'Owner:' in result.stdout or 'Nodes' in result.stdout:
-                return True, "Responsive (device info received)"
-            elif 'Connected to' in result.stdout:
-                return True, "Responsive (connected)"
-            else:
-                return True, "Responsive"
-
-        # Non-zero return but process completed
-        stderr = result.stderr.lower()
-        if 'timed out' in stderr or 'timeout' in stderr:
-            return False, "Port open but not responding (try: sudo systemctl restart meshtasticd)"
-        elif 'connection refused' in stderr:
-            return False, "Connection refused"
-        elif 'error' in stderr:
-            return False, f"Error: {result.stderr[:100]}"
-        else:
-            return False, "Command failed"
-
-    except subprocess.TimeoutExpired:
-        return False, "Port open but unresponsive (hung?) - try: sudo systemctl restart meshtasticd"
-    except FileNotFoundError:
-        # meshtastic CLI not installed, fall back to port check only
-        return True, "Port open (CLI not available for verification)"
-    except Exception as e:
-        return False, f"Check failed: {e}"
+# =============================================================================
+# UTILITY FUNCTIONS
+# These are kept for direct use but NOT used by check_service() for systemd
+# services (Issue #17: avoid conflicting detection methods)
+# =============================================================================
 
 
 def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool:
@@ -327,10 +285,10 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     """
     Check if a service is available and provide actionable feedback.
 
-    Uses multiple detection methods for reliability:
-    1. Port check (TCP or UDP based on service config)
-    2. Process check (pgrep)
-    3. Systemd status
+    SIMPLIFIED ARCHITECTURE (Issue #17):
+        - For systemd services: ONLY trust systemctl (single source of truth)
+        - No conflicting fallback methods (port check, pgrep)
+        - "Unknown" is better than wrong state
 
     Args:
         name: Service name (e.g., 'meshtasticd', 'hamclock', 'rnsd')
@@ -343,123 +301,159 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     API Contract:
         - ALWAYS returns a ServiceStatus (never None)
         - ServiceStatus.available: bool indicating if service is ready
-        - ServiceStatus.state: ServiceState enum (AVAILABLE, UNAVAILABLE, DEGRADED, UNKNOWN)
-        - ServiceStatus.fix_hint: Actionable command to fix the issue
+        - ServiceStatus.state: ServiceState enum (AVAILABLE, NOT_RUNNING, etc.)
+        - ServiceStatus.detection_method: How status was determined
         - Known services: meshtasticd, rnsd, hamclock, mosquitto
-        - Tests: tests/test_service_check.py::TestCheckService
     """
-    # Get known service config
     config = KNOWN_SERVICES.get(name, {})
     check_port_num = port or config.get('port')
-    port_type = config.get('port_type', 'tcp')  # Default to TCP
     systemd_name = config.get('systemd_name', name)
     description = config.get('description', name)
     fix_hint = config.get('fix_hint', f'Start {name} service')
-    verify_func_name = config.get('verify_func')
+    is_systemd = config.get('is_systemd', True)  # Default to systemd
 
-    # Check port if applicable (TCP or UDP)
-    port_is_open = False
+    # =========================================================================
+    # SYSTEMD SERVICES: Trust systemctl ONLY
+    # =========================================================================
+    if is_systemd:
+        try:
+            # Single source of truth: systemctl is-active
+            result = subprocess.run(
+                ['systemctl', 'is-active', systemd_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            is_active = result.returncode == 0
+            status_text = result.stdout.strip()  # "active", "inactive", "failed"
+
+            if is_active:
+                return ServiceStatus(
+                    name=name,
+                    available=True,
+                    state=ServiceState.AVAILABLE,
+                    message=f"{description} is running",
+                    port=check_port_num,
+                    detection_method="systemctl"
+                )
+
+            # Not active - check if it exists
+            if status_text == "inactive":
+                # Service exists but not running
+                return ServiceStatus(
+                    name=name,
+                    available=False,
+                    state=ServiceState.NOT_RUNNING,
+                    message=f"{description} is not running",
+                    fix_hint=fix_hint,
+                    port=check_port_num,
+                    detection_method="systemctl"
+                )
+
+            if status_text == "failed":
+                return ServiceStatus(
+                    name=name,
+                    available=False,
+                    state=ServiceState.DEGRADED,
+                    message=f"{description} has failed",
+                    fix_hint=f"Check logs: journalctl -u {systemd_name}",
+                    port=check_port_num,
+                    detection_method="systemctl"
+                )
+
+            # Check if service unit exists
+            check_result = subprocess.run(
+                ['systemctl', 'list-unit-files', f'{systemd_name}.service'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if systemd_name not in check_result.stdout:
+                return ServiceStatus(
+                    name=name,
+                    available=False,
+                    state=ServiceState.NOT_INSTALLED,
+                    message=f"{description} is not installed",
+                    fix_hint=f"Install {name} first",
+                    port=check_port_num,
+                    detection_method="systemctl"
+                )
+
+            # Generic not running
+            return ServiceStatus(
+                name=name,
+                available=False,
+                state=ServiceState.NOT_RUNNING,
+                message=f"{description} is not running",
+                fix_hint=fix_hint,
+                port=check_port_num,
+                detection_method="systemctl"
+            )
+
+        except FileNotFoundError:
+            # systemctl not available (non-systemd system)
+            logger.warning(f"systemctl not found - cannot check {name}")
+            return ServiceStatus(
+                name=name,
+                available=False,
+                state=ServiceState.UNKNOWN,
+                message=f"{description}: cannot determine status (no systemctl)",
+                fix_hint="Check manually or use port check",
+                port=check_port_num,
+                detection_method="none"
+            )
+        except subprocess.TimeoutExpired:
+            return ServiceStatus(
+                name=name,
+                available=False,
+                state=ServiceState.UNKNOWN,
+                message=f"{description}: status check timed out",
+                fix_hint="System may be overloaded",
+                port=check_port_num,
+                detection_method="systemctl-timeout"
+            )
+        except Exception as e:
+            logger.error(f"Service check failed for {name}: {e}")
+            return ServiceStatus(
+                name=name,
+                available=False,
+                state=ServiceState.UNKNOWN,
+                message=f"{description}: check failed ({e})",
+                port=check_port_num,
+                detection_method="error"
+            )
+
+    # =========================================================================
+    # NON-SYSTEMD SERVICES: Fall back to port/process check
+    # =========================================================================
+    port_type = config.get('port_type', 'tcp')
+
     if check_port_num:
         if port_type == 'udp':
-            port_is_open = check_udp_port(check_port_num, host)
+            port_open = check_udp_port(check_port_num, host)
         else:
-            port_is_open = check_port(check_port_num, host)
+            port_open = check_port(check_port_num, host)
 
-        if port_is_open:
-            # For services with verification function, verify actual responsiveness
-            if verify_func_name and verify_func_name == 'check_meshtasticd_responsive':
-                is_responsive, verify_msg = check_meshtasticd_responsive()
-                if is_responsive:
-                    return ServiceStatus(
-                        name=name,
-                        available=True,
-                        state=ServiceState.AVAILABLE,
-                        message=f"{description}: {verify_msg}",
-                        port=check_port_num
-                    )
-                else:
-                    # Port open but service not responding properly
-                    return ServiceStatus(
-                        name=name,
-                        available=False,
-                        state=ServiceState.DEGRADED,
-                        message=f"{description}: {verify_msg}",
-                        fix_hint="Try: sudo systemctl restart meshtasticd",
-                        port=check_port_num
-                    )
-
-            # Standard port check without verification
-            proto = 'UDP' if port_type == 'udp' else 'TCP'
+        if port_open:
             return ServiceStatus(
                 name=name,
                 available=True,
                 state=ServiceState.AVAILABLE,
-                message=f"{description} is running ({proto} {check_port_num})",
-                port=check_port_num
+                message=f"{description} is running (port {check_port_num})",
+                port=check_port_num,
+                detection_method="port"
             )
 
-    # Check if process is running (catches non-systemd starts)
+    # Try process check as fallback
     if check_process_running(systemd_name):
-        # Process is running - if we have a port and it's not open,
-        # it might be starting up or using a different port
-        if check_port_num and not port_is_open:
-            # Service running but port not responding - might be starting
-            return ServiceStatus(
-                name=name,
-                available=True,  # Mark as available since process IS running
-                state=ServiceState.AVAILABLE,
-                message=f"{description} is running (process detected)",
-                port=check_port_num
-            )
         return ServiceStatus(
             name=name,
             available=True,
             state=ServiceState.AVAILABLE,
-            message=f"{description} is running (process detected)"
+            message=f"{description} is running (process detected)",
+            port=check_port_num,
+            detection_method="process"
         )
-
-    # Check systemd service
-    is_running, is_enabled = check_systemd_service(systemd_name)
-
-    if is_running:
-        # Systemd says running but port not open and process not found
-        # Trust systemd in this case
-        return ServiceStatus(
-            name=name,
-            available=True,
-            state=ServiceState.AVAILABLE,
-            message=f"{description} is running (systemd)"
-        )
-
-    if is_enabled:
-        return ServiceStatus(
-            name=name,
-            available=False,
-            state=ServiceState.NOT_RUNNING,
-            message=f"{description} is enabled but not running",
-            fix_hint=fix_hint,
-            port=check_port_num
-        )
-
-    # Check if service exists at all
-    try:
-        result = subprocess.run(
-            ['systemctl', 'status', systemd_name],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if 'could not be found' in result.stderr.lower():
-            return ServiceStatus(
-                name=name,
-                available=False,
-                state=ServiceState.NOT_INSTALLED,
-                message=f"{description} is not installed (no systemd service)",
-                fix_hint=f"Install {name} first or start manually",
-                port=check_port_num
-            )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
 
     return ServiceStatus(
         name=name,
@@ -467,7 +461,8 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
         state=ServiceState.NOT_RUNNING,
         message=f"{description} is not running",
         fix_hint=fix_hint,
-        port=check_port_num
+        port=check_port_num,
+        detection_method="port+process"
     )
 
 
