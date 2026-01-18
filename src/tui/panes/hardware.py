@@ -231,7 +231,8 @@ class HardwarePane(Container):
             await self._enable_uart()
 
         elif button_id == "hw-edit-boot":
-            await self._edit_boot_config()
+            self._edit_boot_config()  # Sync - suspends app for nano
+            self.refresh_status()  # Refresh after editor closes
 
         elif button_id == "hw-reboot":
             await self._prompt_reboot()
@@ -385,22 +386,23 @@ class HardwarePane(Container):
 
         self.refresh_status()
 
-    @work
-    async def _edit_boot_config(self):
-        """Edit boot config in nano"""
+    def _edit_boot_config(self):
+        """Edit boot config in nano - properly suspends TUI"""
         log = self.query_one("#hw-log", Log)
 
         boot_config = self.BOOT_CONFIG if self.BOOT_CONFIG.exists() else self.BOOT_CONFIG_ALT
 
         if boot_config.exists():
             log.write(f"[yellow]Opening {boot_config} in nano...[/yellow]")
-            log.write("Press Ctrl+O to save, Ctrl+X to exit")
+            log.write("[dim]Press Ctrl+O to save, Ctrl+X to exit nano[/dim]")
 
-            import subprocess
-            subprocess.run(['nano', str(boot_config)], timeout=300)
+            # Suspend app to properly release terminal for external editor
+            with self.app.suspend():
+                import subprocess
+                subprocess.run(['nano', str(boot_config)], timeout=300)
 
-            log.write("[green]Editor closed[/green]")
-            self.refresh_status()
+            log.write("[green]Editor closed - returned to TUI[/green]")
+            # Note: refresh_status() is called by the button handler after this returns
         else:
             log.write("[red]Boot config not found[/red]")
 
