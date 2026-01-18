@@ -408,9 +408,10 @@ class GatewayMixin:
         logger.debug("[RNS] Starting gateway...")
         self.main_window.set_status_message("Checking service prerequisites...")
 
-        def do_start():
+        def do_preflight():
+            """Run pre-flight checks in background thread, then schedule bridge start on main thread."""
             try:
-                # Pre-flight service checks
+                # Pre-flight service checks (safe to run in background)
                 service_issues = []
 
                 if check_service:
@@ -423,10 +424,8 @@ class GatewayMixin:
 
                     # Check if RNS module is available (gateway will initialize it)
                     # Don't require external rnsd - MeshForge can be the RNS instance
-                    rns_available = False
                     try:
                         import RNS
-                        rns_available = True
                         logger.debug("[RNS] RNS module available - gateway will initialize")
                     except ImportError:
                         service_issues.append("RNS module not installed")
@@ -442,44 +441,65 @@ class GatewayMixin:
                     GLib.idle_add(self._gateway_start_complete, False, "Required services not running")
                     return
 
-                # All checks passed, proceed with gateway start
-                GLib.idle_add(
-                    lambda: self.main_window.set_status_message("Starting gateway...")
-                )
+                # Pre-flight passed - schedule bridge start on MAIN thread
+                # CRITICAL: RNS.Reticulum() uses signal handlers which ONLY work in main thread
+                GLib.idle_add(self._do_gateway_start_main_thread)
 
-                from gateway.rns_bridge import RNSMeshtasticBridge
-                from gateway.config import GatewayConfig
-
-                config = GatewayConfig.load()
-                config.enabled = True
-                config.save()
-
-                self._gateway_bridge = RNSMeshtasticBridge(config)
-                success = self._gateway_bridge.start()
-                logger.debug(f"[RNS] Gateway start: {'OK' if success else 'FAILED'}")
-
-                # Register bridge with commands module so messaging can use it
-                if success:
-                    try:
-                        from commands import gateway as gateway_cmd
-                        gateway_cmd.set_bridge(self._gateway_bridge)
-                    except Exception as e:
-                        logger.warning(f"[RNS] Could not register bridge: {e}")
-
-                GLib.idle_add(self._gateway_start_complete, success)
             except ImportError as e:
-                logger.debug(f"[RNS] Gateway start failed - missing module: {e}")
+                logger.debug(f"[RNS] Gateway preflight failed - missing module: {e}")
                 GLib.idle_add(self._gateway_start_complete, False, f"Missing module: {e}")
             except (SystemExit, KeyboardInterrupt, GeneratorExit):
                 raise
             except BaseException as e:
                 # Catch pyo3 PanicException and other crashes
-                logger.debug(f"[RNS] Gateway start exception: {e}")
+                logger.debug(f"[RNS] Gateway preflight exception: {e}")
                 GLib.idle_add(self._gateway_start_complete, False, str(e))
 
-        thread = threading.Thread(target=do_start)
+        thread = threading.Thread(target=do_preflight)
         thread.daemon = True
         thread.start()
+
+    def _do_gateway_start_main_thread(self):
+        """Start the gateway bridge - MUST be called from main thread.
+
+        RNS.Reticulum() uses signal handlers which require the main thread.
+        This is scheduled via GLib.idle_add() after pre-flight checks pass.
+        """
+        try:
+            self.main_window.set_status_message("Starting gateway...")
+
+            from gateway.rns_bridge import RNSMeshtasticBridge
+            from gateway.config import GatewayConfig
+
+            config = GatewayConfig.load()
+            config.enabled = True
+            config.save()
+
+            self._gateway_bridge = RNSMeshtasticBridge(config)
+            success = self._gateway_bridge.start()
+            logger.debug(f"[RNS] Gateway start: {'OK' if success else 'FAILED'}")
+
+            # Register bridge with commands module so messaging can use it
+            if success:
+                try:
+                    from commands import gateway as gateway_cmd
+                    gateway_cmd.set_bridge(self._gateway_bridge)
+                except Exception as e:
+                    logger.warning(f"[RNS] Could not register bridge: {e}")
+
+            self._gateway_start_complete(success)
+
+        except ImportError as e:
+            logger.debug(f"[RNS] Gateway start failed - missing module: {e}")
+            self._gateway_start_complete(False, f"Missing module: {e}")
+        except (SystemExit, KeyboardInterrupt, GeneratorExit):
+            raise
+        except BaseException as e:
+            # Catch pyo3 PanicException and other crashes
+            logger.debug(f"[RNS] Gateway start exception: {e}")
+            self._gateway_start_complete(False, str(e))
+
+        return False  # Don't repeat GLib.idle_add
 
     def _show_service_warning(self, title, message):
         """Show a warning dialog about service issues"""
