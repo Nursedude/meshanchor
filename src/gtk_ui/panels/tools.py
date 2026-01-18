@@ -62,6 +62,13 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         self._build_ui()
         GLib.idle_add(self._refresh_status)
 
+        # Connect cleanup handler for when panel is destroyed
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         """Build the tools panel UI"""
         # Title

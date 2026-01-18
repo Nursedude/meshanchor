@@ -32,6 +32,12 @@ class ConfigPanel(Gtk.Box):
         self._build_ui()
         self._refresh_configs()
 
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _build_ui(self):
         """Build the config panel UI"""
         # Title

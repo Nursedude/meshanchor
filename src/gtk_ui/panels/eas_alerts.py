@@ -175,6 +175,13 @@ class EASAlertsPanel(Gtk.Box):
         self._build_ui()
         self._refresh_alerts()
 
+        # Connect unrealize signal for cleanup
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _load_location_settings(self):
         """Load user location settings"""
         # Default location (Hawaii - user's example)
