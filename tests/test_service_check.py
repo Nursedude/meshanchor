@@ -117,44 +117,50 @@ class TestCheckService:
     """Tests for check_service function."""
 
     def test_meshtasticd_available(self):
-        """Test detection of available meshtasticd."""
-        with patch('src.utils.service_check.check_port') as mock_port:
-            with patch('src.utils.service_check.check_meshtasticd_responsive') as mock_responsive:
-                mock_port.return_value = True
-                mock_responsive.return_value = (True, "Responsive")
+        """Test detection of available meshtasticd (Issue #17: systemctl only)."""
+        with patch('subprocess.run') as mock_run:
+            # systemctl is-active meshtasticd returns "active"
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout='active\n'
+            )
 
-                status = check_service('meshtasticd')
+            status = check_service('meshtasticd')
 
-                assert status.available is True
-                assert status.state == ServiceState.AVAILABLE
-                assert status.port == 4403
-                mock_port.assert_called_once_with(4403, 'localhost')
+            assert status.available is True
+            assert status.state == ServiceState.AVAILABLE
+            assert status.port == 4403
+            assert status.detection_method == "systemctl"
 
     def test_hamclock_not_running(self):
-        """Test detection of stopped hamclock."""
-        with patch('src.utils.service_check.check_port') as mock_port:
-            with patch('src.utils.service_check.check_systemd_service') as mock_systemd:
-                mock_port.return_value = False
-                mock_systemd.return_value = (False, True)  # not running, but enabled
+        """Test detection of stopped hamclock (Issue #17: systemctl only)."""
+        with patch('subprocess.run') as mock_run:
+            # systemctl is-active hamclock returns "inactive"
+            mock_run.return_value = MagicMock(
+                returncode=3,
+                stdout='inactive\n'
+            )
 
-                status = check_service('hamclock')
+            status = check_service('hamclock')
 
-                assert status.available is False
-                assert status.state == ServiceState.NOT_RUNNING
-                assert 'not running' in status.message.lower()
-                assert 'systemctl start' in status.fix_hint.lower()
+            assert status.available is False
+            assert status.state == ServiceState.NOT_RUNNING
+            assert 'not running' in status.message.lower()
+            assert status.detection_method == "systemctl"
 
     def test_unknown_service(self):
-        """Test handling of unknown service."""
-        with patch('src.utils.service_check.check_port') as mock_port:
-            with patch('src.utils.service_check.check_systemd_service') as mock_systemd:
-                mock_port.return_value = False
-                mock_systemd.return_value = (False, False)
+        """Test handling of unknown service (defaults to systemd check)."""
+        with patch('subprocess.run') as mock_run:
+            # Unknown service treated as systemd service by default
+            mock_run.return_value = MagicMock(
+                returncode=3,
+                stdout='inactive\n'
+            )
 
-                status = check_service('unknown_service', port=9999)
+            status = check_service('unknown_service', port=9999)
 
-                assert status.available is False
-                assert status.port == 9999
+            assert status.available is False
+            assert status.port == 9999
 
     def test_service_status_bool(self):
         """Test ServiceStatus boolean conversion."""

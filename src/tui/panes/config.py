@@ -164,6 +164,70 @@ class ConfigPane(Container):
             active_status.update("[red]N/A[/red]")
             active_detail.update("Directory missing")
 
+    def _check_config_status_sync(self):
+        """Synchronous version of config status check for use after editor closes"""
+        # Check main config.yaml
+        main_status = self.query_one("#cfg-main-status", Static)
+        main_detail = self.query_one("#cfg-main-detail", Static)
+        main_config = self.CONFIG_BASE / "config.yaml"
+
+        if main_config.exists():
+            try:
+                content = main_config.read_text()
+                missing = []
+                found = []
+                for section in self.REQUIRED_SECTIONS:
+                    if section + ':' in content:
+                        found.append(section)
+                    else:
+                        missing.append(section)
+
+                if missing:
+                    main_status.update(f"[yellow]Incomplete[/yellow]")
+                    main_detail.update(f"Missing: {', '.join(missing)}")
+                else:
+                    main_status.update("[green]Valid[/green]")
+                    main_detail.update(f"Found: {', '.join(found)}")
+            except Exception as e:
+                main_status.update("[red]Error[/red]")
+                main_detail.update(str(e)[:30])
+        else:
+            main_status.update("[red]Missing[/red]")
+            main_detail.update("Create or copy from template")
+
+        # Check hardware config (active in config.d)
+        hw_status = self.query_one("#cfg-hw-status", Static)
+        hw_detail = self.query_one("#cfg-hw-detail", Static)
+
+        if self.CONFIG_D.exists():
+            lora_configs = list(self.CONFIG_D.glob("lora-*.yaml"))
+            if lora_configs:
+                hw_status.update("[green]Configured[/green]")
+                hw_detail.update(lora_configs[0].name)
+            else:
+                hw_status.update("[yellow]No LoRa[/yellow]")
+                hw_detail.update("Activate a lora-*.yaml")
+        else:
+            hw_status.update("[red]Missing[/red]")
+            hw_detail.update("config.d/ not found")
+
+        # Count active configs
+        active_status = self.query_one("#cfg-active-count", Static)
+        active_detail = self.query_one("#cfg-active-detail", Static)
+
+        if self.CONFIG_D.exists():
+            active_files = list(self.CONFIG_D.glob("*.yaml"))
+            count = len(active_files)
+            if count > 0:
+                active_status.update(f"[green]{count} files[/green]")
+                active_detail.update("Ready")
+            else:
+                active_status.update("[yellow]0 files[/yellow]")
+                active_detail.update("No configs active")
+        else:
+            active_status.update("[red]N/A[/red]")
+            active_detail.update("Directory missing")
+
     async def refresh_lists(self):
         """Refresh config lists"""
         available_list = self.query_one("#available-list", ListView)
@@ -255,10 +319,12 @@ class ConfigPane(Container):
             await self._deactivate_selected()
 
         elif button_id == "cfg-edit":
-            self._edit_selected()
+            self._edit_selected()  # Sync - suspends app for nano
+            await self.refresh_lists()  # Refresh after editor closes
 
         elif button_id == "cfg-main":
-            self._edit_main_config()
+            self._edit_main_config()  # Sync - suspends app for nano
+            await self._check_config_status()  # Refresh after editor closes
 
         elif button_id == "cfg-apply":
             await self._apply_and_restart()
@@ -420,9 +486,8 @@ class ConfigPane(Container):
                     preview.write(f"[red]Error: {e}[/red]")
                 break
 
-    @work
-    async def _edit_selected(self):
-        """Edit selected config in nano"""
+    def _edit_selected(self):
+        """Edit selected config in nano - properly suspends TUI"""
         preview = self.query_one("#cfg-preview", Log)
         available_list = self.query_one("#available-list", ListView)
         active_list = self.query_one("#active-list", ListView)
@@ -450,25 +515,28 @@ class ConfigPane(Container):
 
         if config_path:
             preview.write(f"[yellow]Opening {config_path.name} in nano...[/yellow]")
-            preview.write("[dim]Press Ctrl+O to save, Ctrl+X to exit[/dim]")
-            subprocess.run(['nano', str(config_path)], timeout=300)
-            preview.write("[green]Editor closed[/green]")
-            await self.refresh_lists()
+            preview.write("[dim]Press Ctrl+O to save, Ctrl+X to exit nano[/dim]")
+            # Suspend app to properly release terminal for external editor
+            with self.app.suspend():
+                subprocess.run(['nano', str(config_path)], timeout=300)
+            preview.write("[green]Editor closed - returned to TUI[/green]")
+            # Note: refresh_lists() is called by the button handler after this returns
         else:
             preview.write("[yellow]Select a config first[/yellow]")
 
-    @work
-    async def _edit_main_config(self):
-        """Edit main config.yaml"""
+    def _edit_main_config(self):
+        """Edit main config.yaml - properly suspends TUI"""
         preview = self.query_one("#cfg-preview", Log)
         main_config = self.CONFIG_BASE / "config.yaml"
 
         if main_config.exists():
             preview.write(f"[yellow]Opening {main_config} in nano...[/yellow]")
-            preview.write("[dim]Press Ctrl+O to save, Ctrl+X to exit[/dim]")
-            subprocess.run(['nano', str(main_config)], timeout=300)
-            preview.write("[green]Editor closed[/green]")
-            await self._check_config_status()
+            preview.write("[dim]Press Ctrl+O to save, Ctrl+X to exit nano[/dim]")
+            # Suspend app to properly release terminal for external editor
+            with self.app.suspend():
+                subprocess.run(['nano', str(main_config)], timeout=300)
+            preview.write("[green]Editor closed - returned to TUI[/green]")
+            # Note: _check_config_status() is called by the button handler after this returns
         else:
             preview.write(f"[red]Main config not found: {main_config}[/red]")
             preview.write("[yellow]Creating template config.yaml...[/yellow]")
@@ -494,8 +562,11 @@ General:
                 self.CONFIG_BASE.mkdir(parents=True, exist_ok=True)
                 main_config.write_text(template)
                 preview.write(f"[green]Created template: {main_config}[/green]")
-                subprocess.run(['nano', str(main_config)], timeout=300)
-                await self._check_config_status()
+                # Suspend app to properly release terminal for external editor
+                with self.app.suspend():
+                    subprocess.run(['nano', str(main_config)], timeout=300)
+                preview.write("[green]Editor closed - returned to TUI[/green]")
+                # Note: _check_config_status() is called by the button handler after this returns
             except Exception as e:
                 preview.write(f"[red]Error creating config: {e}[/red]")
 

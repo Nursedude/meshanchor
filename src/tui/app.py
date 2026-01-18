@@ -261,23 +261,33 @@ class MeshtasticdTUI(App):
 [bold]Navigation[/bold]
   [green]d[/green]  Dashboard    [green]s[/green]  Service     [green]c[/green]  Config
   [green]h[/green]  Hardware     [green]m[/green]  CLI         [green]t[/green]  Tools
-  [green]Tab[/green]  Next tab   [green]Shift+Tab[/green]  Previous tab
+  [green]Tab[/green]  Next widget   [green]Shift+Tab[/green]  Previous widget
 
 [bold]Actions[/bold]
   [green]r[/green]  Refresh current view
   [green]T[/green]  Toggle dark/light theme
   [green]?[/green]  Show this help
 
-[bold]Exit[/bold]
-  [green]q[/green]  or  [green]Escape[/green]  Quit application
+[bold]Exit / Back[/bold]
+  [green]q[/green]  Quit application
+  [green]Escape[/green]  Go back / Cancel / Quit
+
+[bold]In Text Inputs[/bold]
+  [green]Tab[/green]  Move to next field
+  [green]Escape[/green]  Cancel editing
 
 [bold]In Lists[/bold]
   [green]↑/↓[/green]  Navigate items
   [green]Enter[/green]  Select/Preview
+  [green]Escape[/green]  Unfocus list
+
+[bold]In External Editor (nano)[/bold]
+  [green]Ctrl+O[/green]  Save file
+  [green]Ctrl+X[/green]  Exit editor (returns to TUI)
 
 Press any key to close this help.
 """
-        self.notify(help_text, title="Help", timeout=15)
+        self.notify(help_text, title="Help", timeout=20)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Global button handler"""
