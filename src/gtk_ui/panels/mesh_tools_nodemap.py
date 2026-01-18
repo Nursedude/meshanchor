@@ -34,12 +34,14 @@ try:
     from utils.meshtastic_connection import (
         MESHTASTIC_CONNECTION_LOCK,
         wait_for_cooldown,
-        safe_close_interface
+        safe_close_interface,
+        get_connection_manager
     )
     HAS_MESHTASTIC_LOCK = True
 except ImportError:
     HAS_MESHTASTIC_LOCK = False
     MESHTASTIC_CONNECTION_LOCK = None
+    get_connection_manager = None
 
 
 class NodeMapTabMixin:
@@ -172,27 +174,52 @@ class NodeMapTabMixin:
                         pass
 
             if tcp_available:
-                # Acquire global lock - meshtasticd only supports one TCP connection
-                lock_acquired = False
-                if HAS_MESHTASTIC_LOCK and MESHTASTIC_CONNECTION_LOCK:
-                    lock_acquired = MESHTASTIC_CONNECTION_LOCK.acquire(timeout=5.0)
-                    if not lock_acquired:
-                        GLib.idle_add(self._log_message, "Could not acquire connection lock (another operation in progress)")
-                    else:
-                        wait_for_cooldown()
-                else:
-                    lock_acquired = True
+                # Check if gateway/other component already has a persistent connection
+                # meshtasticd only supports ONE TCP connection at a time
+                interface = None
+                owns_connection = False
 
-                if lock_acquired:
-                    interface = None
+                if HAS_MESHTASTIC_LOCK and get_connection_manager:
+                    conn_mgr = get_connection_manager()
+                    if conn_mgr.has_persistent():
+                        # Use existing connection from gateway - don't create new one
+                        interface = conn_mgr.get_interface()
+                        owner = conn_mgr.get_persistent_owner()
+                        GLib.idle_add(self._log_message, f"Using existing connection from {owner}")
+                    else:
+                        # No persistent connection - acquire lock and create one
+                        lock_acquired = MESHTASTIC_CONNECTION_LOCK.acquire(timeout=5.0)
+                        if not lock_acquired:
+                            GLib.idle_add(self._log_message, "Could not acquire connection lock (another operation in progress)")
+                        else:
+                            wait_for_cooldown()
+                            try:
+                                import meshtastic.tcp_interface
+                                GLib.idle_add(self._log_message, "Connecting to meshtasticd via TCP...")
+                                interface = meshtastic.tcp_interface.TCPInterface('localhost', 4403)
+                                owns_connection = True
+                                import time
+                                time.sleep(2)
+                            except Exception as e:
+                                GLib.idle_add(self._log_message, f"Connection failed: {e}")
+                                interface = None
+                            finally:
+                                MESHTASTIC_CONNECTION_LOCK.release()
+                else:
+                    # Fallback without connection manager
                     try:
                         import meshtastic.tcp_interface
                         import time
                         GLib.idle_add(self._log_message, "Connecting to meshtasticd via TCP...")
-
                         interface = meshtastic.tcp_interface.TCPInterface('localhost', 4403)
+                        owns_connection = True
                         time.sleep(2)
+                    except Exception as e:
+                        GLib.idle_add(self._log_message, f"Connection failed: {e}")
+                        interface = None
 
+                if interface:
+                    try:
                         if hasattr(interface, 'nodes') and interface.nodes:
                             for node_id, node in interface.nodes.items():
                                 user = node.get('user', {})
@@ -218,7 +245,8 @@ class NodeMapTabMixin:
                     except BaseException as e:
                         GLib.idle_add(self._log_message, f"Meshtastic error: {e}")
                     finally:
-                        if interface:
+                        # Only close if we created the connection
+                        if owns_connection and interface:
                             if HAS_MESHTASTIC_LOCK:
                                 safe_close_interface(interface)
                             else:
@@ -226,11 +254,6 @@ class NodeMapTabMixin:
                                     interface.close()
                                 except Exception:
                                     pass
-                        if HAS_MESHTASTIC_LOCK and MESHTASTIC_CONNECTION_LOCK:
-                            try:
-                                MESHTASTIC_CONNECTION_LOCK.release()
-                            except RuntimeError:
-                                pass
             else:
                 GLib.idle_add(self._log_message, "meshtasticd TCP port 4403 not available")
 
