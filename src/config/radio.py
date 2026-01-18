@@ -30,10 +30,14 @@ class RadioConfigurator:
 
         if modem_config:
             config.update(modem_config)
+            preset_name = modem_config.get('preset_name', 'LongFast')
+        else:
+            preset_name = 'LongFast'
+            console.print("[yellow]Using default preset: LongFast[/yellow]")
 
         # Channel slot configuration
         console.print("\n[cyan]Step 2: Channel Slot Configuration[/cyan]")
-        slot_config = self.configure_channel_slot(modem_config.get('preset_name', 'LongFast'))
+        slot_config = self.configure_channel_slot(preset_name)
 
         config.update(slot_config)
 
