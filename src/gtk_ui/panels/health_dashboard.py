@@ -226,7 +226,7 @@ class HealthDashboardPanel(Gtk.Box):
                 'name': name,
                 'available': status.available,
                 'state': status.state.value if status.state else 'unknown',
-                'details': status.details or '',
+                'details': status.message or '',  # Fixed: ServiceStatus has 'message' not 'details'
             })
         return results
 
