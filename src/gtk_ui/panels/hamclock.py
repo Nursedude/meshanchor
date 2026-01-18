@@ -155,6 +155,13 @@ class HamClockPanel(
         # Start update time checker (updates "last updated" display)
         self._update_check_timer_id = self._schedule_timer(60000, self._check_data_freshness)
 
+        # Connect cleanup handler for when panel is destroyed
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
         """Schedule a timer and track it for cleanup."""
         if args:

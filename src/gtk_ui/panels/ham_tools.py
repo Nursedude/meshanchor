@@ -113,6 +113,13 @@ class HamToolsPanel(CallsignLookupMixin, PropagationMixin, Gtk.Box):
         # Initial checks
         self._schedule_timer(500, self._check_hamclock_status)
 
+        # Connect unrealize signal for cleanup
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _save_settings(self):
         """Save settings"""
         if HAS_SETTINGS:

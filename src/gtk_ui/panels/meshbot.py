@@ -69,6 +69,13 @@ class MeshBotPanel(Gtk.Box):
         # Check status on startup
         self._schedule_timer(500, self._check_status)
 
+        # Connect unrealize signal for cleanup
+        self.connect("unrealize", self._on_unrealize)
+
+    def _on_unrealize(self, widget):
+        """Called when panel is destroyed - trigger cleanup."""
+        self.cleanup()
+
     def _schedule_timer(self, delay_ms: int, callback, *args) -> int:
         """Schedule a timer and track it for cleanup."""
         if args:
