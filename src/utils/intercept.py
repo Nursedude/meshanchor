@@ -24,6 +24,8 @@ from typing import Dict, List, Optional
 from enum import Enum
 import json
 
+from utils.paths import get_real_user_home
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,12 +67,15 @@ class InterceptBridge:
     - Direct tool access (rtl_433, dump1090, etc.)
     """
 
-    # Default Intercept paths
-    INTERCEPT_PATHS = [
-        Path.home() / "intercept",
-        Path("/opt/intercept"),
-        Path("/usr/local/intercept"),
-    ]
+    # Default Intercept paths - computed at instance creation time
+    # to properly resolve user home even under sudo (MF001)
+    @property
+    def INTERCEPT_PATHS(self):
+        return [
+            get_real_user_home() / "intercept",
+            Path("/opt/intercept"),
+            Path("/usr/local/intercept"),
+        ]
 
     # Default web port
     WEB_PORT = 5000
