@@ -400,8 +400,8 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     """
     Detect current Meshtastic LoRa settings from connected device.
 
-    Tries connection methods in order (stops on first success):
-    1. meshtasticd on localhost:4403
+    First checks if meshtasticd service is running (systemctl), then tries:
+    1. meshtasticd on localhost:4403 (via meshtastic CLI)
     2. Direct USB/serial connection
     3. CLI auto-detect
 
@@ -409,21 +409,24 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
         verbose: If True, include attempt summary in result
 
     Returns dict with:
-        - preset: str (preset name like 'MEDIUM_FAST')
+        - preset: str (preset name like 'MEDIUM_FAST') or None
         - frequency: int (Hz)
         - bandwidth: int (Hz)
         - spreading_factor: int
         - coding_rate: int
         - detection_method: str (how it was detected)
         - attempts_log: list (if verbose, summary of attempts)
+        - service_running: bool (True if meshtasticd systemd service is active)
 
-    Returns None if detection fails.
+    Returns None if detection fails completely (no service, no CLI).
+    Returns dict with service_running=True but preset=None if service runs but CLI unavailable.
     """
     import subprocess
     import glob
 
     attempts_log = []
     result_data = None
+    service_running = False
 
     def log_attempt(method: str, success: bool, detail: str = ""):
         status = "✓" if success else "✗"
@@ -435,6 +438,27 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
             logger.info(f"Meshtastic detection: {method} succeeded")
         else:
             logger.debug(f"Meshtastic detection: {method} failed - {detail}")
+
+    # =========================================================================
+    # First: Check if meshtasticd systemd service is running
+    # =========================================================================
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'meshtasticd'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.stdout.strip() == 'active':
+            service_running = True
+            log_attempt("meshtasticd systemd service", True, "running")
+        else:
+            log_attempt("meshtasticd systemd service", False, result.stdout.strip() or "not active")
+    except subprocess.TimeoutExpired:
+        log_attempt("meshtasticd systemd service", False, "check timed out")
+    except FileNotFoundError:
+        # Not a systemd system, skip this check
+        pass
+    except Exception as e:
+        log_attempt("meshtasticd systemd service", False, str(e))
 
     def run_meshtastic_cmd(args: list, timeout: int = 10) -> Optional[subprocess.CompletedProcess]:
         """Run meshtastic CLI with error handling (no retries)"""
@@ -546,6 +570,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
                 'coding_rate': preset_data['coding_rate'],
                 'description': preset_data.get('description', ''),
                 'detection_method': result_data.get('detection_method', 'unknown'),
+                'service_running': service_running,
             }
 
             if verbose:
@@ -553,9 +578,18 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
 
             return final_result
 
-    # Detection failed
+    # Preset detection failed - but service might still be running!
     if verbose:
-        return {'preset': None, 'error': True, 'attempts_log': attempts_log}
+        return {
+            'preset': None,
+            'error': not service_running,  # Only error if service not running
+            'service_running': service_running,
+            'attempts_log': attempts_log
+        }
+
+    # Return minimal info if service is running even without preset
+    if service_running:
+        return {'preset': None, 'service_running': True}
 
     return None
 
