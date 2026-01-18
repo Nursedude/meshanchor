@@ -39,6 +39,19 @@ except ImportError:
         HAS_COVERAGE_MAP = False
         CoverageMapGenerator = None
 
+# Import AREDN utilities for unified map
+try:
+    from utils.aredn import AREDNClient, AREDNScanner, AREDNNode
+    HAS_AREDN = True
+except ImportError:
+    try:
+        from src.utils.aredn import AREDNClient, AREDNScanner, AREDNNode
+        HAS_AREDN = True
+    except ImportError:
+        HAS_AREDN = False
+        AREDNNode = None
+        logger.info("AREDN utilities not available - AREDN nodes won't be shown on map")
+
 # Try to import WebKit for embedded map
 # Note: WebKit doesn't work when running as root (sandbox issues)
 import os
@@ -262,7 +275,7 @@ class MapPanel(Gtk.Box):
 
         self.append(header_box)
 
-        subtitle = Gtk.Label(label="Unified view of Meshtastic and RNS mesh networks")
+        subtitle = Gtk.Label(label="Unified view of Meshtastic, RNS, and AREDN mesh networks")
         subtitle.add_css_class("dim-label")
         subtitle.set_xalign(0)
         self.append(subtitle)
@@ -288,6 +301,16 @@ class MapPanel(Gtk.Box):
                 "Nodes appear in list below. Map markers require position data."
             )
         stats_box.append(self.stat_rns)
+
+        self.stat_aredn = self._create_stat_label("AREDN", "0")
+        if HAS_AREDN:
+            self.stat_aredn.set_tooltip_text(
+                "AREDN nodes discovered via network scan. "
+                "Map markers require node location configuration."
+            )
+        else:
+            self.stat_aredn.set_tooltip_text("AREDN utilities not available")
+        stats_box.append(self.stat_aredn)
 
         self.stat_online = self._create_stat_label("Online", "0")
         stats_box.append(self.stat_online)
@@ -444,7 +467,7 @@ class MapPanel(Gtk.Box):
         def fetch_data():
             from datetime import datetime
 
-            stats = {"total": 0, "meshtastic": 0, "rns": 0, "online": 0, "with_position": 0, "via_mqtt": 0}
+            stats = {"total": 0, "meshtastic": 0, "rns": 0, "aredn": 0, "online": 0, "with_position": 0, "via_mqtt": 0}
             geojson = {"type": "FeatureCollection", "features": []}
             nodes_raw = []
             error_msg = None
@@ -598,6 +621,64 @@ class MapPanel(Gtk.Box):
 
             stats["rns"] = rns_count
 
+            # Fetch AREDN nodes
+            aredn_count = 0
+            if HAS_AREDN:
+                try:
+                    # Try to get cached AREDN nodes from settings
+                    from utils.common import SettingsManager
+                    aredn_settings = SettingsManager("aredn")
+                    known_nodes = aredn_settings.get("known_nodes", [])
+
+                    # Also try to fetch from known AREDN hosts
+                    aredn_hosts = aredn_settings.get("aredn_hosts", [])
+
+                    for host in aredn_hosts:
+                        try:
+                            client = AREDNClient(host, timeout=3)
+                            aredn_node = client.get_node_info()
+                            if aredn_node:
+                                aredn_count += 1
+                                stats["total"] += 1
+
+                                # Check for location
+                                if aredn_node.has_location():
+                                    stats["with_position"] += 1
+                                    feature = {
+                                        "type": "Feature",
+                                        "geometry": {
+                                            "type": "Point",
+                                            "coordinates": [
+                                                aredn_node.longitude,
+                                                aredn_node.latitude
+                                            ]
+                                        },
+                                        "properties": {
+                                            "id": aredn_node.hostname,
+                                            "name": aredn_node.hostname,
+                                            "network": "aredn",
+                                            "is_online": True,  # We just talked to it
+                                            "is_local": False,
+                                            "is_gateway": aredn_node.tunnel_count > 0,
+                                            "via_mqtt": False,
+                                            "snr": None,
+                                            "battery": None,
+                                            "last_seen": "now",
+                                            "hardware": aredn_node.model,
+                                            "role": "AREDN",
+                                            "grid_square": aredn_node.grid_square,
+                                            "links": len(aredn_node.links),
+                                        }
+                                    }
+                                    geojson["features"].append(feature)
+                        except Exception as e:
+                            logger.debug(f"Error fetching AREDN node {host}: {e}")
+
+                except Exception as e:
+                    logger.debug(f"Error fetching AREDN nodes: {e}")
+
+            stats["aredn"] = aredn_count
+
             GLib.idle_add(self._update_ui, stats, geojson, nodes_raw, error_msg)
 
         threading.Thread(target=fetch_data, daemon=True).start()
@@ -611,6 +692,7 @@ class MapPanel(Gtk.Box):
         self._update_stat(self.stat_total, stats.get("total", 0))
         self._update_stat(self.stat_meshtastic, stats.get("meshtastic", 0))
         self._update_stat(self.stat_rns, stats.get("rns", 0))
+        self._update_stat(self.stat_aredn, stats.get("aredn", 0))
         self._update_stat(self.stat_online, stats.get("online", 0))
         self._update_stat(self.stat_with_pos, stats.get("with_position", 0))
 
@@ -640,11 +722,17 @@ class MapPanel(Gtk.Box):
             self.status_label.set_label(f"Error: {error_msg}")
         else:
             mqtt_count = stats.get('via_mqtt', 0)
-            mqtt_str = f", {mqtt_count} MQTT" if mqtt_count > 0 else ""
+            aredn_count = stats.get('aredn', 0)
+            extra_info = []
+            if mqtt_count > 0:
+                extra_info.append(f"{mqtt_count} MQTT")
+            if aredn_count > 0:
+                extra_info.append(f"{aredn_count} AREDN")
+            extra_str = f", {', '.join(extra_info)}" if extra_info else ""
             self.status_label.set_label(
                 f"Last updated: {stats.get('total', 0)} nodes "
                 f"({stats.get('with_position', 0)} mapped, "
-                f"{stats.get('online', 0)} online{mqtt_str})"
+                f"{stats.get('online', 0)} online{extra_str})"
             )
 
         return False
