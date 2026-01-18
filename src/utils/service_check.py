@@ -92,9 +92,9 @@ KNOWN_SERVICES = {
         'port': RNS_SHARED_INSTANCE_PORT,
         'port_type': 'udp',
         'systemd_name': 'rnsd',
-        'is_systemd': True,  # Trust systemctl only
+        'is_systemd': False,  # rnsd is a user-space daemon, NOT a systemd service
         'description': 'Reticulum Network Stack daemon',
-        'fix_hint': 'Start with: sudo systemctl start rnsd',
+        'fix_hint': 'Start with: rnsd (run as user, not root)',
     },
     'hamclock': {
         'port': HAMCLOCK_PORT,

@@ -186,37 +186,43 @@ class TestRnsdStatusAcrossUIs:
 class TestMeshtasticdStatusConsistency:
     """Verify meshtasticd status is consistent across UIs."""
 
-    @patch('src.utils.service_check.check_port')
-    @patch('src.utils.service_check.check_process_running')
-    @patch('src.utils.service_check.check_systemd_service')
-    @patch('src.utils.service_check.check_meshtasticd_responsive')
-    def test_meshtasticd_running_consistent(self, mock_responsive, mock_systemd, mock_proc, mock_port):
-        """When meshtasticd is running, all UIs should report it as running."""
-        mock_port.return_value = True  # TCP port 4403 open
-        mock_proc.return_value = True
-        mock_systemd.return_value = (True, True)
-        mock_responsive.return_value = (True, "Responsive")
+    @patch('subprocess.run')
+    def test_meshtasticd_running_consistent(self, mock_run):
+        """When meshtasticd is running, all UIs should report it as running.
+
+        Issue #17: meshtasticd is a systemd service, so we trust systemctl only.
+        """
+        # systemctl is-active meshtasticd returns "active"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='active\n'
+        )
 
         from src.utils.service_check import check_service
 
         result = check_service('meshtasticd')
         assert result.available is True, \
-            "meshtasticd should be reported as available when TCP port is open"
+            "meshtasticd should be reported as available when systemctl says active"
+        assert result.detection_method == "systemctl", \
+            "meshtasticd status should be via systemctl"
 
-    @patch('src.utils.service_check.check_port')
-    @patch('src.utils.service_check.check_process_running')
-    @patch('src.utils.service_check.check_systemd_service')
-    def test_meshtasticd_stopped_consistent(self, mock_systemd, mock_proc, mock_port):
-        """When meshtasticd is stopped, all UIs should report it as stopped."""
-        mock_port.return_value = False  # TCP port closed
-        mock_proc.return_value = False
-        mock_systemd.return_value = (False, False)
+    @patch('subprocess.run')
+    def test_meshtasticd_stopped_consistent(self, mock_run):
+        """When meshtasticd is stopped, all UIs should report it as stopped.
+
+        Issue #17: meshtasticd is a systemd service, so we trust systemctl only.
+        """
+        # systemctl is-active meshtasticd returns "inactive"
+        mock_run.return_value = MagicMock(
+            returncode=3,
+            stdout='inactive\n'
+        )
 
         from src.utils.service_check import check_service
 
         result = check_service('meshtasticd')
         assert result.available is False, \
-            "meshtasticd should be reported as unavailable when stopped"
+            "meshtasticd should be reported as unavailable when systemctl says inactive"
 
 
 class TestNoOrphanedImplementations:
