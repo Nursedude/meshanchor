@@ -28,6 +28,9 @@ class ConfigFileManager:
     BOOT_CONFIG = Path("/boot/firmware/config.txt")
     BOOT_CONFIG_ALT = Path("/boot/config.txt")
 
+    # Project templates directory (for MeshForge-provided configs)
+    TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates" / "available.d"
+
     # Required config sections for a working setup
     REQUIRED_SECTIONS = {
         'Lora': 'LoRa radio settings (Module, Region, etc.)',
@@ -61,9 +64,56 @@ class ConfigFileManager:
 
     def list_available_configs(self):
         """List all yaml files in available.d"""
-        if not self.AVAILABLE_D.exists():
+        configs = set()
+
+        # System available.d
+        if self.AVAILABLE_D.exists():
+            configs.update(f.name for f in self.AVAILABLE_D.glob("*.yaml"))
+
+        return sorted(configs)
+
+    def list_template_configs(self):
+        """List template configs that can be installed"""
+        templates = set()
+        if self.TEMPLATES_DIR.exists():
+            templates.update(f.name for f in self.TEMPLATES_DIR.glob("*.yaml"))
+        return sorted(templates)
+
+    def get_missing_templates(self):
+        """Get templates that exist in project but not in system"""
+        system_configs = set(self.list_available_configs())
+        template_configs = set(self.list_template_configs())
+        return sorted(template_configs - system_configs)
+
+    def install_templates(self, templates=None):
+        """Install templates from project directory to system available.d"""
+        if templates is None:
+            templates = self.get_missing_templates()
+
+        if not templates:
+            console.print("[green]All templates already installed[/green]")
             return []
-        return sorted([f.name for f in self.AVAILABLE_D.glob("*.yaml")])
+
+        if not self.TEMPLATES_DIR.exists():
+            console.print("[red]Templates directory not found[/red]")
+            return []
+
+        # Create system directory if needed
+        self.AVAILABLE_D.mkdir(parents=True, exist_ok=True)
+
+        installed = []
+        for template in templates:
+            src = self.TEMPLATES_DIR / template
+            dst = self.AVAILABLE_D / template
+            if src.exists() and not dst.exists():
+                try:
+                    shutil.copy2(src, dst)
+                    installed.append(template)
+                    console.print(f"  [green]+[/green] {template}")
+                except Exception as e:
+                    console.print(f"  [red]X[/red] {template}: {e}")
+
+        return installed
 
     def list_active_configs(self):
         """List all yaml files in config.d"""
@@ -285,8 +335,9 @@ class ConfigFileManager:
             console.print("\n[dim cyan]── Setup Helpers ──[/dim cyan]")
             console.print(f"  [bold]g[/bold]. Guided Setup Wizard")
             console.print(f"  [bold]h[/bold]. Check Hardware (SPI, I2C)")
+            console.print(f"  [bold]p[/bold]. Set GPS Position (manual coordinates)")
 
-            choices = self._prompt_back(["1", "2", "3", "4", "5", "6", "7", "8", "9", "g", "h"])
+            choices = self._prompt_back(["1", "2", "3", "4", "5", "6", "7", "8", "9", "g", "h", "p"])
             choice = Prompt.ask("\n[cyan]Select option[/cyan]", choices=choices, default="0")
 
             if self._handle_back(choice):
@@ -314,6 +365,8 @@ class ConfigFileManager:
                 self._guided_setup()
             elif choice == "h":
                 self._check_hardware()
+            elif choice == "p":
+                self._set_gps_position()
 
     def _guided_setup(self):
         """Guided setup wizard for new installations"""
@@ -597,13 +650,43 @@ class ConfigFileManager:
     def _select_and_activate(self):
         """Select a config from available.d and copy to config.d"""
         available = self.list_available_configs()
+        missing_templates = self.get_missing_templates()
 
         if not available:
             console.print("[yellow]No configuration files found in available.d[/yellow]")
             console.print(f"[dim]Directory: {self.AVAILABLE_D}[/dim]")
-            console.print("[dim]Install meshtasticd to get configuration templates[/dim]")
-            Prompt.ask("\n[dim]Press Enter to continue[/dim]")
-            return
+
+            # Check if we have templates to install
+            if missing_templates:
+                console.print(f"\n[cyan]Found {len(missing_templates)} MeshForge templates that can be installed:[/cyan]")
+                for t in missing_templates[:5]:
+                    console.print(f"  [dim]{t}[/dim]")
+                if len(missing_templates) > 5:
+                    console.print(f"  [dim]... and {len(missing_templates) - 5} more[/dim]")
+
+                if Confirm.ask("\n[cyan]Install MeshForge templates?[/cyan]", default=True):
+                    console.print("\n[cyan]Installing templates...[/cyan]")
+                    self.install_templates()
+                    available = self.list_available_configs()
+                    if not available:
+                        console.print("[red]No templates installed. Check permissions.[/red]")
+                        Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+                        return
+                else:
+                    Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+                    return
+            else:
+                console.print("[dim]Install meshtasticd to get configuration templates[/dim]")
+                Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+                return
+        elif missing_templates:
+            # Some templates exist but there are new ones available
+            console.print(f"\n[dim]Tip: {len(missing_templates)} additional MeshForge templates available[/dim]")
+            console.print(f"[dim]New: {', '.join(missing_templates[:3])}{'...' if len(missing_templates) > 3 else ''}[/dim]")
+            if Confirm.ask("[cyan]Install new templates?[/cyan]", default=False):
+                console.print("\n[cyan]Installing templates...[/cyan]")
+                self.install_templates(missing_templates)
+                available = self.list_available_configs()
 
         console.print("\n[bold cyan]═══════════════ Select Hardware Configuration ═══════════════[/bold cyan]\n")
         console.print("[dim]Select the configuration that matches your LoRa hardware.[/dim]")
@@ -956,3 +1039,129 @@ Logging:
             console.print(f"[red]Error reading config: {e}[/red]")
 
         Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+
+    def _set_gps_position(self):
+        """Set GPS position manually"""
+        console.print("\n[bold cyan]═══════════════ Set GPS Position ═══════════════[/bold cyan]\n")
+        console.print("Set your node's fixed GPS position for the mesh network.\n")
+
+        console.print("[cyan]Options:[/cyan]")
+        console.print("  1. Set coordinates manually (latitude/longitude)")
+        console.print("  2. Use GPS module (configure in config.yaml)")
+        console.print("  0. Cancel")
+
+        choice = Prompt.ask("\nSelect option", choices=["0", "1", "2"], default="0")
+
+        if choice == "0":
+            return
+
+        if choice == "2":
+            console.print("\n[cyan]GPS Module Configuration[/cyan]")
+            console.print("To use a GPS module, add this to your config.yaml:\n")
+            console.print("[dim]GPS:[/dim]")
+            console.print("[dim]  SerialPath: /dev/serial0  # or /dev/ttyS0[/dim]")
+            console.print("[dim]  # GPSEnableGpio: 4  # Optional: GPIO to enable GPS[/dim]")
+            console.print("\n[yellow]Make sure UART is enabled in raspi-config[/yellow]")
+            Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+            return
+
+        # Manual coordinate entry
+        console.print("\n[yellow]Enter coordinates in decimal degrees[/yellow]")
+        console.print("[dim]Find your coordinates:[/dim]")
+        console.print("[dim]  - Google Maps: right-click → 'What's here?'[/dim]")
+        console.print("[dim]  - GPS app on phone[/dim]")
+        console.print("[dim]Example: Hawaii Big Island: 19.435175, -155.213842[/dim]\n")
+
+        # Latitude
+        while True:
+            lat_str = Prompt.ask("Latitude (-90 to 90)", default="")
+            if not lat_str:
+                console.print("[yellow]Cancelled[/yellow]")
+                return
+            try:
+                latitude = float(lat_str)
+                if -90 <= latitude <= 90:
+                    break
+                console.print("[red]Latitude must be between -90 and 90[/red]")
+            except ValueError:
+                console.print("[red]Enter a valid number (e.g., 19.435175)[/red]")
+
+        # Longitude
+        while True:
+            lon_str = Prompt.ask("Longitude (-180 to 180)", default="")
+            if not lon_str:
+                console.print("[yellow]Cancelled[/yellow]")
+                return
+            try:
+                longitude = float(lon_str)
+                if -180 <= longitude <= 180:
+                    break
+                console.print("[red]Longitude must be between -180 and 180[/red]")
+            except ValueError:
+                console.print("[red]Enter a valid number (e.g., -155.213842)[/red]")
+
+        # Altitude (optional)
+        altitude = None
+        if Confirm.ask("\nSet altitude? (optional)", default=False):
+            alt_str = Prompt.ask("Altitude in meters", default="0")
+            try:
+                altitude = int(float(alt_str))
+            except ValueError:
+                altitude = 0
+
+        # Display summary
+        console.print(f"\n[bold]Position Summary:[/bold]")
+        console.print(f"  Latitude:  [green]{latitude}[/green]")
+        console.print(f"  Longitude: [green]{longitude}[/green]")
+        if altitude is not None:
+            console.print(f"  Altitude:  [green]{altitude}m[/green]")
+
+        # Show CLI command
+        console.print(f"\n[dim]Meshtastic CLI command:[/dim]")
+        cmd = f"meshtastic --host localhost --setlat {latitude} --setlon {longitude}"
+        if altitude is not None:
+            cmd += f" --setalt {altitude}"
+        console.print(f"[cyan]{cmd}[/cyan]")
+
+        if Confirm.ask("\n[yellow]Apply this position now?[/yellow]", default=True):
+            self._apply_gps_position(latitude, longitude, altitude)
+        else:
+            console.print("\n[dim]You can apply manually with the command above.[/dim]")
+
+        Prompt.ask("\n[dim]Press Enter to continue[/dim]")
+
+    def _apply_gps_position(self, latitude, longitude, altitude=None):
+        """Apply GPS position using meshtastic CLI"""
+        console.print(f"\n[cyan]Setting position to {latitude}, {longitude}...[/cyan]")
+
+        try:
+            cmd = ['meshtastic', '--host', 'localhost', '--setlat', str(latitude), '--setlon', str(longitude)]
+            if altitude is not None:
+                cmd.extend(['--setalt', str(altitude)])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                console.print("[bold green]Position set successfully![/bold green]")
+                if result.stdout:
+                    console.print(f"[dim]{result.stdout.strip()}[/dim]")
+                return True
+            else:
+                console.print(f"[red]Error setting position[/red]")
+                if result.stderr:
+                    console.print(f"[dim]{result.stderr.strip()}[/dim]")
+                console.print("\n[yellow]Troubleshooting:[/yellow]")
+                console.print("  - Is meshtasticd running? Check: systemctl status meshtasticd")
+                console.print("  - Is meshtastic CLI installed? pip install meshtastic")
+                return False
+
+        except FileNotFoundError:
+            console.print("[red]meshtastic CLI not found[/red]")
+            console.print("[dim]Install with: pip install meshtastic[/dim]")
+            return False
+        except subprocess.TimeoutExpired:
+            console.print("[red]Command timed out (30s)[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return False
