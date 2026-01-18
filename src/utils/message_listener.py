@@ -56,6 +56,10 @@ class MessageListener:
 
     Subscribes to meshtastic.receive pubsub events and stores incoming
     messages without requiring the full RNS bridge.
+
+    If another component (like the gateway bridge) already has a persistent
+    connection, this listener will share it via pub/sub instead of creating
+    a new connection. meshtasticd only supports ONE TCP connection at a time.
     """
 
     def __init__(self, host: str = "localhost", store_messages: bool = True):
@@ -72,6 +76,7 @@ class MessageListener:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._interface = None
+        self._owns_connection = False  # Track if we created the connection
         self._callbacks: List[Callable] = []
         self._lock = threading.Lock()
 
@@ -128,14 +133,18 @@ class MessageListener:
         except Exception as e:
             logger.debug(f"Cleanup: pubsub unsubscribe: {e}")
 
-        # Close interface
-        if self._interface:
+        # Only close interface if we own it (not borrowing from gateway)
+        if self._interface and self._owns_connection:
             try:
-                self._interface.close()
+                from utils.meshtastic_connection import safe_close_interface, get_connection_manager
+                safe_close_interface(self._interface)
+                # Release persistent connection if we acquired it
+                get_connection_manager().release_persistent()
             except Exception as e:
                 logger.debug(f"Cleanup: interface close: {e}")
             self._interface = None
 
+        self._owns_connection = False
         self._status.state = DISCONNECTED
         logger.info("Message listener stopped")
 
@@ -144,31 +153,40 @@ class MessageListener:
         self._status.state = CONNECTING
 
         try:
-            # Import meshtastic
+            # Import dependencies
             try:
-                import meshtastic
-                import meshtastic.tcp_interface
                 from pubsub import pub
+                from utils.meshtastic_connection import get_connection_manager
             except ImportError as e:
                 self._status.state = ERROR
                 self._status.error = f"Missing dependency: {e}"
                 logger.error(f"Cannot start listener: {e}")
                 return
 
-            # Connect to meshtastic
-            logger.info(f"Connecting to meshtastic at {self.host}...")
-            try:
-                self._interface = meshtastic.tcp_interface.TCPInterface(
-                    hostname=self.host,
-                    noProto=False
-                )
-            except Exception as e:
-                self._status.state = ERROR
-                self._status.error = f"Connection failed: {e}"
-                logger.error(f"Failed to connect to meshtastic: {e}")
-                return
+            # Check if another component (like gateway) already has a connection
+            # meshtasticd only supports ONE TCP connection at a time
+            conn_mgr = get_connection_manager(host=self.host)
 
-            # Subscribe to messages
+            if conn_mgr.has_persistent():
+                # Another component owns the connection - just subscribe to pub/sub
+                self._interface = conn_mgr.get_interface()
+                self._owns_connection = False
+                owner = conn_mgr.get_persistent_owner()
+                logger.info(f"Using existing connection from {owner} (pub/sub only)")
+            else:
+                # No existing connection - we need to create one
+                logger.info(f"Connecting to meshtastic at {self.host}...")
+                if conn_mgr.acquire_persistent(owner="message_listener"):
+                    self._interface = conn_mgr.get_interface()
+                    self._owns_connection = True
+                    logger.info("Message listener acquired connection")
+                else:
+                    self._status.state = ERROR
+                    self._status.error = "Failed to acquire connection"
+                    logger.error("Failed to acquire meshtastic connection")
+                    return
+
+            # Subscribe to messages (works regardless of who owns connection)
             pub.subscribe(self._on_receive, "meshtastic.receive")
 
             self._status.state = CONNECTED
@@ -180,10 +198,11 @@ class MessageListener:
             while self._running:
                 time.sleep(1)
 
-                # Check connection health
-                if self._interface and not self._interface.isConnected:
-                    logger.warning("Connection lost, attempting reconnect...")
-                    self._reconnect()
+                # Only check connection health if we own it
+                if self._owns_connection and self._interface:
+                    if not getattr(self._interface, 'isConnected', True):
+                        logger.warning("Connection lost, attempting reconnect...")
+                        self._reconnect()
 
         except Exception as e:
             self._status.state = ERROR
@@ -192,37 +211,51 @@ class MessageListener:
 
     def _reconnect(self):
         """Attempt to reconnect after connection loss."""
+        # Only reconnect if we own the connection
+        if not self._owns_connection:
+            logger.debug("Connection lost but we don't own it - waiting for owner to reconnect")
+            return
+
         self._status.state = CONNECTING
 
-        # Close old interface
-        if self._interface:
-            try:
-                self._interface.close()
-            except Exception:
-                pass
+        try:
+            from utils.meshtastic_connection import (
+                get_connection_manager, safe_close_interface, wait_for_cooldown
+            )
+            conn_mgr = get_connection_manager(host=self.host)
 
-        # Exponential backoff
-        for attempt in range(5):
-            if not self._running:
-                return
+            # Release old connection properly
+            conn_mgr.release_persistent()
+            self._interface = None
 
-            try:
-                import meshtastic.tcp_interface
-                self._interface = meshtastic.tcp_interface.TCPInterface(
-                    hostname=self.host,
-                    noProto=False
-                )
-                self._status.state = CONNECTED
-                self._status.connected_since = datetime.now()
-                logger.info("Reconnected to meshtastic")
-                return
-            except Exception as e:
-                wait_time = 2 ** attempt
-                logger.warning(f"Reconnect attempt {attempt + 1} failed: {e}, waiting {wait_time}s")
-                time.sleep(wait_time)
+            # Wait for meshtasticd to cleanup
+            wait_for_cooldown()
 
-        self._status.state = ERROR
-        self._status.error = "Failed to reconnect after 5 attempts"
+            # Exponential backoff for reconnection
+            for attempt in range(5):
+                if not self._running:
+                    return
+
+                try:
+                    if conn_mgr.acquire_persistent(owner="message_listener"):
+                        self._interface = conn_mgr.get_interface()
+                        self._status.state = CONNECTED
+                        self._status.connected_since = datetime.now()
+                        logger.info("Reconnected to meshtastic")
+                        return
+                except Exception as e:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Reconnect attempt {attempt + 1} failed: {e}, waiting {wait_time}s")
+                    time.sleep(wait_time)
+
+            self._status.state = ERROR
+            self._status.error = "Failed to reconnect after 5 attempts"
+            self._owns_connection = False
+
+        except Exception as e:
+            logger.error(f"Reconnect error: {e}")
+            self._status.state = ERROR
+            self._status.error = str(e)
 
     def _on_receive(self, packet, interface=None):
         """Handle incoming meshtastic packet."""
