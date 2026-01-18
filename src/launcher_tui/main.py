@@ -53,6 +53,8 @@ from channel_config_mixin import ChannelConfigMixin
 from ai_tools_mixin import AIToolsMixin
 from meshtasticd_config_mixin import MeshtasticdConfigMixin
 from site_planner_mixin import SitePlannerMixin
+from service_discovery_mixin import ServiceDiscoveryMixin
+from first_run_mixin import FirstRunMixin
 
 
 class MeshForgeLauncher(
@@ -60,7 +62,9 @@ class MeshForgeLauncher(
     ChannelConfigMixin,
     AIToolsMixin,
     MeshtasticdConfigMixin,
-    SitePlannerMixin
+    SitePlannerMixin,
+    ServiceDiscoveryMixin,
+    FirstRunMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -114,6 +118,10 @@ class MeshForgeLauncher(
             print("whiptail/dialog not available, using basic launcher...")
             self._run_basic_launcher()
             return
+
+        # Check for first run and offer setup wizard
+        if self._check_first_run():
+            self._run_first_run_wizard()
 
         self._run_main_menu()
 
@@ -359,38 +367,182 @@ class MeshForgeLauncher(
         self.dialog.msgbox("Hardware Interfaces", "\n".join(checks))
 
     def _analyze_logs(self):
-        """Analyze system logs for errors."""
-        self.dialog.infobox("Logs", "Analyzing logs...")
+        """P4: Enhanced log viewer with service selection."""
+        while True:
+            choices = [
+                ("summary", "Error Summary (All Services)"),
+                ("meshtasticd", "View meshtasticd Logs"),
+                ("rnsd", "View rnsd Logs"),
+                ("syslog", "View System Log (syslog)"),
+                ("dmesg", "View Kernel Messages (dmesg)"),
+                ("meshforge", "View MeshForge Logs"),
+                ("back", "Back"),
+            ]
 
-        logs = []
+            choice = self.dialog.menu(
+                "Log Viewer",
+                "View and analyze system logs:",
+                choices
+            )
 
-        # Check meshtasticd logs
+            if choice is None or choice == "back":
+                break
+
+            if choice == "summary":
+                self._log_error_summary()
+            elif choice == "meshtasticd":
+                self._view_service_logs("meshtasticd")
+            elif choice == "rnsd":
+                self._view_service_logs("rnsd")
+            elif choice == "syslog":
+                self._view_syslog()
+            elif choice == "dmesg":
+                self._view_dmesg()
+            elif choice == "meshforge":
+                self._view_meshforge_logs()
+
+    def _log_error_summary(self):
+        """Show error summary for all services."""
+        self.dialog.infobox("Logs", "Analyzing logs for errors...")
+
+        services = ['meshtasticd', 'rnsd', 'lxmf.delivery']
+        summary = ["Error Summary\n" + "=" * 40]
+
+        for svc in services:
+            try:
+                result = subprocess.run(
+                    ['journalctl', '-u', svc, '-n', '100', '--no-pager', '-p', 'err'],
+                    capture_output=True, text=True, timeout=10
+                )
+                error_count = len([l for l in result.stdout.split('\n') if l.strip()])
+                status = f"[ERRORS: {error_count}]" if error_count > 0 else "[OK]"
+                summary.append(f"\n{svc}: {status}")
+            except Exception:
+                summary.append(f"\n{svc}: [Unable to read]")
+
+        # Check recent errors
+        summary.append("\n" + "-" * 40)
+        summary.append("Recent errors (last hour):")
+
         try:
             result = subprocess.run(
-                ['journalctl', '-u', 'meshtasticd', '-n', '20', '--no-pager'],
+                ['journalctl', '--since', '1 hour ago', '-p', 'err', '--no-pager', '-n', '10'],
                 capture_output=True, text=True, timeout=10
             )
-            errors = [l for l in result.stdout.split('\n') if 'error' in l.lower()]
-            logs.append(f"meshtasticd: {len(errors)} errors in last 20 lines")
+            if result.stdout.strip():
+                for line in result.stdout.split('\n')[:8]:
+                    if line.strip():
+                        summary.append(f"  {line[:60]}...")
+            else:
+                summary.append("  No errors in last hour")
         except Exception:
-            logs.append("meshtasticd: Unable to read logs")
+            summary.append("  Unable to read recent errors")
 
-        # Check rnsd logs
+        self.dialog.msgbox("Log Analysis", "\n".join(summary))
+
+    def _view_service_logs(self, service: str):
+        """View logs for a specific service."""
+        # Ask for number of lines
+        lines = self.dialog.inputbox(
+            f"{service} Logs",
+            "Number of log lines to show:",
+            "50"
+        )
+
+        if not lines:
+            return
+
+        try:
+            lines = int(lines)
+        except ValueError:
+            lines = 50
+
+        self.dialog.infobox("Loading", f"Loading {service} logs...")
+
         try:
             result = subprocess.run(
-                ['journalctl', '-u', 'rnsd', '-n', '20', '--no-pager'],
+                ['journalctl', '-u', service, '-n', str(lines), '--no-pager'],
+                capture_output=True, text=True, timeout=15
+            )
+
+            if result.stdout.strip():
+                # Use scrollable textbox for long output
+                subprocess.run(['clear'], check=False, timeout=5)
+                print(f"=== {service} Logs (last {lines} lines) ===\n")
+                print(result.stdout)
+                print("\n" + "=" * 50)
+                input("\nPress Enter to continue...")
+            else:
+                self.dialog.msgbox(f"{service} Logs", "No logs found for this service")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read logs: {e}")
+
+    def _view_syslog(self):
+        """View system log."""
+        self.dialog.infobox("Loading", "Loading system log...")
+
+        try:
+            result = subprocess.run(
+                ['journalctl', '-n', '50', '--no-pager'],
+                capture_output=True, text=True, timeout=15
+            )
+
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== System Log (last 50 lines) ===\n")
+            print(result.stdout)
+            print("\n" + "=" * 50)
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read syslog: {e}")
+
+    def _view_dmesg(self):
+        """View kernel messages."""
+        self.dialog.infobox("Loading", "Loading kernel messages...")
+
+        try:
+            result = subprocess.run(
+                ['dmesg', '--time-format=reltime'],
                 capture_output=True, text=True, timeout=10
             )
-            errors = [l for l in result.stdout.split('\n') if 'error' in l.lower()]
-            logs.append(f"rnsd: {len(errors)} errors in last 20 lines")
-        except Exception:  # Error reported to user
-            logs.append("rnsd: Unable to read logs")
 
-        logs.append("")
-        logs.append("For detailed logs, use:")
-        logs.append("  journalctl -u meshtasticd -f")
+            # Get last 50 lines
+            lines = result.stdout.strip().split('\n')[-50:]
 
-        self.dialog.msgbox("Log Analysis", "\n".join(logs))
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Kernel Messages (dmesg, last 50 lines) ===\n")
+            print('\n'.join(lines))
+            print("\n" + "=" * 50)
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read dmesg: {e}")
+
+    def _view_meshforge_logs(self):
+        """View MeshForge application logs."""
+        log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+
+        if not log_dir.exists():
+            self.dialog.msgbox("Logs", "No MeshForge logs found yet.\n\nLogs are created when you use MeshForge.")
+            return
+
+        log_files = list(log_dir.glob("*.log"))
+        if not log_files:
+            self.dialog.msgbox("Logs", "No log files found in:\n" + str(log_dir))
+            return
+
+        # Show most recent log
+        latest_log = max(log_files, key=lambda f: f.stat().st_mtime)
+
+        try:
+            content = latest_log.read_text()
+            lines = content.strip().split('\n')[-50:]  # Last 50 lines
+
+            subprocess.run(['clear'], check=False, timeout=5)
+            print(f"=== MeshForge Log: {latest_log.name} ===\n")
+            print('\n'.join(lines))
+            print("\n" + "=" * 50)
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read log: {e}")
 
     def _check_system_resources(self):
         """Check system resources."""
@@ -450,6 +602,7 @@ class MeshForgeLauncher(
         """Network tools menu."""
         while True:
             choices = [
+                ("discover", "Service Discovery (Auto-Scan)"),
                 ("ping", "Ping Test"),
                 ("ports", "Port Scanner"),
                 ("mesh", "Meshtastic Discovery"),
@@ -469,7 +622,9 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "ping":
+            if choice == "discover":
+                self._service_discovery_menu()
+            elif choice == "ping":
                 self._ping_test()
             elif choice == "ports":
                 self._port_scan()
@@ -906,6 +1061,7 @@ class MeshForgeLauncher(
             ("connection", "Meshtastic Connection"),
             ("gateway", "Gateway Settings"),
             ("hamclock", "HamClock Settings"),
+            ("wizard", "Run Setup Wizard"),
             ("back", "Back"),
         ]
 
@@ -925,6 +1081,8 @@ class MeshForgeLauncher(
                 self._configure_gateway()
             elif choice == "hamclock":
                 self._configure_hamclock()
+            elif choice == "wizard":
+                self._settings_run_wizard()
 
     def _configure_connection(self):
         """Configure Meshtastic connection."""
