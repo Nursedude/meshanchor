@@ -170,6 +170,12 @@ Configure custom channel slot? [y/n/c] (n):
 | Webhooks | Implemented, low maintenance |
 | Textual TUI | Works but lower priority than Launcher TUI |
 
+### Experimental (Deferred)
+
+| Feature | Reason |
+|---------|--------|
+| GTK Messaging Panel | TX/RX unreliable, use Meshtastic Web Client instead |
+
 ### Cut/Deferred
 
 | Feature | Reason |
