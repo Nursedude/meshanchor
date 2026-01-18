@@ -453,18 +453,27 @@ class GatewaySetupWizard(Adw.Window):
     def _check_services(self, button):
         """Check if required services are running."""
         def check():
-            import subprocess
             results = {}
 
-            for service in ['meshtasticd', 'rnsd']:
-                try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', service],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    results[service] = result.stdout.strip() == 'active'
-                except Exception:
-                    results[service] = False
+            # Use check_service which handles both systemd and non-systemd services
+            # correctly (rnsd is a user-space daemon, NOT a systemd service)
+            try:
+                from utils.service_check import check_service
+                for service in ['meshtasticd', 'rnsd']:
+                    status = check_service(service)
+                    results[service] = status.available
+            except ImportError:
+                # Fallback if service_check not available
+                import subprocess
+                for service in ['meshtasticd', 'rnsd']:
+                    try:
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', service],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        results[service] = result.stdout.strip() == 'active'
+                    except Exception:
+                        results[service] = False
 
             GLib.idle_add(self._update_service_status, results)
 

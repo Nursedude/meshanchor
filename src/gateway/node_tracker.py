@@ -407,7 +407,19 @@ class UnifiedNodeTracker:
         IMPORTANT: MeshForge operates as a CLIENT ONLY - it connects to existing
         rnsd/NomadNet instances but never creates its own RNS instance that would
         bind interfaces and conflict with NomadNet or other RNS services.
+
+        NOTE: RNS.Reticulum() uses signal handlers which ONLY work in the main
+        thread. If called from a background thread, it will fail with:
+        "signal only works in main thread of the main interpreter"
         """
+        # Check if we're in the main thread - RNS signal handlers require it
+        import threading as _threading
+        if _threading.current_thread() is not _threading.main_thread():
+            logger.warning("RNS initialization must be in main thread - skipping node discovery")
+            logger.info("RNS node discovery disabled (call start() from main thread to enable)")
+            self._rns_connected = False
+            return
+
         try:
             import RNS
             logger.info("Checking for existing RNS service...")
