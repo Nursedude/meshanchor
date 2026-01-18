@@ -370,10 +370,38 @@ class GatewayMixin:
             self.gateway_start_btn.set_sensitive(True)
             self.gateway_stop_btn.set_sensitive(False)
 
-            self.mesh_conn_icon.set_from_icon_name("dialog-question-symbolic")
-            self.mesh_conn_label.set_label("Meshtastic: Unknown")
-            self.rns_conn_icon.set_from_icon_name("dialog-question-symbolic")
-            self.rns_conn_label.set_label("RNS: Unknown")
+            # Show actual service status instead of "Unknown" when gateway isn't running
+            # This prevents the "false lights" issue where indicators always show unknown
+            try:
+                if check_service:
+                    mesh_status = check_service('meshtasticd')
+                    rns_status = check_service('rnsd')
+
+                    if mesh_status.available:
+                        self.mesh_conn_icon.set_from_icon_name("emblem-default-symbolic")
+                        self.mesh_conn_label.set_label("Meshtastic: Service OK")
+                    else:
+                        self.mesh_conn_icon.set_from_icon_name("dialog-warning-symbolic")
+                        self.mesh_conn_label.set_label("Meshtastic: Not running")
+
+                    if rns_status.available:
+                        self.rns_conn_icon.set_from_icon_name("emblem-default-symbolic")
+                        self.rns_conn_label.set_label("RNS: Service OK")
+                    else:
+                        self.rns_conn_icon.set_from_icon_name("dialog-warning-symbolic")
+                        self.rns_conn_label.set_label("RNS: Not running")
+                else:
+                    # Fallback if check_service not available
+                    self.mesh_conn_icon.set_from_icon_name("dialog-question-symbolic")
+                    self.mesh_conn_label.set_label("Meshtastic: (check unavailable)")
+                    self.rns_conn_icon.set_from_icon_name("dialog-question-symbolic")
+                    self.rns_conn_label.set_label("RNS: (check unavailable)")
+            except Exception as e:
+                logger.debug(f"Error checking service status: {e}")
+                self.mesh_conn_icon.set_from_icon_name("dialog-question-symbolic")
+                self.mesh_conn_label.set_label("Meshtastic: Unknown")
+                self.rns_conn_icon.set_from_icon_name("dialog-question-symbolic")
+                self.rns_conn_label.set_label("RNS: Unknown")
 
     def _on_gateway_start(self, button):
         """Start the gateway bridge"""
