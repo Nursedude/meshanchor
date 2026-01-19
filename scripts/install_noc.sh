@@ -404,7 +404,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
 MESHTOAD_CONFIG
 
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/rak-hat-spi.yaml" << 'RAK_CONFIG'
@@ -422,7 +422,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
 RAK_CONFIG
 
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/waveshare-spi.yaml" << 'WAVESHARE_CONFIG'
@@ -443,7 +443,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
 WAVESHARE_CONFIG
 
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" << 'USB_CONFIG'
@@ -502,7 +502,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
   RootPath: /usr/share/meshtasticd/web
 
 General:
@@ -523,7 +523,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/etc/meshtasticd
-ExecStart=/usr/sbin/meshtasticd -c /etc/meshtasticd/config.yaml
+ExecStart=/usr/bin/meshtasticd -c /etc/meshtasticd/config.yaml
 Restart=on-failure
 RestartSec=5
 
