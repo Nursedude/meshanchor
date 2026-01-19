@@ -3,9 +3,13 @@
 # MeshForge NOC Stack Installer
 #
 # Installs the complete NOC stack:
-#   - meshtasticd (Meshtastic daemon)
+#   - meshtasticd (Meshtastic daemon) - auto-detects USB or SPI radio
 #   - Reticulum/RNS (rnsd)
 #   - MeshForge (orchestrates everything)
+#
+# Supports:
+#   - USB Serial radios (T-Beam, Heltec, RAK USB) → Python CLI
+#   - Native SPI radios (Meshtoad, RAK HAT) → Native meshtasticd binary
 #
 # Usage:
 #   sudo bash scripts/install_noc.sh
@@ -14,6 +18,8 @@
 #   --skip-meshtasticd    Don't install meshtasticd
 #   --skip-rns            Don't install Reticulum
 #   --client-only         Only install MeshForge as client (no daemons)
+#   --force-native        Force native meshtasticd (for SPI radios)
+#   --force-python        Force Python meshtastic CLI (for USB radios)
 #
 
 set -e
@@ -31,6 +37,21 @@ INSTALL_MESHTASTICD=true
 INSTALL_RNS=true
 INSTALL_DIR="/opt/meshforge"
 VENV_DIR="$INSTALL_DIR/venv"
+MESHTASTICD_CONFIG_DIR="/etc/meshtasticd"
+FORCE_NATIVE=false
+FORCE_PYTHON=false
+
+# Architecture detection
+ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
+case $ARCH in
+    aarch64|arm64) ARCH="arm64" ;;
+    armv7l|armhf) ARCH="armhf" ;;
+    x86_64|amd64) ARCH="amd64" ;;
+esac
+
+# Native meshtasticd version
+NATIVE_VERSION="2.5.19.f77f1d6"
+NATIVE_DEB_URL="https://github.com/meshtastic/firmware/releases/download/v${NATIVE_VERSION}/meshtasticd_${NATIVE_VERSION}_${ARCH}.deb"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -46,6 +67,14 @@ while [[ $# -gt 0 ]]; do
         --client-only)
             INSTALL_MESHTASTICD=false
             INSTALL_RNS=false
+            shift
+            ;;
+        --force-native)
+            FORCE_NATIVE=true
+            shift
+            ;;
+        --force-python)
+            FORCE_PYTHON=true
             shift
             ;;
         *)
@@ -68,6 +97,57 @@ if [[ $EUID -ne 0 ]]; then
    echo "Please run: sudo bash $0"
    exit 1
 fi
+
+# ─────────────────────────────────────────────────────────────────
+# Radio Type Detection Functions
+# ─────────────────────────────────────────────────────────────────
+
+detect_radio_type() {
+    # Returns: "spi", "usb", or "none"
+
+    # Check for CH341 (Meshtoad USB-to-SPI adapter)
+    if dmesg 2>/dev/null | grep -qi "ch341.*spi\|ch341-spi"; then
+        echo "spi"
+        return
+    fi
+
+    # Check for known SPI HAT configurations
+    if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
+        # Check if there's a SPI radio config or HAT overlay
+        if grep -q "meshtastic\|sx126\|sx127\|lora" /boot/config.txt 2>/dev/null; then
+            echo "spi"
+            return
+        fi
+    fi
+
+    # Check for USB serial devices
+    if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -1 >/dev/null; then
+        echo "usb"
+        return
+    fi
+
+    echo "none"
+}
+
+get_usb_device() {
+    # Find the first USB serial device
+    for dev in /dev/ttyUSB* /dev/ttyACM*; do
+        if [[ -e "$dev" ]]; then
+            echo "$dev"
+            return
+        fi
+    done
+    echo ""
+}
+
+load_ch341_driver() {
+    # Load CH341 kernel module if needed
+    if ! lsmod | grep -q ch341; then
+        echo -e "  ${CYAN}Loading CH341 driver...${NC}"
+        modprobe ch341 2>/dev/null || true
+        sleep 1
+    fi
+}
 
 # ─────────────────────────────────────────────────────────────────
 # Detect existing installations
@@ -159,22 +239,193 @@ if ls /usr/lib/python3*/EXTERNALLY-MANAGED 1>/dev/null 2>&1; then
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Install meshtasticd
+# Install meshtasticd (auto-detect USB vs SPI)
 # ─────────────────────────────────────────────────────────────────
 if $INSTALL_MESHTASTICD; then
     echo -e "${CYAN}[3/8] Installing meshtasticd...${NC}"
 
-    # Install meshtastic Python package (includes meshtasticd)
-    # --ignore-installed avoids conflicts with apt-installed packages
-    pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+    # Create udev rules first (needed for detection)
+    if [[ ! -f /etc/udev/rules.d/99-meshtastic.rules ]]; then
+        echo "  Creating udev rules for radio devices..."
+        cat > /etc/udev/rules.d/99-meshtastic.rules << 'UDEV_RULES'
+# Meshtastic USB devices
+# T-Beam, Heltec, RAK, etc.
 
-    # Create systemd service if not exists
-    if ! systemctl list-unit-files | grep -q meshtasticd.service; then
-        echo "  Creating meshtasticd systemd service..."
+# Silicon Labs CP210x
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", GROUP="dialout"
 
-        cat > /etc/systemd/system/meshtasticd.service << 'MESHTASTICD_SERVICE'
+# CH340/CH341 (USB serial AND USB-to-SPI for Meshtoad)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", GROUP="dialout"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="5512", MODE="0666", GROUP="dialout"
+
+# FTDI
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", GROUP="dialout"
+
+# ESP32 native USB
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666", GROUP="dialout"
+
+# SPI device permissions (for native meshtasticd)
+SUBSYSTEM=="spidev", MODE="0666", GROUP="spi"
+UDEV_RULES
+
+        udevadm control --reload-rules
+        udevadm trigger
+        sleep 1
+    fi
+
+    # Load CH341 driver if present (Meshtoad)
+    load_ch341_driver
+
+    # Determine radio type
+    if $FORCE_NATIVE; then
+        RADIO_TYPE="spi"
+    elif $FORCE_PYTHON; then
+        RADIO_TYPE="usb"
+    else
+        RADIO_TYPE=$(detect_radio_type)
+    fi
+
+    echo -e "  ${CYAN}Detected radio type: ${BOLD}${RADIO_TYPE}${NC}"
+
+    # Create meshtasticd config directory structure
+    echo "  Creating /etc/meshtasticd/ structure..."
+    mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
+    chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
+
+    # Create config templates
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" << 'MESHTOAD_CONFIG'
+# Meshtoad SPI Radio Configuration
+# Uses CH341 USB-to-SPI adapter with SX1262
+
+Lora:
+  Module: sx1262
+  CS: 0
+  IRQ: 22
+  Busy: 23
+  Reset: 24
+  TXen: 5
+  RXen: 6
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 4403
+MESHTOAD_CONFIG
+
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/rak-hat-spi.yaml" << 'RAK_CONFIG'
+# RAK WisLink SPI HAT Configuration
+# Direct GPIO connection on Raspberry Pi
+
+Lora:
+  Module: sx1262
+  CS: 0
+  IRQ: 22
+  Busy: 23
+  Reset: 24
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 4403
+RAK_CONFIG
+
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" << 'USB_CONFIG'
+# USB Serial Radio Configuration
+# For radios connected via USB (T-Beam, Heltec, RAK USB)
+# This config is for reference - USB radios use Python CLI
+
+Serial:
+  Device: auto
+
+Logging:
+  LogLevel: info
+USB_CONFIG
+
+    # Install appropriate daemon based on radio type
+    case "$RADIO_TYPE" in
+        spi)
+            echo -e "  ${CYAN}Installing native meshtasticd for SPI radio...${NC}"
+
+            # Check if already installed
+            if ! command -v meshtasticd &>/dev/null; then
+                # Download and install native .deb
+                DEB_FILE="/tmp/meshtasticd_${ARCH}.deb"
+                echo "  Downloading meshtasticd v${NATIVE_VERSION} for ${ARCH}..."
+
+                if wget -q "$NATIVE_DEB_URL" -O "$DEB_FILE"; then
+                    echo "  Installing meshtasticd..."
+                    dpkg -i "$DEB_FILE" || apt-get install -f -y -qq
+                    rm -f "$DEB_FILE"
+                    echo -e "  ${GREEN}✓ Native meshtasticd installed${NC}"
+                else
+                    echo -e "  ${RED}Failed to download meshtasticd${NC}"
+                    echo -e "  ${YELLOW}Manual install: wget $NATIVE_DEB_URL && sudo dpkg -i meshtasticd_*.deb${NC}"
+                fi
+            else
+                echo -e "  ${GREEN}✓ Native meshtasticd already installed${NC}"
+            fi
+
+            # Enable Meshtoad config by default
+            ln -sf ../available.d/meshtoad-spi.yaml "$MESHTASTICD_CONFIG_DIR/config.d/active.yaml"
+
+            # Create main config.yaml
+            cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
+# MeshForge Meshtasticd Configuration
+# Managed by MeshForge NOC
+
+# Include active configuration
+# Active radio: config.d/active.yaml -> available.d/meshtoad-spi.yaml
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 4403
+MAIN_CONFIG
+
+            # Create/update systemd service for native meshtasticd
+            cat > /etc/systemd/system/meshtasticd.service << 'NATIVE_SERVICE'
 [Unit]
-Description=Meshtastic Daemon (TCP Server Mode)
+Description=Meshtastic Daemon (Native SPI)
+Documentation=https://meshtastic.org
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/meshtasticd
+ExecStart=/usr/sbin/meshtasticd -c /etc/meshtasticd/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+NATIVE_SERVICE
+
+            DAEMON_TYPE="native"
+            ;;
+
+        usb)
+            echo -e "  ${CYAN}Installing Python meshtastic for USB radio...${NC}"
+
+            # Install meshtastic Python package
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+
+            USB_DEV=$(get_usb_device)
+            echo -e "  ${GREEN}✓ Python meshtastic installed${NC}"
+            if [[ -n "$USB_DEV" ]]; then
+                echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
+            fi
+
+            # Enable USB config
+            ln -sf ../available.d/usb-serial.yaml "$MESHTASTICD_CONFIG_DIR/config.d/active.yaml"
+
+            # Create systemd service for Python CLI
+            cat > /etc/systemd/system/meshtasticd.service << 'PYTHON_SERVICE'
+[Unit]
+Description=Meshtastic Daemon (Python TCP Server)
 Documentation=https://meshtastic.org
 After=network.target
 
@@ -188,36 +439,43 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-MESHTASTICD_SERVICE
+PYTHON_SERVICE
 
-        systemctl daemon-reload
-    fi
+            DAEMON_TYPE="python"
+            ;;
 
-    # Create udev rules for USB radio devices
-    if [[ ! -f /etc/udev/rules.d/99-meshtastic.rules ]]; then
-        echo "  Creating udev rules for radio devices..."
-        cat > /etc/udev/rules.d/99-meshtastic.rules << 'UDEV_RULES'
-# Meshtastic USB devices
-# T-Beam, Heltec, RAK, etc.
+        none)
+            echo -e "  ${YELLOW}⚠ No radio detected${NC}"
+            echo -e "  ${YELLOW}  Installing Python meshtastic (default)${NC}"
 
-# Silicon Labs CP210x
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", GROUP="dialout"
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic
 
-# CH340/CH341
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", GROUP="dialout"
+            # Create a generic service
+            cat > /etc/systemd/system/meshtasticd.service << 'GENERIC_SERVICE'
+[Unit]
+Description=Meshtastic Daemon
+Documentation=https://meshtastic.org
+After=network.target
 
-# FTDI
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", GROUP="dialout"
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/meshtastic --tcp
+Restart=on-failure
+RestartSec=5
 
-# ESP32 native USB
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666", GROUP="dialout"
-UDEV_RULES
+[Install]
+WantedBy=multi-user.target
+GENERIC_SERVICE
 
-        udevadm control --reload-rules
-        udevadm trigger
-    fi
+            DAEMON_TYPE="python"
+            ;;
+    esac
 
-    echo -e "  ${GREEN}✓ meshtasticd installed${NC}"
+    systemctl daemon-reload
+
+    echo -e "  ${GREEN}✓ meshtasticd installed (${DAEMON_TYPE})${NC}"
+    echo -e "  ${GREEN}✓ Config directory: $MESHTASTICD_CONFIG_DIR${NC}"
 else
     echo -e "${CYAN}[3/8] Skipping meshtasticd...${NC}"
     echo -e "  ${YELLOW}⊘ Skipped${NC}"
@@ -306,35 +564,62 @@ if ! $INSTALL_MESHTASTICD; then
     NOC_MODE="client"
 fi
 
+# Set defaults if not set earlier
+DAEMON_TYPE=${DAEMON_TYPE:-"python"}
+RADIO_TYPE=${RADIO_TYPE:-"unknown"}
+USB_DEV=${USB_DEV:-$(get_usb_device)}
+
 # Create config directory
 CONFIG_DIR="/etc/meshforge"
 mkdir -p "$CONFIG_DIR"
 
-# Create NOC config
+# Create comprehensive NOC config
 cat > "$CONFIG_DIR/noc.yaml" << NOC_CONFIG
 # MeshForge NOC Configuration
 # Generated by install_noc.sh on $(date)
+# Architecture: $ARCH
 
 noc:
   mode: "$NOC_MODE"  # local | client | remote-only
+  version: "1.0.0"
 
+  # Radio configuration
+  radio:
+    type: "$RADIO_TYPE"        # spi | usb | none
+    daemon: "$DAEMON_TYPE"     # native | python
+    device: "$USB_DEV"         # USB device path (if applicable)
+    config_dir: "$MESHTASTICD_CONFIG_DIR"
+
+  # Service management
   services:
     meshtasticd:
       managed: $INSTALL_MESHTASTICD
       auto_start: $INSTALL_MESHTASTICD
+      daemon_type: "$DAEMON_TYPE"
+      port: 4403
 
     rnsd:
       managed: $INSTALL_RNS
       auto_start: $INSTALL_RNS
 
+  # Startup behavior
   startup:
     auto_start_services: true
     health_check_interval: 30
     restart_on_failure: true
     max_restart_attempts: 3
+
+  # Paths
+  paths:
+    install_dir: "$INSTALL_DIR"
+    venv_dir: "$VENV_DIR"
+    meshtasticd_config: "$MESHTASTICD_CONFIG_DIR"
+    meshforge_config: "$CONFIG_DIR"
 NOC_CONFIG
 
 echo -e "  ${GREEN}✓ NOC mode: $NOC_MODE${NC}"
+echo -e "  ${GREEN}✓ Radio type: $RADIO_TYPE${NC}"
+echo -e "  ${GREEN}✓ Daemon type: $DAEMON_TYPE${NC}"
 
 # ─────────────────────────────────────────────────────────────────
 # Create system commands and services
@@ -413,24 +698,41 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo -e "${CYAN}Installed Components:${NC}"
 if $INSTALL_MESHTASTICD; then
-    echo -e "  ${GREEN}✓${NC} meshtasticd (Meshtastic daemon)"
+    if [[ "$DAEMON_TYPE" == "native" ]]; then
+        echo -e "  ${GREEN}✓${NC} meshtasticd (native binary for SPI)"
+    else
+        echo -e "  ${GREEN}✓${NC} meshtastic (Python CLI for USB)"
+    fi
 fi
 if $INSTALL_RNS; then
     echo -e "  ${GREEN}✓${NC} Reticulum (RNS)"
 fi
 echo -e "  ${GREEN}✓${NC} MeshForge NOC"
 echo ""
-echo -e "${CYAN}NOC Mode:${NC} $NOC_MODE"
+echo -e "${CYAN}Configuration:${NC}"
+echo -e "  NOC Mode:    ${BOLD}$NOC_MODE${NC}"
+echo -e "  Radio Type:  ${BOLD}$RADIO_TYPE${NC}"
+echo -e "  Daemon:      ${BOLD}$DAEMON_TYPE${NC}"
+if [[ -n "$USB_DEV" ]]; then
+    echo -e "  USB Device:  ${BOLD}$USB_DEV${NC}"
+fi
+echo ""
+echo -e "${CYAN}Config Files:${NC}"
+echo "  /etc/meshforge/noc.yaml           - MeshForge NOC config"
+echo "  /etc/meshtasticd/config.yaml      - Meshtasticd config"
+echo "  /etc/meshtasticd/available.d/     - Radio templates"
+echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo "  ${GREEN}sudo meshforge${NC}           - Launch interface wizard"
-echo "  ${GREEN}sudo meshforge-noc --start${NC} - Start NOC services"
+echo "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
+echo "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
 echo "  ${GREEN}sudo meshforge-noc --status${NC} - Check service status"
-echo "  ${GREEN}sudo meshforge-noc --stop${NC}  - Stop NOC services"
+echo "  ${GREEN}sudo meshforge-noc --stop${NC}   - Stop NOC services"
 echo ""
-echo -e "${CYAN}Systemd Service:${NC}"
-echo "  ${GREEN}sudo systemctl enable meshforge${NC}  - Enable on boot"
-echo "  ${GREEN}sudo systemctl start meshforge${NC}   - Start now"
+echo -e "${CYAN}Systemd Services:${NC}"
+echo "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
+echo "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
+echo "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
 
 # Offer to start services

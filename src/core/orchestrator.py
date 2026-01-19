@@ -4,6 +4,11 @@ MeshForge Service Orchestrator
 Manages the complete NOC stack: meshtasticd, rnsd, and MeshForge services.
 MeshForge IS the node - this orchestrator ensures all services start, run, and recover.
 
+Supports:
+    - Native meshtasticd (for SPI radios like Meshtoad)
+    - Python meshtastic CLI (for USB serial radios)
+    - Automatic config detection from /etc/meshforge/noc.yaml
+
 Usage:
     # As module
     from core.orchestrator import ServiceOrchestrator
@@ -11,7 +16,7 @@ Usage:
     orch.startup()
 
     # As standalone
-    python -m core.orchestrator [--stop|--status|--install]
+    python -m core.orchestrator [--stop|--status|--install|--config]
 """
 
 import os
@@ -24,10 +29,20 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Dict, List, Callable, Any
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Configuration paths
+NOC_CONFIG_PATH = Path("/etc/meshforge/noc.yaml")
+MESHTASTICD_CONFIG_DIR = Path("/etc/meshtasticd")
 
 
 class ServiceState(Enum):
@@ -105,7 +120,7 @@ class ServiceOrchestrator:
 
     def __init__(self, config_path: Optional[Path] = None):
         """Initialize orchestrator."""
-        self._config_path = config_path
+        self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
         self._monitor_thread: Optional[threading.Thread] = None
         self._callbacks: Dict[str, List[Callable]] = {
@@ -118,8 +133,11 @@ class ServiceOrchestrator:
         # Load configuration
         self._load_config()
 
+        # Adjust meshtasticd service based on daemon type
+        self._configure_meshtasticd()
+
     def _load_config(self):
-        """Load NOC configuration."""
+        """Load NOC configuration from /etc/meshforge/noc.yaml."""
         # Default config
         self.config = {
             'mode': 'local',  # local | client | remote-only
@@ -127,9 +145,102 @@ class ServiceOrchestrator:
             'health_check_interval': 30,
             'restart_on_failure': True,
             'max_restart_attempts': 3,
+            'radio': {
+                'type': 'unknown',
+                'daemon': 'python',
+                'device': '',
+            },
+            'services': {
+                'meshtasticd': {'managed': True, 'auto_start': True},
+                'rnsd': {'managed': True, 'auto_start': True},
+            },
         }
 
-        # TODO: Load from ~/.config/meshforge/noc.yaml if exists
+        # Load from config file
+        if self._config_path and self._config_path.exists():
+            if HAS_YAML:
+                try:
+                    with open(self._config_path) as f:
+                        file_config = yaml.safe_load(f)
+                        if file_config and 'noc' in file_config:
+                            noc_config = file_config['noc']
+                            # Merge configs
+                            self._merge_config(noc_config)
+                            logger.info(f"Loaded config from {self._config_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load config: {e}")
+            else:
+                logger.warning("PyYAML not installed, using defaults")
+        else:
+            logger.info("No config file found, using defaults")
+
+    def _merge_config(self, noc_config: Dict[str, Any]):
+        """Merge loaded config with defaults."""
+        if 'mode' in noc_config:
+            self.config['mode'] = noc_config['mode']
+
+        if 'radio' in noc_config:
+            self.config['radio'].update(noc_config['radio'])
+
+        if 'services' in noc_config:
+            for service, svc_config in noc_config['services'].items():
+                if service not in self.config['services']:
+                    self.config['services'][service] = {}
+                self.config['services'][service].update(svc_config)
+
+        if 'startup' in noc_config:
+            startup = noc_config['startup']
+            if 'health_check_interval' in startup:
+                self.config['health_check_interval'] = startup['health_check_interval']
+            if 'restart_on_failure' in startup:
+                self.config['restart_on_failure'] = startup['restart_on_failure']
+            if 'max_restart_attempts' in startup:
+                self.config['max_restart_attempts'] = startup['max_restart_attempts']
+            if 'auto_start_services' in startup:
+                self.config['auto_start'] = startup['auto_start_services']
+
+    def _configure_meshtasticd(self):
+        """Configure meshtasticd service based on daemon type."""
+        daemon_type = self.config['radio'].get('daemon', 'python')
+
+        if daemon_type == 'native':
+            # Native meshtasticd binary (for SPI radios)
+            self.SERVICES['meshtasticd'] = ServiceConfig(
+                name='meshtasticd',
+                systemd_name='meshtasticd',
+                check_port=4403,
+                startup_delay=5,
+                required=True,
+                # No install command - requires .deb
+            )
+            logger.info("Configured for native meshtasticd (SPI radio)")
+        else:
+            # Python CLI (for USB serial radios)
+            self.SERVICES['meshtasticd'] = ServiceConfig(
+                name='meshtasticd',
+                systemd_name='meshtasticd',
+                check_port=4403,
+                startup_delay=5,
+                required=True,
+                install_command=['pip3', 'install', 'meshtastic'],
+            )
+            logger.info("Configured for Python meshtastic CLI (USB radio)")
+
+    def get_config_info(self) -> Dict[str, Any]:
+        """Get current configuration information."""
+        return {
+            'config_file': str(self._config_path),
+            'config_exists': self._config_path.exists() if self._config_path else False,
+            'mode': self.config['mode'],
+            'radio_type': self.config['radio'].get('type', 'unknown'),
+            'daemon_type': self.config['radio'].get('daemon', 'python'),
+            'device': self.config['radio'].get('device', ''),
+            'meshtasticd_config_dir': str(MESHTASTICD_CONFIG_DIR),
+            'meshtasticd_config_exists': MESHTASTICD_CONFIG_DIR.exists(),
+            'health_check_interval': self.config['health_check_interval'],
+            'restart_on_failure': self.config['restart_on_failure'],
+            'max_restart_attempts': self.config['max_restart_attempts'],
+        }
 
     # ─────────────────────────────────────────────────────────────
     # Service State Checks
@@ -552,11 +663,45 @@ def main():
     parser.add_argument('--stop', action='store_true', help='Stop all services')
     parser.add_argument('--restart', action='store_true', help='Restart all services')
     parser.add_argument('--status', action='store_true', help='Show service status')
+    parser.add_argument('--config', action='store_true', help='Show configuration')
     parser.add_argument('--install', action='store_true', help='Install missing services')
     parser.add_argument('--monitor', action='store_true', help='Start with monitoring')
 
     args = parser.parse_args()
     orch = ServiceOrchestrator()
+
+    if args.config:
+        print("\n═══ MeshForge NOC Configuration ═══\n")
+        config_info = orch.get_config_info()
+        print(f"  Config File:        {config_info['config_file']}")
+        print(f"  Config Exists:      {config_info['config_exists']}")
+        print(f"  NOC Mode:           {config_info['mode']}")
+        print(f"  Radio Type:         {config_info['radio_type']}")
+        print(f"  Daemon Type:        {config_info['daemon_type']}")
+        if config_info['device']:
+            print(f"  USB Device:         {config_info['device']}")
+        print(f"  Meshtasticd Config: {config_info['meshtasticd_config_dir']}")
+        print(f"  Config Dir Exists:  {config_info['meshtasticd_config_exists']}")
+        print(f"  Health Check:       {config_info['health_check_interval']}s")
+        print(f"  Restart on Fail:    {config_info['restart_on_failure']}")
+        print(f"  Max Restarts:       {config_info['max_restart_attempts']}")
+
+        # Show meshtasticd configs if they exist
+        if MESHTASTICD_CONFIG_DIR.exists():
+            available = list((MESHTASTICD_CONFIG_DIR / "available.d").glob("*.yaml"))
+            enabled = list((MESHTASTICD_CONFIG_DIR / "config.d").glob("*.yaml"))
+            print(f"\n  Available Configs:  {len(available)}")
+            for cfg in available:
+                print(f"    - {cfg.stem}")
+            print(f"  Enabled Configs:    {len(enabled)}")
+            for cfg in enabled:
+                if cfg.is_symlink():
+                    target = cfg.resolve().stem
+                    print(f"    - {cfg.stem} -> {target}")
+                else:
+                    print(f"    - {cfg.stem}")
+        print()
+        sys.exit(0)
 
     if args.stop:
         sys.exit(0 if orch.shutdown() else 1)
@@ -567,6 +712,10 @@ def main():
         sys.exit(0 if orch.startup() else 1)
 
     if args.status:
+        print("\n═══ MeshForge NOC Status ═══\n")
+        config_info = orch.get_config_info()
+        print(f"  Mode: {config_info['mode']} | Radio: {config_info['radio_type']} | Daemon: {config_info['daemon_type']}\n")
+
         statuses = orch.get_all_status()
         for name, status in statuses.items():
             state_icon = {
@@ -575,14 +724,18 @@ def main():
                 ServiceState.FAILED: '✗',
                 ServiceState.NOT_INSTALLED: '?',
             }.get(status.state, '?')
-            print(f"  {state_icon} {name}: {status.state.value} - {status.message}")
+            pid_str = f" (PID: {status.pid})" if status.pid else ""
+            print(f"  {state_icon} {name}: {status.state.value}{pid_str}")
+            if status.message and status.state != ServiceState.RUNNING:
+                print(f"      {status.message}")
+        print()
         sys.exit(0)
 
     if args.install:
         sys.exit(0 if orch.install_missing() else 1)
 
     # Default: start
-    if args.start or not any([args.stop, args.restart, args.status, args.install]):
+    if args.start or not any([args.stop, args.restart, args.status, args.install, args.config]):
         success = orch.startup()
         if success and args.monitor:
             orch.start_monitoring()
