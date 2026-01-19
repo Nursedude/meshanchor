@@ -294,17 +294,19 @@ UDEV_RULES
 
     # Create config templates
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" << 'MESHTOAD_CONFIG'
-# Meshtoad SPI Radio Configuration
+# Meshtoad / MeshStick SPI Radio Configuration
 # Uses CH341 USB-to-SPI adapter with SX1262
+# Reference: https://github.com/markbirss/MESHSTICK
 
 Lora:
   Module: sx1262
+  spidev: ch341
   CS: 0
-  IRQ: 22
-  Busy: 23
-  Reset: 24
-  TXen: 5
-  RXen: 6
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
 
 Logging:
   LogLevel: info
@@ -330,6 +332,27 @@ Logging:
 Webserver:
   Port: 4403
 RAK_CONFIG
+
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/waveshare-spi.yaml" << 'WAVESHARE_CONFIG'
+# Waveshare SX1262 LoRa HAT Configuration
+# For Raspberry Pi (adjust gpiochip for Pi 5)
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  # Uncomment for Raspberry Pi 5:
+  # gpiochip: 4
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 4403
+WAVESHARE_CONFIG
 
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" << 'USB_CONFIG'
 # USB Serial Radio Configuration
@@ -724,15 +747,15 @@ echo "  /etc/meshtasticd/available.d/     - Radio templates"
 echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
-echo "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
-echo "  ${GREEN}sudo meshforge-noc --status${NC} - Check service status"
-echo "  ${GREEN}sudo meshforge-noc --stop${NC}   - Stop NOC services"
+echo -e "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
+echo -e "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
+echo -e "  ${GREEN}sudo meshforge-noc --status${NC} - Check service status"
+echo -e "  ${GREEN}sudo meshforge-noc --stop${NC}   - Stop NOC services"
 echo ""
 echo -e "${CYAN}Systemd Services:${NC}"
-echo "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
-echo "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
-echo "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
+echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
+echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
+echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
 
 # Offer to start services

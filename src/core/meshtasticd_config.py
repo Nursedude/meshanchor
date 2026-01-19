@@ -64,21 +64,26 @@ RADIO_TEMPLATES = {
         "name": "meshtoad-spi",
         "radio_type": RadioType.NATIVE_SPI,
         "chip": "sx1262",
-        "description": "Meshtoad SPI Radio (SX1262 via CH341)",
-        "config": """# Meshtoad SPI Radio Configuration
-# Uses CH341 USB-to-SPI adapter
+        "description": "Meshtoad/MeshStick SPI Radio (SX1262 via CH341)",
+        "config": """# Meshtoad / MeshStick SPI Radio Configuration
+# Uses CH341 USB-to-SPI adapter with SX1262
+# Reference: https://github.com/markbirss/MESHSTICK
 
 Lora:
   Module: sx1262
+  spidev: ch341
   CS: 0
-  IRQ: 22
-  Busy: 23
-  Reset: 24
-  TXen: 5
-  RXen: 6
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
 
 Logging:
   LogLevel: info
+
+Webserver:
+  Port: 4403
 """
     },
     "rak-hat-spi": {
