@@ -27,7 +27,7 @@ python3 src/standalone.py         # Zero-dependency mode
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
-# Version is in src/__version__.py (currently 0.4.6-beta)
+# Version is in src/__version__.py (currently 0.4.7-beta)
 ```
 
 ## Architecture Overview

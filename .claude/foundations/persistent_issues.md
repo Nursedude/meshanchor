@@ -232,22 +232,24 @@ from utils.service_check import check_service, check_port, ServiceState
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-01-15)
+### Current Status (2026-01-19)
 
 **Python files over 1,500 lines:**
 
-| File | Lines | Priority | Suggested Split |
-|------|-------|----------|-----------------|
-| `src/launcher_tui/main.py` | 2,822 | HIGH | Extract menu handlers |
-| `src/gtk_ui/panels/hamclock.py` | 2,625 | HIGH | Extract API client |
-| `src/gtk_ui/panels/mesh_tools.py` | 1,953 | MEDIUM | Extract RF calculations |
-| `src/gtk_ui/panels/tools.py` | 1,842 | MEDIUM | Split by tool category |
-| `src/tui/app.py` | 1,734 | LOW | Extract panes to modules |
-| `src/core/diagnostics/engine.py` | 1,677 | LOW | Extract rules |
-| `src/gtk_ui/panels/ham_tools.py` | 1,657 | LOW | Extract tool groups |
-| `src/gtk_ui/app.py` | 1,532 | LOW | Monitor |
+| File | Lines | Priority | Status |
+|------|-------|----------|--------|
+| `src/core/diagnostics/engine.py` | 1,677 | LOW | Monitor |
+| `src/gtk_ui/panels/tools.py` | 1,562 | LOW | Monitor |
+| `src/gtk_ui/panels/diagnostics.py` | 1,560 | LOW | Monitor |
+| `src/gtk_ui/app.py` | 1,539 | LOW | Monitor |
+| `src/gtk_ui/panels/hamclock.py` | 1,525 | - | ✅ Refactored from 2,625 |
 
-*Note: rns.py (673), main_web.py (1,314) successfully refactored.*
+**Successfully refactored:**
+- `launcher_tui/main.py`: 2,822 → 1,336 lines ✅
+- `hamclock.py`: 2,625 → 1,525 lines ✅
+- `rns.py`: 673 lines ✅
+- `main_web.py`: 1,370 lines ✅
+- `mesh_tools.py`: Now under 1,500 lines ✅
 
 **Markdown files over 1,000 lines:**
 
