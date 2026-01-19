@@ -885,7 +885,7 @@ if [[ "$DAEMON_TYPE" == "native" ]]; then
     echo -e "    - ${BOLD}TX Power${NC}   (depends on region/radio)"
     echo ""
     echo -e "  ${CYAN}Option 1: Web UI (Recommended)${NC}"
-    echo -e "  ${GREEN}http://${LOCAL_IP}:4403${NC}"
+    echo -e "  ${GREEN}https://${LOCAL_IP}:9443${NC}"
     echo -e "  Navigate to: Config → LoRa"
     echo ""
     echo -e "  ${CYAN}Option 2: Interactive CLI wizard${NC}"
