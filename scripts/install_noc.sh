@@ -278,9 +278,11 @@ if $MESHTASTICD_EXISTS && $INSTALL_MESHTASTICD; then
     echo -e "  ${BOLD}3)${NC} Skip meshtasticd setup"
     echo "     Install MeshForge only, configure later"
     echo ""
+    echo -e "  ${BOLD}q)${NC} Quit installer"
+    echo ""
 
     if [[ -c /dev/tty ]]; then
-        read -p "  Select mode [1/2/3] (default: 1): " -n 1 -r mode_choice < /dev/tty
+        read -p "  Select mode [1/2/3/q] (default: 1): " -n 1 -r mode_choice < /dev/tty
         echo ""
         case $mode_choice in
             2)
@@ -290,6 +292,10 @@ if $MESHTASTICD_EXISTS && $INSTALL_MESHTASTICD; then
             3)
                 INSTALL_MESHTASTICD=false
                 echo -e "  ${CYAN}→ Skipping meshtasticd setup${NC}"
+                ;;
+            q|Q|0)
+                echo -e "  ${YELLOW}→ Installation cancelled${NC}"
+                exit 0
                 ;;
             *)
                 echo -e "  ${GREEN}→ Taking ownership of meshtasticd${NC}"
