@@ -363,8 +363,9 @@ class DiagnosticsTabMixin:
             try:
                 uname = subprocess.run(['uname', '-a'], capture_output=True, text=True, timeout=5)
                 report_lines.append(f"  {uname.stdout.strip()}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to get system info: %s", e)
+                report_lines.append("  System info unavailable")
 
             # MeshBot status
             report_lines.append("\n[MeshBot Status]")
@@ -379,8 +380,9 @@ class DiagnosticsTabMixin:
             try:
                 result = subprocess.run(['pgrep', '-f', 'mesh_bot.py'], capture_output=True, timeout=5)
                 report_lines.append(f"  Running: {'Yes' if result.returncode == 0 else 'No'}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to check mesh_bot.py process: %s", e)
+                report_lines.append("  Running: Unknown")
 
             # Network
             report_lines.append("\n[Network]")
@@ -405,14 +407,15 @@ class DiagnosticsTabMixin:
                 sock.settimeout(2)
                 result = sock.connect_ex(('localhost', 4403))
                 report_lines.append(f"  TCP 4403: {'Open' if result == 0 else 'Closed'}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to check TCP 4403: %s", e)
+                report_lines.append("  TCP 4403: Check failed")
             finally:
                 if sock:
                     try:
                         sock.close()
                     except Exception:
-                        pass
+                        pass  # Cleanup - safe to ignore
 
             report_lines.append("\n" + "=" * 60)
 

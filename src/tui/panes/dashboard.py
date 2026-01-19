@@ -228,7 +228,7 @@ class DashboardPane(Container):
                 try:
                     sock.close()
                 except Exception:
-                    pass
+                    pass  # Cleanup - safe to ignore
 
         # Check RNS - use centralized service checker (SINGLE SOURCE OF TRUTH)
         if check_service:
