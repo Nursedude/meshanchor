@@ -390,22 +390,30 @@ USB_CONFIG
                 echo -e "  ${GREEN}✓ Native meshtasticd already installed${NC}"
             fi
 
-            # Enable Meshtoad config by default
-            ln -sf ../available.d/meshtoad-spi.yaml "$MESHTASTICD_CONFIG_DIR/config.d/active.yaml"
+            # Enable Meshtoad config by default (copy is more reliable than symlink)
+            cp "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
 
-            # Create main config.yaml
+            # Create main config.yaml (minimal - auto-loads from config.d/)
             cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
-# MeshForge Meshtasticd Configuration
-# Managed by MeshForge NOC
-
-# Include active configuration
-# Active radio: config.d/active.yaml -> available.d/meshtoad-spi.yaml
+### MeshForge NOC - Meshtasticd Configuration
+### Device configs are loaded from /etc/meshtasticd/config.d/
+### Copy configs from available.d/ to config.d/ to activate
+---
+Lora:
+  Module: auto
 
 Logging:
   LogLevel: info
 
 Webserver:
   Port: 4403
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 MAIN_CONFIG
 
             # Create/update systemd service for native meshtasticd
@@ -442,8 +450,8 @@ NATIVE_SERVICE
                 echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
             fi
 
-            # Enable USB config
-            ln -sf ../available.d/usb-serial.yaml "$MESHTASTICD_CONFIG_DIR/config.d/active.yaml"
+            # Enable USB config (copy is more reliable than symlink)
+            cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
 
             # Create systemd service for Python CLI
             cat > /etc/systemd/system/meshtasticd.service << 'PYTHON_SERVICE'
