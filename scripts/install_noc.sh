@@ -149,14 +149,22 @@ apt-get install -y -qq \
 echo -e "  ${GREEN}✓ System dependencies installed${NC}"
 
 # ─────────────────────────────────────────────────────────────────
+# Detect PEP 668 (externally-managed-environment)
+# ─────────────────────────────────────────────────────────────────
+PIP_ARGS=""
+if python3 -c "import sys; sys.exit(0 if any('EXTERNALLY-MANAGED' in open(f).read() for f in __import__('glob').glob(sys.prefix + '/**/EXTERNALLY-MANAGED', recursive=True)) else 1)" 2>/dev/null; then
+    echo -e "${YELLOW}  Detected: Externally managed Python (PEP 668)${NC}"
+    PIP_ARGS="--break-system-packages"
+fi
+
+# ─────────────────────────────────────────────────────────────────
 # Install meshtasticd
 # ─────────────────────────────────────────────────────────────────
 if $INSTALL_MESHTASTICD; then
     echo -e "${CYAN}[3/8] Installing meshtasticd...${NC}"
 
     # Install meshtastic Python package (includes meshtasticd)
-    pip3 install --break-system-packages -q meshtastic 2>/dev/null || \
-    pip3 install -q meshtastic
+    pip3 install $PIP_ARGS -q meshtastic
 
     # Create systemd service if not exists
     if ! systemctl list-unit-files | grep -q meshtasticd.service; then
@@ -221,8 +229,7 @@ fi
 if $INSTALL_RNS; then
     echo -e "${CYAN}[4/8] Installing Reticulum (RNS)...${NC}"
 
-    pip3 install --break-system-packages -q rns 2>/dev/null || \
-    pip3 install -q rns
+    pip3 install $PIP_ARGS -q rns
 
     # Create systemd service if not exists
     if ! systemctl list-unit-files | grep -q rnsd.service; then
