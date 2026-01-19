@@ -174,19 +174,17 @@ if $INSTALL_MESHTASTICD; then
 
         cat > /etc/systemd/system/meshtasticd.service << 'MESHTASTICD_SERVICE'
 [Unit]
-Description=Meshtastic Daemon
+Description=Meshtastic Daemon (TCP Server Mode)
 Documentation=https://meshtastic.org
 After=network.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/meshtasticd
+# Run meshtastic CLI in TCP server mode (listens on port 4403)
+ExecStart=/usr/local/bin/meshtastic --tcp
 Restart=on-failure
 RestartSec=5
-
-# Auto-detect device
-Environment=MESHTASTIC_PORT=auto
 
 [Install]
 WantedBy=multi-user.target
@@ -354,7 +352,7 @@ chmod +x /usr/local/bin/meshforge
 # NOC orchestrator command
 cat > /usr/local/bin/meshforge-noc << 'NOC_CMD'
 #!/bin/bash
-cd /opt/meshforge
+cd /opt/meshforge/src
 exec sudo /opt/meshforge/venv/bin/python -m core.orchestrator "$@"
 NOC_CMD
 chmod +x /usr/local/bin/meshforge-noc
@@ -369,7 +367,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshforge
+WorkingDirectory=/opt/meshforge/src
 # Orchestrator manages meshtasticd and rnsd
 ExecStart=/opt/meshforge/venv/bin/python -m core.orchestrator --start --monitor
 ExecStop=/opt/meshforge/venv/bin/python -m core.orchestrator --stop
