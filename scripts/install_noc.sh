@@ -769,6 +769,13 @@ exec sudo /opt/meshforge/venv/bin/python -m core.orchestrator "$@"
 NOC_CMD
 chmod +x /usr/local/bin/meshforge-noc
 
+# LoRa configuration helper
+cat > /usr/local/bin/meshforge-lora << 'LORA_CMD'
+#!/bin/bash
+exec sudo /opt/meshforge/scripts/configure_lora.sh "$@"
+LORA_CMD
+chmod +x /usr/local/bin/meshforge-lora
+
 # Update systemd service to use orchestrator
 cat > /etc/systemd/system/meshforge.service << 'MESHFORGE_SERVICE'
 [Unit]
@@ -862,17 +869,30 @@ echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
 echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
 
-# Post-install note for SPI radios (need region set)
+# Post-install note for network configuration
 if [[ "$DAEMON_TYPE" == "native" ]]; then
+    # Get IP address for web UI URL
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+
     echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  IMPORTANT: Set your LoRa region after first boot!        ║${NC}"
+    echo -e "${YELLOW}║  IMPORTANT: Configure LoRa settings to join a network!    ║${NC}"
     echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  Native meshtasticd requires region configuration:"
-    echo -e "  ${GREEN}meshtastic --host localhost --set lora.region US${NC}"
+    echo -e "  Your radio needs these settings to match your mesh network:"
+    echo -e "    - ${BOLD}Region${NC}     (US, EU_868, AU_915, etc.)"
+    echo -e "    - ${BOLD}Channel${NC}    (frequency slot - MUST match network)"
+    echo -e "    - ${BOLD}Preset${NC}     (LONG_FAST, SHORT_FAST, etc.)"
+    echo -e "    - ${BOLD}TX Power${NC}   (depends on region/radio)"
     echo ""
-    echo -e "  Common regions: US, EU_868, AU_915, CN, JP, KR, TW, IN, NZ_865"
-    echo -e "  Full list: meshtastic --host localhost --get lora.region"
+    echo -e "  ${CYAN}Option 1: Web UI (Recommended)${NC}"
+    echo -e "  ${GREEN}http://${LOCAL_IP}:4403${NC}"
+    echo -e "  Navigate to: Config → LoRa"
+    echo ""
+    echo -e "  ${CYAN}Option 2: Interactive CLI wizard${NC}"
+    echo -e "  ${GREEN}sudo meshforge-lora --interactive${NC}"
+    echo ""
+    echo -e "  ${CYAN}Option 3: Quick profile${NC}"
+    echo -e "  ${GREEN}sudo meshforge-lora --profile us_default${NC}"
     echo ""
 fi
 
