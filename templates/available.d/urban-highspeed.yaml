@@ -53,8 +53,9 @@ Lora:
   ChannelNum: 0
 
 Webserver:
-  # Web interface port (443 for HTTPS, 80 for HTTP)
-  Port: 443
+  # Port 9443 is meshtasticd's web UI (browser config)
+  # Port 4403 is the TCP API (CLI, Python SDK, MeshForge gateway)
+  Port: 9443
 
 # === Urban Network Channel ===
 # Default public channel for urban mesh
