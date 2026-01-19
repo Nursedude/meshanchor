@@ -49,9 +49,9 @@ case $ARCH in
     x86_64|amd64) ARCH="amd64" ;;
 esac
 
-# Native meshtasticd version
-NATIVE_VERSION="2.5.19.f77f1d6"
-NATIVE_DEB_URL="https://github.com/meshtastic/firmware/releases/download/v${NATIVE_VERSION}/meshtasticd_${NATIVE_VERSION}_${ARCH}.deb"
+# OpenSUSE Build Service repo for native meshtasticd
+# Supports: Debian_12, Debian_13, Debian_Testing, Raspbian_12, Ubuntu_24.04, etc.
+OBS_BASE_URL="https://download.opensuse.org/repositories/network:/Meshtastic:/beta"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -149,6 +149,89 @@ load_ch341_driver() {
     fi
 }
 
+detect_os_repo() {
+    # Detect OS and return the correct OpenSUSE Build Service repo name
+    # Returns: Debian_12, Debian_13, Raspbian_12, Ubuntu_24.04, etc.
+
+    if [[ ! -f /etc/os-release ]]; then
+        echo "Debian_12"  # Fallback
+        return
+    fi
+
+    # shellcheck source=/dev/null
+    source /etc/os-release
+
+    local os_name="${ID}"
+    local version="${VERSION_ID:-}"
+    local version_codename="${VERSION_CODENAME:-}"
+
+    case "$os_name" in
+        debian)
+            case "$version" in
+                12) echo "Debian_12" ;;
+                13) echo "Debian_13" ;;
+                *)
+                    # Use codename for sid/testing
+                    case "$version_codename" in
+                        bookworm) echo "Debian_12" ;;
+                        trixie)   echo "Debian_13" ;;
+                        sid)      echo "Debian_Unstable" ;;
+                        *)        echo "Debian_Testing" ;;
+                    esac
+                    ;;
+            esac
+            ;;
+        raspbian)
+            case "$version" in
+                12) echo "Raspbian_12" ;;
+                11) echo "Raspbian_11" ;;
+                *)  echo "Raspbian_12" ;;  # Fallback to latest supported
+            esac
+            ;;
+        ubuntu)
+            case "$version" in
+                24.04|24.10) echo "xUbuntu_24.04" ;;
+                22.04)       echo "xUbuntu_22.04" ;;
+                20.04)       echo "xUbuntu_20.04" ;;
+                *)           echo "xUbuntu_24.04" ;;  # Fallback to latest
+            esac
+            ;;
+        *)
+            # Fallback: try Debian version if it's a Debian derivative
+            if [[ -n "$version" ]]; then
+                echo "Debian_${version%%.*}"
+            else
+                echo "Debian_12"
+            fi
+            ;;
+    esac
+}
+
+add_meshtastic_repo() {
+    # Add OpenSUSE Build Service meshtastic repo for the detected OS
+    local os_repo
+    os_repo=$(detect_os_repo)
+
+    echo -e "  ${CYAN}Adding Meshtastic repo for ${BOLD}${os_repo}${NC}"
+
+    local repo_url="${OBS_BASE_URL}/${os_repo}/"
+    local key_url="${OBS_BASE_URL}/${os_repo}/Release.key"
+
+    # Add repo
+    echo "deb ${repo_url} /" > /etc/apt/sources.list.d/meshtastic.list
+
+    # Add GPG key
+    curl -fsSL "$key_url" | gpg --dearmor > /etc/apt/trusted.gpg.d/meshtastic.gpg 2>/dev/null
+
+    # Update apt cache
+    if ! apt-get update -qq 2>/dev/null; then
+        echo -e "  ${YELLOW}Warning: apt update had errors (repo may be unavailable)${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Detect existing installations
 # ─────────────────────────────────────────────────────────────────
@@ -219,10 +302,19 @@ fi
 # System dependencies
 # ─────────────────────────────────────────────────────────────────
 echo -e "${CYAN}[2/8] Installing system dependencies...${NC}"
+
+# Show detected OS
+OS_REPO=$(detect_os_repo)
+if [[ -f /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    echo -e "  ${CYAN}Detected: ${BOLD}${PRETTY_NAME:-$ID}${NC} → repo: ${BOLD}${OS_REPO}${NC}"
+fi
+
 apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
-    git wget curl \
+    git wget curl gnupg \
     libusb-1.0-0 \
     &>/dev/null
 
@@ -373,21 +465,25 @@ USB_CONFIG
 
             # Check if already installed
             if ! command -v meshtasticd &>/dev/null; then
-                # Download and install native .deb
-                DEB_FILE="/tmp/meshtasticd_${ARCH}.deb"
-                echo "  Downloading meshtasticd v${NATIVE_VERSION} for ${ARCH}..."
-
-                if wget -q "$NATIVE_DEB_URL" -O "$DEB_FILE"; then
-                    echo "  Installing meshtasticd..."
-                    dpkg -i "$DEB_FILE" || apt-get install -f -y -qq
-                    rm -f "$DEB_FILE"
-                    echo -e "  ${GREEN}✓ Native meshtasticd installed${NC}"
+                # Add OpenSUSE Build Service repo and install via apt
+                if add_meshtastic_repo; then
+                    echo "  Installing meshtasticd via apt..."
+                    if apt-get install -y -qq meshtasticd; then
+                        INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                        echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
+                    else
+                        echo -e "  ${RED}Failed to install meshtasticd via apt${NC}"
+                        echo -e "  ${YELLOW}Check: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
+                    fi
                 else
-                    echo -e "  ${RED}Failed to download meshtasticd${NC}"
-                    echo -e "  ${YELLOW}Manual install: wget $NATIVE_DEB_URL && sudo dpkg -i meshtasticd_*.deb${NC}"
+                    echo -e "  ${RED}Failed to add Meshtastic repo${NC}"
+                    echo -e "  ${YELLOW}Manual install instructions:${NC}"
+                    echo -e "  ${YELLOW}  1. Visit: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
+                    echo -e "  ${YELLOW}  2. Select your OS and follow instructions${NC}"
                 fi
             else
-                echo -e "  ${GREEN}✓ Native meshtasticd already installed${NC}"
+                INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
             fi
 
             # Enable Meshtoad config by default (copy is more reliable than symlink)
@@ -765,6 +861,20 @@ echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
 echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
 echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
+
+# Post-install note for SPI radios (need region set)
+if [[ "$DAEMON_TYPE" == "native" ]]; then
+    echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  IMPORTANT: Set your LoRa region after first boot!        ║${NC}"
+    echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  Native meshtasticd requires region configuration:"
+    echo -e "  ${GREEN}meshtastic --host localhost --set lora.region US${NC}"
+    echo ""
+    echo -e "  Common regions: US, EU_868, AU_915, CN, JP, KR, TW, IN, NZ_865"
+    echo -e "  Full list: meshtastic --host localhost --get lora.region"
+    echo ""
+fi
 
 # Offer to start services
 if [[ -c /dev/tty ]]; then
