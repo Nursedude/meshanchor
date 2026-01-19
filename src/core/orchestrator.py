@@ -481,44 +481,68 @@ class ServiceOrchestrator:
     # Orchestration
     # ─────────────────────────────────────────────────────────────
 
-    def startup(self) -> bool:
+    def startup(self, graceful: bool = False) -> bool:
         """
         Start all managed services in correct order.
 
+        Args:
+            graceful: If True, continue even when services fail (for no-radio scenarios)
+
         Returns:
-            True if all required services are running and healthy
+            True if all required services are running and healthy (or graceful mode)
         """
         logger.info("═══ MeshForge NOC Startup ═══")
+        if graceful:
+            logger.info("Graceful mode: will continue even if services fail")
 
         success = True
+        failed_services = []
+
         for service_name in self.STARTUP_ORDER:
             config = self.SERVICES.get(service_name)
             if not config:
                 continue
 
-            # Check dependencies
+            # Check dependencies (skip in graceful mode if dep failed)
+            dep_ok = True
             for dep in config.dependencies:
                 if not self.is_healthy(dep):
                     logger.error(f"Dependency {dep} not healthy for {service_name}")
-                    if config.required:
+                    if graceful:
+                        logger.warning(f"Graceful mode: skipping {service_name} due to dependency")
+                        dep_ok = False
+                        break
+                    elif config.required:
                         success = False
                         continue
 
+            if not dep_ok:
+                failed_services.append(service_name)
+                continue
+
             # Start service
             if not self.start_service(service_name):
-                if config.required:
+                failed_services.append(service_name)
+                if config.required and not graceful:
                     logger.error(f"Required service {service_name} failed to start")
                     success = False
+                elif graceful:
+                    logger.warning(f"Graceful mode: {service_name} failed but continuing")
                 else:
                     logger.warning(f"Optional service {service_name} failed to start")
 
         if success:
             logger.info("═══ All services started ═══")
             self._emit('all_ready')
+        elif graceful:
+            logger.warning("═══ Startup completed with failures (graceful mode) ═══")
+            if failed_services:
+                logger.warning(f"Failed services: {', '.join(failed_services)}")
+            logger.info("MeshForge running in degraded mode - some features unavailable")
         else:
             logger.error("═══ Startup failed ═══")
 
-        return success
+        return success or graceful
 
     def shutdown(self) -> bool:
         """Stop all managed services in reverse order."""
@@ -666,6 +690,8 @@ def main():
     parser.add_argument('--config', action='store_true', help='Show configuration')
     parser.add_argument('--install', action='store_true', help='Install missing services')
     parser.add_argument('--monitor', action='store_true', help='Start with monitoring')
+    parser.add_argument('--graceful', action='store_true',
+                        help='Continue even if services fail (for no-radio scenarios)')
 
     args = parser.parse_args()
     orch = ServiceOrchestrator()
@@ -736,8 +762,8 @@ def main():
 
     # Default: start
     if args.start or not any([args.stop, args.restart, args.status, args.install, args.config]):
-        success = orch.startup()
-        if success and args.monitor:
+        success = orch.startup(graceful=args.graceful)
+        if (success or args.graceful) and args.monitor:
             orch.start_monitoring()
             try:
                 while True:
