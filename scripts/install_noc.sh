@@ -165,7 +165,8 @@ if $INSTALL_MESHTASTICD; then
     echo -e "${CYAN}[3/8] Installing meshtasticd...${NC}"
 
     # Install meshtastic Python package (includes meshtasticd)
-    pip3 install $PIP_ARGS -q meshtastic
+    # --ignore-installed avoids conflicts with apt-installed packages
+    pip3 install $PIP_ARGS --ignore-installed -q meshtastic
 
     # Create systemd service if not exists
     if ! systemctl list-unit-files | grep -q meshtasticd.service; then
@@ -230,7 +231,7 @@ fi
 if $INSTALL_RNS; then
     echo -e "${CYAN}[4/8] Installing Reticulum (RNS)...${NC}"
 
-    pip3 install $PIP_ARGS -q rns
+    pip3 install $PIP_ARGS --ignore-installed -q rns
 
     # Create systemd service if not exists
     if ! systemctl list-unit-files | grep -q rnsd.service; then
