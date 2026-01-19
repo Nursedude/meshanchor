@@ -354,7 +354,7 @@ chmod +x /usr/local/bin/meshforge
 # NOC orchestrator command
 cat > /usr/local/bin/meshforge-noc << 'NOC_CMD'
 #!/bin/bash
-cd /opt/meshforge
+cd /opt/meshforge/src
 exec sudo /opt/meshforge/venv/bin/python -m core.orchestrator "$@"
 NOC_CMD
 chmod +x /usr/local/bin/meshforge-noc
@@ -369,7 +369,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshforge
+WorkingDirectory=/opt/meshforge/src
 # Orchestrator manages meshtasticd and rnsd
 ExecStart=/opt/meshforge/venv/bin/python -m core.orchestrator --start --monitor
 ExecStop=/opt/meshforge/venv/bin/python -m core.orchestrator --stop
