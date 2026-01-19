@@ -273,6 +273,111 @@ class CoverageMapGenerator:
         """Add a link between two nodes."""
         self._links.append((from_id, to_id, props))
 
+    def add_link_with_quality(self, from_id: str, to_id: str, snr: float = None,
+                               rssi: int = None, bidirectional: bool = True) -> None:
+        """
+        Add a link with quality-based coloring (inspired by Stridetastic).
+
+        Args:
+            from_id: Source node ID
+            to_id: Destination node ID
+            snr: Signal-to-noise ratio in dB
+            rssi: Received signal strength indicator
+            bidirectional: True if link works both ways
+        """
+        # SNR-based color coding
+        # Excellent: > 10 dB (green)
+        # Good: 5-10 dB (light green)
+        # Marginal: 0-5 dB (yellow)
+        # Poor: -5 to 0 dB (orange)
+        # Bad: < -5 dB (red)
+        if snr is not None:
+            if snr > 10:
+                color = '#22c55e'  # Green
+                quality = 'Excellent'
+            elif snr > 5:
+                color = '#84cc16'  # Light green
+                quality = 'Good'
+            elif snr > 0:
+                color = '#eab308'  # Yellow
+                quality = 'Marginal'
+            elif snr > -5:
+                color = '#f97316'  # Orange
+                quality = 'Poor'
+            else:
+                color = '#ef4444'  # Red
+                quality = 'Bad'
+        else:
+            color = '#3b82f6'  # Blue (unknown)
+            quality = 'Unknown'
+
+        # Line weight based on quality
+        weight = 3 if snr and snr > 5 else 2
+
+        # Dashed line for unidirectional links
+        dash_array = None if bidirectional else '5, 10'
+
+        # Build label
+        label_parts = [f"Quality: {quality}"]
+        if snr is not None:
+            label_parts.append(f"SNR: {snr:.1f} dB")
+        if rssi is not None:
+            label_parts.append(f"RSSI: {rssi} dBm")
+        if not bidirectional:
+            label_parts.append("(One-way)")
+
+        self._links.append((from_id, to_id, {
+            'color': color,
+            'weight': weight,
+            'dash_array': dash_array,
+            'label': '<br>'.join(label_parts),
+            'snr': snr,
+            'rssi': rssi,
+            'bidirectional': bidirectional,
+        }))
+
+    def add_links_from_neighborinfo(self, neighbor_data: List[Dict]) -> None:
+        """
+        Add links from Meshtastic NeighborInfo packets.
+
+        Parses the standard NeighborInfo format from meshtastic telemetry.
+
+        Args:
+            neighbor_data: List of neighbor info dicts with structure:
+                {
+                    'node_id': '!abc123',
+                    'neighbors': [
+                        {'node_id': '!def456', 'snr': 8.5},
+                        {'node_id': '!ghi789', 'snr': -2.0},
+                    ]
+                }
+        """
+        # Track which links we've seen for bidirectional detection
+        seen_links = set()
+
+        for node_info in neighbor_data:
+            node_id = node_info.get('node_id', '')
+            neighbors = node_info.get('neighbors', [])
+
+            for neighbor in neighbors:
+                neighbor_id = neighbor.get('node_id', '')
+                snr = neighbor.get('snr')
+
+                if node_id and neighbor_id:
+                    # Check if reverse link exists
+                    reverse_key = (neighbor_id, node_id)
+                    forward_key = (node_id, neighbor_id)
+
+                    bidirectional = reverse_key in seen_links
+                    seen_links.add(forward_key)
+
+                    self.add_link_with_quality(
+                        from_id=node_id,
+                        to_id=neighbor_id,
+                        snr=snr,
+                        bidirectional=bidirectional
+                    )
+
     def set_coverage_radius(self, meters: int) -> None:
         """Set custom coverage radius in meters."""
         self._coverage_radius = meters
@@ -445,16 +550,21 @@ class CoverageMapGenerator:
                 if from_node and to_node:
                     if (from_node.latitude and from_node.longitude and
                         to_node.latitude and to_node.longitude):
-                        folium.PolyLine(
-                            locations=[
+                        # Support dash_array for unidirectional links
+                        line_opts = {
+                            'locations': [
                                 [from_node.latitude, from_node.longitude],
                                 [to_node.latitude, to_node.longitude]
                             ],
-                            color=props.get('color', 'blue'),
-                            weight=props.get('weight', 2),
-                            opacity=0.7,
-                            popup=props.get('label', '')
-                        ).add_to(links_group)
+                            'color': props.get('color', 'blue'),
+                            'weight': props.get('weight', 2),
+                            'opacity': 0.7,
+                            'popup': props.get('label', ''),
+                        }
+                        if props.get('dash_array'):
+                            line_opts['dash_array'] = props['dash_array']
+
+                        folium.PolyLine(**line_opts).add_to(links_group)
 
         # Add groups to map
         online_group.add_to(m)
@@ -531,6 +641,25 @@ class CoverageMapGenerator:
         with_pos = len([n for n in self._nodes if n.latitude and n.longitude])
         gateways = len([n for n in self._nodes if n.is_gateway])
         via_mqtt = len([n for n in self._nodes if n.via_mqtt])
+        total_links = len(self._links)
+
+        # Check if we have quality-colored links
+        has_quality_links = any(props.get('snr') is not None for _, _, props in self._links)
+
+        # Link quality legend (only if we have quality data)
+        link_legend = ""
+        if has_quality_links:
+            link_legend = """
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd;">
+                <div style="font-weight: bold; margin-bottom: 4px;">Link Quality (SNR)</div>
+                <div><span style="color: #22c55e;">━</span> Excellent (&gt;10dB)</div>
+                <div><span style="color: #84cc16;">━</span> Good (5-10dB)</div>
+                <div><span style="color: #eab308;">━</span> Marginal (0-5dB)</div>
+                <div><span style="color: #f97316;">━</span> Poor (-5-0dB)</div>
+                <div><span style="color: #ef4444;">━</span> Bad (&lt;-5dB)</div>
+                <div style="color: #888; font-size: 11px;">┄ = one-way link</div>
+            </div>
+            """
 
         return f"""
         <div style="
@@ -551,6 +680,8 @@ class CoverageMapGenerator:
             <div>Mapped: {with_pos}</div>
             <div style="color: purple;">Gateways: {gateways}</div>
             <div style="color: blue;">Via MQTT: {via_mqtt}</div>
+            <div>Links: {total_links}</div>
+            {link_legend}
             <div style="font-size: 11px; color: #888; margin-top: 5px;">
                 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
             </div>
