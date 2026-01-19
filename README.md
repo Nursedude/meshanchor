@@ -47,15 +47,20 @@ Meshtastic  <------>  MeshForge Gateway  <------>  Reticulum
 
 ## Quick Start
 
-**One-liner install:**
-```bash
-curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo bash
-```
-
-**Or manual install:**
+**NOC Stack Install (Recommended):**
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
+sudo bash scripts/install_noc.sh
+```
+
+This installs the complete stack:
+- **meshtasticd** (native binary for SPI radios, or Python CLI for USB)
+- **Reticulum (rnsd)** for RNS mesh support
+- **MeshForge** orchestrator and interfaces
+
+**Or minimal install:**
+```bash
 pip3 install rich textual flask --break-system-packages
 sudo python3 src/launcher.py
 ```
@@ -79,16 +84,49 @@ The launcher auto-detects your environment and picks the best interface.
 |---------|:----------:|:---:|
 | Gateway bridge (Meshtastic ↔ RNS) | ✓ | ✓ |
 | Unified node tracking | ✓ | ✓ |
+| NOC orchestrator (service management) | ✓ | ✓ |
+| Native meshtasticd support (SPI HATs) | ✓ | ✓ |
 | Nodeless MQTT monitoring | ✓ | ✓ |
-| Coverage map generation | ✓ | ✓ |
+| Coverage maps with SNR-based link quality | ✓ | ✓ |
 | RF calculations (FSPL, Fresnel, link budget) | ✓ | ✓ |
-| Service management (start/stop/logs) | ✓ | ✓ |
-| Full radio configuration | ✓ | ✓ |
+| LoRa configuration wizard | ✓ | ✓ |
 | AI diagnostics | Rule-based | Claude-powered |
 | Knowledge base | ✓ | ✓ |
 | Natural language queries | — | ✓ |
 
 **PRO mode** requires an Anthropic API key (`ANTHROPIC_API_KEY` env var).
+
+---
+
+## NOC Stack
+
+MeshForge is designed to BE your Meshtastic node - owning the full stack:
+
+```
+┌─────────────────────────────────────────────┐
+│             MeshForge NOC                   │
+│  ┌─────────┐  ┌─────────┐  ┌─────────────┐ │
+│  │meshtasticd│  │  rnsd   │  │ Orchestrator│ │
+│  │ (radio)  │  │ (RNS)   │  │  (manager)  │ │
+│  └────┬─────┘  └────┬────┘  └──────┬──────┘ │
+│       │             │              │        │
+│       └─────────────┴──────────────┘        │
+│                     │                       │
+│         Health Monitoring + Auto-restart    │
+└─────────────────────────────────────────────┘
+```
+
+**Supported Radio Hardware:**
+- **SPI HATs**: Meshtoad, MeshAdv-Pi-Hat, RAK WisLink, Waveshare SX126x
+- **USB Radios**: T-Beam, Heltec V3/V4, RAK4631, MeshStick
+
+**Commands:**
+```bash
+sudo meshforge              # Launch interface wizard
+sudo meshforge-noc --start  # Start NOC services
+sudo meshforge-noc --status # Check service status
+sudo meshforge-lora --interactive  # Configure LoRa settings
+```
 
 ---
 
@@ -174,14 +212,21 @@ USER INTERFACES
 
 ## Supported Hardware
 
-**Raspberry Pi**: Pi 5, Pi 4, Pi 3, Zero 2 W
+**Platforms**: Raspberry Pi 5/4/3/Zero 2 W, Debian/Ubuntu x86_64
 
-**USB LoRa Devices**
-- ESP32-S3: MeshToad, MeshTadpole, Heltec V3
-- nRF52840: RAK4631, MeshStick
-- ESP32: T-Beam, T-Echo
+**Native SPI Radios** (via meshtasticd):
+- Meshtoad / MeshStick (CH341 USB-to-SPI + SX1262)
+- MeshAdv-Pi-Hat (GPIO SPI)
+- RAK WisLink HAT
+- Waveshare SX126x HAT
 
-**SPI HATs**: MeshAdv-Pi-Hat, Waveshare SX126x, Adafruit RFM9x
+**USB Serial Radios** (via Python CLI):
+- Heltec V3/V4 (ESP32-S3)
+- RAK4631 (nRF52840)
+- T-Beam, T-Echo (ESP32)
+- LilyGo T-Deck
+
+Config templates in `/etc/meshtasticd/available.d/` - copy to `config.d/` to activate.
 
 ---
 
