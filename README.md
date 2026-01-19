@@ -175,9 +175,9 @@ SUGGESTIONS:
 | Interface | Command | Best For |
 |-----------|---------|----------|
 | **Auto** | `sudo python3 src/launcher.py` | Let MeshForge decide |
-| **TUI** | `sudo python3 src/launcher_tui.py` | SSH / headless (recommended) |
-| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical interface |
-| **Web UI** | `sudo python3 src/main_web.py` | Browser access |
+| **Rich CLI** | `sudo python3 src/launcher_tui/main.py` | SSH / headless (recommended) |
+| **Web UI** | `sudo python3 src/main_web.py` | Browser access (port 8880) |
+| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical (needs display) |
 | **Standalone** | `python3 src/standalone.py` | Zero dependencies |
 
 All interfaces share the same AI features and gateway capabilities.

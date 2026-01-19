@@ -77,9 +77,9 @@ I2C:
   I2CDevice: /dev/i2c-1
 
 Webserver:
-  # Web interface port
-  # FemtoFox comes with pre-configured web apps
-  Port: 443
+  # Port 9443 is meshtasticd's web UI (browser config)
+  # Port 4403 is the TCP API (CLI, Python SDK, MeshForge gateway)
+  Port: 9443
 
 # === Optional: MQTT Configuration ===
 # Uncomment to enable MQTT for connecting to mesh networks

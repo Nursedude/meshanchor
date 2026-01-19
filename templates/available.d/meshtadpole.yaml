@@ -53,7 +53,9 @@ Lora:
   # ChannelNum: 20
 
 Webserver:
-  Port: 443
+  # Port 9443 is meshtasticd's web UI (browser config)
+  # Port 4403 is the TCP API (CLI, Python SDK, MeshForge gateway)
+  Port: 9443
 
 # === MtnMesh Recommended Settings ===
 # MediumFast preset (MtnMesh community standard):
