@@ -463,34 +463,75 @@ USB_CONFIG
         spi)
             echo -e "  ${CYAN}Installing native meshtasticd for SPI radio...${NC}"
 
+            NATIVE_INSTALLED=false
+
             # Check if already installed
-            if ! command -v meshtasticd &>/dev/null; then
+            if command -v meshtasticd &>/dev/null; then
+                INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
+                NATIVE_INSTALLED=true
+            else
                 # Add OpenSUSE Build Service repo and install via apt
                 if add_meshtastic_repo; then
                     echo "  Installing meshtasticd via apt..."
-                    if apt-get install -y -qq meshtasticd; then
-                        INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
-                        echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
+                    if apt-get install -y meshtasticd 2>&1 | tail -5; then
+                        # Verify it actually installed
+                        if command -v meshtasticd &>/dev/null; then
+                            INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                            echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
+                            NATIVE_INSTALLED=true
+                        else
+                            echo -e "  ${RED}Package installed but binary not found${NC}"
+                        fi
                     else
                         echo -e "  ${RED}Failed to install meshtasticd via apt${NC}"
-                        echo -e "  ${YELLOW}Check: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
                     fi
                 else
                     echo -e "  ${RED}Failed to add Meshtastic repo${NC}"
-                    echo -e "  ${YELLOW}Manual install instructions:${NC}"
-                    echo -e "  ${YELLOW}  1. Visit: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
-                    echo -e "  ${YELLOW}  2. Select your OS and follow instructions${NC}"
                 fi
-            else
-                INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
-                echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
+
+                # If native install failed, fall back to Python CLI
+                if ! $NATIVE_INSTALLED; then
+                    echo -e "  ${YELLOW}Falling back to Python meshtastic CLI...${NC}"
+                    echo -e "  ${YELLOW}(Native meshtasticd required for SPI radios - install manually later)${NC}"
+                    echo -e "  ${YELLOW}Manual: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
+                    pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+
+                    # Create Python CLI service as fallback
+                    cat > /etc/systemd/system/meshtasticd.service << 'FALLBACK_SERVICE'
+[Unit]
+Description=Meshtastic Daemon (Python TCP Server - Fallback)
+Documentation=https://meshtastic.org
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Run meshtastic CLI in TCP server mode (listens on port 4403)
+# Note: Native meshtasticd recommended for SPI radios
+ExecStart=/usr/local/bin/meshtastic --tcp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+FALLBACK_SERVICE
+                    DAEMON_TYPE="python-fallback"
+                    RADIO_TYPE="usb"  # Mark as USB mode for config
+                fi
             fi
 
-            # Enable Meshtoad config by default (copy is more reliable than symlink)
-            cp "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            # Only create native configs if native binary is installed
+            if $NATIVE_INSTALLED; then
+                # Find actual binary path
+                MESHTASTICD_BIN=$(command -v meshtasticd)
+                echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
 
-            # Create main config.yaml (minimal - auto-loads from config.d/)
-            cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
+                # Enable Meshtoad config by default (copy is more reliable than symlink)
+                cp "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+
+                # Create main config.yaml (minimal - auto-loads from config.d/)
+                cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
 ### MeshForge NOC - Meshtasticd Configuration
 ### Device configs are loaded from /etc/meshtasticd/config.d/
 ### Copy configs from available.d/ to config.d/ to activate
@@ -512,8 +553,9 @@ General:
   AvailableDirectory: /etc/meshtasticd/available.d/
 MAIN_CONFIG
 
-            # Create/update systemd service for native meshtasticd
-            cat > /etc/systemd/system/meshtasticd.service << 'NATIVE_SERVICE'
+                # Create/update systemd service for native meshtasticd
+                # Use the actual binary path we found
+                cat > /etc/systemd/system/meshtasticd.service << NATIVE_SERVICE
 [Unit]
 Description=Meshtastic Daemon (Native SPI)
 Documentation=https://meshtastic.org
@@ -523,7 +565,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/etc/meshtasticd
-ExecStart=/usr/bin/meshtasticd -c /etc/meshtasticd/config.yaml
+ExecStart=${MESHTASTICD_BIN} -c /etc/meshtasticd/config.yaml
 Restart=on-failure
 RestartSec=5
 
@@ -531,7 +573,8 @@ RestartSec=5
 WantedBy=multi-user.target
 NATIVE_SERVICE
 
-            DAEMON_TYPE="native"
+                DAEMON_TYPE="native"
+            fi
             ;;
 
         usb)
