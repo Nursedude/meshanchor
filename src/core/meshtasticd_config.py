@@ -83,7 +83,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
 """
     },
     "rak-hat-spi": {
@@ -211,7 +211,7 @@ Logging:
 
 # Server settings (for TCP connections from MeshForge)
 Webserver:
-  Port: 4403
+  Port: 9443
 """
         self.main_config.write_text(config_content)
         logger.info(f"Created main config: {self.main_config}")
