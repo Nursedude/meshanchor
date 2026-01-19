@@ -14,8 +14,11 @@ Falls back to basic terminal menu if neither available.
 import os
 import sys
 import subprocess
+import logging
 from pathlib import Path
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 # Ensure src directory is in path for imports when run directly
 _src_dir = Path(__file__).parent.parent
@@ -435,7 +438,8 @@ class MeshForgeLauncher(
                         summary.append(f"  {line[:60]}...")
             else:
                 summary.append("  No errors in last hour")
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read journal errors: %s", e)
             summary.append("  Unable to read recent errors")
 
         self.dialog.msgbox("Log Analysis", "\n".join(summary))

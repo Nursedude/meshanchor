@@ -171,7 +171,7 @@ class NodeMapTabMixin:
                     try:
                         sock.close()
                     except Exception:
-                        pass
+                        pass  # Cleanup - safe to ignore
 
             if tcp_available:
                 # Check if gateway/other component already has a persistent connection
@@ -253,7 +253,7 @@ class NodeMapTabMixin:
                                 try:
                                     interface.close()
                                 except Exception:
-                                    pass
+                                    pass  # Cleanup - safe to ignore
             else:
                 GLib.idle_add(self._log_message, "meshtasticd TCP port 4403 not available")
 
@@ -355,7 +355,7 @@ class NodeMapTabMixin:
                     try:
                         sock.close()
                     except Exception:
-                        pass
+                        pass  # Cleanup - safe to ignore
 
         self._log_message("No map server found on common ports (9443, 8080, 5000, 8000)")
         self._log_message("Make sure meshtasticd or meshbot web is running")
