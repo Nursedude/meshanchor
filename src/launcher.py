@@ -30,6 +30,13 @@ except ImportError:
             return Path(f'/home/{sudo_user}')
         return Path.home()
 
+# Import NOC orchestrator for service management
+try:
+    from core.orchestrator import ServiceOrchestrator, ServiceState
+    HAS_ORCHESTRATOR = True
+except ImportError:
+    HAS_ORCHESTRATOR = False
+
 # Config file location
 CONFIG_DIR = get_real_user_home() / '.config' / 'meshtasticd-installer'
 CONFIG_FILE = CONFIG_DIR / 'preferences.json'
@@ -467,6 +474,63 @@ def launch_gateway_bridge(src_dir):
         print(f"{Colors.RED}Error starting bridge: {e}{Colors.NC}")
 
 
+def start_noc_services():
+    """
+    Start NOC managed services (meshtasticd, rnsd) if in local mode.
+
+    Returns:
+        bool: True if services ready, False if failed
+    """
+    if not HAS_ORCHESTRATOR:
+        return True  # No orchestrator, skip service management
+
+    # Check if NOC config exists
+    noc_config_path = Path('/etc/meshforge/noc.yaml')
+    if not noc_config_path.exists():
+        # No NOC config, running in legacy mode
+        return True
+
+    try:
+        import yaml
+        with open(noc_config_path) as f:
+            config = yaml.safe_load(f)
+    except Exception:
+        return True  # Can't read config, proceed without orchestration
+
+    noc_mode = config.get('noc', {}).get('mode', 'client')
+    if noc_mode != 'local':
+        return True  # Not managing services in client mode
+
+    print(f"{Colors.CYAN}Starting NOC services...{Colors.NC}")
+
+    orch = ServiceOrchestrator()
+    statuses = orch.get_all_status()
+
+    # Check what needs starting
+    services_to_start = []
+    for name, status in statuses.items():
+        if status.state == ServiceState.NOT_INSTALLED:
+            print(f"  {Colors.YELLOW}⚠ {name} not installed{Colors.NC}")
+        elif status.state in (ServiceState.STOPPED, ServiceState.FAILED):
+            services_to_start.append(name)
+        elif status.state == ServiceState.RUNNING:
+            print(f"  {Colors.GREEN}✓ {name} running{Colors.NC}")
+
+    if not services_to_start:
+        return True
+
+    # Start services
+    success = orch.startup()
+
+    if success:
+        print(f"{Colors.GREEN}✓ NOC services ready{Colors.NC}")
+    else:
+        print(f"{Colors.YELLOW}⚠ Some services failed to start{Colors.NC}")
+        print(f"  Run 'meshforge-noc --status' for details")
+
+    return success
+
+
 def main():
     """Main entry point"""
     # Check root
@@ -474,6 +538,11 @@ def main():
         print(f"\n{Colors.RED}Error: This application requires root/sudo privileges{Colors.NC}")
         print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
         sys.exit(1)
+
+    # Start NOC services if in local mode (meshtasticd, rnsd)
+    # This ensures services are running before we try to connect
+    if '--no-services' not in sys.argv:
+        start_noc_services()
 
     # Check for first run - offer setup wizard
     if '--setup' in sys.argv or check_first_run():
