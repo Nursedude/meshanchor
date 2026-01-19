@@ -152,7 +152,8 @@ echo -e "  ${GREEN}✓ System dependencies installed${NC}"
 # Detect PEP 668 (externally-managed-environment)
 # ─────────────────────────────────────────────────────────────────
 PIP_ARGS=""
-if python3 -c "import sys; sys.exit(0 if any('EXTERNALLY-MANAGED' in open(f).read() for f in __import__('glob').glob(sys.prefix + '/**/EXTERNALLY-MANAGED', recursive=True)) else 1)" 2>/dev/null; then
+# Check for EXTERNALLY-MANAGED file (Debian Bookworm, RPi OS)
+if ls /usr/lib/python3*/EXTERNALLY-MANAGED 1>/dev/null 2>&1; then
     echo -e "${YELLOW}  Detected: Externally managed Python (PEP 668)${NC}"
     PIP_ARGS="--break-system-packages"
 fi
