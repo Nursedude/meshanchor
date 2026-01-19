@@ -59,7 +59,7 @@ except ImportError:
         return Path.home()
 
 # Import modular pane classes
-from panes import DashboardPane, ServicePane, ConfigPane, CLIPane, ToolsPane, HardwarePane
+from tui.panes import DashboardPane, ServicePane, ConfigPane, CLIPane, ToolsPane, HardwarePane
 
 
 class StatusWidget(Static):
