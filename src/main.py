@@ -621,6 +621,14 @@ def _create_rns_config_wizard():
     # Additional options
     console.print("\n[bold]Step 2: Additional Options[/bold]\n")
 
+    # Instance name (for multiple RNS instances)
+    set_instance = Confirm.ask("Set custom instance name? (for multiple RNS instances)", default=False)
+    if set_instance:
+        import socket
+        default_name = socket.gethostname() + " RNS"
+        instance_name = Prompt.ask("  Instance name", default=default_name)
+        config = config.replace('# instance_name = default', f'instance_name = {instance_name}')
+
     # Transport node
     if template_choice in ['2', '6']:
         console.print("[green]✓ Transport enabled (routing for other nodes)[/green]")
@@ -643,6 +651,11 @@ def _create_rns_config_wizard():
         config = config.replace('target_host = remote.example.com', f'target_host = {target_host}')
         config = config.replace('target_port = 4242', f'target_port = {target_port}')
         config = config.replace('name = Remote Server', f'name = {conn_name}')
+
+    # RNode LoRa interface (direct RNode, not Meshtastic)
+    add_rnode = Confirm.ask("\nAdd RNode LoRa interface? (direct RNode hardware)", default=False)
+    if add_rnode:
+        config = _add_rnode_interface(config)
 
     # Meshtastic interface
     if template_choice in ['5', '6']:
@@ -724,6 +737,7 @@ def _build_rns_config(template: str) -> str:
 enable_transport = False
 share_instance = Yes
 shared_instance_port = 37428
+# instance_name = default
 panic_on_interface_error = No
 
 [logging]
@@ -850,6 +864,59 @@ WantedBy=multi-user.target
         console.print(f"[dim]Run: sudo tee /etc/systemd/system/rnsd.service << 'EOF'\n{service_content}EOF[/dim]")
     except Exception as e:
         console.print(f"[red]✗ Error creating service: {e}[/red]")
+
+
+def _add_rnode_interface(config: str) -> str:
+    """Add RNode LoRa interface configuration interactively"""
+    console.print("\n[bold]RNode LoRa Interface Config:[/bold]")
+    console.print("[dim]Direct RNode hardware (not Meshtastic bridge)[/dim]\n")
+
+    # Interface name
+    import socket
+    default_name = socket.gethostname() + " rnode"
+    iface_name = Prompt.ask("  Interface name", default=default_name)
+
+    # Serial port
+    console.print("  [dim]Common ports: /dev/ttyACM0, /dev/ttyUSB0[/dim]")
+    port = Prompt.ask("  Serial port", default="/dev/ttyACM0")
+
+    # Frequency (US 900 MHz band)
+    console.print("  [dim]US frequencies: 902-928 MHz (e.g., 903625000 = 903.625 MHz)[/dim]")
+    frequency = Prompt.ask("  Frequency (Hz)", default="903625000")
+
+    # TX Power
+    console.print("  [dim]TX power: typically 2-22 dBm depending on hardware[/dim]")
+    txpower = Prompt.ask("  TX Power (dBm)", default="22")
+
+    # Bandwidth
+    bandwidths = {'1': '125000', '2': '250000', '3': '500000'}
+    console.print("  Bandwidth: 1=125kHz, 2=250kHz, 3=500kHz")
+    bw_choice = Prompt.ask("  Select bandwidth", choices=["1", "2", "3"], default="2")
+    bandwidth = bandwidths[bw_choice]
+
+    # Spreading factor
+    console.print("  [dim]Spreading factor: 7-12 (lower=faster, higher=longer range)[/dim]")
+    sf = Prompt.ask("  Spreading factor", default="7")
+
+    # Coding rate
+    console.print("  [dim]Coding rate: 5-8 (5=4/5, 6=4/6, 7=4/7, 8=4/8)[/dim]")
+    cr = Prompt.ask("  Coding rate", default="5")
+
+    rnode_config = f'''
+# RNode LoRa Interface
+[[{iface_name}]]
+    type = RNodeInterface
+    interface_enabled = True
+    port = {port}
+    frequency = {frequency}
+    txpower = {txpower}
+    bandwidth = {bandwidth}
+    spreadingfactor = {sf}
+    codingrate = {cr}
+'''
+
+    console.print(f"\n[green]✓ RNode interface '{iface_name}' configured[/green]")
+    return config + rnode_config
 
 
 def network_tools_menu():
