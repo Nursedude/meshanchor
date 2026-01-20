@@ -17,6 +17,7 @@ import os
 import sys
 import subprocess
 import click
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
@@ -28,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.system import check_root, get_system_info
 from utils.logger import setup_logger, log
 from utils import emoji as em
+from utils.paths import get_real_user_home
 from utils.env_config import initialize_config, get_config_bool
 from installer.meshtasticd import MeshtasticdInstaller
 from config.device import DeviceConfigurator
@@ -288,6 +290,7 @@ def rns_tools_menu():
         console.print(f"  [bold]5[/bold]. {em.get('📦')} Install/Update RNS")
         console.print(f"  [bold]6[/bold]. {em.get('📦')} Install NomadNet")
         console.print(f"  [bold]7[/bold]. {em.get('📦')} Install LXMF")
+        console.print(f"  [bold]i[/bold]. {em.get('🔌')} Install Meshtastic Interface")
 
         console.print("\n[dim cyan]-- Configuration --[/dim cyan]")
         console.print(f"  [bold]8[/bold]. {em.get('📝')} Edit RNS config")
@@ -299,7 +302,7 @@ def rns_tools_menu():
         console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to Main Menu")
 
         choice = Prompt.ask("\n[cyan]Select option[/cyan]",
-                          choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "n"],
+                          choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "i", "n"],
                           default="0")
 
         if choice == "0":
@@ -326,6 +329,8 @@ def rns_tools_menu():
             console.print("\n[cyan]Installing LXMF...[/cyan]")
             subprocess.run(['pip3', 'install', '--upgrade', 'lxmf'], timeout=120)
             input("\nPress Enter to continue...")
+        elif choice == "i":
+            _install_meshtastic_interface()
         elif choice == "8":
             config_path = Path.home() / '.reticulum' / 'config'
             if config_path.exists():
@@ -499,6 +504,73 @@ def _run_service_command(service: str, action: str):
             console.print(f"[red]✗ Failed: {result.stderr}[/red]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
+    input("\nPress Enter to continue...")
+
+
+def _install_meshtastic_interface():
+    """Download and install Meshtastic_Interface.py for RNS"""
+    import requests
+
+    console.print("\n[bold cyan]Install Meshtastic Interface[/bold cyan]")
+    console.print("[dim]RNS interface for Meshtastic LoRa transport[/dim]")
+    console.print("[dim]Source: github.com/Nursedude/RNS_Over_Meshtastic_Gateway[/dim]\n")
+
+    # Use get_real_user_home for sudo compatibility
+    real_home = get_real_user_home()
+    interfaces_dir = real_home / '.reticulum' / 'interfaces'
+    interface_file = interfaces_dir / 'Meshtastic_Interface.py'
+
+    # Check if already installed
+    if interface_file.exists():
+        console.print(f"[yellow]Meshtastic_Interface.py already exists at:[/yellow]")
+        console.print(f"  {interface_file}")
+        if not Confirm.ask("\n[cyan]Overwrite with latest version?[/cyan]", default=False):
+            return
+
+    # Create interfaces directory if needed
+    try:
+        interfaces_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Interfaces directory: {interfaces_dir}")
+    except PermissionError:
+        console.print(f"[red]✗ Cannot create {interfaces_dir} - permission denied[/red]")
+        console.print("[dim]Try running without sudo, or check directory permissions[/dim]")
+        input("\nPress Enter to continue...")
+        return
+
+    # Download from Nursedude's fork
+    url = "https://raw.githubusercontent.com/Nursedude/RNS_Over_Meshtastic_Gateway/main/Meshtastic_Interface.py"
+    console.print(f"\n[cyan]Downloading from {url}...[/cyan]")
+
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        interface_file.write_text(response.text)
+        console.print(f"[green]✓ Installed: {interface_file}[/green]")
+
+        # Show config snippet
+        console.print("\n[bold]Add to ~/.reticulum/config:[/bold]")
+        console.print("""
+[dim][[Meshtastic LoRa]]
+  type = Meshtastic_Interface
+  enabled = true
+  # Connection method (choose one):
+  # port = /dev/ttyUSB0     # Serial
+  # ble_addr = AA:BB:CC:DD  # Bluetooth
+  # tcp_addr = 127.0.0.1    # TCP (meshtasticd)
+  tcp_addr = 127.0.0.1
+  tcp_port = 4403
+  data_speed = 8            # 0-8, higher = faster (Short Turbo = 8)[/dim]
+""")
+        console.print("[dim]Note: data_speed 8 requires SHORT_TURBO modem preset[/dim]")
+
+    except requests.exceptions.RequestException as e:
+        console.print(f"[red]✗ Download failed: {e}[/red]")
+    except PermissionError:
+        console.print(f"[red]✗ Cannot write to {interface_file} - permission denied[/red]")
+    except Exception as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
+
     input("\nPress Enter to continue...")
 
 
