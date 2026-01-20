@@ -322,20 +322,20 @@ def rns_tools_menu():
             input("\nPress Enter to continue...")
         elif choice == "5":
             console.print("\n[cyan]Installing RNS...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', 'rns'], timeout=120)
+            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'rns'], timeout=120)
             input("\nPress Enter to continue...")
         elif choice == "6":
             console.print("\n[cyan]Installing NomadNet...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', 'nomadnet'], timeout=120)
+            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'nomadnet'], timeout=120)
             input("\nPress Enter to continue...")
         elif choice == "7":
             console.print("\n[cyan]Installing LXMF...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', 'lxmf'], timeout=120)
+            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'lxmf'], timeout=120)
             input("\nPress Enter to continue...")
         elif choice == "i":
             _install_meshtastic_interface()
         elif choice == "8":
-            config_path = Path.home() / '.reticulum' / 'config'
+            config_path = get_real_user_home() / '.reticulum' / 'config'
             if config_path.exists():
                 subprocess.run(['nano', str(config_path)], timeout=300)
             else:
