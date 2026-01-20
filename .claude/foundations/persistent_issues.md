@@ -1086,7 +1086,7 @@ if current_time - last_check >= 30:
 
 ---
 
-*Last updated: 2026-01-18 - Added Issues #17-19 (Connection Contention, Auto-Reconnect, path_table Discovery)*
+*Last updated: 2026-01-20 - Added Issues #17-21*
 
 ---
 
@@ -1236,5 +1236,51 @@ def _on_message(self, event):
 - Don't add more detection fallback methods - simplify instead
 - Test with actual hardware in various states (running, stopped, misconfigured)
 - UI should always distinguish "service state" from "detection capability"
+
+---
+
+## Issue #21: Meshtastic CLI Preset Settings Not Reliably Applied
+
+### Symptom (Discovered MOC2 2026-01-20)
+- User sets modem preset via CLI: `meshtastic --host localhost --set lora.modem_preset SHORT_TURBO`
+- CLI reports success
+- Browser UI at localhost:9443 shows LONG_FAST (not SHORT_TURBO)
+- Other settings (region, owner) apply correctly
+
+### Root Cause
+**Upstream meshtastic CLI issue** - The Python meshtastic CLI doesn't always apply preset changes correctly. This is NOT a MeshForge bug.
+
+### Impact
+- Users think they're on one preset but actually on another
+- Network performance expectations don't match reality
+- Slot coordination fails if nodes on different presets
+
+### Workaround
+**Always verify in browser** - The Web UI at port 9443 is the source of truth:
+1. Apply settings via CLI
+2. Verify in browser: `http://localhost:9443`
+3. If mismatch, use browser to set correct value
+
+### MeshForge Recommendation
+Add verification step after CLI config:
+
+```python
+# In device config wizard
+def apply_preset(preset_name):
+    result = run_meshtastic_cli(['--set', 'lora.modem_preset', preset_name])
+    if result.success:
+        console.print(f"[yellow]Verify preset in browser: http://localhost:9443[/yellow]")
+        console.print("[dim]Note: CLI preset changes may not always apply correctly[/dim]")
+```
+
+### Files to Update
+- `src/config/radio.py` - Add verification warning
+- `src/main.py` - Add verification step in config wizard
+- Documentation - Note the CLI limitation
+
+### Prevention
+- Always recommend browser verification after CLI changes
+- Consider implementing direct meshtasticd API calls instead of CLI
+- Track upstream meshtastic-python issue
 
 ---
