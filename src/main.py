@@ -602,10 +602,11 @@ def _create_rns_config_wizard():
 
     templates = {
         '1': ('Local Only', 'AutoInterface for LAN discovery only'),
-        '2': ('Gateway Node', 'Transport enabled + AutoInterface + TCP Server'),
+        '2': ('Gateway Node', 'Transport + AutoInterface + TCP Server (host)'),
         '3': ('Client + Testnet', 'AutoInterface + RNS Testnet connections'),
-        '4': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
-        '5': ('Full Gateway', 'Transport + TCP Server + Meshtastic_Interface'),
+        '4': ('Connect to Server', 'AutoInterface + TCPClientInterface (join network)'),
+        '5': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
+        '6': ('Full Gateway', 'Transport + TCP Server + Meshtastic + Client'),
     }
 
     for key, (name, desc) in templates.items():
@@ -621,20 +622,30 @@ def _create_rns_config_wizard():
     console.print("\n[bold]Step 2: Additional Options[/bold]\n")
 
     # Transport node
-    if template_choice in ['2', '5']:
+    if template_choice in ['2', '6']:
         console.print("[green]✓ Transport enabled (routing for other nodes)[/green]")
     else:
         enable_transport = Confirm.ask("Enable transport (route traffic for others)?", default=False)
         if enable_transport:
             config = config.replace('enable_transport = False', 'enable_transport = True')
 
-    # TCP Server port
-    if template_choice in ['2', '5']:
-        tcp_port = Prompt.ask("TCP Server port", default="4242")
+    # TCP Server port (for hosting)
+    if template_choice in ['2', '6']:
+        tcp_port = Prompt.ask("TCP Server port (for incoming connections)", default="4242")
         config = config.replace('listen_port = 4242', f'listen_port = {tcp_port}')
 
+    # TCP Client (connect to remote server)
+    if template_choice in ['4', '6']:
+        console.print("\n[bold]TCP Client Connection (connect to remote RNS node):[/bold]")
+        target_host = Prompt.ask("  Target host/IP", default="192.168.1.1")
+        target_port = Prompt.ask("  Target port", default="4242")
+        conn_name = Prompt.ask("  Connection name", default="Remote RNS")
+        config = config.replace('target_host = remote.example.com', f'target_host = {target_host}')
+        config = config.replace('target_port = 4242', f'target_port = {target_port}')
+        config = config.replace('name = Remote Server', f'name = {conn_name}')
+
     # Meshtastic interface
-    if template_choice in ['4', '5']:
+    if template_choice in ['5', '6']:
         console.print("\n[bold]Meshtastic Interface Config:[/bold]")
         console.print("  [dim]Connection method:[/dim]")
         console.print("    1. TCP (meshtasticd on localhost:4403)")
@@ -771,23 +782,37 @@ loglevel = 4
     hop_limit = 3
 '''
 
+    # TCP Client (connect to remote RNS server)
+    tcp_client = '''
+# Connect to remote RNS server
+[[Remote Server]]
+    type = TCPClientInterface
+    enabled = Yes
+    target_host = remote.example.com
+    target_port = 4242
+    name = Remote Server
+'''
+
     # Build based on template
     if template == '1':  # Local Only
         return base + auto_interface
 
-    elif template == '2':  # Gateway Node
+    elif template == '2':  # Gateway Node (host)
         config = base.replace('enable_transport = False', 'enable_transport = True')
         return config + auto_interface + tcp_server
 
     elif template == '3':  # Client + Testnet
         return base + auto_interface + testnet
 
-    elif template == '4':  # Meshtastic Bridge
+    elif template == '4':  # Connect to Server (TCPClientInterface)
+        return base + auto_interface + tcp_client
+
+    elif template == '5':  # Meshtastic Bridge
         return base + auto_interface + meshtastic
 
-    elif template == '5':  # Full Gateway
+    elif template == '6':  # Full Gateway (everything)
         config = base.replace('enable_transport = False', 'enable_transport = True')
-        return config + auto_interface + tcp_server + meshtastic
+        return config + auto_interface + tcp_server + tcp_client + meshtastic
 
     return base + auto_interface
 
