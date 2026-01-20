@@ -602,10 +602,11 @@ def _create_rns_config_wizard():
 
     templates = {
         '1': ('Local Only', 'AutoInterface for LAN discovery only'),
-        '2': ('Gateway Node', 'Transport enabled + AutoInterface + TCP Server'),
+        '2': ('Gateway Node', 'Transport + AutoInterface + TCP Server (host)'),
         '3': ('Client + Testnet', 'AutoInterface + RNS Testnet connections'),
-        '4': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
-        '5': ('Full Gateway', 'Transport + TCP Server + Meshtastic_Interface'),
+        '4': ('Connect to Server', 'AutoInterface + TCPClientInterface (join network)'),
+        '5': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
+        '6': ('Full Gateway', 'Transport + TCP Server + Meshtastic + Client'),
     }
 
     for key, (name, desc) in templates.items():
@@ -620,21 +621,44 @@ def _create_rns_config_wizard():
     # Additional options
     console.print("\n[bold]Step 2: Additional Options[/bold]\n")
 
+    # Instance name (for multiple RNS instances)
+    set_instance = Confirm.ask("Set custom instance name? (for multiple RNS instances)", default=False)
+    if set_instance:
+        import socket
+        default_name = socket.gethostname() + " RNS"
+        instance_name = Prompt.ask("  Instance name", default=default_name)
+        config = config.replace('# instance_name = default', f'instance_name = {instance_name}')
+
     # Transport node
-    if template_choice in ['2', '5']:
+    if template_choice in ['2', '6']:
         console.print("[green]✓ Transport enabled (routing for other nodes)[/green]")
     else:
         enable_transport = Confirm.ask("Enable transport (route traffic for others)?", default=False)
         if enable_transport:
             config = config.replace('enable_transport = False', 'enable_transport = True')
 
-    # TCP Server port
-    if template_choice in ['2', '5']:
-        tcp_port = Prompt.ask("TCP Server port", default="4242")
+    # TCP Server port (for hosting)
+    if template_choice in ['2', '6']:
+        tcp_port = Prompt.ask("TCP Server port (for incoming connections)", default="4242")
         config = config.replace('listen_port = 4242', f'listen_port = {tcp_port}')
 
+    # TCP Client (connect to remote server)
+    if template_choice in ['4', '6']:
+        console.print("\n[bold]TCP Client Connection (connect to remote RNS node):[/bold]")
+        target_host = Prompt.ask("  Target host/IP", default="192.168.1.1")
+        target_port = Prompt.ask("  Target port", default="4242")
+        conn_name = Prompt.ask("  Connection name", default="Remote RNS")
+        config = config.replace('target_host = remote.example.com', f'target_host = {target_host}')
+        config = config.replace('target_port = 4242', f'target_port = {target_port}')
+        config = config.replace('name = Remote Server', f'name = {conn_name}')
+
+    # RNode LoRa interface (direct RNode, not Meshtastic)
+    add_rnode = Confirm.ask("\nAdd RNode LoRa interface? (direct RNode hardware)", default=False)
+    if add_rnode:
+        config = _add_rnode_interface(config)
+
     # Meshtastic interface
-    if template_choice in ['4', '5']:
+    if template_choice in ['5', '6']:
         console.print("\n[bold]Meshtastic Interface Config:[/bold]")
         console.print("  [dim]Connection method:[/dim]")
         console.print("    1. TCP (meshtasticd on localhost:4403)")
@@ -713,6 +737,7 @@ def _build_rns_config(template: str) -> str:
 enable_transport = False
 share_instance = Yes
 shared_instance_port = 37428
+# instance_name = default
 panic_on_interface_error = No
 
 [logging]
@@ -771,23 +796,37 @@ loglevel = 4
     hop_limit = 3
 '''
 
+    # TCP Client (connect to remote RNS server)
+    tcp_client = '''
+# Connect to remote RNS server
+[[Remote Server]]
+    type = TCPClientInterface
+    enabled = Yes
+    target_host = remote.example.com
+    target_port = 4242
+    name = Remote Server
+'''
+
     # Build based on template
     if template == '1':  # Local Only
         return base + auto_interface
 
-    elif template == '2':  # Gateway Node
+    elif template == '2':  # Gateway Node (host)
         config = base.replace('enable_transport = False', 'enable_transport = True')
         return config + auto_interface + tcp_server
 
     elif template == '3':  # Client + Testnet
         return base + auto_interface + testnet
 
-    elif template == '4':  # Meshtastic Bridge
+    elif template == '4':  # Connect to Server (TCPClientInterface)
+        return base + auto_interface + tcp_client
+
+    elif template == '5':  # Meshtastic Bridge
         return base + auto_interface + meshtastic
 
-    elif template == '5':  # Full Gateway
+    elif template == '6':  # Full Gateway (everything)
         config = base.replace('enable_transport = False', 'enable_transport = True')
-        return config + auto_interface + tcp_server + meshtastic
+        return config + auto_interface + tcp_server + tcp_client + meshtastic
 
     return base + auto_interface
 
@@ -825,6 +864,59 @@ WantedBy=multi-user.target
         console.print(f"[dim]Run: sudo tee /etc/systemd/system/rnsd.service << 'EOF'\n{service_content}EOF[/dim]")
     except Exception as e:
         console.print(f"[red]✗ Error creating service: {e}[/red]")
+
+
+def _add_rnode_interface(config: str) -> str:
+    """Add RNode LoRa interface configuration interactively"""
+    console.print("\n[bold]RNode LoRa Interface Config:[/bold]")
+    console.print("[dim]Direct RNode hardware (not Meshtastic bridge)[/dim]\n")
+
+    # Interface name
+    import socket
+    default_name = socket.gethostname() + " rnode"
+    iface_name = Prompt.ask("  Interface name", default=default_name)
+
+    # Serial port
+    console.print("  [dim]Common ports: /dev/ttyACM0, /dev/ttyUSB0[/dim]")
+    port = Prompt.ask("  Serial port", default="/dev/ttyACM0")
+
+    # Frequency (US 900 MHz band)
+    console.print("  [dim]US frequencies: 902-928 MHz (e.g., 903625000 = 903.625 MHz)[/dim]")
+    frequency = Prompt.ask("  Frequency (Hz)", default="903625000")
+
+    # TX Power
+    console.print("  [dim]TX power: typically 2-22 dBm depending on hardware[/dim]")
+    txpower = Prompt.ask("  TX Power (dBm)", default="22")
+
+    # Bandwidth
+    bandwidths = {'1': '125000', '2': '250000', '3': '500000'}
+    console.print("  Bandwidth: 1=125kHz, 2=250kHz, 3=500kHz")
+    bw_choice = Prompt.ask("  Select bandwidth", choices=["1", "2", "3"], default="2")
+    bandwidth = bandwidths[bw_choice]
+
+    # Spreading factor
+    console.print("  [dim]Spreading factor: 7-12 (lower=faster, higher=longer range)[/dim]")
+    sf = Prompt.ask("  Spreading factor", default="7")
+
+    # Coding rate
+    console.print("  [dim]Coding rate: 5-8 (5=4/5, 6=4/6, 7=4/7, 8=4/8)[/dim]")
+    cr = Prompt.ask("  Coding rate", default="5")
+
+    rnode_config = f'''
+# RNode LoRa Interface
+[[{iface_name}]]
+    type = RNodeInterface
+    interface_enabled = True
+    port = {port}
+    frequency = {frequency}
+    txpower = {txpower}
+    bandwidth = {bandwidth}
+    spreadingfactor = {sf}
+    codingrate = {cr}
+'''
+
+    console.print(f"\n[green]✓ RNode interface '{iface_name}' configured[/green]")
+    return config + rnode_config
 
 
 def network_tools_menu():
