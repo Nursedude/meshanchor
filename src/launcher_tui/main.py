@@ -1094,6 +1094,7 @@ class MeshForgeLauncher(
             ("localhost", "Local TCP (localhost:4403)"),
             ("serial", "Serial Port"),
             ("remote", "Remote Host"),
+            ("back", "Back"),
         ]
 
         choice = self.dialog.menu(
@@ -1102,7 +1103,9 @@ class MeshForgeLauncher(
             choices
         )
 
-        if choice == "localhost":
+        if choice is None or choice == "back":
+            return
+        elif choice == "localhost":
             self.dialog.msgbox("Connection", "Connection set to localhost:4403")
         elif choice == "serial":
             port = self.dialog.inputbox("Serial Port", "Enter serial port:", "/dev/ttyUSB0")
