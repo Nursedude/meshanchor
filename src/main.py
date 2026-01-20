@@ -366,15 +366,19 @@ def gateway_bridge_menu():
     console.print("\n[bold cyan]═══════════ Gateway Bridge ═══════════[/bold cyan]\n")
 
     while True:
-        # Check gateway status
+        # Check gateway status using the bridge module
         gateway_running = False
         try:
-            # Check if gateway process is running
-            result = subprocess.run(['pgrep', '-f', 'gateway.*bridge'],
-                                   capture_output=True, text=True, timeout=5)
-            gateway_running = result.returncode == 0
-        except Exception:
-            pass
+            from gateway.rns_bridge import is_gateway_running
+            gateway_running = is_gateway_running()
+        except ImportError:
+            # Fall back to process check if module not available
+            try:
+                result = subprocess.run(['pgrep', '-f', 'gateway.*bridge'],
+                                       capture_output=True, text=True, timeout=5)
+                gateway_running = result.returncode == 0
+            except Exception:
+                pass
 
         status = "[green]Running[/green]" if gateway_running else "[yellow]Stopped[/yellow]"
         console.print(f"[dim]Gateway Status: {status}[/dim]\n")
