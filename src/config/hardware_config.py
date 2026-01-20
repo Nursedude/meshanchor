@@ -45,45 +45,63 @@ class HardwareDevice:
 
 
 # Known Meshtastic hardware devices
+# yaml_file should match actual templates in templates/available.d/
 HARDWARE_DEVICES = {
-    # LoRa HATs - 900MHz (US/Americas)
-    'lora-900m30s': HardwareDevice(
-        name='LoRa 900MHz 30dBm SX1262',
-        description='High power 900MHz LoRa module (US region)',
-        yaml_file='lora-MeshAdv-900M30S.yaml',
+    # LoRa HATs - High Power
+    'meshadv-pi-hat': HardwareDevice(
+        name='MeshAdv-Pi-Hat (1W)',
+        description='High power SX1262 (E22-900M30S) - US 915MHz',
+        yaml_file='meshadv-pi-hat.yaml',
         requires_spi=True,
         spi_overlay='spi0-0cs',
-        notes='Requires SPI enabled, uses CE0'
+        notes='1W output, requires SPI. Template: meshadv-pi-hat.yaml'
     ),
-    'lora-900m22s': HardwareDevice(
-        name='LoRa 900MHz 22dBm SX1262',
-        description='Standard power 900MHz LoRa module',
-        yaml_file='lora-MeshAdv-900M22S.yaml',
+    # LoRa HATs - Standard Power
+    'meshadv-mini': HardwareDevice(
+        name='MeshAdv-Mini',
+        description='SX1262/SX1268 HAT - 22dBm',
+        yaml_file='meshadv-mini.yaml',
         requires_spi=True,
-        spi_overlay='spi0-0cs'
+        spi_overlay='spi0-0cs',
+        notes='Standard power. Template: meshadv-mini.yaml'
     ),
-    # LoRa HATs - 868MHz (EU)
-    'lora-868m22s': HardwareDevice(
-        name='LoRa 868MHz 22dBm SX1262',
-        description='EU region 868MHz LoRa module',
-        yaml_file='lora-MeshAdv-868M22S.yaml',
+    'waveshare-sx1262': HardwareDevice(
+        name='Waveshare SX1262',
+        description='Waveshare LoRa HAT SX1262',
+        yaml_file='waveshare-sx1262.yaml',
         requires_spi=True,
-        spi_overlay='spi0-0cs'
+        spi_overlay='spi0-0cs',
+        notes='Template: waveshare-sx1262.yaml'
+    ),
+    'adafruit-rfm9x': HardwareDevice(
+        name='Adafruit RFM9x',
+        description='Adafruit LoRa Radio Bonnet RFM95/96',
+        yaml_file='adafruit-rfm9x.yaml',
+        requires_spi=True,
+        spi_overlay='spi0-0cs',
+        notes='Template: adafruit-rfm9x.yaml'
+    ),
+    'meshtoad': HardwareDevice(
+        name='Meshtoad',
+        description='Meshtoad USB-to-SPI adapter (CH341)',
+        yaml_file='meshtoad.yaml',
+        requires_spi=True,
+        notes='Uses CH341 SPI. Template: meshtoad.yaml'
     ),
     # Waveshare displays
     'display-waveshare-1.44': HardwareDevice(
         name='Waveshare 1.44" LCD',
-        description='128x128 SPI LCD display',
-        yaml_file='display-waveshare-1.44.yaml',
+        description='128x128 SPI LCD display (ST7735)',
+        yaml_file='display-waveshare-1-44.yaml',
         requires_spi=True,
-        notes='ST7735 controller'
+        notes='Template: display-waveshare-1-44.yaml'
     ),
     'display-waveshare-2.8': HardwareDevice(
         name='Waveshare 2.8" LCD',
-        description='320x240 SPI LCD display',
+        description='320x240 SPI LCD display (ILI9341)',
         yaml_file='display-waveshare-2.8.yaml',
         requires_spi=True,
-        notes='ILI9341 controller'
+        notes='Template: display-waveshare-2.8.yaml'
     ),
     # I2C devices
     'i2c-oled-128x64': HardwareDevice(
@@ -91,16 +109,16 @@ HARDWARE_DEVICES = {
         description='SSD1306 I2C OLED display',
         yaml_file='display-i2c-oled.yaml',
         requires_spi=False,
-        requires_i2c=True
+        requires_i2c=True,
+        notes='Common OLED display module'
     ),
-    # GPS modules
-    'gps-serial': HardwareDevice(
-        name='Serial GPS Module',
-        description='UART GPS (NEO-6M, NEO-7M, etc.)',
-        yaml_file='gps-serial.yaml',
+    # USB Serial
+    'usb-serial': HardwareDevice(
+        name='USB Serial Radio',
+        description='USB-connected Meshtastic device',
+        yaml_file='usb-serial.yaml',
         requires_spi=False,
-        requires_serial=True,
-        notes='Uses /dev/ttyAMA0 or /dev/serial0'
+        notes='For T-Beam, T-Echo, etc. Template: usb-serial.yaml'
     ),
 }
 
@@ -408,10 +426,11 @@ class HardwareConfigurator:
 
         # Show available devices
         table = Table(title="Available Devices", show_header=True)
-        table.add_column("#", style="bold")
-        table.add_column("Device", style="cyan")
-        table.add_column("Description")
-        table.add_column("Requirements")
+        table.add_column("#", style="bold", width=3)
+        table.add_column("Device", style="cyan", width=20)
+        table.add_column("Description", width=35)
+        table.add_column("Template", style="green", width=25)
+        table.add_column("Requires", width=8)
 
         devices = list(HARDWARE_DEVICES.items())
         for i, (key, device) in enumerate(devices, 1):
@@ -422,9 +441,16 @@ class HardwareConfigurator:
                 reqs.append("I2C")
             if device.requires_serial:
                 reqs.append("Serial")
-            table.add_row(str(i), device.name, device.description, ', '.join(reqs))
+            table.add_row(
+                str(i),
+                device.name,
+                device.description,
+                device.yaml_file,
+                ', '.join(reqs) if reqs else "USB"
+            )
 
         console.print(table)
+        console.print("\n[dim]Template files are in /etc/meshtasticd/available.d/[/dim]")
         console.print()
 
         choice = Prompt.ask("Select device number (or 0 to cancel)", default="0")
@@ -741,6 +767,11 @@ class HardwareConfigurator:
 
         if not Confirm.ask("[bold red]Are you sure you want to reboot now?[/bold red]", default=False):
             console.print("\n[green]Reboot cancelled.[/green]")
+            console.print("\n[yellow]When you reboot manually:[/yellow]")
+            console.print("  [cyan]sudo reboot[/cyan]")
+            console.print("\n[bold green]After reboot, type:[/bold green]")
+            console.print("  [cyan]meshforge[/cyan]")
+            console.print("[dim]to continue configuration[/dim]")
             input("\nPress Enter to continue...")
             return
 

@@ -2,6 +2,7 @@
 
 from rich.console import Console
 from rich.prompt import Prompt, Confirm, IntPrompt
+from rich.table import Table
 
 from utils.logger import log
 

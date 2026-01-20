@@ -393,30 +393,32 @@ def manage_templates():
     console.print("\n[bold cyan]=============== Configuration Templates ===============[/bold cyan]\n")
 
     console.print("[dim cyan]-- Hardware Templates --[/dim cyan]")
-    console.print(f"  [bold]1[/bold]. {em.get('🔧')} MeshAdv-Mini (SX1262/SX1268 HAT)")
-    console.print(f"  [bold]2[/bold]. {em.get('🔧')} MeshAdv-Mini 400MHz variant")
-    console.print(f"  [bold]3[/bold]. {em.get('🔧')} Waveshare SX1262")
-    console.print(f"  [bold]4[/bold]. {em.get('🔧')} Adafruit RFM9x")
+    console.print(f"  [bold]1[/bold]. {em.get('🔧')} MeshAdv-Pi-Hat [yellow](1W High-Power SX1262)[/yellow]")
+    console.print(f"  [bold]2[/bold]. {em.get('🔧')} MeshAdv-Mini (SX1262/SX1268 HAT)")
+    console.print(f"  [bold]3[/bold]. {em.get('🔧')} MeshAdv-Mini 400MHz variant")
+    console.print(f"  [bold]4[/bold]. {em.get('🔧')} Waveshare SX1262")
+    console.print(f"  [bold]5[/bold]. {em.get('🔧')} Adafruit RFM9x")
 
     console.print("\n[dim cyan]-- Network Presets --[/dim cyan]")
-    console.print(f"  [bold]5[/bold]. {em.get('🏔️')}  [yellow]MtnMesh Community[/yellow] [dim](Slot 20, MediumFast)[/dim]")
-    console.print(f"  [bold]6[/bold]. {em.get('🚨')} [yellow]Emergency/SAR[/yellow] [dim](Maximum Range)[/dim]")
-    console.print(f"  [bold]7[/bold]. {em.get('🏙️')}  [yellow]Urban High-Speed[/yellow] [dim](Fast, Short Range)[/dim]")
-    console.print(f"  [bold]8[/bold]. {em.get('📡')} [yellow]Repeater Node[/yellow] [dim](Router Mode)[/dim]")
+    console.print(f"  [bold]6[/bold]. {em.get('🏔️')}  [yellow]MtnMesh Community[/yellow] [dim](Slot 20, MediumFast)[/dim]")
+    console.print(f"  [bold]7[/bold]. {em.get('🚨')} [yellow]Emergency/SAR[/yellow] [dim](Maximum Range)[/dim]")
+    console.print(f"  [bold]8[/bold]. {em.get('🏙️')}  [yellow]Urban High-Speed[/yellow] [dim](Fast, Short Range)[/dim]")
+    console.print(f"  [bold]9[/bold]. {em.get('📡')} [yellow]Repeater Node[/yellow] [dim](Router Mode)[/dim]")
 
-    console.print(f"\n  [bold]9[/bold]. {em.get('⬅️')}  Back to Main Menu")
+    console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to Main Menu")
 
-    choice = Prompt.ask("\n[cyan]Select template[/cyan]", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"], default="9")
+    choice = Prompt.ask("\n[cyan]Select template[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], default="0")
 
     template_map = {
-        "1": "meshadv-mini.yaml",
-        "2": "meshadv-mini-400mhz.yaml",
-        "3": "waveshare-sx1262.yaml",
-        "4": "adafruit-rfm9x.yaml",
-        "5": "mtnmesh-community.yaml",
-        "6": "emergency-sar.yaml",
-        "7": "urban-highspeed.yaml",
-        "8": "repeater-node.yaml"
+        "1": "meshadv-pi-hat.yaml",
+        "2": "meshadv-mini.yaml",
+        "3": "meshadv-mini-400mhz.yaml",
+        "4": "waveshare-sx1262.yaml",
+        "5": "adafruit-rfm9x.yaml",
+        "6": "mtnmesh-community.yaml",
+        "7": "emergency-sar.yaml",
+        "8": "urban-highspeed.yaml",
+        "9": "repeater-node.yaml"
     }
 
     if choice in template_map:
@@ -467,6 +469,19 @@ def apply_template(template_name):
                     console.print("[green]Service restarted![/green]")
                 else:
                     console.print(f"[red]Failed to restart service: {result.stderr}[/red]")
+
+            # Show next steps guidance
+            console.print("\n[bold cyan]═══════════ Next Steps ═══════════[/bold cyan]\n")
+            console.print("[yellow]Complete your node configuration:[/yellow]\n")
+            console.print("  [bold]Option 1: Web Browser[/bold]")
+            console.print("    Open: [cyan]http://localhost:9443[/cyan]")
+            console.print("    Set region, channel settings, and node name\n")
+            console.print("  [bold]Option 2: CLI Commands[/bold]")
+            console.print("    [cyan]meshtastic --host localhost --set lora.region US[/cyan]")
+            console.print("    [cyan]meshtastic --host localhost --set-owner 'YourCallsign'[/cyan]")
+            console.print("    [cyan]meshtastic --host localhost --info[/cyan]")
+            console.print("\n[dim]See: https://meshtastic.org/docs/getting-started/initial-config/[/dim]")
+            input("\nPress Enter to continue...")
 
         except Exception as e:
             console.print(f"[red]Failed to apply template: {e}[/red]")
@@ -635,6 +650,18 @@ def configure_radio_complete():
         radio_config.save_configuration_yaml(config)
 
     console.print("\n[green]Radio configuration complete![/green]")
+
+    # Show next steps
+    console.print("\n[bold cyan]═══════════ Next Steps ═══════════[/bold cyan]\n")
+    console.print("[yellow]Complete your node setup:[/yellow]\n")
+    console.print("  [bold]1. Set Regional Settings (REQUIRED)[/bold]")
+    console.print("    Web: [cyan]http://localhost:9443[/cyan] → Radio Config")
+    console.print("    CLI: [cyan]meshtastic --host localhost --set lora.region US[/cyan]\n")
+    console.print("  [bold]2. Set Node Identity[/bold]")
+    console.print("    [cyan]meshtastic --host localhost --set-owner 'YourCallsign'[/cyan]\n")
+    console.print("  [bold]3. Verify Connection[/bold]")
+    console.print("    [cyan]meshtastic --host localhost --info[/cyan]")
+    console.print("\n[dim]Docs: https://meshtastic.org/docs/getting-started/initial-config/[/dim]")
 
 
 def configure_lora():

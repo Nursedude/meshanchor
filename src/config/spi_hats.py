@@ -483,7 +483,9 @@ class SPIHatConfigurator:
         else:
             console.print("\n[yellow]Please reboot manually when ready:[/yellow]")
             console.print("  [cyan]sudo reboot[/cyan]\n")
-            console.print("[dim]After reboot, run: sudo meshtasticd-installer[/dim]")
+            console.print("[bold green]After reboot, type:[/bold green]")
+            console.print("  [cyan]meshforge[/cyan]")
+            console.print("[dim]to continue configuration[/dim]")
 
     def _setup_resume_service(self):
         """Create a one-shot systemd service to resume installer after reboot"""

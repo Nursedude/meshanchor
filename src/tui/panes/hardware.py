@@ -414,7 +414,10 @@ class HardwarePane(Container):
         log.write("Hardware changes require a reboot to take effect.")
         log.write("")
         log.write("To reboot now, run: [cyan]sudo reboot[/cyan]")
-        log.write("Or reboot later when convenient.")
+        log.write("")
+        log.write("[bold green]After reboot, type:[/bold green]")
+        log.write("  [cyan]meshforge[/cyan]")
+        log.write("[dim]to continue configuration[/dim]")
         log.write("")
 
         # Show what will happen on reboot
