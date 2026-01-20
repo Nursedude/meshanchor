@@ -366,15 +366,19 @@ def gateway_bridge_menu():
     console.print("\n[bold cyan]═══════════ Gateway Bridge ═══════════[/bold cyan]\n")
 
     while True:
-        # Check gateway status
+        # Check gateway status using the bridge module
         gateway_running = False
         try:
-            # Check if gateway process is running
-            result = subprocess.run(['pgrep', '-f', 'gateway.*bridge'],
-                                   capture_output=True, text=True, timeout=5)
-            gateway_running = result.returncode == 0
-        except Exception:
-            pass
+            from gateway.rns_bridge import is_gateway_running
+            gateway_running = is_gateway_running()
+        except ImportError:
+            # Fall back to process check if module not available
+            try:
+                result = subprocess.run(['pgrep', '-f', 'gateway.*bridge'],
+                                       capture_output=True, text=True, timeout=5)
+                gateway_running = result.returncode == 0
+            except Exception:
+                pass
 
         status = "[green]Running[/green]" if gateway_running else "[yellow]Stopped[/yellow]"
         console.print(f"[dim]Gateway Status: {status}[/dim]\n")
@@ -433,9 +437,9 @@ def gateway_bridge_menu():
             input("\nPress Enter to continue...")
         elif choice == "4":
             console.print("\n[cyan]Gateway Configuration:[/cyan]")
-            config_path = Path.home() / '.config' / 'meshforge' / 'gateway.json'
+            config_path = get_real_user_home() / '.config' / 'meshforge' / 'gateway.json'
             if config_path.exists():
-                subprocess.run(['nano', str(config_path)], timeout=300)
+                subprocess.run(['nano', str(config_path)])  # No timeout for editor
             else:
                 console.print(f"[yellow]Config not found at {config_path}[/yellow]")
                 console.print("[dim]Start the gateway once to create default config[/dim]")
