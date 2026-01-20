@@ -37,6 +37,15 @@ try:
 except ImportError:
     HAS_ORCHESTRATOR = False
 
+# Import startup health check
+try:
+    from utils.startup_health import run_health_check, print_health_summary
+    HAS_HEALTH_CHECK = True
+except ImportError:
+    HAS_HEALTH_CHECK = False
+    run_health_check = None
+    print_health_summary = None
+
 # Config file location
 CONFIG_DIR = get_real_user_home() / '.config' / 'meshtasticd-installer'
 CONFIG_FILE = CONFIG_DIR / 'preferences.json'
@@ -137,6 +146,26 @@ def print_banner():
 
     Choose your interface to get started
 {Colors.NC}""")
+
+
+def show_startup_health():
+    """Show startup health summary."""
+    if not HAS_HEALTH_CHECK:
+        return
+
+    print(f"{Colors.CYAN}{'─' * 50}{Colors.NC}")
+    print()
+
+    try:
+        health = run_health_check()
+        summary = print_health_summary(health, use_color=True)
+        print(summary)
+    except Exception as e:
+        print(f"{Colors.YELLOW}Health check skipped: {e}{Colors.NC}")
+
+    print()
+    print(f"{Colors.CYAN}{'─' * 50}{Colors.NC}")
+    print()
 
 
 def detect_environment():
@@ -584,8 +613,9 @@ def main():
         import subprocess
         subprocess.run(['clear'] if os.name == 'posix' else ['cls'], shell=False, check=False, timeout=5)
 
-        # Print banner and info
+        # Print banner and health summary
         print_banner()
+        show_startup_health()
 
         # Detect environment
         env = detect_environment()
