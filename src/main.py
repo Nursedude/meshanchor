@@ -296,6 +296,7 @@ def rns_tools_menu():
         console.print(f"  [bold]i[/bold]. {em.get('🔌')} Install Meshtastic Interface")
 
         console.print("\n[dim cyan]-- Configuration --[/dim cyan]")
+        console.print(f"  [bold]c[/bold]. {em.get('🛠️')} [green]Create/Setup RNS Config[/green] [dim](Templates)[/dim]")
         console.print(f"  [bold]8[/bold]. {em.get('📝')} Edit RNS config")
         console.print(f"  [bold]9[/bold]. {em.get('📊')} Show rnstatus")
 
@@ -305,7 +306,7 @@ def rns_tools_menu():
         console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to Main Menu")
 
         choice = Prompt.ask("\n[cyan]Select option[/cyan]",
-                          choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "i", "n"],
+                          choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "i", "n"],
                           default="0")
 
         if choice == "0":
@@ -334,6 +335,8 @@ def rns_tools_menu():
             input("\nPress Enter to continue...")
         elif choice == "i":
             _install_meshtastic_interface()
+        elif choice == "c":
+            _create_rns_config_wizard()
         elif choice == "8":
             config_path = get_real_user_home() / '.reticulum' / 'config'
             if config_path.exists():
@@ -575,6 +578,253 @@ def _install_meshtastic_interface():
         console.print(f"[red]✗ Error: {e}[/red]")
 
     input("\nPress Enter to continue...")
+
+
+def _create_rns_config_wizard():
+    """Create or reconfigure ~/.reticulum/config with templates"""
+    console.print("\n[bold cyan]═══════════ RNS Configuration Wizard ═══════════[/bold cyan]")
+    console.print("[dim]Configure Reticulum Network Stack[/dim]\n")
+
+    real_home = get_real_user_home()
+    config_dir = real_home / '.reticulum'
+    config_file = config_dir / 'config'
+
+    # Check if config exists
+    if config_file.exists():
+        console.print(f"[yellow]Existing config found: {config_file}[/yellow]")
+        if not Confirm.ask("Overwrite with new configuration?", default=False):
+            console.print("[dim]Keeping existing config[/dim]")
+            input("\nPress Enter to continue...")
+            return
+
+    # Template selection
+    console.print("\n[bold]Step 1: Select Configuration Template[/bold]\n")
+
+    templates = {
+        '1': ('Local Only', 'AutoInterface for LAN discovery only'),
+        '2': ('Gateway Node', 'Transport enabled + AutoInterface + TCP Server'),
+        '3': ('Client + Testnet', 'AutoInterface + RNS Testnet connections'),
+        '4': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
+        '5': ('Full Gateway', 'Transport + TCP Server + Meshtastic_Interface'),
+    }
+
+    for key, (name, desc) in templates.items():
+        console.print(f"  [bold]{key}[/bold]. {name} - [dim]{desc}[/dim]")
+
+    template_choice = Prompt.ask("\n[cyan]Select template[/cyan]",
+                                 choices=list(templates.keys()), default="1")
+
+    # Build configuration based on template
+    config = _build_rns_config(template_choice)
+
+    # Additional options
+    console.print("\n[bold]Step 2: Additional Options[/bold]\n")
+
+    # Transport node
+    if template_choice in ['2', '5']:
+        console.print("[green]✓ Transport enabled (routing for other nodes)[/green]")
+    else:
+        enable_transport = Confirm.ask("Enable transport (route traffic for others)?", default=False)
+        if enable_transport:
+            config = config.replace('enable_transport = False', 'enable_transport = True')
+
+    # TCP Server port
+    if template_choice in ['2', '5']:
+        tcp_port = Prompt.ask("TCP Server port", default="4242")
+        config = config.replace('listen_port = 4242', f'listen_port = {tcp_port}')
+
+    # Meshtastic interface
+    if template_choice in ['4', '5']:
+        console.print("\n[bold]Meshtastic Interface Config:[/bold]")
+        console.print("  [dim]Connection method:[/dim]")
+        console.print("    1. TCP (meshtasticd on localhost:4403)")
+        console.print("    2. Serial (/dev/ttyUSB0)")
+        console.print("    3. BLE (Bluetooth)")
+
+        mesh_conn = Prompt.ask("  Connection type", choices=["1", "2", "3"], default="1")
+
+        if mesh_conn == "1":
+            config = config.replace('# tcp_port = 127.0.0.1:4403', 'tcp_port = 127.0.0.1:4403')
+            config = config.replace('port = /dev/ttyUSB0', '# port = /dev/ttyUSB0')
+        elif mesh_conn == "2":
+            port = Prompt.ask("  Serial port", default="/dev/ttyUSB0")
+            config = config.replace('port = /dev/ttyUSB0', f'port = {port}')
+        else:
+            ble_addr = Prompt.ask("  BLE device name/address", default="RNode_1234")
+            config = config.replace('port = /dev/ttyUSB0', f'# port = /dev/ttyUSB0')
+            config = config.replace('# ble_port = RNode_1234', f'ble_port = {ble_addr}')
+
+        data_speed = Prompt.ask("  Data speed (0=LongFast, 8=Turbo)", default="8")
+        config = config.replace('data_speed = 8', f'data_speed = {data_speed}')
+
+    # Display preview
+    console.print("\n[bold]Configuration Preview:[/bold]")
+    console.print("[dim]" + "─" * 50 + "[/dim]")
+    # Show first 30 lines
+    preview_lines = config.split('\n')[:35]
+    for line in preview_lines:
+        if line.startswith('#'):
+            console.print(f"[dim]{line}[/dim]")
+        elif line.startswith('['):
+            console.print(f"[cyan]{line}[/cyan]")
+        elif '=' in line and not line.strip().startswith('#'):
+            console.print(f"[green]{line}[/green]")
+        else:
+            console.print(line)
+    console.print("[dim]... (truncated)[/dim]")
+    console.print("[dim]" + "─" * 50 + "[/dim]")
+
+    # Save config
+    if Confirm.ask("\n[cyan]Save this configuration?[/cyan]", default=True):
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(config)
+            console.print(f"\n[green]✓ Config saved to {config_file}[/green]")
+
+            # Offer to create rnsd service
+            if not Path('/etc/systemd/system/rnsd.service').exists():
+                if Confirm.ask("\nCreate rnsd systemd service?", default=True):
+                    _create_rnsd_service()
+
+            console.print("\n[bold yellow]Next steps:[/bold yellow]")
+            console.print("  1. Start rnsd: [cyan]sudo systemctl start rnsd[/cyan]")
+            console.print("  2. Check status: [cyan]rnstatus[/cyan]")
+            console.print("  3. View logs: [cyan]journalctl -u rnsd -f[/cyan]")
+
+        except PermissionError:
+            console.print(f"[red]✗ Cannot write to {config_file} - permission denied[/red]")
+        except Exception as e:
+            console.print(f"[red]✗ Error: {e}[/red]")
+    else:
+        console.print("[yellow]Configuration cancelled[/yellow]")
+
+    input("\nPress Enter to continue...")
+
+
+def _build_rns_config(template: str) -> str:
+    """Build RNS config based on template choice"""
+
+    # Base config
+    base = '''# Reticulum Network Stack Configuration
+# Generated by MeshForge
+# Reference: https://reticulum.network/manual/interfaces.html
+
+[reticulum]
+enable_transport = False
+share_instance = Yes
+shared_instance_port = 37428
+panic_on_interface_error = No
+
+[logging]
+loglevel = 4
+
+[interfaces]
+'''
+
+    # AutoInterface (all templates)
+    auto_interface = '''
+# Local network discovery
+[[Default Interface]]
+    type = AutoInterface
+    enabled = Yes
+'''
+
+    # TCP Server (for gateway templates)
+    tcp_server = '''
+# Accept incoming RNS connections
+[[TCP Server]]
+    type = TCPServerInterface
+    enabled = Yes
+    listen_ip = 0.0.0.0
+    listen_port = 4242
+'''
+
+    # Testnet connections
+    testnet = '''
+# RNS Testnet - Dublin
+[[RNS Testnet Dublin]]
+    type = TCPClientInterface
+    enabled = Yes
+    target_host = dublin.connect.reticulum.network
+    target_port = 4965
+
+# RNS Testnet - BetweenTheBorders
+[[RNS Testnet BTB]]
+    type = TCPClientInterface
+    enabled = Yes
+    target_host = reticulum.betweentheborders.com
+    target_port = 4242
+'''
+
+    # Meshtastic interface
+    meshtastic = '''
+# Meshtastic LoRa Bridge
+# Requires: Meshtastic_Interface.py in ~/.reticulum/interfaces/
+[[Meshtastic LoRa]]
+    type = Meshtastic_Interface
+    enabled = Yes
+    mode = gateway
+    port = /dev/ttyUSB0
+    # tcp_port = 127.0.0.1:4403
+    # ble_port = RNode_1234
+    data_speed = 8
+    hop_limit = 3
+'''
+
+    # Build based on template
+    if template == '1':  # Local Only
+        return base + auto_interface
+
+    elif template == '2':  # Gateway Node
+        config = base.replace('enable_transport = False', 'enable_transport = True')
+        return config + auto_interface + tcp_server
+
+    elif template == '3':  # Client + Testnet
+        return base + auto_interface + testnet
+
+    elif template == '4':  # Meshtastic Bridge
+        return base + auto_interface + meshtastic
+
+    elif template == '5':  # Full Gateway
+        config = base.replace('enable_transport = False', 'enable_transport = True')
+        return config + auto_interface + tcp_server + meshtastic
+
+    return base + auto_interface
+
+
+def _create_rnsd_service():
+    """Create rnsd systemd service"""
+    import pwd
+
+    # Get the real user (not root if running with sudo)
+    real_user = os.environ.get('SUDO_USER', os.environ.get('USER', 'pi'))
+
+    service_content = f'''[Unit]
+Description=Reticulum Network Stack Daemon
+After=network.target
+
+[Service]
+Type=simple
+User={real_user}
+ExecStart=/usr/local/bin/rnsd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+'''
+
+    try:
+        service_path = Path('/etc/systemd/system/rnsd.service')
+        service_path.write_text(service_content)
+        subprocess.run(['systemctl', 'daemon-reload'], timeout=10)
+        subprocess.run(['systemctl', 'enable', 'rnsd'], timeout=10)
+        console.print("[green]✓ rnsd service created and enabled[/green]")
+    except PermissionError:
+        console.print("[red]✗ Need sudo to create systemd service[/red]")
+        console.print(f"[dim]Run: sudo tee /etc/systemd/system/rnsd.service << 'EOF'\n{service_content}EOF[/dim]")
+    except Exception as e:
+        console.print(f"[red]✗ Error creating service: {e}[/red]")
 
 
 def network_tools_menu():
