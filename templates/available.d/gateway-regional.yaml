@@ -1,0 +1,102 @@
+# MeshForge Gateway Configuration - Regional RNS Bridge
+# Meshtastic: Short Turbo, Slot 8 → MeshForge Gateway → RNS Regional
+#
+# Use Case: Bridging local Meshtastic mesh to Regional RNS network
+# Created: 2026-01-20
+# Author: WH6GXZ / Dude AI
+#
+# This template configures meshtasticd for gateway bridge operation
+# with Short Turbo preset on frequency slot 8.
+
+# === LoRa Configuration ===
+Lora:
+  # SX1262 module (MeshAdv-Pi-Hat or similar)
+  Module: sx1262
+
+  # GPIO Configuration (MeshAdv-Pi-Hat pinout)
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  TXen: 13
+  RXen: 12
+  DIO3_TCXO_VOLTAGE: true
+
+# === Radio Settings ===
+# Short Turbo preset for high-throughput gateway operations
+# Good balance of speed and range for gateway use
+Radio:
+  # Region: US (902-928 MHz ISM band)
+  Region: US
+
+  # Frequency Slot 8 - dedicated gateway channel
+  # Avoids default slot 0 used by most nodes
+  FrequencySlot: 8
+
+  # Short Turbo Modem Preset
+  # - Bandwidth: 250 kHz
+  # - Spreading Factor: 11
+  # - Coding Rate: 4/5
+  # - ~6.8 kbps effective data rate
+  ModemPreset: SHORT_TURBO
+
+  # Hop Limit - gateway typically uses 3
+  HopLimit: 3
+
+  # TX Power - adjust based on your setup
+  # MeshAdv-Pi-Hat: 30 dBm max (1W)
+  TxPower: 30
+
+# === Device Identity ===
+Device:
+  # Long name (up to 40 characters)
+  LongName: "wh6gxz-ecom"
+
+  # Short name (4 characters for mesh display)
+  ShortName: "ecom"
+
+  # Role: Router for gateway operations
+  Role: ROUTER
+
+# === Position (Big Island, Hawaii) ===
+Position:
+  Latitude: 19.435175
+  Longitude: -155.213842
+  Altitude: 0
+  PositionBroadcastSecs: 900  # 15 minutes
+
+# === MQTT Configuration ===
+# Disable MQTT since we're bridging to RNS instead
+MQTT:
+  Enabled: false
+  IgnoreMQTT: true
+
+# === Webserver ===
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+# === Logging ===
+Logging:
+  LogLevel: info
+
+# === General ===
+General:
+  MaxNodes: 200
+
+# === MeshForge Gateway Notes ===
+#
+# After applying this config:
+# 1. Restart meshtasticd: sudo systemctl restart meshtasticd
+# 2. Verify via browser: http://localhost:9443
+# 3. Configure RNS bridge in MeshForge:
+#    - meshforge → Gateway Configuration
+#    - Set RNS interface to Regional
+#    - Enable bidirectional bridge
+#
+# RNS Config (~/.reticulum/config):
+#   [[Regional]]
+#     type = TCPClientInterface
+#     enabled = yes
+#     target_host = regional.example.com
+#     target_port = 4242

@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-01-17
+> **Last Updated:** 2026-01-20
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -36,6 +36,25 @@
 - [x] **Gateway setup wizard** - Guided configuration for new users (2026-01-12)
 - [x] **Bridge status monitoring** - Real-time health checks (API endpoints)
 - [x] `rns_bridge.py:624` - Implement regex matching for filters (2026-01-11)
+- [x] **Gateway config template** - gateway-regional.yaml (2026-01-20)
+
+### Rich CLI Enhancements (MOC2 Testing)
+- [ ] **RNS/RNSD tools menu** - Mirror GTK panel functionality:
+  - [ ] rnsd service status/control
+  - [ ] Config file editor
+  - [ ] Interface list
+  - [ ] Announce management
+  - [ ] NomadNet launcher
+- [ ] **Device config wizard** - Complete setup flow:
+  - [ ] Long name (40 char)
+  - [ ] Short name (4 char)
+  - [ ] Region selection
+  - [ ] Frequency slot
+  - [ ] Modem preset (Short Turbo, etc.)
+  - [ ] TX power
+  - [ ] Position (lat/lon)
+  - [ ] MQTT policy
+- [ ] **Gateway config menu** - For RNS bridge setup
 
 ### Code Quality
 - [x] **Consolidate `get_real_user_home()`** - Reviewed: try/except fallback pattern is intentional for robustness when utils.paths unavailable
@@ -152,6 +171,15 @@
 - [x] **Link budget history/trends** (2026-01-17)
 - [x] **REST API documentation** (2026-01-17)
 - [x] **Webhook support** (2026-01-17)
+- [x] **MOC2 Health Check Fixes** (2026-01-20):
+  - [x] Fixed Table import in radio.py
+  - [x] Fixed meshtasticd.service (was using `meshtastic --tcp` client instead of daemon)
+  - [x] Added post-reboot guidance ("type meshforge to continue")
+  - [x] Added MeshAdv-Pi-Hat to template menu
+  - [x] Added post-config guidance (browser/CLI next steps)
+  - [x] Improved hardware-to-template mapping
+  - [x] Improved auto-review index_no_check pattern (19→0 false positives)
+  - [x] Created gateway-regional.yaml template
 
 ---
 
