@@ -498,32 +498,26 @@ USB_CONFIG
 
                 # If native install failed, fall back to Python CLI
                 if ! $NATIVE_INSTALLED; then
-                    echo -e "  ${YELLOW}Falling back to Python meshtastic CLI...${NC}"
-                    echo -e "  ${YELLOW}(Native meshtasticd required for SPI radios - install manually later)${NC}"
-                    echo -e "  ${YELLOW}Manual: https://software.opensuse.org/download.html?project=network%3AMeshtastic%3Abeta&package=meshtasticd${NC}"
+                    echo -e "  ${YELLOW}Native meshtasticd required for SPI radios${NC}"
+                    echo -e "  ${YELLOW}Install from: https://meshtastic.org/docs/software/linux-native/${NC}"
                     pip3 install $PIP_ARGS --ignore-installed -q meshtastic
 
-                    # Create Python CLI service as fallback
-                    cat > /etc/systemd/system/meshtasticd.service << 'FALLBACK_SERVICE'
+                    # Create placeholder service explaining the requirement
+                    cat > /etc/systemd/system/meshtasticd.service << 'SPI_NEEDS_NATIVE'
 [Unit]
-Description=Meshtastic Daemon (Python TCP Server - Fallback)
-Documentation=https://meshtastic.org
-After=network.target
+Description=Meshtastic (Native daemon required for SPI)
+Documentation=https://meshtastic.org/docs/software/linux-native/
 
 [Service]
-Type=simple
-User=root
-# Run meshtastic CLI in TCP server mode (listens on port 4403)
-# Note: Native meshtasticd recommended for SPI radios
-ExecStart=/usr/local/bin/meshtastic --tcp
-Restart=on-failure
-RestartSec=5
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/echo "SPI radios require native meshtasticd. Install from meshtastic.org then run: meshforge"
 
 [Install]
 WantedBy=multi-user.target
-FALLBACK_SERVICE
-                    DAEMON_TYPE="python-fallback"
-                    RADIO_TYPE="usb"  # Mark as USB mode for config
+SPI_NEEDS_NATIVE
+                    DAEMON_TYPE="spi-pending"
+                    RADIO_TYPE="spi"  # Mark as SPI mode needing native daemon
                 fi
             fi
 
@@ -584,13 +578,13 @@ NATIVE_SERVICE
             ;;
 
         usb)
-            echo -e "  ${CYAN}Installing Python meshtastic for USB radio...${NC}"
+            echo -e "  ${CYAN}Installing for USB serial radio...${NC}"
 
-            # Install meshtastic Python package
+            # Install meshtastic Python package for CLI tools
             pip3 install $PIP_ARGS --ignore-installed -q meshtastic
 
             USB_DEV=$(get_usb_device)
-            echo -e "  ${GREEN}✓ Python meshtastic installed${NC}"
+            echo -e "  ${GREEN}✓ Python meshtastic CLI installed${NC}"
             if [[ -n "$USB_DEV" ]]; then
                 echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
             fi
@@ -598,36 +592,89 @@ NATIVE_SERVICE
             # Enable USB config (copy is more reliable than symlink)
             cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
 
-            # Create systemd service for Python CLI
-            cat > /etc/systemd/system/meshtasticd.service << 'PYTHON_SERVICE'
+            # Check if native meshtasticd is available (can work with USB serial too)
+            if command -v meshtasticd &> /dev/null; then
+                MESHTASTICD_BIN=$(command -v meshtasticd)
+                echo -e "  ${GREEN}✓ Native meshtasticd available: ${MESHTASTICD_BIN}${NC}"
+
+                # Create USB serial config for native daemon
+                if [[ -n "$USB_DEV" ]]; then
+                    cat > "$MESHTASTICD_CONFIG_DIR/config.d/usb-device.yaml" << USB_CONFIG
+# USB Serial Radio Configuration (auto-generated)
+Lora:
+  SerialPath: ${USB_DEV}
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 200
+USB_CONFIG
+                fi
+
+                # Create service using native meshtasticd
+                cat > /etc/systemd/system/meshtasticd.service << NATIVE_USB_SERVICE
 [Unit]
-Description=Meshtastic Daemon (Python TCP Server)
+Description=Meshtastic Daemon (USB Serial)
 Documentation=https://meshtastic.org
 After=network.target
 
 [Service]
 Type=simple
 User=root
-# Run meshtastic CLI in TCP server mode (listens on port 4403)
-ExecStart=/usr/local/bin/meshtastic --tcp
+WorkingDirectory=/etc/meshtasticd
+ExecStart=${MESHTASTICD_BIN} -c /etc/meshtasticd/config.yaml
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-PYTHON_SERVICE
+NATIVE_USB_SERVICE
 
-            DAEMON_TYPE="python"
+                DAEMON_TYPE="native-usb"
+            else
+                # No native daemon - USB radios work directly without a service
+                # The firmware handles mesh networking; CLI connects on demand
+                echo -e "  ${YELLOW}Note: USB radios don't require a daemon service${NC}"
+                echo -e "  ${YELLOW}  Use CLI: meshtastic --port ${USB_DEV:-/dev/ttyUSB0} --info${NC}"
+
+                # Create a placeholder service that explains the situation
+                cat > /etc/systemd/system/meshtasticd.service << 'USB_PLACEHOLDER'
+[Unit]
+Description=Meshtastic USB Radio (No Daemon Needed)
+Documentation=https://meshtastic.org
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/echo "USB radios work directly - use: meshtastic --port /dev/ttyUSB0 --info"
+
+[Install]
+WantedBy=multi-user.target
+USB_PLACEHOLDER
+
+                DAEMON_TYPE="usb-direct"
+            fi
             ;;
 
         none)
             echo -e "  ${YELLOW}⚠ No radio detected${NC}"
-            echo -e "  ${YELLOW}  Installing Python meshtastic (default)${NC}"
+            echo -e "  ${YELLOW}  Installing Python meshtastic CLI tools${NC}"
 
             pip3 install $PIP_ARGS --ignore-installed -q meshtastic
 
-            # Create a generic service
-            cat > /etc/systemd/system/meshtasticd.service << 'GENERIC_SERVICE'
+            # Check if native meshtasticd is available
+            if command -v meshtasticd &> /dev/null; then
+                MESHTASTICD_BIN=$(command -v meshtasticd)
+                echo -e "  ${GREEN}✓ Native meshtasticd available: ${MESHTASTICD_BIN}${NC}"
+                echo -e "  ${YELLOW}  Configure hardware in /etc/meshtasticd/config.d/${NC}"
+
+                # Create service using native meshtasticd
+                cat > /etc/systemd/system/meshtasticd.service << NATIVE_GENERIC
 [Unit]
 Description=Meshtastic Daemon
 Documentation=https://meshtastic.org
@@ -636,15 +683,36 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/meshtastic --tcp
+WorkingDirectory=/etc/meshtasticd
+ExecStart=${MESHTASTICD_BIN} -c /etc/meshtasticd/config.yaml
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-GENERIC_SERVICE
+NATIVE_GENERIC
 
-            DAEMON_TYPE="python"
+                DAEMON_TYPE="native"
+            else
+                # Create a placeholder service
+                echo -e "  ${YELLOW}  Connect USB radio or configure SPI HAT${NC}"
+
+                cat > /etc/systemd/system/meshtasticd.service << 'NO_RADIO_SERVICE'
+[Unit]
+Description=Meshtastic (No Radio Configured)
+Documentation=https://meshtastic.org
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/echo "No radio detected. Connect USB radio or configure SPI HAT, then run: meshforge"
+
+[Install]
+WantedBy=multi-user.target
+NO_RADIO_SERVICE
+
+                DAEMON_TYPE="placeholder"
+            fi
             ;;
     esac
 
