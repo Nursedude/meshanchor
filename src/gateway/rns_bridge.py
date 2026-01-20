@@ -42,6 +42,15 @@ logger = logging.getLogger(__name__)
 # Import centralized path utility
 from utils.paths import get_real_user_home
 
+# Import service checker for pre-flight checks (Issue #3)
+try:
+    from utils.service_check import check_service, ServiceState
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    HAS_SERVICE_CHECK = False
+    check_service = None
+    ServiceState = None
+
 # Import event bus for RX message notifications (Issue #17 Phase 3)
 try:
     from utils.event_bus import emit_message
@@ -174,6 +183,16 @@ class RNSMeshtasticBridge:
         if self._running:
             logger.warning("Bridge already running")
             return True
+
+        # Issue #3: Pre-flight service check
+        if HAS_SERVICE_CHECK:
+            meshtasticd_status = check_service('meshtasticd')
+            if not meshtasticd_status.available:
+                logger.warning(f"meshtasticd not available: {meshtasticd_status.message}")
+                logger.warning(f"Fix: {meshtasticd_status.fix_hint}")
+                # Continue anyway - gateway can start in degraded mode
+            else:
+                logger.info("Pre-flight check: meshtasticd is running")
 
         logger.info("Starting RNS-Meshtastic bridge...")
         self._running = True

@@ -19,14 +19,14 @@ import logging
 import subprocess
 from datetime import datetime
 
-# Import event bus for real-time message updates (Issue #17 Phase 3)
+# Import MessageListener for real-time RX message display (Issue #20 Phase 3)
+# Uses existing callback pattern - no new event bus needed
 try:
-    from utils.event_bus import event_bus, MessageEvent
-    HAS_EVENT_BUS = True
+    from utils.message_listener import MessageListener
+    HAS_MESSAGE_LISTENER = True
 except ImportError:
-    HAS_EVENT_BUS = False
-    event_bus = None
-    MessageEvent = None
+    HAS_MESSAGE_LISTENER = False
+    MessageListener = None
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +50,19 @@ class MessagingPanel(Gtk.Box):
         # Connect cleanup handler for when panel is destroyed
         self.connect("unrealize", self._on_unrealize)
 
-        # Subscribe to event bus for real-time RX messages (Issue #17 Phase 3)
-        self._event_handler = None
-        if HAS_EVENT_BUS and event_bus:
-            self._event_handler = self._on_message_event
-            event_bus.subscribe('message', self._event_handler)
-            logger.debug("MessagingPanel subscribed to message events")
+        # Subscribe to MessageListener for real-time RX messages (Issue #20 Phase 3)
+        # Uses existing callback pattern - stable and simple
+        self._message_listener = None
+        self._listener_callback = None
+        if HAS_MESSAGE_LISTENER:
+            try:
+                self._message_listener = MessageListener()
+                self._listener_callback = self._on_rx_message
+                self._message_listener.add_callback(self._listener_callback)
+                self._message_listener.start()
+                logger.debug("MessagingPanel subscribed to MessageListener")
+            except Exception as e:
+                logger.debug("Could not start MessageListener: %s", e)
 
     def _on_unrealize(self, widget):
         """Called when panel is destroyed - trigger cleanup."""
@@ -621,9 +628,55 @@ class MessagingPanel(Gtk.Box):
         threading.Thread(target=do_open, daemon=True).start()
         self.main_window.set_status_message("Opening Meshtastic Web Client...")
 
+    def _on_rx_message(self, msg_data: dict):
+        """
+        Handle incoming message from MessageListener (Issue #20 Phase 3).
+
+        Called from listener thread - schedules UI update on GTK main thread.
+        msg_data contains: from_id, to_id, content, channel, snr, rssi, timestamp
+        """
+        # Schedule UI update on GTK main thread (GTK threading rule)
+        GLib.idle_add(self._add_rx_message_to_ui, msg_data)
+
+    def _add_rx_message_to_ui(self, msg_data: dict):
+        """Add received message to UI (runs on GTK main thread)."""
+        try:
+            from_id = msg_data.get('from_id', 'Unknown')
+            content = msg_data.get('content', '')
+            timestamp = msg_data.get('timestamp', datetime.now())
+
+            if isinstance(timestamp, (int, float)):
+                timestamp = datetime.fromtimestamp(timestamp)
+
+            # Add to messages list
+            if hasattr(self, '_messages_store'):
+                # Format: [direction, from, content, timestamp, status]
+                self._messages_store.append([
+                    "RX",
+                    str(from_id),
+                    str(content)[:100],  # Truncate for display
+                    timestamp.strftime("%H:%M:%S") if hasattr(timestamp, 'strftime') else str(timestamp),
+                    "received"
+                ])
+                logger.debug(f"RX message added to UI from {from_id}")
+
+            # Update stats
+            if hasattr(self, 'received_count'):
+                current = int(self.received_count.get_text().split(': ')[1])
+                self.received_count.set_text(f"Received: {current + 1}")
+
+        except Exception as e:
+            logger.debug("Error adding RX message to UI: %s", e)
+
+        return False  # Don't repeat GLib.idle_add
+
     def cleanup(self):
         """Clean up panel resources."""
-        # Unsubscribe from event bus (Issue #17 Phase 3)
-        if HAS_EVENT_BUS and event_bus and self._event_handler:
-            event_bus.unsubscribe('message', self._event_handler)
-            logger.debug("MessagingPanel unsubscribed from message events")
+        # Stop and unsubscribe from MessageListener (Issue #20 Phase 3)
+        if self._message_listener and self._listener_callback:
+            try:
+                self._message_listener.remove_callback(self._listener_callback)
+                self._message_listener.stop()
+                logger.debug("MessagingPanel unsubscribed from MessageListener")
+            except Exception as e:
+                logger.debug("Error cleaning up MessageListener: %s", e)
