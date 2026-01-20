@@ -340,7 +340,7 @@ def rns_tools_menu():
         elif choice == "8":
             config_path = get_real_user_home() / '.reticulum' / 'config'
             if config_path.exists():
-                subprocess.run(['nano', str(config_path)], timeout=300)
+                subprocess.run(['nano', str(config_path)])  # No timeout for editor
             else:
                 console.print(f"[yellow]Config not found at {config_path}[/yellow]")
                 console.print("[dim]Run 'rnsd' once to create default config[/dim]")
