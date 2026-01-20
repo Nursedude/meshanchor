@@ -17,6 +17,7 @@ import os
 import sys
 import subprocess
 import click
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
@@ -28,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.system import check_root, get_system_info
 from utils.logger import setup_logger, log
 from utils import emoji as em
+from utils.paths import get_real_user_home
 from utils.env_config import initialize_config, get_config_bool
 from installer.meshtasticd import MeshtasticdInstaller
 from config.device import DeviceConfigurator
@@ -139,6 +141,11 @@ def interactive_menu():
         console.print("\n[dim cyan]-- Meshtastic CLI --[/dim cyan]")
         console.print(f"  [bold]c[/bold]. {em.get('💻')} [yellow]Meshtastic CLI Commands[/yellow]")
 
+        # RNS/Gateway Section
+        console.print("\n[dim cyan]-- RNS & Gateway --[/dim cyan]")
+        console.print(f"  [bold]s[/bold]. {em.get('🌐')} [green]RNS Tools[/green] [dim](rnsd, NomadNet, LXMF)[/dim]")
+        console.print(f"  [bold]b[/bold]. {em.get('🔗')} [green]Gateway Bridge[/green] [dim](Meshtastic ↔ RNS)[/dim]")
+
         # Tools Section
         console.print("\n[dim cyan]-- Tools --[/dim cyan]")
         console.print(f"  [bold]t[/bold]. {em.get('🔧')} [cyan]System Diagnostics[/cyan] [dim](Network, Hardware, Health)[/dim]")
@@ -152,6 +159,7 @@ def interactive_menu():
         console.print("\n[dim cyan]-- System --[/dim cyan]")
         console.print(f"  [bold]9[/bold]. {em.get('🔍')} Check dependencies")
         console.print(f"  [bold]h[/bold]. {em.get('🔌')} Hardware detection")
+        console.print(f"  [bold]x[/bold]. {em.get('🎯')} [bold green]Device Wizard[/bold green] [dim](Scan + Configure all ports)[/dim]")
         console.print(f"  [bold]w[/bold]. {em.get('🛠️')} [yellow]Hardware Configuration[/yellow] [dim](SPI, Serial, GPIO)[/dim]")
         console.print(f"  [bold]d[/bold]. {em.get('🐛')} Debug & troubleshooting")
         console.print(f"  [bold]u[/bold]. {em.get('🗑️', '[DEL]')} [red]Uninstall[/red]")
@@ -159,7 +167,7 @@ def interactive_menu():
         console.print(f"\n  [bold]q[/bold]. {em.get('🚪')} Exit")
         console.print(f"  [bold]?[/bold]. {em.get('❓')} Help")
 
-        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "f", "t", "p", "n", "r", "m", "g", "h", "w", "d", "u", "?"], default="1")
+        choice = Prompt.ask("\n[cyan]Select an option[/cyan]", choices=["q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "f", "s", "b", "t", "p", "n", "r", "m", "g", "h", "x", "w", "d", "u", "?"], default="1")
 
         if choice == "1":
             show_dashboard()
@@ -181,6 +189,10 @@ def interactive_menu():
             meshtastic_cli_menu()
         elif choice == "f":
             full_radio_config_menu()
+        elif choice == "s":
+            rns_tools_menu()
+        elif choice == "b":
+            gateway_bridge_menu()
         elif choice == "t":
             system_diagnostics_menu()
         elif choice == "p":
@@ -197,6 +209,8 @@ def interactive_menu():
             check_dependencies()
         elif choice == "h":
             detect_hardware()
+        elif choice == "x":
+            device_wizard()
         elif choice == "w":
             hardware_config_menu()
         elif choice == "d":
@@ -244,6 +258,325 @@ def site_planner_menu():
     planner.interactive_menu()
 
 
+def rns_tools_menu():
+    """RNS/Reticulum tools menu"""
+    console.print("\n[bold cyan]═══════════ RNS Tools ═══════════[/bold cyan]\n")
+
+    while True:
+        # Check RNS installation status
+        rns_installed = False
+        try:
+            import RNS
+            rns_installed = True
+            rns_version = getattr(RNS, '__version__', 'unknown')
+        except ImportError:
+            rns_version = "Not installed"
+
+        # Check rnsd service status
+        rnsd_status = "unknown"
+        try:
+            result = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                   capture_output=True, text=True, timeout=5)
+            rnsd_status = result.stdout.strip()
+        except Exception:
+            pass
+
+        console.print(f"[dim]RNS: {rns_version} | rnsd: {rnsd_status}[/dim]\n")
+
+        console.print("[dim cyan]-- Service Control --[/dim cyan]")
+        console.print(f"  [bold]1[/bold]. {em.get('▶️')}  Start rnsd")
+        console.print(f"  [bold]2[/bold]. {em.get('⏹️')}  Stop rnsd")
+        console.print(f"  [bold]3[/bold]. {em.get('🔄')} Restart rnsd")
+        console.print(f"  [bold]4[/bold]. {em.get('📋')} View rnsd logs")
+
+        console.print("\n[dim cyan]-- Installation --[/dim cyan]")
+        console.print(f"  [bold]5[/bold]. {em.get('📦')} Install/Update RNS")
+        console.print(f"  [bold]6[/bold]. {em.get('📦')} Install NomadNet")
+        console.print(f"  [bold]7[/bold]. {em.get('📦')} Install LXMF")
+        console.print(f"  [bold]i[/bold]. {em.get('🔌')} Install Meshtastic Interface")
+
+        console.print("\n[dim cyan]-- Configuration --[/dim cyan]")
+        console.print(f"  [bold]8[/bold]. {em.get('📝')} Edit RNS config")
+        console.print(f"  [bold]9[/bold]. {em.get('📊')} Show rnstatus")
+
+        console.print("\n[dim cyan]-- Applications --[/dim cyan]")
+        console.print(f"  [bold]n[/bold]. {em.get('🌐')} Launch NomadNet")
+
+        console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to Main Menu")
+
+        choice = Prompt.ask("\n[cyan]Select option[/cyan]",
+                          choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "i", "n"],
+                          default="0")
+
+        if choice == "0":
+            break
+        elif choice == "1":
+            _run_service_command('rnsd', 'start')
+        elif choice == "2":
+            _run_service_command('rnsd', 'stop')
+        elif choice == "3":
+            _run_service_command('rnsd', 'restart')
+        elif choice == "4":
+            console.print("\n[cyan]Recent rnsd logs:[/cyan]")
+            subprocess.run(['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'], timeout=10)
+            input("\nPress Enter to continue...")
+        elif choice == "5":
+            console.print("\n[cyan]Installing RNS...[/cyan]")
+            subprocess.run(['pip3', 'install', '--upgrade', 'rns'], timeout=120)
+            input("\nPress Enter to continue...")
+        elif choice == "6":
+            console.print("\n[cyan]Installing NomadNet...[/cyan]")
+            subprocess.run(['pip3', 'install', '--upgrade', 'nomadnet'], timeout=120)
+            input("\nPress Enter to continue...")
+        elif choice == "7":
+            console.print("\n[cyan]Installing LXMF...[/cyan]")
+            subprocess.run(['pip3', 'install', '--upgrade', 'lxmf'], timeout=120)
+            input("\nPress Enter to continue...")
+        elif choice == "i":
+            _install_meshtastic_interface()
+        elif choice == "8":
+            config_path = Path.home() / '.reticulum' / 'config'
+            if config_path.exists():
+                subprocess.run(['nano', str(config_path)], timeout=300)
+            else:
+                console.print(f"[yellow]Config not found at {config_path}[/yellow]")
+                console.print("[dim]Run 'rnsd' once to create default config[/dim]")
+                input("\nPress Enter to continue...")
+        elif choice == "9":
+            console.print("\n[cyan]RNS Status:[/cyan]")
+            subprocess.run(['rnstatus'], timeout=10)
+            input("\nPress Enter to continue...")
+        elif choice == "n":
+            console.print("\n[cyan]Launching NomadNet...[/cyan]")
+            console.print("[dim]Press Ctrl+C to exit NomadNet[/dim]\n")
+            try:
+                subprocess.run(['nomadnet'], timeout=None)
+            except KeyboardInterrupt:
+                pass
+            except FileNotFoundError:
+                console.print("[red]NomadNet not installed. Use option 6 to install.[/red]")
+                input("\nPress Enter to continue...")
+
+
+def gateway_bridge_menu():
+    """Gateway bridge menu (Meshtastic ↔ RNS)"""
+    console.print("\n[bold cyan]═══════════ Gateway Bridge ═══════════[/bold cyan]\n")
+
+    while True:
+        # Check gateway status
+        gateway_running = False
+        try:
+            # Check if gateway process is running
+            result = subprocess.run(['pgrep', '-f', 'gateway.*bridge'],
+                                   capture_output=True, text=True, timeout=5)
+            gateway_running = result.returncode == 0
+        except Exception:
+            pass
+
+        status = "[green]Running[/green]" if gateway_running else "[yellow]Stopped[/yellow]"
+        console.print(f"[dim]Gateway Status: {status}[/dim]\n")
+
+        console.print("[dim cyan]-- Bridge Control --[/dim cyan]")
+        console.print(f"  [bold]1[/bold]. {em.get('▶️')}  Start Gateway Bridge")
+        console.print(f"  [bold]2[/bold]. {em.get('⏹️')}  Stop Gateway Bridge")
+        console.print(f"  [bold]3[/bold]. {em.get('📊')} View Bridge Stats")
+
+        console.print("\n[dim cyan]-- Configuration --[/dim cyan]")
+        console.print(f"  [bold]4[/bold]. {em.get('⚙️')}  Configure Gateway")
+        console.print(f"  [bold]5[/bold]. {em.get('📋')} Apply Gateway Template")
+
+        console.print("\n[dim cyan]-- Diagnostics --[/dim cyan]")
+        console.print(f"  [bold]6[/bold]. {em.get('🔍')} Test Meshtastic Connection")
+        console.print(f"  [bold]7[/bold]. {em.get('🔍')} Test RNS Connection")
+
+        console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back to Main Menu")
+
+        choice = Prompt.ask("\n[cyan]Select option[/cyan]",
+                          choices=["0", "1", "2", "3", "4", "5", "6", "7"],
+                          default="0")
+
+        if choice == "0":
+            break
+        elif choice == "1":
+            console.print("\n[cyan]Starting Gateway Bridge...[/cyan]")
+            try:
+                from gateway.rns_bridge import start_gateway_headless
+                start_gateway_headless()
+            except ImportError as e:
+                console.print(f"[red]Failed to import gateway: {e}[/red]")
+                console.print("[dim]Make sure RNS is installed: pip3 install rns[/dim]")
+            except Exception as e:
+                console.print(f"[red]Error starting gateway: {e}[/red]")
+            input("\nPress Enter to continue...")
+        elif choice == "2":
+            console.print("\n[cyan]Stopping Gateway Bridge...[/cyan]")
+            subprocess.run(['pkill', '-f', 'gateway.*bridge'], timeout=10)
+            console.print("[green]Gateway stopped[/green]")
+            input("\nPress Enter to continue...")
+        elif choice == "3":
+            console.print("\n[cyan]Gateway Stats:[/cyan]")
+            try:
+                from gateway.rns_bridge import get_gateway_stats
+                stats = get_gateway_stats()
+                if stats:
+                    console.print(f"  Messages Mesh→RNS: {stats.get('messages_mesh_to_rns', 0)}")
+                    console.print(f"  Messages RNS→Mesh: {stats.get('messages_rns_to_mesh', 0)}")
+                    console.print(f"  Errors: {stats.get('errors', 0)}")
+                    console.print(f"  Bounced: {stats.get('bounced', 0)}")
+                else:
+                    console.print("[yellow]Gateway not running or no stats available[/yellow]")
+            except Exception as e:
+                console.print(f"[red]Error getting stats: {e}[/red]")
+            input("\nPress Enter to continue...")
+        elif choice == "4":
+            console.print("\n[cyan]Gateway Configuration:[/cyan]")
+            config_path = Path.home() / '.config' / 'meshforge' / 'gateway.json'
+            if config_path.exists():
+                subprocess.run(['nano', str(config_path)], timeout=300)
+            else:
+                console.print(f"[yellow]Config not found at {config_path}[/yellow]")
+                console.print("[dim]Start the gateway once to create default config[/dim]")
+                input("\nPress Enter to continue...")
+        elif choice == "5":
+            # Show gateway templates
+            template_dir = Path(__file__).parent.parent / 'templates' / 'available.d'
+            gateway_templates = list(template_dir.glob('gateway-*.yaml'))
+            if gateway_templates:
+                console.print("\n[cyan]Available Gateway Templates:[/cyan]")
+                for i, t in enumerate(gateway_templates, 1):
+                    console.print(f"  {i}. {t.name}")
+                # TODO: implement template selection
+            else:
+                console.print("[yellow]No gateway templates found[/yellow]")
+            input("\nPress Enter to continue...")
+        elif choice == "6":
+            console.print("\n[cyan]Testing Meshtastic Connection...[/cyan]")
+            try:
+                result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost', '--info'],
+                    capture_output=True, text=True, timeout=15
+                )
+                if result.returncode == 0:
+                    console.print("[green]✓ Meshtastic connection OK[/green]")
+                    # Show first few lines
+                    lines = result.stdout.split('\n')[:10]
+                    for line in lines:
+                        console.print(f"  [dim]{line}[/dim]")
+                else:
+                    console.print(f"[red]✗ Connection failed: {result.stderr}[/red]")
+            except Exception as e:
+                console.print(f"[red]✗ Error: {e}[/red]")
+            input("\nPress Enter to continue...")
+        elif choice == "7":
+            console.print("\n[cyan]Testing RNS Connection...[/cyan]")
+            try:
+                import RNS
+                console.print(f"[green]✓ RNS library loaded (v{RNS.__version__})[/green]")
+
+                # Try to connect to shared instance
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                try:
+                    sock.connect(('localhost', 37428))  # Default RNS shared instance port
+                    console.print("[green]✓ RNS shared instance reachable[/green]")
+                except Exception:
+                    console.print("[yellow]⚠ RNS shared instance not reachable on port 37428[/yellow]")
+                    console.print("[dim]  Start rnsd or check if it's using a different port[/dim]")
+                finally:
+                    sock.close()
+            except ImportError:
+                console.print("[red]✗ RNS library not installed[/red]")
+                console.print("[dim]  Install with: pip3 install rns[/dim]")
+            except Exception as e:
+                console.print(f"[red]✗ Error: {e}[/red]")
+            input("\nPress Enter to continue...")
+
+
+def _run_service_command(service: str, action: str):
+    """Run a systemctl command on a service"""
+    console.print(f"\n[cyan]{action.capitalize()}ing {service}...[/cyan]")
+    try:
+        result = subprocess.run(
+            ['systemctl', action, service],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            console.print(f"[green]✓ {service} {action}ed successfully[/green]")
+        else:
+            console.print(f"[red]✗ Failed: {result.stderr}[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+    input("\nPress Enter to continue...")
+
+
+def _install_meshtastic_interface():
+    """Download and install Meshtastic_Interface.py for RNS"""
+    import requests
+
+    console.print("\n[bold cyan]Install Meshtastic Interface[/bold cyan]")
+    console.print("[dim]RNS interface for Meshtastic LoRa transport[/dim]")
+    console.print("[dim]Source: github.com/Nursedude/RNS_Over_Meshtastic_Gateway[/dim]\n")
+
+    # Use get_real_user_home for sudo compatibility
+    real_home = get_real_user_home()
+    interfaces_dir = real_home / '.reticulum' / 'interfaces'
+    interface_file = interfaces_dir / 'Meshtastic_Interface.py'
+
+    # Check if already installed
+    if interface_file.exists():
+        console.print(f"[yellow]Meshtastic_Interface.py already exists at:[/yellow]")
+        console.print(f"  {interface_file}")
+        if not Confirm.ask("\n[cyan]Overwrite with latest version?[/cyan]", default=False):
+            return
+
+    # Create interfaces directory if needed
+    try:
+        interfaces_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Interfaces directory: {interfaces_dir}")
+    except PermissionError:
+        console.print(f"[red]✗ Cannot create {interfaces_dir} - permission denied[/red]")
+        console.print("[dim]Try running without sudo, or check directory permissions[/dim]")
+        input("\nPress Enter to continue...")
+        return
+
+    # Download from Nursedude's fork
+    url = "https://raw.githubusercontent.com/Nursedude/RNS_Over_Meshtastic_Gateway/main/Meshtastic_Interface.py"
+    console.print(f"\n[cyan]Downloading from {url}...[/cyan]")
+
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        interface_file.write_text(response.text)
+        console.print(f"[green]✓ Installed: {interface_file}[/green]")
+
+        # Show config snippet
+        console.print("\n[bold]Add to ~/.reticulum/config:[/bold]")
+        console.print("""
+[dim][[Meshtastic LoRa]]
+  type = Meshtastic_Interface
+  enabled = true
+  # Connection method (choose one):
+  # port = /dev/ttyUSB0     # Serial
+  # ble_addr = AA:BB:CC:DD  # Bluetooth
+  # tcp_addr = 127.0.0.1    # TCP (meshtasticd)
+  tcp_addr = 127.0.0.1
+  tcp_port = 4403
+  data_speed = 8            # 0-8, higher = faster (Short Turbo = 8)[/dim]
+""")
+        console.print("[dim]Note: data_speed 8 requires SHORT_TURBO modem preset[/dim]")
+
+    except requests.exceptions.RequestException as e:
+        console.print(f"[red]✗ Download failed: {e}[/red]")
+    except PermissionError:
+        console.print(f"[red]✗ Cannot write to {interface_file} - permission denied[/red]")
+    except Exception as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
+
+    input("\nPress Enter to continue...")
+
+
 def network_tools_menu():
     """Network tools menu (TCP/IP, ping, scanning)"""
     from tools.network_tools import NetworkTools
@@ -282,6 +615,336 @@ def hardware_config_menu():
 
     configurator = HardwareConfigurator()
     configurator.interactive_menu()
+
+
+def device_wizard():
+    """
+    Industrial-class device detection and configuration wizard.
+    Scans USB, SPI, TCP, and BLE for Meshtastic devices.
+    """
+    import socket
+    from utils.device_scanner import DeviceScanner
+
+    console.print("\n[bold cyan]═══════════ MeshForge Device Wizard ═══════════[/bold cyan]")
+    console.print("[dim]Industrial-class port detection for LoRa mesh devices[/dim]\n")
+
+    devices_found = []
+
+    # === SCAN USB DEVICES ===
+    console.print("[cyan]Scanning USB ports...[/cyan]")
+    try:
+        scanner = DeviceScanner()
+        scan_result = scanner.scan_all()
+
+        for port in scan_result.get('serial_ports', []):
+            if port.meshtastic_compatible:
+                devices_found.append({
+                    'type': 'USB',
+                    'port': port.device,
+                    'by_id': port.by_id or '',
+                    'description': port.description or f"{port.usb_vendor}:{port.usb_product}",
+                    'driver': port.driver,
+                })
+
+        console.print(f"  [green]✓[/green] Found {len(scan_result.get('serial_ports', []))} serial ports")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ USB scan error: {e}[/yellow]")
+
+    # === SCAN SPI DEVICES ===
+    console.print("[cyan]Scanning SPI/GPIO...[/cyan]")
+    spi_devices = []
+    for spi_path in ['/dev/spidev0.0', '/dev/spidev0.1', '/dev/spidev1.0']:
+        if Path(spi_path).exists():
+            spi_devices.append(spi_path)
+
+    if spi_devices:
+        devices_found.append({
+            'type': 'SPI',
+            'port': spi_devices[0],
+            'by_id': '',
+            'description': 'SPI LoRa HAT (MeshAdv, Waveshare, etc.)',
+            'driver': 'spidev',
+        })
+        console.print(f"  [green]✓[/green] Found SPI: {', '.join(spi_devices)}")
+    else:
+        console.print("  [dim]No SPI devices found[/dim]")
+
+    # === SCAN TCP (meshtasticd) ===
+    console.print("[cyan]Scanning TCP (meshtasticd)...[/cyan]")
+    tcp_ports = [4403, 4404]  # Primary and alternate
+    for tcp_port in tcp_ports:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', tcp_port))
+            sock.close()
+            if result == 0:
+                devices_found.append({
+                    'type': 'TCP',
+                    'port': f'127.0.0.1:{tcp_port}',
+                    'by_id': '',
+                    'description': f'meshtasticd daemon (port {tcp_port})',
+                    'driver': 'tcp',
+                })
+                console.print(f"  [green]✓[/green] Found meshtasticd on port {tcp_port}")
+                break
+        except Exception:
+            pass
+    else:
+        console.print("  [dim]meshtasticd not running (TCP 4403/4404)[/dim]")
+
+    # === DISPLAY RESULTS ===
+    console.print(f"\n[bold]Found {len(devices_found)} Meshtastic-compatible device(s)[/bold]\n")
+
+    if not devices_found:
+        console.print("[yellow]No devices detected.[/yellow]")
+        console.print("\n[dim]Tips:[/dim]")
+        console.print("  • Connect a USB LoRa radio (T-Beam, Heltec, RAK, etc.)")
+        console.print("  • Enable SPI in raspi-config for HAT devices")
+        console.print("  • Start meshtasticd service for TCP connection")
+        input("\nPress Enter to continue...")
+        return
+
+    # Build selection table
+    table = Table(title="Detected Devices", show_header=True, header_style="bold magenta")
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Type", style="yellow", width=6)
+    table.add_column("Port", style="green")
+    table.add_column("Description", style="dim")
+
+    for i, dev in enumerate(devices_found, 1):
+        table.add_row(str(i), dev['type'], dev['port'], dev['description'])
+
+    console.print(table)
+
+    # === SELECT DEVICE ===
+    choices = [str(i) for i in range(1, len(devices_found) + 1)] + ["0"]
+    console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')}  Back (no configuration)")
+
+    choice = Prompt.ask("\n[cyan]Select device to configure[/cyan]",
+                       choices=choices, default="1")
+
+    if choice == "0":
+        return
+
+    selected = devices_found[int(choice) - 1]
+    console.print(f"\n[green]Selected: {selected['type']} - {selected['port']}[/green]")
+
+    # === CONFIGURE DEVICE ===
+    _configure_device_wizard(selected)
+
+
+def _configure_device_wizard(device: dict):
+    """Walk through complete device configuration"""
+    console.print("\n[bold cyan]═══════════ Device Configuration ═══════════[/bold cyan]")
+    console.print(f"[dim]Configuring: {device['type']} at {device['port']}[/dim]\n")
+
+    config = {'device': device}
+
+    # --- Step 1: Node Identity ---
+    console.print("[bold]Step 1: Node Identity[/bold]")
+
+    long_name = Prompt.ask(
+        "  Long name (up to 40 chars)",
+        default="MeshForge Node"
+    )[:40]
+    config['long_name'] = long_name
+
+    # Generate short name suggestion from long name
+    suggested_short = ''.join(c for c in long_name[:4].upper() if c.isalnum())
+    short_name = Prompt.ask(
+        "  Short name (4 chars for mesh display)",
+        default=suggested_short or "MESH"
+    )[:4].upper()
+    config['short_name'] = short_name
+
+    console.print(f"  [green]✓[/green] Identity: {long_name} ({short_name})")
+
+    # --- Step 2: Region ---
+    console.print("\n[bold]Step 2: Region Selection[/bold]")
+
+    regions = {
+        '1': ('US', '902-928 MHz ISM'),
+        '2': ('EU_868', '863-870 MHz'),
+        '3': ('CN', '470-510 MHz'),
+        '4': ('JP', '920-925 MHz'),
+        '5': ('ANZ', '915-928 MHz Australia/NZ'),
+        '6': ('KR', '920-923 MHz Korea'),
+        '7': ('TW', '920-925 MHz Taiwan'),
+        '8': ('RU', '868-870 MHz Russia'),
+        '9': ('IN', '865-867 MHz India'),
+    }
+
+    for key, (code, desc) in regions.items():
+        console.print(f"  [bold]{key}[/bold]. {code} - {desc}")
+
+    region_choice = Prompt.ask("  Select region", choices=list(regions.keys()), default="1")
+    config['region'] = regions[region_choice][0]
+    console.print(f"  [green]✓[/green] Region: {config['region']}")
+
+    # --- Step 3: Modem Preset ---
+    console.print("\n[bold]Step 3: Modem Preset[/bold]")
+
+    presets = {
+        '1': ('LONG_FAST', 'Default - Good range/speed balance'),
+        '2': ('SHORT_TURBO', 'High-speed gateway (~6.8 kbps, shorter range)'),
+        '3': ('LONG_SLOW', 'Maximum range, slower speed'),
+        '4': ('MEDIUM_FAST', 'Balanced for urban areas'),
+        '5': ('LONG_MODERATE', 'Long range with moderate speed'),
+    }
+
+    for key, (name, desc) in presets.items():
+        marker = " [cyan](Recommended for gateway)[/cyan]" if name == "SHORT_TURBO" else ""
+        console.print(f"  [bold]{key}[/bold]. {name} - {desc}{marker}")
+
+    preset_choice = Prompt.ask("  Select modem preset", choices=list(presets.keys()), default="1")
+    config['modem_preset'] = presets[preset_choice][0]
+    console.print(f"  [green]✓[/green] Preset: {config['modem_preset']}")
+
+    # --- Step 4: Frequency Slot ---
+    console.print("\n[bold]Step 4: Frequency Slot[/bold]")
+    console.print("  [dim]Different slots avoid interference between networks[/dim]")
+    console.print("  [dim]Slot 0 = default, Slot 8 = common gateway slot[/dim]")
+
+    slot = Prompt.ask("  Frequency slot (0-103 for US)", default="0")
+    try:
+        config['frequency_slot'] = int(slot)
+    except ValueError:
+        config['frequency_slot'] = 0
+    console.print(f"  [green]✓[/green] Slot: {config['frequency_slot']}")
+
+    # --- Step 5: TX Power ---
+    console.print("\n[bold]Step 5: TX Power[/bold]")
+    console.print("  [dim]Higher = longer range, more power consumption[/dim]")
+    console.print("  [dim]Standard: 20 dBm, High-power HAT: 30 dBm (1W)[/dim]")
+
+    tx_power = Prompt.ask("  TX Power (dBm)", default="20")
+    try:
+        config['tx_power'] = int(tx_power)
+    except ValueError:
+        config['tx_power'] = 20
+    console.print(f"  [green]✓[/green] TX Power: {config['tx_power']} dBm")
+
+    # --- Step 6: Position (Optional) ---
+    console.print("\n[bold]Step 6: Position (Optional)[/bold]")
+
+    if Confirm.ask("  Set fixed position?", default=False):
+        lat = Prompt.ask("  Latitude (e.g., 19.435175)", default="0.0")
+        lon = Prompt.ask("  Longitude (e.g., -155.213842)", default="0.0")
+        try:
+            config['latitude'] = float(lat)
+            config['longitude'] = float(lon)
+            console.print(f"  [green]✓[/green] Position: {config['latitude']}, {config['longitude']}")
+        except ValueError:
+            console.print("  [yellow]Invalid coordinates - skipping position[/yellow]")
+    else:
+        console.print("  [dim]Position not set (use GPS or set later)[/dim]")
+
+    # --- Step 7: MQTT ---
+    console.print("\n[bold]Step 7: MQTT Policy[/bold]")
+
+    mqtt_enabled = Confirm.ask("  Enable MQTT uplink?", default=False)
+    config['mqtt_enabled'] = mqtt_enabled
+    if mqtt_enabled:
+        console.print("  [green]✓[/green] MQTT enabled")
+    else:
+        console.print("  [dim]MQTT disabled (recommended for gateway bridging to RNS)[/dim]")
+
+    # === DISPLAY SUMMARY ===
+    console.print("\n[bold cyan]═══════════ Configuration Summary ═══════════[/bold cyan]\n")
+
+    summary_table = Table(show_header=False, box=None)
+    summary_table.add_column("Setting", style="cyan")
+    summary_table.add_column("Value", style="green")
+
+    summary_table.add_row("Device", f"{config['device']['type']} - {config['device']['port']}")
+    summary_table.add_row("Long Name", config['long_name'])
+    summary_table.add_row("Short Name", config['short_name'])
+    summary_table.add_row("Region", config['region'])
+    summary_table.add_row("Modem Preset", config['modem_preset'])
+    summary_table.add_row("Frequency Slot", str(config['frequency_slot']))
+    summary_table.add_row("TX Power", f"{config['tx_power']} dBm")
+    if 'latitude' in config:
+        summary_table.add_row("Position", f"{config['latitude']}, {config['longitude']}")
+    summary_table.add_row("MQTT", "Enabled" if config['mqtt_enabled'] else "Disabled")
+
+    console.print(summary_table)
+
+    # === APPLY CONFIGURATION ===
+    if Confirm.ask("\n[cyan]Apply this configuration?[/cyan]", default=True):
+        _apply_device_config(config)
+    else:
+        console.print("[yellow]Configuration cancelled[/yellow]")
+
+    input("\nPress Enter to continue...")
+
+
+def _apply_device_config(config: dict):
+    """Apply configuration to the device via meshtastic CLI or meshtasticd"""
+    console.print("\n[cyan]Applying configuration...[/cyan]")
+
+    device = config['device']
+    commands = []
+
+    # Build meshtastic CLI commands
+    if device['type'] == 'TCP':
+        base_cmd = ['meshtastic', '--host', '127.0.0.1']
+    elif device['type'] == 'USB':
+        port = device.get('by_id') or device['port']
+        base_cmd = ['meshtastic', '--port', port]
+    else:
+        # SPI - use TCP to meshtasticd
+        base_cmd = ['meshtastic', '--host', '127.0.0.1']
+
+    # Set owner/identity
+    commands.append(base_cmd + ['--set-owner', config['long_name']])
+    commands.append(base_cmd + ['--set-owner-short', config['short_name']])
+
+    # Set region
+    commands.append(base_cmd + ['--set', 'lora.region', config['region']])
+
+    # Set modem preset
+    commands.append(base_cmd + ['--set', 'lora.modem_preset', config['modem_preset']])
+
+    # Set channel/frequency slot
+    commands.append(base_cmd + ['--set', 'lora.channel_num', str(config['frequency_slot'])])
+
+    # Set TX power
+    commands.append(base_cmd + ['--set', 'lora.tx_power', str(config['tx_power'])])
+
+    # Set position if provided
+    if 'latitude' in config and 'longitude' in config:
+        commands.append(base_cmd + ['--setlat', str(config['latitude'])])
+        commands.append(base_cmd + ['--setlon', str(config['longitude'])])
+
+    # Set MQTT
+    mqtt_val = 'true' if config['mqtt_enabled'] else 'false'
+    commands.append(base_cmd + ['--set', 'mqtt.enabled', mqtt_val])
+
+    # Execute commands
+    success_count = 0
+    for cmd in commands:
+        try:
+            console.print(f"  [dim]Running: {' '.join(cmd[:4])}...[/dim]")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                success_count += 1
+            else:
+                console.print(f"  [yellow]Warning: {result.stderr.strip()}[/yellow]")
+        except subprocess.TimeoutExpired:
+            console.print(f"  [yellow]Command timed out[/yellow]")
+        except FileNotFoundError:
+            console.print("[red]meshtastic CLI not found. Install with: pip install meshtastic[/red]")
+            return
+        except Exception as e:
+            console.print(f"  [red]Error: {e}[/red]")
+
+    console.print(f"\n[green]✓ Applied {success_count}/{len(commands)} settings[/green]")
+
+    # Reminder about verification
+    console.print("\n[bold yellow]Important:[/bold yellow]")
+    console.print("  CLI settings may not always apply reliably (upstream bug).")
+    console.print("  [cyan]Verify settings in browser: http://localhost:9443[/cyan]")
 
 
 def full_radio_config_menu():
