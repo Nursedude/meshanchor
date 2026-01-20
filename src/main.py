@@ -437,9 +437,9 @@ def gateway_bridge_menu():
             input("\nPress Enter to continue...")
         elif choice == "4":
             console.print("\n[cyan]Gateway Configuration:[/cyan]")
-            config_path = Path.home() / '.config' / 'meshforge' / 'gateway.json'
+            config_path = get_real_user_home() / '.config' / 'meshforge' / 'gateway.json'
             if config_path.exists():
-                subprocess.run(['nano', str(config_path)], timeout=300)
+                subprocess.run(['nano', str(config_path)])  # No timeout for editor
             else:
                 console.print(f"[yellow]Config not found at {config_path}[/yellow]")
                 console.print("[dim]Start the gateway once to create default config[/dim]")
