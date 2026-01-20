@@ -1241,3 +1241,116 @@ class RNSMeshtasticBridge:
                 callback(status, self.get_status())
             except Exception as e:
                 logger.error(f"Status callback error: {e}")
+
+
+# === Module-level helper functions for CLI/headless operation ===
+
+_active_bridge: Optional[RNSMeshtasticBridge] = None
+
+
+def start_gateway_headless() -> bool:
+    """
+    Start the gateway bridge in headless mode (for CLI use).
+
+    Returns True if started successfully, False otherwise.
+    """
+    global _active_bridge
+
+    if _active_bridge is not None and _active_bridge._running:
+        logger.warning("Gateway bridge is already running")
+        print("Gateway bridge is already running")
+        return True
+
+    try:
+        _active_bridge = RNSMeshtasticBridge()
+        success = _active_bridge.start()
+
+        if success:
+            print("Gateway bridge started successfully")
+            print(f"  Meshtastic: {'Connected' if _active_bridge._connected_mesh else 'Disconnected'}")
+            print(f"  RNS: {'Connected' if _active_bridge._connected_rns else 'Disconnected'}")
+        else:
+            print("Gateway bridge failed to start - check logs")
+
+        return success
+    except Exception as e:
+        logger.error(f"Failed to start gateway: {e}")
+        print(f"Failed to start gateway: {e}")
+        return False
+
+
+def stop_gateway_headless() -> bool:
+    """
+    Stop the gateway bridge (for CLI use).
+
+    Returns True if stopped successfully.
+    """
+    global _active_bridge
+
+    if _active_bridge is None:
+        print("No active gateway bridge to stop")
+        return True
+
+    try:
+        _active_bridge.stop()
+        _active_bridge = None
+        print("Gateway bridge stopped")
+        return True
+    except Exception as e:
+        logger.error(f"Error stopping gateway: {e}")
+        print(f"Error stopping gateway: {e}")
+        return False
+
+
+def get_gateway_stats() -> dict:
+    """
+    Get current gateway statistics (for CLI use).
+
+    Returns dict with bridge status and statistics.
+    """
+    global _active_bridge
+
+    if _active_bridge is None:
+        return {
+            'running': False,
+            'status': 'Not started',
+            'meshtastic_connected': False,
+            'rns_connected': False,
+            'messages_mesh_to_rns': 0,
+            'messages_rns_to_mesh': 0,
+            'errors': 0,
+            'bounced': 0,
+        }
+
+    try:
+        status = _active_bridge.get_status()
+        stats = status.get('statistics', {})
+        return {
+            'running': _active_bridge._running,
+            'status': 'Running' if _active_bridge._running else 'Stopped',
+            'meshtastic_connected': _active_bridge._connected_mesh,
+            'rns_connected': _active_bridge._connected_rns,
+            'messages_mesh_to_rns': stats.get('messages_mesh_to_rns', 0),
+            'messages_rns_to_mesh': stats.get('messages_rns_to_mesh', 0),
+            'errors': stats.get('errors', 0),
+            'bounced': stats.get('bounced', 0),
+            'uptime_seconds': status.get('uptime_seconds'),
+        }
+    except Exception as e:
+        logger.error(f"Error getting gateway stats: {e}")
+        return {
+            'running': False,
+            'status': f'Error: {e}',
+            'meshtastic_connected': False,
+            'rns_connected': False,
+            'messages_mesh_to_rns': 0,
+            'messages_rns_to_mesh': 0,
+            'errors': 0,
+            'bounced': 0,
+        }
+
+
+def is_gateway_running() -> bool:
+    """Check if gateway bridge is currently running."""
+    global _active_bridge
+    return _active_bridge is not None and _active_bridge._running
