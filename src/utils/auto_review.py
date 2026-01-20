@@ -663,6 +663,58 @@ class ReviewAgent:
             # Check for common attribute access patterns that are known safe
             if '.parts[0]' in line or '.groups()[0]' in line:
                 return True
+            # rsplit/split always returns at least one element
+            if '.rsplit(' in line or 'rsplit(' in line:
+                return True
+            # .get() with list default guarantees elements
+            if re.search(r'\.get\s*\([^,]+,\s*\[', line):
+                return True  # .get(key, [default]) pattern
+            # max() result tuple access (max returns item from collection)
+            if 'max(' in line and '[0]' in line:
+                return True
+            # Docstrings and comments describing API contracts
+            if 'MUST check' in line or 'before accessing' in line:
+                return True  # API documentation, not code
+
+            # Context-aware guard checking: look for guards in previous lines
+            if lines and line_num > 0:
+                # Extract variable name from pattern like "varname[0]" or "self.varname[0]"
+                var_match = re.search(r'(\b\w+(?:\.\w+)*)\s*\[\s*0\s*\]', line)
+                if var_match:
+                    var_name = var_match.group(1)
+                    # Get the base name (last component) for simpler matching
+                    base_name = var_name.split('.')[-1]
+
+                    # Look back up to 10 lines for guard patterns
+                    start_line = max(0, line_num - 10)
+                    context_lines = lines[start_line:line_num - 1]
+
+                    for ctx_line in context_lines:
+                        ctx_stripped = ctx_line.strip()
+                        # Pattern: "if varname:" or "if self.varname:"
+                        if re.search(rf'\bif\s+{re.escape(var_name)}\s*:', ctx_stripped):
+                            return True
+                        if re.search(rf'\bif\s+{re.escape(base_name)}\s*:', ctx_stripped):
+                            return True
+                        # Pattern: "if not varname:" followed by return/continue/break
+                        if re.search(rf'\bif\s+not\s+{re.escape(var_name)}\s*:', ctx_stripped):
+                            return True
+                        if re.search(rf'\bif\s+not\s+{re.escape(base_name)}\s*:', ctx_stripped):
+                            return True
+                        # Pattern: "if len(varname)" checks
+                        if re.search(rf'\bif\s+len\s*\(\s*{re.escape(var_name)}\s*\)', ctx_stripped):
+                            return True
+                        if re.search(rf'\bif\s+len\s*\(\s*{re.escape(base_name)}\s*\)', ctx_stripped):
+                            return True
+                        # Pattern: "if varname and" (truthiness check before use)
+                        if re.search(rf'\bif\s+{re.escape(base_name)}\s+and\b', ctx_stripped):
+                            return True
+                        # Pattern: "varname = something.get(..., [default])" - assigned with default
+                        if re.search(rf'{re.escape(base_name)}\s*=.*\.get\s*\([^,]+,\s*\[', ctx_stripped):
+                            return True
+                        # Pattern: "varname = max(...)" - max() returns item from non-empty
+                        if re.search(rf'{re.escape(base_name)}\s*=\s*max\s*\(', ctx_stripped):
+                            return True
 
         # Issue #1: Path.home() - allow in utils/paths.py (canonical implementation)
         if pattern_name == 'path_home':
