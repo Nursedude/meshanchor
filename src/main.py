@@ -607,6 +607,7 @@ def _create_rns_config_wizard():
         '4': ('Connect to Server', 'AutoInterface + TCPClientInterface (join network)'),
         '5': ('Meshtastic Bridge', 'AutoInterface + Meshtastic_Interface'),
         '6': ('Full Gateway', 'Transport + TCP Server + Meshtastic + Client'),
+        '7': ('Gateway Client', 'TCPClient + Meshtastic (NO AutoInterface) - MOC2 style'),
     }
 
     for key, (name, desc) in templates.items():
@@ -643,7 +644,7 @@ def _create_rns_config_wizard():
         config = config.replace('listen_port = 4242', f'listen_port = {tcp_port}')
 
     # TCP Client (connect to remote server)
-    if template_choice in ['4', '6']:
+    if template_choice in ['4', '6', '7']:
         console.print("\n[bold]TCP Client Connection (connect to remote RNS node):[/bold]")
         target_host = Prompt.ask("  Target host/IP", default="192.168.1.1")
         target_port = Prompt.ask("  Target port", default="4242")
@@ -658,7 +659,7 @@ def _create_rns_config_wizard():
         config = _add_rnode_interface(config)
 
     # Meshtastic interface
-    if template_choice in ['5', '6']:
+    if template_choice in ['5', '6', '7']:
         console.print("\n[bold]Meshtastic Interface Config:[/bold]")
         console.print("  [dim]Connection method:[/dim]")
         console.print("    1. TCP (meshtasticd on localhost:4403)")
@@ -827,6 +828,9 @@ loglevel = 4
     elif template == '6':  # Full Gateway (everything)
         config = base.replace('enable_transport = False', 'enable_transport = True')
         return config + auto_interface + tcp_server + tcp_client + meshtastic
+
+    elif template == '7':  # Gateway Client (MOC2 style - NO AutoInterface)
+        return base + tcp_client + meshtastic
 
     return base + auto_interface
 
