@@ -76,10 +76,10 @@ Core NOC functionality for Meshtastic and Reticulum networks.
 [################    ] GTK4 Desktop Polish
 ```
 
-### Phase 2: Protocol Expansion
+### Phase 2: Protocol Expansion & Connection Layer
 **Status: Research & Planning**
 
-Integrate additional mesh protocols to expand interoperability.
+Integrate additional mesh protocols and improve device connectivity.
 
 | Integration | Protocol | Priority | Notes |
 |-------------|----------|----------|-------|
@@ -87,11 +87,15 @@ Integrate additional mesh protocols to expand interoperability.
 | **AREDN** | TCP/IP over ham | Medium | Amateur Radio Emergency Data Network |
 | **QMesh** | Experimental | Low | Research phase |
 
-**MeshCore Integration:**
-MeshCore extends Reticulum with improved routing. Since MeshForge already bridges RNS, MeshCore nodes gain Meshtastic interop through the existing gateway.
+**Connection Abstraction Layer** *(inspired by [meshtastic/standalone-ui](https://github.com/meshtastic/standalone-ui))*:
+Unified interface for Serial, TCP, and USB connections - same code works regardless of connection type.
 
-**AREDN Integration:**
-AREDN provides high-bandwidth TCP/IP mesh over amateur frequencies. MeshForge will offer AREDN node discovery, status monitoring, and message relay for text-based communication.
+| Feature | Description | Reference |
+|---------|-------------|-----------|
+| **DeviceController** | MVC pattern for device communication | standalone-ui ViewController |
+| **Unified Connection Interface** | Serial/TCP/USB abstraction | SerialClient, UARTClient pattern |
+| **Thread-safe Packet Queue** | MeshEnvelope-style encoding | Protobuf packet handling |
+| **Offline Map Caching** | Local tile storage for field use | FileLoader SD card integration |
 
 ### Phase 3: Advanced NOC
 **Status: Design Phase**
@@ -105,6 +109,7 @@ Enterprise-grade network operations capabilities.
 | **Predictive Analytics** | Link failure prediction using ML |
 | **Multi-Gateway Coordination** | Distributed NOC architecture |
 | **Historical Analysis** | Long-term network health trends |
+| **Internationalization (i18n)** | Multi-language support for global HAM community |
 
 ### Phase 4: Ecosystem
 **Status: Future**
@@ -114,6 +119,7 @@ Enterprise-grade network operations capabilities.
 | **Plugin Architecture** | Third-party protocol adapters |
 | **Federation** | NOC-to-NOC communication |
 | **Mobile Companion** | iOS/Android status app |
+| **LVGL Embedded UI** | Lightweight interface for Pi Zero/embedded deployments |
 
 ## Quick Start
 
