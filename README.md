@@ -28,22 +28,20 @@ The mesh networking landscape is fractured. Meshtastic, Reticulum, MeshCore, ARE
 
 MeshForge changes this.
 
-```
-                         MESHFORGE NOC
-    ╔════════════════════════════════════════════════════╗
-    ║                                                    ║
-    ║   Meshtastic  ──►  ╔══════════════╗  ◄──  RNS     ║
-    ║                    ║   GATEWAY    ║               ║
-    ║   MeshCore    ──►  ║    BRIDGE    ║  ◄──  AREDN   ║
-    ║                    ╚══════════════╝               ║
-    ║                          │                        ║
-    ║              ╔═══════════╧═══════════╗            ║
-    ║              ║  Unified Node View    ║            ║
-    ║              ║  AI Diagnostics       ║            ║
-    ║              ║  Coverage Analysis    ║            ║
-    ║              ║  Health Monitoring    ║            ║
-    ║              ╚═══════════════════════╝            ║
-    ╚════════════════════════════════════════════════════╝
+```mermaid
+flowchart TB
+    subgraph MeshForge NOC
+        direction TB
+        M[Meshtastic<br/>LoRa Mesh] --> GW[Gateway Bridge]
+        MC[MeshCore<br/>Future] -.-> GW
+        GW --> R[Reticulum<br/>RNS Network]
+        GW --> A[AREDN<br/>Future]
+
+        GW --> CORE[Unified Node View<br/>AI Diagnostics<br/>Coverage Analysis<br/>Health Monitoring]
+    end
+
+    style GW fill:#4a9eff,stroke:#333,stroke-width:2px,color:#fff
+    style CORE fill:#2d5a3d,stroke:#333,stroke-width:2px,color:#fff
 ```
 
 **First open-source tool designed to bridge incompatible mesh protocols.**
@@ -154,23 +152,39 @@ Ready! [Continue] [Configure] [Troubleshoot]
 
 MeshForge owns the complete stack from radio hardware to user interface:
 
-```
-╔══════════════════════════════════════════════════════════╗
-║                     USER INTERFACES                       ║
-║    GTK Desktop  |  Rich TUI  |  Web UI  |  Standalone    ║
-╠══════════════════════════════════════════════════════════╣
-║                     CORE SERVICES                         ║
-║  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  ║
-║  │ meshtasticd  │  │    rnsd      │  │  Orchestrator  │  ║
-║  │  (radio)     │  │    (RNS)     │  │   (manager)    │  ║
-║  └──────────────┘  └──────────────┘  └────────────────┘  ║
-╠══════════════════════════════════════════════════════════╣
-║                    GATEWAY BRIDGE                         ║
-║         Meshtastic <──> Protocol Translation <──> RNS    ║
-╠══════════════════════════════════════════════════════════╣
-║                    INTELLIGENCE                           ║
-║    Diagnostics Engine  |  Knowledge Base  |  Claude AI   ║
-╚══════════════════════════════════════════════════════════╝
+```mermaid
+flowchart TB
+    subgraph UI[User Interfaces]
+        GTK[GTK Desktop]
+        TUI[Rich TUI]
+        WEB[Web UI]
+        SA[Standalone]
+    end
+
+    subgraph SERVICES[Core Services]
+        MTD[meshtasticd<br/>Radio Control]
+        RNS[rnsd<br/>Reticulum Stack]
+        ORC[Orchestrator<br/>Health Monitor]
+    end
+
+    subgraph BRIDGE[Gateway Bridge]
+        PROTO[Protocol Translation<br/>Meshtastic ↔ RNS]
+    end
+
+    subgraph INTEL[Intelligence Layer]
+        DIAG[Diagnostics Engine]
+        KB[Knowledge Base]
+        AI[Claude AI]
+    end
+
+    UI --> SERVICES
+    SERVICES --> BRIDGE
+    BRIDGE --> INTEL
+
+    style UI fill:#4a9eff,stroke:#333,color:#fff
+    style SERVICES fill:#6b8e23,stroke:#333,color:#fff
+    style BRIDGE fill:#ff6b6b,stroke:#333,color:#fff
+    style INTEL fill:#9b59b6,stroke:#333,color:#fff
 ```
 
 **Supported Hardware:**
