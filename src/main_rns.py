@@ -84,19 +84,68 @@ def rns_tools_menu():
             _run_service_command('rnsd', 'restart')
         elif choice == "4":
             console.print("\n[cyan]Recent rnsd logs:[/cyan]")
-            subprocess.run(['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'], timeout=10)
+            try:
+                result = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.stdout:
+                    console.print(result.stdout)
+                elif result.returncode != 0:
+                    console.print("[yellow]No logs found or service not configured[/yellow]")
+            except FileNotFoundError:
+                console.print("[yellow]journalctl not available (non-systemd system?)[/yellow]")
+                console.print("[dim]Try: cat /var/log/syslog | grep rnsd[/dim]")
+            except subprocess.TimeoutExpired:
+                console.print("[yellow]Timeout reading logs[/yellow]")
             input("\nPress Enter to continue...")
         elif choice == "5":
             console.print("\n[cyan]Installing RNS...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'rns'], timeout=120)
+            try:
+                result = subprocess.run(
+                    ['pip3', 'install', '--upgrade', '--break-system-packages', 'rns'],
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    console.print("[green]RNS installed successfully![/green]")
+                else:
+                    console.print("[red]Installation may have failed. Check output above.[/red]")
+            except subprocess.TimeoutExpired:
+                console.print("[red]Installation timed out (network issue?)[/red]")
+            except FileNotFoundError:
+                console.print("[red]pip3 not found. Install python3-pip first.[/red]")
             input("\nPress Enter to continue...")
         elif choice == "6":
             console.print("\n[cyan]Installing NomadNet...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'nomadnet'], timeout=120)
+            try:
+                result = subprocess.run(
+                    ['pip3', 'install', '--upgrade', '--break-system-packages', 'nomadnet'],
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    console.print("[green]NomadNet installed successfully![/green]")
+                else:
+                    console.print("[red]Installation may have failed. Check output above.[/red]")
+            except subprocess.TimeoutExpired:
+                console.print("[red]Installation timed out (network issue?)[/red]")
+            except FileNotFoundError:
+                console.print("[red]pip3 not found. Install python3-pip first.[/red]")
             input("\nPress Enter to continue...")
         elif choice == "7":
             console.print("\n[cyan]Installing LXMF...[/cyan]")
-            subprocess.run(['pip3', 'install', '--upgrade', '--break-system-packages', 'lxmf'], timeout=120)
+            try:
+                result = subprocess.run(
+                    ['pip3', 'install', '--upgrade', '--break-system-packages', 'lxmf'],
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    console.print("[green]LXMF installed successfully![/green]")
+                else:
+                    console.print("[red]Installation may have failed. Check output above.[/red]")
+            except subprocess.TimeoutExpired:
+                console.print("[red]Installation timed out (network issue?)[/red]")
+            except FileNotFoundError:
+                console.print("[red]pip3 not found. Install python3-pip first.[/red]")
             input("\nPress Enter to continue...")
         elif choice == "i":
             _install_meshtastic_interface()
@@ -105,14 +154,36 @@ def rns_tools_menu():
         elif choice == "8":
             config_path = get_real_user_home() / '.reticulum' / 'config'
             if config_path.exists():
-                subprocess.run(['nano', str(config_path)])  # No timeout for editor
+                try:
+                    subprocess.run(['nano', str(config_path)], timeout=None)  # Interactive editor
+                except FileNotFoundError:
+                    # Fallback to other editors
+                    for editor in ['vim', 'vi', 'less']:
+                        try:
+                            subprocess.run([editor, str(config_path)], timeout=None)  # Interactive
+                            break
+                        except FileNotFoundError:
+                            continue
+                    else:
+                        console.print(f"[yellow]No editor found. View config at:[/yellow]")
+                        console.print(f"  [cyan]{config_path}[/cyan]")
+                        input("\nPress Enter to continue...")
             else:
                 console.print(f"[yellow]Config not found at {config_path}[/yellow]")
                 console.print("[dim]Run 'rnsd' once to create default config[/dim]")
                 input("\nPress Enter to continue...")
         elif choice == "9":
             console.print("\n[cyan]RNS Status:[/cyan]")
-            subprocess.run(['rnstatus'], timeout=10)
+            try:
+                result = subprocess.run(['rnstatus'], capture_output=True, text=True, timeout=10)
+                if result.stdout:
+                    console.print(result.stdout)
+                if result.stderr:
+                    console.print(f"[yellow]{result.stderr}[/yellow]")
+            except FileNotFoundError:
+                console.print("[yellow]rnstatus not found. Install RNS first (option 5).[/yellow]")
+            except subprocess.TimeoutExpired:
+                console.print("[yellow]Timeout - rnsd may not be running[/yellow]")
             input("\nPress Enter to continue...")
         elif choice == "n":
             console.print("\n[cyan]Launching NomadNet...[/cyan]")
@@ -204,22 +275,108 @@ def gateway_bridge_menu():
             console.print("\n[cyan]Gateway Configuration:[/cyan]")
             config_path = get_real_user_home() / '.config' / 'meshforge' / 'gateway.json'
             if config_path.exists():
-                subprocess.run(['nano', str(config_path)])  # No timeout for editor
+                try:
+                    subprocess.run(['nano', str(config_path)], timeout=None)  # Interactive editor
+                except FileNotFoundError:
+                    # Fallback to other editors
+                    for editor in ['vim', 'vi', 'less']:
+                        try:
+                            subprocess.run([editor, str(config_path)], timeout=None)  # Interactive
+                            break
+                        except FileNotFoundError:
+                            continue
+                    else:
+                        console.print(f"[yellow]No editor found. Config location:[/yellow]")
+                        console.print(f"  [cyan]{config_path}[/cyan]")
+                        input("\nPress Enter to continue...")
             else:
                 console.print(f"[yellow]Config not found at {config_path}[/yellow]")
                 console.print("[dim]Start the gateway once to create default config[/dim]")
                 input("\nPress Enter to continue...")
         elif choice == "5":
-            # Show gateway templates
+            # Gateway template selection and application
+            import shutil
             template_dir = Path(__file__).parent.parent / 'templates' / 'available.d'
-            gateway_templates = list(template_dir.glob('gateway-*.yaml'))
-            if gateway_templates:
-                console.print("\n[cyan]Available Gateway Templates:[/cyan]")
-                for i, t in enumerate(gateway_templates, 1):
-                    console.print(f"  {i}. {t.name}")
-                # TODO: implement template selection
-            else:
+            gateway_templates = sorted(template_dir.glob('gateway-*.yaml'))
+
+            if not gateway_templates:
                 console.print("[yellow]No gateway templates found[/yellow]")
+                console.print("[dim]Gateway templates should be named 'gateway-*.yaml'[/dim]")
+                input("\nPress Enter to continue...")
+                continue
+
+            console.print("\n[bold cyan]═══════════ Gateway Templates ═══════════[/bold cyan]\n")
+            for i, t in enumerate(gateway_templates, 1):
+                # Extract description from first comment lines
+                try:
+                    with open(t, 'r') as f:
+                        first_lines = [l.strip('# \n') for l in f.readlines()[:3] if l.startswith('#')]
+                        desc = first_lines[0] if first_lines else "No description"
+                except Exception:
+                    desc = "No description"
+                console.print(f"  [bold]{i}[/bold]. {t.stem}")
+                console.print(f"      [dim]{desc}[/dim]")
+
+            console.print(f"\n  [bold]0[/bold]. Cancel")
+
+            choices = ["0"] + [str(i) for i in range(1, len(gateway_templates) + 1)]
+            selection = Prompt.ask("\n[cyan]Select template[/cyan]", choices=choices, default="0")
+
+            if selection == "0":
+                continue
+
+            selected_template = gateway_templates[int(selection) - 1]
+            dest_path = Path('/etc/meshtasticd/config.yaml')
+
+            # Show preview
+            console.print(f"\n[cyan]Template: {selected_template.name}[/cyan]")
+            console.print("[dim]Preview (first 25 lines):[/dim]\n")
+            try:
+                with open(selected_template, 'r') as f:
+                    lines = f.readlines()[:25]
+                    for line in lines:
+                        console.print(f"[dim]{line.rstrip()}[/dim]")
+                    if len(lines) >= 25:
+                        console.print("[dim]...[/dim]")
+            except Exception as e:
+                console.print(f"[red]Error reading template: {e}[/red]")
+                input("\nPress Enter to continue...")
+                continue
+
+            if Confirm.ask(f"\nApply template to {dest_path}?", default=True):
+                try:
+                    # Backup existing config
+                    if dest_path.exists():
+                        backup_path = dest_path.with_suffix('.yaml.bak')
+                        shutil.copy2(dest_path, backup_path)
+                        console.print(f"[dim]Backed up to {backup_path}[/dim]")
+
+                    shutil.copy2(selected_template, dest_path)
+                    console.print("[green]Template applied successfully![/green]")
+
+                    if Confirm.ask("\nRestart meshtasticd service?", default=True):
+                        result = subprocess.run(
+                            ['systemctl', 'restart', 'meshtasticd'],
+                            capture_output=True, text=True, timeout=30
+                        )
+                        if result.returncode == 0:
+                            console.print("[green]Service restarted![/green]")
+                        else:
+                            console.print(f"[red]Restart failed: {result.stderr}[/red]")
+
+                    # Gateway-specific next steps
+                    console.print("\n[bold cyan]═══════════ Next Steps ═══════════[/bold cyan]\n")
+                    console.print("[yellow]Complete gateway setup:[/yellow]\n")
+                    console.print("  1. Configure RNS identity (option 3 in RNS Tools)")
+                    console.print("  2. Start the gateway bridge (option 1)")
+                    console.print("  3. Verify connectivity (options 6 & 7)")
+                    console.print("\n[dim]Gateway config: ~/.config/meshforge/gateway.json[/dim]")
+
+                except PermissionError:
+                    console.print("[red]Permission denied. Run with sudo.[/red]")
+                except Exception as e:
+                    console.print(f"[red]Failed to apply template: {e}[/red]")
+
             input("\nPress Enter to continue...")
         elif choice == "6":
             console.print("\n[cyan]Testing Meshtastic Connection...[/cyan]")
