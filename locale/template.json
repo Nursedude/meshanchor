@@ -1,0 +1,73 @@
+{
+  "_comment": "MeshForge Translation Template - Copy to <lang_code>.json and translate values",
+  "_instructions": "Keep English keys, replace empty values with translations",
+
+  "Connected": "",
+  "Disconnected": "",
+  "Connecting...": "",
+  "Error": "",
+  "Warning": "",
+  "Success": "",
+
+  "Main Menu": "",
+  "Settings": "",
+  "Help": "",
+  "Exit": "",
+  "Back": "",
+
+  "Online": "",
+  "Offline": "",
+  "Unknown": "",
+  "No devices found": "",
+
+  "Start": "",
+  "Stop": "",
+  "Restart": "",
+  "Configure": "",
+  "Install": "",
+  "Update": "",
+  "Uninstall": "",
+
+  "Gateway Bridge": "",
+  "Gateway running": "",
+  "Gateway stopped": "",
+  "Messages sent": "",
+  "Messages received": "",
+
+  "RNS Tools": "",
+  "RNS connected": "",
+  "RNS disconnected": "",
+
+  "System Diagnostics": "",
+  "Hardware Detection": "",
+  "Network Status": "",
+  "Service Status": "",
+
+  "Yes": "",
+  "No": "",
+  "Cancel": "",
+  "OK": "",
+  "Apply": "",
+  "Save": "",
+  "Load": "",
+  "Reset": "",
+
+  "Connection failed": "",
+  "Permission denied": "",
+  "File not found": "",
+  "Invalid configuration": "",
+
+  "Callsign": "",
+  "Node": "",
+  "Nodes": "",
+  "Channel": "",
+  "Frequency": "",
+  "SNR": "",
+  "RSSI": "",
+  "Battery": "",
+  "Last seen": "",
+
+  "Press Enter to continue": "",
+  "Select an option": "",
+  "Invalid selection": ""
+}
