@@ -22,6 +22,13 @@ if str(_src_dir) not in sys.path:
 
 from utils.paths import get_real_user_home
 
+# Import centralized service checker
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    SERVICE_CHECK_AVAILABLE = False
+
 
 def print_header(title: str):
     """Print a section header."""
@@ -52,19 +59,29 @@ def check_services():
 
     services = ['meshtasticd', 'rnsd']
     for svc in services:
-        try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', svc],
-                capture_output=True, text=True, timeout=5
-            )
-            is_active = result.stdout.strip() == 'active'
-            print_status(svc, is_active, result.stdout.strip())
-        except FileNotFoundError:
-            print_status(svc, False, "systemctl not found")
-        except subprocess.TimeoutExpired:
-            print_status(svc, False, "timeout")
-        except Exception as e:
-            print_status(svc, False, str(e))
+        if SERVICE_CHECK_AVAILABLE:
+            # Use centralized service checker
+            status = check_service(svc)
+            is_active = status.available
+            detail = status.state.value
+            if not is_active and status.fix_hint:
+                detail = f"{detail} - {status.fix_hint}"
+            print_status(svc, is_active, detail)
+        else:
+            # Fallback to direct systemctl call
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', svc],
+                    capture_output=True, text=True, timeout=5
+                )
+                is_active = result.stdout.strip() == 'active'
+                print_status(svc, is_active, result.stdout.strip())
+            except FileNotFoundError:
+                print_status(svc, False, "systemctl not found")
+            except subprocess.TimeoutExpired:
+                print_status(svc, False, "timeout")
+            except Exception as e:
+                print_status(svc, False, str(e))
 
 
 def check_rns_port():

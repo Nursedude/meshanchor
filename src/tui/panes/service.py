@@ -8,6 +8,13 @@ from textual.containers import Container, Horizontal
 from textual.widgets import Static, Button, Log, Rule
 from textual import work
 
+# Import centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    SERVICE_CHECK_AVAILABLE = False
+
 logger = logging.getLogger('tui')
 
 
@@ -57,27 +64,48 @@ class ServicePane(Container):
     async def refresh_status(self):
         """Refresh service status"""
         try:
-            result = await asyncio.create_subprocess_exec(
-                'systemctl', 'is-active', 'meshtasticd',
-                stdout=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await result.communicate()
-            is_active = stdout.decode().strip() == "active"
-
             status_widget = self.query_one("#svc-status", Static)
-            if is_active:
-                status_widget.update("[bold green]● Running[/bold green]")
-            else:
-                status_widget.update("[bold red]○ Stopped[/bold red]")
+            detail_widget = self.query_one("#svc-detail", Static)
 
-            # Get details
-            result = await asyncio.create_subprocess_exec(
-                'systemctl', 'show', 'meshtasticd',
-                '--property=MainPID,ActiveEnterTimestamp',
-                stdout=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await result.communicate()
-            self.query_one("#svc-detail", Static).update(stdout.decode().strip())
+            if SERVICE_CHECK_AVAILABLE:
+                # Use centralized service checker
+                svc_status = await asyncio.to_thread(check_service, 'meshtasticd')
+                is_active = svc_status.available
+
+                if is_active:
+                    status_widget.update("[bold green]● Running[/bold green]")
+                elif svc_status.state == ServiceState.DEGRADED:
+                    status_widget.update("[bold yellow]● Degraded[/bold yellow]")
+                else:
+                    status_widget.update("[bold red]○ Stopped[/bold red]")
+
+                # Show detection method and any hints
+                detail_text = f"Detection: {svc_status.detection_method}"
+                if svc_status.message:
+                    detail_text += f"\n{svc_status.message}"
+                detail_widget.update(detail_text)
+            else:
+                # Fallback to direct systemctl call
+                result = await asyncio.create_subprocess_exec(
+                    'systemctl', 'is-active', 'meshtasticd',
+                    stdout=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await result.communicate()
+                is_active = stdout.decode().strip() == "active"
+
+                if is_active:
+                    status_widget.update("[bold green]● Running[/bold green]")
+                else:
+                    status_widget.update("[bold red]○ Stopped[/bold red]")
+
+                # Get details
+                result = await asyncio.create_subprocess_exec(
+                    'systemctl', 'show', 'meshtasticd',
+                    '--property=MainPID,ActiveEnterTimestamp',
+                    stdout=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await result.communicate()
+                detail_widget.update(stdout.decode().strip())
 
         except Exception as e:
             self.query_one("#svc-status", Static).update(f"[red]Error: {e}[/red]")

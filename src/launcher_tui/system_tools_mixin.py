@@ -18,6 +18,14 @@ from typing import Optional
 import logging
 logger = logging.getLogger(__name__)
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
 try:
     from utils.paths import get_real_user_home

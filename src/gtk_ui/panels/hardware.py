@@ -10,6 +10,13 @@ import subprocess
 import threading
 from pathlib import Path
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 class HardwarePanel(Gtk.Box):
     """Hardware detection and configuration panel"""
@@ -299,15 +306,21 @@ class HardwarePanel(Gtk.Box):
             try:
                 is_running = False
 
-                # Check systemctl
-                result = subprocess.run(
-                    ['systemctl', 'is-active', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.stdout.strip() == 'active':
-                    is_running = True
+                # Use centralized service checker if available
+                if _HAS_SERVICE_CHECK:
+                    status = check_service('meshtasticd')
+                    if status.available:
+                        is_running = True
+                else:
+                    # Fallback to direct systemctl call
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', 'meshtasticd'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.stdout.strip() == 'active':
+                        is_running = True
 
-                # Check process
+                # Check process if service not found
                 if not is_running:
                     result = subprocess.run(['pgrep', '-f', 'meshtasticd'],
                                            capture_output=True, text=True, timeout=5)

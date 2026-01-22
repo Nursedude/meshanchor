@@ -20,6 +20,14 @@ from rich.table import Table
 from utils import emoji as em
 from utils.paths import get_real_user_home
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 console = Console()
 
 
@@ -37,14 +45,19 @@ def rns_tools_menu():
         except ImportError:
             rns_version = "Not installed"
 
-        # Check rnsd service status
+        # Check rnsd service status using centralized checker (SINGLE SOURCE OF TRUTH)
         rnsd_status = "unknown"
-        try:
-            result = subprocess.run(['systemctl', 'is-active', 'rnsd'],
-                                   capture_output=True, text=True, timeout=5)
-            rnsd_status = result.stdout.strip()
-        except Exception:
-            pass
+        if check_service is not None:
+            status = check_service('rnsd')
+            rnsd_status = "active" if status.available else status.state.value
+        else:
+            # Fallback if service_check not available
+            try:
+                result = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                       capture_output=True, text=True, timeout=5)
+                rnsd_status = result.stdout.strip()
+            except Exception:
+                pass
 
         console.print(f"[dim]RNS: {rns_version} | rnsd: {rnsd_status}[/dim]\n")
 

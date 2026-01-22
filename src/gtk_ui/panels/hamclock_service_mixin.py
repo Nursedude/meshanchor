@@ -14,6 +14,13 @@ import threading
 import logging
 from gi.repository import GLib, Gio
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,24 +44,38 @@ class HamClockServiceMixin:
 
             for name in service_names:
                 try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', name],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if result.returncode == 0 and result.stdout.strip() == 'active':
-                        status['installed'] = True
-                        status['running'] = True
-                        status['service_name'] = name
-                        break
+                    # Use centralized service checker if available
+                    if _HAS_SERVICE_CHECK:
+                        is_running, is_enabled = check_systemd_service(name)
+                        if is_running:
+                            status['installed'] = True
+                            status['running'] = True
+                            status['service_name'] = name
+                            break
+                        elif is_enabled or is_running is not None:
+                            # Service exists but not running
+                            status['installed'] = True
+                            status['service_name'] = name
+                    else:
+                        # Fallback to direct systemctl call
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', name],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if result.returncode == 0 and result.stdout.strip() == 'active':
+                            status['installed'] = True
+                            status['running'] = True
+                            status['service_name'] = name
+                            break
 
-                    # Check if installed but not running
-                    result2 = subprocess.run(
-                        ['systemctl', 'is-enabled', name],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if result2.returncode == 0 or 'disabled' in result2.stdout:
-                        status['installed'] = True
-                        status['service_name'] = name
+                        # Check if installed but not running
+                        result2 = subprocess.run(
+                            ['systemctl', 'is-enabled', name],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if result2.returncode == 0 or 'disabled' in result2.stdout:
+                            status['installed'] = True
+                            status['service_name'] = name
 
                 except subprocess.TimeoutExpired:
                     logger.debug(f"[HamClock] Timeout checking service: {name}")

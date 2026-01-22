@@ -21,6 +21,14 @@ from typing import List
 
 from utils.paths import get_real_user_home
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 # Import diagnostic system
 try:
     from utils.network_diagnostics import (
@@ -1393,18 +1401,28 @@ class DiagnosticsPanel(Gtk.Box):
             results.append("[FAIL] Port 4403 not responding")
             results.append("  FIX: Start meshtasticd: sudo systemctl start meshtasticd")
 
-        # Check service
-        try:
-            proc = subprocess.run(
-                ['systemctl', 'is-active', 'meshtasticd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if proc.stdout.strip() == 'active':
+        # Check service using centralized checker (SINGLE SOURCE OF TRUTH)
+        if check_service is not None:
+            status = check_service('meshtasticd')
+            if status.available:
                 results.append("[PASS] meshtasticd service is active")
             else:
-                results.append(f"[WARN] meshtasticd service: {proc.stdout.strip()}")
-        except Exception as e:
-            results.append(f"[WARN] Could not check service: {e}")
+                results.append(f"[WARN] meshtasticd service: {status.state.value}")
+                if status.fix_hint:
+                    results.append(f"  FIX: {status.fix_hint}")
+        else:
+            # Fallback if service_check not available
+            try:
+                proc = subprocess.run(
+                    ['systemctl', 'is-active', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if proc.stdout.strip() == 'active':
+                    results.append("[PASS] meshtasticd service is active")
+                else:
+                    results.append(f"[WARN] meshtasticd service: {proc.stdout.strip()}")
+            except Exception as e:
+                results.append(f"[WARN] Could not check service: {e}")
 
         return results
 

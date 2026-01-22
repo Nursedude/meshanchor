@@ -23,6 +23,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from utils import emoji as em
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 console = Console()
 
 
@@ -773,22 +780,34 @@ class SystemDiagnostics:
     def _check_service_running(self) -> bool:
         """Check if meshtasticd service is running"""
         try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', 'meshtasticd'],
-                capture_output=True, text=True
-            )
-            return result.stdout.strip() == 'active'
+            # Use centralized service checker if available
+            if _HAS_SERVICE_CHECK:
+                status = check_service('meshtasticd')
+                return status.available
+            else:
+                # Fallback to direct systemctl call
+                result = subprocess.run(
+                    ['systemctl', 'is-active', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=10
+                )
+                return result.stdout.strip() == 'active'
         except Exception:
             return False
 
     def _check_service_enabled(self) -> bool:
         """Check if meshtasticd service is enabled on boot"""
         try:
-            result = subprocess.run(
-                ['systemctl', 'is-enabled', 'meshtasticd'],
-                capture_output=True, text=True
-            )
-            return result.stdout.strip() == 'enabled'
+            # Use centralized service checker if available
+            if _HAS_SERVICE_CHECK:
+                is_running, is_enabled = check_systemd_service('meshtasticd')
+                return is_enabled
+            else:
+                # Fallback to direct systemctl call
+                result = subprocess.run(
+                    ['systemctl', 'is-enabled', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=10
+                )
+                return result.stdout.strip() == 'enabled'
         except Exception:
             return False
 

@@ -20,6 +20,14 @@ from rich.table import Table
 
 from utils import emoji as em
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 console = Console()
 
 
@@ -219,6 +227,20 @@ def view_error_logs():
 def test_service():
     """Test meshtasticd service"""
     console.print("\n[cyan]Testing meshtasticd service...[/cyan]\n")
+
+    # First show status using centralized checker (SINGLE SOURCE OF TRUTH)
+    if check_service is not None:
+        status = check_service('meshtasticd')
+        if status.available:
+            console.print(f"[green]Service Status: {status.state.value}[/green]")
+        else:
+            console.print(f"[yellow]Service Status: {status.state.value}[/yellow]")
+        console.print(f"[dim]{status.message}[/dim]")
+        if status.fix_hint and not status.available:
+            console.print(f"[dim]Fix: {status.fix_hint}[/dim]")
+        console.print()
+
+    # Also show full systemctl status for detailed information
     result = subprocess.run(['systemctl', 'status', 'meshtasticd'],
                           capture_output=True, text=True, timeout=15)
     console.print(result.stdout)

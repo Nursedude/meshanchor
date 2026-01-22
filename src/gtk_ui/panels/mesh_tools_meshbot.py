@@ -31,6 +31,13 @@ try:
 except ImportError:
     HAS_UI_HELPERS = False
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 class MeshBotTabMixin:
     """
@@ -563,12 +570,20 @@ class MeshBotTabMixin:
 
         def do_stop():
             try:
-                service_check = subprocess.run(
-                    ['systemctl', 'is-active', 'mesh_bot.service'],
-                    capture_output=True, text=True, timeout=5
-                )
+                # Use centralized service checker if available
+                service_active = False
+                if _HAS_SERVICE_CHECK:
+                    is_running, is_enabled = check_systemd_service('mesh_bot')
+                    service_active = is_running
+                else:
+                    # Fallback to direct systemctl call
+                    service_check = subprocess.run(
+                        ['systemctl', 'is-active', 'mesh_bot.service'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    service_active = service_check.stdout.strip() == 'active'
 
-                if service_check.stdout.strip() == 'active':
+                if service_active:
                     GLib.idle_add(self._log_message, "Stopping systemd service...")
                     result = subprocess.run(
                         ['sudo', 'systemctl', 'stop', 'mesh_bot.service'],
