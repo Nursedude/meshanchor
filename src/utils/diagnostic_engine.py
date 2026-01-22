@@ -38,6 +38,13 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service as _check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 # =============================================================================
 # EVIDENCE CHECK FUNCTIONS
@@ -104,13 +111,21 @@ def check_process_not_running(process_name: str) -> Optional[str]:
 def check_systemd_service_active(service_name: str) -> Optional[str]:
     """Check if a systemd service is active. Returns evidence string or None."""
     try:
-        result = subprocess.run(
-            ["systemctl", "is-active", service_name],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0 and "active" in result.stdout:
-            return f"Systemd service '{service_name}' is active"
-        return None
+        # Use centralized service checker if available
+        if _HAS_SERVICE_CHECK:
+            is_running, is_enabled = _check_systemd_service(service_name)
+            if is_running:
+                return f"Systemd service '{service_name}' is active"
+            return None
+        else:
+            # Fallback to direct systemctl call
+            result = subprocess.run(
+                ["systemctl", "is-active", service_name],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and "active" in result.stdout:
+                return f"Systemd service '{service_name}' is active"
+            return None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
 
@@ -118,13 +133,21 @@ def check_systemd_service_active(service_name: str) -> Optional[str]:
 def check_systemd_service_inactive(service_name: str) -> Optional[str]:
     """Check if a systemd service is inactive. Returns evidence string or None."""
     try:
-        result = subprocess.run(
-            ["systemctl", "is-active", service_name],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0 or "inactive" in result.stdout:
-            return f"Systemd service '{service_name}' is NOT active"
-        return None
+        # Use centralized service checker if available
+        if _HAS_SERVICE_CHECK:
+            is_running, is_enabled = _check_systemd_service(service_name)
+            if not is_running:
+                return f"Systemd service '{service_name}' is NOT active"
+            return None
+        else:
+            # Fallback to direct systemctl call
+            result = subprocess.run(
+                ["systemctl", "is-active", service_name],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0 or "inactive" in result.stdout:
+                return f"Systemd service '{service_name}' is NOT active"
+            return None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return f"Systemd service '{service_name}' status unknown"
 

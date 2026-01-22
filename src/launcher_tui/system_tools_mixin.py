@@ -18,6 +18,26 @@ from typing import Optional
 import logging
 logger = logging.getLogger(__name__)
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
+# Import for sudo-safe home directory - see persistent_issues.md Issue #1
+try:
+    from utils.paths import get_real_user_home
+except ImportError:
+    # Fallback if utils not available
+    def get_real_user_home():
+        import os
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            return Path(f'/home/{sudo_user}')
+        return Path.home()
+
 
 class SystemToolsMixin:
     """Comprehensive Linux diagnostic tools for NOC operations."""
@@ -819,7 +839,7 @@ class SystemToolsMixin:
             print("=== Home Directory Usage (top 20) ===\n")
             try:
                 result = subprocess.run(
-                    ['du', '-h', '--max-depth=1', str(Path.home())],
+                    ['du', '-h', '--max-depth=1', str(get_real_user_home())],
                     capture_output=True, text=True, timeout=60
                 )
                 lines = sorted(result.stdout.strip().split('\n'), key=lambda x: x.split()[0] if x else '0')

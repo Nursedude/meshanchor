@@ -10,6 +10,13 @@ import subprocess
 # Import from web.utils for testability
 from web.utils import VALID_ACTIONS, ALLOWED_SERVICES
 
+# Import centralized service checker
+try:
+    from utils.service_check import check_service, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    SERVICE_CHECK_AVAILABLE = False
+
 service_bp = Blueprint('service', __name__)
 
 
@@ -53,29 +60,44 @@ def api_service_status(service_name):
     if service_name not in ALLOWED_SERVICES:
         return jsonify({'error': 'Service not allowed'}), 400
 
-    try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', service_name],
-            capture_output=True, text=True, timeout=10
-        )
-        active = result.stdout.strip() == 'active'
+    if SERVICE_CHECK_AVAILABLE:
+        try:
+            status = check_service(service_name)
+            return jsonify({
+                'service': service_name,
+                'active': status.available,
+                'status': status.state.value,
+                'message': status.message,
+                'fix_hint': status.fix_hint,
+                'detection_method': status.detection_method
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    else:
+        # Fallback to direct systemctl call
+        try:
+            result = subprocess.run(
+                ['systemctl', 'is-active', service_name],
+                capture_output=True, text=True, timeout=10
+            )
+            active = result.stdout.strip() == 'active'
 
-        # Get more detailed status
-        status_result = subprocess.run(
-            ['systemctl', 'status', service_name, '--no-pager'],
-            capture_output=True, text=True, timeout=10
-        )
+            # Get more detailed status
+            status_result = subprocess.run(
+                ['systemctl', 'status', service_name, '--no-pager'],
+                capture_output=True, text=True, timeout=10
+            )
 
-        return jsonify({
-            'service': service_name,
-            'active': active,
-            'status': result.stdout.strip(),
-            'details': status_result.stdout[:500] if status_result.stdout else None
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Status check timed out'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            return jsonify({
+                'service': service_name,
+                'active': active,
+                'status': result.stdout.strip(),
+                'details': status_result.stdout[:500] if status_result.stdout else None
+            })
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Status check timed out'}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
 
 @service_bp.route('/service/<service_name>/<action>', methods=['POST'])
@@ -123,19 +145,35 @@ def api_all_services_status():
     statuses = {}
 
     for service_name in ALLOWED_SERVICES:
-        try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', service_name],
-                capture_output=True, text=True, timeout=10
-            )
-            statuses[service_name] = {
-                'active': result.stdout.strip() == 'active',
-                'status': result.stdout.strip()
-            }
-        except Exception:
-            statuses[service_name] = {
-                'active': False,
-                'status': 'unknown'
-            }
+        if SERVICE_CHECK_AVAILABLE:
+            try:
+                status = check_service(service_name)
+                statuses[service_name] = {
+                    'active': status.available,
+                    'status': status.state.value,
+                    'message': status.message,
+                    'detection_method': status.detection_method
+                }
+            except Exception:
+                statuses[service_name] = {
+                    'active': False,
+                    'status': 'unknown'
+                }
+        else:
+            # Fallback to direct systemctl call
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', service_name],
+                    capture_output=True, text=True, timeout=10
+                )
+                statuses[service_name] = {
+                    'active': result.stdout.strip() == 'active',
+                    'status': result.stdout.strip()
+                }
+            except Exception:
+                statuses[service_name] = {
+                    'active': False,
+                    'status': 'unknown'
+                }
 
     return jsonify({'services': statuses})

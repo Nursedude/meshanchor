@@ -15,6 +15,13 @@ from rich.layout import Layout
 from rich.text import Text
 from rich import box
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 console = Console()
 
 
@@ -436,17 +443,30 @@ class ConfigFileManager:
             console.print("\n[cyan]Checking service status...[/cyan]")
             import time
             time.sleep(2)
-            result = subprocess.run(
-                ["systemctl", "is-active", "meshtasticd"],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.stdout.strip() == "active":
-                console.print("[bold green]Service is running![/bold green]")
-                console.print("\n[cyan]Check the web interface at:[/cyan]")
-                console.print("  https://<your-ip>:9443")
+
+            # Use centralized service checker if available
+            if _HAS_SERVICE_CHECK:
+                status = check_service('meshtasticd')
+                if status.available:
+                    console.print("[bold green]Service is running![/bold green]")
+                    console.print("\n[cyan]Check the web interface at:[/cyan]")
+                    console.print("  https://<your-ip>:9443")
+                else:
+                    console.print("[yellow]Service may not be running properly.[/yellow]")
+                    console.print("Check logs with: journalctl -u meshtasticd -f")
             else:
-                console.print("[yellow]Service may not be running properly.[/yellow]")
-                console.print("Check logs with: journalctl -u meshtasticd -f")
+                # Fallback to direct systemctl call
+                result = subprocess.run(
+                    ["systemctl", "is-active", "meshtasticd"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.stdout.strip() == "active":
+                    console.print("[bold green]Service is running![/bold green]")
+                    console.print("\n[cyan]Check the web interface at:[/cyan]")
+                    console.print("  https://<your-ip>:9443")
+                else:
+                    console.print("[yellow]Service may not be running properly.[/yellow]")
+                    console.print("Check logs with: journalctl -u meshtasticd -f")
 
         console.print("\n[bold green]Setup wizard complete![/bold green]")
         Prompt.ask("\n[dim]Press Enter to continue[/dim]")
@@ -614,15 +634,25 @@ class ConfigFileManager:
         # Check service
         console.print("\n[bold]Checking service status...[/bold]")
         try:
-            result = subprocess.run(
-                ["systemctl", "is-active", "meshtasticd"],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.stdout.strip() == "active":
-                console.print("  [green]OK[/green] meshtasticd service is running")
+            # Use centralized service checker if available
+            if _HAS_SERVICE_CHECK:
+                status = check_service('meshtasticd')
+                if status.available:
+                    console.print("  [green]OK[/green] meshtasticd service is running")
+                else:
+                    info.append("meshtasticd service not running")
+                    console.print(f"  [yellow]~[/yellow] Service status: {status.state.value}")
             else:
-                info.append("meshtasticd service not running")
-                console.print(f"  [yellow]~[/yellow] Service status: {result.stdout.strip()}")
+                # Fallback to direct systemctl call
+                result = subprocess.run(
+                    ["systemctl", "is-active", "meshtasticd"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.stdout.strip() == "active":
+                    console.print("  [green]OK[/green] meshtasticd service is running")
+                else:
+                    info.append("meshtasticd service not running")
+                    console.print(f"  [yellow]~[/yellow] Service status: {result.stdout.strip()}")
         except Exception as e:
             console.print(f"  [yellow]~[/yellow] Could not check service: {e}")
 
@@ -1000,16 +1030,25 @@ Logging:
                 for line in lines[:15]:  # First 15 lines
                     console.print(line)
 
-                # Check if running
-                is_active = subprocess.run(
-                    ["systemctl", "is-active", "meshtasticd"],
-                    capture_output=True, text=True, timeout=10
-                )
-                if is_active.stdout.strip() == "active":
-                    console.print("\n[bold green]Service is running![/bold green]")
+                # Check if running using centralized service checker
+                if _HAS_SERVICE_CHECK:
+                    status = check_service('meshtasticd')
+                    if status.available:
+                        console.print("\n[bold green]Service is running![/bold green]")
+                    else:
+                        console.print(f"\n[yellow]Service status: {status.state.value}[/yellow]")
+                        console.print("[dim]Check logs with: journalctl -u meshtasticd -f[/dim]")
                 else:
-                    console.print(f"\n[yellow]Service status: {is_active.stdout.strip()}[/yellow]")
-                    console.print("[dim]Check logs with: journalctl -u meshtasticd -f[/dim]")
+                    # Fallback to direct systemctl call
+                    is_active = subprocess.run(
+                        ["systemctl", "is-active", "meshtasticd"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if is_active.stdout.strip() == "active":
+                        console.print("\n[bold green]Service is running![/bold green]")
+                    else:
+                        console.print(f"\n[yellow]Service status: {is_active.stdout.strip()}[/yellow]")
+                        console.print("[dim]Check logs with: journalctl -u meshtasticd -f[/dim]")
 
             except subprocess.TimeoutExpired:
                 console.print("[yellow]Timeout checking status[/yellow]")

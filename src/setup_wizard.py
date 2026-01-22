@@ -23,9 +23,23 @@ from enum import Enum
 # Setup logging
 logger = logging.getLogger(__name__)
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import (
+        check_service as _check_service_central,
+        check_port,
+        ServiceState as CentralServiceState
+    )
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    _check_service_central = None
+    check_port = None
+    CentralServiceState = None
+    SERVICE_CHECK_AVAILABLE = False
 
-class ServiceState(Enum):
-    """Service states"""
+
+class WizardServiceState(Enum):
+    """Service states for wizard display"""
     NOT_INSTALLED = "not_installed"
     INSTALLED = "installed"
     RUNNING = "running"
@@ -38,7 +52,7 @@ class ServiceStatus:
     """Status of a detected service"""
     name: str
     display_name: str
-    state: ServiceState
+    state: WizardServiceState
     version: Optional[str] = None
     path: Optional[str] = None
     systemd_unit: Optional[str] = None
@@ -229,11 +243,11 @@ class SetupWizard:
 
             # Print status
             state_icons = {
-                ServiceState.RUNNING: ("RUNNING", "success"),
-                ServiceState.INSTALLED: ("INSTALLED", "warning"),
-                ServiceState.STOPPED: ("STOPPED", "warning"),
-                ServiceState.NOT_INSTALLED: ("NOT FOUND", "dim"),
-                ServiceState.ERROR: ("ERROR", "error"),
+                WizardServiceState.RUNNING: ("RUNNING", "success"),
+                WizardServiceState.INSTALLED: ("INSTALLED", "warning"),
+                WizardServiceState.STOPPED: ("STOPPED", "warning"),
+                WizardServiceState.NOT_INSTALLED: ("NOT FOUND", "dim"),
+                WizardServiceState.ERROR: ("ERROR", "error"),
             }
             icon, style = state_icons.get(status.state, ("?", "normal"))
 
@@ -250,7 +264,7 @@ class SetupWizard:
         status = ServiceStatus(
             name=svc['name'],
             display_name=svc['display'],
-            state=ServiceState.NOT_INSTALLED
+            state=WizardServiceState.NOT_INSTALLED
         )
 
         # Check if command exists
@@ -265,7 +279,7 @@ class SetupWizard:
 
         if cmd_path:
             status.path = cmd_path
-            status.state = ServiceState.INSTALLED
+            status.state = WizardServiceState.INSTALLED
 
             # Try to get version
             try:
@@ -285,24 +299,44 @@ class SetupWizard:
             except Exception as e:
                 status.notes.append(f"Could not get version: {e}")
 
-        # Check systemd service if applicable
+        # Check systemd service if applicable - use centralized checker (SINGLE SOURCE OF TRUTH)
         if svc.get('systemd'):
             status.systemd_unit = svc['systemd']
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc['systemd']],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.stdout.strip() == 'active':
-                    status.state = ServiceState.RUNNING
-                    status.notes.append("Running as systemd service")
-                elif status.state == ServiceState.INSTALLED:
-                    status.state = ServiceState.STOPPED
-            except Exception:
-                pass
 
-        # Check if running as process (fallback)
-        if status.state != ServiceState.RUNNING:
+            # Use centralized service checker if available
+            if SERVICE_CHECK_AVAILABLE and _check_service_central is not None:
+                try:
+                    central_status = _check_service_central(svc['name'])
+                    if central_status.available:
+                        status.state = WizardServiceState.RUNNING
+                        status.notes.append(f"Running ({central_status.detection_method})")
+                    elif central_status.state == CentralServiceState.NOT_INSTALLED:
+                        # Keep NOT_INSTALLED state
+                        pass
+                    elif status.state == WizardServiceState.INSTALLED:
+                        status.state = WizardServiceState.STOPPED
+                        if central_status.fix_hint:
+                            status.notes.append(f"Fix: {central_status.fix_hint}")
+                except Exception as e:
+                    logger.debug(f"Centralized check failed for {svc['name']}: {e}")
+                    # Fall through to direct systemctl check
+            else:
+                # Fallback: direct systemctl check
+                try:
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', svc['systemd']],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.stdout.strip() == 'active':
+                        status.state = WizardServiceState.RUNNING
+                        status.notes.append("Running as systemd service")
+                    elif status.state == WizardServiceState.INSTALLED:
+                        status.state = WizardServiceState.STOPPED
+                except Exception:
+                    pass
+
+        # Check if running as process (fallback for non-systemd services)
+        if status.state != WizardServiceState.RUNNING:
             try:
                 result = subprocess.run(
                     ['pgrep', '-f', svc['name']],
@@ -314,7 +348,7 @@ class SetupWizard:
                     our_pid = str(os.getpid())
                     other_pids = [p for p in pids if p != our_pid]
                     if other_pids:
-                        status.state = ServiceState.RUNNING
+                        status.state = WizardServiceState.RUNNING
                         status.notes.append(f"Running as process (PID: {other_pids[0]})")
             except Exception:
                 pass
@@ -326,9 +360,9 @@ class SetupWizard:
         """Show summary of detected services"""
         self._print("\n=== Current Status ===", "header")
 
-        running = [s for s in self.service_status.values() if s.state == ServiceState.RUNNING]
-        installed = [s for s in self.service_status.values() if s.state in [ServiceState.INSTALLED, ServiceState.STOPPED]]
-        missing = [s for s in self.service_status.values() if s.state == ServiceState.NOT_INSTALLED]
+        running = [s for s in self.service_status.values() if s.state == WizardServiceState.RUNNING]
+        installed = [s for s in self.service_status.values() if s.state in [WizardServiceState.INSTALLED, WizardServiceState.STOPPED]]
+        missing = [s for s in self.service_status.values() if s.state == WizardServiceState.NOT_INSTALLED]
 
         if running:
             self._print(f"\nRunning ({len(running)}):", "success")
@@ -401,8 +435,8 @@ class SetupWizard:
         rns_status = self.service_status.get('rnsd')
         nomad_status = self.service_status.get('nomadnet')
 
-        if (rns_status and rns_status.state == ServiceState.RUNNING and
-            nomad_status and nomad_status.state == ServiceState.RUNNING):
+        if (rns_status and rns_status.state == WizardServiceState.RUNNING and
+            nomad_status and nomad_status.state == WizardServiceState.RUNNING):
             # Both running - check if nomadnet is configured to use shared instance
             config_path = self._get_real_home() / ".reticulum" / "config"
             if config_path.exists():
@@ -455,7 +489,7 @@ class SetupWizard:
         # Check meshtasticd
         mesh_status = self.service_status.get('meshtasticd')
         if mesh_status:
-            if mesh_status.state == ServiceState.NOT_INSTALLED:
+            if mesh_status.state == WizardServiceState.NOT_INSTALLED:
                 self._print("\nmeshtasticd is not installed.", "warning")
                 self._print("This is required for Meshtastic radio communication.", "dim")
                 choice = self._ask("Would you like installation instructions?", ['y', 'n'], 'y')
@@ -465,7 +499,7 @@ class SetupWizard:
                     self._print("\nInstall meshtasticd:", "header")
                     self._print("  See: https://meshtastic.org/docs/software/linux-native", "dim")
                     self._print("  Or use the Meshtastic Flasher for Raspberry Pi", "dim")
-            elif mesh_status.state == ServiceState.STOPPED:
+            elif mesh_status.state == WizardServiceState.STOPPED:
                 choice = self._ask("\nmeshtasticd is installed but not running. Start it?", ['y', 'n'], 'y')
                 self._record_decision("meshtasticd", "Start service?", choice, "")
                 if choice == 'y':
@@ -474,17 +508,17 @@ class SetupWizard:
         # Check rnsd
         rns_status = self.service_status.get('rnsd')
         if rns_status:
-            if rns_status.state == ServiceState.NOT_INSTALLED:
+            if rns_status.state == WizardServiceState.NOT_INSTALLED:
                 choice = self._ask("\nrnsd (Reticulum) is not installed. Install now?", ['y', 'n'], 'n')
                 self._record_decision("rnsd", "Install?", choice, "")
                 if choice == 'y':
                     self._install_package('rns', 'rnsd')
-            elif rns_status.state == ServiceState.STOPPED:
+            elif rns_status.state == WizardServiceState.STOPPED:
                 choice = self._ask("\nrnsd is installed but not running. Start it?", ['y', 'n'], 'y')
                 self._record_decision("rnsd", "Start service?", choice, "")
                 if choice == 'y':
                     self._start_service('rnsd')
-            elif rns_status.state == ServiceState.RUNNING:
+            elif rns_status.state == WizardServiceState.RUNNING:
                 # Check if systemd service exists
                 if not self._check_systemd_exists('rnsd'):
                     choice = self._ask("\nrnsd is running but no systemd service. Create service for auto-start?", ['y', 'n'], 'y')

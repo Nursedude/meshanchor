@@ -37,6 +37,15 @@ try:
 except ImportError:
     HAS_YAML = False
 
+# Import centralized port checker for consistency across MeshForge
+# See: utils/service_check.py - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_port as _centralized_check_port
+    HAS_SERVICE_CHECK = True
+except ImportError:
+    _centralized_check_port = None
+    HAS_SERVICE_CHECK = False
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -300,7 +309,14 @@ class ServiceOrchestrator:
         return True
 
     def _check_port(self, port: int, host: str = 'localhost', timeout: float = 2.0) -> bool:
-        """Check if port is accepting connections."""
+        """Check if port is accepting connections.
+
+        Uses centralized port checker from utils/service_check.py for consistency.
+        """
+        if HAS_SERVICE_CHECK and _centralized_check_port is not None:
+            return _centralized_check_port(port, host, timeout)
+
+        # Fallback if service_check not available
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)

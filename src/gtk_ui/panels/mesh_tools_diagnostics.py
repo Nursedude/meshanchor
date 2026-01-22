@@ -26,6 +26,13 @@ except ImportError:
 # Import path utilities
 from utils.paths import get_real_user_home
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 class DiagnosticsTabMixin:
     """
@@ -395,8 +402,15 @@ class DiagnosticsTabMixin:
             # Meshtasticd
             report_lines.append("\n[Meshtasticd]")
             try:
-                result = subprocess.run(['systemctl', 'is-active', 'meshtasticd'], capture_output=True, text=True, timeout=5)
-                report_lines.append(f"  Service: {result.stdout.strip()}")
+                # Use centralized service checker if available
+                if _HAS_SERVICE_CHECK:
+                    status = check_service('meshtasticd')
+                    service_state = "active" if status.available else status.state.value
+                    report_lines.append(f"  Service: {service_state}")
+                else:
+                    # Fallback to direct systemctl call
+                    result = subprocess.run(['systemctl', 'is-active', 'meshtasticd'], capture_output=True, text=True, timeout=5)
+                    report_lines.append(f"  Service: {result.stdout.strip()}")
             except Exception:
                 report_lines.append("  Service: Unknown")
 

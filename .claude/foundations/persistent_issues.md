@@ -1368,3 +1368,96 @@ elif not config_yaml.exists():
 - Test fresh installs with `apt install meshtasticd` THEN run MeshForge
 
 ---
+
+## Issue #23: No Post-Install Verification (Installation Unreliability)
+
+### Symptom
+Installation completes "successfully" but:
+- meshtasticd doesn't start
+- Web client (port 9443) doesn't respond
+- Gateway can't connect
+- User spends more time troubleshooting than manual install would take
+
+### Root Cause (Identified 2026-01-22)
+**No automated verification after installation.** The install script:
+1. Installs packages ✓
+2. Creates config files ✓
+3. Creates systemd services ✓
+4. **Does NOT verify anything actually works** ✗
+
+### Impact
+- User thinks install succeeded when it didn't
+- Silent failures lead to confusion hours later
+- MeshForge takes MORE time than manual install (defeats purpose)
+- Support burden from "it doesn't work" reports
+
+### The Problem Pattern
+```
+install_noc.sh runs...
+  ✓ meshtasticd package installed
+  ✓ config.yaml created
+  ✓ systemd service created
+  "Installation Complete!"
+
+User runs meshforge...
+  ✗ meshtasticd won't start (config invalid)
+  ✗ Web client unreachable (Webserver section missing)
+  ✗ Gateway fails (no HAT config selected)
+```
+
+### Proper Fix (Implemented 2026-01-22)
+
+**1. Created `scripts/verify_post_install.sh`:**
+```bash
+#!/bin/bash
+# Verify MeshForge installation health
+# Run after install_noc.sh or anytime to check system state
+
+# Checks performed:
+# - meshtasticd binary exists and is executable
+# - config.yaml exists and has required sections
+# - systemd service can start (or is already running)
+# - Web client port 9443 responds
+# - At least one radio configured (SPI HAT or USB)
+# - RNS installed and rnsd functional
+```
+
+**2. Added `meshforge --verify-install` command**
+
+**3. Install script now calls verification automatically:**
+```bash
+# At end of install_noc.sh:
+echo "Verifying installation..."
+if bash scripts/verify_post_install.sh; then
+    echo "✓ Installation verified successfully"
+else
+    echo "⚠ Installation needs attention - see above"
+fi
+```
+
+### Required Verification Checks
+
+| Check | What It Verifies | Failure Action |
+|-------|------------------|----------------|
+| meshtasticd binary | Native daemon installed | Suggest apt install |
+| config.yaml exists | Base config created | Create minimal config |
+| Webserver section | Web client will work | Warn, show fix command |
+| Port 9443 | Web client responding | Check service status |
+| Radio detected | Hardware present | Warn, suggest HAT selection |
+| config.d/ populated | HAT config selected (SPI) | Prompt HAT selection |
+| rnsd available | RNS tools installed | Suggest pip install rns |
+| udev rules | Device permissions correct | Reload udev rules |
+
+### Files Changed
+- [NEW] `scripts/verify_post_install.sh` - Comprehensive verification script
+- [MOD] `scripts/install_noc.sh` - Call verification at end
+- [NEW] `src/commands/verify.py` - Python verification for CLI
+- [MOD] `src/launcher.py` - Add --verify-install flag
+
+### Prevention
+- ALWAYS run verification after install changes
+- CI should test verification on all supported platforms
+- Verification failures should be actionable (show how to fix)
+- Never mark install "complete" until verification passes
+
+---
