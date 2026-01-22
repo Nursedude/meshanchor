@@ -67,13 +67,14 @@ def _get_connection_args() -> List[str]:
     return ["--host", "localhost"]
 
 
-def _run_command(args: List[str], timeout: int = 60) -> CommandResult:
+def _run_command(args: List[str], timeout: int = 60, auto_detect: bool = True) -> CommandResult:
     """
     Run a meshtastic CLI command.
 
     Args:
         args: Command arguments (without 'meshtastic' prefix)
         timeout: Command timeout in seconds
+        auto_detect: If True, retry with auto-detection on connection failure
 
     Returns:
         CommandResult with output
@@ -104,9 +105,29 @@ def _run_command(args: List[str], timeout: int = 60) -> CommandResult:
                 raw=result.stdout
             )
         else:
+            error_text = result.stderr or result.stdout
+
+            # Check for connection refused - try auto-detect
+            if auto_detect and 'Connection refused' in error_text:
+                logger.info("Connection refused, attempting auto-detect...")
+                detect_result = auto_detect_connection()
+                if detect_result.success:
+                    # Retry with new connection
+                    return _run_command(args, timeout, auto_detect=False)
+
+                # Provide helpful message for connection failure
+                return CommandResult.fail(
+                    message="Cannot connect to Meshtastic device.\n\n"
+                            "For USB radios: Ensure device is connected\n"
+                            "For HAT radios: Start meshtasticd service\n"
+                            "  sudo systemctl start meshtasticd",
+                    error="connection_refused",
+                    fix_hint="Check device connection or start meshtasticd"
+                )
+
             return CommandResult.fail(
-                message=f"Command failed: {result.stderr or result.stdout}",
-                error=result.stderr or result.stdout,
+                message=f"Command failed: {error_text}",
+                error=error_text,
                 raw=result.stdout
             )
 
@@ -168,6 +189,75 @@ def test_connection() -> CommandResult:
         "Connection failed",
         error=result.error
     )
+
+
+def auto_detect_connection() -> CommandResult:
+    """
+    Auto-detect the best connection method.
+
+    Checks in order:
+    1. TCP port 4403 (meshtasticd daemon)
+    2. USB serial devices (/dev/ttyUSB*, /dev/ttyACM*)
+
+    Returns:
+        CommandResult with data={'type': ..., 'value': ...} on success
+    """
+    import socket
+
+    # Check if meshtasticd is running on port 4403
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1.0)
+        result = sock.connect_ex(('127.0.0.1', 4403))
+        sock.close()
+        if result == 0:
+            set_connection("localhost", "127.0.0.1")
+            return CommandResult.ok(
+                "Using TCP connection to meshtasticd (port 4403)",
+                data={'type': 'localhost', 'value': '127.0.0.1', 'method': 'tcp'}
+            )
+    except Exception:
+        pass
+
+    # Check for USB serial devices
+    usb_paths = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+    if usb_paths:
+        # Sort to get consistent ordering
+        usb_paths.sort()
+        usb_port = str(usb_paths[0])
+        set_connection("serial", usb_port)
+        return CommandResult.ok(
+            f"Using USB serial connection ({usb_port})",
+            data={'type': 'serial', 'value': usb_port, 'method': 'usb'}
+        )
+
+    # No connection found
+    return CommandResult.fail(
+        "No Meshtastic device found.\n\n"
+        "For USB radios: Connect device to USB port\n"
+        "For HAT radios: Start meshtasticd service\n"
+        "  sudo systemctl start meshtasticd",
+        error="no_device"
+    )
+
+
+def ensure_connection() -> CommandResult:
+    """
+    Ensure we have a valid connection, auto-detecting if needed.
+
+    Call this before running commands to ensure proper connection.
+    """
+    # If already connected to something other than default, test it
+    if _connection_type != "localhost" or _connection_value != "localhost":
+        test_result = test_connection()
+        if test_result.success:
+            return CommandResult.ok(
+                f"Connected via {_connection_type}: {_connection_value}",
+                data={'type': _connection_type, 'value': _connection_value}
+            )
+
+    # Auto-detect
+    return auto_detect_connection()
 
 
 # Information Commands
