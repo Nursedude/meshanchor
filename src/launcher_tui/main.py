@@ -127,7 +127,78 @@ class MeshForgeLauncher(
         if self._check_first_run():
             self._run_first_run_wizard()
 
+        # Check for service misconfiguration (SPI HAT with USB config)
+        self._check_service_misconfig()
+
         self._run_main_menu()
+
+    def _check_service_misconfig(self):
+        """Check for service misconfiguration and offer to fix."""
+        config_d = Path('/etc/meshtasticd/config.d')
+        if not config_d.exists():
+            return
+
+        # Check what configs are active
+        active_configs = list(config_d.glob('*.yaml'))
+        usb_config = config_d / 'usb-serial.yaml'
+
+        # Check for SPI configs
+        spi_config_names = ['meshadv', 'waveshare', 'rak-hat', 'meshtoad', 'sx126', 'sx127', 'lora']
+        has_spi_config = any(
+            any(name in cfg.name.lower() for name in spi_config_names)
+            for cfg in active_configs
+        )
+
+        # If SPI config exists AND usb-serial.yaml also exists, that's wrong
+        if has_spi_config and usb_config.exists():
+            spi_configs = [c.name for c in active_configs if any(n in c.name.lower() for n in spi_config_names)]
+
+            msg = "CONFLICTING CONFIGURATIONS!\n\n"
+            msg += "Both SPI HAT and USB configs are active:\n\n"
+            msg += f"  SPI: {', '.join(spi_configs)}\n"
+            msg += f"  USB: usb-serial.yaml (WRONG)\n\n"
+            msg += "Remove the USB config?"
+
+            if self.dialog.yesno("Config Conflict", msg):
+                try:
+                    usb_config.unlink()
+                    subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                    self.dialog.msgbox(
+                        "Fixed",
+                        "Removed usb-serial.yaml\n"
+                        "Restarted meshtasticd\n\n"
+                        "Check: systemctl status meshtasticd"
+                    )
+                except Exception as e:
+                    self.dialog.msgbox("Error", f"Failed:\n{e}")
+            return
+
+        # Check: SPI hardware present but USB config active (wrong)
+        spi_devices = list(Path('/dev').glob('spidev*'))
+
+        has_spi = len(spi_devices) > 0
+
+        # Only skip if no SPI hardware at all
+        if not has_spi:
+            return
+
+        if not usb_config.exists():
+            return
+
+        result = subprocess.run(['which', 'meshtasticd'], capture_output=True, timeout=5)
+        has_native = result.returncode == 0
+
+        msg = "CONFIGURATION MISMATCH!\n\n"
+        msg += "SPI HAT detected but USB config active.\n\n"
+        msg += f"SPI: {', '.join(d.name for d in spi_devices)}\n"
+        msg += "Config: usb-serial.yaml (WRONG)\n"
+        if not has_native:
+            msg += "Native meshtasticd: NOT INSTALLED\n"
+        msg += "\nFix this now?"
+
+        if self.dialog.yesno("Service Misconfiguration", msg):
+            self._fix_spi_config(has_native)
 
     def _run_main_menu(self):
         """Display the main menu."""
@@ -1191,6 +1262,105 @@ class MeshForgeLauncher(
             ):
                 self._install_native_meshtasticd()
 
+    def _fix_spi_config(self, has_native: bool = False):
+        """Quick fix for SPI HAT with wrong USB config."""
+        self.dialog.infobox("Fixing", "Removing wrong USB configuration...")
+
+        try:
+            config_dir = Path('/etc/meshtasticd')
+
+            # Remove wrong USB config
+            usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
+            if usb_config.exists():
+                usb_config.unlink()
+                self.dialog.infobox("Fixing", "Removed usb-serial.yaml")
+
+            # Create config.yaml if missing - use official template
+            config_yaml = config_dir / 'config.yaml'
+            if not config_yaml.exists():
+                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
+                if template_path.exists():
+                    import shutil
+                    shutil.copy(template_path, config_yaml)
+                else:
+                    # Fallback - minimal official format
+                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
+---
+Lora:
+  Module: auto
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 200
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+""")
+                self.dialog.infobox("Fixing", "Created config.yaml")
+
+            # Ensure config directories exist
+            (config_dir / 'available.d').mkdir(exist_ok=True)
+            (config_dir / 'config.d').mkdir(exist_ok=True)
+
+            # Create Waveshare SPI HAT config if not exists
+            waveshare_avail = config_dir / 'available.d' / 'waveshare-spi.yaml'
+            if not waveshare_avail.exists():
+                waveshare_avail.write_text("""# Waveshare SX1262 LoRa HAT Configuration
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+""")
+
+            if not has_native:
+                # Offer to install native meshtasticd
+                if self.dialog.yesno(
+                    "Install Native Daemon?",
+                    "SPI HATs require the native meshtasticd daemon.\n\n"
+                    "Would you like to install it now?\n\n"
+                    "(This requires internet connection)"
+                ):
+                    self._install_native_meshtasticd()
+                else:
+                    self.dialog.msgbox(
+                        "Config Fixed",
+                        "Wrong USB config removed.\n\n"
+                        "To complete setup, install native meshtasticd:\n"
+                        "  sudo apt install meshtasticd\n\n"
+                        "Or run: sudo bash scripts/install_noc.sh --force-native"
+                    )
+            else:
+                # Native daemon exists - restart service
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+                self.dialog.msgbox(
+                    "Config Fixed",
+                    "Configuration corrected!\n\n"
+                    "- Removed wrong USB config\n"
+                    "- Restarted meshtasticd service\n\n"
+                    "Check status: sudo systemctl status meshtasticd"
+                )
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Fix failed:\n{e}")
+
     def _install_native_meshtasticd(self):
         """Install native meshtasticd for SPI HAT."""
         self.dialog.infobox("Installing", "Installing native meshtasticd...")
@@ -1202,17 +1372,25 @@ class MeshForgeLauncher(
                 # Not installed - try to install
                 self.dialog.infobox("Installing", "Adding Meshtastic repository...")
 
-                # Detect OS for correct repo
+                # Detect OS for correct repo (matching install_noc.sh logic)
                 os_repo = "Raspbian_12"  # Default for Pi
                 if Path('/etc/os-release').exists():
+                    os_info = {}
                     with open('/etc/os-release') as f:
                         for line in f:
-                            if line.startswith('ID='):
-                                os_id = line.strip().split('=')[1].strip('"')
-                                if os_id == 'debian':
-                                    os_repo = "Debian_12"
-                                elif os_id == 'ubuntu':
-                                    os_repo = "xUbuntu_24.04"
+                            if '=' in line:
+                                key, val = line.strip().split('=', 1)
+                                os_info[key] = val.strip('"')
+
+                    os_id = os_info.get('ID', '')
+                    version_id = os_info.get('VERSION_ID', '')
+
+                    if os_id == 'raspbian':
+                        os_repo = f"Raspbian_{version_id.split('.')[0]}" if version_id else "Raspbian_12"
+                    elif os_id == 'debian':
+                        os_repo = f"Debian_{version_id.split('.')[0]}" if version_id else "Debian_12"
+                    elif os_id == 'ubuntu':
+                        os_repo = f"xUbuntu_{version_id}" if version_id else "xUbuntu_24.04"
 
                 repo_url = f"https://download.opensuse.org/repositories/network:/Meshtastic:/beta/{os_repo}/"
 
@@ -1249,14 +1427,20 @@ class MeshForgeLauncher(
             (config_dir / 'config.d').mkdir(exist_ok=True)
             (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
 
-            # Create config.yaml if missing
+            # Create config.yaml if missing - use official template
             config_yaml = config_dir / 'config.yaml'
             if not config_yaml.exists():
-                config_yaml.write_text("""### MeshForge NOC - Meshtasticd Configuration
-### Device configs are loaded from /etc/meshtasticd/config.d/
+                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
+                if template_path.exists():
+                    import shutil
+                    shutil.copy(template_path, config_yaml)
+                else:
+                    # Fallback - minimal official format
+                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
-  Module: sx1262
+  Module: auto
 
 Logging:
   LogLevel: info
@@ -1266,7 +1450,7 @@ Webserver:
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/
