@@ -384,212 +384,26 @@ UDEV_RULES
 
     echo -e "  ${CYAN}Detected radio type: ${BOLD}${RADIO_TYPE}${NC}"
 
-    # Create meshtasticd config directory structure
+    # Create meshtasticd config directory structure (if not exists)
     echo "  Creating /etc/meshtasticd/ structure..."
     mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
     chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
 
-    # Copy templates from MeshForge repo if available
-    if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
-        echo "  Copying HAT templates from MeshForge..."
-        cp "$INSTALL_DIR/templates/available.d"/*.yaml "$MESHTASTICD_CONFIG_DIR/available.d/" 2>/dev/null || true
+    # NOTE: We do NOT create HAT templates here!
+    # meshtasticd already ships with proper templates in available.d/
+    # See: /etc/meshtasticd/available.d/ after installing meshtasticd
+    # Users select their HAT via 'meshforge' menu which copies from available.d/ to config.d/
+
+    echo -e "  ${CYAN}Available configs (from meshtasticd):${NC}"
+    if ls "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | head -5 >/dev/null; then
+        ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | head -10 | xargs -I {} basename {} | sed 's/^/    - /'
+        AVAIL_COUNT=$(ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | wc -l)
+        if [[ "$AVAIL_COUNT" -gt 10 ]]; then
+            echo "    ... and $((AVAIL_COUNT - 10)) more"
+        fi
+    else
+        echo "    (will be populated when meshtasticd is installed)"
     fi
-
-    # Create/update config templates (ensures latest versions)
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" << 'MESHTOAD_CONFIG'
-# Meshtoad / MeshStick SPI Radio Configuration
-# Uses CH341 USB-to-SPI adapter with SX1262
-# Reference: https://github.com/markbirss/MESHSTICK
-
-Lora:
-  Module: sx1262
-  spidev: ch341
-  CS: 0
-  IRQ: 6
-  Reset: 2
-  Busy: 4
-  DIO2_AS_RF_SWITCH: true
-  DIO3_TCXO_VOLTAGE: true
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-MESHTOAD_CONFIG
-
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/rak-hat-spi.yaml" << 'RAK_CONFIG'
-# RAK WisLink SPI HAT Configuration
-# Direct GPIO connection on Raspberry Pi
-
-Lora:
-  Module: sx1262
-  CS: 0
-  IRQ: 22
-  Busy: 23
-  Reset: 24
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-RAK_CONFIG
-
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/waveshare-spi.yaml" << 'WAVESHARE_CONFIG'
-# Waveshare SX1262 LoRa HAT Configuration
-# For Raspberry Pi (adjust gpiochip for Pi 5)
-
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  CS: 21
-  IRQ: 16
-  Busy: 20
-  Reset: 18
-  # Uncomment for Raspberry Pi 5:
-  # gpiochip: 4
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-WAVESHARE_CONFIG
-
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" << 'USB_CONFIG'
-# USB Serial Radio Configuration
-# For radios connected via USB (T-Beam, Heltec, RAK USB)
-# This config is for reference - USB radios use Python CLI
-
-Serial:
-  Device: auto
-
-Logging:
-  LogLevel: info
-USB_CONFIG
-
-    # MeshAdv-Pi-Hat (1W High-Power SX1262)
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshadv-pi-hat.yaml" << 'MESHADV_CONFIG'
-# MeshAdv-Pi-Hat Configuration (1W High-Power SX1262)
-# High-power LoRa HAT for Raspberry Pi
-# Reference: https://github.com/mesh-advanced
-
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  DIO3_TCXO_VOLTAGE: true
-  CS: 21
-  IRQ: 16
-  Busy: 20
-  Reset: 18
-  # For Raspberry Pi 5, uncomment:
-  # gpiochip: 4
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-MESHADV_CONFIG
-
-    # MeshAdv-Mini (SX1262/SX1268)
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshadv-mini.yaml" << 'MESHADV_MINI'
-# MeshAdv-Mini Configuration (SX1262/SX1268)
-# Compact LoRa HAT for Raspberry Pi
-
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  CS: 21
-  IRQ: 16
-  Busy: 20
-  Reset: 18
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-MESHADV_MINI
-
-    # Adafruit RFM9x LoRa Radio Bonnet
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/adafruit-rfm9x.yaml" << 'ADAFRUIT_CONFIG'
-# Adafruit RFM9x LoRa Radio Bonnet
-# 915MHz or 868MHz versions
-
-Lora:
-  Module: sx1276
-  CS: 25
-  IRQ: 22
-  Reset: 17
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-ADAFRUIT_CONFIG
-
-    # Heltec HT-CT62 (ESP32 with SX1262)
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/heltec-ht-ct62.yaml" << 'HELTEC_CONFIG'
-# Heltec HT-CT62 USB Configuration
-# ESP32-C3 with SX1262 - connects via USB serial
-
-Serial:
-  Device: /dev/ttyACM0
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-HELTEC_CONFIG
-
-    # Generic SX1262 SPI template
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/generic-sx1262.yaml" << 'GENERIC_SX1262'
-# Generic SX1262 SPI Configuration Template
-# Adjust GPIO pins for your specific hardware
-
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  # Common Raspberry Pi GPIO pins (BCM numbering)
-  CS: 21      # SPI chip select
-  IRQ: 16     # DIO1 interrupt
-  Busy: 20    # Busy signal
-  Reset: 18   # Reset pin
-  # For Raspberry Pi 5:
-  # gpiochip: 4
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-GENERIC_SX1262
-
-    # Generic SX1276/78 SPI template
-    cat > "$MESHTASTICD_CONFIG_DIR/available.d/generic-sx1276.yaml" << 'GENERIC_SX1276'
-# Generic SX1276/SX1278 SPI Configuration Template
-# For older LoRa modules (RFM95/96/97/98)
-
-Lora:
-  Module: sx1276
-  CS: 25
-  IRQ: 22
-  Reset: 17
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-GENERIC_SX1276
-
-    echo -e "  ${GREEN}✓ Created config templates in available.d/${NC}"
-    echo -e "  ${CYAN}Available configs:${NC}"
-    ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/" | sed 's/^/    - /'
 
     # Install appropriate daemon based on radio type
     case "$RADIO_TYPE" in
