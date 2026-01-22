@@ -9,6 +9,7 @@ Guides new users through MeshForge setup:
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -104,11 +105,32 @@ class FirstRunMixin:
 
         # Check for SPI devices (HAT-based radios like MeshAdv-Pi-Hat)
         spi_devices = list(Path('/dev').glob('spidev*'))
+        is_raspberry_pi = self._is_raspberry_pi()
+
         if spi_devices:
             lines.append(f"\n✓ SPI Interface Available:")
             for spi in spi_devices[:3]:
                 lines.append(f"  • {spi.name}")
             lines.append("  (Supports HAT radios: MeshAdv-Pi-Hat, Waveshare)")
+        elif is_raspberry_pi:
+            # No SPI but on Pi - offer to enable it
+            lines.append("\n✗ SPI Interface Not Enabled")
+            lines.append("  HAT radios require SPI to be enabled.")
+            self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
+
+            # Ask if they want to enable SPI
+            if self._offer_enable_spi():
+                # Re-check after enable
+                spi_devices = list(Path('/dev').glob('spidev*'))
+                if spi_devices:
+                    self.dialog.msgbox(
+                        "SPI Enabled",
+                        "SPI has been enabled!\n\n"
+                        "A REBOOT is required for changes to take effect.\n\n"
+                        "After reboot, your HAT radio will be detected."
+                    )
+                    lines = ["Hardware Detection\n", "=" * 40]
+                    lines.append("\n✓ SPI Enabled (reboot required)")
 
         if DeviceScanner is None:
             if not spi_devices:
@@ -151,6 +173,92 @@ class FirstRunMixin:
             lines.append("the interface and configure later.")
 
         self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
+
+    def _is_raspberry_pi(self) -> bool:
+        """Check if running on Raspberry Pi."""
+        try:
+            # Check /proc/cpuinfo for Raspberry Pi
+            cpuinfo = Path('/proc/cpuinfo')
+            if cpuinfo.exists():
+                content = cpuinfo.read_text()
+                if 'Raspberry Pi' in content or 'BCM' in content:
+                    return True
+            # Check device tree model
+            model = Path('/proc/device-tree/model')
+            if model.exists():
+                if 'Raspberry Pi' in model.read_text():
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _offer_enable_spi(self) -> bool:
+        """Offer to enable SPI on Raspberry Pi. Returns True if enabled."""
+        result = self.dialog.yesno(
+            "Enable SPI?",
+            "No SPI interface detected.\n\n"
+            "HAT-based radios (MeshAdv-Pi-Hat, Waveshare, etc.)\n"
+            "require SPI to be enabled.\n\n"
+            "Would you like to enable SPI now?\n\n"
+            "(Requires reboot to take effect)"
+        )
+
+        if not result:
+            return False
+
+        self.dialog.infobox("Enabling SPI", "Configuring SPI interface...")
+
+        try:
+            import subprocess
+
+            # Find the boot config file
+            boot_config = None
+            for path in ['/boot/firmware/config.txt', '/boot/config.txt']:
+                if Path(path).exists():
+                    boot_config = path
+                    break
+
+            if not boot_config:
+                self.dialog.msgbox("Error", "Could not find boot config file.")
+                return False
+
+            # Enable SPI using raspi-config if available
+            raspi_config = shutil.which('raspi-config')
+            if raspi_config:
+                subprocess.run(
+                    ['raspi-config', 'nonint', 'set_config_var', 'dtparam=spi', 'on', boot_config],
+                    timeout=30,
+                    check=False
+                )
+
+            # Add dtoverlay=spi0-0cs if not present (for HAT compatibility)
+            config_content = Path(boot_config).read_text()
+            if 'dtoverlay=spi0-0cs' not in config_content:
+                # Find dtparam=spi=on line and add overlay after it
+                lines = config_content.split('\n')
+                new_lines = []
+                added = False
+                for line in lines:
+                    new_lines.append(line)
+                    if 'dtparam=spi=on' in line and not added:
+                        new_lines.append('dtoverlay=spi0-0cs')
+                        added = True
+
+                # If dtparam=spi=on wasn't found, add both at the end
+                if not added:
+                    new_lines.append('dtparam=spi=on')
+                    new_lines.append('dtoverlay=spi0-0cs')
+
+                Path(boot_config).write_text('\n'.join(new_lines))
+
+            return True
+
+        except subprocess.TimeoutExpired:
+            self.dialog.msgbox("Error", "Timeout while configuring SPI.")
+            return False
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to enable SPI: {e}")
+            return False
 
     def _wizard_step_services(self):
         """Wizard Step 2: Service Status"""
