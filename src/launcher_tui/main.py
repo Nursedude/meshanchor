@@ -48,6 +48,16 @@ except ImportError:
             return Path(f'/home/{sudo_user}')
         return Path.home()
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
+# See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    # Fallback if running standalone - will use direct systemctl
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend
 
@@ -435,62 +445,97 @@ class MeshForgeLauncher(
         input("\nPress Enter to continue...")
 
     def _check_services(self):
-        """Check service status."""
+        """Check service status using centralized service checker.
+
+        Uses utils/service_check.py - SINGLE SOURCE OF TRUTH for service status.
+        This ensures consistent status across all MeshForge UIs.
+        """
         self.dialog.infobox("Services", "Checking services...")
 
-        services = ['meshtasticd', 'rnsd', 'lxmf.delivery']
+        services = ['meshtasticd', 'rnsd', 'hamclock']
         results = []
 
         for svc in services:
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc],
-                    capture_output=True, text=True, timeout=5
-                )
-                status = result.stdout.strip()
-                results.append(f"{svc}: {status.upper()}")
-            except Exception:
-                results.append(f"{svc}: UNKNOWN")
+            if check_service is not None:
+                # Use centralized service checker (preferred)
+                status = check_service(svc)
+                state_str = status.state.value.upper() if status.state else "UNKNOWN"
+                if status.available:
+                    results.append(f"{svc}: {state_str} ✓")
+                else:
+                    results.append(f"{svc}: {state_str}")
+                    if status.fix_hint:
+                        results.append(f"  → {status.fix_hint}")
+            else:
+                # Fallback to direct systemctl (only if service_check unavailable)
+                try:
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', svc],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    status = result.stdout.strip()
+                    results.append(f"{svc}: {status.upper()}")
+                except Exception:
+                    results.append(f"{svc}: UNKNOWN")
 
         self.dialog.msgbox("Service Status", "\n".join(results))
 
     def _check_network(self):
-        """Check network connectivity."""
+        """Check network connectivity using centralized utilities.
+
+        Uses utils/service_check.py for port checks - consistent with service status.
+        """
         self.dialog.infobox("Network", "Testing connectivity...")
 
         tests = []
 
-        # Test meshtasticd TCP
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('localhost', 4403))
-            sock.close()
-            tests.append(f"meshtasticd (4403): {'OK' if result == 0 else 'FAIL'}")
-        except Exception:
-            tests.append("meshtasticd (4403): ERROR")
+        # Test meshtasticd TCP using centralized port checker
+        if check_port is not None:
+            port_ok = check_port(4403)
+            tests.append(f"meshtasticd (4403): {'OK ✓' if port_ok else 'FAIL'}")
+        else:
+            # Fallback to direct socket check
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('localhost', 4403))
+                sock.close()
+                tests.append(f"meshtasticd (4403): {'OK' if result == 0 else 'FAIL'}")
+            except Exception:
+                tests.append("meshtasticd (4403): ERROR")
 
-        # Test RNS
+        # Test RNS using rnstatus command
         try:
             result = subprocess.run(
                 ['rnstatus', '-j'],
                 capture_output=True, text=True, timeout=5
             )
-            tests.append(f"RNS Status: {'OK' if result.returncode == 0 else 'FAIL'}")
+            tests.append(f"RNS Status: {'OK ✓' if result.returncode == 0 else 'FAIL'}")
+        except FileNotFoundError:
+            tests.append("RNS Status: NOT INSTALLED")
         except Exception:
             tests.append("RNS Status: NOT AVAILABLE")
 
-        # Test internet
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            result = sock.connect_ex(('8.8.8.8', 53))
-            sock.close()
-            tests.append(f"Internet (DNS): {'OK' if result == 0 else 'FAIL'}")
-        except Exception:  # Error reported to user
-            tests.append("Internet: ERROR")
+        # Test web client (port 9443) using centralized port checker
+        if check_port is not None:
+            web_ok = check_port(9443)
+            tests.append(f"Web Client (9443): {'OK ✓' if web_ok else 'NOT RUNNING'}")
+
+        # Test internet connectivity
+        if check_port is not None:
+            inet_ok = check_port(53, host='8.8.8.8', timeout=3.0)
+            tests.append(f"Internet (DNS): {'OK ✓' if inet_ok else 'FAIL'}")
+        else:
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                result = sock.connect_ex(('8.8.8.8', 53))
+                sock.close()
+                tests.append(f"Internet (DNS): {'OK' if result == 0 else 'FAIL'}")
+            except Exception:
+                tests.append("Internet: ERROR")
 
         self.dialog.msgbox("Network Connectivity", "\n".join(tests))
 
