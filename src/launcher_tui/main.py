@@ -1145,7 +1145,11 @@ class MeshForgeLauncher(
             service_content = ""
 
         is_placeholder = "No Daemon Needed" in service_content or "USB radios work directly" in service_content
-        is_native = "meshtasticd" in service_content and "/usr/bin/meshtasticd" in service_content
+        is_spi_pending = "Native daemon required for SPI" in service_content
+        is_native = ("meshtasticd" in service_content and
+                     ("/usr/bin/meshtasticd" in service_content or
+                      "/usr/local/bin/meshtasticd" in service_content or
+                      "ExecStart=" in service_content and "meshtasticd -c" in service_content))
 
         # Build status report
         lines = ["Hardware & Service Check\n" + "=" * 40]
@@ -1156,6 +1160,8 @@ class MeshForgeLauncher(
         lines.append(f"\nService Configuration:")
         if is_placeholder:
             lines.append("  Type: USB Placeholder (no daemon)")
+        elif is_spi_pending:
+            lines.append("  Type: SPI pending (native daemon required)")
         elif is_native:
             lines.append("  Type: Native meshtasticd daemon")
         else:
@@ -1196,15 +1202,30 @@ class MeshForgeLauncher(
                 # Not installed - try to install
                 self.dialog.infobox("Installing", "Adding Meshtastic repository...")
 
+                # Detect OS for correct repo
+                os_repo = "Raspbian_12"  # Default for Pi
+                if Path('/etc/os-release').exists():
+                    with open('/etc/os-release') as f:
+                        for line in f:
+                            if line.startswith('ID='):
+                                os_id = line.strip().split('=')[1].strip('"')
+                                if os_id == 'debian':
+                                    os_repo = "Debian_12"
+                                elif os_id == 'ubuntu':
+                                    os_repo = "xUbuntu_24.04"
+
+                repo_url = f"https://download.opensuse.org/repositories/network:/Meshtastic:/beta/{os_repo}/"
+
                 # Add repo
-                subprocess.run([
-                    'bash', '-c',
-                    'echo "deb http://download.opensuse.org/repositories/home:/meshtastic/Raspbian_12/ /" | sudo tee /etc/apt/sources.list.d/meshtastic.list'
-                ], timeout=30, check=False)
+                subprocess.run(
+                    ['tee', '/etc/apt/sources.list.d/meshtastic.list'],
+                    input=f"deb {repo_url} /\n",
+                    text=True, timeout=30, check=False
+                )
 
                 subprocess.run([
                     'bash', '-c',
-                    'curl -fsSL https://download.opensuse.org/repositories/home:meshtastic/Raspbian_12/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/meshtastic.gpg > /dev/null'
+                    f'curl -fsSL {repo_url}Release.key | gpg --dearmor > /etc/apt/trusted.gpg.d/meshtastic.gpg'
                 ], timeout=30, check=False)
 
                 self.dialog.infobox("Installing", "Updating package list...")
@@ -1217,8 +1238,70 @@ class MeshForgeLauncher(
                     self.dialog.msgbox("Error", f"Failed to install meshtasticd:\n{result.stderr[:500]}")
                     return
 
+            # Find actual meshtasticd binary path
+            result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
+            meshtasticd_bin = result.stdout.strip() if result.returncode == 0 else '/usr/bin/meshtasticd'
+
+            # Create config directory structure
+            config_dir = Path('/etc/meshtasticd')
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / 'available.d').mkdir(exist_ok=True)
+            (config_dir / 'config.d').mkdir(exist_ok=True)
+            (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
+
+            # Create config.yaml if missing
+            config_yaml = config_dir / 'config.yaml'
+            if not config_yaml.exists():
+                config_yaml.write_text("""### MeshForge NOC - Meshtasticd Configuration
+### Device configs are loaded from /etc/meshtasticd/config.d/
+---
+Lora:
+  Module: sx1262
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+""")
+                self.dialog.infobox("Installing", "Created /etc/meshtasticd/config.yaml")
+
+            # Create Waveshare SPI HAT config template
+            waveshare_config = config_dir / 'available.d' / 'waveshare-spi.yaml'
+            if not waveshare_config.exists():
+                waveshare_config.write_text("""# Waveshare SX1262 LoRa HAT Configuration
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  # Uncomment for Raspberry Pi 5:
+  # gpiochip: 4
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+""")
+
+            # Remove wrong USB config if present
+            usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
+            if usb_config.exists():
+                usb_config.unlink()
+                self.dialog.infobox("Installing", "Removed incorrect USB config")
+
             # Create service file
-            service_content = """[Unit]
+            service_content = f"""[Unit]
 Description=Meshtastic Daemon (Native SPI)
 Documentation=https://meshtastic.org
 After=network.target
@@ -1227,7 +1310,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/etc/meshtasticd
-ExecStart=/usr/bin/meshtasticd -c /etc/meshtasticd/config.yaml
+ExecStart={meshtasticd_bin} -c /etc/meshtasticd/config.yaml
 Restart=on-failure
 RestartSec=5
 
@@ -1245,6 +1328,7 @@ WantedBy=multi-user.target
                 "Success",
                 "Native meshtasticd installed and started!\n\n"
                 "Service configured for SPI HAT.\n"
+                "Config: /etc/meshtasticd/config.yaml\n\n"
                 "Check status: sudo systemctl status meshtasticd"
             )
 
