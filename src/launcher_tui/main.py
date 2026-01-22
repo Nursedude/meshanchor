@@ -230,13 +230,40 @@ class MeshForgeLauncher(
 
     def _launch_web(self):
         """Launch Web monitor."""
-        self.dialog.msgbox(
-            "Web Monitor",
+        # Get network IP for displaying to user
+        local_ip = self._get_local_ip()
+
+        access_info = (
             "Starting Web Monitor...\n\n"
-            "Access at: http://localhost:5000\n\n"
-            "Press Ctrl+C to stop."
+            "Access URLs:\n"
+            f"  • This device:  http://localhost:5000\n"
         )
+        if local_ip and local_ip != "127.0.0.1":
+            access_info += f"  • Network:      http://{local_ip}:5000\n"
+
+        access_info += (
+            "\nAPI Endpoints:\n"
+            "  • /api/status    - System status\n"
+            "  • /api/nodes     - Node list\n"
+            "  • /health        - Health check\n\n"
+            "Press Ctrl+C to stop the server."
+        )
+
+        self.dialog.msgbox("Web Monitor", access_info)
         os.execv(sys.executable, [sys.executable, str(self.src_dir / 'web_monitor.py')])
+
+    def _get_local_ip(self) -> str:
+        """Get local network IP address."""
+        import socket
+        try:
+            # Connect to external address to find local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     # =========================================================================
     # System Diagnostics

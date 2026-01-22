@@ -99,26 +99,33 @@ class FirstRunMixin:
         """Wizard Step 1: Hardware Detection"""
         self.dialog.infobox("Step 1/4", "Detecting connected hardware...")
 
+        lines = ["Hardware Detection\n"]
+        lines.append("=" * 40)
+
+        # Check for SPI devices (HAT-based radios like MeshAdv-Pi-Hat)
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        if spi_devices:
+            lines.append(f"\n✓ SPI Interface Available:")
+            for spi in spi_devices[:3]:
+                lines.append(f"  • {spi.name}")
+            lines.append("  (Supports HAT radios: MeshAdv-Pi-Hat, Waveshare)")
+
         if DeviceScanner is None:
-            self.dialog.msgbox(
-                "Hardware Detection",
-                "Device scanner not available.\n\n"
-                "Connect your Meshtastic device via USB\n"
-                "and ensure drivers are loaded."
-            )
+            if not spi_devices:
+                lines.append("\n✗ Device scanner not available")
+                lines.append("\nConnect a Meshtastic device via USB")
+                lines.append("or configure meshtasticd for HAT/SPI")
+            self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
             return
 
         scanner = DeviceScanner()
         results = scanner.scan_all()
 
-        lines = ["Hardware Detection\n"]
-        lines.append("=" * 40)
-
         if results['meshtastic_candidates']:
             lines.append(f"\n✓ Found {len(results['meshtastic_candidates'])} Meshtastic-compatible device(s):\n")
             for dev in results['meshtastic_candidates']:
                 lines.append(f"  • {dev.description}")
-        else:
+        elif not spi_devices:
             lines.append("\n✗ No Meshtastic devices detected")
             lines.append("\nTo use MeshForge with a radio:")
             lines.append("  1. Connect a Meshtastic device via USB")
@@ -133,6 +140,15 @@ class FirstRunMixin:
 
         if results['recommended_port']:
             lines.append(f"\n→ Recommended port: {results['recommended_port']}")
+
+        # Summary for new users
+        if spi_devices or results.get('meshtastic_candidates'):
+            lines.append("\n" + "-" * 40)
+            lines.append("Hardware detected! Continue to configure.")
+        else:
+            lines.append("\n" + "-" * 40)
+            lines.append("No radio found - you can still explore")
+            lines.append("the interface and configure later.")
 
         self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
 
@@ -221,18 +237,41 @@ class FirstRunMixin:
         """Wizard completion"""
         self._mark_setup_complete()
 
+        # Get network IP for web access info
+        local_ip = self._get_local_ip()
+
+        web_info = ""
+        if local_ip and local_ip != "127.0.0.1":
+            web_info = f"\nWeb Access (from other devices):\n  http://{local_ip}:5000\n"
+
         self.dialog.msgbox(
             "Setup Complete!",
             "MeshForge is ready to use!\n\n"
-            "Quick Start:\n"
+            "Next Steps:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "• Diagnostics → Check system health\n"
-            "• Service Manager → Start/stop services\n"
-            "• Radio Config → Configure Meshtastic\n"
-            "• Network Tools → Test connectivity\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "1. Service Manager → Start meshtasticd\n"
+            "2. Rich CLI → Configure your radio\n"
+            "3. Diagnostics → Verify everything works\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{web_info}"
+            "\nNeed Help?\n"
+            "  • Run diagnostics for system health\n"
+            "  • Check GitHub issues for known fixes\n"
+            "  • HAM community: 73s and good luck!\n\n"
             "Press Enter to continue to main menu."
         )
+
+    def _get_local_ip(self) -> str:
+        """Get local network IP address."""
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     def _settings_run_wizard(self):
         """Run wizard from settings menu"""
