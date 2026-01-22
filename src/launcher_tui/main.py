@@ -1274,24 +1274,31 @@ class MeshForgeLauncher(
         try:
             config_dir = Path('/etc/meshtasticd')
 
-            # Remove wrong USB config
+            # Remove wrong USB config from config.d
             usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
             if usb_config.exists():
                 usb_config.unlink()
-                self.dialog.infobox("Fixing", "Removed usb-serial.yaml")
+                self.dialog.infobox("Fixing", "Removed usb-serial.yaml from config.d/")
 
-            # Create config.yaml if missing - use official template
+            # Check if config.yaml exists and is valid (has Webserver section)
             config_yaml = config_dir / 'config.yaml'
+            needs_config = False
             if not config_yaml.exists():
-                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
-                if template_path.exists():
-                    import shutil
-                    shutil.copy(template_path, config_yaml)
-                else:
-                    # Fallback - minimal official format
-                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
-### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
----
+                needs_config = True
+            elif not config_yaml.read_text().strip():
+                needs_config = True
+            elif 'Webserver:' not in config_yaml.read_text():
+                # Config exists but missing Webserver - probably corrupted
+                self.dialog.msgbox(
+                    "Config Warning",
+                    f"Your config.yaml may be corrupted:\n{config_yaml}\n\n"
+                    "It's missing the Webserver section.\n"
+                    "Check: cat /etc/meshtasticd/config.yaml"
+                )
+
+            # Only create config.yaml if it doesn't exist or is empty
+            if needs_config:
+                config_yaml.write_text("""---
 Lora:
   Module: auto
 
@@ -1304,34 +1311,12 @@ Webserver:
 
 General:
   MaxNodes: 200
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
-                self.dialog.infobox("Fixing", "Created config.yaml")
+                self.dialog.infobox("Fixing", "Created minimal config.yaml")
 
-            # Ensure config directories exist
-            (config_dir / 'available.d').mkdir(exist_ok=True)
-            (config_dir / 'config.d').mkdir(exist_ok=True)
-
-            # Create Waveshare SPI HAT config if not exists
-            waveshare_avail = config_dir / 'available.d' / 'waveshare-spi.yaml'
-            if not waveshare_avail.exists():
-                waveshare_avail.write_text("""# Waveshare SX1262 LoRa HAT Configuration
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  CS: 21
-  IRQ: 16
-  Busy: 20
-  Reset: 18
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-""")
+            # NOTE: We do NOT create HAT templates - meshtasticd provides them
+            # User should select from /etc/meshtasticd/available.d/
 
             if not has_native:
                 # Offer to install native meshtasticd
@@ -1425,25 +1410,21 @@ Webserver:
             result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
             meshtasticd_bin = result.stdout.strip() if result.returncode == 0 else '/usr/bin/meshtasticd'
 
-            # Create config directory structure
+            # Ensure config directories exist (meshtasticd package should create these)
             config_dir = Path('/etc/meshtasticd')
             config_dir.mkdir(parents=True, exist_ok=True)
             (config_dir / 'available.d').mkdir(exist_ok=True)
             (config_dir / 'config.d').mkdir(exist_ok=True)
             (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
 
-            # Create config.yaml if missing - use official template
+            # Check if meshtasticd installed a valid config.yaml
+            # Only create one if missing or empty - NEVER overwrite
             config_yaml = config_dir / 'config.yaml'
-            if not config_yaml.exists():
-                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
-                if template_path.exists():
-                    import shutil
-                    shutil.copy(template_path, config_yaml)
-                else:
-                    # Fallback - minimal official format
-                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
-### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
----
+            if config_yaml.exists() and 'Webserver:' in config_yaml.read_text():
+                self.dialog.infobox("Installing", "Using existing config.yaml from meshtasticd package")
+            elif not config_yaml.exists() or not config_yaml.read_text().strip():
+                # No config or empty - create minimal one
+                config_yaml.write_text("""---
 Lora:
   Module: auto
 
@@ -1456,32 +1437,12 @@ Webserver:
 
 General:
   MaxNodes: 200
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
-                self.dialog.infobox("Installing", "Created /etc/meshtasticd/config.yaml")
+                self.dialog.infobox("Installing", "Created minimal config.yaml")
 
-            # Create Waveshare SPI HAT config template
-            waveshare_config = config_dir / 'available.d' / 'waveshare-spi.yaml'
-            if not waveshare_config.exists():
-                waveshare_config.write_text("""# Waveshare SX1262 LoRa HAT Configuration
-Lora:
-  Module: sx1262
-  DIO2_AS_RF_SWITCH: true
-  CS: 21
-  IRQ: 16
-  Busy: 20
-  Reset: 18
-  # Uncomment for Raspberry Pi 5:
-  # gpiochip: 4
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-""")
+            # NOTE: We do NOT create HAT templates - meshtasticd package provides them
+            # User selects their HAT from /etc/meshtasticd/available.d/ via Hardware Config menu
 
             # Remove wrong USB config if present
             usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
@@ -1515,10 +1476,14 @@ WantedBy=multi-user.target
 
             self.dialog.msgbox(
                 "Success",
-                "Native meshtasticd installed and started!\n\n"
-                "Service configured for SPI HAT.\n"
-                "Config: /etc/meshtasticd/config.yaml\n\n"
-                "Check status: sudo systemctl status meshtasticd"
+                "Native meshtasticd installed!\n\n"
+                "NEXT STEP: Select your HAT config:\n"
+                "  meshtasticd → Hardware Config\n\n"
+                "Or manually:\n"
+                "  ls /etc/meshtasticd/available.d/\n"
+                "  sudo cp /etc/meshtasticd/available.d/<your-hat>.yaml \\\n"
+                "         /etc/meshtasticd/config.d/\n"
+                "  sudo systemctl restart meshtasticd"
             )
 
         except Exception as e:
