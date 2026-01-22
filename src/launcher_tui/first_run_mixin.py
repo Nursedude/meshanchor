@@ -151,14 +151,16 @@ class FirstRunMixin:
         all_running = True
         for svc_id, svc_name, description in services:
             status = check_service(svc_id)
-            if status.running:
+            if status.available:
                 lines.append(f"\n✓ {svc_name}")
                 lines.append(f"  Status: Running")
             else:
                 all_running = False
                 lines.append(f"\n✗ {svc_name}")
-                lines.append(f"  Status: Not Running")
+                lines.append(f"  Status: {status.message}")
                 lines.append(f"  ({description})")
+                if status.fix_hint:
+                    lines.append(f"  Fix: {status.fix_hint}")
 
         if all_running:
             lines.append("\n" + "-" * 40)
