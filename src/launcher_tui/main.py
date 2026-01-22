@@ -451,9 +451,12 @@ class MeshForgeLauncher(
                 ("summary", "Error Summary (All Services)"),
                 ("meshtasticd", "View meshtasticd Logs"),
                 ("rnsd", "View rnsd Logs"),
-                ("syslog", "View System Log (syslog)"),
+                ("syslog", "View System Log (journalctl)"),
                 ("dmesg", "View Kernel Messages (dmesg)"),
                 ("meshforge", "View MeshForge Logs"),
+                ("live", "Live Log Follow (journalctl -f)"),
+                ("boot", "Boot Messages (this boot)"),
+                ("errors", "Errors Only (last hour)"),
                 ("back", "Back"),
             ]
 
@@ -478,6 +481,12 @@ class MeshForgeLauncher(
                 self._view_dmesg()
             elif choice == "meshforge":
                 self._view_meshforge_logs()
+            elif choice == "live":
+                self._live_log_follow()
+            elif choice == "boot":
+                self._view_boot_logs()
+            elif choice == "errors":
+                self._view_errors_only()
 
     def _log_error_summary(self):
         """Show error summary for all services."""
@@ -622,6 +631,92 @@ class MeshForgeLauncher(
             input("\nPress Enter to continue...")
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to read log: {e}")
+
+    def _live_log_follow(self):
+        """Follow logs live (like tail -f)."""
+        choices = [
+            ("all", "All System Logs"),
+            ("meshtasticd", "meshtasticd Only"),
+            ("rnsd", "rnsd Only"),
+            ("kernel", "Kernel Only (dmesg)"),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "Live Logs",
+            "Select logs to follow (Ctrl+C to stop):",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        self.dialog.msgbox(
+            "Live Log Follow",
+            "Starting live log follow...\n\n"
+            "Press Ctrl+C to stop and return to menu."
+        )
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Live Log Follow (Ctrl+C to stop) ===\n")
+
+        try:
+            if choice == "all":
+                subprocess.run(['journalctl', '-f', '-n', '20'], timeout=None)
+            elif choice == "meshtasticd":
+                subprocess.run(['journalctl', '-u', 'meshtasticd', '-f', '-n', '20'], timeout=None)
+            elif choice == "rnsd":
+                subprocess.run(['journalctl', '-u', 'rnsd', '-f', '-n', '20'], timeout=None)
+            elif choice == "kernel":
+                subprocess.run(['dmesg', '-w'], timeout=None)
+        except KeyboardInterrupt:
+            print("\n\nStopped.")
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed: {e}")
+
+    def _view_boot_logs(self):
+        """View logs from current boot."""
+        self.dialog.infobox("Loading", "Loading boot messages...")
+
+        try:
+            result = subprocess.run(
+                ['journalctl', '-b', '-n', '100', '--no-pager'],
+                capture_output=True, text=True, timeout=15
+            )
+
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Boot Messages (this boot, last 100) ===\n")
+            print(result.stdout)
+            print("\n" + "=" * 50)
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read boot logs: {e}")
+
+    def _view_errors_only(self):
+        """View only error-level messages."""
+        self.dialog.infobox("Loading", "Scanning for errors...")
+
+        try:
+            result = subprocess.run(
+                ['journalctl', '-p', 'err', '--since', '1 hour ago', '-n', '50', '--no-pager'],
+                capture_output=True, text=True, timeout=15
+            )
+
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Errors Only (last hour, priority err+) ===\n")
+
+            if result.stdout.strip():
+                print(result.stdout)
+            else:
+                print("No errors found in the last hour!")
+
+            print("\n" + "=" * 50)
+            print("\nLog Priority Levels:")
+            print("  emerg(0) > alert(1) > crit(2) > err(3) > warning(4) > notice(5) > info(6) > debug(7)")
+            input("\nPress Enter to continue...")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read error logs: {e}")
 
     def _check_system_resources(self):
         """Check system resources."""
