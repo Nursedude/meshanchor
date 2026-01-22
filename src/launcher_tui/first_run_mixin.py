@@ -9,6 +9,7 @@ Guides new users through MeshForge setup:
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -99,26 +100,54 @@ class FirstRunMixin:
         """Wizard Step 1: Hardware Detection"""
         self.dialog.infobox("Step 1/4", "Detecting connected hardware...")
 
+        lines = ["Hardware Detection\n"]
+        lines.append("=" * 40)
+
+        # Check for SPI devices (HAT-based radios like MeshAdv-Pi-Hat)
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        is_raspberry_pi = self._is_raspberry_pi()
+
+        if spi_devices:
+            lines.append(f"\n✓ SPI Interface Available:")
+            for spi in spi_devices[:3]:
+                lines.append(f"  • {spi.name}")
+            lines.append("  (Supports HAT radios: MeshAdv-Pi-Hat, Waveshare)")
+        elif is_raspberry_pi:
+            # No SPI but on Pi - offer to enable it
+            lines.append("\n✗ SPI Interface Not Enabled")
+            lines.append("  HAT radios require SPI to be enabled.")
+            self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
+
+            # Ask if they want to enable SPI
+            if self._offer_enable_spi():
+                # Re-check after enable
+                spi_devices = list(Path('/dev').glob('spidev*'))
+                if spi_devices:
+                    self.dialog.msgbox(
+                        "SPI Enabled",
+                        "SPI has been enabled!\n\n"
+                        "A REBOOT is required for changes to take effect.\n\n"
+                        "After reboot, your HAT radio will be detected."
+                    )
+                    lines = ["Hardware Detection\n", "=" * 40]
+                    lines.append("\n✓ SPI Enabled (reboot required)")
+
         if DeviceScanner is None:
-            self.dialog.msgbox(
-                "Hardware Detection",
-                "Device scanner not available.\n\n"
-                "Connect your Meshtastic device via USB\n"
-                "and ensure drivers are loaded."
-            )
+            if not spi_devices:
+                lines.append("\n✗ Device scanner not available")
+                lines.append("\nConnect a Meshtastic device via USB")
+                lines.append("or configure meshtasticd for HAT/SPI")
+            self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
             return
 
         scanner = DeviceScanner()
         results = scanner.scan_all()
 
-        lines = ["Hardware Detection\n"]
-        lines.append("=" * 40)
-
         if results['meshtastic_candidates']:
             lines.append(f"\n✓ Found {len(results['meshtastic_candidates'])} Meshtastic-compatible device(s):\n")
             for dev in results['meshtastic_candidates']:
                 lines.append(f"  • {dev.description}")
-        else:
+        elif not spi_devices:
             lines.append("\n✗ No Meshtastic devices detected")
             lines.append("\nTo use MeshForge with a radio:")
             lines.append("  1. Connect a Meshtastic device via USB")
@@ -134,7 +163,102 @@ class FirstRunMixin:
         if results['recommended_port']:
             lines.append(f"\n→ Recommended port: {results['recommended_port']}")
 
+        # Summary for new users
+        if spi_devices or results.get('meshtastic_candidates'):
+            lines.append("\n" + "-" * 40)
+            lines.append("Hardware detected! Continue to configure.")
+        else:
+            lines.append("\n" + "-" * 40)
+            lines.append("No radio found - you can still explore")
+            lines.append("the interface and configure later.")
+
         self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
+
+    def _is_raspberry_pi(self) -> bool:
+        """Check if running on Raspberry Pi."""
+        try:
+            # Check /proc/cpuinfo for Raspberry Pi
+            cpuinfo = Path('/proc/cpuinfo')
+            if cpuinfo.exists():
+                content = cpuinfo.read_text()
+                if 'Raspberry Pi' in content or 'BCM' in content:
+                    return True
+            # Check device tree model
+            model = Path('/proc/device-tree/model')
+            if model.exists():
+                if 'Raspberry Pi' in model.read_text():
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _offer_enable_spi(self) -> bool:
+        """Offer to enable SPI on Raspberry Pi. Returns True if enabled."""
+        result = self.dialog.yesno(
+            "Enable SPI?",
+            "No SPI interface detected.\n\n"
+            "HAT-based radios (MeshAdv-Pi-Hat, Waveshare, etc.)\n"
+            "require SPI to be enabled.\n\n"
+            "Would you like to enable SPI now?\n\n"
+            "(Requires reboot to take effect)"
+        )
+
+        if not result:
+            return False
+
+        self.dialog.infobox("Enabling SPI", "Configuring SPI interface...")
+
+        try:
+            import subprocess
+
+            # Find the boot config file
+            boot_config = None
+            for path in ['/boot/firmware/config.txt', '/boot/config.txt']:
+                if Path(path).exists():
+                    boot_config = path
+                    break
+
+            if not boot_config:
+                self.dialog.msgbox("Error", "Could not find boot config file.")
+                return False
+
+            # Enable SPI using raspi-config if available
+            raspi_config = shutil.which('raspi-config')
+            if raspi_config:
+                subprocess.run(
+                    ['raspi-config', 'nonint', 'set_config_var', 'dtparam=spi', 'on', boot_config],
+                    timeout=30,
+                    check=False
+                )
+
+            # Add dtoverlay=spi0-0cs if not present (for HAT compatibility)
+            config_content = Path(boot_config).read_text()
+            if 'dtoverlay=spi0-0cs' not in config_content:
+                # Find dtparam=spi=on line and add overlay after it
+                lines = config_content.split('\n')
+                new_lines = []
+                added = False
+                for line in lines:
+                    new_lines.append(line)
+                    if 'dtparam=spi=on' in line and not added:
+                        new_lines.append('dtoverlay=spi0-0cs')
+                        added = True
+
+                # If dtparam=spi=on wasn't found, add both at the end
+                if not added:
+                    new_lines.append('dtparam=spi=on')
+                    new_lines.append('dtoverlay=spi0-0cs')
+
+                Path(boot_config).write_text('\n'.join(new_lines))
+
+            return True
+
+        except subprocess.TimeoutExpired:
+            self.dialog.msgbox("Error", "Timeout while configuring SPI.")
+            return False
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to enable SPI: {e}")
+            return False
 
     def _wizard_step_services(self):
         """Wizard Step 2: Service Status"""
@@ -151,14 +275,16 @@ class FirstRunMixin:
         all_running = True
         for svc_id, svc_name, description in services:
             status = check_service(svc_id)
-            if status.running:
+            if status.available:
                 lines.append(f"\n✓ {svc_name}")
                 lines.append(f"  Status: Running")
             else:
                 all_running = False
                 lines.append(f"\n✗ {svc_name}")
-                lines.append(f"  Status: Not Running")
+                lines.append(f"  Status: {status.message}")
                 lines.append(f"  ({description})")
+                if status.fix_hint:
+                    lines.append(f"  Fix: {status.fix_hint}")
 
         if all_running:
             lines.append("\n" + "-" * 40)
@@ -219,18 +345,41 @@ class FirstRunMixin:
         """Wizard completion"""
         self._mark_setup_complete()
 
+        # Get network IP for web access info
+        local_ip = self._get_local_ip()
+
+        web_info = ""
+        if local_ip and local_ip != "127.0.0.1":
+            web_info = f"\nWeb Access (from other devices):\n  http://{local_ip}:5000\n"
+
         self.dialog.msgbox(
             "Setup Complete!",
             "MeshForge is ready to use!\n\n"
-            "Quick Start:\n"
+            "Next Steps:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "• Diagnostics → Check system health\n"
-            "• Service Manager → Start/stop services\n"
-            "• Radio Config → Configure Meshtastic\n"
-            "• Network Tools → Test connectivity\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "1. Service Manager → Start meshtasticd\n"
+            "2. Rich CLI → Configure your radio\n"
+            "3. Diagnostics → Verify everything works\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{web_info}"
+            "\nNeed Help?\n"
+            "  • Run diagnostics for system health\n"
+            "  • Check GitHub issues for known fixes\n"
+            "  • HAM community: 73s and good luck!\n\n"
             "Press Enter to continue to main menu."
         )
+
+    def _get_local_ip(self) -> str:
+        """Get local network IP address."""
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     def _settings_run_wizard(self):
         """Run wizard from settings menu"""
