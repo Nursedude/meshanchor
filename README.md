@@ -48,33 +48,46 @@ flowchart TB
 
 ## Current Capabilities (v0.4.7-beta)
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Meshtastic Integration** | Production | Full SPI/USB/TCP support via meshtasticd |
-| **Reticulum Bridge** | Production | RNS transport with LXMF messaging |
-| **Gateway Bridge** | Production | Bidirectional Meshtastic-RNS message routing |
-| **AI Diagnostics** | Production | Natural language troubleshooting |
-| **Coverage Maps** | Production | SNR-based link quality visualization |
-| **Multi-Interface** | Production | GTK, TUI, Web, CLI, Standalone |
-| **Health Monitoring** | Production | Service orchestration with auto-restart |
+> **Honesty Note**: We're being transparent about what works TODAY vs what's in progress.
+> See our [development blog](https://nursedude.substack.com) for the full story.
+
+| Feature | Status | What This Means |
+|---------|--------|-----------------|
+| **Meshtastic Integration** | ✅ Working | SPI HAT and USB radio support via meshtasticd |
+| **Install Verification** | ✅ Working | Post-install checks confirm everything works |
+| **AI Diagnostics** | ✅ Working | Offline troubleshooting with knowledge base |
+| **Coverage Maps** | ✅ Working | Generate SNR-based link quality maps |
+| **RF Calculator** | ✅ Working | Link budgets, Fresnel zones, path loss |
+| **Multi-Interface** | ✅ Working | GTK, Rich CLI, Web, Standalone modes |
+| **Reticulum Bridge** | 🔨 In Progress | RNS transport layer implemented, testing |
+| **Gateway Bridge** | 🔨 In Progress | Meshtastic↔RNS routing, needs validation |
+| **Health Monitoring** | 🔨 In Progress | Service orchestrator, recently unified |
+
+**What "Working" means**: You can install it, run it, and it does what it says without manual intervention.
+
+**What "In Progress" means**: Code exists, but needs more testing before we call it reliable.
 
 ## Roadmap
 
 MeshForge development follows a milestone-based approach. We ship when quality gates pass, not arbitrary dates.
 
 ### Phase 1: Foundation (Current)
-**Status: Production Beta**
+**Status: Active Development**
 
 Core NOC functionality for Meshtastic and Reticulum networks.
 
 ```
-[####################] Meshtastic Integration
-[####################] RNS/Reticulum Bridge
-[####################] Gateway Message Routing
-[####################] AI Diagnostics Engine
-[##################  ] Rich CLI Completion
-[################    ] GTK4 Desktop Polish
+[####################] Install & Verification     ← Just completed
+[####################] AI Diagnostics Engine      ← Working offline
+[####################] RF Tools & Calculators     ← Solid
+[##################  ] Meshtastic Integration     ← SPI/USB working, config WIP
+[##############      ] Rich CLI Polish            ← Unified, needs testing
+[############        ] RNS/Reticulum Bridge       ← Code exists, needs validation
+[##########          ] Gateway Message Routing    ← Architecture done, untested
+[########            ] GTK4 Desktop Polish        ← Functional, needs UX work
 ```
+
+**Current Focus**: Reliable installation that works first try. Everything else follows.
 
 ### Phase 2: Protocol Expansion & Connection Layer
 **Status: Research & Planning**
