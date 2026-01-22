@@ -127,7 +127,45 @@ class MeshForgeLauncher(
         if self._check_first_run():
             self._run_first_run_wizard()
 
+        # Check for service misconfiguration (SPI HAT with USB config)
+        self._check_service_misconfig()
+
         self._run_main_menu()
+
+    def _check_service_misconfig(self):
+        """Check for service misconfiguration and offer to fix."""
+        # Detect hardware
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+
+        has_spi = len(spi_devices) > 0
+        has_usb = len(usb_devices) > 0
+
+        # Only check for mismatch on SPI HAT systems without USB
+        if not has_spi or has_usb:
+            return
+
+        # Check if wrong USB config is active
+        usb_config = Path('/etc/meshtasticd/config.d/usb-serial.yaml')
+        if not usb_config.exists():
+            return
+
+        # Check if native meshtasticd is installed
+        result = subprocess.run(['which', 'meshtasticd'], capture_output=True, timeout=5)
+        has_native = result.returncode == 0
+
+        # Found mismatch! Offer to fix
+        msg = "CONFIGURATION MISMATCH DETECTED!\n\n"
+        msg += "Your system has an SPI HAT but USB config is active.\n\n"
+        msg += "Detected:\n"
+        msg += f"  - SPI devices: {', '.join(d.name for d in spi_devices)}\n"
+        msg += f"  - Wrong config: usb-serial.yaml\n"
+        if not has_native:
+            msg += f"  - Native meshtasticd: NOT INSTALLED\n"
+        msg += "\nWould you like to fix this now?"
+
+        if self.dialog.yesno("Service Misconfiguration", msg):
+            self._fix_spi_config(has_native)
 
     def _run_main_menu(self):
         """Display the main menu."""
@@ -1190,6 +1228,98 @@ class MeshForgeLauncher(
                 "Proceed?"
             ):
                 self._install_native_meshtasticd()
+
+    def _fix_spi_config(self, has_native: bool = False):
+        """Quick fix for SPI HAT with wrong USB config."""
+        self.dialog.infobox("Fixing", "Removing wrong USB configuration...")
+
+        try:
+            config_dir = Path('/etc/meshtasticd')
+
+            # Remove wrong USB config
+            usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
+            if usb_config.exists():
+                usb_config.unlink()
+                self.dialog.infobox("Fixing", "Removed usb-serial.yaml")
+
+            # Create config.yaml if missing
+            config_yaml = config_dir / 'config.yaml'
+            if not config_yaml.exists():
+                config_yaml.write_text("""### MeshForge NOC - Meshtasticd Configuration
+### Device configs are loaded from /etc/meshtasticd/config.d/
+---
+Lora:
+  Module: sx1262
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+""")
+                self.dialog.infobox("Fixing", "Created config.yaml")
+
+            # Ensure config directories exist
+            (config_dir / 'available.d').mkdir(exist_ok=True)
+            (config_dir / 'config.d').mkdir(exist_ok=True)
+
+            # Create Waveshare SPI HAT config if not exists
+            waveshare_avail = config_dir / 'available.d' / 'waveshare-spi.yaml'
+            if not waveshare_avail.exists():
+                waveshare_avail.write_text("""# Waveshare SX1262 LoRa HAT Configuration
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+""")
+
+            if not has_native:
+                # Offer to install native meshtasticd
+                if self.dialog.yesno(
+                    "Install Native Daemon?",
+                    "SPI HATs require the native meshtasticd daemon.\n\n"
+                    "Would you like to install it now?\n\n"
+                    "(This requires internet connection)"
+                ):
+                    self._install_native_meshtasticd()
+                else:
+                    self.dialog.msgbox(
+                        "Config Fixed",
+                        "Wrong USB config removed.\n\n"
+                        "To complete setup, install native meshtasticd:\n"
+                        "  sudo apt install meshtasticd\n\n"
+                        "Or run: sudo bash scripts/install_noc.sh --force-native"
+                    )
+            else:
+                # Native daemon exists - restart service
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+                self.dialog.msgbox(
+                    "Config Fixed",
+                    "Configuration corrected!\n\n"
+                    "- Removed wrong USB config\n"
+                    "- Restarted meshtasticd service\n\n"
+                    "Check status: sudo systemctl status meshtasticd"
+                )
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Fix failed:\n{e}")
 
     def _install_native_meshtasticd(self):
         """Install native meshtasticd for SPI HAT."""
