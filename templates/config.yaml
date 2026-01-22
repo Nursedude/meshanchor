@@ -1,105 +1,19 @@
 ## Many device configs have been moved to /etc/meshtasticd/available.d
 ### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
-
-### Define your devices here using Broadcom pin numbering
-### Uncomment the block that corresponds to your hardware
-### Including the "Module:" line!
 ---
 
-# ============================================================================
-# LoRa Radio Configuration
-# ============================================================================
-# The Module setting below uses auto-detect.
-# Device-specific pin configurations are loaded from config.d/
-# Copy your HAT config from available.d/ to config.d/ to activate it.
 Lora:
   Module: auto
 
-# ============================================================================
-# GPS Configuration (Optional)
-# ============================================================================
-GPS:
-  # Serial port for GPS module
-#  SerialPath: /dev/ttyS0
-  # GPS enable GPIO pin
-#  GPSEnableGpio: 4
-
-# ============================================================================
-# I2C Configuration (sensors, displays)
-# ============================================================================
-I2C:
-  # I2C device path
-#  I2CDevice: /dev/i2c-1
-
-# ============================================================================
-# Display Configuration (Optional)
-# ============================================================================
-Display:
-  # SPI displays must be configured here
-  # I2C displays are generally auto-detected
-  # See templates/available.d/ for display configs
-
-# ============================================================================
-# Touchscreen Configuration (Optional)
-# ============================================================================
-Touchscreen:
-  # Note: touchscreen must have a CS pin defined
-  # See templates/available.d/ for touchscreen configs
-
-# ============================================================================
-# Input Configuration (Optional)
-# ============================================================================
-Input:
-  # Keyboard device for direct input
-#  KeyboardDevice: /dev/input/by-id/usb-_Raspberry_Pi_Internal_Keyboard-event-kbd
-  # User button GPIO
-#  UserButton: 6
-
-# ============================================================================
-# Logging Configuration
-# ============================================================================
 Logging:
-  # Log level: debug, info, warn, error
   LogLevel: info
-  # JSON trace file for debugging
-#  TraceFile: /var/log/meshtasticd.json
-  # Force ASCII logs (default: auto-detect based on terminal)
-#  AsciiLogs: true
 
-# ============================================================================
-# Web Server Configuration
-# ============================================================================
 Webserver:
-  # HTTPS port for web interface
   Port: 9443
-  # Web interface root directory
   RootPath: /usr/share/meshtasticd/web
-  # SSL certificate paths (auto-generated if not present)
-#  SSLKey: /etc/meshtasticd/ssl/private_key.pem
-#  SSLCert: /etc/meshtasticd/ssl/certificate.pem
 
-# ============================================================================
-# Host Metrics Configuration (Optional)
-# ============================================================================
-HostMetrics:
-  # Interval in minutes between HostMetrics packets (0 to disable)
-#  ReportInterval: 30
-  # Channel for sending host metrics
-#  Channel: 0
-
-# ============================================================================
-# General Configuration
-# ============================================================================
 General:
-  # Maximum number of nodes to track
   MaxNodes: 200
-  # Maximum message queue size
   MaxMessageQueue: 100
-  # Directory for additional config files (HAT-specific)
   ConfigDirectory: /etc/meshtasticd/config.d/
-  # Directory for available hardware templates
   AvailableDirectory: /etc/meshtasticd/available.d/
-  # Custom MAC address (optional)
-#  MACAddress: AA:BB:CC:DD:EE:FF
-  # Get MAC from network interface
-#  MACAddressSource: eth0
