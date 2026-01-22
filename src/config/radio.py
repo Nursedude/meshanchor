@@ -21,7 +21,7 @@ def ask_yes_no_cancel(prompt: str, default: bool = False) -> bool | None:
         True for yes, False for no, None for cancel
     """
     default_str = "y" if default else "n"
-    hint = f"[y/n/c] ({default_str})" if default else "[y/n/c] (n)"
+    hint = f"[y/n/m] ({default_str})" if default else "[y/n/m] (n)"
 
     while True:
         response = Prompt.ask(
@@ -34,10 +34,10 @@ def ask_yes_no_cancel(prompt: str, default: bool = False) -> bool | None:
             return True
         elif response in ('n', 'no', ''):
             return False
-        elif response in ('c', 'cancel', 'q', 'quit', 'back'):
+        elif response in ('c', 'cancel', 'q', 'quit', 'back', 'm', 'menu', 'b'):
             return None
         else:
-            console.print("[yellow]Enter y (yes), n (no), or c (cancel)[/yellow]")
+            console.print("[yellow]Enter y/n/m (yes, no, or m for menu)[/yellow]")
 
 
 class RadioConfigurator:
@@ -113,17 +113,27 @@ class RadioConfigurator:
             return {'channel_slot': 20 if preset_name == 'LongFast' else 0, 'slot_info': 'Default (cancelled)'}
 
         if use_custom:
-            slot = IntPrompt.ask(
-                "Enter channel slot number",
-                default=20,
-                show_default=True
+            # Get slot with back/cancel option
+            slot_input = Prompt.ask(
+                "Enter channel slot number (or 'm' for menu)",
+                default="20"
             )
 
-            # Validate slot
-            if 0 <= slot < max_slots:
-                console.print(f"[green]Channel slot set to: {slot}[/green]")
-            else:
-                console.print(f"[yellow]Invalid slot. Using default: 20[/yellow]")
+            # Check for back/cancel
+            if slot_input.lower().strip() in ('m', 'menu', 'b', 'back', 'c', 'cancel'):
+                console.print("[yellow]Cancelled - using default slot[/yellow]")
+                return {'channel_slot': 20 if preset_name == 'LongFast' else 0, 'slot_info': 'Default (cancelled)'}
+
+            try:
+                slot = int(slot_input)
+                # Validate slot
+                if 0 <= slot < max_slots:
+                    console.print(f"[green]Channel slot set to: {slot}[/green]")
+                else:
+                    console.print(f"[yellow]Invalid slot. Using default: 20[/yellow]")
+                    slot = 20
+            except ValueError:
+                console.print(f"[yellow]Invalid input. Using default: 20[/yellow]")
                 slot = 20
         else:
             # Use recommended slot
@@ -154,22 +164,29 @@ class RadioConfigurator:
         console.print("  27 dBm: High power (500mW)")
         console.print("  30 dBm: Maximum (1W, MeshToad/high-power modules)")
 
-        tx_power = IntPrompt.ask(
-            "\nEnter TX power in dBm",
-            default=20,
-            show_default=True
+        tx_input = Prompt.ask(
+            "\nEnter TX power in dBm (or 'm' for menu)",
+            default="20"
         )
 
-        # Validate
-        if tx_power < 0:
-            tx_power = 0
-        elif tx_power > 30:
-            console.print("[yellow]Warning: 30 dBm is maximum for most modules[/yellow]")
-            tx_power = 30
+        # Check for back/cancel
+        if tx_input.lower().strip() in ('m', 'menu', 'b', 'back', 'c', 'cancel'):
+            console.print("[yellow]Using default: 20 dBm[/yellow]")
+            return 20
 
-        console.print(f"[green]TX power set to: {tx_power} dBm[/green]")
-
-        return tx_power
+        try:
+            tx_power = int(tx_input)
+            # Validate
+            if tx_power < 0:
+                tx_power = 0
+            elif tx_power > 30:
+                console.print("[yellow]Warning: 30 dBm is maximum for most modules[/yellow]")
+                tx_power = 30
+            console.print(f"[green]TX power set to: {tx_power} dBm[/green]")
+            return tx_power
+        except ValueError:
+            console.print("[yellow]Invalid input. Using default: 20 dBm[/yellow]")
+            return 20
 
     def configure_hop_limit(self):
         """Configure hop limit"""
@@ -183,22 +200,29 @@ class RadioConfigurator:
         console.print("  4-7: Larger networks")
         console.print("  1-2: Small, local networks")
 
-        hop_limit = IntPrompt.ask(
-            "\nEnter hop limit",
-            default=3,
-            show_default=True
+        hop_input = Prompt.ask(
+            "\nEnter hop limit (or 'm' for menu)",
+            default="3"
         )
 
-        # Validate
-        if hop_limit < 0:
-            hop_limit = 0
-        elif hop_limit > 7:
-            console.print("[yellow]Warning: Values above 7 can cause network congestion[/yellow]")
-            hop_limit = 7
+        # Check for back/cancel
+        if hop_input.lower().strip() in ('m', 'menu', 'b', 'back', 'c', 'cancel'):
+            console.print("[yellow]Using default: 3 hops[/yellow]")
+            return 3
 
-        console.print(f"[green]Hop limit set to: {hop_limit}[/green]")
-
-        return hop_limit
+        try:
+            hop_limit = int(hop_input)
+            # Validate
+            if hop_limit < 0:
+                hop_limit = 0
+            elif hop_limit > 7:
+                console.print("[yellow]Warning: Values above 7 can cause network congestion[/yellow]")
+                hop_limit = 7
+            console.print(f"[green]Hop limit set to: {hop_limit}[/green]")
+            return hop_limit
+        except ValueError:
+            console.print("[yellow]Invalid input. Using default: 3 hops[/yellow]")
+            return 3
 
     def configure_gps_position(self):
         """Configure GPS position manually or via GPS module"""
