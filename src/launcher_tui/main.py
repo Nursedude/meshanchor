@@ -59,6 +59,7 @@ from meshtasticd_config_mixin import MeshtasticdConfigMixin
 from site_planner_mixin import SitePlannerMixin
 from service_discovery_mixin import ServiceDiscoveryMixin
 from first_run_mixin import FirstRunMixin
+from system_tools_mixin import SystemToolsMixin
 
 
 class MeshForgeLauncher(
@@ -68,7 +69,8 @@ class MeshForgeLauncher(
     MeshtasticdConfigMixin,
     SitePlannerMixin,
     ServiceDiscoveryMixin,
-    FirstRunMixin
+    FirstRunMixin,
+    SystemToolsMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -393,6 +395,7 @@ class MeshForgeLauncher(
         while True:
             choices = [
                 ("full", "Full System Diagnostic"),
+                ("tools", "System Tools (Full Linux CLI)"),
                 ("services", "Service Status Check"),
                 ("network", "Network Connectivity"),
                 ("hardware", "Hardware Interfaces"),
@@ -412,6 +415,8 @@ class MeshForgeLauncher(
 
             if choice == "full":
                 self._run_full_diagnostics()
+            elif choice == "tools":
+                self._system_tools_menu()
             elif choice == "services":
                 self._check_services()
             elif choice == "network":
