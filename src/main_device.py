@@ -18,6 +18,7 @@ from rich.table import Table
 
 from utils import emoji as em
 from config.device import DeviceConfigurator
+from main_utils import detect_hardware
 
 console = Console()
 
@@ -357,43 +358,38 @@ def configure_device():
     console.print("\n[bold cyan]=============== Device Configuration ===============[/bold cyan]\n")
 
     while True:
-        console.print("\n[dim cyan]-- Radio Settings --[/dim cyan]")
-        console.print(f"  [bold]1[/bold]. {em.get('📻')} Complete Radio Setup [dim](Recommended)[/dim]")
-        console.print(f"  [bold]2[/bold]. {em.get('🌐')} LoRa Settings [dim](Region, Preset)[/dim]")
-        console.print(f"  [bold]3[/bold]. {em.get('📢')} Channel Configuration")
-        console.print(f"  [bold]4[/bold]. {em.get('⚡')} [yellow]Channel Presets[/yellow] [dim](Quick Setup)[/dim]")
+        console.print("\n[dim cyan]-- Meshtastic Settings (via CLI) --[/dim cyan]")
+        console.print(f"  [bold]1[/bold]. {em.get('🌐')} Region & Modem Preset [dim](US, LONG_TURBO, etc.)[/dim]")
+        console.print(f"  [bold]2[/bold]. {em.get('📢')} Channel Configuration")
+        console.print(f"  [bold]3[/bold]. {em.get('⚡')} [yellow]Channel Presets[/yellow] [dim](Quick Setup)[/dim]")
+        console.print(f"  [bold]4[/bold]. {em.get('🔌')} Module Configuration [dim](MQTT, Serial, etc.)[/dim]")
+        console.print(f"  [bold]5[/bold]. {em.get('📝')} Device Settings [dim](Name, WiFi, etc.)[/dim]")
 
-        console.print("\n[dim cyan]-- Device & Modules --[/dim cyan]")
-        console.print(f"  [bold]5[/bold]. {em.get('🔌')} Module Configuration [dim](MQTT, Serial, etc.)[/dim]")
-        console.print(f"  [bold]6[/bold]. {em.get('📝')} Device Settings [dim](Name, WiFi, etc.)[/dim]")
+        console.print("\n[dim cyan]-- Hardware (config.yaml) --[/dim cyan]")
+        console.print(f"  [bold]6[/bold]. {em.get('🔍')} Hardware Detection")
+        console.print(f"  [bold]7[/bold]. {em.get('🎛️')}  SPI HAT Configuration [dim](GPIO pins, Module type)[/dim]")
 
-        console.print("\n[dim cyan]-- Hardware --[/dim cyan]")
-        console.print(f"  [bold]7[/bold]. {em.get('🔍')} Hardware Detection")
-        console.print(f"  [bold]8[/bold]. {em.get('🎛️')}  SPI HAT Configuration [dim](MeshAdv-Mini, etc.)[/dim]")
+        console.print(f"\n  [bold]8[/bold]. {em.get('⬅️')}  Back to Main Menu")
 
-        console.print(f"\n  [bold]9[/bold]. {em.get('⬅️')}  Back to Main Menu")
-
-        choice = Prompt.ask("\n[cyan]Select configuration option[/cyan]", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"], default="1")
+        choice = Prompt.ask("\n[cyan]Select configuration option[/cyan]", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="1")
 
         if choice == "1":
-            configure_radio_complete()
-        elif choice == "2":
             configure_lora()
-        elif choice == "3":
+        elif choice == "2":
             configure_channels()
-        elif choice == "4":
+        elif choice == "3":
             # Import here to avoid circular import
             from main import configure_channel_presets
             configure_channel_presets()
-        elif choice == "5":
+        elif choice == "4":
             configure_modules()
-        elif choice == "6":
+        elif choice == "5":
             configure_device_settings()
-        elif choice == "7":
+        elif choice == "6":
             detect_hardware()
-        elif choice == "8":
+        elif choice == "7":
             configure_spi_hat()
-        elif choice == "9":
+        elif choice == "8":
             break
 
 
