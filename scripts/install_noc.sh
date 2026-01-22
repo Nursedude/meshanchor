@@ -545,48 +545,12 @@ SPI_NEEDS_NATIVE
 
                     # Still create config.yaml for when native daemon is installed
                     cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'SPI_CONFIG'
-### MeshForge NOC - Meshtasticd Configuration (SPI HAT)
-### Device configs are loaded from /etc/meshtasticd/config.d/
-### Native meshtasticd required - install from meshtastic.org
+## MeshForge NOC - Meshtasticd Configuration
+## Device configs are loaded from /etc/meshtasticd/config.d/
+## Copy configs from available.d/ to config.d/ to activate
 ---
 Lora:
-  Module: sx1262
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-  RootPath: /usr/share/meshtasticd/web
-
-General:
-  MaxNodes: 400
-  MaxMessageQueue: 100
-  ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
-SPI_CONFIG
-
-                    # Enable SPI HAT config (Waveshare default - common HAT)
-                    cp "$MESHTASTICD_CONFIG_DIR/available.d/waveshare-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/" 2>/dev/null || true
-                fi
-            fi
-
-            # Only create native configs if native binary is installed
-            if $NATIVE_INSTALLED; then
-                # Find actual binary path
-                MESHTASTICD_BIN=$(command -v meshtasticd)
-                echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
-
-                # Enable Meshtoad config by default (copy is more reliable than symlink)
-                cp "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
-
-                # Create main config.yaml (minimal - auto-loads from config.d/)
-                cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
-### MeshForge NOC - Meshtasticd Configuration
-### Device configs are loaded from /etc/meshtasticd/config.d/
-### Copy configs from available.d/ to config.d/ to activate
----
-Lora:
+  # Auto-detect module - configs from config.d/ override this
   Module: auto
 
 Logging:
@@ -598,10 +562,45 @@ Webserver:
 
 General:
   MaxNodes: 400
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
+SPI_CONFIG
+
+                    # Don't auto-copy any specific HAT config
+                    # User should select their HAT type via meshforge menu
+                    echo -e "  ${YELLOW}Run 'sudo meshforge' to select your HAT type${NC}"
+                fi
+            fi
+
+            # Only create native configs if native binary is installed
+            if $NATIVE_INSTALLED; then
+                # Find actual binary path
+                MESHTASTICD_BIN=$(command -v meshtasticd)
+                echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
+
+                # Create main config.yaml (minimal - auto-loads from config.d/)
+                cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
+## MeshForge NOC - Meshtasticd Configuration
+## Device configs are loaded from /etc/meshtasticd/config.d/
+## Copy configs from available.d/ to config.d/ to activate
+---
+Lora:
+  # Auto-detect module - configs from config.d/ override this
+  Module: auto
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  ConfigDirectory: /etc/meshtasticd/config.d/
 MAIN_CONFIG
+
+                # Don't auto-copy any HAT config - user selects via meshforge
+                echo -e "  ${YELLOW}Run 'sudo meshforge' to select your SPI HAT type${NC}"
 
                 # Create/update systemd service for native meshtasticd
                 # Use the actual binary path we found

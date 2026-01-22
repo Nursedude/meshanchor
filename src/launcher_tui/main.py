@@ -1279,11 +1279,13 @@ class MeshForgeLauncher(
             # Create config.yaml if missing
             config_yaml = config_dir / 'config.yaml'
             if not config_yaml.exists():
-                config_yaml.write_text("""### MeshForge NOC - Meshtasticd Configuration
-### Device configs are loaded from /etc/meshtasticd/config.d/
+                config_yaml.write_text("""## MeshForge NOC - Meshtasticd Configuration
+## Device configs are loaded from /etc/meshtasticd/config.d/
+## Copy configs from available.d/ to config.d/ to activate
 ---
 Lora:
-  Module: sx1262
+  # Auto-detect module - configs from config.d/ override this
+  Module: auto
 
 Logging:
   LogLevel: info
@@ -1295,7 +1297,6 @@ Webserver:
 General:
   MaxNodes: 400
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Fixing", "Created config.yaml")
 
@@ -1416,11 +1417,13 @@ Webserver:
             # Create config.yaml if missing
             config_yaml = config_dir / 'config.yaml'
             if not config_yaml.exists():
-                config_yaml.write_text("""### MeshForge NOC - Meshtasticd Configuration
-### Device configs are loaded from /etc/meshtasticd/config.d/
+                config_yaml.write_text("""## MeshForge NOC - Meshtasticd Configuration
+## Device configs are loaded from /etc/meshtasticd/config.d/
+## Copy configs from available.d/ to config.d/ to activate
 ---
 Lora:
-  Module: sx1262
+  # Auto-detect module - configs from config.d/ override this
+  Module: auto
 
 Logging:
   LogLevel: info
@@ -1431,9 +1434,7 @@ Webserver:
 
 General:
   MaxNodes: 400
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Installing", "Created /etc/meshtasticd/config.yaml")
 
