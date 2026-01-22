@@ -488,6 +488,128 @@ Logging:
   LogLevel: info
 USB_CONFIG
 
+    # MeshAdv-Pi-Hat (1W High-Power SX1262)
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshadv-pi-hat.yaml" << 'MESHADV_CONFIG'
+# MeshAdv-Pi-Hat Configuration (1W High-Power SX1262)
+# High-power LoRa HAT for Raspberry Pi
+# Reference: https://github.com/mesh-advanced
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  # For Raspberry Pi 5, uncomment:
+  # gpiochip: 4
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+MESHADV_CONFIG
+
+    # MeshAdv-Mini (SX1262/SX1268)
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshadv-mini.yaml" << 'MESHADV_MINI'
+# MeshAdv-Mini Configuration (SX1262/SX1268)
+# Compact LoRa HAT for Raspberry Pi
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+MESHADV_MINI
+
+    # Adafruit RFM9x LoRa Radio Bonnet
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/adafruit-rfm9x.yaml" << 'ADAFRUIT_CONFIG'
+# Adafruit RFM9x LoRa Radio Bonnet
+# 915MHz or 868MHz versions
+
+Lora:
+  Module: sx1276
+  CS: 25
+  IRQ: 22
+  Reset: 17
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+ADAFRUIT_CONFIG
+
+    # Heltec HT-CT62 (ESP32 with SX1262)
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/heltec-ht-ct62.yaml" << 'HELTEC_CONFIG'
+# Heltec HT-CT62 USB Configuration
+# ESP32-C3 with SX1262 - connects via USB serial
+
+Serial:
+  Device: /dev/ttyACM0
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+HELTEC_CONFIG
+
+    # Generic SX1262 SPI template
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/generic-sx1262.yaml" << 'GENERIC_SX1262'
+# Generic SX1262 SPI Configuration Template
+# Adjust GPIO pins for your specific hardware
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  # Common Raspberry Pi GPIO pins (BCM numbering)
+  CS: 21      # SPI chip select
+  IRQ: 16     # DIO1 interrupt
+  Busy: 20    # Busy signal
+  Reset: 18   # Reset pin
+  # For Raspberry Pi 5:
+  # gpiochip: 4
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+GENERIC_SX1262
+
+    # Generic SX1276/78 SPI template
+    cat > "$MESHTASTICD_CONFIG_DIR/available.d/generic-sx1276.yaml" << 'GENERIC_SX1276'
+# Generic SX1276/SX1278 SPI Configuration Template
+# For older LoRa modules (RFM95/96/97/98)
+
+Lora:
+  Module: sx1276
+  CS: 25
+  IRQ: 22
+  Reset: 17
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+GENERIC_SX1276
+
+    echo -e "  ${GREEN}✓ Created config templates in available.d/${NC}"
+    echo -e "  ${CYAN}Available configs:${NC}"
+    ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/" | sed 's/^/    - /'
+
     # Install appropriate daemon based on radio type
     case "$RADIO_TYPE" in
         spi)
