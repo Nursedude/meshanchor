@@ -1276,15 +1276,19 @@ class MeshForgeLauncher(
                 usb_config.unlink()
                 self.dialog.infobox("Fixing", "Removed usb-serial.yaml")
 
-            # Create config.yaml if missing
+            # Create config.yaml if missing - use official template
             config_yaml = config_dir / 'config.yaml'
             if not config_yaml.exists():
-                config_yaml.write_text("""## MeshForge NOC - Meshtasticd Configuration
-## Device configs are loaded from /etc/meshtasticd/config.d/
-## Copy configs from available.d/ to config.d/ to activate
+                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
+                if template_path.exists():
+                    import shutil
+                    shutil.copy(template_path, config_yaml)
+                else:
+                    # Fallback - minimal official format
+                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
-  # Auto-detect module - configs from config.d/ override this
   Module: auto
 
 Logging:
@@ -1295,8 +1299,10 @@ Webserver:
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Fixing", "Created config.yaml")
 
@@ -1414,15 +1420,19 @@ Webserver:
             (config_dir / 'config.d').mkdir(exist_ok=True)
             (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
 
-            # Create config.yaml if missing
+            # Create config.yaml if missing - use official template
             config_yaml = config_dir / 'config.yaml'
             if not config_yaml.exists():
-                config_yaml.write_text("""## MeshForge NOC - Meshtasticd Configuration
-## Device configs are loaded from /etc/meshtasticd/config.d/
-## Copy configs from available.d/ to config.d/ to activate
+                template_path = self.src_dir.parent / 'templates' / 'config.yaml'
+                if template_path.exists():
+                    import shutil
+                    shutil.copy(template_path, config_yaml)
+                else:
+                    # Fallback - minimal official format
+                    config_yaml.write_text("""## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
-  # Auto-detect module - configs from config.d/ override this
   Module: auto
 
 Logging:
@@ -1433,8 +1443,10 @@ Webserver:
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Installing", "Created /etc/meshtasticd/config.yaml")
 

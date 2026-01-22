@@ -665,14 +665,17 @@ SPI_NEEDS_NATIVE
                     DAEMON_TYPE="spi-pending"
                     RADIO_TYPE="spi"  # Mark as SPI mode needing native daemon
 
-                    # Still create config.yaml for when native daemon is installed
-                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'SPI_CONFIG'
-## MeshForge NOC - Meshtasticd Configuration
-## Device configs are loaded from /etc/meshtasticd/config.d/
-## Copy configs from available.d/ to config.d/ to activate
+                    # Copy official config.yaml template from MeshForge
+                    if [[ -f "$INSTALL_DIR/templates/config.yaml" ]]; then
+                        cp "$INSTALL_DIR/templates/config.yaml" "$MESHTASTICD_CONFIG_DIR/config.yaml"
+                        echo -e "  ${GREEN}✓ Copied official config.yaml template${NC}"
+                    else
+                        # Fallback - create minimal config
+                        cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'FALLBACK_CONFIG'
+## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
-  # Auto-detect module - configs from config.d/ override this
   Module: auto
 
 Logging:
@@ -683,9 +686,12 @@ Webserver:
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-SPI_CONFIG
+  AvailableDirectory: /etc/meshtasticd/available.d/
+FALLBACK_CONFIG
+                    fi
 
                     # Don't auto-copy any specific HAT config
                     # User should select their HAT type via meshforge menu
@@ -699,14 +705,17 @@ SPI_CONFIG
                 MESHTASTICD_BIN=$(command -v meshtasticd)
                 echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
 
-                # Create main config.yaml (minimal - auto-loads from config.d/)
-                cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
-## MeshForge NOC - Meshtasticd Configuration
-## Device configs are loaded from /etc/meshtasticd/config.d/
-## Copy configs from available.d/ to config.d/ to activate
+                # Copy official config.yaml template from MeshForge
+                if [[ -f "$INSTALL_DIR/templates/config.yaml" ]]; then
+                    cp "$INSTALL_DIR/templates/config.yaml" "$MESHTASTICD_CONFIG_DIR/config.yaml"
+                    echo -e "  ${GREEN}✓ Copied official config.yaml template${NC}"
+                else
+                    # Fallback - create minimal config matching meshtasticd format
+                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
+## Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
-  # Auto-detect module - configs from config.d/ override this
   Module: auto
 
 Logging:
@@ -717,9 +726,12 @@ Webserver:
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 MAIN_CONFIG
+                fi
 
                 # Don't auto-copy any HAT config - user selects via meshforge
                 echo -e "  ${YELLOW}Run 'sudo meshforge' to select your SPI HAT type${NC}"
