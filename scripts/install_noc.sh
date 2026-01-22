@@ -460,15 +460,9 @@ SPI_NEEDS_NATIVE
                     DAEMON_TYPE="spi-pending"
                     RADIO_TYPE="spi"  # Mark as SPI mode needing native daemon
 
-                    # Copy official config.yaml template from MeshForge
-                    if [[ -f "$INSTALL_DIR/templates/config.yaml" ]]; then
-                        cp "$INSTALL_DIR/templates/config.yaml" "$MESHTASTICD_CONFIG_DIR/config.yaml"
-                        echo -e "  ${GREEN}✓ Copied official config.yaml template${NC}"
-                    else
-                        # Fallback - create minimal config
+                    # Only create config.yaml if it doesn't exist
+                    if [[ ! -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
                         cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'FALLBACK_CONFIG'
-## Many device configs have been moved to /etc/meshtasticd/available.d
-### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 ---
 Lora:
   Module: auto
@@ -482,15 +476,13 @@ Webserver:
 
 General:
   MaxNodes: 200
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
 FALLBACK_CONFIG
+                        echo -e "  ${GREEN}✓ Created placeholder config.yaml${NC}"
                     fi
 
-                    # Don't auto-copy any specific HAT config
-                    # User should select their HAT type via meshforge menu
-                    echo -e "  ${YELLOW}Run 'sudo meshforge' to select your HAT type${NC}"
+                    # User needs to install native meshtasticd manually
+                    echo -e "  ${YELLOW}After installing meshtasticd, run 'sudo meshforge' to select your HAT${NC}"
                 fi
             fi
 
@@ -500,15 +492,21 @@ FALLBACK_CONFIG
                 MESHTASTICD_BIN=$(command -v meshtasticd)
                 echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
 
-                # Copy official config.yaml template from MeshForge
-                if [[ -f "$INSTALL_DIR/templates/config.yaml" ]]; then
-                    cp "$INSTALL_DIR/templates/config.yaml" "$MESHTASTICD_CONFIG_DIR/config.yaml"
-                    echo -e "  ${GREEN}✓ Copied official config.yaml template${NC}"
+                # CHECK if meshtasticd already has a valid config.yaml
+                # DO NOT overwrite if it exists and has content
+                if [[ -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
+                    # Check if it has Webserver section (sign of valid config)
+                    if grep -q "Webserver:" "$MESHTASTICD_CONFIG_DIR/config.yaml" 2>/dev/null; then
+                        echo -e "  ${GREEN}✓ Using existing config.yaml (from meshtasticd package)${NC}"
+                    else
+                        # Config exists but missing Webserver - might be corrupted
+                        echo -e "  ${YELLOW}⚠ config.yaml exists but may be incomplete${NC}"
+                        echo -e "  ${YELLOW}  Check: cat /etc/meshtasticd/config.yaml${NC}"
+                    fi
                 else
-                    # Fallback - create minimal config matching meshtasticd format
-                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MAIN_CONFIG'
-## Many device configs have been moved to /etc/meshtasticd/available.d
-### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
+                    # No config.yaml - create minimal one
+                    echo -e "  ${CYAN}Creating minimal config.yaml...${NC}"
+                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MINIMAL_CONFIG'
 ---
 Lora:
   Module: auto
@@ -522,14 +520,14 @@ Webserver:
 
 General:
   MaxNodes: 200
-  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
-MAIN_CONFIG
+MINIMAL_CONFIG
+                    echo -e "  ${GREEN}✓ Created minimal config.yaml${NC}"
                 fi
 
                 # Don't auto-copy any HAT config - user selects via meshforge
                 echo -e "  ${YELLOW}Run 'sudo meshforge' to select your SPI HAT type${NC}"
+                echo -e "  ${CYAN}  Or manually: cp /etc/meshtasticd/available.d/<your-hat>.yaml /etc/meshtasticd/config.d/${NC}"
 
                 # Create/update systemd service for native meshtasticd
                 # Use the actual binary path we found
