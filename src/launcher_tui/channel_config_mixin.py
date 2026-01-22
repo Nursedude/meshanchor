@@ -13,8 +13,51 @@ import base64
 class ChannelConfigMixin:
     """Mixin providing channel configuration tools for the TUI launcher."""
 
+    def _ensure_meshtastic_connection(self) -> bool:
+        """
+        Ensure meshtastic connection is configured.
+        Auto-detects TCP (meshtasticd) or USB serial.
+
+        Returns True if connected, False if failed.
+        """
+        try:
+            sys.path.insert(0, str(self.src_dir))
+            from commands import meshtastic as mesh_cmd
+
+            self.dialog.infobox("Connection", "Detecting Meshtastic device...")
+
+            result = mesh_cmd.ensure_connection()
+            if result.success:
+                conn_type = result.data.get('type', 'unknown')
+                conn_value = result.data.get('value', '')
+                method = result.data.get('method', '')
+
+                if method == 'usb':
+                    msg = f"Connected via USB: {conn_value}"
+                else:
+                    msg = f"Connected via TCP: localhost:4403"
+
+                self.dialog.infobox("Connected", msg)
+                return True
+            else:
+                self.dialog.msgbox(
+                    "Connection Failed",
+                    f"{result.message}\n\n"
+                    "Check that your radio is connected\n"
+                    "or meshtasticd service is running."
+                )
+                return False
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Connection check failed:\n{e}")
+            return False
+
     def _channel_config_menu(self):
         """Channel configuration menu."""
+        # Ensure we have a valid connection first
+        if not self._ensure_meshtastic_connection():
+            return
+
         while True:
             choices = [
                 ("list", "View All Channels"),
