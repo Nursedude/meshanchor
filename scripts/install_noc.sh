@@ -921,22 +921,38 @@ systemctl daemon-reload
 echo -e "  ${GREEN}✓ System integration complete${NC}"
 
 # ─────────────────────────────────────────────────────────────────
-# Detect radio hardware
+# Detect radio hardware (USB and SPI)
 # ─────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}Detecting radio hardware...${NC}"
 
 RADIO_FOUND=false
+
+# Check USB radios
 for dev in /dev/ttyUSB* /dev/ttyACM*; do
     if [[ -e "$dev" ]]; then
-        echo -e "  ${GREEN}✓ Found: $dev${NC}"
+        echo -e "  ${GREEN}✓ USB Radio: $dev${NC}"
         RADIO_FOUND=true
     fi
 done
 
+# Check SPI devices (MeshAdv-Pi-Hat, Waveshare, etc.)
+if [[ -e "/dev/spidev0.0" ]]; then
+    echo -e "  ${GREEN}✓ SPI Device: /dev/spidev0.0${NC}"
+    # Check if SPI is enabled in boot config
+    if grep -q "dtparam=spi=on" /boot/config.txt 2>/dev/null || \
+       grep -q "dtparam=spi=on" /boot/firmware/config.txt 2>/dev/null; then
+        echo -e "  ${GREEN}✓ SPI enabled in boot config${NC}"
+        echo -e "  ${DIM}  (MeshAdv-Pi-Hat, Waveshare SX126x, or similar)${NC}"
+        RADIO_FOUND=true
+    fi
+fi
+
 if ! $RADIO_FOUND; then
     echo -e "  ${YELLOW}⚠ No radio device detected${NC}"
-    echo -e "  ${YELLOW}  Connect a Meshtastic radio via USB${NC}"
+    echo -e "  ${YELLOW}  Options:${NC}"
+    echo -e "  ${YELLOW}  - USB: Connect a Meshtastic radio via USB${NC}"
+    echo -e "  ${YELLOW}  - SPI HAT: Enable SPI with 'sudo raspi-config'${NC}"
 fi
 
 # ─────────────────────────────────────────────────────────────────
