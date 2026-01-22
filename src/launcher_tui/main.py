@@ -174,14 +174,13 @@ class MeshForgeLauncher(
                     self.dialog.msgbox("Error", f"Failed:\n{e}")
             return
 
-        # Original check: SPI hardware but only USB config
+        # Check: SPI hardware present but USB config active (wrong)
         spi_devices = list(Path('/dev').glob('spidev*'))
-        usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
 
         has_spi = len(spi_devices) > 0
-        has_usb = len(usb_devices) > 0
 
-        if not has_spi or has_usb:
+        # Only skip if no SPI hardware at all
+        if not has_spi:
             return
 
         if not usb_config.exists():
@@ -1373,17 +1372,25 @@ Webserver:
                 # Not installed - try to install
                 self.dialog.infobox("Installing", "Adding Meshtastic repository...")
 
-                # Detect OS for correct repo
+                # Detect OS for correct repo (matching install_noc.sh logic)
                 os_repo = "Raspbian_12"  # Default for Pi
                 if Path('/etc/os-release').exists():
+                    os_info = {}
                     with open('/etc/os-release') as f:
                         for line in f:
-                            if line.startswith('ID='):
-                                os_id = line.strip().split('=')[1].strip('"')
-                                if os_id == 'debian':
-                                    os_repo = "Debian_12"
-                                elif os_id == 'ubuntu':
-                                    os_repo = "xUbuntu_24.04"
+                            if '=' in line:
+                                key, val = line.strip().split('=', 1)
+                                os_info[key] = val.strip('"')
+
+                    os_id = os_info.get('ID', '')
+                    version_id = os_info.get('VERSION_ID', '')
+
+                    if os_id == 'raspbian':
+                        os_repo = f"Raspbian_{version_id.split('.')[0]}" if version_id else "Raspbian_12"
+                    elif os_id == 'debian':
+                        os_repo = f"Debian_{version_id.split('.')[0]}" if version_id else "Debian_12"
+                    elif os_id == 'ubuntu':
+                        os_repo = f"xUbuntu_{version_id}" if version_id else "xUbuntu_24.04"
 
                 repo_url = f"https://download.opensuse.org/repositories/network:/Meshtastic:/beta/{os_repo}/"
 
