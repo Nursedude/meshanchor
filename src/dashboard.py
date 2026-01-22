@@ -68,28 +68,46 @@ class StatusDashboard:
                 return {'status': 'unknown', 'running': False, 'color': 'yellow'}
 
     def get_installed_version(self):
-        """Get installed meshtasticd version using commands layer"""
-        if COMMANDS_AVAILABLE:
-            try:
-                result = service.get_version('meshtasticd')
-                if result.success:
-                    return result.data.get('version', 'Unknown')
-            except Exception as e:
-                logger.error(f"Failed to get version: {e}")
-            return 'Unknown'
-        else:
-            # Fallback to direct subprocess call
-            import subprocess
-            try:
-                result = subprocess.run(
-                    ['meshtasticd', '--version'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    return result.stdout.strip()
-            except Exception as e:
-                logger.error(f"Failed to get version: {e}")
-            return 'Unknown'
+        """Get installed meshtasticd version or connection mode."""
+        import shutil
+
+        # First check for native meshtasticd binary
+        meshtasticd_path = shutil.which('meshtasticd')
+        if meshtasticd_path:
+            if COMMANDS_AVAILABLE:
+                try:
+                    result = service.get_version('meshtasticd')
+                    if result.success:
+                        return result.data.get('version', 'Native')
+                except Exception as e:
+                    logger.error(f"Failed to get version: {e}")
+                return 'Native'
+            else:
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        ['meshtasticd', '--version'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        return result.stdout.strip()
+                except Exception:
+                    pass
+                return 'Native'
+
+        # No native daemon - check for USB devices (direct connection mode)
+        usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+        if usb_devices:
+            return f'USB ({usb_devices[0].name})'
+
+        # Check for meshtastic Python package
+        try:
+            import meshtastic
+            return f'CLI {getattr(meshtastic, "__version__", "")}'.strip()
+        except ImportError:
+            pass
+
+        return 'Not installed'
 
     def get_system_info(self):
         """Get system information - CPU temp, memory, disk"""
