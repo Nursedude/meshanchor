@@ -41,14 +41,27 @@ class StatusDashboard:
         if COMMANDS_AVAILABLE:
             try:
                 result = service.check_status('meshtasticd')
+                status_data = result.data
+
+                # Check for misconfiguration (SPI HAT with USB placeholder)
+                message = status_data.get('message', '')
+                if 'WRONG CONFIG' in message:
+                    return {
+                        'status': 'misconfigured',
+                        'running': False,
+                        'color': 'red',
+                        'message': 'SPI HAT needs native daemon'
+                    }
+
                 return {
-                    'status': result.data.get('status', 'unknown'),
-                    'running': result.data.get('running', False),
-                    'color': 'green' if result.data.get('running') else 'red'
+                    'status': status_data.get('status', 'unknown'),
+                    'running': status_data.get('running', False),
+                    'color': 'green' if status_data.get('running') else 'red',
+                    'message': message
                 }
             except Exception as e:
                 logger.error(f"Failed to get service status: {e}")
-                return {'status': 'unknown', 'running': False, 'color': 'yellow'}
+                return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
         else:
             # Fallback to direct subprocess call
             import subprocess
@@ -58,14 +71,43 @@ class StatusDashboard:
                     capture_output=True, text=True, timeout=5
                 )
                 status = result.stdout.strip()
+
+                # Check SubState to detect placeholder services
+                if status == 'active':
+                    state_result = subprocess.run(
+                        ['systemctl', 'show', 'meshtasticd', '--property=SubState'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    sub_state = state_result.stdout.strip().split('=')[-1] if '=' in state_result.stdout else ''
+
+                    # Exited = placeholder service
+                    if sub_state == 'exited':
+                        # Check for SPI HAT mismatch
+                        spi_exists = list(Path('/dev').glob('spidev*'))
+                        usb_exists = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+                        if spi_exists and not usb_exists:
+                            return {
+                                'status': 'misconfigured',
+                                'running': False,
+                                'color': 'red',
+                                'message': 'SPI HAT needs native daemon'
+                            }
+                        return {
+                            'status': 'placeholder',
+                            'running': False,
+                            'color': 'yellow',
+                            'message': 'USB mode (no daemon)'
+                        }
+
                 return {
                     'status': status,
                     'running': status == 'active',
-                    'color': 'green' if status == 'active' else 'red'
+                    'color': 'green' if status == 'active' else 'red',
+                    'message': ''
                 }
             except Exception as e:
                 logger.error(f"Failed to get service status: {e}")
-                return {'status': 'unknown', 'running': False, 'color': 'yellow'}
+                return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
 
     def get_installed_version(self):
         """Get installed meshtasticd version or connection mode."""
@@ -95,8 +137,14 @@ class StatusDashboard:
                     pass
                 return 'Native'
 
-        # No native daemon - check for USB devices (direct connection mode)
+        # No native daemon - check what hardware exists
+        spi_devices = list(Path('/dev').glob('spidev*'))
         usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+
+        if spi_devices and not usb_devices:
+            # SPI HAT but no native daemon - this is a problem
+            return 'SPI (needs daemon)'
+
         if usb_devices:
             return f'USB ({usb_devices[0].name})'
 
@@ -163,15 +211,35 @@ class StatusDashboard:
         console.clear()
 
         # Service Status Table
-        service = self.get_service_status()
+        svc = self.get_service_status()
         status_table = Table(title=f"{em.get('📡')} Meshtasticd Service", box=ROUNDED, show_header=False)
         status_table.add_column("Property", style="cyan")
         status_table.add_column("Value", style="green")
 
-        status_icon = em.get('🟢') if service['running'] else em.get('🔴')
-        status_str = "RUNNING" if service['running'] else "STOPPED"
+        # Status with color based on state
+        if svc['status'] == 'misconfigured':
+            status_icon = em.get('🔴')
+            status_str = "[red]MISCONFIGURED[/red]"
+            status_style = "red"
+        elif svc['running']:
+            status_icon = em.get('🟢')
+            status_str = "[green]RUNNING[/green]"
+            status_style = "green"
+        elif svc['status'] == 'placeholder':
+            status_icon = em.get('🟡')
+            status_str = "[yellow]USB MODE[/yellow]"
+            status_style = "yellow"
+        else:
+            status_icon = em.get('🔴')
+            status_str = "[red]STOPPED[/red]"
+            status_style = "red"
+
         status_table.add_row(f"{status_icon} Status", status_str)
         status_table.add_row(f"{em.get('📦')} Version", self.get_installed_version())
+
+        # Show message if there's a problem
+        if svc.get('message') and 'needs' in svc.get('message', '').lower():
+            status_table.add_row(f"{em.get('⚠️')} Issue", f"[red]{svc['message']}[/red]")
 
         console.print(status_table)
         console.print()
@@ -194,16 +262,28 @@ class StatusDashboard:
 
     def get_quick_status_line(self):
         """Get a single line status for menu display"""
-        service = self.get_service_status()
+        svc = self.get_service_status()
         info = self.get_system_info()
 
-        status_icon = em.get('🟢') if service['running'] else em.get('🔴')
+        # Status indicator with appropriate icon
+        if svc['status'] == 'misconfigured':
+            status_icon = em.get('🔴')
+            status_text = "[red]MISCONFIG[/red]"
+        elif svc['running']:
+            status_icon = em.get('🟢')
+            status_text = "[green]Running[/green]"
+        elif svc['status'] == 'placeholder':
+            status_icon = em.get('🟡')
+            status_text = "[yellow]USB[/yellow]"
+        else:
+            status_icon = em.get('🔴')
+            status_text = "[red]Stopped[/red]"
+
         version = self.get_installed_version()
 
-        return Text(
-            f"{status_icon} Service | {em.get('📦')} {version} | {em.get('🌡️')} {info['cpu_temp']} | "
-            f"{em.get('💾')} {info['memory']} | {em.get('💿')} {info['disk']}",
-            style="dim"
+        return Text.from_markup(
+            f"{status_icon} {status_text} | {em.get('📦')} {version} | {em.get('🌡️')} {info['cpu_temp']} | "
+            f"{em.get('💾')} {info['memory']} | {em.get('💿')} {info['disk']}"
         )
 
     def interactive_dashboard(self):
