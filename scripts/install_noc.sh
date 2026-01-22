@@ -104,6 +104,7 @@ fi
 
 detect_radio_type() {
     # Returns: "spi", "usb", or "none"
+    # Priority: SPI HAT > USB Serial > None
 
     # Check for CH341 (Meshtoad USB-to-SPI adapter)
     if dmesg 2>/dev/null | grep -qi "ch341.*spi\|ch341-spi"; then
@@ -111,18 +112,41 @@ detect_radio_type() {
         return
     fi
 
-    # Check for known SPI HAT configurations
+    # Check for SPI devices (Raspberry Pi HATs)
     if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
-        # Check if there's a SPI radio config or HAT overlay
-        if grep -q "meshtastic\|sx126\|sx127\|lora" /boot/config.txt 2>/dev/null; then
-            echo "spi"
-            return
+        # SPI device exists - check for Raspberry Pi
+        if [[ -f /proc/device-tree/model ]]; then
+            if grep -qi "raspberry" /proc/device-tree/model 2>/dev/null; then
+                # On Raspberry Pi with SPI enabled = likely HAT
+                # Check boot config for SPI enabled
+                for cfg in /boot/config.txt /boot/firmware/config.txt; do
+                    if [[ -f "$cfg" ]]; then
+                        # SPI enabled = HAT is likely present
+                        if grep -q "dtparam=spi=on" "$cfg" 2>/dev/null || \
+                           grep -q "^spi=on" "$cfg" 2>/dev/null; then
+                            echo "spi"
+                            return
+                        fi
+                        # Check for specific LoRa overlays
+                        if grep -qi "meshtastic\|sx126\|sx127\|lora\|waveshare" "$cfg" 2>/dev/null; then
+                            echo "spi"
+                            return
+                        fi
+                    fi
+                done
+            fi
         fi
     fi
 
     # Check for USB serial devices
     if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -1 >/dev/null; then
         echo "usb"
+        return
+    fi
+
+    # If SPI exists but we couldn't confirm HAT, still prefer SPI
+    if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
+        echo "spi"
         return
     fi
 
@@ -518,6 +542,32 @@ WantedBy=multi-user.target
 SPI_NEEDS_NATIVE
                     DAEMON_TYPE="spi-pending"
                     RADIO_TYPE="spi"  # Mark as SPI mode needing native daemon
+
+                    # Still create config.yaml for when native daemon is installed
+                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'SPI_CONFIG'
+### MeshForge NOC - Meshtasticd Configuration (SPI HAT)
+### Device configs are loaded from /etc/meshtasticd/config.d/
+### Native meshtasticd required - install from meshtastic.org
+---
+Lora:
+  Module: sx1262
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+SPI_CONFIG
+
+                    # Enable SPI HAT config (Waveshare default - common HAT)
+                    cp "$MESHTASTICD_CONFIG_DIR/available.d/waveshare-spi.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/" 2>/dev/null || true
                 fi
             fi
 
