@@ -85,17 +85,26 @@ class DeviceConfigurator:
             console.print("1. USB Serial")
             console.print("2. Network (TCP)")
             console.print("3. Auto-detect")
+            console.print("0. Back to main menu")
 
-            method = Prompt.ask("Connection method", choices=["1", "2", "3"], default="3")
+            method = Prompt.ask("Connection method [1/2/3/0]", choices=["1", "2", "3", "0", "b", "back"], default="3")
+
+            if method in ("0", "b", "back"):
+                console.print("[yellow]Returning to main menu...[/yellow]")
+                return False
 
             if method == "1":
-                port = Prompt.ask("Enter USB serial port", default="/dev/ttyUSB0")
+                port = Prompt.ask("Enter USB serial port (or 'b' to go back)", default="/dev/ttyUSB0")
+                if port.lower() in ('b', 'back', '0'):
+                    return False
                 self.interface = meshtastic.serial_interface.SerialInterface(port)
                 console.print(f"[green]Connected via USB serial: {port}[/green]")
                 return True
 
             elif method == "2":
-                host = Prompt.ask("Enter hostname or IP", default="meshtastic.local")
+                host = Prompt.ask("Enter hostname or IP (or 'b' to go back)", default="meshtastic.local")
+                if host.lower() in ('b', 'back', '0'):
+                    return False
                 self.interface = meshtastic.tcp_interface.TCPInterface(hostname=host)
                 console.print(f"[green]Connected via TCP: {host}[/green]")
                 return True
@@ -105,6 +114,10 @@ class DeviceConfigurator:
                 self.interface = meshtastic.serial_interface.SerialInterface()
                 console.print("[green]Connected (auto-detected)[/green]")
                 return True
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Cancelled by user[/yellow]")
+            return False
 
         except ImportError:
             console.print("[bold red]Meshtastic Python library not installed[/bold red]")
