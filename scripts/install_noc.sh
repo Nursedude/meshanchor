@@ -606,8 +606,8 @@ GENERIC_SX1276
             else
                 # Add OpenSUSE Build Service repo and install via apt
                 if add_meshtastic_repo; then
-                    echo "  Installing meshtasticd via apt..."
-                    if apt-get install -y meshtasticd 2>&1 | tail -5; then
+                    echo -e "  ${CYAN}Installing meshtasticd via apt (this may take a minute)...${NC}"
+                    if apt-get install -y -qq meshtasticd >/dev/null 2>&1; then
                         # Verify it actually installed
                         if command -v meshtasticd &>/dev/null; then
                             INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
