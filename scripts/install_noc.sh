@@ -112,41 +112,16 @@ detect_radio_type() {
         return
     fi
 
-    # Check for SPI devices (Raspberry Pi HATs)
+    # Check for SPI devices - if present, prefer SPI over USB
+    # Works on Raspberry Pi, Jetson, x86 SoM, etc.
     if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
-        # SPI device exists - check for Raspberry Pi
-        if [[ -f /proc/device-tree/model ]]; then
-            if grep -qi "raspberry" /proc/device-tree/model 2>/dev/null; then
-                # On Raspberry Pi with SPI enabled = likely HAT
-                # Check boot config for SPI enabled
-                for cfg in /boot/config.txt /boot/firmware/config.txt; do
-                    if [[ -f "$cfg" ]]; then
-                        # SPI enabled = HAT is likely present
-                        if grep -q "dtparam=spi=on" "$cfg" 2>/dev/null || \
-                           grep -q "^spi=on" "$cfg" 2>/dev/null; then
-                            echo "spi"
-                            return
-                        fi
-                        # Check for specific LoRa overlays
-                        if grep -qi "meshtastic\|sx126\|sx127\|lora\|waveshare" "$cfg" 2>/dev/null; then
-                            echo "spi"
-                            return
-                        fi
-                    fi
-                done
-            fi
-        fi
+        echo "spi"
+        return
     fi
 
     # Check for USB serial devices
     if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -1 >/dev/null; then
         echo "usb"
-        return
-    fi
-
-    # If SPI exists but we couldn't confirm HAT, still prefer SPI
-    if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
-        echo "spi"
         return
     fi
 
@@ -414,7 +389,13 @@ UDEV_RULES
     mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
     chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
 
-    # Create config templates
+    # Copy templates from MeshForge repo if available
+    if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
+        echo "  Copying HAT templates from MeshForge..."
+        cp "$INSTALL_DIR/templates/available.d"/*.yaml "$MESHTASTICD_CONFIG_DIR/available.d/" 2>/dev/null || true
+    fi
+
+    # Create/update config templates (ensures latest versions)
     cat > "$MESHTASTICD_CONFIG_DIR/available.d/meshtoad-spi.yaml" << 'MESHTOAD_CONFIG'
 # Meshtoad / MeshStick SPI Radio Configuration
 # Uses CH341 USB-to-SPI adapter with SX1262
