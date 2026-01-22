@@ -22,6 +22,13 @@ except ImportError:
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 def check_root() -> bool:
     """
@@ -527,14 +534,30 @@ def get_service_status(service_name: str) -> str:
     Args:
         service_name: Name of the systemd service (validated, no shell chars)
     """
-    # Use list form to prevent command injection
-    result = run_command(['systemctl', 'is-active', service_name])
-    return result['stdout'].strip() if result['success'] else 'unknown'
+    # Use centralized service checker if available
+    if _HAS_SERVICE_CHECK:
+        is_running, is_enabled = check_systemd_service(service_name)
+        if is_running:
+            return 'active'
+        elif is_running is False:
+            return 'inactive'
+        else:
+            return 'unknown'
+    else:
+        # Fallback to direct systemctl call using list form to prevent command injection
+        result = run_command(['systemctl', 'is-active', service_name])
+        return result['stdout'].strip() if result['success'] else 'unknown'
 
 
 def is_service_running(service_name: str) -> bool:
     """Check if a systemd service is running"""
-    return get_service_status(service_name) == 'active'
+    # Use centralized service checker if available
+    if _HAS_SERVICE_CHECK:
+        is_running, is_enabled = check_systemd_service(service_name)
+        return is_running
+    else:
+        # Fallback to direct method
+        return get_service_status(service_name) == 'active'
 
 
 def enable_service(service_name: str) -> bool:

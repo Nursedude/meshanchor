@@ -35,6 +35,14 @@ from utils.paths import get_real_user_home
 
 from __version__ import __version__, get_full_version, __app_name__
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+
 # Edition detection
 try:
     from core.edition import Edition, detect_edition, has_feature, get_edition_info
@@ -1109,17 +1117,21 @@ class MeshForgeWindow(Adw.ApplicationWindow):
         try:
             import socket
 
-            # Simplified check: just use systemctl is-active (most reliable)
-            # Removed redundant pgrep and socket checks that added latency
+            # Use centralized service checker (SINGLE SOURCE OF TRUTH)
             is_active = False
             uptime = "--"
 
-            result = subprocess.run(
-                ['systemctl', 'is-active', 'meshtasticd'],
-                capture_output=True, text=True, timeout=3
-            )
-            if result.stdout.strip() == 'active':
-                is_active = True
+            if check_service is not None:
+                status = check_service('meshtasticd')
+                is_active = status.available
+            else:
+                # Fallback if service_check not available
+                result = subprocess.run(
+                    ['systemctl', 'is-active', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=3
+                )
+                if result.stdout.strip() == 'active':
+                    is_active = True
 
             # Get uptime only if active (single combined call)
             node_count = "--"

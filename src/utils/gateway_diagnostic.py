@@ -17,6 +17,13 @@ from typing import List, Dict, Optional
 # Import centralized path utility
 from utils.paths import get_real_user_home
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 class CheckStatus(Enum):
     """Status of a diagnostic check."""
@@ -612,22 +619,31 @@ class GatewayDiagnostic:
     def _check_ble_available(self) -> bool:
         """Check if Bluetooth LE is available."""
         try:
-            # Check for bluetooth service
-            result = subprocess.run(
-                ['systemctl', 'is-active', 'bluetooth'],
-                capture_output=True, text=True, timeout=5
-            )
-            return result.stdout.strip() == 'active'
-        except Exception:
-            # Try hciconfig as fallback
-            try:
+            # Use centralized service checker if available
+            if _HAS_SERVICE_CHECK:
+                is_running, is_enabled = check_systemd_service('bluetooth')
+                if is_running:
+                    return True
+            else:
+                # Fallback to direct systemctl call
                 result = subprocess.run(
-                    ['hciconfig'],
+                    ['systemctl', 'is-active', 'bluetooth'],
                     capture_output=True, text=True, timeout=5
                 )
-                return 'UP RUNNING' in result.stdout
-            except Exception:
-                return False
+                if result.stdout.strip() == 'active':
+                    return True
+        except Exception:
+            pass
+
+        # Try hciconfig as fallback
+        try:
+            result = subprocess.run(
+                ['hciconfig'],
+                capture_output=True, text=True, timeout=5
+            )
+            return 'UP RUNNING' in result.stdout
+        except Exception:
+            return False
 
     # ========================================
     # Interactive Wizard

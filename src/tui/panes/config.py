@@ -10,6 +10,13 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Static, Button, Label, ListItem, ListView, Log, Rule
 from textual import work
 
+# Import centralized service checker
+try:
+    from utils.service_check import check_service, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    SERVICE_CHECK_AVAILABLE = False
+
 logger = logging.getLogger('tui')
 
 
@@ -599,19 +606,31 @@ General:
 
                 # Wait a moment then check status
                 await asyncio.sleep(2)
-                result = await asyncio.create_subprocess_exec(
-                    'systemctl', 'is-active', 'meshtasticd',
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await asyncio.wait_for(result.communicate(), timeout=10)
-                status = stdout.decode().strip()
 
-                if status == "active":
-                    preview.write("[bold green]Service is running[/bold green]")
+                if SERVICE_CHECK_AVAILABLE:
+                    # Use centralized service checker
+                    svc_status = await asyncio.to_thread(check_service, 'meshtasticd')
+                    if svc_status.available:
+                        preview.write("[bold green]Service is running[/bold green]")
+                    else:
+                        preview.write(f"[yellow]Service status: {svc_status.state.value}[/yellow]")
+                        if svc_status.fix_hint:
+                            preview.write(f"[dim]{svc_status.fix_hint}[/dim]")
                 else:
-                    preview.write(f"[yellow]Service status: {status}[/yellow]")
-                    preview.write("[dim]Check logs for details[/dim]")
+                    # Fallback to direct systemctl call
+                    result = await asyncio.create_subprocess_exec(
+                        'systemctl', 'is-active', 'meshtasticd',
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, _ = await asyncio.wait_for(result.communicate(), timeout=10)
+                    status = stdout.decode().strip()
+
+                    if status == "active":
+                        preview.write("[bold green]Service is running[/bold green]")
+                    else:
+                        preview.write(f"[yellow]Service status: {status}[/yellow]")
+                        preview.write("[dim]Check logs for details[/dim]")
             else:
                 preview.write(f"[red]Error: {stderr.decode()}[/red]")
 
