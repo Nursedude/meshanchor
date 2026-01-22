@@ -327,12 +327,61 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
             is_active = result.returncode == 0
             status_text = result.stdout.strip()  # "active", "inactive", "failed"
 
+            # For daemon services, also check the actual state (running vs exited)
+            # "active (exited)" means it ran once and exited - NOT a running daemon
+            sub_state = ""
             if is_active:
+                state_result = subprocess.run(
+                    ['systemctl', 'show', systemd_name, '--property=SubState'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                # Output is like "SubState=running" or "SubState=exited"
+                if '=' in state_result.stdout:
+                    sub_state = state_result.stdout.strip().split('=')[1]
+
+            # Check for placeholder services (active but exited = not a real daemon)
+            if is_active and sub_state == "exited":
+                # This is a placeholder or oneshot that ran and exited
+                # For meshtasticd, this means no daemon is actually listening
+                return ServiceStatus(
+                    name=name,
+                    available=False,
+                    state=ServiceState.NOT_RUNNING,
+                    message=f"{description}: placeholder (not a daemon)",
+                    fix_hint="USB radios don't need daemon - use --port /dev/ttyUSB0",
+                    port=check_port_num,
+                    detection_method="systemctl (exited)"
+                )
+
+            if is_active and sub_state == "running":
                 return ServiceStatus(
                     name=name,
                     available=True,
                     state=ServiceState.AVAILABLE,
                     message=f"{description} is running",
+                    port=check_port_num,
+                    detection_method="systemctl"
+                )
+
+            if is_active:
+                # Active but unknown sub-state, check port as fallback
+                if check_port_num and check_port(check_port_num, host):
+                    return ServiceStatus(
+                        name=name,
+                        available=True,
+                        state=ServiceState.AVAILABLE,
+                        message=f"{description} is running",
+                        port=check_port_num,
+                        detection_method="systemctl+port"
+                    )
+                return ServiceStatus(
+                    name=name,
+                    available=False,
+                    state=ServiceState.NOT_RUNNING,
+                    message=f"{description}: active but not listening",
+                    fix_hint=fix_hint,
                     port=check_port_num,
                     detection_method="systemctl"
                 )
