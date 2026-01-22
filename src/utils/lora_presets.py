@@ -26,6 +26,13 @@ from utils.ports import MESHTASTICD_PORTS
 
 logger = logging.getLogger(__name__)
 
+# Try to use centralized service checker
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 class MeshtasticPreset(Enum):
     """Official Meshtastic modem presets (fastest to slowest)"""
@@ -443,15 +450,25 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     # First: Check if meshtasticd systemd service is running
     # =========================================================================
     try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', 'meshtasticd'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.stdout.strip() == 'active':
-            service_running = True
-            log_attempt("meshtasticd systemd service", True, "running")
+        # Use centralized service checker if available
+        if _HAS_SERVICE_CHECK:
+            status = check_service('meshtasticd')
+            if status.available:
+                service_running = True
+                log_attempt("meshtasticd systemd service", True, "running")
+            else:
+                log_attempt("meshtasticd systemd service", False, status.state.value or "not active")
         else:
-            log_attempt("meshtasticd systemd service", False, result.stdout.strip() or "not active")
+            # Fallback to direct systemctl call
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'meshtasticd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip() == 'active':
+                service_running = True
+                log_attempt("meshtasticd systemd service", True, "running")
+            else:
+                log_attempt("meshtasticd systemd service", False, result.stdout.strip() or "not active")
     except subprocess.TimeoutExpired:
         log_attempt("meshtasticd systemd service", False, "check timed out")
     except FileNotFoundError:

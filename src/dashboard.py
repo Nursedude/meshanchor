@@ -25,6 +25,13 @@ try:
 except ImportError:
     COMMANDS_AVAILABLE = False
 
+# Import centralized service checker for fallback
+try:
+    from utils.service_check import check_service, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    SERVICE_CHECK_AVAILABLE = False
+
 console = Console()
 logger = logging.getLogger(__name__)
 
@@ -63,29 +70,21 @@ class StatusDashboard:
                 logger.error(f"Failed to get service status: {e}")
                 return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
         else:
-            # Fallback to direct subprocess call
-            import subprocess
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                status = result.stdout.strip()
-
-                # Check SubState to detect placeholder services
-                if status == 'active':
-                    state_result = subprocess.run(
-                        ['systemctl', 'show', 'meshtasticd', '--property=SubState'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    sub_state = state_result.stdout.strip().split('=')[-1] if '=' in state_result.stdout else ''
-
-                    # Exited = placeholder service
-                    if sub_state == 'exited':
-                        # Check for SPI HAT mismatch
-                        spi_exists = list(Path('/dev').glob('spidev*'))
-                        usb_exists = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
-                        if spi_exists and not usb_exists:
+            # Fallback to centralized service checker or direct subprocess call
+            if SERVICE_CHECK_AVAILABLE:
+                try:
+                    status = check_service('meshtasticd')
+                    # Map ServiceState to dashboard status format
+                    if status.state == ServiceState.AVAILABLE:
+                        return {
+                            'status': 'active',
+                            'running': True,
+                            'color': 'green',
+                            'message': status.message
+                        }
+                    elif status.state == ServiceState.DEGRADED:
+                        # Check if it's a SPI HAT misconfiguration
+                        if 'WRONG CONFIG' in status.message:
                             return {
                                 'status': 'misconfigured',
                                 'running': False,
@@ -93,21 +92,74 @@ class StatusDashboard:
                                 'message': 'SPI HAT needs native daemon'
                             }
                         return {
+                            'status': 'degraded',
+                            'running': False,
+                            'color': 'yellow',
+                            'message': status.message
+                        }
+                    elif 'USB mode' in status.message or 'placeholder' in status.message:
+                        return {
                             'status': 'placeholder',
                             'running': False,
                             'color': 'yellow',
                             'message': 'USB mode (no daemon)'
                         }
+                    else:
+                        return {
+                            'status': status.state.value,
+                            'running': False,
+                            'color': 'red',
+                            'message': status.message
+                        }
+                except Exception as e:
+                    logger.error(f"Failed to get service status via service_check: {e}")
+                    return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
+            else:
+                # Final fallback to direct subprocess call
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', 'meshtasticd'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    status = result.stdout.strip()
 
-                return {
-                    'status': status,
-                    'running': status == 'active',
-                    'color': 'green' if status == 'active' else 'red',
-                    'message': ''
-                }
-            except Exception as e:
-                logger.error(f"Failed to get service status: {e}")
-                return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
+                    # Check SubState to detect placeholder services
+                    if status == 'active':
+                        state_result = subprocess.run(
+                            ['systemctl', 'show', 'meshtasticd', '--property=SubState'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        sub_state = state_result.stdout.strip().split('=')[-1] if '=' in state_result.stdout else ''
+
+                        # Exited = placeholder service
+                        if sub_state == 'exited':
+                            # Check for SPI HAT mismatch
+                            spi_exists = list(Path('/dev').glob('spidev*'))
+                            usb_exists = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+                            if spi_exists and not usb_exists:
+                                return {
+                                    'status': 'misconfigured',
+                                    'running': False,
+                                    'color': 'red',
+                                    'message': 'SPI HAT needs native daemon'
+                                }
+                            return {
+                                'status': 'placeholder',
+                                'running': False,
+                                'color': 'yellow',
+                                'message': 'USB mode (no daemon)'
+                            }
+
+                    return {
+                        'status': status,
+                        'running': status == 'active',
+                        'color': 'green' if status == 'active' else 'red',
+                        'message': ''
+                    }
+                except Exception as e:
+                    logger.error(f"Failed to get service status: {e}")
+                    return {'status': 'unknown', 'running': False, 'color': 'yellow', 'message': str(e)}
 
     def get_installed_version(self):
         """Get installed meshtasticd version or connection mode."""

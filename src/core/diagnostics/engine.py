@@ -57,6 +57,16 @@ try:
 except ImportError:
     CLASSIFIER_AVAILABLE = False
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service as _check_service_status, check_port, ServiceState as SvcState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    _check_service_status = None
+    check_port = None
+    SvcState = None
+    SERVICE_CHECK_AVAILABLE = False
+
 
 class DiagnosticEngine:
     """
@@ -395,6 +405,46 @@ class DiagnosticEngine:
     def _check_service(self, service: str, display_name: str) -> CheckResult:
         """Check if a systemd service is running."""
         start = time.time()
+
+        # Use centralized service checker if available (SINGLE SOURCE OF TRUTH)
+        if SERVICE_CHECK_AVAILABLE and _check_service_status is not None:
+            try:
+                status = _check_service_status(service)
+                duration = (time.time() - start) * 1000
+
+                if status.available:
+                    return CheckResult(
+                        name=f"{display_name}",
+                        category=CheckCategory.SERVICES,
+                        status=CheckStatus.PASS,
+                        message="Service running",
+                        details={"detection_method": status.detection_method},
+                        duration_ms=duration
+                    )
+                elif status.state == SvcState.NOT_INSTALLED:
+                    return CheckResult(
+                        name=f"{display_name}",
+                        category=CheckCategory.SERVICES,
+                        status=CheckStatus.SKIP,
+                        message="Service not installed",
+                        fix_hint=status.fix_hint,
+                        duration_ms=duration
+                    )
+                else:
+                    return CheckResult(
+                        name=f"{display_name}",
+                        category=CheckCategory.SERVICES,
+                        status=CheckStatus.FAIL,
+                        message=status.message,
+                        fix_hint=status.fix_hint,
+                        details={"detection_method": status.detection_method},
+                        duration_ms=duration
+                    )
+            except Exception as e:
+                logger.warning(f"Centralized service check failed, falling back: {e}")
+                # Fall through to direct systemctl check
+
+        # Fallback: direct systemctl check (for standalone use or import failure)
         try:
             result = subprocess.run(
                 ['systemctl', 'is-active', service],
@@ -478,6 +528,35 @@ class DiagnosticEngine:
     def _check_tcp_port(self, port: int, name: str, optional: bool = False) -> CheckResult:
         """Check if a TCP port is listening."""
         start = time.time()
+
+        # Use centralized port checker if available
+        if SERVICE_CHECK_AVAILABLE and check_port is not None:
+            try:
+                is_open = check_port(port, '127.0.0.1', timeout=2.0)
+                duration = (time.time() - start) * 1000
+
+                if is_open:
+                    return CheckResult(
+                        name=f"{name} (:{port})",
+                        category=CheckCategory.NETWORK,
+                        status=CheckStatus.PASS,
+                        message="Listening",
+                        duration_ms=duration
+                    )
+                else:
+                    return CheckResult(
+                        name=f"{name} (:{port})",
+                        category=CheckCategory.NETWORK,
+                        status=CheckStatus.SKIP if optional else CheckStatus.FAIL,
+                        message="Not reachable",
+                        fix_hint=f"Ensure {name} is running",
+                        duration_ms=duration
+                    )
+            except Exception as e:
+                logger.warning(f"Centralized port check failed, falling back: {e}")
+                # Fall through to direct socket check
+
+        # Fallback: direct socket check (for standalone use or import failure)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
@@ -490,7 +569,7 @@ class DiagnosticEngine:
                     name=f"{name} (:{port})",
                     category=CheckCategory.NETWORK,
                     status=CheckStatus.PASS,
-                    message=f"Listening",
+                    message="Listening",
                     duration_ms=duration
                 )
             else:

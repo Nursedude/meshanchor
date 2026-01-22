@@ -1005,8 +1005,43 @@ if [[ "$DAEMON_TYPE" == "native" ]]; then
     echo ""
 fi
 
+# ─────────────────────────────────────────────────────────────────
+# Post-Install Verification (CRITICAL - Issue #23)
+# See: .claude/foundations/install_reliability_triage.md
+# ─────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}╔═══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║           Verifying Installation...                       ║${NC}"
+echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+VERIFY_SCRIPT="$INSTALL_DIR/scripts/verify_post_install.sh"
+if [[ -x "$VERIFY_SCRIPT" ]]; then
+    if bash "$VERIFY_SCRIPT"; then
+        echo ""
+        echo -e "${GREEN}✓ Installation verified successfully${NC}"
+    else
+        VERIFY_EXIT=$?
+        echo ""
+        if [[ $VERIFY_EXIT -eq 1 ]]; then
+            echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  WARNING: Installation has critical issues                ║${NC}"
+            echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}Review the failures above and fix before proceeding.${NC}"
+            echo -e "${YELLOW}Re-run verification: sudo bash $VERIFY_SCRIPT${NC}"
+        else
+            echo -e "${YELLOW}⚠ Installation has warnings - review above${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}⚠ Verification script not found: $VERIFY_SCRIPT${NC}"
+    echo -e "${YELLOW}  Skipping verification${NC}"
+fi
+
 # Offer to start services
 if [[ -c /dev/tty ]]; then
+    echo ""
     echo -e "${CYAN}Would you like to start MeshForge NOC now? [Y/n]${NC}"
     read -r response < /dev/tty
     if [[ ! "$response" =~ ^([nN][oO]|[nN])$ ]]; then

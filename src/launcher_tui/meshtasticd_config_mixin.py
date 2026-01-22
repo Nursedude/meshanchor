@@ -10,6 +10,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_systemd_service, ServiceState
+except ImportError:
+    check_service = None
+    check_systemd_service = None
+    ServiceState = None
+
 
 class MeshtasticdConfigMixin:
     """Mixin providing meshtasticd configuration methods for the launcher."""
@@ -60,20 +68,26 @@ class MeshtasticdConfigMixin:
         self.dialog.infobox("Status", "Checking meshtasticd status...")
 
         try:
-            result = subprocess.run(
-                ['systemctl', 'status', 'meshtasticd'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-
-            # Parse status
-            output = result.stdout
-            is_running = "active (running)" in output
-            is_enabled = subprocess.run(
-                ['systemctl', 'is-enabled', 'meshtasticd'],
-                capture_output=True, text=True, timeout=5
-            ).returncode == 0
+            # Use centralized service checker (SINGLE SOURCE OF TRUTH)
+            if check_service is not None and check_systemd_service is not None:
+                status = check_service('meshtasticd')
+                is_running = status.available
+                _, is_enabled = check_systemd_service('meshtasticd')
+                output = status.message
+            else:
+                # Fallback if service_check not available
+                result = subprocess.run(
+                    ['systemctl', 'status', 'meshtasticd'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                output = result.stdout
+                is_running = "active (running)" in output
+                is_enabled = subprocess.run(
+                    ['systemctl', 'is-enabled', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=5
+                ).returncode == 0
 
             # Get config file info
             config_path = Path('/etc/meshtasticd/config.yaml')

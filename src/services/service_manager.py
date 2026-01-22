@@ -6,6 +6,16 @@ from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.table import Table
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+    SERVICE_CHECK_AVAILABLE = False
+
 console = Console()
 
 
@@ -49,6 +59,24 @@ class ServiceManager:
 
     def get_status(self):
         """Get service status"""
+        # Use centralized service checker if available (SINGLE SOURCE OF TRUTH)
+        if SERVICE_CHECK_AVAILABLE and check_service is not None:
+            try:
+                status = check_service(self.SERVICE_NAME)
+                # Also get detailed output for display
+                result = self._run_systemctl('status')
+                return {
+                    'running': status.available,
+                    'output': result.stdout if result else status.message,
+                    'error': result.stderr if result else '',
+                    'state': status.state,
+                    'fix_hint': status.fix_hint,
+                    'detection_method': status.detection_method
+                }
+            except Exception:
+                pass  # Fall through to direct check
+
+        # Fallback to direct systemctl check
         result = self._run_systemctl('status')
         if result:
             return {

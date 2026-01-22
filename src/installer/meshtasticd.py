@@ -17,6 +17,16 @@ from utils.system import (
 )
 from utils.logger import log, log_command, log_exception
 
+# Import centralized service checker - SINGLE SOURCE OF TRUTH
+try:
+    from utils.service_check import check_service, check_port, ServiceState
+    SERVICE_CHECK_AVAILABLE = True
+except ImportError:
+    check_service = None
+    check_port = None
+    ServiceState = None
+    SERVICE_CHECK_AVAILABLE = False
+
 console = Console()
 
 # Log file location
@@ -339,14 +349,25 @@ class MeshtasticdInstaller:
         else:
             console.print("    [red]✗ meshtasticd binary not found[/red]")
 
-        # Test 2: Check if service is running
+        # Test 2: Check if service is running (use centralized checker)
         console.print("  [dim]Test 2: Checking service status...[/dim]")
-        result = run_command('systemctl is-active meshtasticd')
-        if result['success'] and 'active' in result['stdout']:
-            console.print("    [green]✓ meshtasticd service is running[/green]")
-            tests_passed += 1
+        if SERVICE_CHECK_AVAILABLE and check_service is not None:
+            status = check_service('meshtasticd')
+            if status.available:
+                console.print("    [green]✓ meshtasticd service is running[/green]")
+                tests_passed += 1
+            else:
+                console.print(f"    [yellow]⚠ {status.message}[/yellow]")
+                if status.fix_hint:
+                    console.print(f"    [dim]Hint: {status.fix_hint}[/dim]")
         else:
-            console.print("    [yellow]⚠ meshtasticd service not running yet (may start shortly)[/yellow]")
+            # Fallback to direct systemctl check
+            result = run_command('systemctl is-active meshtasticd')
+            if result['success'] and 'active' in result['stdout']:
+                console.print("    [green]✓ meshtasticd service is running[/green]")
+                tests_passed += 1
+            else:
+                console.print("    [yellow]⚠ meshtasticd service not running yet (may start shortly)[/yellow]")
 
         # Test 3: Check version
         console.print("  [dim]Test 3: Checking version...[/dim]")
