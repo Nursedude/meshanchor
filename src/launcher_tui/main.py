@@ -134,35 +134,69 @@ class MeshForgeLauncher(
 
     def _check_service_misconfig(self):
         """Check for service misconfiguration and offer to fix."""
-        # Detect hardware
+        config_d = Path('/etc/meshtasticd/config.d')
+        if not config_d.exists():
+            return
+
+        # Check what configs are active
+        active_configs = list(config_d.glob('*.yaml'))
+        usb_config = config_d / 'usb-serial.yaml'
+
+        # Check for SPI configs
+        spi_config_names = ['meshadv', 'waveshare', 'rak-hat', 'meshtoad', 'sx126', 'sx127', 'lora']
+        has_spi_config = any(
+            any(name in cfg.name.lower() for name in spi_config_names)
+            for cfg in active_configs
+        )
+
+        # If SPI config exists AND usb-serial.yaml also exists, that's wrong
+        if has_spi_config and usb_config.exists():
+            spi_configs = [c.name for c in active_configs if any(n in c.name.lower() for n in spi_config_names)]
+
+            msg = "CONFLICTING CONFIGURATIONS!\n\n"
+            msg += "Both SPI HAT and USB configs are active:\n\n"
+            msg += f"  SPI: {', '.join(spi_configs)}\n"
+            msg += f"  USB: usb-serial.yaml (WRONG)\n\n"
+            msg += "Remove the USB config?"
+
+            if self.dialog.yesno("Config Conflict", msg):
+                try:
+                    usb_config.unlink()
+                    subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                    self.dialog.msgbox(
+                        "Fixed",
+                        "Removed usb-serial.yaml\n"
+                        "Restarted meshtasticd\n\n"
+                        "Check: systemctl status meshtasticd"
+                    )
+                except Exception as e:
+                    self.dialog.msgbox("Error", f"Failed:\n{e}")
+            return
+
+        # Original check: SPI hardware but only USB config
         spi_devices = list(Path('/dev').glob('spidev*'))
         usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
 
         has_spi = len(spi_devices) > 0
         has_usb = len(usb_devices) > 0
 
-        # Only check for mismatch on SPI HAT systems without USB
         if not has_spi or has_usb:
             return
 
-        # Check if wrong USB config is active
-        usb_config = Path('/etc/meshtasticd/config.d/usb-serial.yaml')
         if not usb_config.exists():
             return
 
-        # Check if native meshtasticd is installed
         result = subprocess.run(['which', 'meshtasticd'], capture_output=True, timeout=5)
         has_native = result.returncode == 0
 
-        # Found mismatch! Offer to fix
-        msg = "CONFIGURATION MISMATCH DETECTED!\n\n"
-        msg += "Your system has an SPI HAT but USB config is active.\n\n"
-        msg += "Detected:\n"
-        msg += f"  - SPI devices: {', '.join(d.name for d in spi_devices)}\n"
-        msg += f"  - Wrong config: usb-serial.yaml\n"
+        msg = "CONFIGURATION MISMATCH!\n\n"
+        msg += "SPI HAT detected but USB config active.\n\n"
+        msg += f"SPI: {', '.join(d.name for d in spi_devices)}\n"
+        msg += "Config: usb-serial.yaml (WRONG)\n"
         if not has_native:
-            msg += f"  - Native meshtasticd: NOT INSTALLED\n"
-        msg += "\nWould you like to fix this now?"
+            msg += "Native meshtasticd: NOT INSTALLED\n"
+        msg += "\nFix this now?"
 
         if self.dialog.yesno("Service Misconfiguration", msg):
             self._fix_spi_config(has_native)
