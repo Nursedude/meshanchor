@@ -113,6 +113,54 @@ KNOWN_SERVICES = {
 }
 
 
+def _detect_radio_hardware() -> dict:
+    """
+    Detect what Meshtastic radio hardware is present.
+
+    Returns:
+        dict with:
+            has_spi: bool - SPI devices present (/dev/spidev*)
+            has_usb: bool - USB serial devices present (/dev/ttyUSB*, /dev/ttyACM*)
+            spi_devices: list - SPI device paths
+            usb_devices: list - USB device paths
+            usb_device: str - First USB device (for fix hints)
+            hardware_type: str - 'spi', 'usb', 'both', or 'none'
+    """
+    from pathlib import Path
+
+    result = {
+        'has_spi': False,
+        'has_usb': False,
+        'spi_devices': [],
+        'usb_devices': [],
+        'usb_device': '/dev/ttyUSB0',
+        'hardware_type': 'none'
+    }
+
+    # Check SPI devices
+    spi_devices = list(Path('/dev').glob('spidev*'))
+    if spi_devices:
+        result['has_spi'] = True
+        result['spi_devices'] = [str(d) for d in spi_devices]
+
+    # Check USB serial devices
+    usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+    if usb_devices:
+        result['has_usb'] = True
+        result['usb_devices'] = [str(d) for d in usb_devices]
+        result['usb_device'] = str(usb_devices[0])
+
+    # Determine hardware type
+    if result['has_spi'] and result['has_usb']:
+        result['hardware_type'] = 'both'
+    elif result['has_spi']:
+        result['hardware_type'] = 'spi'
+    elif result['has_usb']:
+        result['hardware_type'] = 'usb'
+
+    return result
+
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # These are kept for direct use but NOT used by check_service() for systemd
@@ -344,16 +392,42 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
             # Check for placeholder services (active but exited = not a real daemon)
             if is_active and sub_state == "exited":
                 # This is a placeholder or oneshot that ran and exited
-                # For meshtasticd, this means no daemon is actually listening
-                return ServiceStatus(
-                    name=name,
-                    available=False,
-                    state=ServiceState.NOT_RUNNING,
-                    message=f"{description}: placeholder (not a daemon)",
-                    fix_hint="USB radios don't need daemon - use --port /dev/ttyUSB0",
-                    port=check_port_num,
-                    detection_method="systemctl (exited)"
-                )
+                # Check if this is a mismatch (SPI HAT but USB placeholder)
+                hardware = _detect_radio_hardware()
+
+                if hardware['has_spi'] and not hardware['has_usb']:
+                    # SPI HAT detected but placeholder service - MISMATCH!
+                    return ServiceStatus(
+                        name=name,
+                        available=False,
+                        state=ServiceState.DEGRADED,
+                        message=f"{description}: WRONG CONFIG - SPI HAT needs native daemon",
+                        fix_hint="Run: sudo bash scripts/install_noc.sh (or install meshtasticd)",
+                        port=check_port_num,
+                        detection_method="systemctl (exited) + hardware mismatch"
+                    )
+                elif hardware['has_usb']:
+                    # USB radio - placeholder is correct
+                    return ServiceStatus(
+                        name=name,
+                        available=False,
+                        state=ServiceState.NOT_RUNNING,
+                        message=f"{description}: USB mode (no daemon needed)",
+                        fix_hint=f"Use: meshtastic --port {hardware.get('usb_device', '/dev/ttyUSB0')} --info",
+                        port=check_port_num,
+                        detection_method="systemctl (exited)"
+                    )
+                else:
+                    # No hardware detected
+                    return ServiceStatus(
+                        name=name,
+                        available=False,
+                        state=ServiceState.NOT_RUNNING,
+                        message=f"{description}: placeholder (no hardware detected)",
+                        fix_hint="Connect a Meshtastic device via USB or configure SPI HAT",
+                        port=check_port_num,
+                        detection_method="systemctl (exited)"
+                    )
 
             if is_active and sub_state == "running":
                 return ServiceStatus(

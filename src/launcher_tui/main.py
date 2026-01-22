@@ -1077,6 +1077,7 @@ class MeshForgeLauncher(
                 ("meshtasticd", "Manage meshtasticd"),
                 ("rnsd", "Manage rnsd"),
                 ("hamclock", "Manage HamClock"),
+                ("fix", "Fix Service Misconfiguration"),
                 ("back", "Back to Main Menu"),
             ]
 
@@ -1091,6 +1092,8 @@ class MeshForgeLauncher(
 
             if choice == "status":
                 self._show_service_status()
+            elif choice == "fix":
+                self._fix_service_config()
             else:
                 self._manage_service(choice)
 
@@ -1119,6 +1122,134 @@ class MeshForgeLauncher(
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to get service status:\n{e}")
+
+    def _fix_service_config(self):
+        """Detect and fix service misconfigurations."""
+        self.dialog.infobox("Checking", "Detecting hardware and service configuration...")
+
+        # Detect hardware
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+
+        has_spi = len(spi_devices) > 0
+        has_usb = len(usb_devices) > 0
+
+        # Check current service config
+        try:
+            result = subprocess.run(
+                ['systemctl', 'cat', 'meshtasticd'],
+                capture_output=True, text=True, timeout=10
+            )
+            service_content = result.stdout
+        except Exception:
+            service_content = ""
+
+        is_placeholder = "No Daemon Needed" in service_content or "USB radios work directly" in service_content
+        is_native = "meshtasticd" in service_content and "/usr/bin/meshtasticd" in service_content
+
+        # Build status report
+        lines = ["Hardware & Service Check\n" + "=" * 40]
+        lines.append(f"\nHardware Detected:")
+        lines.append(f"  SPI: {'Yes (' + ', '.join(d.name for d in spi_devices) + ')' if has_spi else 'No'}")
+        lines.append(f"  USB: {'Yes (' + ', '.join(d.name for d in usb_devices) + ')' if has_usb else 'No'}")
+
+        lines.append(f"\nService Configuration:")
+        if is_placeholder:
+            lines.append("  Type: USB Placeholder (no daemon)")
+        elif is_native:
+            lines.append("  Type: Native meshtasticd daemon")
+        else:
+            lines.append("  Type: Unknown or not configured")
+
+        # Check for mismatch
+        mismatch = False
+        if has_spi and not has_usb and is_placeholder:
+            mismatch = True
+            lines.append("\n" + "!" * 40)
+            lines.append("MISMATCH DETECTED!")
+            lines.append("SPI HAT detected but USB placeholder service installed.")
+            lines.append("Your SPI HAT needs the native meshtasticd daemon.")
+            lines.append("!" * 40)
+
+        self.dialog.msgbox("Configuration Check", "\n".join(lines))
+
+        if mismatch:
+            if self.dialog.yesno(
+                "Fix Configuration?",
+                "Would you like to install the correct service for your SPI HAT?\n\n"
+                "This will:\n"
+                "1. Install native meshtasticd (if not present)\n"
+                "2. Create correct systemd service\n"
+                "3. Configure for your SPI radio\n\n"
+                "Proceed?"
+            ):
+                self._install_native_meshtasticd()
+
+    def _install_native_meshtasticd(self):
+        """Install native meshtasticd for SPI HAT."""
+        self.dialog.infobox("Installing", "Installing native meshtasticd...")
+
+        try:
+            # Check if already installed
+            result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                # Not installed - try to install
+                self.dialog.infobox("Installing", "Adding Meshtastic repository...")
+
+                # Add repo
+                subprocess.run([
+                    'bash', '-c',
+                    'echo "deb http://download.opensuse.org/repositories/home:/meshtastic/Raspbian_12/ /" | sudo tee /etc/apt/sources.list.d/meshtastic.list'
+                ], timeout=30, check=False)
+
+                subprocess.run([
+                    'bash', '-c',
+                    'curl -fsSL https://download.opensuse.org/repositories/home:meshtastic/Raspbian_12/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/meshtastic.gpg > /dev/null'
+                ], timeout=30, check=False)
+
+                self.dialog.infobox("Installing", "Updating package list...")
+                subprocess.run(['apt-get', 'update'], timeout=120, check=False)
+
+                self.dialog.infobox("Installing", "Installing meshtasticd...")
+                result = subprocess.run(['apt-get', 'install', '-y', 'meshtasticd'], timeout=300, capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    self.dialog.msgbox("Error", f"Failed to install meshtasticd:\n{result.stderr[:500]}")
+                    return
+
+            # Create service file
+            service_content = """[Unit]
+Description=Meshtastic Daemon (Native SPI)
+Documentation=https://meshtastic.org
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/meshtasticd
+ExecStart=/usr/bin/meshtasticd -c /etc/meshtasticd/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+            Path('/etc/systemd/system/meshtasticd.service').write_text(service_content)
+
+            # Reload and enable
+            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'enable', 'meshtasticd'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+            self.dialog.msgbox(
+                "Success",
+                "Native meshtasticd installed and started!\n\n"
+                "Service configured for SPI HAT.\n"
+                "Check status: sudo systemctl status meshtasticd"
+            )
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Installation failed:\n{e}")
 
     def _manage_service(self, service_name: str):
         """Manage a specific service."""
