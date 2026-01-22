@@ -449,17 +449,30 @@ class AIToolsMixin:
         return []
 
     def _open_in_browser(self, url: str):
-        """Open URL in browser (in background thread)."""
+        """Open URL in browser (in background thread).
+
+        Handles running as root by using sudo -u to run browser as real user.
+        """
         import threading
+        import os
 
         def do_open():
             try:
-                # Try xdg-open first (Linux)
-                subprocess.run(
-                    ['xdg-open', url],
-                    capture_output=True,
-                    timeout=10
-                )
+                # When running as root, use sudo -u to run as real user
+                real_user = os.environ.get('SUDO_USER')
+                if os.geteuid() == 0 and real_user:
+                    subprocess.run(
+                        ['sudo', '-u', real_user, 'xdg-open', url],
+                        capture_output=True,
+                        timeout=10
+                    )
+                else:
+                    # Not root or no SUDO_USER - try xdg-open directly
+                    subprocess.run(
+                        ['xdg-open', url],
+                        capture_output=True,
+                        timeout=10
+                    )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 try:
                     webbrowser.open(url)
