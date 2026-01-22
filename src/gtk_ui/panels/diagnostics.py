@@ -172,7 +172,13 @@ class DiagnosticsPanel(Gtk.Box):
             Gtk.Label(label="System Logs")
         )
 
-        # Tab 5: Reports
+        # Tab 5: System Tools
+        notebook.append_page(
+            self._create_system_tools_tab(),
+            Gtk.Label(label="System Tools")
+        )
+
+        # Tab 6: Reports
         notebook.append_page(
             self._create_reports_tab(),
             Gtk.Label(label="Reports")
@@ -750,6 +756,284 @@ class DiagnosticsPanel(Gtk.Box):
     def _refresh_system_logs(self):
         """Initial refresh of system logs."""
         self._on_refresh_system_logs()
+
+    def _create_system_tools_tab(self) -> Gtk.Widget:
+        """Create system tools tab with inline stats and terminal launchers."""
+        import shutil
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        # ═══════════════════════════════════════════════════════════════
+        # Section 1: Live System Stats
+        # ═══════════════════════════════════════════════════════════════
+        stats_frame = Gtk.Frame()
+        stats_frame.set_label("System Resources")
+
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        stats_box.set_margin_start(15)
+        stats_box.set_margin_end(15)
+        stats_box.set_margin_top(10)
+        stats_box.set_margin_bottom(10)
+
+        # Stats grid
+        stats_grid = Gtk.Grid()
+        stats_grid.set_column_spacing(30)
+        stats_grid.set_row_spacing(8)
+
+        # Labels that will be updated
+        self.sys_cpu_label = Gtk.Label(label="--")
+        self.sys_mem_label = Gtk.Label(label="--")
+        self.sys_disk_label = Gtk.Label(label="--")
+        self.sys_uptime_label = Gtk.Label(label="--")
+        self.sys_temp_label = Gtk.Label(label="--")
+        self.sys_load_label = Gtk.Label(label="--")
+
+        # Row 0: CPU and Memory
+        stats_grid.attach(Gtk.Label(label="CPU:", xalign=1), 0, 0, 1, 1)
+        stats_grid.attach(self.sys_cpu_label, 1, 0, 1, 1)
+        stats_grid.attach(Gtk.Label(label="Memory:", xalign=1), 2, 0, 1, 1)
+        stats_grid.attach(self.sys_mem_label, 3, 0, 1, 1)
+
+        # Row 1: Disk and Temp
+        stats_grid.attach(Gtk.Label(label="Disk:", xalign=1), 0, 1, 1, 1)
+        stats_grid.attach(self.sys_disk_label, 1, 1, 1, 1)
+        stats_grid.attach(Gtk.Label(label="Temp:", xalign=1), 2, 1, 1, 1)
+        stats_grid.attach(self.sys_temp_label, 3, 1, 1, 1)
+
+        # Row 2: Uptime and Load
+        stats_grid.attach(Gtk.Label(label="Uptime:", xalign=1), 0, 2, 1, 1)
+        stats_grid.attach(self.sys_uptime_label, 1, 2, 1, 1)
+        stats_grid.attach(Gtk.Label(label="Load:", xalign=1), 2, 2, 1, 1)
+        stats_grid.attach(self.sys_load_label, 3, 2, 1, 1)
+
+        stats_box.append(stats_grid)
+
+        # Refresh button
+        refresh_btn = Gtk.Button(label="Refresh Stats")
+        refresh_btn.connect("clicked", self._on_refresh_system_stats)
+        stats_box.append(refresh_btn)
+
+        stats_frame.set_child(stats_box)
+        box.append(stats_frame)
+
+        # ═══════════════════════════════════════════════════════════════
+        # Section 2: Open in Terminal buttons
+        # ═══════════════════════════════════════════════════════════════
+        term_frame = Gtk.Frame()
+        term_frame.set_label("Open in Terminal")
+
+        term_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        term_box.set_margin_start(15)
+        term_box.set_margin_end(15)
+        term_box.set_margin_top(10)
+        term_box.set_margin_bottom(10)
+
+        term_box.append(Gtk.Label(
+            label="Launch interactive monitoring tools in a terminal window:",
+            xalign=0
+        ))
+
+        # Button grid for tools
+        btn_grid = Gtk.Grid()
+        btn_grid.set_column_spacing(10)
+        btn_grid.set_row_spacing(10)
+        btn_grid.set_column_homogeneous(True)
+
+        # Row 0: Process monitors
+        htop_btn = Gtk.Button(label="htop")
+        htop_btn.set_tooltip_text("Interactive process viewer")
+        htop_btn.connect("clicked", lambda b: self._open_in_terminal("htop"))
+        htop_btn.set_sensitive(shutil.which("htop") is not None)
+        btn_grid.attach(htop_btn, 0, 0, 1, 1)
+
+        top_btn = Gtk.Button(label="top")
+        top_btn.set_tooltip_text("Classic process viewer")
+        top_btn.connect("clicked", lambda b: self._open_in_terminal("top"))
+        btn_grid.attach(top_btn, 1, 0, 1, 1)
+
+        btop_btn = Gtk.Button(label="btop")
+        btop_btn.set_tooltip_text("Modern resource monitor")
+        btop_btn.connect("clicked", lambda b: self._open_in_terminal("btop"))
+        btop_btn.set_sensitive(shutil.which("btop") is not None)
+        btn_grid.attach(btop_btn, 2, 0, 1, 1)
+
+        # Row 1: Network tools
+        ss_btn = Gtk.Button(label="ss -tuln")
+        ss_btn.set_tooltip_text("Show listening ports")
+        ss_btn.connect("clicked", lambda b: self._open_in_terminal("ss -tuln; read -p 'Press Enter...'"))
+        btn_grid.attach(ss_btn, 0, 1, 1, 1)
+
+        netstat_btn = Gtk.Button(label="netstat")
+        netstat_btn.set_tooltip_text("Network connections")
+        netstat_btn.connect("clicked", lambda b: self._open_in_terminal("netstat -an | head -50; read -p 'Press Enter...'"))
+        btn_grid.attach(netstat_btn, 1, 1, 1, 1)
+
+        ip_btn = Gtk.Button(label="ip addr")
+        ip_btn.set_tooltip_text("IP addresses")
+        ip_btn.connect("clicked", lambda b: self._open_in_terminal("ip addr; read -p 'Press Enter...'"))
+        btn_grid.attach(ip_btn, 2, 1, 1, 1)
+
+        # Row 2: System info
+        lscpu_btn = Gtk.Button(label="lscpu")
+        lscpu_btn.set_tooltip_text("CPU information")
+        lscpu_btn.connect("clicked", lambda b: self._open_in_terminal("lscpu; read -p 'Press Enter...'"))
+        btn_grid.attach(lscpu_btn, 0, 2, 1, 1)
+
+        lsusb_btn = Gtk.Button(label="lsusb")
+        lsusb_btn.set_tooltip_text("USB devices")
+        lsusb_btn.connect("clicked", lambda b: self._open_in_terminal("lsusb; read -p 'Press Enter...'"))
+        btn_grid.attach(lsusb_btn, 1, 2, 1, 1)
+
+        lsblk_btn = Gtk.Button(label="lsblk")
+        lsblk_btn.set_tooltip_text("Block devices")
+        lsblk_btn.connect("clicked", lambda b: self._open_in_terminal("lsblk -f; read -p 'Press Enter...'"))
+        btn_grid.attach(lsblk_btn, 2, 2, 1, 1)
+
+        # Row 3: Logs
+        journal_btn = Gtk.Button(label="journalctl -f")
+        journal_btn.set_tooltip_text("Follow system logs")
+        journal_btn.connect("clicked", lambda b: self._open_in_terminal("journalctl -f -n 50"))
+        btn_grid.attach(journal_btn, 0, 3, 1, 1)
+
+        dmesg_btn = Gtk.Button(label="dmesg -w")
+        dmesg_btn.set_tooltip_text("Follow kernel messages")
+        dmesg_btn.connect("clicked", lambda b: self._open_in_terminal("sudo dmesg -w"))
+        btn_grid.attach(dmesg_btn, 1, 3, 1, 1)
+
+        mesh_log_btn = Gtk.Button(label="meshtasticd logs")
+        mesh_log_btn.set_tooltip_text("Follow meshtasticd logs")
+        mesh_log_btn.connect("clicked", lambda b: self._open_in_terminal("journalctl -u meshtasticd -f -n 50"))
+        btn_grid.attach(mesh_log_btn, 2, 3, 1, 1)
+
+        term_box.append(btn_grid)
+        term_frame.set_child(term_box)
+        box.append(term_frame)
+
+        # Initial stats refresh
+        GLib.idle_add(self._on_refresh_system_stats, None)
+
+        return box
+
+    def _on_refresh_system_stats(self, button=None):
+        """Refresh system statistics."""
+        def do_refresh():
+            stats = {}
+
+            # CPU usage
+            try:
+                with open('/proc/stat', 'r') as f:
+                    cpu_line = f.readline()
+                    values = cpu_line.split()[1:5]
+                    idle = int(values[3])
+                    total = sum(int(v) for v in values)
+                    # Simple approximation - would need two samples for accurate %
+                    stats['cpu'] = "Available"
+            except Exception:
+                stats['cpu'] = "N/A"
+
+            # Memory
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    lines = f.readlines()
+                    total = int([l for l in lines if 'MemTotal' in l][0].split()[1]) / 1024
+                    avail = int([l for l in lines if 'MemAvailable' in l][0].split()[1]) / 1024
+                    used_pct = (1 - avail/total) * 100
+                    stats['mem'] = f"{used_pct:.0f}% ({avail:.0f}/{total:.0f} MB)"
+            except Exception:
+                stats['mem'] = "N/A"
+
+            # Disk
+            try:
+                result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, timeout=5)
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    parts = lines[1].split()
+                    stats['disk'] = f"{parts[4]} used ({parts[2]}/{parts[1]})"
+            except Exception:
+                stats['disk'] = "N/A"
+
+            # Temperature
+            try:
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp = int(f.read()) / 1000
+                    stats['temp'] = f"{temp:.1f}°C"
+            except Exception:
+                stats['temp'] = "N/A"
+
+            # Uptime
+            try:
+                with open('/proc/uptime', 'r') as f:
+                    uptime_secs = float(f.read().split()[0])
+                    days = int(uptime_secs // 86400)
+                    hours = int((uptime_secs % 86400) // 3600)
+                    mins = int((uptime_secs % 3600) // 60)
+                    stats['uptime'] = f"{days}d {hours}h {mins}m"
+            except Exception:
+                stats['uptime'] = "N/A"
+
+            # Load average
+            try:
+                with open('/proc/loadavg', 'r') as f:
+                    loads = f.read().split()[:3]
+                    stats['load'] = f"{loads[0]} {loads[1]} {loads[2]}"
+            except Exception:
+                stats['load'] = "N/A"
+
+            # Update UI on main thread
+            GLib.idle_add(self._update_system_stats_ui, stats)
+
+        threading.Thread(target=do_refresh, daemon=True).start()
+
+    def _update_system_stats_ui(self, stats: dict):
+        """Update system stats labels on main thread."""
+        if self._is_destroyed:
+            return False
+        self.sys_cpu_label.set_text(stats.get('cpu', 'N/A'))
+        self.sys_mem_label.set_text(stats.get('mem', 'N/A'))
+        self.sys_disk_label.set_text(stats.get('disk', 'N/A'))
+        self.sys_temp_label.set_text(stats.get('temp', 'N/A'))
+        self.sys_uptime_label.set_text(stats.get('uptime', 'N/A'))
+        self.sys_load_label.set_text(stats.get('load', 'N/A'))
+        return False
+
+    def _open_in_terminal(self, command: str):
+        """Open a command in a new terminal window."""
+        import shutil
+
+        def do_open():
+            # Try different terminal emulators
+            terminals = [
+                ('gnome-terminal', ['gnome-terminal', '--', 'bash', '-c', command]),
+                ('konsole', ['konsole', '-e', 'bash', '-c', command]),
+                ('xfce4-terminal', ['xfce4-terminal', '-e', f'bash -c "{command}"']),
+                ('xterm', ['xterm', '-e', f'bash -c "{command}"']),
+                ('lxterminal', ['lxterminal', '-e', f'bash -c "{command}"']),
+            ]
+
+            for name, cmd in terminals:
+                if shutil.which(name):
+                    try:
+                        subprocess.Popen(cmd, start_new_session=True)
+                        return
+                    except Exception as e:
+                        logger.debug(f"Failed to launch {name}: {e}")
+                        continue
+
+            # Fallback: try x-terminal-emulator (Debian/Ubuntu default)
+            if shutil.which('x-terminal-emulator'):
+                try:
+                    subprocess.Popen(['x-terminal-emulator', '-e', f'bash -c "{command}"'], start_new_session=True)
+                    return
+                except Exception:
+                    pass
+
+            logger.warning("No terminal emulator found")
+
+        threading.Thread(target=do_open, daemon=True).start()
 
     def _create_reports_tab(self) -> Gtk.Widget:
         """Create reports tab."""

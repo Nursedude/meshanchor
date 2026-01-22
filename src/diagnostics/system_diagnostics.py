@@ -59,12 +59,15 @@ class SystemDiagnostics:
             console.print("\n[dim cyan]── Full Report ──[/dim cyan]")
             console.print(f"  [bold]9[/bold]. {em.get('📋')} [yellow]Run All Diagnostics[/yellow]")
 
+            console.print("\n[dim cyan]── Linux Tools ──[/dim cyan]")
+            console.print(f"  [bold]t[/bold]. {em.get('🖥️')} System Tools (top, htop, netstat, etc.)")
+
             console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')} Back")
             console.print(f"  [bold]m[/bold]. Main Menu")
 
             choice = Prompt.ask(
                 "\n[cyan]Select diagnostic[/cyan]",
-                choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "m"],
+                choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "t", "m"],
                 default="0"
             )
 
@@ -91,6 +94,8 @@ class SystemDiagnostics:
                 self.log_analysis()
             elif choice == "9":
                 self.run_all_diagnostics()
+            elif choice == "t":
+                self.system_tools_menu()
 
             Prompt.ask("\n[dim]Press Enter to continue[/dim]")
 
@@ -953,3 +958,125 @@ class SystemDiagnostics:
             table.add_row(name, status, str(details))
 
         console.print(table)
+
+    # =========================================================================
+    # System Tools Menu - Full Linux CLI diagnostics
+    # =========================================================================
+
+    def system_tools_menu(self):
+        """Linux system tools menu - like being on the terminal"""
+        import shutil
+
+        while True:
+            console.print("\n[bold cyan]═══════════════ System Tools ═══════════════[/bold cyan]\n")
+
+            console.print("[dim cyan]── Interactive Monitoring ──[/dim cyan]")
+            has_htop = shutil.which('htop')
+            has_btop = shutil.which('btop')
+            console.print(f"  [bold]1[/bold]. top (Classic Process Viewer)")
+            if has_htop:
+                console.print(f"  [bold]2[/bold]. htop (Interactive Process Viewer)")
+            if has_btop:
+                console.print(f"  [bold]3[/bold]. btop (Modern Resource Monitor)")
+
+            console.print("\n[dim cyan]── Process & Network ──[/dim cyan]")
+            console.print(f"  [bold]4[/bold]. ps aux (All Processes)")
+            console.print(f"  [bold]5[/bold]. ss -tuln (Listening Ports)")
+            console.print(f"  [bold]6[/bold]. netstat -an (Network Connections)")
+
+            console.print("\n[dim cyan]── Hardware Info ──[/dim cyan]")
+            console.print(f"  [bold]7[/bold]. lscpu (CPU Info)")
+            console.print(f"  [bold]8[/bold]. lsusb (USB Devices)")
+            console.print(f"  [bold]9[/bold]. lsblk (Block Devices)")
+
+            console.print("\n[dim cyan]── System Info ──[/dim cyan]")
+            console.print(f"  [bold]a[/bold]. free -h (Memory Usage)")
+            console.print(f"  [bold]b[/bold]. df -h (Disk Space)")
+            console.print(f"  [bold]c[/bold]. uptime (Load Average)")
+
+            console.print("\n[dim cyan]── Logs ──[/dim cyan]")
+            console.print(f"  [bold]d[/bold]. journalctl -f (Live Logs)")
+            console.print(f"  [bold]e[/bold]. dmesg (Kernel Messages)")
+
+            console.print(f"\n  [bold]0[/bold]. {em.get('⬅️')} Back")
+
+            choices = ["0", "1", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e"]
+            if has_htop:
+                choices.append("2")
+            if has_btop:
+                choices.append("3")
+
+            choice = Prompt.ask(
+                "\n[cyan]Select tool[/cyan]",
+                choices=choices,
+                default="0"
+            )
+
+            if choice == "0":
+                return
+
+            self._run_system_tool(choice)
+
+    def _run_system_tool(self, choice: str):
+        """Run the selected system tool"""
+        import shutil
+        import os
+
+        tools = {
+            "1": (["top"], "top - Process Viewer"),
+            "2": (["htop"], "htop - Interactive Process Viewer"),
+            "3": (["btop"], "btop - Resource Monitor"),
+            "4": (["ps", "aux", "--forest"], "Process List"),
+            "5": (["ss", "-tuln"], "Listening Ports"),
+            "6": (["netstat", "-an"], "Network Connections"),
+            "7": (["lscpu"], "CPU Information"),
+            "8": (["lsusb"], "USB Devices"),
+            "9": (["lsblk", "-f"], "Block Devices"),
+            "a": (["free", "-h"], "Memory Usage"),
+            "b": (["df", "-h"], "Disk Space"),
+            "c": (["uptime"], "System Uptime"),
+            "d": (["journalctl", "-f", "-n", "50"], "Live System Logs"),
+            "e": (["dmesg", "--time-format=reltime"], "Kernel Messages"),
+        }
+
+        if choice not in tools:
+            return
+
+        cmd, title = tools[choice]
+
+        # Check if command exists
+        if not shutil.which(cmd[0]):
+            console.print(f"[red]{cmd[0]} not found. Install it first.[/red]")
+            return
+
+        # Clear screen and run
+        os.system('clear')
+        console.print(f"[bold cyan]═══ {title} ═══[/bold cyan]\n")
+
+        # Interactive tools (top, htop, btop, journalctl -f)
+        interactive = choice in ["1", "2", "3", "d"]
+
+        if interactive:
+            console.print("[dim]Press 'q' or Ctrl+C to exit[/dim]\n")
+
+        try:
+            if interactive:
+                subprocess.run(cmd, timeout=None)
+            else:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                # Limit output for large results
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 50:
+                    for line in lines[:50]:
+                        console.print(line)
+                    console.print(f"\n[dim]... ({len(lines) - 50} more lines)[/dim]")
+                else:
+                    console.print(result.stdout)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Stopped[/yellow]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Command timed out[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+
+        Prompt.ask("\n[dim]Press Enter to continue[/dim]")

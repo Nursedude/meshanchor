@@ -1284,3 +1284,87 @@ def apply_preset(preset_name):
 - Track upstream meshtastic-python issue
 
 ---
+
+## Issue #22: MeshForge Overwriting meshtasticd's config.yaml
+
+### Symptom
+- Web client (https://localhost:9443) not working
+- config.yaml contains radio parameters (Bandwidth, SpreadFactor, TXpower) instead of base config
+- User's HAT works but then stops after MeshForge install/update
+- "Webserver:" section missing from config.yaml
+
+### Root Cause
+MeshForge install scripts and TUI were **overwriting** `/etc/meshtasticd/config.yaml` with our own templates, even when meshtasticd package already provided a valid one.
+
+Multiple places were creating HAT templates in `available.d/` that might conflict with meshtasticd's official templates.
+
+### Impact
+- Web client inaccessible (missing Webserver config)
+- Users think meshtasticd is broken when it's a config issue
+- Radio parameters (Bandwidth, SpreadFactor, TXpower) appear in config.yaml where they shouldn't be
+- User has to manually fix config.yaml
+
+### The Correct Architecture
+
+```
+/etc/meshtasticd/
+├── config.yaml              # Base config (Module: auto, Webserver, Logging)
+│                            # PROVIDED BY meshtasticd package - DO NOT OVERWRITE
+├── available.d/             # HAT templates (GPIO pins only)
+│   ├── lora-MeshAdv-900M30S.yaml
+│   ├── lora-waveshare-sxxx.yaml
+│   └── ...                  # PROVIDED BY meshtasticd package - DO NOT CREATE OUR OWN
+└── config.d/                # User's active HAT config
+    └── lora-MeshAdv-900M30S.yaml  # COPIED from available.d/ by user
+```
+
+**Radio parameters (Bandwidth, SpreadFactor, TXpower) are:**
+- Set via `meshtastic --set lora.modem_preset LONG_TURBO`
+- Stored in meshtasticd's internal device database
+- **NEVER in yaml files**
+
+### Proper Fix
+
+**In install scripts:**
+```bash
+# CHECK if config.yaml exists and is valid BEFORE touching it
+if [[ -f "$CONFIG_DIR/config.yaml" ]] && grep -q "Webserver:" "$CONFIG_DIR/config.yaml"; then
+    echo "Using existing config.yaml from meshtasticd package"
+else
+    # Only create if missing/empty
+    create_minimal_config
+fi
+```
+
+**In Python code:**
+```python
+config_yaml = Path('/etc/meshtasticd/config.yaml')
+
+# Check if valid config exists
+if config_yaml.exists() and 'Webserver:' in config_yaml.read_text():
+    # DO NOT OVERWRITE - meshtasticd provided a good one
+    pass
+elif not config_yaml.exists():
+    # Only create if missing
+    create_minimal_config(config_yaml)
+```
+
+**MeshForge's job is to:**
+1. Help users SELECT their HAT from meshtasticd's available.d/
+2. COPY (not create) the HAT config to config.d/
+3. NEVER overwrite config.yaml if meshtasticd provided a valid one
+4. NEVER create HAT templates - meshtasticd provides them
+
+### Files Fixed (2026-01-22)
+- [x] `scripts/install_noc.sh` - Don't overwrite config.yaml, don't create HAT templates
+- [x] `src/launcher_tui/main.py` - _fix_spi_config(), _install_native_meshtasticd()
+- [x] `templates/config.yaml` - Simplified to minimal base config
+- [x] Removed `templates/available.d/` HAT configs (meshtasticd provides these)
+
+### Prevention
+- NEVER use `cp templates/config.yaml /etc/meshtasticd/config.yaml` without checking
+- NEVER create HAT templates - point users to meshtasticd's available.d/
+- Always CHECK for "Webserver:" in existing config before modifying
+- Test fresh installs with `apt install meshtasticd` THEN run MeshForge
+
+---
