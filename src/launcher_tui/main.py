@@ -13,6 +13,7 @@ Falls back to basic terminal menu if neither available.
 
 import os
 import sys
+import shutil
 import subprocess
 import logging
 from pathlib import Path
@@ -139,6 +140,8 @@ class MeshForgeLauncher(
                 choices.append(("gtk", "GTK4 Desktop Interface"))
             choices.append(("cli", "Rich CLI (Terminal Menu)"))
             choices.append(("web", "Web Monitor Dashboard"))
+            choices.append(("webui", "Web Dashboard (Full UI)"))
+            choices.append(("standalone", "Standalone Mode (Zero-Dep)"))
 
             # Tools section
             choices.append(("---", "──────────── Tools ────────────"))
@@ -187,6 +190,10 @@ class MeshForgeLauncher(
             self._launch_cli()
         elif choice == "web":
             self._launch_web()
+        elif choice == "webui":
+            self._launch_webui()
+        elif choice == "standalone":
+            self._launch_standalone()
         elif choice == "ai":
             self._ai_tools_menu()
         elif choice == "diag":
@@ -230,13 +237,81 @@ class MeshForgeLauncher(
 
     def _launch_web(self):
         """Launch Web monitor."""
-        self.dialog.msgbox(
-            "Web Monitor",
+        # Get network IP for displaying to user
+        local_ip = self._get_local_ip()
+
+        access_info = (
             "Starting Web Monitor...\n\n"
-            "Access at: http://localhost:5000\n\n"
-            "Press Ctrl+C to stop."
+            "Access URLs:\n"
+            f"  • This device:  http://localhost:5000\n"
         )
+        if local_ip and local_ip != "127.0.0.1":
+            access_info += f"  • Network:      http://{local_ip}:5000\n"
+
+        access_info += (
+            "\nAPI Endpoints:\n"
+            "  • /api/status    - System status\n"
+            "  • /api/nodes     - Node list\n"
+            "  • /health        - Health check\n\n"
+            "Press Ctrl+C to stop the server."
+        )
+
+        self.dialog.msgbox("Web Monitor", access_info)
         os.execv(sys.executable, [sys.executable, str(self.src_dir / 'web_monitor.py')])
+
+    def _get_local_ip(self) -> str:
+        """Get local network IP address."""
+        import socket
+        try:
+            # Connect to external address to find local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    def _launch_webui(self):
+        """Launch full Web Dashboard (main_web.py)."""
+        local_ip = self._get_local_ip()
+
+        access_info = (
+            "Starting Web Dashboard (Full UI)...\n\n"
+            "This is the full-featured web interface with:\n"
+            "  • Node management and visualization\n"
+            "  • Service control panel\n"
+            "  • Real-time monitoring\n"
+            "  • Configuration editor\n\n"
+            "Access URLs:\n"
+            f"  • This device:  http://localhost:8880\n"
+        )
+        if local_ip and local_ip != "127.0.0.1":
+            access_info += f"  • Network:      http://{local_ip}:8880\n"
+            access_info += "\n(Use --host 0.0.0.0 for network access)\n"
+
+        access_info += "\nPress Ctrl+C to stop the server."
+
+        self.dialog.msgbox("Web Dashboard", access_info)
+        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_web.py')])
+
+    def _launch_standalone(self):
+        """Launch zero-dependency standalone mode."""
+        self.dialog.msgbox(
+            "Standalone Mode",
+            "Starting Standalone Mode...\n\n"
+            "Zero-dependency mode that works without:\n"
+            "  • GTK or GUI libraries\n"
+            "  • Rich terminal formatting\n"
+            "  • External service connections\n\n"
+            "Perfect for:\n"
+            "  • Minimal systems\n"
+            "  • Emergency recovery\n"
+            "  • Quick diagnostics\n"
+            "  • SSH over slow connections\n\n"
+            "Press Ctrl+C to exit."
+        )
+        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'standalone.py')])
 
     # =========================================================================
     # System Diagnostics
@@ -1015,7 +1090,30 @@ class MeshForgeLauncher(
             self.dialog.msgbox("Error", f"Action failed:\n{e}")
 
     def _hardware_menu(self):
-        """Hardware detection menu."""
+        """Hardware detection and configuration menu."""
+        while True:
+            choices = [
+                ("detect", "Detect Hardware"),
+                ("spi", "Enable SPI (for HAT radios)"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Hardware",
+                "Hardware detection and configuration:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "detect":
+                self._detect_hardware()
+            elif choice == "spi":
+                self._enable_spi()
+
+    def _detect_hardware(self):
+        """Run hardware detection."""
         self.dialog.infobox("Hardware", "Detecting hardware...")
 
         try:
@@ -1058,6 +1156,124 @@ class MeshForgeLauncher(
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Hardware detection failed:\n{e}")
+
+    def _enable_spi(self):
+        """Enable SPI interface for HAT-based radios."""
+        # Check if SPI is already enabled
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        if spi_devices:
+            self.dialog.msgbox(
+                "SPI Status",
+                "SPI is already enabled!\n\n"
+                f"Devices: {', '.join(d.name for d in spi_devices)}\n\n"
+                "Your HAT radio should be detected."
+            )
+            return
+
+        # Check if on Raspberry Pi
+        is_pi = self._is_raspberry_pi()
+        if not is_pi:
+            self.dialog.msgbox(
+                "Not Raspberry Pi",
+                "SPI auto-enable is only available on Raspberry Pi.\n\n"
+                "For other systems, consult your board's documentation\n"
+                "for enabling SPI interfaces."
+            )
+            return
+
+        # Confirm enablement
+        result = self.dialog.yesno(
+            "Enable SPI",
+            "This will enable the SPI interface for HAT radios.\n\n"
+            "Supported HATs:\n"
+            "  • MeshAdv-Pi-Hat\n"
+            "  • Waveshare LoRa HAT\n"
+            "  • Other SPI-based radios\n\n"
+            "A REBOOT is required after enabling.\n\n"
+            "Enable SPI now?"
+        )
+
+        if not result:
+            return
+
+        self.dialog.infobox("SPI", "Enabling SPI interface...")
+
+        try:
+            # Find boot config
+            boot_config = None
+            for path in ['/boot/firmware/config.txt', '/boot/config.txt']:
+                if Path(path).exists():
+                    boot_config = path
+                    break
+
+            if not boot_config:
+                self.dialog.msgbox("Error", "Could not find boot config file.")
+                return
+
+            # Use raspi-config if available
+            raspi_config = shutil.which('raspi-config')
+            if raspi_config:
+                subprocess.run(
+                    ['raspi-config', 'nonint', 'set_config_var', 'dtparam=spi', 'on', boot_config],
+                    timeout=30,
+                    check=False
+                )
+
+            # Add dtoverlay for HAT compatibility
+            config_content = Path(boot_config).read_text()
+            needs_write = False
+            lines = config_content.split('\n')
+            new_lines = []
+            added_overlay = False
+
+            for line in lines:
+                new_lines.append(line)
+                # Add overlay after dtparam=spi=on
+                if 'dtparam=spi=on' in line and 'dtoverlay=spi0-0cs' not in config_content:
+                    new_lines.append('dtoverlay=spi0-0cs')
+                    added_overlay = True
+                    needs_write = True
+
+            # If dtparam=spi=on wasn't found, add both
+            if 'dtparam=spi=on' not in config_content:
+                new_lines.append('dtparam=spi=on')
+                new_lines.append('dtoverlay=spi0-0cs')
+                needs_write = True
+
+            if needs_write:
+                Path(boot_config).write_text('\n'.join(new_lines))
+
+            self.dialog.msgbox(
+                "SPI Enabled",
+                "SPI interface has been enabled!\n\n"
+                "IMPORTANT: You must REBOOT for changes to take effect.\n\n"
+                "After reboot:\n"
+                "  1. Your HAT radio will be detected\n"
+                "  2. Configure meshtasticd for SPI\n"
+                "  3. Start meshtasticd service\n\n"
+                "Reboot now with: sudo reboot"
+            )
+
+        except subprocess.TimeoutExpired:
+            self.dialog.msgbox("Error", "Timeout while configuring SPI.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to enable SPI:\n{e}")
+
+    def _is_raspberry_pi(self) -> bool:
+        """Check if running on Raspberry Pi."""
+        try:
+            cpuinfo = Path('/proc/cpuinfo')
+            if cpuinfo.exists():
+                content = cpuinfo.read_text()
+                if 'Raspberry Pi' in content or 'BCM' in content:
+                    return True
+            model = Path('/proc/device-tree/model')
+            if model.exists():
+                if 'Raspberry Pi' in model.read_text():
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _settings_menu(self):
         """Settings menu."""
