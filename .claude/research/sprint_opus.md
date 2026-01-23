@@ -36,10 +36,10 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ### Phase 2: Gateway Bridge Hardening
 
-- [ ] **Reconnection logic audit** — what happens when meshtasticd restarts?
+- [x] **Reconnection logic audit** — integrated ReconnectStrategy with backoff + jitter
 - [ ] **Message queue overflow** — SQLite queue growth limits, cleanup policy
-- [ ] **Bridge health metrics** — messages relayed, failed, queued, latency
-- [ ] **Error categorization** — distinguish transient vs permanent failures
+- [x] **Bridge health metrics** — BridgeHealthMonitor: uptime, rates, errors, is_healthy
+- [x] **Error categorization** — classify_error: transient/permanent/unknown patterns
 - [ ] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip
 - [ ] **LXMF delivery confirmation** — track message delivery end-to-end
 
@@ -91,7 +91,9 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Meshtasticd TCP interface collection — direct node data with positions, online detection
 - [x] Node history SQLite — trajectory, snapshots, stats, cleanup, API endpoints
 - [x] Auto-open map on TUI launch — toggle setting, silent background start
-- [x] 67 tests for map data pipeline (1359 total)
+- [x] Gateway bridge hardening — ReconnectStrategy integration, health monitor, error classification
+- [x] Failed message persistence — re-queue to persistent queue on send failure
+- [x] 94 new tests for map + bridge pipeline (1386 total)
 
 ---
 
