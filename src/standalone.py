@@ -74,23 +74,6 @@ class DependencyStatus:
             self.available['gtk'] = False
             self.messages['gtk'] = "apt install python3-gi gir1.2-gtk-4.0"
 
-        # Textual - for TUI
-        try:
-            import textual
-            self.available['textual'] = True
-            self.messages['textual'] = "Textual TUI available"
-        except ImportError:
-            self.available['textual'] = False
-            self.messages['textual'] = "pip install textual"
-
-        # Flask - for Web UI
-        try:
-            import flask
-            self.available['flask'] = True
-            self.messages['flask'] = "Flask web server available"
-        except ImportError:
-            self.available['flask'] = False
-            self.messages['flask'] = "pip install flask"
 
         # Meshtastic - for device communication
         try:
@@ -507,20 +490,7 @@ def main_menu(deps: DependencyStatus):
         else:
             print("  g. GTK4 Desktop UI      [Not installed]")
 
-        if deps.available['textual']:
-            print("  t. Textual TUI          [Available]")
-        else:
-            print("  t. Textual TUI          [Not installed]")
-
-        if deps.available['flask']:
-            print("  w. Web Interface        [Available]")
-        else:
-            print("  w. Web Interface        [Not installed]")
-
-        if deps.available['rich']:
-            print("  r. Rich CLI             [Available]")
-        else:
-            print("  r. Rich CLI             [Not installed]")
+        print("  t. Launcher TUI         [raspi-config style]")
 
         print("---------------------------------------------------------")
         print("  d. Check dependencies")
@@ -554,26 +524,8 @@ def main_menu(deps: DependencyStatus):
                 print("\nGTK4 not available. Install with:")
                 print("  sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1")
         elif choice == 't':
-            if deps.available['textual']:
-                print("\nLaunching Textual TUI...")
-                os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'main_tui.py')])
-            else:
-                print("\nTextual not available. Install with:")
-                print("  pip install textual")
-        elif choice == 'w':
-            if deps.available['flask']:
-                print("\nLaunching Web Interface...")
-                os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'main_web.py')])
-            else:
-                print("\nFlask not available. Install with:")
-                print("  pip install flask")
-        elif choice == 'r':
-            if deps.available['rich']:
-                print("\nLaunching Rich CLI...")
-                os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'main.py')])
-            else:
-                print("\nRich not available. Install with:")
-                print("  pip install rich")
+            print("\nLaunching TUI...")
+            os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'launcher_tui' / 'main.py')])
         else:
             print("\nInvalid option")
 

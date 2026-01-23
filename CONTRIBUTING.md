@@ -77,41 +77,34 @@ pip install rich textual flask meshtastic
 # GTK Desktop UI (requires display)
 sudo python3 src/main_gtk.py
 
-# Web UI (headless/SSH)
-sudo python3 src/main_web.py
+# Terminal UI (SSH/headless, raspi-config style)
+sudo python3 src/launcher_tui/main.py
 
-# Terminal TUI
-sudo python3 src/main_tui.py
-
-# Rich CLI
-sudo python3 src/main.py
-
-# Monitor (no sudo required)
-python3 -m src.monitor
+# Auto-detect best interface
+sudo python3 src/launcher.py
 ```
 
 ### Development Tips
 
 1. **Test on actual hardware** - Many features require a LoRa device
-2. **Use the Monitor** - `python3 -m src.monitor` doesn't need sudo
-3. **Check logs** - `journalctl -u meshtasticd -f` for service logs
-4. **Web UI hot reload** - Flask auto-reloads on file changes
+2. **Check logs** - `journalctl -u meshtasticd -f` for service logs
+3. **TUI works over SSH** - No display needed for terminal interface
 
 ## Project Architecture
 
 ```
 meshforge/
 ├── src/
-│   ├── launcher.py           # Auto-detect best interface
+│   ├── launcher.py           # Auto-detect: GTK or TUI
 │   ├── main_gtk.py           # GTK4/libadwaita desktop
-│   ├── main_web.py           # Flask web server
-│   ├── main_tui.py           # Textual terminal UI
-│   ├── main.py               # Rich CLI
-│   ├── monitor.py            # Lightweight node monitor
+│   ├── standalone.py         # Zero-dependency RF tools
 │   │
 │   ├── gtk_ui/               # GTK desktop components
 │   │   ├── app.py            # Main application window
 │   │   ├── panels/           # Feature panels (tabs)
+│   │
+│   ├── launcher_tui/         # Terminal UI (raspi-config style)
+│   │   ├── main.py           # Primary CLI interface
 │   │   └── dialogs/          # Modal dialogs
 │   │
 │   ├── tui/                  # Terminal UI components
