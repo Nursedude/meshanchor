@@ -55,74 +55,69 @@ class AIToolsMixin:
                 self._generate_coverage_map()
 
     def _open_live_map(self):
-        """Open the live network map in browser with current node data."""
+        """Open the live network map with real node data."""
         import json
-        import tempfile
+        import socket
 
-        # Find the map template
-        src_dir = Path(__file__).parent.parent.parent
-        map_template = src_dir / "web" / "node_map.html"
+        choices = [
+            ("browser", "Open map in browser (snapshot)"),
+            ("server", "Start map server (live updates)"),
+            ("back", "Back"),
+        ]
 
-        if not map_template.exists():
-            self.dialog.msgbox(
-                "Map Not Found",
-                f"Map template not found at:\n{map_template}\n\n"
-                "Ensure web/node_map.html exists."
-            )
+        choice = self.dialog.menu(
+            "Live Network Map",
+            "Select map mode:",
+            choices
+        )
+
+        if choice is None or choice == "back":
             return
 
-        self.dialog.infobox("Loading", "Fetching node data...")
+        if choice == "server":
+            self._start_map_server()
+            return
 
-        # Try to get node data from meshtasticd
-        geojson = {"type": "FeatureCollection", "features": []}
+        # Browser mode: collect data, inject into HTML, open
+        self.dialog.infobox("Loading", "Collecting node data from all sources...")
+
         try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('localhost', 4403))
-            sock.close()
+            from utils.map_data_service import MapDataCollector
 
-            if result == 0:
-                # meshtasticd is running - get nodes via CLI
-                cli_result = subprocess.run(
-                    ['meshtastic', '--host', 'localhost', '--export-config'],
-                    capture_output=True, text=True, timeout=15
+            collector = MapDataCollector()
+            geojson = collector.collect()
+            node_count = len(geojson.get("features", []))
+            sources = geojson.get("properties", {}).get("sources", {})
+
+            # Find the map template
+            src_dir = Path(__file__).parent.parent.parent
+            map_template = src_dir / "web" / "node_map.html"
+
+            if not map_template.exists():
+                self.dialog.msgbox(
+                    "Map Not Found",
+                    f"Map template not found at:\n{map_template}"
                 )
-                if cli_result.returncode == 0:
-                    try:
-                        config = json.loads(cli_result.stdout)
-                        # Not all configs have node info, fall through
-                    except (json.JSONDecodeError, ValueError):
-                        pass
+                return
 
-                # Try --nodes for node list (newer meshtastic CLI)
-                nodes_result = subprocess.run(
-                    ['meshtastic', '--host', 'localhost', '--info'],
-                    capture_output=True, text=True, timeout=30
-                )
-                # Node parsing is best-effort; map will show demo data if empty
-        except Exception:
-            pass  # Map will open with demo data
-
-        # Read template and inject data
-        try:
+            # Read template and inject data
             with open(map_template, 'r') as f:
                 html_content = f.read()
 
-            node_count = len(geojson.get('features', []))
-
             if node_count > 0:
-                # Inject live data
                 geojson_str = json.dumps(geojson)
                 inject_script = (
                     f'\n<script>\n'
-                    f'// Injected by MeshForge TUI - {node_count} nodes\n'
+                    f'// MeshForge: {node_count} nodes from '
+                    f'meshtasticd({sources.get("meshtasticd", 0)}) '
+                    f'mqtt({sources.get("mqtt", 0)}) '
+                    f'tracker({sources.get("node_tracker", 0)})\n'
                     f'window.meshforgeData = {geojson_str};\n'
                     f'</script>\n</body>'
                 )
                 html_content = html_content.replace('</body>', inject_script)
 
-            # Write to temp location
+            # Write to user-accessible location
             from utils.paths import get_real_user_home
             output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,24 +126,67 @@ class AIToolsMixin:
             with open(output_file, 'w') as f:
                 f.write(html_content)
 
+            source_info = []
+            if sources.get("meshtasticd", 0):
+                source_info.append(f"meshtasticd: {sources['meshtasticd']}")
+            if sources.get("mqtt", 0):
+                source_info.append(f"MQTT: {sources['mqtt']}")
+            if sources.get("node_tracker", 0):
+                source_info.append(f"tracker: {sources['node_tracker']}")
+
             msg = (
-                f"Live map saved to:\n{output_file}\n\n"
-                f"Nodes with data: {node_count}\n"
+                f"Map saved: {output_file}\n\n"
+                f"Nodes: {node_count}\n"
+                f"Sources: {', '.join(source_info) or 'cache/demo'}\n\n"
                 "Opening in browser..."
             )
-            if node_count == 0:
-                msg = (
-                    f"Live map saved to:\n{output_file}\n\n"
-                    "No live node data available.\n"
-                    "Map will show demo nodes.\n\n"
-                    "Opening in browser..."
-                )
-
             self.dialog.msgbox("Live Map", msg)
             self._open_in_browser(f"file://{output_file}")
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to generate live map: {e}")
+
+    def _start_map_server(self):
+        """Start the map HTTP server for live-updating browser access."""
+        import socket
+
+        port = 5000
+
+        # Check if port is already in use
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('localhost', port))
+            sock.close()
+            if result == 0:
+                self.dialog.msgbox(
+                    "Map Server",
+                    f"Map server already running!\n\n"
+                    f"Open: http://localhost:{port}\n\n"
+                    "The map auto-refreshes every 30 seconds."
+                )
+                self._open_in_browser(f"http://localhost:{port}")
+                return
+        except OSError:
+            pass
+
+        try:
+            from utils.map_data_service import MapServer
+
+            server = MapServer(port=port)
+            server.start_background()
+
+            self.dialog.msgbox(
+                "Map Server Started",
+                f"Live map server running!\n\n"
+                f"URL: http://localhost:{port}\n\n"
+                "The map pulls fresh data every 30 seconds.\n"
+                "Server runs until MeshForge exits."
+            )
+            self._open_in_browser(f"http://localhost:{port}")
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to start map server: {e}")
 
     def _intelligent_diagnostics(self):
         """Run intelligent diagnostics with symptom analysis."""
