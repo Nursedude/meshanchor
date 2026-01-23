@@ -73,7 +73,7 @@ MQTT:
 
 # === Webserver ===
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 # === Logging ===
@@ -82,13 +82,14 @@ Logging:
 
 # === General ===
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
 
 # === MeshForge Gateway Notes ===
 #
 # After applying this config:
 # 1. Restart meshtasticd: sudo systemctl restart meshtasticd
-# 2. Verify via browser: http://localhost:9443
+# 2. Verify via browser: http://localhost:4403
 # 3. Configure RNS bridge in MeshForge:
 #    - meshforge → Gateway Configuration
 #    - Set RNS interface to HawaiiNet

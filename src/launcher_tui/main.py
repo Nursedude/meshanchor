@@ -237,6 +237,7 @@ class MeshForgeLauncher(
 
             # Config section
             choices.append(("---", "──────────── Config ───────────"))
+            choices.append(("web", "Web Client (Radio Config)"))
             choices.append(("meshtasticd", "Meshtasticd Config"))
             choices.append(("services", "Service Management"))
             choices.append(("hardware", "Hardware Detection"))
@@ -285,6 +286,8 @@ class MeshForgeLauncher(
             self._messaging_menu()
         elif choice == "rf":
             self._rf_tools_menu()
+        elif choice == "web":
+            self._open_web_client()
         elif choice == "meshtasticd":
             self._meshtasticd_menu()
         elif choice == "services":
@@ -300,6 +303,53 @@ class MeshForgeLauncher(
         """Launch GTK interface."""
         self.dialog.infobox("Launching", "Starting GTK4 Desktop Interface...")
         os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_gtk.py')])
+
+    def _open_web_client(self):
+        """Show/open meshtasticd web client for full radio configuration."""
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "localhost"
+
+        web_url = f"http://{local_ip}:4403"
+
+        # Check if web server is responding
+        port_ok = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            port_ok = sock.connect_ex((local_ip, 4403)) == 0
+            sock.close()
+        except Exception:
+            pass
+
+        if port_ok:
+            msg = (
+                f"Meshtastic Web Client is RUNNING\n\n"
+                f"  URL: {web_url}\n\n"
+                f"Open this in any browser on your network.\n\n"
+                f"Configure your radio:\n"
+                f"  Config → LoRa      Region, Preset, TX Power\n"
+                f"  Config → Channels  PSK keys, channel names\n"
+                f"  Config → Device    Node name, position\n\n"
+                f"Also provides: messaging, node map, telemetry\n\n"
+                f"Access from any device on your network.\n\n"
+                f"CLI shortcut: meshforge-web"
+            )
+        else:
+            msg = (
+                f"Web client NOT responding on port 4403\n\n"
+                f"meshtasticd may not be running.\n\n"
+                f"  Start: sudo systemctl start meshtasticd\n"
+                f"  Check: sudo systemctl status meshtasticd\n"
+                f"  Logs:  sudo journalctl -u meshtasticd -f"
+            )
+
+        self.dialog.msgbox("Web Client", msg)
 
     # =========================================================================
     # System Diagnostics
@@ -422,10 +472,10 @@ class MeshForgeLauncher(
         except Exception:
             tests.append("RNS Status: NOT AVAILABLE")
 
-        # Test web client (port 9443) using centralized port checker
+        # Test web client (port 4403) using centralized port checker
         if check_port is not None:
-            web_ok = check_port(9443)
-            tests.append(f"Web Client (9443): {'OK ✓' if web_ok else 'NOT RUNNING'}")
+            web_ok = check_port(4403)
+            tests.append(f"Web Client (4403): {'OK ✓' if web_ok else 'NOT RUNNING'}")
 
         # Test internet connectivity
         if check_port is not None:
@@ -900,7 +950,7 @@ class MeshForgeLauncher(
             (4403, "Meshtasticd"),
             (8080, "HamClock"),
             (8082, "HamClock API"),
-            (9443, "Meshtastic Web"),
+            (4403, "Meshtastic Web"),
         ]
 
         results = []
@@ -1255,12 +1305,14 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Fixing", "Created minimal config.yaml")
 
@@ -1381,12 +1433,14 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 """)
                 self.dialog.infobox("Installing", "Created minimal config.yaml")
 
@@ -1892,12 +1946,27 @@ Made with aloha for the mesh community
             # Get destination
             dest = self.dialog.inputbox(
                 "Send Message",
-                "Destination (node ID or leave empty for broadcast):",
+                "Destination node ID (e.g. !abc12345)\n"
+                "Leave empty for broadcast to channel:",
                 ""
             )
 
             if dest is None:
                 return
+
+            # Validate destination format
+            if dest:
+                dest = dest.strip()
+                if not dest.startswith('!'):
+                    dest = '!' + dest
+                # Must be ! followed by hex chars
+                hex_part = dest[1:]
+                if not hex_part or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                    self.dialog.msgbox("Error",
+                        f"Invalid node ID: {dest}\n\n"
+                        "Format: !abc12345 (hex characters)\n"
+                        "Leave empty for broadcast.")
+                    return
 
             # Get message content
             content = self.dialog.inputbox(
