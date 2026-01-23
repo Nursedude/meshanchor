@@ -29,7 +29,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] **Map data service** — unified collector from all sources (meshtasticd, MQTT, tracker)
 - [x] **Map HTTP server** — `/api/nodes/geojson` endpoint, serves live map at localhost:5000
 - [x] **MQTT node tracking → map feed** — mqtt_subscriber persists GeoJSON cache every 30s
-- [ ] **Map data feed from meshtasticd** — improve CLI output parsing for position data
+- [x] **Map data feed from meshtasticd** — TCP interface + CLI fallback with position parsing
 - [ ] **Node history SQLite** — store node positions/states over time for playback
 - [ ] **Auto-open map on TUI launch** — option to start with map in browser
 - [ ] **Map tile pre-cache for Hawaii** — ship with offline tiles for default region
@@ -79,7 +79,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 
 ## Completed This Sprint
 
-- [x] Full code review and healthcheck (1318 tests, 0 failures)
+- [x] Full code review and healthcheck (1335 tests, 0 failures)
 - [x] README revamp (mermaid diagrams, elevator speech, honest capabilities)
 - [x] GTK frozen decision documented (TUI + browser-maps is the path)
 - [x] Maps "Double Tap" vision document (.claude/research/maps_double_tap.md)
@@ -88,7 +88,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Gateway scope clarification (Meshtastic↔RNS bridge, AREDN monitoring)
 - [x] Map data service (src/utils/map_data_service.py) — unified collector + HTTP server
 - [x] MQTT subscriber → map cache persistence (auto-populates map data)
-- [x] 26 new tests for map data pipeline (1318 total)
+- [x] Meshtasticd TCP interface collection — direct node data with positions, online detection
+- [x] 43 tests for map data pipeline (1335 total)
 
 ---
 
