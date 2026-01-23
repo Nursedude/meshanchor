@@ -17,6 +17,8 @@ from pathlib import Path
 
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
+from .reconnect import ReconnectStrategy
+from .bridge_health import BridgeHealthMonitor, classify_error
 
 # Import persistent message queue for reliable delivery
 try:
@@ -97,6 +99,13 @@ class RNSMeshtasticBridge:
         self._connected_mesh = False
         self._connected_rns = False
         self._rns_init_failed_permanently = False  # True if RNS can't be initialized from this thread
+
+        # Reconnection strategies (exponential backoff with jitter)
+        self._mesh_reconnect = ReconnectStrategy.for_meshtastic()
+        self._rns_reconnect = ReconnectStrategy.for_rns()
+
+        # Health monitoring
+        self.health = BridgeHealthMonitor()
 
         # Message queues (bounded to prevent memory exhaustion)
         self._mesh_to_rns_queue = Queue(maxsize=1000)
@@ -502,64 +511,104 @@ class RNSMeshtasticBridge:
     # ========================================
 
     def _meshtastic_loop(self):
-        """Main loop for Meshtastic connection with auto-reconnect"""
-        reconnect_delay = 1  # Start with 1 second delay
-        max_reconnect_delay = 30  # Max 30 seconds between retries
+        """Main loop for Meshtastic connection with auto-reconnect.
 
+        Uses ReconnectStrategy for exponential backoff with jitter.
+        Records events to BridgeHealthMonitor for metrics.
+        """
         while self._running:
             try:
                 if not self._connected_mesh:
-                    logger.info(f"Attempting Meshtastic reconnection (delay was {reconnect_delay}s)...")
+                    if not self._mesh_reconnect.should_retry():
+                        logger.warning("Meshtastic reconnection: max attempts reached, resetting")
+                        self._mesh_reconnect.reset()
+                        time.sleep(self._mesh_reconnect.config.max_delay)
+                        continue
+
+                    logger.info(f"Attempting Meshtastic connection "
+                               f"(attempt {self._mesh_reconnect.attempts + 1})...")
+                    self.health.record_connection_event("meshtastic", "retry")
                     self._connect_meshtastic()
 
                     if self._connected_mesh:
-                        reconnect_delay = 1  # Reset delay on successful connect
-                        logger.info("Meshtastic reconnection successful")
+                        self._mesh_reconnect.record_success()
+                        self.health.record_connection_event("meshtastic", "connected")
+                        logger.info("Meshtastic connection established")
                     else:
-                        # Exponential backoff for failed reconnects
-                        logger.debug(f"Reconnection failed, waiting {reconnect_delay}s before retry")
-                        time.sleep(reconnect_delay)
-                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                        self._mesh_reconnect.record_failure()
+                        self._mesh_reconnect.wait()
                         continue
 
                 if self._connected_mesh:
-                    # Health check and process updates
                     self._poll_meshtastic()
 
                 time.sleep(1)
 
             except (BrokenPipeError, ConnectionResetError, OSError) as e:
-                logger.warning(f"Meshtastic connection error: {e}")
+                category = self.health.record_error("meshtastic", e)
+                logger.warning(f"Meshtastic connection error ({category}): {e}")
                 self._handle_connection_lost()
-                time.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                self.health.record_connection_event("meshtastic", "disconnected", str(e))
+                self._mesh_reconnect.record_failure()
+                self._mesh_reconnect.wait()
             except Exception as e:
-                logger.error(f"Meshtastic loop error: {e}")
+                category = self.health.record_error("meshtastic", e)
+                logger.error(f"Meshtastic loop error ({category}): {e}")
                 self._connected_mesh = False
-                time.sleep(5)
-                time.sleep(5)
+                self.health.record_connection_event("meshtastic", "error", str(e))
+                self._mesh_reconnect.record_failure()
+                self._mesh_reconnect.wait()
 
     def _rns_loop(self):
-        """Main loop for RNS connection"""
+        """Main loop for RNS connection with auto-reconnect.
+
+        Uses ReconnectStrategy for exponential backoff with jitter.
+        Respects permanent failure flag for non-retriable errors.
+        """
         while self._running:
             try:
                 # Don't retry if RNS init failed permanently (e.g., signal handler issue)
                 if self._rns_init_failed_permanently:
-                    time.sleep(10)
+                    time.sleep(30)
                     continue
 
                 if not self._connected_rns:
+                    if not self._rns_reconnect.should_retry():
+                        logger.warning("RNS reconnection: max attempts reached, resetting")
+                        self._rns_reconnect.reset()
+                        time.sleep(self._rns_reconnect.config.max_delay)
+                        continue
+
+                    logger.info(f"Attempting RNS connection "
+                               f"(attempt {self._rns_reconnect.attempts + 1})...")
+                    self.health.record_connection_event("rns", "retry")
                     self._connect_rns()
+
+                    if self._connected_rns:
+                        self._rns_reconnect.record_success()
+                        self.health.record_connection_event("rns", "connected")
+                        logger.info("RNS connection established")
+                    else:
+                        self._rns_reconnect.record_failure()
+                        self._rns_reconnect.wait()
+                        continue
 
                 if self._connected_rns:
                     # RNS handles its own event loop
-                    # Just keep the connection alive
                     time.sleep(1)
 
             except Exception as e:
-                logger.error(f"RNS loop error: {e}")
+                category = self.health.record_error("rns", e)
+                logger.error(f"RNS loop error ({category}): {e}")
                 self._connected_rns = False
-                time.sleep(5)
+                self.health.record_connection_event("rns", "error", str(e))
+
+                if category == "permanent":
+                    logger.error("RNS permanent error detected, stopping retries")
+                    self._rns_init_failed_permanently = True
+                else:
+                    self._rns_reconnect.record_failure()
+                    self._rns_reconnect.wait()
 
     def _bridge_loop(self):
         """Main loop for message bridging"""
@@ -1018,35 +1067,38 @@ class RNSMeshtasticBridge:
         return True
 
     def _process_mesh_to_rns(self, msg: BridgedMessage):
-        """Process message from Meshtastic to RNS"""
+        """Process message from Meshtastic to RNS.
+
+        On send failure for non-broadcast messages, attempts to persist
+        to the persistent queue for later retry.
+        """
         try:
             prefix = f"[Mesh:{msg.source_id[-4:]}] " if msg.source_id else "[Mesh] "
             content = prefix + msg.content
 
-            # Attempt to send to RNS
-            # For broadcasts or unknown destinations, this may fail
-            # but we should at least try and report properly
             destination_hash = None
-
-            # Check if we have a mapped destination
             if msg.destination_id and not msg.is_broadcast:
-                # Try to find RNS destination for this Meshtastic node
                 destination_hash = self._get_rns_destination(msg.destination_id)
 
             if self.send_to_rns(content, destination_hash):
                 logger.info(f"Bridge Mesh→RNS: {content[:50]}...")
                 self.stats['messages_mesh_to_rns'] += 1
+                self.health.record_message_sent("mesh_to_rns")
             else:
-                # Log but don't count as error for broadcasts (expected behavior)
                 if msg.is_broadcast:
                     logger.debug(f"Mesh→RNS broadcast not sent (no propagation node): {content[:30]}...")
                 else:
                     logger.warning(f"Failed to bridge Mesh→RNS: {content[:30]}...")
                     self.stats['errors'] += 1
+                    requeued = self._requeue_failed_message(msg, "rns")
+                    self.health.record_message_failed("mesh_to_rns", requeued=requeued)
 
         except Exception as e:
             logger.error(f"Error bridging Mesh→RNS: {e}")
             self.stats['errors'] += 1
+            self.health.record_error("rns", e)
+            self._requeue_failed_message(msg, "rns")
+            self.health.record_message_failed("mesh_to_rns", requeued=True)
 
     def _get_rns_destination(self, meshtastic_id: str) -> bytes:
         """Look up RNS destination hash for a Meshtastic node ID"""
@@ -1057,8 +1109,38 @@ class RNSMeshtasticBridge:
                 return node.rns_hash
         return None
 
+    def _requeue_failed_message(self, msg: BridgedMessage, destination: str) -> bool:
+        """Persist a failed message to the persistent queue for later retry.
+
+        Args:
+            msg: The message that failed to send.
+            destination: Target network ("meshtastic" or "rns").
+
+        Returns:
+            True if message was successfully persisted, False otherwise.
+        """
+        if not self._persistent_queue:
+            return False
+
+        try:
+            self._persistent_queue.enqueue_message(
+                content=msg.content,
+                destination=destination,
+                source_id=msg.source_id,
+                destination_id=msg.destination_id or "",
+                metadata=msg.metadata or {},
+            )
+            logger.debug(f"Failed message re-queued to persistent storage ({destination})")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to persist message for retry: {e}")
+            return False
+
     def _process_rns_to_mesh(self, msg: BridgedMessage):
-        """Process message from RNS to Meshtastic"""
+        """Process message from RNS to Meshtastic.
+
+        On send failure, persists to persistent queue for later retry.
+        """
         try:
             prefix = f"[RNS:{msg.source_id[:4]}] "
             content = prefix + msg.content
@@ -1066,13 +1148,19 @@ class RNSMeshtasticBridge:
             if self.send_to_meshtastic(content, channel=self.config.meshtastic.channel):
                 logger.info(f"Bridge RNS→Mesh: {content[:50]}...")
                 self.stats['messages_rns_to_mesh'] += 1
+                self.health.record_message_sent("rns_to_mesh")
             else:
                 logger.warning("Failed to bridge RNS→Mesh")
                 self.stats['errors'] += 1
+                requeued = self._requeue_failed_message(msg, "meshtastic")
+                self.health.record_message_failed("rns_to_mesh", requeued=requeued)
 
         except Exception as e:
             logger.error(f"Error bridging RNS→Mesh: {e}")
             self.stats['errors'] += 1
+            self.health.record_error("meshtastic", e)
+            self._requeue_failed_message(msg, "meshtastic")
+            self.health.record_message_failed("rns_to_mesh", requeued=True)
 
     def _update_meshtastic_nodes(self):
         """Update node tracker with Meshtastic nodes"""
@@ -1325,7 +1413,7 @@ def get_gateway_stats() -> dict:
     try:
         status = _active_bridge.get_status()
         stats = status.get('statistics', {})
-        return {
+        result = {
             'running': _active_bridge._running,
             'status': 'Running' if _active_bridge._running else 'Stopped',
             'meshtastic_connected': _active_bridge._connected_mesh,
@@ -1336,6 +1424,10 @@ def get_gateway_stats() -> dict:
             'bounced': stats.get('bounced', 0),
             'uptime_seconds': status.get('uptime_seconds'),
         }
+        # Include health metrics if available
+        if hasattr(_active_bridge, 'health'):
+            result['health'] = _active_bridge.health.get_summary()
+        return result
     except Exception as e:
         logger.error(f"Error getting gateway stats: {e}")
         return {
