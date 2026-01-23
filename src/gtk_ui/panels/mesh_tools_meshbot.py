@@ -418,11 +418,11 @@ class MeshBotTabMixin:
                     GLib.idle_add(self._log_message, "MeshBot is running - may conflict with browser")
                     GLib.idle_add(self._log_message, "Consider using TCP mode or stopping MeshBot")
 
-                GLib.idle_add(self._open_url, "http://localhost:4403")
+                GLib.idle_add(self._open_url, "https://localhost:9443")
 
             except Exception as e:
                 GLib.idle_add(self._log_message, f"Error: {e}")
-                GLib.idle_add(self._open_url, "http://localhost:4403")
+                GLib.idle_add(self._open_url, "https://localhost:9443")
 
         threading.Thread(target=check_and_open, daemon=True).start()
 

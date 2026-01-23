@@ -78,12 +78,6 @@ Lora:
   Busy: 4
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 4403
 """
     },
     "rak-hat-spi": {
@@ -199,23 +193,22 @@ class MeshtasticdConfig:
 
     def _create_main_config(self):
         """Create main config.yaml file."""
-        config_content = """# MeshForge Meshtasticd Configuration
-# This file is managed by MeshForge NOC
+        config_content = """# Meshtasticd Configuration (fallback)
+# Normally provided by the meshtasticd package.
 # Individual radio configs are in config.d/
 
-# Include enabled configurations from config.d/
-# Active config is symlinked from available.d/
+Lora:
+  Module: auto
 
 Logging:
   LogLevel: info
 
-# Server settings (for TCP connections and web client)
 Webserver:
-  Port: 4403
+  Port: 9443
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/

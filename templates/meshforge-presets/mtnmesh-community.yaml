@@ -52,8 +52,7 @@ Lora:
   ChannelNum: 20
 
 Webserver:
-  # Port 4403 serves both web UI and TCP API
-  Port: 4403
+  Port: 9443
 
 # === MtnMesh Channel Configuration ===
 # Default MtnMesh channel with public encryption
