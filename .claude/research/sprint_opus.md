@@ -30,7 +30,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] **Map HTTP server** — `/api/nodes/geojson` endpoint, serves live map at localhost:5000
 - [x] **MQTT node tracking → map feed** — mqtt_subscriber persists GeoJSON cache every 30s
 - [x] **Map data feed from meshtasticd** — TCP interface + CLI fallback with position parsing
-- [ ] **Node history SQLite** — store node positions/states over time for playback
+- [x] **Node history SQLite** — store node positions/states over time for playback
 - [ ] **Auto-open map on TUI launch** — option to start with map in browser
 - [ ] **Map tile pre-cache for Hawaii** — ship with offline tiles for default region
 
@@ -89,7 +89,8 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Map data service (src/utils/map_data_service.py) — unified collector + HTTP server
 - [x] MQTT subscriber → map cache persistence (auto-populates map data)
 - [x] Meshtasticd TCP interface collection — direct node data with positions, online detection
-- [x] 43 tests for map data pipeline (1335 total)
+- [x] Node history SQLite — trajectory, snapshots, stats, cleanup, API endpoints
+- [x] 67 tests for map data pipeline (1359 total)
 
 ---
 
