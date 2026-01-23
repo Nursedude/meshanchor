@@ -54,7 +54,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 ### Phase 4: AI Diagnostics Expansion
 
 - [ ] **More diagnostic rules** — expand from 20+ to 50+ symptom patterns
-- [ ] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
+- [x] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
 - [x] **Health scoring** — overall network health 0-100 based on node metrics
 - [ ] **Predictive maintenance** — battery drain rate, node dropout patterns
 - [ ] **Knowledge base expansion** — RNS troubleshooting, AREDN basics, RF fundamentals
@@ -105,7 +105,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Multi-hop path loss — cumulative analysis, relay selection, preset comparison, path reports
 - [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
 - [x] Network health scoring — unified 0-100 score with connectivity, performance, reliability, freshness
-- [x] 606 new tests across all modules (1898 total)
+- [x] Log parsing patterns — 29 patterns for meshtasticd, rnsd, systemd, MeshForge with structured output
+- [x] 680 new tests across all modules (1972 total)
 
 ---
 
