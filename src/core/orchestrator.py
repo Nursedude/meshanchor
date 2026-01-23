@@ -111,7 +111,8 @@ class ServiceOrchestrator:
             name='rnsd',
             systemd_name='rnsd',
             check_binary='rnsd',
-            check_command=['rnstatus', '-s'],
+            # No check_command or check_port: trust systemctl is-active.
+            # rnstatus -s fails on fresh installs before interfaces are configured.
             startup_delay=3,
             required=True,
             install_command=['pip3', 'install', 'rns'],
