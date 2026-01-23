@@ -332,24 +332,58 @@ Always prioritize safety - never suggest actions that could damage hardware
         return content
 
     def _build_context_string(self) -> str:
-        """Build context string from network state."""
-        if not self._network_context:
-            return ""
-
+        """Build context string from network state + live metrics."""
         parts = []
 
-        if "node_count" in self._network_context:
-            parts.append(f"{self._network_context['node_count']} nodes")
+        # Static network context (set by caller)
+        if self._network_context:
+            if "node_count" in self._network_context:
+                parts.append(f"{self._network_context['node_count']} nodes")
 
-        if "health_summary" in self._network_context:
-            health = self._network_context["health_summary"]
-            if isinstance(health, dict):
-                parts.append(f"health: {health.get('overall_health', 'unknown')}")
+            if "health_summary" in self._network_context:
+                health = self._network_context["health_summary"]
+                if isinstance(health, dict):
+                    parts.append(f"health: {health.get('overall_health', 'unknown')}")
 
-        if "recent_events" in self._network_context:
-            events = self._network_context["recent_events"]
-            if events:
-                parts.append(f"{len(events)} recent events")
+            if "recent_events" in self._network_context:
+                events = self._network_context["recent_events"]
+                if events:
+                    parts.append(f"{len(events)} recent events")
+
+        # Live service latency from NOC monitor
+        try:
+            from utils.latency_monitor import get_latency_monitor
+            monitor = get_latency_monitor(auto_start=False)
+            if monitor._services:
+                svc_parts = []
+                for svc in monitor._services.values():
+                    if svc.samples:
+                        svc_parts.append(
+                            f"{svc.name}:{svc.status}"
+                            f"({svc.avg_rtt_ms:.0f}ms)"
+                        )
+                if svc_parts:
+                    parts.append(f"services=[{', '.join(svc_parts)}]")
+
+                degraded = monitor.get_degraded()
+                if degraded:
+                    parts.append(f"DEGRADED: {', '.join(degraded)}")
+        except (ImportError, Exception):
+            pass
+
+        # Recent diagnostics
+        try:
+            from utils.diagnostic_engine import get_engine
+            engine = get_engine()
+            recent = engine.get_recent_diagnoses(limit=3)
+            if recent:
+                diag_parts = [
+                    f"{d.category.name}:{d.symptom[:40]}"
+                    for d in recent
+                ]
+                parts.append(f"recent_diag=[{'; '.join(diag_parts)}]")
+        except (ImportError, Exception):
+            pass
 
         return ", ".join(parts)
 

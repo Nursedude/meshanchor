@@ -508,6 +508,21 @@ class ServiceOrchestrator:
             True if all required services are running and healthy (or graceful mode)
         """
         logger.info("═══ MeshForge NOC Startup ═══")
+
+        # Pre-flight: check all required services are installed BEFORE starting anything
+        missing = self._preflight_check()
+        if missing and not graceful:
+            logger.error("═══ Pre-flight check failed ═══")
+            logger.error("")
+            logger.error("Required services not installed:")
+            for svc_name, fix_cmd in missing:
+                logger.error(f"  • {svc_name}")
+                logger.error(f"    Fix: {fix_cmd}")
+            logger.error("")
+            logger.error("After installing, run: sudo meshforge-noc --start")
+            logger.error("Or run the full installer: sudo bash /opt/meshforge/scripts/install_noc.sh")
+            return False
+
         if graceful:
             logger.info("Graceful mode: will continue even if services fail")
 
@@ -519,21 +534,22 @@ class ServiceOrchestrator:
             if not config:
                 continue
 
-            # Check dependencies (skip in graceful mode if dep failed)
-            dep_ok = True
+            # Skip if dependency already failed (don't cascade)
+            dep_failed = False
             for dep in config.dependencies:
+                if dep in failed_services:
+                    logger.warning(f"Skipping {service_name}: dependency {dep} not available")
+                    dep_failed = True
+                    break
                 if not self.is_healthy(dep):
-                    logger.error(f"Dependency {dep} not healthy for {service_name}")
-                    if graceful:
-                        logger.warning(f"Graceful mode: skipping {service_name} due to dependency")
-                        dep_ok = False
-                        break
-                    elif config.required:
-                        success = False
-                        continue
+                    logger.warning(f"Skipping {service_name}: dependency {dep} not healthy")
+                    dep_failed = True
+                    break
 
-            if not dep_ok:
+            if dep_failed:
                 failed_services.append(service_name)
+                if config.required and not graceful:
+                    success = False
                 continue
 
             # Start service
@@ -557,8 +573,38 @@ class ServiceOrchestrator:
             logger.info("MeshForge running in degraded mode - some features unavailable")
         else:
             logger.error("═══ Startup failed ═══")
+            if failed_services:
+                logger.error(f"Failed: {', '.join(failed_services)}")
+                logger.error("Run 'meshforge-noc --status' for details")
 
         return success or graceful
+
+    def _preflight_check(self) -> List[tuple]:
+        """
+        Check all required services are installed before attempting startup.
+
+        Returns:
+            List of (service_name, fix_command) for missing services.
+            Empty list means all services are ready.
+        """
+        missing = []
+        for service_name in self.STARTUP_ORDER:
+            config = self.SERVICES.get(service_name)
+            if not config or not config.required:
+                continue
+            if not self.is_installed(service_name):
+                fix = self._get_install_hint(service_name)
+                missing.append((service_name, fix))
+        return missing
+
+    def _get_install_hint(self, service_name: str) -> str:
+        """Get actionable install command for a missing service."""
+        hints = {
+            'meshtasticd': 'sudo apt install meshtasticd (add repo first: see meshforge docs)',
+            'rnsd': 'pip3 install rns && sudo systemctl enable rnsd',
+            'mosquitto': 'sudo apt install mosquitto',
+        }
+        return hints.get(service_name, f'Install {service_name}')
 
     def shutdown(self) -> bool:
         """Stop all managed services in reverse order."""

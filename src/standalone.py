@@ -116,8 +116,10 @@ class StandaloneTools:
             from utils.rf import (
                 haversine_distance, fresnel_radius,
                 free_space_path_loss, earth_bulge,
-                link_budget, is_fast_available
+                link_budget, detailed_link_budget,
+                is_fast_available, CABLE_LOSS_DB_PER_M
             )
+            _has_detailed = True
             fast_mode = " (Cython optimized)" if is_fast_available() else ""
             print(f"RF calculations ready{fast_mode}\n")
         except ImportError:
@@ -142,6 +144,7 @@ class StandaloneTools:
             def earth_bulge(distance_m):
                 return (distance_m ** 2) / (8 * 6371000 * (4/3))
 
+            _has_detailed = False
             print("RF calculations ready (inline mode)\n")
 
         while True:
@@ -149,7 +152,7 @@ class StandaloneTools:
             print("2. Free Space Path Loss (FSPL)")
             print("3. Fresnel zone radius")
             print("4. Earth bulge calculation")
-            print("5. Link budget")
+            print("5. Detailed link budget")
             print("0. Back")
 
             try:
@@ -202,17 +205,48 @@ class StandaloneTools:
 
             elif choice == "5":
                 try:
-                    print("\nEnter link parameters:")
-                    tx_power = float(input("  TX Power (dBm): "))
-                    tx_gain = float(input("  TX Antenna Gain (dBi): "))
-                    rx_gain = float(input("  RX Antenna Gain (dBi): "))
-                    dist = float(input("  Distance (km): ")) * 1000
-                    freq = float(input("  Frequency (MHz): "))
+                    if _has_detailed:
+                        print("\n─── Detailed Link Budget ───")
+                        print("  Cable types: rg174, rg58, rg8x, lmr195, lmr240, lmr400, lmr600\n")
+                        tx_power = float(input("  TX Power (dBm) [20]: ") or "20")
+                        tx_cable = input("  TX Cable type [lmr400]: ").strip() or "lmr400"
+                        tx_cable_len = float(input("  TX Cable length (m) [1]: ") or "1")
+                        tx_gain = float(input("  TX Antenna Gain (dBi) [2]: ") or "2")
+                        rx_gain = float(input("  RX Antenna Gain (dBi) [2]: ") or "2")
+                        rx_cable = input("  RX Cable type [lmr400]: ").strip() or "lmr400"
+                        rx_cable_len = float(input("  RX Cable length (m) [1]: ") or "1")
+                        dist = float(input("  Distance (km) [5]: ") or "5") * 1000
+                        freq = float(input("  Frequency (MHz) [906.875]: ") or "906.875")
+                        sf = int(input("  Spreading Factor (7-12) [11]: ") or "11")
 
-                    fspl = free_space_path_loss(dist, freq)
-                    rx_power = tx_power + tx_gain + rx_gain - fspl
-                    print(f"\n  FSPL: {fspl:.2f} dB")
-                    print(f"  RX Power: {rx_power:.2f} dBm\n")
+                        result = detailed_link_budget(
+                            tx_power_dbm=tx_power,
+                            tx_cable_type=tx_cable,
+                            tx_cable_length_m=tx_cable_len,
+                            tx_antenna_gain_dbi=tx_gain,
+                            rx_antenna_gain_dbi=rx_gain,
+                            rx_cable_type=rx_cable,
+                            rx_cable_length_m=rx_cable_len,
+                            distance_m=dist,
+                            freq_mhz=freq,
+                            spreading_factor=sf,
+                        )
+                        print("\n─── Results ───")
+                        for line in result.summary():
+                            print(f"  {line}")
+                        print()
+                    else:
+                        # Inline fallback - simple version
+                        print("\nEnter link parameters:")
+                        tx_power = float(input("  TX Power (dBm): "))
+                        tx_gain = float(input("  TX Antenna Gain (dBi): "))
+                        rx_gain = float(input("  RX Antenna Gain (dBi): "))
+                        dist = float(input("  Distance (km): ")) * 1000
+                        freq = float(input("  Frequency (MHz): "))
+                        fspl = free_space_path_loss(dist, freq)
+                        rx_power = tx_power + tx_gain + rx_gain - fspl
+                        print(f"\n  FSPL: {fspl:.2f} dB")
+                        print(f"  RX Power: {rx_power:.2f} dBm\n")
                 except ValueError:
                     print("Invalid input\n")
 
