@@ -1132,6 +1132,44 @@ exec sudo /opt/meshforge/scripts/configure_lora.sh "$@"
 LORA_CMD
 chmod +x /usr/local/bin/meshforge-lora
 
+# Web client launcher
+cat > /usr/local/bin/meshforge-web << 'WEB_CMD'
+#!/bin/bash
+# Open or display the meshtasticd web client URL
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$LOCAL_IP" ] && LOCAL_IP="localhost"
+URL="https://${LOCAL_IP}:9443"
+
+# Check if meshtasticd web server is responding
+if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/9443" 2>/dev/null; then
+    echo "Meshtastic Web Client: ${URL}"
+    echo ""
+    echo "  Full radio configuration in your browser:"
+    echo "    • Region, Preset, TX Power (Config → LoRa)"
+    echo "    • Channels and PSK keys   (Config → Channels)"
+    echo "    • Node name and position   (Config → Device)"
+    echo "    • Messaging and map view"
+    echo ""
+    # Try to open browser (works on desktop, no-op on headless)
+    if command -v xdg-open &>/dev/null && [ -n "$DISPLAY" ]; then
+        xdg-open "$URL" 2>/dev/null &
+        echo "  Opening browser..."
+    else
+        echo "  Open this URL in any browser on your network:"
+        echo "  ${URL}"
+    fi
+else
+    echo "ERROR: meshtasticd web server not responding on port 9443"
+    echo ""
+    echo "  Check: sudo systemctl status meshtasticd"
+    echo "  Start: sudo systemctl start meshtasticd"
+    echo ""
+    echo "  The web client is served by meshtasticd when running."
+    echo "  Config: /etc/meshtasticd/config.yaml (Webserver section)"
+fi
+WEB_CMD
+chmod +x /usr/local/bin/meshforge-web
+
 # Update systemd service to use orchestrator
 cat > /etc/systemd/system/meshforge.service << 'MESHFORGE_SERVICE'
 [Unit]
@@ -1215,6 +1253,7 @@ echo "  /etc/meshtasticd/available.d/     - Radio templates"
 echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
+echo -e "  ${GREEN}meshforge-web${NC}              - Open radio web client (config)"
 echo -e "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
 echo -e "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
 echo -e "  ${GREEN}sudo meshforge-noc --status${NC} - Check service status"
@@ -1225,33 +1264,6 @@ echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
 echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
 echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
-
-# Post-install note for network configuration (native daemon has web UI)
-if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
-    # Get IP address for web UI URL
-    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
-
-    echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  IMPORTANT: Configure LoRa settings to join a network!    ║${NC}"
-    echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  Your radio needs these settings to match your mesh network:"
-    echo -e "    - ${BOLD}Region${NC}     (US, EU_868, AU_915, etc.)"
-    echo -e "    - ${BOLD}Channel${NC}    (frequency slot - MUST match network)"
-    echo -e "    - ${BOLD}Preset${NC}     (LONG_FAST, SHORT_FAST, etc.)"
-    echo -e "    - ${BOLD}TX Power${NC}   (depends on region/radio)"
-    echo ""
-    echo -e "  ${CYAN}Option 1: Web UI (Recommended)${NC}"
-    echo -e "  ${GREEN}https://${LOCAL_IP}:9443${NC}"
-    echo -e "  Navigate to: Config → LoRa"
-    echo ""
-    echo -e "  ${CYAN}Option 2: Interactive CLI wizard${NC}"
-    echo -e "  ${GREEN}sudo meshforge-lora --interactive${NC}"
-    echo ""
-    echo -e "  ${CYAN}Option 3: Quick profile${NC}"
-    echo -e "  ${GREEN}sudo meshforge-lora --profile us_default${NC}"
-    echo ""
-fi
 
 # ─────────────────────────────────────────────────────────────────
 # SPI Reboot Gate: If SPI was just enabled, stop here cleanly
@@ -1328,6 +1340,28 @@ if [[ "$DAEMON_TYPE" != "spi-pending" && "$DAEMON_TYPE" != "placeholder" ]] && [
         /usr/local/bin/meshforge-noc --start
         echo ""
         echo -e "${GREEN}NOC is running. Launch interface with: sudo meshforge${NC}"
+    fi
+fi
+
+# Show web client URL if meshtasticd is running (the primary config interface)
+if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/9443" 2>/dev/null; then
+        echo ""
+        echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║  Meshtastic Web Client Ready                              ║${NC}"
+        echo -e "${GREEN}╠═══════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${GREEN}║                                                           ║${NC}"
+        echo -e "${GREEN}║  ${NC}${BOLD}https://${LOCAL_IP}:9443${NC}${GREEN}                              ║${NC}"
+        echo -e "${GREEN}║                                                           ║${NC}"
+        echo -e "${GREEN}║  Configure your radio:                                    ║${NC}"
+        echo -e "${GREEN}║    Config → LoRa     (Region, Preset, TX Power)           ║${NC}"
+        echo -e "${GREEN}║    Config → Channels (PSK, channel names)                 ║${NC}"
+        echo -e "${GREEN}║    Config → Device   (Node name, position)                ║${NC}"
+        echo -e "${GREEN}║                                                           ║${NC}"
+        echo -e "${GREEN}║  Also: ${NC}${BOLD}meshforge-web${NC}${GREEN}  (shows this URL anytime)            ║${NC}"
+        echo -e "${GREEN}║                                                           ║${NC}"
+        echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
     fi
 fi
 

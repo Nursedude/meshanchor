@@ -237,6 +237,7 @@ class MeshForgeLauncher(
 
             # Config section
             choices.append(("---", "──────────── Config ───────────"))
+            choices.append(("web", "Web Client (Radio Config)"))
             choices.append(("meshtasticd", "Meshtasticd Config"))
             choices.append(("services", "Service Management"))
             choices.append(("hardware", "Hardware Detection"))
@@ -285,6 +286,8 @@ class MeshForgeLauncher(
             self._messaging_menu()
         elif choice == "rf":
             self._rf_tools_menu()
+        elif choice == "web":
+            self._open_web_client()
         elif choice == "meshtasticd":
             self._meshtasticd_menu()
         elif choice == "services":
@@ -300,6 +303,53 @@ class MeshForgeLauncher(
         """Launch GTK interface."""
         self.dialog.infobox("Launching", "Starting GTK4 Desktop Interface...")
         os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_gtk.py')])
+
+    def _open_web_client(self):
+        """Show/open meshtasticd web client for full radio configuration."""
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "localhost"
+
+        web_url = f"https://{local_ip}:9443"
+
+        # Check if web server is responding
+        port_ok = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            port_ok = sock.connect_ex((local_ip, 9443)) == 0
+            sock.close()
+        except Exception:
+            pass
+
+        if port_ok:
+            msg = (
+                f"Meshtastic Web Client is RUNNING\n\n"
+                f"  URL: {web_url}\n\n"
+                f"Open this in any browser on your network.\n\n"
+                f"Configure your radio:\n"
+                f"  Config → LoRa      Region, Preset, TX Power\n"
+                f"  Config → Channels  PSK keys, channel names\n"
+                f"  Config → Device    Node name, position\n\n"
+                f"Also provides: messaging, node map, telemetry\n\n"
+                f"Note: Accept the self-signed cert warning.\n\n"
+                f"CLI shortcut: meshforge-web"
+            )
+        else:
+            msg = (
+                f"Web client NOT responding on port 9443\n\n"
+                f"meshtasticd may not be running.\n\n"
+                f"  Start: sudo systemctl start meshtasticd\n"
+                f"  Check: sudo systemctl status meshtasticd\n"
+                f"  Logs:  sudo journalctl -u meshtasticd -f"
+            )
+
+        self.dialog.msgbox("Web Client", msg)
 
     # =========================================================================
     # System Diagnostics
