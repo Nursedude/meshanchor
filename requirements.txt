@@ -1,31 +1,21 @@
-# Core dependencies for the installer UI
-click>=8.0.0
+# MeshForge Dependencies
 
 # Meshtastic Python library (required for radio communication)
-# Note: CLI (meshtastic command) can also be installed via pipx for user isolation
 meshtastic>=2.3.0
 
-# Reticulum Network Stack (RNS) - for gateway bridge functionality
-# Enables RNS-Meshtastic bidirectional messaging
+# Reticulum Network Stack (RNS) - for gateway bridge
 rns>=0.7.0
 lxmf>=0.4.0
+
+# Terminal formatting (used by TUI, diagnostics, tools)
 rich>=13.0.0
+
+# Configuration and utilities
 pyyaml>=6.0
 requests>=2.31.0
-
-# System utilities
 psutil>=5.9.0
 distro>=1.8.0
-
-# Configuration
 python-dotenv>=1.0.0
-
-# TUI Framework (for SSH/headless access)
-# Install with: pip install textual
-textual>=0.45.0
-
-# Web UI Framework
-flask>=2.3.0
 
 # Coverage maps
 folium>=0.15.0
