@@ -37,7 +37,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 ### Phase 2: Gateway Bridge Hardening
 
 - [x] **Reconnection logic audit** — integrated ReconnectStrategy with backoff + jitter
-- [ ] **Message queue overflow** — SQLite queue growth limits, cleanup policy
+- [x] **Message queue overflow** — max_queue_size, priority-based shedding, auto-cleanup, stale recovery
 - [x] **Bridge health metrics** — BridgeHealthMonitor: uptime, rates, errors, is_healthy
 - [x] **Error categorization** — classify_error: transient/permanent/unknown patterns
 - [ ] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip
@@ -93,7 +93,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Auto-open map on TUI launch — toggle setting, silent background start
 - [x] Gateway bridge hardening — ReconnectStrategy integration, health monitor, error classification
 - [x] Failed message persistence — re-queue to persistent queue on send failure
-- [x] 94 new tests for map + bridge pipeline (1386 total)
+- [x] Message queue overflow protection — max size limits, priority shedding, stale recovery, auto-cleanup
+- [x] 117 new tests for map + bridge + queue pipeline (1409 total)
 
 ---
 
