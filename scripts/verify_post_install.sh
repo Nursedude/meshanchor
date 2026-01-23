@@ -190,11 +190,11 @@ if [[ -f "$CONFIG_YAML" ]]; then
 
     # Check for Webserver section (CRITICAL for web client)
     if grep -q "Webserver:" "$CONFIG_YAML" 2>/dev/null; then
-        PORT=$(grep -A1 "Webserver:" "$CONFIG_YAML" | grep "Port:" | awk '{print $2}' || echo "9443")
-        check_pass "Webserver section" "Port: ${PORT:-9443}"
+        PORT=$(grep -A1 "Webserver:" "$CONFIG_YAML" | grep "Port:" | awk '{print $2}' || echo "4403")
+        check_pass "Webserver section" "Port: ${PORT:-4403}"
     else
         check_fail "Webserver section" "Missing from config.yaml - web client won't work" \
-            "Add: Webserver:\\n  Port: 9443\\n  RootPath: /usr/share/meshtasticd/web"
+            "Add: Webserver:\\n  Port: 4403\\n  RootPath: /usr/share/meshtasticd/web"
     fi
 
     # Check for Lora section
@@ -262,12 +262,7 @@ else
     check_warn "Port 4403 (TCP)" "Not listening" "meshtasticd may not be running or configured"
 fi
 
-# Check if port 9443 is listening (web client)
-if ss -tlnp 2>/dev/null | grep -q ":9443 "; then
-    check_pass "Port 9443 (HTTPS)" "Web client listening"
-else
-    check_warn "Port 9443 (HTTPS)" "Not listening" "Web client may not start until meshtasticd is running"
-fi
+# Web client is on same port 4403 as TCP API (checked above)
 
 # Check rnsd service
 if systemctl is-active --quiet rnsd 2>/dev/null; then
@@ -331,17 +326,17 @@ log ""
 # ─────────────────────────────────────────────────────────────────
 log "${BOLD}[6/6] Network Connectivity${NC}"
 
-# Test web client if port is open
-if ss -tlnp 2>/dev/null | grep -q ":9443 "; then
+# Test web client (port 4403 - same as TCP API)
+if ss -tlnp 2>/dev/null | grep -q ":4403 "; then
     # Try to connect to web client
-    if curl -sk --max-time 5 "https://localhost:9443" &>/dev/null; then
-        check_pass "Web client connection" "https://localhost:9443 responds"
+    if curl -s --max-time 5 "http://localhost:4403" &>/dev/null; then
+        check_pass "Web client connection" "http://localhost:4403 responds"
     else
         check_warn "Web client connection" "Port open but not responding" \
             "May still be starting up"
     fi
 else
-    check_skip "Web client connection" "Port 9443 not listening"
+    check_skip "Web client connection" "Port 4403 not listening"
 fi
 
 # Test meshtasticd TCP if port is open

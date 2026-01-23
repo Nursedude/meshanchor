@@ -450,7 +450,7 @@ class ConfigFileManager:
                 if status.available:
                     console.print("[bold green]Service is running![/bold green]")
                     console.print("\n[cyan]Check the web interface at:[/cyan]")
-                    console.print("  https://<your-ip>:9443")
+                    console.print("  http://<your-ip>:4403")
                 else:
                     console.print("[yellow]Service may not be running properly.[/yellow]")
                     console.print("Check logs with: journalctl -u meshtasticd -f")
@@ -463,7 +463,7 @@ class ConfigFileManager:
                 if result.stdout.strip() == "active":
                     console.print("[bold green]Service is running![/bold green]")
                     console.print("\n[cyan]Check the web interface at:[/cyan]")
-                    console.print("  https://<your-ip>:9443")
+                    console.print("  http://<your-ip>:4403")
                 else:
                     console.print("[yellow]Service may not be running properly.[/yellow]")
                     console.print("Check logs with: journalctl -u meshtasticd -f")
@@ -877,7 +877,7 @@ Lora:
 
 # Web server settings (RECOMMENDED)
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 # Logging settings

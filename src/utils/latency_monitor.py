@@ -7,7 +7,7 @@ real-time network health assessment.
 
 Services monitored:
 - meshtasticd TCP (4403) - mesh radio daemon
-- meshtasticd HTTP (9443) - web client API
+- meshtasticd HTTP (4403) - web client (same port as TCP API)
 - rnsd (37428) - Reticulum shared instance
 - MQTT (1883) - message broker
 """
@@ -98,7 +98,7 @@ class ServiceHealth:
 # Default services to monitor
 DEFAULT_SERVICES = [
     ('meshtasticd_tcp', 'localhost', 4403),
-    ('meshtasticd_http', 'localhost', 9443),
+    ('meshtasticd_http', 'localhost', 4403),
     ('rnsd', 'localhost', 37428),
     ('mqtt', 'localhost', 1883),
 ]
