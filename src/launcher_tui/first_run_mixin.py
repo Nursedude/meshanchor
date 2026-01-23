@@ -18,22 +18,23 @@ from typing import Optional
 try:
     from utils.paths import get_real_user_home
 except ImportError:
-    from src.utils.paths import get_real_user_home
+    def get_real_user_home() -> Path:
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            return Path(f'/home/{sudo_user}')
+        return Path.home()
 
 # Import service check
 try:
     from utils.service_check import check_service
 except ImportError:
-    from src.utils.service_check import check_service
+    check_service = None
 
 # Import device scanner
 try:
     from utils.device_scanner import DeviceScanner
 except ImportError:
-    try:
-        from src.utils.device_scanner import DeviceScanner
-    except ImportError:
-        DeviceScanner = None
+    DeviceScanner = None
 
 
 class FirstRunMixin:

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Meshtasticd installation script for 64-bit Raspberry Pi OS (arm64)
 # Uses official OpenSUSE Build Service repositories
+# Official docs: https://meshtastic.org/docs/software/linux/installation/
 #
 # This script:
 # 1. Installs meshtasticd daemon from official repos
@@ -166,7 +167,7 @@ fi
 # Use --break-system-packages since we're running as root
 echo -e "\n${GREEN}Installing installer UI dependencies...${NC}"
 python3 -m pip install --quiet --break-system-packages \
-    click rich pyyaml requests psutil distro python-dotenv 2>&1 || {
+    rich pyyaml requests psutil distro python-dotenv 2>&1 || {
     echo -e "${YELLOW}Note: Some packages may already be satisfied by system packages${NC}"
 }
 

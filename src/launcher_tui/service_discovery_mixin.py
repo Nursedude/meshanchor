@@ -17,16 +17,14 @@ from dataclasses import dataclass
 try:
     from utils.service_check import check_service, check_port
 except ImportError:
-    from src.utils.service_check import check_service, check_port
+    check_service = None
+    check_port = None
 
 # Import device scanner
 try:
     from utils.device_scanner import DeviceScanner
 except ImportError:
-    try:
-        from src.utils.device_scanner import DeviceScanner
-    except ImportError:
-        DeviceScanner = None
+    DeviceScanner = None
 
 
 @dataclass
