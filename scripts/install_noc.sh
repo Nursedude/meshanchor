@@ -565,8 +565,10 @@ NATIVE_SERVICE
                 echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
             fi
 
-            # Enable USB config (copy is more reliable than symlink)
-            cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            # Enable USB config if meshtasticd provides one
+            if [[ -f "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" ]]; then
+                cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            fi
 
             # Check if native meshtasticd is available (can work with USB serial too)
             if command -v meshtasticd &> /dev/null; then

@@ -248,7 +248,6 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 - `launcher_tui/main.py`: 2,822 → 1,336 lines ✅
 - `hamclock.py`: 2,625 → 1,525 lines ✅
 - `rns.py`: 673 lines ✅
-- `main_web.py`: 1,370 lines ✅
 - `mesh_tools.py`: Now under 1,500 lines ✅
 
 **Markdown files over 1,000 lines:**
@@ -260,119 +259,14 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 
 ### Proper Fix
 
-**Priority 1: main_web.py (3,524 lines)**
-```python
-# Split into Flask blueprints:
-src/web/
-├── __init__.py           # Flask app factory
-├── routes/
-│   ├── api.py            # /api/* routes
-│   ├── monitor.py        # /monitor/* routes
-│   └── config.py         # /config/* routes
-└── templates/            # Jinja templates
-```
-
-**Priority 2: rns.py (3,162 lines)**
-```python
-# Extract config editor:
-src/gtk_ui/panels/
-├── rns.py                # Main RNS panel
-└── rns_config_editor.py  # Config editing dialog
-```
+Files over 1,500 lines should be split when adding new features to them.
+Previously refactored: launcher_tui (extracted mixins), hamclock (extracted API client),
+rns.py (extracted config editor + mixins). Web UI and Rich CLI were deleted in consolidation.
 
 ### Prevention
 - Check file length before adding new features
 - Split files proactively at 1,000 lines
 - Use `wc -l src/**/*.py | sort -rn | head -10` to monitor
-
----
-
-## Issue #6: Textual TUI height: 1fr CSS Conflicts
-
-### Symptom
-TUI dashboard shows no visual output despite code executing correctly:
-- Logs confirm widgets are queried successfully
-- Data is fetched (247 nodes)
-- Widget update calls complete
-- BUT: Status cards stuck on "Checking...", Log panel empty, no text visible
-
-### Root Causes (TWO related issues)
-
-#### Cause 1: ScrollableContainer breaks height: 1fr
-`DashboardPane` extended `ScrollableContainer`, but the Log widget CSS used `height: 1fr`.
-
-#### Cause 2: CSS `overflow-y: auto` creates same problem
-Even with `Container`, CSS `overflow-y: auto` on parent creates a scroll context:
-
-```css
-/* BREAKS height: 1fr in children */
-TabPane > Container {
-    height: 100%;
-    overflow-y: auto;  /* Creates scroll context - breaks 1fr! */
-}
-
-.log-panel {
-    height: 1fr;  /* Calculates to 0 in scroll context */
-}
-```
-
-**Why this fails:**
-- `height: 1fr` means "take one fraction of remaining space"
-- Scroll contexts (ScrollableContainer OR `overflow-y: auto`) can expand infinitely
-- "Remaining space" in infinite container = undefined/zero
-- Widget calculates to height: 0 → invisible
-
-### Proper Fix
-
-**1. Use Container, not ScrollableContainer:**
-```python
-# WRONG
-class DashboardPane(ScrollableContainer):
-    pass
-
-# CORRECT
-class DashboardPane(Container):
-    pass
-```
-
-**2. Never use `overflow-y: auto` on parents of `height: 1fr` children:**
-```css
-/* WRONG */
-TabPane > Container {
-    height: 100%;
-    overflow-y: auto;
-}
-
-/* CORRECT */
-TabPane > Container {
-    height: 100%;
-    /* NO overflow-y: auto */
-}
-```
-
-**3. Make on_mount async and log errors:**
-```python
-# WRONG - silent failures
-def on_mount(self):
-    try:
-        ...
-    except Exception as e:
-        pass  # Silent!
-
-# CORRECT
-async def on_mount(self):
-    try:
-        ...
-    except Exception as e:
-        logger.error(f"on_mount failed: {e}")
-```
-
-### Prevention
-- Use `Container` as base class for TUI panes (not ScrollableContainer)
-- Never add `overflow-y: auto` to parents of `height: 1fr` widgets
-- All `on_mount` methods should be `async def on_mount(self):`
-- Never use `except: pass` - always log errors
-- Test TUI changes visually, not just via logs
 
 ---
 
@@ -400,9 +294,9 @@ Adding menu options that reference new scripts without creating the scripts firs
 ### Prevention
 Run this verification before committing launcher changes:
 ```bash
-# Check all referenced files exist
-for f in src/main_gtk.py src/main.py src/web_monitor.py src/cli/diagnose.py \
-         src/gateway/bridge_cli.py src/monitor.py src/launcher.py; do
+# Check all referenced files exist (post-consolidation: 2 UIs only)
+for f in src/main_gtk.py src/launcher.py src/launcher_tui/main.py \
+         src/standalone.py src/monitor.py; do
   [ -f "$f" ] && echo "OK: $f" || echo "MISSING: $f"
 done
 ```
@@ -1086,7 +980,7 @@ if current_time - last_check >= 30:
 
 ---
 
-*Last updated: 2026-01-20 - Added Issues #17-21*
+*Last updated: 2026-01-23 - Removed stale Textual/Flask/Web UI references after UI consolidation*
 
 ---
 
@@ -1275,7 +1169,7 @@ def apply_preset(preset_name):
 
 ### Files to Update
 - `src/config/radio.py` - Add verification warning
-- `src/main.py` - Add verification step in config wizard
+- `src/launcher_tui/main.py` - Add verification step in config wizard
 - Documentation - Note the CLI limitation
 
 ### Prevention
