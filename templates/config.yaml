@@ -9,11 +9,11 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/
