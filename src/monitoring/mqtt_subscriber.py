@@ -22,6 +22,7 @@ Usage:
 
 import json
 import logging
+import random
 import ssl
 import threading
 import time
@@ -43,6 +44,15 @@ DEFAULT_PORT = 1883
 DEFAULT_ROOT_TOPIC = "msh/US/2/e"
 DEFAULT_CHANNEL = "LongFast"
 DEFAULT_KEY = "AQ=="  # Default Meshtastic encryption key
+
+# Robustness limits
+MAX_PAYLOAD_BYTES = 65536  # 64 KB max per MQTT message
+MAX_NODES = 10000  # Maximum tracked nodes before pruning
+STALE_NODE_HOURS = 72  # Remove nodes not seen for 72 hours
+VALID_LAT_RANGE = (-90.0, 90.0)
+VALID_LON_RANGE = (-180.0, 180.0)
+VALID_SNR_RANGE = (-50.0, 50.0)  # dB
+VALID_RSSI_RANGE = (-200, 0)  # dBm
 
 
 @dataclass
@@ -136,12 +146,20 @@ class MQTTNodelessSubscriber:
         self._last_cache_write: float = 0
         self._cache_interval: int = 30  # Write cache every 30 seconds max
 
+        # Stale node cleanup
+        self._last_cleanup: float = 0
+        self._cleanup_interval: int = 600  # Check every 10 minutes
+
         # Stats
         self._stats = {
             "messages_received": 0,
+            "messages_rejected": 0,
             "nodes_discovered": 0,
+            "nodes_pruned": 0,
             "connect_time": None,
             "last_message_time": None,
+            "reconnect_attempts": 0,
+            "last_disconnect_reason": "",
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -314,6 +332,8 @@ class MQTTNodelessSubscriber:
         self._connected = False
 
         if rc != 0:
+            reason = f"unexpected_rc_{rc}"
+            self._stats["last_disconnect_reason"] = reason
             logger.warning(f"Unexpected MQTT disconnect (rc={rc})")
             if self._config.get("auto_reconnect", True) and not self._stop_event.is_set():
                 self._start_reconnect()
@@ -332,16 +352,21 @@ class MQTTNodelessSubscriber:
         self._reconnect_thread.start()
 
     def _reconnect_loop(self) -> None:
-        """Reconnection loop with exponential backoff."""
+        """Reconnection loop with exponential backoff and jitter."""
         delay = self._config.get("reconnect_delay", 5)
         max_delay = self._config.get("max_reconnect_delay", 60)
 
         while not self._stop_event.is_set():
-            logger.info(f"Reconnecting in {delay}s...")
-            self._stop_event.wait(delay)
+            # Add jitter (0-25% of delay) to prevent thundering herd
+            jitter = random.uniform(0, delay * 0.25)
+            wait_time = delay + jitter
+            logger.info(f"Reconnecting in {wait_time:.1f}s...")
+            self._stop_event.wait(wait_time)
 
             if self._stop_event.is_set():
                 break
+
+            self._stats["reconnect_attempts"] += 1
 
             if self._connect():
                 logger.info("Reconnection successful")
@@ -354,6 +379,12 @@ class MQTTNodelessSubscriber:
         try:
             topic = msg.topic
             payload = msg.payload
+
+            # Payload size defense
+            if len(payload) > MAX_PAYLOAD_BYTES:
+                self._stats["messages_rejected"] += 1
+                logger.debug(f"Rejected oversized payload: {len(payload)} bytes")
+                return
 
             self._stats["messages_received"] += 1
             self._stats["last_message_time"] = datetime.now()
@@ -370,6 +401,11 @@ class MQTTNodelessSubscriber:
             if now - self._last_cache_write >= self._cache_interval:
                 self._persist_map_cache()
                 self._last_cache_write = now
+
+            # Periodically clean stale nodes
+            if now - self._last_cleanup >= self._cleanup_interval:
+                self._cleanup_stale_nodes()
+                self._last_cleanup = now
 
         except Exception as e:
             logger.debug(f"Error processing MQTT message: {e}")
@@ -436,17 +472,47 @@ class MQTTNodelessSubscriber:
                 self._nodes[node_id].last_seen = datetime.now()
             return self._nodes[node_id]
 
+    def _safe_float(self, value: Any, min_val: float, max_val: float) -> Optional[float]:
+        """Safely extract and validate a float value within range."""
+        if value is None:
+            return None
+        try:
+            f = float(value)
+            if min_val <= f <= max_val:
+                return f
+        except (TypeError, ValueError):
+            pass
+        return None
+
+    def _safe_int(self, value: Any, min_val: int, max_val: int) -> Optional[int]:
+        """Safely extract and validate an int value within range."""
+        if value is None:
+            return None
+        try:
+            i = int(value)
+            if min_val <= i <= max_val:
+                return i
+        except (TypeError, ValueError):
+            pass
+        return None
+
     def _update_node_from_json(self, node_id: str, data: Dict) -> None:
-        """Update node info from JSON message."""
+        """Update node info from JSON message with input validation."""
         node = self._ensure_node(node_id)
 
-        # Update fields from message
+        # Validate and update fields
         if "snr" in data:
-            node.snr = data["snr"]
+            snr = self._safe_float(data["snr"], *VALID_SNR_RANGE)
+            if snr is not None:
+                node.snr = snr
         if "rssi" in data:
-            node.rssi = data["rssi"]
+            rssi = self._safe_int(data["rssi"], *VALID_RSSI_RANGE)
+            if rssi is not None:
+                node.rssi = rssi
         if "hop_start" in data:
-            node.hop_start = data["hop_start"]
+            hop = self._safe_int(data["hop_start"], 0, 15)
+            if hop is not None:
+                node.hop_start = hop
         if "hops_away" in data:
             node.hops_away = data["hops_away"]
 
@@ -471,7 +537,7 @@ class MQTTNodelessSubscriber:
         node.role = payload.get("role", node.role)
 
     def _handle_position(self, data: Dict) -> None:
-        """Handle position message."""
+        """Handle position message with coordinate validation."""
         payload = data.get("payload", {})
         node_id = data.get("from")
         if not node_id:
@@ -480,18 +546,34 @@ class MQTTNodelessSubscriber:
         node = self._ensure_node(node_id)
 
         # Position may be in different formats
+        lat = None
+        lon = None
+
         if "latitude_i" in payload:
-            node.latitude = payload["latitude_i"] / 1e7
-            node.longitude = payload["longitude_i"] / 1e7
+            lat = self._safe_float(payload.get("latitude_i"), -900000000, 900000000)
+            lon = self._safe_float(payload.get("longitude_i"), -1800000000, 1800000000)
+            if lat is not None:
+                lat = lat / 1e7
+            if lon is not None:
+                lon = lon / 1e7
         elif "latitude" in payload:
-            node.latitude = payload["latitude"]
-            node.longitude = payload["longitude"]
+            lat = self._safe_float(payload.get("latitude"), *VALID_LAT_RANGE)
+            lon = self._safe_float(payload.get("longitude"), *VALID_LON_RANGE)
+
+        # Only update if both lat/lon are valid and non-zero
+        if lat is not None and lon is not None and (lat != 0.0 or lon != 0.0):
+            if VALID_LAT_RANGE[0] <= lat <= VALID_LAT_RANGE[1] and \
+               VALID_LON_RANGE[0] <= lon <= VALID_LON_RANGE[1]:
+                node.latitude = lat
+                node.longitude = lon
 
         if "altitude" in payload:
-            node.altitude = payload["altitude"]
+            alt = self._safe_float(payload.get("altitude"), -500, 100000)
+            if alt is not None:
+                node.altitude = alt
 
     def _handle_telemetry(self, data: Dict) -> None:
-        """Handle telemetry message."""
+        """Handle telemetry message with value validation."""
         payload = data.get("payload", {})
         node_id = data.get("from")
         if not node_id:
@@ -501,15 +583,22 @@ class MQTTNodelessSubscriber:
 
         # Device metrics
         device = payload.get("device_metrics", {})
-        if device:
-            if "battery_level" in device:
-                node.battery_level = device["battery_level"]
-            if "voltage" in device:
-                node.voltage = device["voltage"]
-            if "channel_utilization" in device:
-                node.channel_utilization = device["channel_utilization"]
-            if "air_util_tx" in device:
-                node.air_util_tx = device["air_util_tx"]
+        if isinstance(device, dict) and device:
+            battery = self._safe_int(device.get("battery_level"), 0, 101)
+            if battery is not None:
+                node.battery_level = battery
+
+            voltage = self._safe_float(device.get("voltage"), 0.0, 10.0)
+            if voltage is not None:
+                node.voltage = voltage
+
+            ch_util = self._safe_float(device.get("channel_utilization"), 0.0, 100.0)
+            if ch_util is not None:
+                node.channel_utilization = ch_util
+
+            air_util = self._safe_float(device.get("air_util_tx"), 0.0, 100.0)
+            if air_util is not None:
+                node.air_util_tx = air_util
 
     def _handle_text_message(self, data: Dict) -> None:
         """Handle text message."""
@@ -538,6 +627,40 @@ class MQTTNodelessSubscriber:
                 callback(msg)
             except Exception as e:
                 logger.debug(f"Message callback error: {e}")
+
+    def _cleanup_stale_nodes(self) -> None:
+        """Remove nodes not seen for STALE_NODE_HOURS.
+
+        Prevents unbounded memory growth when monitoring long-running
+        sessions on busy networks.
+        """
+        cutoff = datetime.now()
+        stale_ids = []
+
+        with self._nodes_lock:
+            for node_id, node in self._nodes.items():
+                delta = cutoff - node.last_seen
+                if delta.total_seconds() > STALE_NODE_HOURS * 3600:
+                    stale_ids.append(node_id)
+
+            # Also enforce MAX_NODES: if over limit, prune oldest
+            if len(self._nodes) > MAX_NODES:
+                # Sort by last_seen, prune oldest
+                sorted_nodes = sorted(
+                    self._nodes.items(),
+                    key=lambda x: x[1].last_seen
+                )
+                excess = len(self._nodes) - MAX_NODES
+                for node_id, _ in sorted_nodes[:excess]:
+                    if node_id not in stale_ids:
+                        stale_ids.append(node_id)
+
+            for node_id in stale_ids:
+                del self._nodes[node_id]
+
+        if stale_ids:
+            self._stats["nodes_pruned"] += len(stale_ids)
+            logger.debug(f"Pruned {len(stale_ids)} stale nodes")
 
     # Public API
 
@@ -591,11 +714,19 @@ class MQTTNodelessSubscriber:
         self._message_callbacks.append(callback)
 
     def get_geojson(self) -> Dict:
-        """Get nodes as GeoJSON FeatureCollection for mapping."""
+        """Get nodes as GeoJSON FeatureCollection for mapping.
+
+        Only includes nodes with valid, non-zero coordinates within
+        the valid lat/lon range.
+        """
         features = []
 
         for node in self.get_nodes_with_position():
-            if node.latitude and node.longitude:
+            # Validate coordinates: non-None, non-zero, within range
+            if (node.latitude is not None and node.longitude is not None and
+                    (node.latitude != 0.0 or node.longitude != 0.0) and
+                    VALID_LAT_RANGE[0] <= node.latitude <= VALID_LAT_RANGE[1] and
+                    VALID_LON_RANGE[0] <= node.longitude <= VALID_LON_RANGE[1]):
                 feature = {
                     "type": "Feature",
                     "geometry": {
@@ -609,10 +740,12 @@ class MQTTNodelessSubscriber:
                         "is_online": node.is_online(),
                         "via_mqtt": True,
                         "snr": node.snr,
+                        "rssi": node.rssi,
                         "battery": node.battery_level,
                         "last_seen": node.get_age_string(),
                         "hardware": node.hardware_model,
                         "role": node.role,
+                        "hops_away": node.hops_away,
                     }
                 }
                 features.append(feature)
