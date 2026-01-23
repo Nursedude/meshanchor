@@ -11,8 +11,9 @@ To compile fast version:
 """
 
 import math
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Tuple, Optional, NamedTuple
+from typing import Dict, List, Tuple, Optional, NamedTuple
 
 # Try to import Cython-optimized versions
 _USE_FAST = False
@@ -370,6 +371,150 @@ def snr_estimate(rx_power_dbm: float, noise_floor_dbm: float = -120.0) -> float:
         Estimated SNR in dB
     """
     return rx_power_dbm - noise_floor_dbm
+
+
+# ============================================================================
+# Detailed Link Budget Analysis
+# ============================================================================
+
+@dataclass
+class LinkBudgetResult:
+    """Complete link budget breakdown showing where every dB goes."""
+
+    # TX side
+    tx_power_dbm: float
+    tx_cable_loss_db: float
+    tx_antenna_gain_dbi: float
+    eirp_dbm: float  # Effective Isotropic Radiated Power
+
+    # Path
+    distance_m: float
+    freq_mhz: float
+    path_loss_db: float
+    fresnel_clearance_m: float
+
+    # RX side
+    rx_antenna_gain_dbi: float
+    rx_cable_loss_db: float
+    received_power_dbm: float
+
+    # Margins
+    rx_sensitivity_dbm: float
+    link_margin_db: float  # How much signal above sensitivity
+    estimated_snr_db: float
+    signal_quality: str  # EXCELLENT/GOOD/FAIR/BAD
+
+    def summary(self) -> List[str]:
+        """Human-readable breakdown for TUI/GTK display."""
+        lines = [
+            f"TX Power:        {self.tx_power_dbm:+.1f} dBm",
+            f"TX Cable Loss:   {self.tx_cable_loss_db:-.1f} dB",
+            f"TX Antenna Gain: {self.tx_antenna_gain_dbi:+.1f} dBi",
+            f"EIRP:            {self.eirp_dbm:+.1f} dBm",
+            f"---",
+            f"Distance:        {self.distance_m:.0f} m ({self.distance_m/1000:.2f} km)",
+            f"Path Loss:       {self.path_loss_db:-.1f} dB",
+            f"Fresnel Zone:    {self.fresnel_clearance_m:.1f} m clearance needed",
+            f"---",
+            f"RX Antenna Gain: {self.rx_antenna_gain_dbi:+.1f} dBi",
+            f"RX Cable Loss:   {self.rx_cable_loss_db:-.1f} dB",
+            f"Received Power:  {self.received_power_dbm:+.1f} dBm",
+            f"---",
+            f"RX Sensitivity:  {self.rx_sensitivity_dbm:.1f} dBm",
+            f"Link Margin:     {self.link_margin_db:+.1f} dB",
+            f"Est. SNR:        {self.estimated_snr_db:+.1f} dB",
+            f"Signal Quality:  {self.signal_quality}",
+        ]
+        return lines
+
+
+def detailed_link_budget(
+    tx_power_dbm: float = 20.0,
+    tx_cable_type: str = 'lmr400',
+    tx_cable_length_m: float = 1.0,
+    tx_antenna_gain_dbi: float = 2.0,
+    rx_antenna_gain_dbi: float = 2.0,
+    rx_cable_type: str = 'lmr400',
+    rx_cable_length_m: float = 1.0,
+    distance_m: float = 1000.0,
+    freq_mhz: float = 906.875,
+    spreading_factor: int = 11,
+) -> LinkBudgetResult:
+    """
+    Calculate detailed link budget with full component breakdown.
+
+    Shows exactly where signal is gained and lost across the entire
+    TX → Path → RX chain. Uses LoRa sensitivity based on spreading factor.
+
+    Args:
+        tx_power_dbm: Transmitter output power (typical: 17-30 dBm)
+        tx_cable_type: TX coax type (rg58, lmr400, etc.)
+        tx_cable_length_m: TX cable length in meters
+        tx_antenna_gain_dbi: TX antenna gain in dBi
+        rx_antenna_gain_dbi: RX antenna gain in dBi
+        rx_cable_type: RX coax type
+        rx_cable_length_m: RX cable length in meters
+        distance_m: Link distance in meters
+        freq_mhz: Frequency in MHz (default 906.875 for US LoRa)
+        spreading_factor: LoRa SF (7-12, affects sensitivity)
+
+    Returns:
+        LinkBudgetResult with full breakdown
+
+    Example:
+        >>> result = detailed_link_budget(distance_m=5000, tx_power_dbm=30)
+        >>> print(result.link_margin_db)
+        25.3  # Comfortable margin
+        >>> for line in result.summary():
+        ...     print(line)
+    """
+    # Calculate cable losses
+    tx_cable_loss = calculate_cable_loss(tx_cable_type, tx_cable_length_m)
+    rx_cable_loss = calculate_cable_loss(rx_cable_type, rx_cable_length_m)
+
+    # EIRP: what actually leaves the TX antenna
+    eirp = tx_power_dbm - tx_cable_loss + tx_antenna_gain_dbi
+
+    # Path loss
+    path_loss = free_space_path_loss(distance_m, freq_mhz)
+
+    # Fresnel zone clearance needed at midpoint
+    distance_km = distance_m / 1000.0
+    freq_ghz = freq_mhz / 1000.0
+    fresnel_m = fresnel_radius(distance_km, freq_ghz) * 0.6  # 60% clearance
+
+    # Received power
+    rx_power = eirp - path_loss + rx_antenna_gain_dbi - rx_cable_loss
+
+    # LoRa sensitivity by spreading factor
+    sensitivity = LORA_SENSITIVITY_DBM.get(spreading_factor, -130.0)
+
+    # Link margin: how far above sensitivity we are
+    margin = rx_power - sensitivity
+
+    # SNR estimate
+    snr = snr_estimate(rx_power)
+
+    # Classify
+    quality = classify_signal(snr, rx_power)
+
+    return LinkBudgetResult(
+        tx_power_dbm=tx_power_dbm,
+        tx_cable_loss_db=tx_cable_loss,
+        tx_antenna_gain_dbi=tx_antenna_gain_dbi,
+        eirp_dbm=eirp,
+        distance_m=distance_m,
+        freq_mhz=freq_mhz,
+        path_loss_db=path_loss,
+        fresnel_clearance_m=fresnel_m,
+        rx_antenna_gain_dbi=rx_antenna_gain_dbi,
+        rx_cable_loss_db=rx_cable_loss,
+        received_power_dbm=rx_power,
+        rx_sensitivity_dbm=sensitivity,
+        link_margin_db=margin,
+        estimated_snr_db=snr,
+        signal_quality=quality.name,
+    )
 
 
 # Use fast versions if available

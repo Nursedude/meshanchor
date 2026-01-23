@@ -102,30 +102,88 @@ fi
 # Radio Type Detection Functions
 # ─────────────────────────────────────────────────────────────────
 
-detect_radio_type() {
-    # Returns: "spi", "usb", or "none"
-    # Priority: SPI HAT > USB Serial > None
+detect_hardware_hints() {
+    # Detect available hardware and report findings (does NOT decide radio type)
+    # Sets: HW_HAS_SPI, HW_HAS_USB, HW_HAS_CH341, HW_USB_DEVS
+    HW_HAS_SPI=false
+    HW_HAS_USB=false
+    HW_HAS_CH341=false
+    HW_USB_DEVS=""
 
     # Check for CH341 (Meshtoad USB-to-SPI adapter)
     if dmesg 2>/dev/null | grep -qi "ch341.*spi\|ch341-spi"; then
-        echo "spi"
-        return
+        HW_HAS_CH341=true
     fi
 
-    # Check for SPI devices - if present, prefer SPI over USB
-    # Works on Raspberry Pi, Jetson, x86 SoM, etc.
+    # Check for SPI devices
     if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
-        echo "spi"
-        return
+        HW_HAS_SPI=true
     fi
 
     # Check for USB serial devices
-    if ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -1 >/dev/null; then
-        echo "usb"
+    HW_USB_DEVS=$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | tr '\n' ' ')
+    if [[ -n "$HW_USB_DEVS" ]]; then
+        HW_HAS_USB=true
+    fi
+}
+
+ask_radio_type() {
+    # Ask user what radio they have, showing detected hardware as hints
+    # Returns: "spi", "usb", or "none"
+
+    detect_hardware_hints
+
+    echo ""
+    echo -e "  ${BOLD}Hardware detected:${NC}"
+    if $HW_HAS_SPI; then
+        echo -e "    ${GREEN}✓${NC} SPI bus available (/dev/spidev0.*)"
+    fi
+    if $HW_HAS_CH341; then
+        echo -e "    ${GREEN}✓${NC} CH341 USB-to-SPI adapter (Meshtoad)"
+    fi
+    if $HW_HAS_USB; then
+        echo -e "    ${GREEN}✓${NC} USB serial ports: $HW_USB_DEVS"
+    fi
+    if ! $HW_HAS_SPI && ! $HW_HAS_USB && ! $HW_HAS_CH341; then
+        echo -e "    ${YELLOW}!${NC} No LoRa hardware detected yet"
+    fi
+    echo ""
+
+    # Try whiptail first (raspi-config style)
+    if command -v whiptail &>/dev/null; then
+        local DEFAULT_ITEM="none"
+        if $HW_HAS_SPI || $HW_HAS_CH341; then
+            DEFAULT_ITEM="spi"
+        elif $HW_HAS_USB; then
+            DEFAULT_ITEM="usb"
+        fi
+
+        local CHOICE
+        CHOICE=$(whiptail --title "Radio Type" --menu \
+            "What type of LoRa radio is connected to this device?\n\nSelect your hardware:" \
+            15 60 3 \
+            "spi"  "SPI HAT (MeshAdv, Waveshare, RAK, Meshtoad)" \
+            "usb"  "USB Serial (T-Beam, Heltec, RAK USB)" \
+            "none" "No radio connected / install later" \
+            --default-item "$DEFAULT_ITEM" \
+            3>&1 1>&2 2>&3) || CHOICE="none"
+
+        echo "$CHOICE"
         return
     fi
 
-    echo "none"
+    # Fallback: simple text menu
+    echo -e "  ${BOLD}What type of LoRa radio is connected?${NC}"
+    echo "    1) SPI HAT (MeshAdv, Waveshare, RAK, Meshtoad)"
+    echo "    2) USB Serial (T-Beam, Heltec, RAK USB)"
+    echo "    3) No radio / install later"
+    echo ""
+    read -rp "  Select [1/2/3]: " radio_choice
+    case "$radio_choice" in
+        1) echo "spi" ;;
+        2) echo "usb" ;;
+        *) echo "none" ;;
+    esac
 }
 
 get_usb_device() {
@@ -373,16 +431,18 @@ UDEV_RULES
     # Load CH341 driver if present (Meshtoad)
     load_ch341_driver
 
-    # Determine radio type
+    # Determine radio type - ask user with hardware hints
     if $FORCE_NATIVE; then
         RADIO_TYPE="spi"
+        echo -e "  ${CYAN}Radio type forced: ${BOLD}spi${NC} (--force-native)"
     elif $FORCE_PYTHON; then
         RADIO_TYPE="usb"
+        echo -e "  ${CYAN}Radio type forced: ${BOLD}usb${NC} (--force-python)"
     else
-        RADIO_TYPE=$(detect_radio_type)
+        RADIO_TYPE=$(ask_radio_type)
     fi
 
-    echo -e "  ${CYAN}Detected radio type: ${BOLD}${RADIO_TYPE}${NC}"
+    echo -e "  ${CYAN}Selected radio type: ${BOLD}${RADIO_TYPE}${NC}"
 
     # Create meshtasticd config directory structure (if not exists)
     echo "  Creating /etc/meshtasticd/ structure..."
@@ -565,8 +625,10 @@ NATIVE_SERVICE
                 echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
             fi
 
-            # Enable USB config (copy is more reliable than symlink)
-            cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            # Enable USB config if meshtasticd provides one
+            if [[ -f "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" ]]; then
+                cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            fi
 
             # Check if native meshtasticd is available (can work with USB serial too)
             if command -v meshtasticd &> /dev/null; then
