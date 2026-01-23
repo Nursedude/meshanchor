@@ -237,6 +237,20 @@ class TestReportSaving:
             content = Path(result).read_text()
             assert "MeshForge Network Status Report" in content
 
+    def test_generate_and_save_default_path(self):
+        """Default path uses get_real_user_home and timestamps."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home = Path(tmpdir)
+            with patch('utils.paths.get_real_user_home',
+                       return_value=mock_home):
+                result = generate_and_save()  # path=None triggers default
+                assert os.path.exists(result)
+                assert "status_report_" in result
+                assert result.endswith(".md")
+                # Should be under .config/meshforge/reports/
+                assert "meshforge" in result
+                assert "reports" in result
+
 
 class TestConvenienceFunctions:
     """Test module-level convenience functions."""
