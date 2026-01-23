@@ -132,8 +132,6 @@ def setup_logging(
             for lib_name in [
                 'urllib3',
                 'requests',
-                'werkzeug',
-                'flask',
                 'meshtastic',
                 'serial',
                 'asyncio',
@@ -261,7 +259,7 @@ def setup_journald_logging(
         # Suppress noisy third-party loggers
         if suppress_libs:
             for lib_name in [
-                'urllib3', 'requests', 'werkzeug', 'flask',
+                'urllib3', 'requests',
                 'meshtastic', 'serial', 'asyncio', 'PIL',
             ]:
                 logging.getLogger(lib_name).setLevel(logging.WARNING)
