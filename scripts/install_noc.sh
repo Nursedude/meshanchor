@@ -129,25 +129,26 @@ detect_hardware_hints() {
 
 ask_radio_type() {
     # Ask user what radio they have, showing detected hardware as hints
-    # Returns: "spi", "usb", or "none"
+    # Returns (stdout): "spi", "usb", or "none"
+    # All display output goes to stderr so it doesn't pollute the return value
 
     detect_hardware_hints
 
-    echo ""
-    echo -e "  ${BOLD}Hardware detected:${NC}"
+    echo "" >&2
+    echo -e "  ${BOLD}Hardware detected:${NC}" >&2
     if $HW_HAS_SPI; then
-        echo -e "    ${GREEN}✓${NC} SPI bus available (/dev/spidev0.*)"
+        echo -e "    ${GREEN}✓${NC} SPI bus available (/dev/spidev0.*)" >&2
     fi
     if $HW_HAS_CH341; then
-        echo -e "    ${GREEN}✓${NC} CH341 USB-to-SPI adapter (Meshtoad)"
+        echo -e "    ${GREEN}✓${NC} CH341 USB-to-SPI adapter (Meshtoad)" >&2
     fi
     if $HW_HAS_USB; then
-        echo -e "    ${GREEN}✓${NC} USB serial ports: $HW_USB_DEVS"
+        echo -e "    ${GREEN}✓${NC} USB serial ports: $HW_USB_DEVS" >&2
     fi
     if ! $HW_HAS_SPI && ! $HW_HAS_USB && ! $HW_HAS_CH341; then
-        echo -e "    ${YELLOW}!${NC} No LoRa hardware detected yet"
+        echo -e "    ${YELLOW}!${NC} No LoRa hardware detected yet" >&2
     fi
-    echo ""
+    echo "" >&2
 
     # Try whiptail first (raspi-config style)
     if command -v whiptail &>/dev/null; then
@@ -173,11 +174,11 @@ ask_radio_type() {
     fi
 
     # Fallback: simple text menu
-    echo -e "  ${BOLD}What type of LoRa radio is connected?${NC}"
-    echo "    1) SPI HAT (MeshAdv, Waveshare, RAK, Meshtoad)"
-    echo "    2) USB Serial (T-Beam, Heltec, RAK USB)"
-    echo "    3) No radio / install later"
-    echo ""
+    echo -e "  ${BOLD}What type of LoRa radio is connected?${NC}" >&2
+    echo "    1) SPI HAT (MeshAdv, Waveshare, RAK, Meshtoad)" >&2
+    echo "    2) USB Serial (T-Beam, Heltec, RAK USB)" >&2
+    echo "    3) No radio / install later" >&2
+    echo "" >&2
     read -rp "  Select [1/2/3]: " radio_choice
     case "$radio_choice" in
         1) echo "spi" ;;
