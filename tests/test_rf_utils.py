@@ -100,6 +100,43 @@ class TestEarthBulge:
         assert bulge < 0.1
 
 
+class TestKnifeEdgeDiffraction:
+    """Test knife_edge_diffraction() terrain model."""
+
+    def test_no_blockage(self):
+        """Obstacle below LOS should cause no loss."""
+        from src.utils.rf import knife_edge_diffraction
+        loss = knife_edge_diffraction(5000, -5.0)
+        assert loss == 0.0
+
+    def test_moderate_blockage(self):
+        """10m obstacle at 5km midpoint should cause 10-20 dB loss."""
+        from src.utils.rf import knife_edge_diffraction
+        loss = knife_edge_diffraction(5000, 10.0)
+        assert 10 < loss < 25
+
+    def test_heavy_blockage(self):
+        """50m obstacle should cause more loss than 10m."""
+        from src.utils.rf import knife_edge_diffraction
+        loss_10m = knife_edge_diffraction(5000, 10.0)
+        loss_50m = knife_edge_diffraction(5000, 50.0)
+        assert loss_50m > loss_10m
+
+    def test_higher_freq_more_loss(self):
+        """Higher frequency should diffract less (more loss)."""
+        from src.utils.rf import knife_edge_diffraction
+        loss_900 = knife_edge_diffraction(5000, 10.0, freq_mhz=906.875)
+        loss_2400 = knife_edge_diffraction(5000, 10.0, freq_mhz=2400.0)
+        assert loss_2400 > loss_900
+
+    def test_multi_obstacle(self):
+        """Multiple obstacles should sum losses."""
+        from src.utils.rf import multi_obstacle_loss
+        single = multi_obstacle_loss(10000, [(0.5, 10.0)])
+        double = multi_obstacle_loss(10000, [(0.3, 10.0), (0.7, 10.0)])
+        assert double > single
+
+
 class TestDetailedLinkBudget:
     """Test detailed_link_budget() component breakdown."""
 
@@ -185,6 +222,7 @@ def run_tests():
         TestFresnelRadius,
         TestFreeSpacePathLoss,
         TestEarthBulge,
+        TestKnifeEdgeDiffraction,
         TestDetailedLinkBudget,
     ]
 
