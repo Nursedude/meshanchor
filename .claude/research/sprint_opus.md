@@ -41,7 +41,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] **Bridge health metrics** — BridgeHealthMonitor: uptime, rates, errors, is_healthy
 - [x] **Error categorization** — classify_error: transient/permanent/unknown patterns
 - [x] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip (29 tests)
-- [ ] **LXMF delivery confirmation** — track message delivery end-to-end
+- [x] **LXMF delivery confirmation** — DeliveryTracker with callbacks, timeouts, confirmation rate
 
 ### Phase 3: RF Tools Enhancement
 
@@ -95,7 +95,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Failed message persistence — re-queue to persistent queue on send failure
 - [x] Message queue overflow protection — max size limits, priority shedding, stale recovery, auto-cleanup
 - [x] Bridge integration test — full Mesh→RNS→Mesh round trip, routing, callbacks, edge cases
-- [x] 146 new tests for map + bridge + queue + integration pipeline (1438 total)
+- [x] LXMF delivery confirmation — DeliveryTracker with pending/confirmed/failed/timeout states
+- [x] 160 new tests for map + bridge + queue + integration + delivery pipeline (1452 total)
 
 ---
 

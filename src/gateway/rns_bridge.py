@@ -18,7 +18,7 @@ from pathlib import Path
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
-from .bridge_health import BridgeHealthMonitor, classify_error
+from .bridge_health import BridgeHealthMonitor, DeliveryTracker, classify_error
 
 # Import persistent message queue for reliable delivery
 try:
@@ -106,6 +106,9 @@ class RNSMeshtasticBridge:
 
         # Health monitoring
         self.health = BridgeHealthMonitor()
+
+        # LXMF delivery confirmation tracking
+        self.delivery_tracker = DeliveryTracker()
 
         # Message queues (bounded to prevent memory exhaustion)
         self._mesh_to_rns_queue = Queue(maxsize=1000)
@@ -354,6 +357,30 @@ class RNSMeshtasticBridge:
                 message,
                 "MeshForge Gateway"
             )
+
+            # Track delivery confirmation
+            msg_id = f"lxmf-{int(time.time() * 1000)}"
+            self.delivery_tracker.track_message(
+                msg_id, destination_hash, message[:50]
+            )
+
+            # Register LXMF delivery/failure callbacks
+            def on_delivered(receipt):
+                self.delivery_tracker.confirm_delivery(msg_id)
+
+            def on_failed(receipt):
+                reason = "delivery_failed"
+                if hasattr(receipt, 'failure_reason'):
+                    reason = str(receipt.failure_reason)
+                self.delivery_tracker.confirm_failure(msg_id, reason)
+
+            try:
+                lxm.register_delivery_callback(on_delivered)
+                lxm.register_failed_callback(on_failed)
+            except (AttributeError, TypeError):
+                # LXMF version may not support callbacks
+                logger.debug("LXMF callbacks not available, skipping delivery tracking")
+
             self._lxmf_router.handle_outbound(lxm)
             return True
 
@@ -612,6 +639,7 @@ class RNSMeshtasticBridge:
 
     def _bridge_loop(self):
         """Main loop for message bridging"""
+        loop_count = 0
         while self._running:
             try:
                 # Process Meshtastic → RNS queue
@@ -627,6 +655,11 @@ class RNSMeshtasticBridge:
                     self._process_rns_to_mesh(msg)
                 except Empty:
                     pass
+
+                # Periodically check delivery timeouts (~every 30s)
+                loop_count += 1
+                if loop_count % 150 == 0:
+                    self.delivery_tracker.check_timeouts()
 
             except Exception as e:
                 logger.error(f"Bridge loop error: {e}")
@@ -1427,6 +1460,9 @@ def get_gateway_stats() -> dict:
         # Include health metrics if available
         if hasattr(_active_bridge, 'health'):
             result['health'] = _active_bridge.health.get_summary()
+        # Include delivery confirmation stats
+        if hasattr(_active_bridge, 'delivery_tracker'):
+            result['delivery'] = _active_bridge.delivery_tracker.get_stats()
         return result
     except Exception as e:
         logger.error(f"Error getting gateway stats: {e}")
