@@ -49,7 +49,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
 - [x] **LoRa preset impact visualization** — show how preset choice affects coverage
 - [x] **Multi-hop path loss** — calculate cumulative loss across relay chain
-- [ ] **Antenna pattern modeling** — basic dipole/yagi/omni patterns for site planning
+- [x] **Antenna pattern modeling** — basic dipole/yagi/omni patterns for site planning
 
 ### Phase 4: AI Diagnostics Expansion
 
@@ -103,7 +103,8 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Error handling audit — all critical paths verified, no bare except, no shell=True, all timeouts
 - [x] LoRa preset impact visualization — sensitivity, range, airtime, throughput, coverage zones, comparison table
 - [x] Multi-hop path loss — cumulative analysis, relay selection, preset comparison, path reports
-- [x] 464 new tests for map + bridge + queue + delivery + terrain + signal + MQTT + pipeline + preset + multihop (1756 total)
+- [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
+- [x] 539 new tests across all modules (1831 total)
 
 ---
 
