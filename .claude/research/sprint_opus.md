@@ -26,24 +26,26 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] SNR-based link topology lines
 - [x] Coverage radius circles (toggle)
 - [x] TUI "Live Network Map" menu option
-- [ ] **Map data feed from meshtasticd** — proper GeoJSON extraction via TCP:4403
-- [ ] **MQTT node tracking → map feed** — mqtt_subscriber provides GeoJSON to map
-- [ ] **Node history SQLite** — store node positions/states over time for playback
-- [ ] **Auto-open map on TUI launch** — option to start with map in browser
+- [x] **Map data service** — unified collector from all sources (meshtasticd, MQTT, tracker)
+- [x] **Map HTTP server** — `/api/nodes/geojson` endpoint, serves live map at localhost:5000
+- [x] **MQTT node tracking → map feed** — mqtt_subscriber persists GeoJSON cache every 30s
+- [x] **Map data feed from meshtasticd** — TCP interface + CLI fallback with position parsing
+- [x] **Node history SQLite** — store node positions/states over time for playback
+- [x] **Auto-open map on TUI launch** — toggle in map menu, persisted setting
 - [ ] **Map tile pre-cache for Hawaii** — ship with offline tiles for default region
 
 ### Phase 2: Gateway Bridge Hardening
 
-- [ ] **Reconnection logic audit** — what happens when meshtasticd restarts?
-- [ ] **Message queue overflow** — SQLite queue growth limits, cleanup policy
-- [ ] **Bridge health metrics** — messages relayed, failed, queued, latency
-- [ ] **Error categorization** — distinguish transient vs permanent failures
-- [ ] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip
-- [ ] **LXMF delivery confirmation** — track message delivery end-to-end
+- [x] **Reconnection logic audit** — integrated ReconnectStrategy with backoff + jitter
+- [x] **Message queue overflow** — max_queue_size, priority-based shedding, auto-cleanup, stale recovery
+- [x] **Bridge health metrics** — BridgeHealthMonitor: uptime, rates, errors, is_healthy
+- [x] **Error categorization** — classify_error: transient/permanent/unknown patterns
+- [x] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip (29 tests)
+- [x] **LXMF delivery confirmation** — DeliveryTracker with callbacks, timeouts, confirmation rate
 
 ### Phase 3: RF Tools Enhancement
 
-- [ ] **Coverage prediction with terrain** — SRTM data download + LOS calculation
+- [x] **Coverage prediction with terrain** — SRTM data download + LOS calculation
 - [ ] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
 - [ ] **LoRa preset impact visualization** — show how preset choice affects coverage
 - [ ] **Multi-hop path loss** — calculate cumulative loss across relay chain
@@ -77,13 +79,25 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ## Completed This Sprint
 
-- [x] Full code review and healthcheck (1302 tests, 0 failures)
+- [x] Full code review and healthcheck (1335 tests, 0 failures)
 - [x] README revamp (mermaid diagrams, elevator speech, honest capabilities)
-- [x] GTK frozen decision documented
+- [x] GTK frozen decision documented (TUI + browser-maps is the path)
 - [x] Maps "Double Tap" vision document (.claude/research/maps_double_tap.md)
 - [x] Live map engine (web/node_map.html) — incremental updates, animations, links
-- [x] TUI live map integration (ai_tools_mixin.py)
+- [x] TUI live map integration (snapshot + server modes)
 - [x] Gateway scope clarification (Meshtastic↔RNS bridge, AREDN monitoring)
+- [x] Map data service (src/utils/map_data_service.py) — unified collector + HTTP server
+- [x] MQTT subscriber → map cache persistence (auto-populates map data)
+- [x] Meshtasticd TCP interface collection — direct node data with positions, online detection
+- [x] Node history SQLite — trajectory, snapshots, stats, cleanup, API endpoints
+- [x] Auto-open map on TUI launch — toggle setting, silent background start
+- [x] Gateway bridge hardening — ReconnectStrategy integration, health monitor, error classification
+- [x] Failed message persistence — re-queue to persistent queue on send failure
+- [x] Message queue overflow protection — max size limits, priority shedding, stale recovery, auto-cleanup
+- [x] Bridge integration test — full Mesh→RNS→Mesh round trip, routing, callbacks, edge cases
+- [x] LXMF delivery confirmation — DeliveryTracker with pending/confirmed/failed/timeout states
+- [x] Coverage prediction with terrain — SRTMProvider, LOSAnalyzer, Fresnel zones, diffraction, coverage grid
+- [x] 193 new tests for map + bridge + queue + integration + delivery + terrain pipeline (1485 total)
 
 ---
 

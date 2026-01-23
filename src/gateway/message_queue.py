@@ -180,12 +180,25 @@ class PersistentMessageQueue:
     # Deduplication window (seconds)
     DEDUP_WINDOW = 60
 
-    def __init__(self, db_path: Optional[str] = None):
+    # Default max queue size (active messages: pending + in_progress)
+    DEFAULT_MAX_QUEUE_SIZE = 1000
+
+    # Auto-cleanup interval (seconds) — purge old delivered/dead_letter
+    AUTO_CLEANUP_INTERVAL = 3600  # 1 hour
+
+    # Stale in_progress timeout (seconds) — messages stuck in processing
+    STALE_TIMEOUT = 300  # 5 minutes
+
+    def __init__(self, db_path: Optional[str] = None,
+                 max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE):
         """
         Initialize the message queue.
 
         Args:
             db_path: Path to SQLite database. Default: ~/.config/meshforge/message_queue.db
+            max_queue_size: Maximum active messages (pending + in_progress).
+                          When exceeded, lowest-priority oldest messages are shed.
+                          Set to 0 for unlimited (not recommended).
         """
         if db_path is None:
             config_dir = get_real_user_home() / ".config" / "meshforge"
@@ -193,10 +206,12 @@ class PersistentMessageQueue:
             db_path = str(config_dir / "message_queue.db")
 
         self._db_path = db_path
+        self._max_queue_size = max_queue_size
         self._lock = threading.Lock()
         self._processing = False
         self._process_thread = None
         self._stop_event = threading.Event()
+        self._last_auto_cleanup = 0.0
 
         # Callbacks
         self._send_callbacks: Dict[str, Callable] = {}  # destination -> send_fn
@@ -213,6 +228,8 @@ class PersistentMessageQueue:
             "failed": 0,
             "retried": 0,
             "deduplicated": 0,
+            "shed": 0,
+            "shed_rejected": 0,
         }
 
     @contextmanager
@@ -341,6 +358,24 @@ class PersistentMessageQueue:
             self._stats["deduplicated"] += 1
             logger.debug(f"Duplicate message suppressed: {content_hash}")
             return None
+
+        # Periodic auto-cleanup of old delivered/dead_letter messages
+        self._maybe_auto_cleanup()
+
+        # Enforce queue size limit
+        if self._max_queue_size > 0:
+            depth = self.get_queue_depth()
+            if depth >= self._max_queue_size:
+                # Try to shed lowest-priority oldest messages
+                shed = self._shed_overflow(count=max(1, depth - self._max_queue_size + 1))
+                if shed == 0:
+                    # Cannot shed anything — all messages are higher priority or in_progress
+                    self._stats["shed_rejected"] += 1
+                    logger.warning(
+                        f"Queue full ({depth}/{self._max_queue_size}), "
+                        f"cannot enqueue message to {destination}"
+                    )
+                    return None
 
         # Generate unique ID
         msg_id = f"{int(time.time() * 1000)}-{content_hash[:8]}"
@@ -561,7 +596,7 @@ class PersistentMessageQueue:
         logger.info("Message queue processing stopped")
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get queue statistics."""
+        """Get queue statistics including overflow metrics."""
         with self._get_connection() as conn:
             cursor = conn.execute("""
                 SELECT status, COUNT(*) as count
@@ -570,14 +605,119 @@ class PersistentMessageQueue:
             """)
             status_counts = {row["status"]: row["count"] for row in cursor.fetchall()}
 
+        pending = status_counts.get("pending", 0)
+        in_progress = status_counts.get("in_progress", 0)
+        queue_depth = pending + in_progress
+
         return {
             **self._stats,
-            "pending": status_counts.get("pending", 0),
-            "in_progress": status_counts.get("in_progress", 0),
+            "pending": pending,
+            "in_progress": in_progress,
             "delivered": status_counts.get("delivered", 0),
             "failed": status_counts.get("failed", 0),
             "dead_letter": status_counts.get("dead_letter", 0),
+            "queue_depth": queue_depth,
+            "max_queue_size": self._max_queue_size,
+            "queue_usage_pct": round(
+                (queue_depth / self._max_queue_size * 100) if self._max_queue_size > 0 else 0, 1
+            ),
         }
+
+    def get_queue_depth(self) -> int:
+        """Get count of active messages (pending + in_progress).
+
+        This is the primary metric for queue overflow monitoring.
+        Does not count delivered or dead_letter messages.
+
+        Returns:
+            Number of active messages in the queue.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT COUNT(*) FROM messages
+                WHERE status IN ('pending', 'in_progress')
+            """)
+            return cursor.fetchone()[0]
+
+    def _shed_overflow(self, count: int = 1) -> int:
+        """Shed lowest-priority oldest pending messages to make room.
+
+        Only sheds PENDING messages (never in_progress). Prefers shedding
+        LOW priority first, then NORMAL. Never sheds HIGH or URGENT.
+
+        Args:
+            count: Number of messages to shed.
+
+        Returns:
+            Number of messages actually shed.
+        """
+        with self._get_connection() as conn:
+            # Find candidates: pending, lowest priority first, oldest first
+            cursor = conn.execute("""
+                SELECT id FROM messages
+                WHERE status = 'pending'
+                AND priority <= ?
+                ORDER BY priority ASC, created_at ASC
+                LIMIT ?
+            """, (MessagePriority.NORMAL.value, count))
+
+            ids = [row["id"] for row in cursor.fetchall()]
+            if not ids:
+                return 0
+
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"DELETE FROM messages WHERE id IN ({placeholders})", ids
+            )
+
+            shed_count = len(ids)
+            self._stats["shed"] += shed_count
+            logger.info(f"Queue overflow: shed {shed_count} low-priority messages")
+            return shed_count
+
+    def _maybe_auto_cleanup(self) -> None:
+        """Periodically clean up old delivered/dead_letter messages.
+
+        Called during enqueue to prevent unbounded table growth.
+        Only runs once per AUTO_CLEANUP_INTERVAL.
+        """
+        now = time.time()
+        if now - self._last_auto_cleanup < self.AUTO_CLEANUP_INTERVAL:
+            return
+
+        self._last_auto_cleanup = now
+        try:
+            purged = self.purge_old(days=1)
+            stale = self.cleanup_stale()
+            if purged > 0 or stale > 0:
+                logger.debug(f"Auto-cleanup: purged {purged} old, unstuck {stale} stale")
+        except Exception as e:
+            logger.debug(f"Auto-cleanup error: {e}")
+
+    def cleanup_stale(self) -> int:
+        """Reset stale in_progress messages back to pending.
+
+        Messages stuck in 'in_progress' for longer than STALE_TIMEOUT
+        are likely from crashed processing attempts. Reset them to
+        pending so they can be retried.
+
+        Returns:
+            Number of messages reset.
+        """
+        cutoff = (datetime.now() - timedelta(seconds=self.STALE_TIMEOUT)).isoformat()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE messages
+                SET status = 'pending', updated_at = ?
+                WHERE status = 'in_progress'
+                AND updated_at < ?
+            """, (datetime.now().isoformat(), cutoff))
+
+            count = cursor.rowcount
+            if count > 0:
+                logger.info(f"Reset {count} stale in_progress messages to pending")
+            return count
 
     def get_dead_letters(self, limit: int = 100) -> List[QueuedMessage]:
         """Get messages in dead letter queue."""

@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import json
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -283,6 +284,303 @@ class TestMapDataCollector:
             result = collector.collect(max_age_seconds=0)
             node_ids = [f["properties"]["id"] for f in result["features"]]
             assert node_ids.count("!same_node") == 1
+
+
+class TestMeshtasticdCollection:
+    """Test meshtasticd TCP interface and CLI parsing."""
+
+    def _make_collector(self, tmp_path):
+        """Create a collector with a temp cache directory."""
+        from utils.map_data_service import MapDataCollector
+        return MapDataCollector(cache_dir=tmp_path)
+
+    def test_parse_tcp_node_float_coords(self, tmp_path):
+        """Parses node with float latitude/longitude."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 0xba4bf9d0,
+            'user': {
+                'longName': 'Maui Gateway',
+                'shortName': 'MG',
+                'hwModel': 'HELTEC_V3',
+                'role': 'ROUTER',
+            },
+            'position': {
+                'latitude': 21.3069,
+                'longitude': -157.8583,
+                'altitude': 100,
+                'time': int(now) - 60,
+            },
+            'deviceMetrics': {
+                'batteryLevel': 85,
+                'voltage': 4.15,
+            },
+            'snr': 8.5,
+            'lastHeard': int(now) - 30,
+            'hopsAway': 0,
+            'viaMqtt': False,
+        }
+
+        feature = collector._parse_tcp_node('!ba4bf9d0', node_data, now)
+
+        assert feature is not None
+        assert feature['geometry']['coordinates'] == [-157.8583, 21.3069]
+        assert feature['properties']['id'] == '!ba4bf9d0'
+        assert feature['properties']['name'] == 'Maui Gateway'
+        assert feature['properties']['network'] == 'meshtastic'
+        assert feature['properties']['is_online'] is True
+        assert feature['properties']['snr'] == 8.5
+        assert feature['properties']['battery'] == 85
+        assert feature['properties']['hardware'] == 'HELTEC_V3'
+        assert feature['properties']['role'] == 'ROUTER'
+        assert feature['properties']['is_gateway'] is True
+        assert feature['properties']['via_mqtt'] is False
+        assert feature['properties']['is_local'] is True
+
+    def test_parse_tcp_node_integer_coords(self, tmp_path):
+        """Parses node with latitudeI/longitudeI (integer * 1e7)."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 0x12345678,
+            'user': {'longName': 'Remote Node'},
+            'position': {
+                'latitudeI': 213069000,
+                'longitudeI': -1578583000,
+            },
+            'snr': 5.0,
+            'lastHeard': int(now) - 120,
+            'hopsAway': 2,
+        }
+
+        feature = collector._parse_tcp_node('!12345678', node_data, now)
+
+        assert feature is not None
+        assert abs(feature['geometry']['coordinates'][0] - (-157.8583)) < 0.001
+        assert abs(feature['geometry']['coordinates'][1] - 21.3069) < 0.001
+        assert feature['properties']['is_local'] is False
+
+    def test_parse_tcp_node_no_position(self, tmp_path):
+        """Returns None for node without position data."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+
+        # No position key at all
+        node_data = {'num': 123, 'user': {'longName': 'No Pos'}}
+        assert collector._parse_tcp_node('!123', node_data, now) is None
+
+        # Empty position dict
+        node_data = {'num': 123, 'position': {}}
+        assert collector._parse_tcp_node('!123', node_data, now) is None
+
+    def test_parse_tcp_node_zero_coords(self, tmp_path):
+        """Returns None for (0,0) coordinates (unset position)."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 123,
+            'position': {'latitude': 0.0, 'longitude': 0.0},
+        }
+        assert collector._parse_tcp_node('!123', node_data, now) is None
+
+    def test_parse_tcp_node_offline_detection(self, tmp_path):
+        """Node not heard in >15 minutes is marked offline."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 0xaabbccdd,
+            'user': {'longName': 'Stale Node'},
+            'position': {'latitude': 20.5, 'longitude': -156.0},
+            'lastHeard': int(now) - 1800,  # 30 minutes ago
+        }
+
+        feature = collector._parse_tcp_node('!aabbccdd', node_data, now)
+
+        assert feature is not None
+        assert feature['properties']['is_online'] is False
+        assert '30m ago' in feature['properties']['last_seen']
+
+    def test_parse_tcp_node_formats_last_seen(self, tmp_path):
+        """Last seen is formatted as human-readable time."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+
+        # Seconds ago
+        node_data = {
+            'num': 1, 'position': {'latitude': 21.0, 'longitude': -157.0},
+            'lastHeard': int(now) - 45,
+        }
+        feature = collector._parse_tcp_node('!1', node_data, now)
+        assert '45s ago' in feature['properties']['last_seen']
+
+        # Hours ago
+        node_data['lastHeard'] = int(now) - 7200
+        feature = collector._parse_tcp_node('!1', node_data, now)
+        assert '2h ago' in feature['properties']['last_seen']
+
+        # Days ago
+        node_data['lastHeard'] = int(now) - 172800
+        feature = collector._parse_tcp_node('!1', node_data, now)
+        assert '2d ago' in feature['properties']['last_seen']
+
+    def test_parse_tcp_node_no_last_heard(self, tmp_path):
+        """Node with no lastHeard shows 'unknown' and is offline."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 1,
+            'user': {'longName': 'Mystery'},
+            'position': {'latitude': 21.0, 'longitude': -157.0},
+        }
+
+        feature = collector._parse_tcp_node('!1', node_data, now)
+
+        assert feature['properties']['is_online'] is False
+        assert feature['properties']['last_seen'] == 'unknown'
+
+    def test_parse_tcp_node_id_formatting(self, tmp_path):
+        """Node ID is properly formatted as hex with ! prefix."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 0x00aabb11,
+            'position': {'latitude': 21.0, 'longitude': -157.0},
+            'lastHeard': int(now),
+        }
+
+        # String node_id with ! prefix passes through
+        feature = collector._parse_tcp_node('!00aabb11', node_data, now)
+        assert feature['properties']['id'] == '!00aabb11'
+
+        # Numeric node_id gets formatted
+        feature = collector._parse_tcp_node('some_key', node_data, now)
+        assert feature['properties']['id'] == '!00aabb11'
+
+    def test_parse_tcp_node_via_mqtt_gateway(self, tmp_path):
+        """Nodes received via MQTT are flagged."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+        node_data = {
+            'num': 42,
+            'position': {'latitude': 21.0, 'longitude': -157.0},
+            'viaMqtt': True,
+            'hopsAway': 3,
+            'lastHeard': int(now) - 10,
+        }
+
+        feature = collector._parse_tcp_node('!0000002a', node_data, now)
+        assert feature['properties']['via_mqtt'] is True
+        assert feature['properties']['is_local'] is False
+
+    def test_collect_via_tcp_interface_mocked(self, tmp_path):
+        """TCP collection uses connection manager and parses nodes."""
+        collector = self._make_collector(tmp_path)
+        now = time.time()
+
+        mock_interface = MagicMock()
+        mock_interface.nodes = {
+            '!node1': {
+                'num': 0x11111111,
+                'user': {'longName': 'Node 1', 'hwModel': 'RAK4631'},
+                'position': {'latitude': 21.3, 'longitude': -157.8},
+                'lastHeard': int(now) - 60,
+                'hopsAway': 0,
+            },
+            '!node2': {
+                'num': 0x22222222,
+                'user': {'longName': 'Node 2'},
+                'position': {'latitude': 20.8, 'longitude': -156.3},
+                'lastHeard': int(now) - 60,
+            },
+            '!nopos': {
+                'num': 0x33333333,
+                'user': {'longName': 'No Position'},
+            }
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.acquire_lock.return_value = True
+        mock_manager._create_interface.return_value = mock_interface
+
+        with patch('utils.meshtastic_connection.get_connection_manager', return_value=mock_manager):
+            features = collector._collect_via_tcp_interface()
+
+        # Should get 2 nodes (one has no position)
+        assert len(features) == 2
+        ids = [f['properties']['id'] for f in features]
+        assert '!node1' in ids  # Key starts with '!', used as-is
+        assert '!node2' in ids
+
+    def test_collect_via_tcp_lock_timeout(self, tmp_path):
+        """Returns empty when connection lock unavailable."""
+        collector = self._make_collector(tmp_path)
+
+        mock_manager = MagicMock()
+        mock_manager.acquire_lock.return_value = False  # Lock held by someone else
+
+        with patch('utils.meshtastic_connection.get_connection_manager', return_value=mock_manager):
+            features = collector._collect_via_tcp_interface()
+
+        assert features == []
+
+    def test_collect_meshtasticd_port_closed(self, tmp_path):
+        """Returns empty when meshtasticd is not running."""
+        collector = self._make_collector(tmp_path)
+        features = collector._collect_meshtasticd()
+        assert features == []
+
+    def test_parse_meshtastic_info_json_output(self, tmp_path):
+        """CLI fallback parses JSON fragments in output."""
+        collector = self._make_collector(tmp_path)
+
+        output = '''Connected to radio
+Nodes in mesh:
+{"num": 12345, "user": {"longName": "Test"}, "position": {"latitude": 21.3, "longitude": -157.8}, "snr": 6.0, "deviceMetrics": {"batteryLevel": 80}}
+'''
+        features = collector._parse_meshtastic_info(output)
+
+        assert len(features) == 1
+        assert features[0]['geometry']['coordinates'] == [-157.8, 21.3]
+        assert features[0]['properties']['snr'] == 6.0
+        assert features[0]['properties']['battery'] == 80
+
+    def test_parse_meshtastic_info_integer_coords(self, tmp_path):
+        """CLI fallback handles latitudeI format."""
+        collector = self._make_collector(tmp_path)
+
+        output = '{"num": 99, "position": {"latitudeI": 213000000, "longitudeI": -1578000000}}'
+        features = collector._parse_meshtastic_info(output)
+
+        assert len(features) == 1
+        assert abs(features[0]['geometry']['coordinates'][0] - (-157.8)) < 0.01
+        assert abs(features[0]['geometry']['coordinates'][1] - 21.3) < 0.01
+
+    def test_parse_meshtastic_info_no_position(self, tmp_path):
+        """CLI fallback skips nodes without position."""
+        collector = self._make_collector(tmp_path)
+
+        output = 'Some text without any position data\nNo JSON here'
+        features = collector._parse_meshtastic_info(output)
+        assert features == []
+
+    def test_collect_via_cli_not_installed(self, tmp_path):
+        """CLI fallback handles missing meshtastic command."""
+        collector = self._make_collector(tmp_path)
+
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            features = collector._collect_via_cli()
+
+        assert features == []
+
+    def test_collect_via_cli_timeout(self, tmp_path):
+        """CLI fallback handles command timeout."""
+        collector = self._make_collector(tmp_path)
+
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('meshtastic', 15)):
+            features = collector._collect_via_cli()
+
+        assert features == []
 
 
 class TestMapServer:
