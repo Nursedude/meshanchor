@@ -103,7 +103,6 @@ class TestEnvironmentDetection:
         assert 'display_type' in env
         assert 'is_ssh' in env
         assert 'has_gtk' in env
-        assert 'has_textual' in env
         assert 'is_root' in env
         assert 'terminal' in env
 
@@ -187,12 +186,11 @@ class TestRecommendation:
             'has_display': True,
             'has_gtk': True,
             'is_ssh': False,
-            'has_textual': True,
         }
         assert get_recommendation(env) == '1'
 
-    def test_recommend_tui_ssh_with_textual(self):
-        """Textual TUI recommended over SSH with textual installed"""
+    def test_recommend_tui_over_ssh(self):
+        """TUI recommended over SSH"""
         import sys
         sys.path.insert(0, 'src')
         from launcher import get_recommendation
@@ -201,26 +199,11 @@ class TestRecommendation:
             'has_display': False,
             'has_gtk': False,
             'is_ssh': True,
-            'has_textual': True,
         }
         assert get_recommendation(env) == '2'
 
-    def test_recommend_web_ssh_no_textual(self):
-        """Web interface recommended over SSH without textual"""
-        import sys
-        sys.path.insert(0, 'src')
-        from launcher import get_recommendation
-
-        env = {
-            'has_display': False,
-            'has_gtk': False,
-            'is_ssh': True,
-            'has_textual': False,
-        }
-        assert get_recommendation(env) == '3'
-
-    def test_recommend_cli_fallback(self):
-        """CLI recommended as fallback"""
+    def test_recommend_tui_no_display(self):
+        """TUI recommended when no display available"""
         import sys
         sys.path.insert(0, 'src')
         from launcher import get_recommendation
@@ -229,9 +212,21 @@ class TestRecommendation:
             'has_display': False,
             'has_gtk': False,
             'is_ssh': False,
-            'has_textual': False,
         }
-        assert get_recommendation(env) == '4'
+        assert get_recommendation(env) == '2'
+
+    def test_recommend_tui_when_gtk_unavailable(self):
+        """TUI recommended when display exists but GTK not installed"""
+        import sys
+        sys.path.insert(0, 'src')
+        from launcher import get_recommendation
+
+        env = {
+            'has_display': True,
+            'has_gtk': False,
+            'is_ssh': False,
+        }
+        assert get_recommendation(env) == '2'
 
 
 class TestFirstRun:
@@ -286,7 +281,6 @@ class TestMenuPrinting:
             'display_type': 'X11',
             'is_ssh': False,
             'has_gtk': True,
-            'has_textual': False,
         }
 
         print_environment_info(env)
@@ -296,7 +290,7 @@ class TestMenuPrinting:
         assert 'X11' in captured.out
 
     def test_print_menu_shows_options(self, capsys):
-        """print_menu shows all interface options"""
+        """print_menu shows interface options"""
         import sys
         sys.path.insert(0, 'src')
         from launcher import print_menu
@@ -306,17 +300,14 @@ class TestMenuPrinting:
             'display_type': 'X11',
             'is_ssh': False,
             'has_gtk': True,
-            'has_textual': True,
         }
 
-        print_menu(env, recommended='1', saved_pref=None)
+        print_menu(env, recommended='1')
         captured = capsys.readouterr()
 
-        # Check that options are shown
-        assert 'GTK4' in captured.out or 'GUI' in captured.out
-        assert 'TUI' in captured.out or 'Textual' in captured.out
-        assert 'Web' in captured.out
-        assert 'CLI' in captured.out
+        # Check that the two interfaces are shown
+        assert 'GTK4' in captured.out or 'Desktop' in captured.out
+        assert 'Terminal' in captured.out or 'TUI' in captured.out
 
 
 class TestVersionImport:
