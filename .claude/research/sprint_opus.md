@@ -61,11 +61,11 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ### Phase 5: TUI Polish
 
-- [ ] **Menu reorganization** — group by workflow (Setup → Monitor → Diagnose → Tools)
-- [ ] **First-run wizard** — detect fresh install, guide through radio setup
-- [ ] **Status bar** — persistent bottom bar showing: nodes online, bridge status, last update
-- [ ] **Quick actions** — single-key shortcuts for common operations
-- [ ] **Export/report** — generate network status report (PDF or markdown)
+- [x] **Menu reorganization** — group by workflow (Monitor → Operate → Networks → Tools)
+- [x] **First-run wizard** — detect fresh install, guide through radio setup
+- [x] **Status bar** — persistent backtitle showing: services, bridge status, node count
+- [x] **Quick actions** — single-key shortcuts (s/n/l/r/R/p/g/d) for common operations
+- [x] **Export/report** — generate network status report (markdown, all subsystems)
 
 ### Phase 6: Field Operations
 
@@ -110,7 +110,12 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] RF tools integration test — 20 cross-module tests (preset→multihop→antenna→health→trending→log_parser)
 - [x] Predictive maintenance — battery drain forecasting, dropout patterns, periodicity detection, solar detection
 - [x] Knowledge base expansion — 19→35 entries, 3→6 guides (RNS identity/transport/LXMF, AREDN overview/discovery/services, FSPL/antennas/propagation/ISM/terrain/solar/interference, MQTT)
-- [x] 919 new tests across all modules (2151 total)
+- [x] Network status report generator — configurable markdown export with all subsystem data
+- [x] TUI status bar — persistent --backtitle with service status, node count, bridge state (10s TTL cache)
+- [x] Quick actions menu — 8 single-key shortcuts (status/nodes/logs/restart/ports/report/diagnostics)
+- [x] Menu reorganization — grouped by workflow (Monitor → Operate → Networks → Tools → Meta)
+- [x] Code review hardening — socket leak fix, silent exception logging, ASCII safety, unused imports
+- [x] 1013 new tests across all modules (2245 total)
 
 ---
 

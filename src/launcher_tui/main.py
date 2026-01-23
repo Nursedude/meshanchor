@@ -231,18 +231,23 @@ class MeshForgeLauncher(
         """Display the main NOC menu."""
         while True:
             choices = [
+                # Monitor
                 ("status", "Status Overview"),
                 ("quick", "Quick Actions (shortcuts)"),
-                ("radio", "Radio (meshtastic CLI)"),
-                ("services", "Services (start/stop/restart)"),
                 ("logs", "Logs (live follow, errors, analysis)"),
                 ("network", "Network & Ports"),
+                # Operate
+                ("radio", "Radio (meshtastic CLI)"),
+                ("services", "Services (start/stop/restart)"),
+                # Mesh Networks
                 ("rns", "RNS / Reticulum"),
                 ("aredn", "AREDN Mesh"),
+                # Tools & Config
                 ("rf", "RF Tools & Calculator"),
                 ("config", "Configuration"),
                 ("hardware", "Hardware Detection"),
                 ("system", "System Tools (full Linux CLI)"),
+                # Meta
                 ("web", "Web Client URL"),
                 ("about", "About"),
                 ("quit", "Exit"),
