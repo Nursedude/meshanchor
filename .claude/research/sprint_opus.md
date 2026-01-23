@@ -26,8 +26,10 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] SNR-based link topology lines
 - [x] Coverage radius circles (toggle)
 - [x] TUI "Live Network Map" menu option
-- [ ] **Map data feed from meshtasticd** — proper GeoJSON extraction via TCP:4403
-- [ ] **MQTT node tracking → map feed** — mqtt_subscriber provides GeoJSON to map
+- [x] **Map data service** — unified collector from all sources (meshtasticd, MQTT, tracker)
+- [x] **Map HTTP server** — `/api/nodes/geojson` endpoint, serves live map at localhost:5000
+- [x] **MQTT node tracking → map feed** — mqtt_subscriber persists GeoJSON cache every 30s
+- [ ] **Map data feed from meshtasticd** — improve CLI output parsing for position data
 - [ ] **Node history SQLite** — store node positions/states over time for playback
 - [ ] **Auto-open map on TUI launch** — option to start with map in browser
 - [ ] **Map tile pre-cache for Hawaii** — ship with offline tiles for default region
@@ -77,13 +79,16 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ## Completed This Sprint
 
-- [x] Full code review and healthcheck (1302 tests, 0 failures)
+- [x] Full code review and healthcheck (1318 tests, 0 failures)
 - [x] README revamp (mermaid diagrams, elevator speech, honest capabilities)
-- [x] GTK frozen decision documented
+- [x] GTK frozen decision documented (TUI + browser-maps is the path)
 - [x] Maps "Double Tap" vision document (.claude/research/maps_double_tap.md)
 - [x] Live map engine (web/node_map.html) — incremental updates, animations, links
-- [x] TUI live map integration (ai_tools_mixin.py)
+- [x] TUI live map integration (snapshot + server modes)
 - [x] Gateway scope clarification (Meshtastic↔RNS bridge, AREDN monitoring)
+- [x] Map data service (src/utils/map_data_service.py) — unified collector + HTTP server
+- [x] MQTT subscriber → map cache persistence (auto-populates map data)
+- [x] 26 new tests for map data pipeline (1318 total)
 
 ---
 
