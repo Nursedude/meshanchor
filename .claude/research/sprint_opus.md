@@ -98,7 +98,10 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] LXMF delivery confirmation — DeliveryTracker with pending/confirmed/failed/timeout states
 - [x] Coverage prediction with terrain — SRTMProvider, LOSAnalyzer, Fresnel zones, diffraction, coverage grid
 - [x] Signal strength trending — SignalTrend, per-node windowed stats, event detection, hourly patterns
-- [x] 253 new tests for map + bridge + queue + integration + delivery + terrain + signal pipeline (1545 total)
+- [x] MQTT subscriber hardening — input validation, payload limits, stale cleanup, reconnect jitter
+- [x] Data pipeline integration test — MQTT → MapCollector → History round trip (22 tests)
+- [x] Error handling audit — all critical paths verified, no bare except, no shell=True, all timeouts
+- [x] 341 new tests for map + bridge + queue + delivery + terrain + signal + MQTT + pipeline (1633 total)
 
 ---
 
