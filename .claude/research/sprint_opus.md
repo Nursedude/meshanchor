@@ -53,7 +53,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ### Phase 4: AI Diagnostics Expansion
 
-- [ ] **More diagnostic rules** — expand from 20+ to 50+ symptom patterns
+- [x] **More diagnostic rules** — expanded from 17 to 58 symptom patterns (7 categories)
 - [x] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
 - [x] **Health scoring** — overall network health 0-100 based on node metrics
 - [ ] **Predictive maintenance** — battery drain rate, node dropout patterns
@@ -106,7 +106,9 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
 - [x] Network health scoring — unified 0-100 score with connectivity, performance, reliability, freshness
 - [x] Log parsing patterns — 29 patterns for meshtasticd, rnsd, systemd, MeshForge with structured output
-- [x] 680 new tests across all modules (1972 total)
+- [x] Diagnostic rules expansion — 17 → 58 rules (connectivity, hardware, protocol, performance, resource, config, security)
+- [x] RF tools integration test — 20 cross-module tests (preset→multihop→antenna→health→trending→log_parser)
+- [x] 760 new tests across all modules (2052 total)
 
 ---
 
