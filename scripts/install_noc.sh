@@ -1124,6 +1124,14 @@ exec sudo /opt/meshforge/scripts/configure_lora.sh "$@"
 LORA_CMD
 chmod +x /usr/local/bin/meshforge-lora
 
+# Status command (terminal-native diagnostics)
+cat > /usr/local/bin/meshforge-status << 'STATUS_CMD'
+#!/bin/bash
+cd /opt/meshforge
+exec /opt/meshforge/venv/bin/python src/cli/status.py "$@"
+STATUS_CMD
+chmod +x /usr/local/bin/meshforge-status
+
 # Web client launcher
 cat > /usr/local/bin/meshforge-web << 'WEB_CMD'
 #!/bin/bash
@@ -1245,6 +1253,7 @@ echo "  /etc/meshtasticd/available.d/     - Radio templates"
 echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
+echo -e "  ${GREEN}meshforge-status${NC}            - Quick system status (no sudo needed)"
 echo -e "  ${GREEN}meshforge-web${NC}              - Open radio web client (config)"
 echo -e "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
 echo -e "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
