@@ -657,9 +657,10 @@ class MeshForgeLauncher(
         input("\nPress Enter to continue...")
 
     def _edit_rns_config(self):
-        """Edit Reticulum config with available editor."""
+        """Edit Reticulum config with available editor. Deploys template if no config exists."""
+        user_home = get_real_user_home()
         config_paths = [
-            get_real_user_home() / '.reticulum' / 'config',
+            user_home / '.reticulum' / 'config',
             Path('/root/.reticulum/config'),
         ]
 
@@ -670,15 +671,37 @@ class MeshForgeLauncher(
                 break
 
         if not config_path:
-            self.dialog.msgbox(
-                "No Config",
-                "No Reticulum config found.\n\n"
-                "Start rnsd once to create default config:\n"
-                "  rnsd\n\n"
-                "Or copy template:\n"
-                "  cp templates/reticulum.conf ~/.reticulum/config"
-            )
-            return
+            # Offer to deploy from template
+            template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+            target = user_home / '.reticulum' / 'config'
+
+            if template.exists():
+                code, _ = self.dialog.yesno(
+                    "Deploy Reticulum Config",
+                    f"No Reticulum config found.\n\n"
+                    f"Deploy template to:\n  {target}\n\n"
+                    f"This sets up RNS with Meshtastic bridge on port 4403.\n"
+                    f"You can edit it after deployment."
+                )
+                if code == 0:  # Yes
+                    try:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(template), str(target))
+                        config_path = str(target)
+                        print(f"\nDeployed: {target}")
+                    except (OSError, PermissionError) as e:
+                        self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
+                        return
+                else:
+                    return
+            else:
+                self.dialog.msgbox(
+                    "No Config",
+                    "No Reticulum config found and template missing.\n\n"
+                    "Install RNS first: pip3 install rns\n"
+                    "Then run rnsd once to generate default config."
+                )
+                return
 
         # Find editor
         editor = None
