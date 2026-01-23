@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 QUICK_ACTIONS = [
     ('s', 'Service status overview', '_qa_service_status'),
     ('n', 'Node list (meshtastic --nodes)', '_qa_node_list'),
+    ('i', 'Node inventory (tracked nodes)', '_qa_node_inventory'),
     ('l', 'Follow logs (meshtasticd)', '_qa_follow_logs'),
     ('r', 'Restart meshtasticd', '_qa_restart_meshtasticd'),
     ('R', 'Restart rnsd', '_qa_restart_rnsd'),
@@ -230,6 +231,58 @@ class QuickActionsMixin:
             print("Error: Report generator module not available.")
         except Exception as e:
             print(f"Error generating report: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_node_inventory(self):
+        """Quick: show tracked node inventory."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Node Inventory ===\n")
+
+        try:
+            from utils.node_inventory import NodeInventory
+            from utils.paths import get_real_user_home
+
+            path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+            inv = NodeInventory(path=path)
+
+            stats = inv.get_stats()
+            print(f"  Total nodes:    {stats['total']}")
+            print(f"  Online:         {stats['online']}")
+            print(f"  Offline:        {stats['offline']}")
+            print(f"  Stale (>7d):    {stats['stale']}")
+            print(f"  With position:  {stats['with_position']}")
+
+            if stats['total'] > 0:
+                # Show node list (non-stale only)
+                nodes = [n for n in inv.get_all_nodes() if not n.is_stale]
+                if nodes:
+                    print(f"\n  {'ID':<12} {'Name':<20} {'Status':<8} {'SNR':>5}  {'Hardware'}")
+                    print(f"  {'-'*12} {'-'*20} {'-'*8} {'-'*5}  {'-'*12}")
+                    for node in nodes[:25]:  # Cap at 25 for readability
+                        name = node.display_name[:20]
+                        nid = node.node_id[:12]
+                        status = node.status
+                        snr = f"{node.last_snr:.1f}" if node.last_snr is not None else "  -"
+                        hw = node.hardware[:12] if node.hardware else "-"
+                        print(f"  {nid:<12} {name:<20} {status:<8} {snr:>5}  {hw}")
+                    if len(nodes) > 25:
+                        print(f"\n  ... and {len(nodes) - 25} more nodes")
+
+                # Role breakdown
+                if stats['roles']:
+                    roles_str = ", ".join(f"{r}: {c}" for r, c in stats['roles'].items())
+                    print(f"\n  Roles: {roles_str}")
+            else:
+                print("\n  No nodes tracked yet.")
+                print("  Nodes are added when received via MQTT or meshtastic CLI.")
+
+        except ImportError:
+            print("Error: Node inventory module not available.")
+        except Exception as e:
+            logger.debug(f"Node inventory quick action failed: {e}")
+            print(f"Error: {e}")
 
         print()
         input("Press Enter to continue...")
