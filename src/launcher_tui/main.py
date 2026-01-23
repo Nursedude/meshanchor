@@ -70,6 +70,7 @@ from site_planner_mixin import SitePlannerMixin
 from service_discovery_mixin import ServiceDiscoveryMixin
 from first_run_mixin import FirstRunMixin
 from system_tools_mixin import SystemToolsMixin
+from quick_actions_mixin import QuickActionsMixin
 
 
 class MeshForgeLauncher(
@@ -80,7 +81,8 @@ class MeshForgeLauncher(
     SitePlannerMixin,
     ServiceDiscoveryMixin,
     FirstRunMixin,
-    SystemToolsMixin
+    SystemToolsMixin,
+    QuickActionsMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -230,6 +232,7 @@ class MeshForgeLauncher(
         while True:
             choices = [
                 ("status", "Status Overview"),
+                ("quick", "Quick Actions (shortcuts)"),
                 ("radio", "Radio (meshtastic CLI)"),
                 ("services", "Services (start/stop/restart)"),
                 ("logs", "Logs (live follow, errors, analysis)"),
@@ -260,6 +263,8 @@ class MeshForgeLauncher(
         """Handle menu selection."""
         if choice == "status":
             self._run_terminal_status()
+        elif choice == "quick":
+            self._quick_actions_menu()
         elif choice == "radio":
             self._radio_menu()
         elif choice == "services":
