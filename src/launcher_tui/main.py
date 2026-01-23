@@ -898,7 +898,6 @@ class MeshForgeLauncher(
             (80, "HTTP"),
             (443, "HTTPS"),
             (4403, "Meshtasticd"),
-            (5000, "Flask/Web"),
             (8080, "HamClock"),
             (8082, "HamClock API"),
             (9443, "Meshtastic Web"),
