@@ -69,6 +69,7 @@ class ServiceConfig:
     """Configuration for a managed service."""
     name: str
     systemd_name: str
+    check_binary: Optional[str] = None  # Binary that must exist for real install
     check_port: Optional[int] = None
     check_command: Optional[List[str]] = None
     startup_delay: int = 3  # seconds to wait after starting
@@ -100,6 +101,7 @@ class ServiceOrchestrator:
         'meshtasticd': ServiceConfig(
             name='meshtasticd',
             systemd_name='meshtasticd',
+            check_binary='meshtasticd',
             check_port=4403,
             startup_delay=5,  # Device init takes time
             required=True,
@@ -108,6 +110,7 @@ class ServiceOrchestrator:
         'rnsd': ServiceConfig(
             name='rnsd',
             systemd_name='rnsd',
+            check_binary='rnsd',
             check_command=['rnstatus', '-s'],
             startup_delay=3,
             required=True,
@@ -117,6 +120,7 @@ class ServiceOrchestrator:
         'mosquitto': ServiceConfig(
             name='mosquitto',
             systemd_name='mosquitto',
+            check_binary='mosquitto',
             check_port=1883,
             startup_delay=2,
             required=False,
@@ -256,10 +260,21 @@ class ServiceOrchestrator:
     # ─────────────────────────────────────────────────────────────
 
     def is_installed(self, service_name: str) -> bool:
-        """Check if service is installed."""
+        """Check if service is properly installed (not just a placeholder unit)."""
         config = self.SERVICES.get(service_name)
         if not config:
             return False
+
+        # Check binary exists (rejects placeholder services that use /bin/echo)
+        if config.check_binary:
+            result = subprocess.run(
+                ['which', config.check_binary],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                return False
 
         # Check systemd unit exists
         result = subprocess.run(
@@ -511,17 +526,21 @@ class ServiceOrchestrator:
 
         # Pre-flight: check all required services are installed BEFORE starting anything
         missing = self._preflight_check()
-        if missing and not graceful:
-            logger.error("═══ Pre-flight check failed ═══")
-            logger.error("")
-            logger.error("Required services not installed:")
-            for svc_name, fix_cmd in missing:
-                logger.error(f"  • {svc_name}")
-                logger.error(f"    Fix: {fix_cmd}")
-            logger.error("")
-            logger.error("After installing, run: sudo meshforge-noc --start")
-            logger.error("Or run the full installer: sudo bash /opt/meshforge/scripts/install_noc.sh")
-            return False
+        if missing:
+            if not graceful:
+                logger.error("═══ Pre-flight check failed ═══")
+                logger.error("")
+                logger.error("Required services not installed:")
+                for svc_name, fix_cmd in missing:
+                    logger.error(f"  • {svc_name}")
+                    logger.error(f"    Fix: {fix_cmd}")
+                logger.error("")
+                logger.error("After installing, run: sudo meshforge-noc --start")
+                logger.error("Or run the full installer: sudo bash /opt/meshforge/scripts/install_noc.sh")
+                return False
+            else:
+                for svc_name, fix_cmd in missing:
+                    logger.warning(f"Service not installed: {svc_name} → {fix_cmd}")
 
         if graceful:
             logger.info("Graceful mode: will continue even if services fail")
