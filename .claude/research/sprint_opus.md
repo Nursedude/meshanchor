@@ -40,7 +40,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] **Message queue overflow** — max_queue_size, priority-based shedding, auto-cleanup, stale recovery
 - [x] **Bridge health metrics** — BridgeHealthMonitor: uptime, rates, errors, is_healthy
 - [x] **Error categorization** — classify_error: transient/permanent/unknown patterns
-- [ ] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip
+- [x] **Integration test** — simulate Meshtastic→RNS→Meshtastic round trip (29 tests)
 - [ ] **LXMF delivery confirmation** — track message delivery end-to-end
 
 ### Phase 3: RF Tools Enhancement
@@ -94,7 +94,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Gateway bridge hardening — ReconnectStrategy integration, health monitor, error classification
 - [x] Failed message persistence — re-queue to persistent queue on send failure
 - [x] Message queue overflow protection — max size limits, priority shedding, stale recovery, auto-cleanup
-- [x] 117 new tests for map + bridge + queue pipeline (1409 total)
+- [x] Bridge integration test — full Mesh→RNS→Mesh round trip, routing, callbacks, edge cases
+- [x] 146 new tests for map + bridge + queue + integration pipeline (1438 total)
 
 ---
 
