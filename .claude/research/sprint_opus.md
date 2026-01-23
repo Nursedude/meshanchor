@@ -71,9 +71,9 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 
 - [ ] **Offline-first data sync** — queue telemetry when internet is down, sync when back
 - [ ] **GPS integration** — operator position on map, distance to nodes
-- [ ] **Emergency mode** — simplified UI for EMCOMM operators (big buttons, clear status)
+- [x] **Emergency mode** — simplified EMCOMM menu (broadcast, direct, SOS beacon, status)
 - [ ] **Channel scan** — detect active channels in range
-- [ ] **Node inventory** — track all known nodes with hardware, firmware, location, owner
+- [x] **Node inventory** — persistent registry with search, stats, pruning, JSON/markdown export
 
 ---
 
@@ -115,7 +115,9 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Quick actions menu — 8 single-key shortcuts (status/nodes/logs/restart/ports/report/diagnostics)
 - [x] Menu reorganization — grouped by workflow (Monitor → Operate → Networks → Tools → Meta)
 - [x] Code review hardening — socket leak fix, silent exception logging, ASCII safety, unused imports
-- [x] 1013 new tests across all modules (2245 total)
+- [x] Node inventory — persistent registry with search, stats, pruning, JSON persistence, markdown export
+- [x] Emergency mode — EMCOMM menu (broadcast, direct, SOS beacon, node status, position, messages)
+- [x] 1112 new tests across all modules (2347 total)
 
 ---
 
