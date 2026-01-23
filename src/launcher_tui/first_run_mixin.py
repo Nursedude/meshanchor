@@ -346,41 +346,21 @@ class FirstRunMixin:
         """Wizard completion"""
         self._mark_setup_complete()
 
-        # Get network IP for web access info
-        local_ip = self._get_local_ip()
-
-        web_info = ""
-        if local_ip and local_ip != "127.0.0.1":
-            web_info = f"\nWeb Access (from other devices):\n  http://{local_ip}:5000\n"
-
         self.dialog.msgbox(
             "Setup Complete!",
             "MeshForge is ready to use!\n\n"
             "Next Steps:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "1. Service Manager → Start meshtasticd\n"
-            "2. Rich CLI → Configure your radio\n"
+            "2. Meshtasticd Config → Configure your radio\n"
             "3. Diagnostics → Verify everything works\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{web_info}"
             "\nNeed Help?\n"
             "  • Run diagnostics for system health\n"
             "  • Check GitHub issues for known fixes\n"
             "  • HAM community: 73s and good luck!\n\n"
             "Press Enter to continue to main menu."
         )
-
-    def _get_local_ip(self) -> str:
-        """Get local network IP address."""
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
 
     def _settings_run_wizard(self):
         """Run wizard from settings menu"""

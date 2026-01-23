@@ -324,7 +324,6 @@ class NodeMapTabMixin:
         map_options = [
             ("https://localhost:9443", 9443, "Meshtastic Web"),
             ("http://localhost:8080", 8080, "Meshtastic Alt"),
-            ("http://localhost:5000", 5000, "Flask/MeshBot"),
             ("http://localhost:8000", 8000, "MeshMap"),
         ]
 
@@ -357,8 +356,8 @@ class NodeMapTabMixin:
                     except Exception:
                         pass  # Cleanup - safe to ignore
 
-        self._log_message("No map server found on common ports (9443, 8080, 5000, 8000)")
-        self._log_message("Make sure meshtasticd or meshbot web is running")
+        self._log_message("No map server found on common ports (9443, 8080, 8000)")
+        self._log_message("Make sure meshtasticd web is running (port 9443)")
 
     def _on_export_geojson(self, button):
         """Export nodes as GeoJSON"""
