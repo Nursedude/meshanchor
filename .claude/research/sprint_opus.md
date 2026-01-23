@@ -48,7 +48,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] **Coverage prediction with terrain** — SRTM data download + LOS calculation
 - [x] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
 - [x] **LoRa preset impact visualization** — show how preset choice affects coverage
-- [ ] **Multi-hop path loss** — calculate cumulative loss across relay chain
+- [x] **Multi-hop path loss** — calculate cumulative loss across relay chain
 - [ ] **Antenna pattern modeling** — basic dipole/yagi/omni patterns for site planning
 
 ### Phase 4: AI Diagnostics Expansion
@@ -102,7 +102,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Data pipeline integration test — MQTT → MapCollector → History round trip (22 tests)
 - [x] Error handling audit — all critical paths verified, no bare except, no shell=True, all timeouts
 - [x] LoRa preset impact visualization — sensitivity, range, airtime, throughput, coverage zones, comparison table
-- [x] 386 new tests for map + bridge + queue + delivery + terrain + signal + MQTT + pipeline + preset (1678 total)
+- [x] Multi-hop path loss — cumulative analysis, relay selection, preset comparison, path reports
+- [x] 464 new tests for map + bridge + queue + delivery + terrain + signal + MQTT + pipeline + preset + multihop (1756 total)
 
 ---
 
