@@ -798,8 +798,6 @@ def get_dependency_status() -> Dict[str, bool]:
         'meshtastic': check_dependency('meshtastic'),
         'rns': check_dependency('RNS'),
         'lxmf': check_dependency('LXMF'),
-        'flask': check_dependency('flask'),
-        'textual': check_dependency('textual'),
         'rich': check_dependency('rich'),
         'pyserial': check_dependency('serial'),
     }

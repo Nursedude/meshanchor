@@ -7,7 +7,7 @@ meshtastic>=2.3.0
 rns>=0.7.0
 lxmf>=0.4.0
 
-# Terminal formatting (used by TUI, diagnostics, tools)
+# Terminal formatting (used by TUI config menus)
 rich>=13.0.0
 
 # Configuration and utilities
