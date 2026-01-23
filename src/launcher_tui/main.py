@@ -315,14 +315,14 @@ class MeshForgeLauncher(
         except Exception:
             local_ip = "localhost"
 
-        web_url = f"http://{local_ip}:4403"
+        web_url = f"https://{local_ip}:9443"
 
         # Check if web server is responding
         port_ok = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
-            port_ok = sock.connect_ex((local_ip, 4403)) == 0
+            port_ok = sock.connect_ex((local_ip, 9443)) == 0
             sock.close()
         except Exception:
             pass
@@ -342,7 +342,7 @@ class MeshForgeLauncher(
             )
         else:
             msg = (
-                f"Web client NOT responding on port 4403\n\n"
+                f"Web client NOT responding on port 9443\n\n"
                 f"meshtasticd may not be running.\n\n"
                 f"  Start: sudo systemctl start meshtasticd\n"
                 f"  Check: sudo systemctl status meshtasticd\n"
@@ -472,10 +472,10 @@ class MeshForgeLauncher(
         except Exception:
             tests.append("RNS Status: NOT AVAILABLE")
 
-        # Test web client (port 4403) using centralized port checker
+        # Test web client (port 9443) using centralized port checker
         if check_port is not None:
-            web_ok = check_port(4403)
-            tests.append(f"Web Client (4403): {'OK ✓' if web_ok else 'NOT RUNNING'}")
+            web_ok = check_port(9443)
+            tests.append(f"Web Client (9443): {'OK ✓' if web_ok else 'NOT RUNNING'}")
 
         # Test internet connectivity
         if check_port is not None:
@@ -950,7 +950,7 @@ class MeshForgeLauncher(
             (4403, "Meshtasticd"),
             (8080, "HamClock"),
             (8082, "HamClock API"),
-            (4403, "Meshtastic Web"),
+            (9443, "Meshtastic Web"),
         ]
 
         results = []
@@ -1305,11 +1305,11 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/
@@ -1433,11 +1433,11 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 4403
+  Port: 9443
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 400
+  MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/

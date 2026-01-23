@@ -279,8 +279,8 @@ class DiagnosticEngine:
         # Meshtasticd API port
         results.append(self._check_tcp_port(4403, 'meshtasticd API'))
 
-        # Meshtasticd Web UI port (same as API on 4403)
-        results.append(self._check_tcp_port(4403, 'meshtasticd Web UI', optional=True))
+        # Meshtasticd Web UI port (HTTPS on 9443)
+        results.append(self._check_tcp_port(9443, 'meshtasticd Web UI', optional=True))
 
         # MQTT (optional)
         results.append(self._check_tcp_port(1883, 'MQTT broker', optional=True))

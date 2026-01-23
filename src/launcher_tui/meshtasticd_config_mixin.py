@@ -80,7 +80,7 @@ class MeshtasticdConfigMixin:
         except Exception:
             local_ip = "YOUR_PI_IP"
 
-        web_url = f"http://{local_ip}:4403"
+        web_url = f"https://{local_ip}:9443"
 
         self.dialog.msgbox(
             "Meshtastic Web Client",

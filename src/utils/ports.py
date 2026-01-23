@@ -21,8 +21,8 @@ MESHTASTICD_PORT = 4403
 # Alternate meshtasticd port (for multi-instance setups)
 MESHTASTICD_ALT_PORT = 4404
 
-# Meshtasticd Web UI port (same as TCP API in current versions)
-MESHTASTICD_WEB_PORT = 4403
+# Meshtasticd Web UI port (HTTPS, separate from TCP API)
+MESHTASTICD_WEB_PORT = 9443
 
 # Meshtasticd ports for detection (ordered by priority)
 MESHTASTICD_PORTS = [MESHTASTICD_PORT, MESHTASTICD_ALT_PORT]

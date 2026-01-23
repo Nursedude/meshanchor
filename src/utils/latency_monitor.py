@@ -7,7 +7,7 @@ real-time network health assessment.
 
 Services monitored:
 - meshtasticd TCP (4403) - mesh radio daemon
-- meshtasticd HTTP (4403) - web client (same port as TCP API)
+- meshtasticd HTTPS (9443) - web client
 - rnsd (37428) - Reticulum shared instance
 - MQTT (1883) - message broker
 """
