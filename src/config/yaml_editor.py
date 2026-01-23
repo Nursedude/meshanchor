@@ -12,6 +12,7 @@ from rich.panel import Panel
 console = Console()
 
 CONFIG_PATH = "/etc/meshtasticd/config.yaml"
+CONFIG_D_PATH = "/etc/meshtasticd/config.d/meshforge-overrides.yaml"
 
 
 class ConfigYamlEditor:
@@ -62,19 +63,29 @@ class ConfigYamlEditor:
             return True
 
     def save_config(self):
-        """Save configuration to file"""
+        """Save configuration to config.d/ overlay (never overwrites main config.yaml)."""
         try:
-            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            overlay_path = Path(CONFIG_D_PATH)
+            overlay_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if self.config_path.exists():
-                backup = self.config_path.with_suffix('.yaml.bak')
-                shutil.copy2(self.config_path, backup)
-                console.print(f"[dim]Backed up to {backup}[/dim]")
+            # Only write non-null sections that the user actually changed
+            overlay = {}
+            for key, value in self.config.items():
+                if value is not None:
+                    overlay[key] = value
 
-            with open(self.config_path, 'w') as f:
-                yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
+            if not overlay:
+                console.print("[yellow]No changes to save.[/yellow]")
+                return True
 
-            console.print(f"[green]Configuration saved to {self.config_path}[/green]")
+            with open(overlay_path, 'w') as f:
+                f.write("# MeshForge configuration overrides\n")
+                f.write("# These settings override /etc/meshtasticd/config.yaml\n")
+                f.write("# To reset: sudo rm this file and restart meshtasticd\n\n")
+                yaml.dump(overlay, f, default_flow_style=False, sort_keys=False)
+
+            console.print(f"[green]Configuration saved to {overlay_path}[/green]")
+            console.print("[dim]Main config.yaml is preserved (package-provided)[/dim]")
             self.modified = False
             return True
         except PermissionError:

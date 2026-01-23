@@ -293,8 +293,8 @@ Press Cancel to keep current values."""
             f"Bandwidth: {params['bw']} kHz\n"
             f"Spreading Factor: SF{params['sf']}\n"
             f"Coding Rate: 4/{params['cr']}\n\n"
-            "This will modify /etc/meshtasticd/config.yaml\n"
-            "and restart the service.",
+            "This saves to config.d/ (main config.yaml preserved)\n"
+            "and restarts the service.",
             default_no=True
         )
 
@@ -304,32 +304,23 @@ Press Cancel to keep current values."""
         self.dialog.infobox("Applying", f"Applying {preset} preset...")
 
         try:
-            config_path = Path('/etc/meshtasticd/config.yaml')
-
-            if not config_path.exists():
-                self.dialog.msgbox("Error", "Config file not found.\nRun installer first.")
-                return
-
-            # Read and modify config
             import yaml
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f) or {}
+            overlay_path = Path('/etc/meshtasticd/config.d/meshforge-lora-preset.yaml')
+            overlay_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if 'Lora' not in config:
-                config['Lora'] = {}
+            # Write only the LoRa override to config.d/
+            overlay = {
+                'Lora': {
+                    'Bandwidth': params['bw'],
+                    'SpreadFactor': params['sf'],
+                    'CodingRate': params['cr'],
+                }
+            }
 
-            config['Lora']['Bandwidth'] = params['bw']
-            config['Lora']['SpreadFactor'] = params['sf']
-            config['Lora']['CodingRate'] = params['cr']
-
-            # Backup and write
-            backup_path = config_path.with_suffix('.yaml.bak')
-            if config_path.exists():
-                import shutil
-                shutil.copy(config_path, backup_path)
-
-            with open(config_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False)
+            with open(overlay_path, 'w') as f:
+                f.write(f"# MeshForge LoRa preset: {preset}\n")
+                f.write("# Overrides Lora section from config.yaml\n\n")
+                yaml.dump(overlay, f, default_flow_style=False)
 
             # Restart service
             subprocess.run(['systemctl', 'restart', 'meshtasticd'],

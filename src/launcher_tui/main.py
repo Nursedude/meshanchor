@@ -213,48 +213,28 @@ class MeshForgeLauncher(
             self._fix_spi_config(has_native)
 
     def _run_main_menu(self):
-        """Display the main menu."""
+        """Display the main NOC menu."""
         while True:
-            # Build dynamic choices based on environment
-            choices = []
-
-            # Interfaces section
-            if self.env['has_display'] and self.env['has_gtk']:
-                choices.append(("gtk", "GTK4 Desktop Interface"))
-
-            # Tools section
-            choices.append(("---", "──────────── Tools ────────────"))
-            choices.append(("ai", "AI Tools"))
-            choices.append(("diag", "System Diagnostics"))
-            choices.append(("network", "Network Tools"))
-            choices.append(("rf", "RF Tools"))
-            choices.append(("site", "Site Planner"))
-            choices.append(("bridge", "Start Gateway Bridge"))
-            choices.append(("monitor", "Node Monitor"))
-            choices.append(("nodes", "View Nodes"))
-            choices.append(("messaging", "Messaging"))
-            choices.append(("space", "Space Weather"))
-
-            # Config section
-            choices.append(("---", "──────────── Config ───────────"))
-            choices.append(("web", "Web Client (Radio Config)"))
-            choices.append(("meshtasticd", "Meshtasticd Config"))
-            choices.append(("services", "Service Management"))
-            choices.append(("hardware", "Hardware Detection"))
-            choices.append(("settings", "Settings"))
-
-            # System
-            choices.append(("---", "──────────────────────────────"))
-            choices.append(("about", "About MeshForge"))
-            choices.append(("quit", "Exit"))
-
-            # Filter out separators for whiptail
-            filtered_choices = [(t, d) for t, d in choices if t != "---"]
+            choices = [
+                ("status", "Status Overview"),
+                ("radio", "Radio (meshtastic CLI)"),
+                ("services", "Services (start/stop/restart)"),
+                ("logs", "Logs (live follow, errors, analysis)"),
+                ("network", "Network & Ports"),
+                ("rns", "RNS / Reticulum"),
+                ("rf", "RF Tools & Calculator"),
+                ("config", "Configuration"),
+                ("hardware", "Hardware Detection"),
+                ("system", "System Tools (full Linux CLI)"),
+                ("web", "Web Client URL"),
+                ("about", "About"),
+                ("quit", "Exit"),
+            ]
 
             choice = self.dialog.menu(
-                f"MeshForge v{__version__}",
-                "Select an option:",
-                filtered_choices
+                f"MeshForge NOC v{__version__}",
+                "Network Operations Center:",
+                choices
             )
 
             if choice is None or choice == "quit":
@@ -264,45 +244,579 @@ class MeshForgeLauncher(
 
     def _handle_choice(self, choice: str):
         """Handle menu selection."""
-        if choice == "gtk":
-            self._launch_gtk()
-        elif choice == "ai":
-            self._ai_tools_menu()
-        elif choice == "diag":
-            self._diagnostics_menu()
-        elif choice == "network":
-            self._network_tools_menu()
-        elif choice == "site":
-            self._site_planner_menu()
-        elif choice == "bridge":
-            self._run_bridge()
-        elif choice == "monitor":
-            self._run_monitor()
-        elif choice == "space":
-            self._show_space_weather()
-        elif choice == "nodes":
-            self._show_nodes()
-        elif choice == "messaging":
-            self._messaging_menu()
-        elif choice == "rf":
-            self._rf_tools_menu()
-        elif choice == "web":
-            self._open_web_client()
-        elif choice == "meshtasticd":
-            self._meshtasticd_menu()
+        if choice == "status":
+            self._run_terminal_status()
+        elif choice == "radio":
+            self._radio_menu()
         elif choice == "services":
             self._service_menu()
+        elif choice == "logs":
+            self._logs_menu()
+        elif choice == "network":
+            self._network_menu()
+        elif choice == "rns":
+            self._rns_menu()
+        elif choice == "rf":
+            self._rf_tools_menu()
+        elif choice == "config":
+            self._config_menu()
         elif choice == "hardware":
             self._hardware_menu()
-        elif choice == "settings":
-            self._settings_menu()
+        elif choice == "system":
+            self._system_tools_menu()
+        elif choice == "web":
+            self._open_web_client()
         elif choice == "about":
             self._show_about()
 
-    def _launch_gtk(self):
-        """Launch GTK interface."""
-        self.dialog.infobox("Launching", "Starting GTK4 Desktop Interface...")
-        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_gtk.py')])
+    # =========================================================================
+    # Radio Menu - Direct meshtastic CLI (terminal-native)
+    # =========================================================================
+
+    def _radio_menu(self):
+        """Radio tools using meshtastic CLI directly."""
+        while True:
+            choices = [
+                ("info", "Radio Info (meshtastic --info)"),
+                ("nodes", "Node List (meshtastic --nodes)"),
+                ("channels", "Channel Info"),
+                ("send", "Send Message"),
+                ("position", "Position Info"),
+                ("set-region", "Set Region"),
+                ("set-name", "Set Node Name"),
+                ("reboot", "Reboot Radio"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Radio Tools",
+                "Meshtastic radio control (terminal-native):",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "info":
+                self._radio_run(['meshtastic', '--info'], "Radio Info")
+            elif choice == "nodes":
+                self._radio_run(['meshtastic', '--nodes'], "Node List")
+            elif choice == "channels":
+                self._radio_run(['meshtastic', '--ch-index', '0', '--ch-getall'], "Channels")
+            elif choice == "position":
+                self._radio_run(['meshtastic', '--pos-fields', 'lat', 'lon', 'alt'], "Position")
+            elif choice == "send":
+                self._radio_send_message()
+            elif choice == "set-region":
+                self._radio_set_region()
+            elif choice == "set-name":
+                self._radio_set_name()
+            elif choice == "reboot":
+                self._radio_reboot()
+
+    def _radio_run(self, cmd: list, title: str):
+        """Run a meshtastic CLI command and show output in terminal."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print(f"=== {title} ===\n")
+        result = subprocess.run(cmd, timeout=30)
+        if result.returncode != 0:
+            print(f"\nCommand failed (exit {result.returncode})")
+            print("Is meshtasticd running? Check: systemctl status meshtasticd")
+        input("\nPress Enter to continue...")
+
+    def _radio_send_message(self):
+        """Send a mesh message via meshtastic CLI."""
+        msg = self.dialog.inputbox(
+            "Send Message",
+            "Message text (broadcast to default channel):",
+            ""
+        )
+        if not msg:
+            return
+
+        dest = self.dialog.inputbox(
+            "Destination",
+            "Node ID (e.g. !abc12345)\nLeave empty for broadcast:",
+            ""
+        )
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Sending Message ===\n")
+
+        cmd = ['meshtastic', '--sendtext', msg]
+        if dest and dest.strip():
+            dest = dest.strip()
+            if not dest.startswith('!'):
+                dest = '!' + dest
+            cmd.extend(['--dest', dest])
+
+        subprocess.run(cmd, timeout=30)
+        input("\nPress Enter to continue...")
+
+    def _radio_set_region(self):
+        """Set LoRa region via meshtastic CLI."""
+        choices = [
+            ("US", "US (902-928 MHz)"),
+            ("EU_868", "EU_868 (863-870 MHz)"),
+            ("CN", "CN (470-510 MHz)"),
+            ("JP", "JP (920-925 MHz)"),
+            ("ANZ", "ANZ (915-928 MHz)"),
+            ("KR", "KR (920-923 MHz)"),
+            ("TW", "TW (920-925 MHz)"),
+            ("RU", "RU (868-870 MHz)"),
+            ("IN", "IN (865-867 MHz)"),
+            ("NZ_865", "NZ_865 (864-868 MHz)"),
+            ("TH", "TH (920-925 MHz)"),
+            ("UA_868", "UA_868 (863-870 MHz)"),
+            ("LORA_24", "LORA_24 (2.4 GHz)"),
+            ("UNSET", "UNSET (clear region)"),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "Set Region",
+            "Select your LoRa region:",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        if self.dialog.yesno("Confirm", f"Set region to {choice}?\n\nRadio will restart."):
+            subprocess.run(['clear'], check=False, timeout=5)
+            print(f"=== Setting Region: {choice} ===\n")
+            subprocess.run(['meshtastic', '--set', 'lora.region', choice], timeout=30)
+            input("\nPress Enter to continue...")
+
+    def _radio_set_name(self):
+        """Set node long name via meshtastic CLI."""
+        name = self.dialog.inputbox(
+            "Node Name",
+            "Enter node long name:",
+            ""
+        )
+        if not name:
+            return
+
+        short = self.dialog.inputbox(
+            "Short Name",
+            "Enter short name (max 4 chars):",
+            name[:4]
+        )
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Setting Node Name ===\n")
+        cmd = ['meshtastic', '--set-owner', name]
+        if short:
+            cmd.extend(['--set-owner-short', short[:4]])
+        subprocess.run(cmd, timeout=30)
+        input("\nPress Enter to continue...")
+
+    def _radio_reboot(self):
+        """Reboot the radio via meshtastic CLI."""
+        if self.dialog.yesno("Reboot Radio", "Reboot the Meshtastic radio?\n\nThis restarts the firmware.", default_no=True):
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Rebooting Radio ===\n")
+            subprocess.run(['meshtastic', '--reboot'], timeout=30)
+            input("\nPress Enter to continue...")
+
+    # =========================================================================
+    # Logs Menu - Terminal-native log viewing
+    # =========================================================================
+
+    def _logs_menu(self):
+        """Log viewer - all terminal-native."""
+        while True:
+            choices = [
+                ("live-mesh", "Live: meshtasticd (Ctrl+C to stop)"),
+                ("live-rns", "Live: rnsd (Ctrl+C to stop)"),
+                ("live-all", "Live: all services (Ctrl+C to stop)"),
+                ("errors", "Errors (last hour)"),
+                ("mesh-50", "meshtasticd (last 50 lines)"),
+                ("rns-50", "rnsd (last 50 lines)"),
+                ("boot", "Boot messages (this boot)"),
+                ("kernel", "Kernel messages (dmesg)"),
+                ("meshforge", "MeshForge app logs"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Log Viewer",
+                "Terminal-native logs (real journalctl):",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            subprocess.run(['clear'], check=False, timeout=5)
+
+            if choice == "live-mesh":
+                print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
+                try:
+                    subprocess.run(
+                        ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
+                        timeout=None
+                    )
+                except KeyboardInterrupt:
+                    pass
+            elif choice == "live-rns":
+                print("=== rnsd live log (Ctrl+C to stop) ===\n")
+                try:
+                    subprocess.run(
+                        ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
+                        timeout=None
+                    )
+                except KeyboardInterrupt:
+                    pass
+            elif choice == "live-all":
+                print("=== All services live log (Ctrl+C to stop) ===\n")
+                try:
+                    subprocess.run(
+                        ['journalctl', '-f', '-n', '30', '--no-pager'],
+                        timeout=None
+                    )
+                except KeyboardInterrupt:
+                    pass
+            elif choice == "errors":
+                print("=== Errors (last hour, priority err+) ===\n")
+                subprocess.run(
+                    ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
+                    timeout=30
+                )
+                input("\nPress Enter to continue...")
+            elif choice == "mesh-50":
+                print("=== meshtasticd (last 50 lines) ===\n")
+                subprocess.run(
+                    ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
+                    timeout=15
+                )
+                input("\nPress Enter to continue...")
+            elif choice == "rns-50":
+                print("=== rnsd (last 50 lines) ===\n")
+                subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
+                    timeout=15
+                )
+                input("\nPress Enter to continue...")
+            elif choice == "boot":
+                print("=== Boot messages (this boot) ===\n")
+                subprocess.run(
+                    ['journalctl', '-b', '-n', '100', '--no-pager'],
+                    timeout=15
+                )
+                input("\nPress Enter to continue...")
+            elif choice == "kernel":
+                print("=== Kernel messages (dmesg) ===\n")
+                subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "meshforge":
+                self._view_meshforge_logs()
+
+    # =========================================================================
+    # Network Menu - Ports, interfaces, connectivity
+    # =========================================================================
+
+    def _network_menu(self):
+        """Network diagnostics - terminal-native."""
+        while True:
+            choices = [
+                ("status", "Quick Network Status"),
+                ("ports", "Listening Ports (ss -tlnp)"),
+                ("ifaces", "Network Interfaces (ip addr)"),
+                ("conns", "Active Connections (ss -tunp)"),
+                ("routes", "Routing Table (ip route)"),
+                ("ping", "Ping Test"),
+                ("dns", "DNS Lookup"),
+                ("discover", "Meshtastic Device Discovery"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Network & Ports",
+                "Network diagnostics (terminal-native):",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                self._run_terminal_network()
+            elif choice == "ports":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Listening Ports ===\n")
+                subprocess.run(['ss', '-tlnp'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "ifaces":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Network Interfaces ===\n")
+                subprocess.run(['ip', '-c', 'addr'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "conns":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Active Connections ===\n")
+                subprocess.run(['ss', '-tunp'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "routes":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Routing Table ===\n")
+                subprocess.run(['ip', 'route'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "ping":
+                self._ping_test()
+            elif choice == "dns":
+                self._dns_lookup()
+            elif choice == "discover":
+                self._meshtastic_discovery()
+
+    # =========================================================================
+    # RNS / Reticulum Menu
+    # =========================================================================
+
+    def _rns_menu(self):
+        """Reticulum Network Stack tools."""
+        while True:
+            choices = [
+                ("status", "RNS Status (rnstatus)"),
+                ("paths", "RNS Path Table (rnpath)"),
+                ("bridge", "Start Gateway Bridge"),
+                ("config", "View Reticulum Config"),
+                ("edit", "Edit Reticulum Config"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "RNS / Reticulum",
+                "Reticulum Network Stack tools:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== RNS Status ===\n")
+                result = subprocess.run(['rnstatus', '-s'], timeout=15)
+                if result.returncode != 0:
+                    print("\nrnstatus not found or rnsd not running.")
+                    print("Install: pip3 install rns")
+                    print("Start:   sudo systemctl start rnsd")
+                input("\nPress Enter to continue...")
+            elif choice == "paths":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== RNS Path Table ===\n")
+                result = subprocess.run(['rnpath', '-t'], timeout=15)
+                if result.returncode != 0:
+                    print("\nrnpath not available. Is RNS installed?")
+                input("\nPress Enter to continue...")
+            elif choice == "bridge":
+                self._run_bridge()
+            elif choice == "config":
+                self._view_rns_config()
+            elif choice == "edit":
+                self._edit_rns_config()
+
+    def _view_rns_config(self):
+        """View current Reticulum config."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Reticulum Configuration ===\n")
+
+        # Try common config locations
+        config_paths = [
+            get_real_user_home() / '.reticulum' / 'config',
+            Path('/root/.reticulum/config'),
+            Path('/etc/reticulum/config'),
+        ]
+
+        found = False
+        for cfg in config_paths:
+            if cfg.exists():
+                print(f"Config: {cfg}\n")
+                try:
+                    content = cfg.read_text()
+                    print(content)
+                    found = True
+                    break
+                except PermissionError:
+                    print(f"Permission denied reading {cfg}")
+                    print(f"Try: sudo cat {cfg}")
+
+        if not found:
+            print("No Reticulum config found.")
+            print("\nExpected locations:")
+            for p in config_paths:
+                print(f"  {p}")
+            print("\nInstall RNS: pip3 install rns")
+            print("Template:    templates/reticulum.conf")
+
+        input("\nPress Enter to continue...")
+
+    def _edit_rns_config(self):
+        """Edit Reticulum config with available editor."""
+        config_paths = [
+            get_real_user_home() / '.reticulum' / 'config',
+            Path('/root/.reticulum/config'),
+        ]
+
+        config_path = None
+        for cfg in config_paths:
+            if cfg.exists():
+                config_path = str(cfg)
+                break
+
+        if not config_path:
+            self.dialog.msgbox(
+                "No Config",
+                "No Reticulum config found.\n\n"
+                "Start rnsd once to create default config:\n"
+                "  rnsd\n\n"
+                "Or copy template:\n"
+                "  cp templates/reticulum.conf ~/.reticulum/config"
+            )
+            return
+
+        # Find editor
+        editor = None
+        for cmd in ['nano', 'vim', 'vi']:
+            if shutil.which(cmd):
+                editor = cmd
+                break
+
+        if not editor:
+            self.dialog.msgbox("Error", "No text editor found (nano, vim, vi)")
+            return
+
+        subprocess.run([editor, config_path])
+
+    # =========================================================================
+    # Config Menu - meshtasticd config.d/ management
+    # =========================================================================
+
+    def _config_menu(self):
+        """Configuration management for meshtasticd."""
+        while True:
+            choices = [
+                ("view", "View Active Config"),
+                ("overlays", "View config.d/ Overlays"),
+                ("available", "Available HAT Configs"),
+                ("presets", "LoRa Presets"),
+                ("channels", "Channel Configuration"),
+                ("meshtasticd", "Advanced meshtasticd Config"),
+                ("settings", "MeshForge Settings"),
+                ("wizard", "Run Setup Wizard"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Configuration",
+                "meshtasticd & MeshForge configuration:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "view":
+                self._view_active_config()
+            elif choice == "overlays":
+                self._view_config_overlays()
+            elif choice == "available":
+                self._view_available_hats()
+            elif choice == "presets":
+                self._meshtasticd_lora_presets()
+            elif choice == "channels":
+                self._channel_config_menu()
+            elif choice == "meshtasticd":
+                self._meshtasticd_menu()
+            elif choice == "settings":
+                self._settings_menu()
+            elif choice == "wizard":
+                self._run_first_run_wizard()
+
+    def _view_active_config(self):
+        """Show the active meshtasticd config.yaml."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== meshtasticd config.yaml ===\n")
+
+        config_path = Path('/etc/meshtasticd/config.yaml')
+        if config_path.exists():
+            print(f"File: {config_path}\n")
+            try:
+                print(config_path.read_text())
+            except PermissionError:
+                print("Permission denied. Try: sudo cat /etc/meshtasticd/config.yaml")
+        else:
+            print("config.yaml not found!")
+            print("\nInstall meshtasticd:")
+            print("  sudo apt install meshtasticd")
+            print("  # or run the MeshForge installer")
+
+        input("\nPress Enter to continue...")
+
+    def _view_config_overlays(self):
+        """Show config.d/ overlay files."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== config.d/ Overlays ===\n")
+
+        config_d = Path('/etc/meshtasticd/config.d')
+        if not config_d.exists():
+            print("config.d/ directory not found.")
+            print("Create it: sudo mkdir -p /etc/meshtasticd/config.d")
+            input("\nPress Enter to continue...")
+            return
+
+        overlays = sorted(config_d.glob('*.yaml'))
+        if not overlays:
+            print("No overlay files in config.d/")
+            print("\nOverlays override sections from config.yaml")
+            print("MeshForge writes here instead of touching config.yaml")
+        else:
+            print(f"Found {len(overlays)} overlay(s):\n")
+            for f in overlays:
+                size = f.stat().st_size
+                print(f"  {f.name} ({size} bytes)")
+
+            # Show contents of each
+            print("\n" + "=" * 50)
+            for f in overlays:
+                print(f"\n--- {f.name} ---")
+                try:
+                    print(f.read_text())
+                except PermissionError:
+                    print("  (permission denied)")
+
+        input("\nPress Enter to continue...")
+
+    def _view_available_hats(self):
+        """Show available HAT configurations from meshtasticd package."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Available HAT Configs ===\n")
+
+        available_d = Path('/etc/meshtasticd/available.d')
+        if not available_d.exists():
+            print("available.d/ not found.")
+            print("meshtasticd package should provide this.")
+            print("\nInstall: sudo apt install meshtasticd")
+            input("\nPress Enter to continue...")
+            return
+
+        configs = sorted(available_d.glob('*.yaml'))
+        if not configs:
+            print("No HAT configs available.")
+        else:
+            print(f"Found {len(configs)} HAT config(s):\n")
+            for i, f in enumerate(configs, 1):
+                print(f"  {i:2d}. {f.name}")
+
+            print("\nTo activate a HAT config:")
+            print("  sudo cp /etc/meshtasticd/available.d/<file>.yaml \\")
+            print("         /etc/meshtasticd/config.d/")
+            print("  sudo systemctl restart meshtasticd")
+            print("\nWARNING: Only ONE Lora config should be in config.d/")
+
+        input("\nPress Enter to continue...")
 
     def _open_web_client(self):
         """Show/open meshtasticd web client for full radio configuration."""
@@ -352,112 +866,13 @@ class MeshForgeLauncher(
         self.dialog.msgbox("Web Client", msg)
 
     # =========================================================================
-    # System Diagnostics
+    # Terminal-native utilities (used by menus above)
     # =========================================================================
-
-    def _diagnostics_menu(self):
-        """System diagnostics menu."""
-        while True:
-            choices = [
-                ("status", "Quick Status (terminal)"),
-                ("full", "Full Diagnostic (terminal)"),
-                ("services", "Service Status (terminal)"),
-                ("logs", "Log Analysis"),
-                ("tools", "System Tools (full Linux CLI)"),
-                ("network", "Network Connectivity"),
-                ("hardware", "Hardware Interfaces"),
-                ("system", "System Resources"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "System Diagnostics",
-                "Terminal-native diagnostics and tools:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "status":
-                self._run_terminal_status()
-            elif choice == "full":
-                self._run_full_diagnostics()
-            elif choice == "tools":
-                self._system_tools_menu()
-            elif choice == "services":
-                self._run_terminal_services()
-            elif choice == "network":
-                self._run_terminal_network()
-            elif choice == "hardware":
-                self._check_hardware_interfaces()
-            elif choice == "logs":
-                self._analyze_logs()
-            elif choice == "system":
-                self._run_terminal_resources()
 
     def _run_terminal_status(self):
         """Run meshforge-status (terminal-native one-shot status)."""
         subprocess.run(['clear'], check=False, timeout=5)
         subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
-        input("\nPress Enter to continue...")
-
-    def _run_full_diagnostics(self):
-        """Run full diagnostics script."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')], timeout=600)
-        input("\nPress Enter to continue...")
-
-    def _run_terminal_services(self):
-        """Show service status directly in terminal."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("MeshForge Service Status")
-        print("=" * 50)
-        print()
-
-        services = [
-            ('meshtasticd', 'Mesh radio daemon'),
-            ('rnsd', 'Reticulum shared instance'),
-            ('meshforge', 'MeshForge NOC'),
-        ]
-
-        for svc, desc in services:
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc],
-                    capture_output=True, text=True, timeout=5
-                )
-                status = result.stdout.strip()
-                if status == 'active':
-                    print(f"  \033[0;32m●\033[0m {svc:<18} running    {desc}")
-                elif status == 'inactive':
-                    print(f"  \033[2m○\033[0m {svc:<18} stopped    {desc}")
-                elif status == 'failed':
-                    print(f"  \033[0;31m●\033[0m {svc:<18} FAILED     {desc}")
-                else:
-                    print(f"  \033[1;33m?\033[0m {svc:<18} {status:<10} {desc}")
-            except Exception:
-                print(f"  ? {svc:<18} unknown    {desc}")
-
-        # Show recent logs for failed services
-        print()
-        for svc, desc in services:
-            try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.stdout.strip() == 'failed':
-                    print(f"\033[0;31m{svc} failure log:\033[0m")
-                    subprocess.run(
-                        ['journalctl', '-u', svc, '-n', '5', '--no-pager', '-o', 'short'],
-                        timeout=10
-                    )
-                    print()
-            except Exception:
-                pass
-
-        print("-" * 50)
         input("\nPress Enter to continue...")
 
     def _run_terminal_network(self):
@@ -521,388 +936,6 @@ class MeshForgeLauncher(
         print("-" * 50)
         input("\nPress Enter to continue...")
 
-    def _run_terminal_resources(self):
-        """Show system resources directly in terminal."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("MeshForge System Resources")
-        print("=" * 50)
-        print()
-
-        # Run the status command with focus on resources
-        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
-
-        print()
-        print("Live monitoring: htop, top, btop")
-        print("-" * 50)
-        input("\nPress Enter to continue...")
-
-    def _system_tools_menu(self):
-        """Launch terminal-native system tools directly."""
-        while True:
-            choices = [
-                ("meshtastic", "meshtastic --info (radio details)"),
-                ("nodes", "meshtastic --nodes (mesh network)"),
-                ("rnstatus", "rnstatus (Reticulum status)"),
-                ("mlog", "meshtasticd logs (live follow)"),
-                ("rlog", "rnsd logs (live follow)"),
-                ("ports", "ss -tlnp (listening ports)"),
-                ("htop", "htop (system monitor)"),
-                ("dmesg", "dmesg (kernel messages)"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "System Tools",
-                "Terminal tools (Ctrl+C to return):",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            subprocess.run(['clear'], check=False, timeout=5)
-
-            if choice == "meshtastic":
-                print("=== meshtastic --info ===\n")
-                subprocess.run(['meshtastic', '--info'], timeout=30)
-                input("\nPress Enter to continue...")
-            elif choice == "nodes":
-                print("=== meshtastic --nodes ===\n")
-                subprocess.run(['meshtastic', '--nodes'], timeout=30)
-                input("\nPress Enter to continue...")
-            elif choice == "rnstatus":
-                print("=== rnstatus ===\n")
-                subprocess.run(['rnstatus', '-s'], timeout=15)
-                input("\nPress Enter to continue...")
-            elif choice == "mlog":
-                print("=== meshtasticd logs (Ctrl+C to stop) ===\n")
-                try:
-                    subprocess.run(
-                        ['journalctl', '-u', 'meshtasticd', '-f', '--no-pager'],
-                        timeout=300
-                    )
-                except (KeyboardInterrupt, subprocess.TimeoutExpired):
-                    pass
-            elif choice == "rlog":
-                print("=== rnsd logs (Ctrl+C to stop) ===\n")
-                try:
-                    subprocess.run(
-                        ['journalctl', '-u', 'rnsd', '-f', '--no-pager'],
-                        timeout=300
-                    )
-                except (KeyboardInterrupt, subprocess.TimeoutExpired):
-                    pass
-            elif choice == "ports":
-                print("=== Listening Ports ===\n")
-                subprocess.run(['ss', '-tlnp'], timeout=10)
-                input("\nPress Enter to continue...")
-            elif choice == "htop":
-                # htop is fully interactive, just exec it
-                htop_cmd = None
-                for cmd in ['htop', 'btop', 'top']:
-                    try:
-                        result = subprocess.run(
-                            ['which', cmd], capture_output=True, timeout=5
-                        )
-                        if result.returncode == 0:
-                            htop_cmd = cmd
-                            break
-                    except Exception:
-                        continue
-                if htop_cmd:
-                    subprocess.run([htop_cmd], timeout=600)
-                else:
-                    print("No system monitor found (htop, btop, top)")
-                    input("\nPress Enter to continue...")
-            elif choice == "dmesg":
-                print("=== Kernel Messages (last 50) ===\n")
-                subprocess.run(
-                    ['dmesg', '--time-format=reltime'],
-                    timeout=10
-                )
-                input("\nPress Enter to continue...")
-
-    def _check_services(self):
-        """Check service status using centralized service checker.
-
-        Uses utils/service_check.py - SINGLE SOURCE OF TRUTH for service status.
-        This ensures consistent status across all MeshForge UIs.
-        """
-        self.dialog.infobox("Services", "Checking services...")
-
-        services = ['meshtasticd', 'rnsd', 'hamclock']
-        results = []
-
-        for svc in services:
-            if check_service is not None:
-                # Use centralized service checker (preferred)
-                status = check_service(svc)
-                state_str = status.state.value.upper() if status.state else "UNKNOWN"
-                if status.available:
-                    results.append(f"{svc}: {state_str} ✓")
-                else:
-                    results.append(f"{svc}: {state_str}")
-                    if status.fix_hint:
-                        results.append(f"  → {status.fix_hint}")
-            else:
-                # Fallback to direct systemctl (only if service_check unavailable)
-                try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', svc],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    status = result.stdout.strip()
-                    results.append(f"{svc}: {status.upper()}")
-                except Exception:
-                    results.append(f"{svc}: UNKNOWN")
-
-        self.dialog.msgbox("Service Status", "\n".join(results))
-
-    def _check_network(self):
-        """Check network connectivity using centralized utilities.
-
-        Uses utils/service_check.py for port checks - consistent with service status.
-        """
-        self.dialog.infobox("Network", "Testing connectivity...")
-
-        tests = []
-
-        # Test meshtasticd TCP using centralized port checker
-        if check_port is not None:
-            port_ok = check_port(4403)
-            tests.append(f"meshtasticd (4403): {'OK ✓' if port_ok else 'FAIL'}")
-        else:
-            # Fallback to direct socket check
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)
-                result = sock.connect_ex(('localhost', 4403))
-                sock.close()
-                tests.append(f"meshtasticd (4403): {'OK' if result == 0 else 'FAIL'}")
-            except Exception:
-                tests.append("meshtasticd (4403): ERROR")
-
-        # Test RNS using rnstatus command
-        try:
-            result = subprocess.run(
-                ['rnstatus', '-j'],
-                capture_output=True, text=True, timeout=5
-            )
-            tests.append(f"RNS Status: {'OK ✓' if result.returncode == 0 else 'FAIL'}")
-        except FileNotFoundError:
-            tests.append("RNS Status: NOT INSTALLED")
-        except Exception:
-            tests.append("RNS Status: NOT AVAILABLE")
-
-        # Test web client (port 9443) using centralized port checker
-        if check_port is not None:
-            web_ok = check_port(9443)
-            tests.append(f"Web Client (9443): {'OK ✓' if web_ok else 'NOT RUNNING'}")
-
-        # Test internet connectivity
-        if check_port is not None:
-            inet_ok = check_port(53, host='8.8.8.8', timeout=3.0)
-            tests.append(f"Internet (DNS): {'OK ✓' if inet_ok else 'FAIL'}")
-        else:
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(3)
-                result = sock.connect_ex(('8.8.8.8', 53))
-                sock.close()
-                tests.append(f"Internet (DNS): {'OK' if result == 0 else 'FAIL'}")
-            except Exception:
-                tests.append("Internet: ERROR")
-
-        self.dialog.msgbox("Network Connectivity", "\n".join(tests))
-
-    def _check_hardware_interfaces(self):
-        """Check hardware interfaces."""
-        self.dialog.infobox("Hardware", "Checking interfaces...")
-
-        checks = []
-
-        # SPI
-        spi_enabled = Path('/dev/spidev0.0').exists()
-        checks.append(f"SPI: {'ENABLED' if spi_enabled else 'DISABLED'}")
-
-        # I2C
-        i2c_enabled = Path('/dev/i2c-1').exists()
-        checks.append(f"I2C: {'ENABLED' if i2c_enabled else 'DISABLED'}")
-
-        # Serial
-        serial_ports = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
-        checks.append(f"Serial Ports: {len(serial_ports)} found")
-        for port in serial_ports[:3]:
-            checks.append(f"  - {port.name}")
-
-        # GPIO
-        gpio_available = Path('/sys/class/gpio').exists()
-        checks.append(f"GPIO: {'AVAILABLE' if gpio_available else 'NOT AVAILABLE'}")
-
-        self.dialog.msgbox("Hardware Interfaces", "\n".join(checks))
-
-    def _analyze_logs(self):
-        """P4: Enhanced log viewer with service selection."""
-        while True:
-            choices = [
-                ("summary", "Error Summary (All Services)"),
-                ("meshtasticd", "View meshtasticd Logs"),
-                ("rnsd", "View rnsd Logs"),
-                ("syslog", "View System Log (journalctl)"),
-                ("dmesg", "View Kernel Messages (dmesg)"),
-                ("meshforge", "View MeshForge Logs"),
-                ("live", "Live Log Follow (journalctl -f)"),
-                ("boot", "Boot Messages (this boot)"),
-                ("errors", "Errors Only (last hour)"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Log Viewer",
-                "View and analyze system logs:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "summary":
-                self._log_error_summary()
-            elif choice == "meshtasticd":
-                self._view_service_logs("meshtasticd")
-            elif choice == "rnsd":
-                self._view_service_logs("rnsd")
-            elif choice == "syslog":
-                self._view_syslog()
-            elif choice == "dmesg":
-                self._view_dmesg()
-            elif choice == "meshforge":
-                self._view_meshforge_logs()
-            elif choice == "live":
-                self._live_log_follow()
-            elif choice == "boot":
-                self._view_boot_logs()
-            elif choice == "errors":
-                self._view_errors_only()
-
-    def _log_error_summary(self):
-        """Show error summary for all services."""
-        self.dialog.infobox("Logs", "Analyzing logs for errors...")
-
-        services = ['meshtasticd', 'rnsd', 'lxmf.delivery']
-        summary = ["Error Summary\n" + "=" * 40]
-
-        for svc in services:
-            try:
-                result = subprocess.run(
-                    ['journalctl', '-u', svc, '-n', '100', '--no-pager', '-p', 'err'],
-                    capture_output=True, text=True, timeout=10
-                )
-                error_count = len([l for l in result.stdout.split('\n') if l.strip()])
-                status = f"[ERRORS: {error_count}]" if error_count > 0 else "[OK]"
-                summary.append(f"\n{svc}: {status}")
-            except Exception:
-                summary.append(f"\n{svc}: [Unable to read]")
-
-        # Check recent errors
-        summary.append("\n" + "-" * 40)
-        summary.append("Recent errors (last hour):")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '--since', '1 hour ago', '-p', 'err', '--no-pager', '-n', '10'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.stdout.strip():
-                for line in result.stdout.split('\n')[:8]:
-                    if line.strip():
-                        summary.append(f"  {line[:60]}...")
-            else:
-                summary.append("  No errors in last hour")
-        except Exception as e:
-            logger.debug("Failed to read journal errors: %s", e)
-            summary.append("  Unable to read recent errors")
-
-        self.dialog.msgbox("Log Analysis", "\n".join(summary))
-
-    def _view_service_logs(self, service: str):
-        """View logs for a specific service."""
-        # Ask for number of lines
-        lines = self.dialog.inputbox(
-            f"{service} Logs",
-            "Number of log lines to show:",
-            "50"
-        )
-
-        if not lines:
-            return
-
-        try:
-            lines = int(lines)
-        except ValueError:
-            lines = 50
-
-        self.dialog.infobox("Loading", f"Loading {service} logs...")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '-u', service, '-n', str(lines), '--no-pager'],
-                capture_output=True, text=True, timeout=15
-            )
-
-            if result.stdout.strip():
-                # Use scrollable textbox for long output
-                subprocess.run(['clear'], check=False, timeout=5)
-                print(f"=== {service} Logs (last {lines} lines) ===\n")
-                print(result.stdout)
-                print("\n" + "=" * 50)
-                input("\nPress Enter to continue...")
-            else:
-                self.dialog.msgbox(f"{service} Logs", "No logs found for this service")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read logs: {e}")
-
-    def _view_syslog(self):
-        """View system log."""
-        self.dialog.infobox("Loading", "Loading system log...")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '-n', '50', '--no-pager'],
-                capture_output=True, text=True, timeout=15
-            )
-
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("=== System Log (last 50 lines) ===\n")
-            print(result.stdout)
-            print("\n" + "=" * 50)
-            input("\nPress Enter to continue...")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read syslog: {e}")
-
-    def _view_dmesg(self):
-        """View kernel messages."""
-        self.dialog.infobox("Loading", "Loading kernel messages...")
-
-        try:
-            result = subprocess.run(
-                ['dmesg', '--time-format=reltime'],
-                capture_output=True, text=True, timeout=10
-            )
-
-            # Get last 50 lines
-            lines = result.stdout.strip().split('\n')[-50:]
-
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("=== Kernel Messages (dmesg, last 50 lines) ===\n")
-            print('\n'.join(lines))
-            print("\n" + "=" * 50)
-            input("\nPress Enter to continue...")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read dmesg: {e}")
-
     def _view_meshforge_logs(self):
         """View MeshForge application logs."""
         log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
@@ -931,186 +964,9 @@ class MeshForgeLauncher(
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to read log: {e}")
 
-    def _live_log_follow(self):
-        """Follow logs live (like tail -f)."""
-        choices = [
-            ("all", "All System Logs"),
-            ("meshtasticd", "meshtasticd Only"),
-            ("rnsd", "rnsd Only"),
-            ("kernel", "Kernel Only (dmesg)"),
-            ("back", "Back"),
-        ]
-
-        choice = self.dialog.menu(
-            "Live Logs",
-            "Select logs to follow (Ctrl+C to stop):",
-            choices
-        )
-
-        if choice is None or choice == "back":
-            return
-
-        self.dialog.msgbox(
-            "Live Log Follow",
-            "Starting live log follow...\n\n"
-            "Press Ctrl+C to stop and return to menu."
-        )
-
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Live Log Follow (Ctrl+C to stop) ===\n")
-
-        try:
-            if choice == "all":
-                subprocess.run(['journalctl', '-f', '-n', '20'], timeout=None)
-            elif choice == "meshtasticd":
-                subprocess.run(['journalctl', '-u', 'meshtasticd', '-f', '-n', '20'], timeout=None)
-            elif choice == "rnsd":
-                subprocess.run(['journalctl', '-u', 'rnsd', '-f', '-n', '20'], timeout=None)
-            elif choice == "kernel":
-                subprocess.run(['dmesg', '-w'], timeout=None)
-        except KeyboardInterrupt:
-            print("\n\nStopped.")
-            input("\nPress Enter to continue...")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed: {e}")
-
-    def _view_boot_logs(self):
-        """View logs from current boot."""
-        self.dialog.infobox("Loading", "Loading boot messages...")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '-b', '-n', '100', '--no-pager'],
-                capture_output=True, text=True, timeout=15
-            )
-
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("=== Boot Messages (this boot, last 100) ===\n")
-            print(result.stdout)
-            print("\n" + "=" * 50)
-            input("\nPress Enter to continue...")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read boot logs: {e}")
-
-    def _view_errors_only(self):
-        """View only error-level messages."""
-        self.dialog.infobox("Loading", "Scanning for errors...")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '-p', 'err', '--since', '1 hour ago', '-n', '50', '--no-pager'],
-                capture_output=True, text=True, timeout=15
-            )
-
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("=== Errors Only (last hour, priority err+) ===\n")
-
-            if result.stdout.strip():
-                print(result.stdout)
-            else:
-                print("No errors found in the last hour!")
-
-            print("\n" + "=" * 50)
-            print("\nLog Priority Levels:")
-            print("  emerg(0) > alert(1) > crit(2) > err(3) > warning(4) > notice(5) > info(6) > debug(7)")
-            input("\nPress Enter to continue...")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read error logs: {e}")
-
-    def _check_system_resources(self):
-        """Check system resources."""
-        self.dialog.infobox("System", "Checking resources...")
-
-        resources = []
-
-        # CPU temperature
-        try:
-            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                temp = int(f.read()) / 1000
-                resources.append(f"CPU Temperature: {temp:.1f}°C")
-        except Exception:
-            resources.append("CPU Temperature: N/A")
-
-        # Memory
-        try:
-            with open('/proc/meminfo', 'r') as f:
-                lines = f.readlines()
-                total = int([l for l in lines if 'MemTotal' in l][0].split()[1]) / 1024
-                avail = int([l for l in lines if 'MemAvailable' in l][0].split()[1]) / 1024
-                used_pct = (1 - avail/total) * 100
-                resources.append(f"Memory: {used_pct:.0f}% used ({avail:.0f}/{total:.0f} MB)")
-        except Exception:
-            resources.append("Memory: N/A")
-
-        # Disk
-        try:
-            result = subprocess.run(
-                ['df', '-h', '/'],
-                capture_output=True, text=True, timeout=5
-            )
-            lines = result.stdout.strip().split('\n')
-            if len(lines) > 1:
-                parts = lines[1].split()
-                resources.append(f"Disk: {parts[4]} used ({parts[2]}/{parts[1]})")
-        except Exception:
-            resources.append("Disk: N/A")
-
-        # Uptime
-        try:
-            with open('/proc/uptime', 'r') as f:
-                uptime_secs = float(f.read().split()[0])
-                days = int(uptime_secs // 86400)
-                hours = int((uptime_secs % 86400) // 3600)
-                resources.append(f"Uptime: {days}d {hours}h")
-        except Exception:  # Error reported to user
-            resources.append("Uptime: N/A")
-
-        self.dialog.msgbox("System Resources", "\n".join(resources))
-
     # =========================================================================
     # Network Tools
     # =========================================================================
-
-    def _network_tools_menu(self):
-        """Network tools menu."""
-        while True:
-            choices = [
-                ("discover", "Service Discovery (Auto-Scan)"),
-                ("ping", "Ping Test"),
-                ("ports", "Port Scanner"),
-                ("mesh", "Meshtastic Discovery"),
-                ("ifaces", "Network Interfaces"),
-                ("routes", "Routing Table"),
-                ("conns", "Active Connections"),
-                ("dns", "DNS Lookup"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Network Tools",
-                "Network diagnostics and testing:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "discover":
-                self._service_discovery_menu()
-            elif choice == "ping":
-                self._ping_test()
-            elif choice == "ports":
-                self._port_scan()
-            elif choice == "mesh":
-                self._meshtastic_discovery()
-            elif choice == "ifaces":
-                self._show_interfaces()
-            elif choice == "routes":
-                self._show_routes()
-            elif choice == "conns":
-                self._show_connections()
-            elif choice == "dns":
-                self._dns_lookup()
 
     def _ping_test(self):
         """Run ping test."""
@@ -1152,44 +1008,6 @@ class MeshForgeLauncher(
         except Exception as e:
             self.dialog.msgbox("Error", str(e))
 
-    def _port_scan(self):
-        """Scan common ports."""
-        host = self.dialog.inputbox(
-            "Port Scanner",
-            "Enter host to scan:",
-            "localhost"
-        )
-
-        if not host:
-            return
-
-        self.dialog.infobox("Scanning", f"Scanning ports on {host}...")
-
-        import socket
-        common_ports = [
-            (22, "SSH"),
-            (80, "HTTP"),
-            (443, "HTTPS"),
-            (4403, "Meshtasticd"),
-            (8080, "HamClock"),
-            (8082, "HamClock API"),
-            (9443, "Meshtastic Web"),
-        ]
-
-        results = []
-        for port, name in common_ports:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex((host, port))
-                sock.close()
-                status = "OPEN" if result == 0 else "closed"
-                results.append(f"{port:5d} {name:15s} {status}")
-            except Exception:  # Error reported to user
-                results.append(f"{port:5d} {name:15s} error")
-
-        self.dialog.msgbox(f"Port Scan: {host}", "\n".join(results))
-
     def _meshtastic_discovery(self):
         """Discover Meshtastic devices."""
         self.dialog.infobox("Discovery", "Scanning for Meshtastic devices...")
@@ -1223,41 +1041,6 @@ class MeshForgeLauncher(
             text = "Found devices:\n\n" + "\n".join(devices)
 
         self.dialog.msgbox("Meshtastic Discovery", text)
-
-    def _show_interfaces(self):
-        """Show network interfaces."""
-        try:
-            result = subprocess.run(
-                ['ip', '-br', 'addr'],
-                capture_output=True, text=True, timeout=5
-            )
-            self.dialog.msgbox("Network Interfaces", result.stdout or "No interfaces found")
-        except Exception as e:
-            self.dialog.msgbox("Error", str(e))
-
-    def _show_routes(self):
-        """Show routing table."""
-        try:
-            result = subprocess.run(
-                ['ip', 'route'],
-                capture_output=True, text=True, timeout=5
-            )
-            self.dialog.msgbox("Routing Table", result.stdout or "No routes found")
-        except Exception as e:
-            self.dialog.msgbox("Error", str(e))
-
-    def _show_connections(self):
-        """Show active connections."""
-        try:
-            result = subprocess.run(
-                ['ss', '-tuln'],
-                capture_output=True, text=True, timeout=5
-            )
-            # Truncate for display
-            output = result.stdout[:1500] if result.stdout else "No connections"
-            self.dialog.msgbox("Active Connections", output)
-        except Exception as e:
-            self.dialog.msgbox("Error", str(e))
 
     def _dns_lookup(self):
         """Perform DNS lookup."""
@@ -1302,86 +1085,21 @@ class MeshForgeLauncher(
                 print("\nBridge stopped.")
             input("\nPress Enter to continue...")
 
-    def _run_monitor(self):
-        """Run node monitor."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        try:
-            subprocess.run([sys.executable, str(self.src_dir / 'monitor.py')])  # Interactive - user Ctrl+C
-        except KeyboardInterrupt:
-            print("\nMonitor stopped.")
-        input("\nPress Enter to continue...")
-
-    def _show_space_weather(self):
-        """Show space weather (uses HamClock if available, else NOAA)."""
-        self.dialog.infobox("Space Weather", "Fetching space weather data...")
-
-        try:
-            # Use the commands layer with auto-fallback
-            sys.path.insert(0, str(self.src_dir))
-            from commands import hamclock
-
-            # Auto-fallback: tries HamClock first, then NOAA
-            result = hamclock.get_propagation_summary()
-
-            if result.success:
-                data = result.data
-                source = data.get('source', 'Unknown')
-
-                # Build display text
-                lines = [
-                    f"Solar Flux Index (SFI): {data.get('sfi', 'N/A')}",
-                    f"Kp Index: {data.get('kp', 'N/A')}",
-                    f"X-Ray Flux: {data.get('xray', 'N/A')}",
-                    f"Sunspot Number: {data.get('ssn', 'N/A')}",
-                    f"Geomagnetic: {data.get('geomagnetic', 'N/A')}",
-                    "",
-                    f"Overall Conditions: {data.get('overall', 'Unknown')}",
-                ]
-
-                # Add band conditions if available
-                bands = data.get('hf_conditions', {})
-                if bands:
-                    lines.append("")
-                    lines.append("HF Band Conditions:")
-                    for band, cond in bands.items():
-                        lines.append(f"  {band}: {cond}")
-
-                # Add alerts if any
-                alerts = data.get('alerts', [])
-                if alerts:
-                    lines.append("")
-                    lines.append("Active Alerts:")
-                    for alert in alerts[:2]:
-                        msg = alert.get('message', '')[:60]
-                        lines.append(f"  - {msg}...")
-
-                lines.append("")
-                lines.append(f"Source: {source}")
-
-                text = "\n".join(lines)
-            else:
-                text = f"Could not retrieve space weather data.\n\nError: {result.message}"
-
-            self.dialog.msgbox("Space Weather", text)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to get space weather:\n{e}")
-
     def _service_menu(self):
-        """Service management menu."""
+        """Service management menu - terminal-native."""
         while True:
             choices = [
-                ("status", "View Service Status"),
+                ("status", "Service Status (all)"),
                 ("meshtasticd", "Manage meshtasticd"),
                 ("rnsd", "Manage rnsd"),
-                ("hamclock", "Manage HamClock"),
-                ("fix", "Fix Service Misconfiguration"),
-                ("back", "Back to Main Menu"),
+                ("restart-mesh", "Restart meshtasticd"),
+                ("restart-rns", "Restart rnsd"),
+                ("back", "Back"),
             ]
 
             choice = self.dialog.menu(
                 "Service Management",
-                "Manage system services:",
+                "Start/stop/restart services:",
                 choices
             )
 
@@ -1389,105 +1107,53 @@ class MeshForgeLauncher(
                 break
 
             if choice == "status":
-                self._show_service_status()
-            elif choice == "fix":
-                self._fix_service_config()
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Service Status ===\n")
+                for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+                    try:
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', svc],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        status = result.stdout.strip()
+                        if status == 'active':
+                            print(f"  \033[0;32m●\033[0m {svc:<18} running")
+                        elif status == 'failed':
+                            print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
+                        else:
+                            print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                    except Exception:
+                        print(f"  ? {svc:<18} unknown")
+                print()
+                # Show failed service logs
+                for svc in ['meshtasticd', 'rnsd']:
+                    try:
+                        r = subprocess.run(['systemctl', 'is-active', svc],
+                                           capture_output=True, text=True, timeout=5)
+                        if r.stdout.strip() == 'failed':
+                            print(f"\033[0;31m{svc} failure:\033[0m")
+                            subprocess.run(
+                                ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
+                                timeout=10
+                            )
+                            print()
+                    except Exception:
+                        pass
+                input("\nPress Enter to continue...")
+            elif choice == "restart-mesh":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Restarting meshtasticd...\n")
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
+                subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "restart-rns":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Restarting rnsd...\n")
+                subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
+                subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                input("\nPress Enter to continue...")
             else:
                 self._manage_service(choice)
-
-    def _show_service_status(self):
-        """Show status of all services."""
-        self.dialog.infobox("Services", "Checking service status...")
-
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import service
-
-            result = service.list_all()
-            if result.success:
-                services = result.data.get('services', {})
-                lines = []
-                for name, info in services.items():
-                    status = "RUNNING" if info.get('running') else "STOPPED"
-                    enabled = "enabled" if info.get('enabled') else "disabled"
-                    lines.append(f"{name}: {status} ({enabled})")
-
-                text = "\n".join(lines) if lines else "No services configured"
-            else:
-                text = f"Error: {result.message}"
-
-            self.dialog.msgbox("Service Status", text)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to get service status:\n{e}")
-
-    def _fix_service_config(self):
-        """Detect and fix service misconfigurations."""
-        self.dialog.infobox("Checking", "Detecting hardware and service configuration...")
-
-        # Detect hardware
-        spi_devices = list(Path('/dev').glob('spidev*'))
-        usb_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
-
-        has_spi = len(spi_devices) > 0
-        has_usb = len(usb_devices) > 0
-
-        # Check current service config
-        try:
-            result = subprocess.run(
-                ['systemctl', 'cat', 'meshtasticd'],
-                capture_output=True, text=True, timeout=10
-            )
-            service_content = result.stdout
-        except Exception:
-            service_content = ""
-
-        is_placeholder = "No Daemon Needed" in service_content or "USB radios work directly" in service_content
-        is_spi_pending = "Native daemon required for SPI" in service_content
-        is_native = ("meshtasticd" in service_content and
-                     ("/usr/bin/meshtasticd" in service_content or
-                      "/usr/local/bin/meshtasticd" in service_content or
-                      "ExecStart=" in service_content and "meshtasticd -c" in service_content))
-
-        # Build status report
-        lines = ["Hardware & Service Check\n" + "=" * 40]
-        lines.append(f"\nHardware Detected:")
-        lines.append(f"  SPI: {'Yes (' + ', '.join(d.name for d in spi_devices) + ')' if has_spi else 'No'}")
-        lines.append(f"  USB: {'Yes (' + ', '.join(d.name for d in usb_devices) + ')' if has_usb else 'No'}")
-
-        lines.append(f"\nService Configuration:")
-        if is_placeholder:
-            lines.append("  Type: USB Placeholder (no daemon)")
-        elif is_spi_pending:
-            lines.append("  Type: SPI pending (native daemon required)")
-        elif is_native:
-            lines.append("  Type: Native meshtasticd daemon")
-        else:
-            lines.append("  Type: Unknown or not configured")
-
-        # Check for mismatch
-        mismatch = False
-        if has_spi and not has_usb and is_placeholder:
-            mismatch = True
-            lines.append("\n" + "!" * 40)
-            lines.append("MISMATCH DETECTED!")
-            lines.append("SPI HAT detected but USB placeholder service installed.")
-            lines.append("Your SPI HAT needs the native meshtasticd daemon.")
-            lines.append("!" * 40)
-
-        self.dialog.msgbox("Configuration Check", "\n".join(lines))
-
-        if mismatch:
-            if self.dialog.yesno(
-                "Fix Configuration?",
-                "Would you like to install the correct service for your SPI HAT?\n\n"
-                "This will:\n"
-                "1. Install native meshtasticd (if not present)\n"
-                "2. Create correct systemd service\n"
-                "3. Configure for your SPI radio\n\n"
-                "Proceed?"
-            ):
-                self._install_native_meshtasticd()
 
     def _fix_spi_config(self, has_native: bool = False):
         """Quick fix for SPI HAT with wrong USB config."""
@@ -1739,45 +1405,50 @@ WantedBy=multi-user.target
             self._service_action(service_name, choice)
 
     def _service_action(self, service_name: str, action: str):
-        """Perform service action."""
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import service
+        """Perform service action using direct systemctl."""
+        subprocess.run(['clear'], check=False, timeout=5)
 
-            if action == "status":
-                result = service.check_status(service_name)
-                text = f"Service: {service_name}\n"
-                text += f"Running: {'Yes' if result.data.get('running') else 'No'}\n"
-                text += f"Enabled: {'Yes' if result.data.get('enabled') else 'No'}\n"
-                text += f"Status: {result.data.get('status', 'Unknown')}"
-                self.dialog.msgbox(f"{service_name} Status", text)
+        if action == "status":
+            print(f"=== {service_name} status ===\n")
+            subprocess.run(
+                ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                timeout=10
+            )
+            input("\nPress Enter to continue...")
 
-            elif action == "start":
-                self.dialog.infobox(service_name, f"Starting {service_name}...")
-                result = service.start(service_name)
-                self.dialog.msgbox("Result", result.message)
+        elif action == "start":
+            print(f"Starting {service_name}...\n")
+            subprocess.run(['systemctl', 'start', service_name], timeout=30)
+            subprocess.run(
+                ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                timeout=10
+            )
+            input("\nPress Enter to continue...")
 
-            elif action == "stop":
-                if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
-                    self.dialog.infobox(service_name, f"Stopping {service_name}...")
-                    result = service.stop(service_name)
-                    self.dialog.msgbox("Result", result.message)
+        elif action == "stop":
+            if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
+                subprocess.run(['clear'], check=False, timeout=5)
+                print(f"Stopping {service_name}...\n")
+                subprocess.run(['systemctl', 'stop', service_name], timeout=30)
+                print(f"{service_name} stopped.")
+                input("\nPress Enter to continue...")
 
-            elif action == "restart":
-                self.dialog.infobox(service_name, f"Restarting {service_name}...")
-                result = service.restart(service_name)
-                self.dialog.msgbox("Result", result.message)
+        elif action == "restart":
+            print(f"Restarting {service_name}...\n")
+            subprocess.run(['systemctl', 'restart', service_name], timeout=30)
+            subprocess.run(
+                ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                timeout=10
+            )
+            input("\nPress Enter to continue...")
 
-            elif action == "logs":
-                result = service.get_logs(service_name, lines=20)
-                logs = result.data.get('logs', 'No logs available')
-                # Truncate for display
-                if len(logs) > 2000:
-                    logs = logs[-2000:] + "\n...(truncated)"
-                self.dialog.msgbox(f"{service_name} Logs", logs)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Action failed:\n{e}")
+        elif action == "logs":
+            print(f"=== {service_name} logs (last 30) ===\n")
+            subprocess.run(
+                ['journalctl', '-u', service_name, '-n', '30', '--no-pager'],
+                timeout=15
+            )
+            input("\nPress Enter to continue...")
 
     def _hardware_menu(self):
         """Hardware detection and configuration menu."""
@@ -1803,49 +1474,53 @@ WantedBy=multi-user.target
                 self._enable_spi()
 
     def _detect_hardware(self):
-        """Run hardware detection."""
-        self.dialog.infobox("Hardware", "Detecting hardware...")
+        """Run hardware detection - terminal-native."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Hardware Detection ===\n")
 
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import hardware
+        # SPI
+        spi_devices = list(Path('/dev').glob('spidev*'))
+        if spi_devices:
+            print(f"  \033[0;32m●\033[0m SPI: {', '.join(d.name for d in spi_devices)}")
+        else:
+            print(f"  \033[2m○\033[0m SPI: not enabled")
 
-            result = hardware.detect_devices()
-            if result.success:
-                data = result.data
+        # I2C
+        i2c_devices = list(Path('/dev').glob('i2c-*'))
+        if i2c_devices:
+            print(f"  \033[0;32m●\033[0m I2C: {', '.join(d.name for d in i2c_devices)}")
+        else:
+            print(f"  \033[2m○\033[0m I2C: not enabled")
 
-                text = "=== Hardware Detection ===\n\n"
+        # Serial/USB
+        serial_ports = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
+        if serial_ports:
+            print(f"  \033[0;32m●\033[0m Serial: {', '.join(d.name for d in serial_ports)}")
+        else:
+            print(f"  \033[2m○\033[0m Serial: no USB serial devices")
 
-                # SPI
-                spi = data.get('spi', {})
-                text += f"SPI: {'Enabled' if spi.get('enabled') else 'Disabled'}\n"
-                if spi.get('devices'):
-                    text += f"  Devices: {', '.join(spi.get('devices', []))}\n"
+        # GPIO
+        gpio_available = Path('/sys/class/gpio').exists()
+        print(f"  {'●' if gpio_available else '○'} GPIO: {'available' if gpio_available else 'not available'}")
 
-                # I2C
-                i2c = data.get('i2c', {})
-                text += f"\nI2C: {'Enabled' if i2c.get('enabled') else 'Disabled'}\n"
-                if i2c.get('devices'):
-                    text += f"  Devices: {len(i2c.get('devices', []))} found\n"
+        # USB devices
+        print("\nUSB Devices:")
+        subprocess.run(['lsusb'], timeout=10)
 
-                # Serial
-                serial = data.get('serial', {})
-                ports = serial.get('ports', [])
-                text += f"\nSerial Ports: {len(ports)} found\n"
-                for port in ports[:5]:  # Limit to 5
-                    text += f"  - {port.get('device', 'Unknown')}\n"
-
-                # Summary
-                summary = data.get('summary', '')
-                if summary:
-                    text += f"\n{summary}"
-
-                self.dialog.msgbox("Hardware Detection", text)
+        # meshtasticd config.d/
+        print("\nmeshtasticd config.d/:")
+        config_d = Path('/etc/meshtasticd/config.d')
+        if config_d.exists():
+            configs = list(config_d.glob('*.yaml'))
+            if configs:
+                for c in configs:
+                    print(f"  {c.name}")
             else:
-                self.dialog.msgbox("Error", f"Detection failed:\n{result.message}")
+                print("  (empty)")
+        else:
+            print("  (not found)")
 
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Hardware detection failed:\n{e}")
+        input("\nPress Enter to continue...")
 
     def _enable_spi(self):
         """Enable SPI interface for HAT-based radios."""
@@ -1969,9 +1644,7 @@ WantedBy=multi-user.target
         """Settings menu."""
         choices = [
             ("connection", "Meshtastic Connection"),
-            ("gateway", "Gateway Settings"),
             ("hamclock", "HamClock Settings"),
-            ("wizard", "Run Setup Wizard"),
             ("back", "Back"),
         ]
 
@@ -1987,12 +1660,8 @@ WantedBy=multi-user.target
 
             if choice == "connection":
                 self._configure_connection()
-            elif choice == "gateway":
-                self._configure_gateway()
             elif choice == "hamclock":
                 self._configure_hamclock()
-            elif choice == "wizard":
-                self._settings_run_wizard()
 
     def _configure_connection(self):
         """Configure Meshtastic connection."""
@@ -2021,14 +1690,6 @@ WantedBy=multi-user.target
             host = self.dialog.inputbox("Remote Host", "Enter host:port:", "192.168.1.100:4403")
             if host:
                 self.dialog.msgbox("Connection", f"Connection set to {host}")
-
-    def _configure_gateway(self):
-        """Configure gateway settings."""
-        self.dialog.msgbox(
-            "Gateway Settings",
-            "Gateway configuration is available in the full CLI.\n\n"
-            "Run 'meshforge' and select Gateway from the menu."
-        )
 
     def _configure_hamclock(self):
         """Configure HamClock settings."""
@@ -2075,171 +1736,6 @@ Made with aloha for the mesh community
 73 de WH6GXZ"""
 
         self.dialog.msgbox("About MeshForge", text)
-
-    def _show_nodes(self):
-        """Show connected nodes."""
-        self.dialog.infobox("Nodes", "Fetching node list...")
-
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import meshtastic as mesh_cmd
-
-            result = mesh_cmd.get_nodes()
-            if result.success:
-                nodes = result.data.get('nodes', [])
-                if not nodes:
-                    self.dialog.msgbox("Nodes", "No nodes found.\n\nMake sure meshtasticd is running.")
-                    return
-
-                text = f"Found {len(nodes)} nodes:\n\n"
-                for node in nodes[:15]:  # Limit display
-                    node_id = node.get('id', '?')
-                    name = node.get('name', 'Unknown')
-                    snr = node.get('snr', 'N/A')
-                    last_heard = node.get('last_heard', 'N/A')
-                    text += f"  {name} ({node_id})\n"
-                    text += f"    SNR: {snr} | Last: {last_heard}\n"
-
-                if len(nodes) > 15:
-                    text += f"\n... and {len(nodes) - 15} more"
-
-                self.dialog.msgbox("Mesh Nodes", text)
-            else:
-                self.dialog.msgbox("Error", f"Failed to get nodes:\n{result.message}")
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Node fetch failed:\n{e}")
-
-    def _messaging_menu(self):
-        """Messaging menu."""
-        choices = [
-            ("view", "View Recent Messages"),
-            ("send", "Send Message"),
-            ("stats", "Message Statistics"),
-            ("back", "Back"),
-        ]
-
-        while True:
-            choice = self.dialog.menu(
-                "Messaging",
-                "Mesh messaging:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "view":
-                self._view_messages()
-            elif choice == "send":
-                self._send_message()
-            elif choice == "stats":
-                self._message_stats()
-
-    def _view_messages(self):
-        """View recent messages."""
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import messaging
-
-            result = messaging.get_messages(limit=20)
-            if result.success:
-                messages = result.data.get('messages', [])
-                if not messages:
-                    self.dialog.msgbox("Messages", "No messages yet.")
-                    return
-
-                text = ""
-                for msg in messages[:10]:
-                    ts = msg.get('timestamp', '')[:16]
-                    from_id = msg.get('from_id', '?')
-                    content = msg.get('content', '')[:40]
-                    text += f"[{ts}] {from_id}\n  {content}\n\n"
-
-                self.dialog.msgbox("Recent Messages", text)
-            else:
-                self.dialog.msgbox("Error", result.message)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to load messages:\n{e}")
-
-    def _send_message(self):
-        """Send a message."""
-        try:
-            # Get destination
-            dest = self.dialog.inputbox(
-                "Send Message",
-                "Destination node ID (e.g. !abc12345)\n"
-                "Leave empty for broadcast to channel:",
-                ""
-            )
-
-            if dest is None:
-                return
-
-            # Validate destination format
-            if dest:
-                dest = dest.strip()
-                if not dest.startswith('!'):
-                    dest = '!' + dest
-                # Must be ! followed by hex chars
-                hex_part = dest[1:]
-                if not hex_part or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
-                    self.dialog.msgbox("Error",
-                        f"Invalid node ID: {dest}\n\n"
-                        "Format: !abc12345 (hex characters)\n"
-                        "Leave empty for broadcast.")
-                    return
-
-            # Get message content
-            content = self.dialog.inputbox(
-                "Send Message",
-                "Message (max 160 chars):",
-                ""
-            )
-
-            if not content:
-                return
-
-            sys.path.insert(0, str(self.src_dir))
-            from commands import messaging
-
-            self.dialog.infobox("Sending", "Sending message...")
-            result = messaging.send_message(
-                content=content,
-                destination=dest if dest else None,
-                network="auto"
-            )
-
-            self.dialog.msgbox("Result", result.message)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Send failed:\n{e}")
-
-    def _message_stats(self):
-        """Show message statistics."""
-        try:
-            sys.path.insert(0, str(self.src_dir))
-            from commands import messaging
-
-            result = messaging.get_stats()
-            if result.success:
-                data = result.data
-                text = f"""Message Statistics:
-
-Total Messages: {data.get('total', 0)}
-Sent: {data.get('sent', 0)}
-Received: {data.get('received', 0)}
-Last 24h: {data.get('last_24h', 0)}
-
-Storage: messages.db"""
-
-                self.dialog.msgbox("Statistics", text)
-            else:
-                self.dialog.msgbox("Error", result.message)
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Stats failed:\n{e}")
 
     def _run_basic_launcher(self):
         """Fallback basic terminal launcher."""

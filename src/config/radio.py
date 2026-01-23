@@ -440,7 +440,7 @@ class RadioConfigurator:
             log(f"Configuration apply error: {str(e)}", 'error')
             return False
 
-    def save_configuration_yaml(self, config, output_file='/etc/meshtasticd/config.yaml'):
+    def save_configuration_yaml(self, config, output_file='/etc/meshtasticd/config.d/meshforge-radio.yaml'):
         """Save configuration to YAML file for meshtasticd"""
         import yaml
 
