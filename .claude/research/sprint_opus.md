@@ -45,7 +45,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ### Phase 3: RF Tools Enhancement
 
-- [ ] **Coverage prediction with terrain** — SRTM data download + LOS calculation
+- [x] **Coverage prediction with terrain** — SRTM data download + LOS calculation
 - [ ] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
 - [ ] **LoRa preset impact visualization** — show how preset choice affects coverage
 - [ ] **Multi-hop path loss** — calculate cumulative loss across relay chain
@@ -96,7 +96,8 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Message queue overflow protection — max size limits, priority shedding, stale recovery, auto-cleanup
 - [x] Bridge integration test — full Mesh→RNS→Mesh round trip, routing, callbacks, edge cases
 - [x] LXMF delivery confirmation — DeliveryTracker with pending/confirmed/failed/timeout states
-- [x] 160 new tests for map + bridge + queue + integration + delivery pipeline (1452 total)
+- [x] Coverage prediction with terrain — SRTMProvider, LOSAnalyzer, Fresnel zones, diffraction, coverage grid
+- [x] 193 new tests for map + bridge + queue + integration + delivery + terrain pipeline (1485 total)
 
 ---
 
