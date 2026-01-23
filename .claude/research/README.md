@@ -35,9 +35,19 @@
 
 | Document | Description |
 |----------|-------------|
+| `maps_double_tap.md` | **Maps "Double Tap" — eye candy vision & task breakdown** |
 | `site_planner.md` | RF site planning resources |
 | `gateway_setup_guide.md` | Gateway configuration guide |
 | `firmware_viability.md` | Firmware compatibility analysis |
+
+### Architecture & Design
+
+| Document | Description |
+|----------|-------------|
+| `uconsole_portable_noc.md` | uConsole portable NOC design |
+| `event_driven_patterns.md` | Event-driven architecture patterns |
+| `meshforge_native_meshtastic.md` | Native Meshtastic protocol research |
+| `product_recommendations.md` | Hardware product recommendations |
 
 ---
 
