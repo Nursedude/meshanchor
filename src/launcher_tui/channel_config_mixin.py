@@ -96,16 +96,20 @@ class ChannelConfigMixin:
 
     def _view_all_channels(self):
         """View all 8 channels with their configuration."""
-        self.dialog.infobox("Channels", "Loading all channels...")
+        self.dialog.infobox("Channels", "Loading channels (timeout: 10s)...")
 
         try:
             sys.path.insert(0, str(self.src_dir))
             from commands import meshtastic as mesh_cmd
 
             channels = []
+            consecutive_failures = 0
             for i in range(8):
-                result = mesh_cmd.get_channel_info(i)
+                result = mesh_cmd._run_command(
+                    ["--ch-index", str(i), "--info"], timeout=10
+                )
                 if result.success:
+                    consecutive_failures = 0
                     raw = result.raw or ''
                     name = self._parse_channel_field(raw, 'name', f'Channel {i}')
                     role = self._parse_channel_field(raw, 'role', 'DISABLED')
@@ -117,12 +121,23 @@ class ChannelConfigMixin:
                         'psk': psk
                     })
                 else:
+                    consecutive_failures += 1
                     channels.append({
                         'index': i,
                         'name': f'Channel {i}',
-                        'role': 'UNKNOWN',
-                        'psk': '?'
+                        'role': 'DISABLED',
+                        'psk': '-'
                     })
+                    # Stop early if radio not responding
+                    if consecutive_failures >= 2:
+                        for j in range(i + 1, 8):
+                            channels.append({
+                                'index': j,
+                                'name': f'Channel {j}',
+                                'role': 'DISABLED',
+                                'psk': '-'
+                            })
+                        break
 
             # Build display
             text = "Channel Configuration (8 slots):\n\n"
