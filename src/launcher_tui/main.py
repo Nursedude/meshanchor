@@ -359,45 +359,268 @@ class MeshForgeLauncher(
         """System diagnostics menu."""
         while True:
             choices = [
-                ("full", "Full System Diagnostic"),
-                ("tools", "System Tools (Full Linux CLI)"),
-                ("services", "Service Status Check"),
+                ("status", "Quick Status (terminal)"),
+                ("full", "Full Diagnostic (terminal)"),
+                ("services", "Service Status (terminal)"),
+                ("logs", "Log Analysis"),
+                ("tools", "System Tools (full Linux CLI)"),
                 ("network", "Network Connectivity"),
                 ("hardware", "Hardware Interfaces"),
-                ("logs", "Log Analysis"),
                 ("system", "System Resources"),
                 ("back", "Back"),
             ]
 
             choice = self.dialog.menu(
                 "System Diagnostics",
-                "Comprehensive system health checks:",
+                "Terminal-native diagnostics and tools:",
                 choices
             )
 
             if choice is None or choice == "back":
                 break
 
-            if choice == "full":
+            if choice == "status":
+                self._run_terminal_status()
+            elif choice == "full":
                 self._run_full_diagnostics()
             elif choice == "tools":
                 self._system_tools_menu()
             elif choice == "services":
-                self._check_services()
+                self._run_terminal_services()
             elif choice == "network":
-                self._check_network()
+                self._run_terminal_network()
             elif choice == "hardware":
                 self._check_hardware_interfaces()
             elif choice == "logs":
                 self._analyze_logs()
             elif choice == "system":
-                self._check_system_resources()
+                self._run_terminal_resources()
+
+    def _run_terminal_status(self):
+        """Run meshforge-status (terminal-native one-shot status)."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
+        input("\nPress Enter to continue...")
 
     def _run_full_diagnostics(self):
         """Run full diagnostics script."""
         subprocess.run(['clear'], check=False, timeout=5)
-        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')], timeout=600)  # 10min max
+        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')], timeout=600)
         input("\nPress Enter to continue...")
+
+    def _run_terminal_services(self):
+        """Show service status directly in terminal."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("MeshForge Service Status")
+        print("=" * 50)
+        print()
+
+        services = [
+            ('meshtasticd', 'Mesh radio daemon'),
+            ('rnsd', 'Reticulum shared instance'),
+            ('meshforge', 'MeshForge NOC'),
+        ]
+
+        for svc, desc in services:
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', svc],
+                    capture_output=True, text=True, timeout=5
+                )
+                status = result.stdout.strip()
+                if status == 'active':
+                    print(f"  \033[0;32m●\033[0m {svc:<18} running    {desc}")
+                elif status == 'inactive':
+                    print(f"  \033[2m○\033[0m {svc:<18} stopped    {desc}")
+                elif status == 'failed':
+                    print(f"  \033[0;31m●\033[0m {svc:<18} FAILED     {desc}")
+                else:
+                    print(f"  \033[1;33m?\033[0m {svc:<18} {status:<10} {desc}")
+            except Exception:
+                print(f"  ? {svc:<18} unknown    {desc}")
+
+        # Show recent logs for failed services
+        print()
+        for svc, desc in services:
+            try:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', svc],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.stdout.strip() == 'failed':
+                    print(f"\033[0;31m{svc} failure log:\033[0m")
+                    subprocess.run(
+                        ['journalctl', '-u', svc, '-n', '5', '--no-pager', '-o', 'short'],
+                        timeout=10
+                    )
+                    print()
+            except Exception:
+                pass
+
+        print("-" * 50)
+        input("\nPress Enter to continue...")
+
+    def _run_terminal_network(self):
+        """Show network diagnostics directly in terminal."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("MeshForge Network Status")
+        print("=" * 50)
+        print()
+
+        import socket as sock
+
+        # Port checks
+        print("Port Checks:")
+        ports = [
+            (4403, 'meshtasticd TCP API'),
+            (9443, 'meshtasticd Web Client'),
+            (37428, 'rnsd (RNS shared instance)'),
+            (1883, 'MQTT broker'),
+        ]
+
+        for port, desc in ports:
+            try:
+                s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+                s.settimeout(1)
+                result = s.connect_ex(('127.0.0.1', port))
+                s.close()
+                if result == 0:
+                    print(f"  \033[0;32m●\033[0m {port:<6} {desc}")
+                else:
+                    print(f"  \033[2m○\033[0m {port:<6} {desc} (not listening)")
+            except Exception:
+                print(f"  ? {port:<6} {desc} (check failed)")
+
+        # Local IP
+        print()
+        try:
+            s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            print(f"  Local IP: {local_ip}")
+        except Exception:
+            print("  Local IP: Unable to determine")
+
+        # Internet connectivity
+        print()
+        print("Connectivity:")
+        try:
+            s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
+            s.settimeout(3)
+            result = s.connect_ex(('8.8.8.8', 53))
+            s.close()
+            if result == 0:
+                print(f"  \033[0;32m●\033[0m Internet (Google DNS)")
+            else:
+                print(f"  \033[0;31m●\033[0m Internet (no route to 8.8.8.8)")
+        except Exception:
+            print(f"  \033[0;31m●\033[0m Internet (unreachable)")
+
+        print()
+        print("-" * 50)
+        input("\nPress Enter to continue...")
+
+    def _run_terminal_resources(self):
+        """Show system resources directly in terminal."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("MeshForge System Resources")
+        print("=" * 50)
+        print()
+
+        # Run the status command with focus on resources
+        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
+
+        print()
+        print("Live monitoring: htop, top, btop")
+        print("-" * 50)
+        input("\nPress Enter to continue...")
+
+    def _system_tools_menu(self):
+        """Launch terminal-native system tools directly."""
+        while True:
+            choices = [
+                ("meshtastic", "meshtastic --info (radio details)"),
+                ("nodes", "meshtastic --nodes (mesh network)"),
+                ("rnstatus", "rnstatus (Reticulum status)"),
+                ("mlog", "meshtasticd logs (live follow)"),
+                ("rlog", "rnsd logs (live follow)"),
+                ("ports", "ss -tlnp (listening ports)"),
+                ("htop", "htop (system monitor)"),
+                ("dmesg", "dmesg (kernel messages)"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "System Tools",
+                "Terminal tools (Ctrl+C to return):",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            subprocess.run(['clear'], check=False, timeout=5)
+
+            if choice == "meshtastic":
+                print("=== meshtastic --info ===\n")
+                subprocess.run(['meshtastic', '--info'], timeout=30)
+                input("\nPress Enter to continue...")
+            elif choice == "nodes":
+                print("=== meshtastic --nodes ===\n")
+                subprocess.run(['meshtastic', '--nodes'], timeout=30)
+                input("\nPress Enter to continue...")
+            elif choice == "rnstatus":
+                print("=== rnstatus ===\n")
+                subprocess.run(['rnstatus', '-s'], timeout=15)
+                input("\nPress Enter to continue...")
+            elif choice == "mlog":
+                print("=== meshtasticd logs (Ctrl+C to stop) ===\n")
+                try:
+                    subprocess.run(
+                        ['journalctl', '-u', 'meshtasticd', '-f', '--no-pager'],
+                        timeout=300
+                    )
+                except (KeyboardInterrupt, subprocess.TimeoutExpired):
+                    pass
+            elif choice == "rlog":
+                print("=== rnsd logs (Ctrl+C to stop) ===\n")
+                try:
+                    subprocess.run(
+                        ['journalctl', '-u', 'rnsd', '-f', '--no-pager'],
+                        timeout=300
+                    )
+                except (KeyboardInterrupt, subprocess.TimeoutExpired):
+                    pass
+            elif choice == "ports":
+                print("=== Listening Ports ===\n")
+                subprocess.run(['ss', '-tlnp'], timeout=10)
+                input("\nPress Enter to continue...")
+            elif choice == "htop":
+                # htop is fully interactive, just exec it
+                htop_cmd = None
+                for cmd in ['htop', 'btop', 'top']:
+                    try:
+                        result = subprocess.run(
+                            ['which', cmd], capture_output=True, timeout=5
+                        )
+                        if result.returncode == 0:
+                            htop_cmd = cmd
+                            break
+                    except Exception:
+                        continue
+                if htop_cmd:
+                    subprocess.run([htop_cmd], timeout=600)
+                else:
+                    print("No system monitor found (htop, btop, top)")
+                    input("\nPress Enter to continue...")
+            elif choice == "dmesg":
+                print("=== Kernel Messages (last 50) ===\n")
+                subprocess.run(
+                    ['dmesg', '--time-format=reltime'],
+                    timeout=10
+                )
+                input("\nPress Enter to continue...")
 
     def _check_services(self):
         """Check service status using centralized service checker.

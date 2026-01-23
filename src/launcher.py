@@ -426,11 +426,24 @@ def start_noc_services():
 
 def main():
     """Main entry point"""
+    # Handle --status (no root needed, quick exit)
+    if '--status' in sys.argv:
+        src_dir = Path(__file__).parent
+        subprocess.run([sys.executable, str(src_dir / 'cli' / 'status.py')] +
+                       [a for a in sys.argv[1:] if a != '--status'], timeout=30)
+        sys.exit(0)
+
     # Check root
     if os.geteuid() != 0:
         print(f"\n{Colors.RED}Error: This application requires root/sudo privileges{Colors.NC}")
         print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
         sys.exit(1)
+
+    # Direct interface flags (skip menu)
+    if '--gtk' in sys.argv:
+        launch_interface('1')
+    if '--tui' in sys.argv:
+        launch_interface('2')
 
     # Start NOC services if in local mode
     if '--no-services' not in sys.argv:
