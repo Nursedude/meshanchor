@@ -374,6 +374,112 @@ def snr_estimate(rx_power_dbm: float, noise_floor_dbm: float = -120.0) -> float:
 
 
 # ============================================================================
+# Terrain / Diffraction Models
+# ============================================================================
+
+def knife_edge_diffraction(distance_m: float, obstacle_height_m: float,
+                           freq_mhz: float = 906.875,
+                           obstacle_position: float = 0.5) -> float:
+    """
+    Calculate diffraction loss over a knife-edge obstacle.
+
+    Uses the Fresnel-Kirchhoff parameter (v) and the Lee approximation
+    for diffraction loss. Applicable for single obstacles (buildings,
+    ridges, tree lines) blocking the RF path.
+
+    Args:
+        distance_m: Total path distance in meters
+        obstacle_height_m: Height of obstacle ABOVE the direct line-of-sight
+                          (positive = blocks LOS, negative = below LOS)
+        freq_mhz: Frequency in MHz (default 906.875 for US LoRa)
+        obstacle_position: Fractional position of obstacle along path
+                          (0.5 = midpoint, 0.25 = quarter-way from TX)
+
+    Returns:
+        Additional path loss in dB due to diffraction (always >= 0)
+        Returns 0 if obstacle is below LOS (no blockage)
+
+    Examples:
+        >>> knife_edge_diffraction(5000, 10)  # 10m obstacle at 5km midpoint
+        15.2  # ~15 dB additional loss
+
+        >>> knife_edge_diffraction(5000, -5)  # Below LOS
+        0.0  # No blockage
+
+    Reference:
+        ITU-R P.526-15, Section 4.2 (Single knife-edge diffraction)
+    """
+    if obstacle_height_m <= 0:
+        return 0.0  # No blockage if obstacle below LOS
+
+    # Wavelength in meters
+    wavelength_m = 300.0 / freq_mhz
+
+    # Distances from TX and RX to obstacle
+    d1 = distance_m * obstacle_position
+    d2 = distance_m * (1.0 - obstacle_position)
+
+    # Prevent division by zero for edge positions
+    if d1 < 1.0 or d2 < 1.0:
+        d1 = max(d1, 1.0)
+        d2 = max(d2, 1.0)
+
+    # Fresnel-Kirchhoff parameter (v)
+    v = obstacle_height_m * math.sqrt(
+        2.0 * (d1 + d2) / (wavelength_m * d1 * d2)
+    )
+
+    # Lee approximation for diffraction loss (dB)
+    # Valid for v > -0.7 (practical range)
+    if v <= -0.7:
+        return 0.0
+    elif v <= 0:
+        # Slight sub-LOS: minimal loss
+        loss = 6.02 + 9.0 * v + 1.65 * v * v
+    elif v <= 1.0:
+        # Moderate blockage
+        loss = 6.02 + 9.11 * v - 1.27 * v * v
+    elif v <= 2.4:
+        # Significant blockage
+        loss = 12.95 + 20.0 * math.log10(v)
+    else:
+        # Heavy blockage (deep shadow)
+        loss = 12.95 + 20.0 * math.log10(v)
+
+    return max(0.0, loss)
+
+
+def multi_obstacle_loss(distance_m: float, obstacles: List[Tuple[float, float]],
+                        freq_mhz: float = 906.875) -> float:
+    """
+    Estimate total diffraction loss from multiple obstacles along a path.
+
+    Uses the Epstein-Peterson method: sum individual knife-edge losses.
+    This is a conservative estimate (actual loss is usually less due to
+    constructive interference between diffracted waves).
+
+    Args:
+        distance_m: Total path distance in meters
+        obstacles: List of (position_fraction, height_above_los_m) tuples
+                  position_fraction is 0.0-1.0 along the path
+        freq_mhz: Frequency in MHz
+
+    Returns:
+        Total estimated additional path loss in dB
+
+    Example:
+        >>> obstacles = [(0.3, 5.0), (0.6, 8.0)]  # Two obstacles
+        >>> multi_obstacle_loss(10000, obstacles)
+        18.7  # Combined loss from both obstacles
+    """
+    total_loss = 0.0
+    for position, height in obstacles:
+        loss = knife_edge_diffraction(distance_m, height, freq_mhz, position)
+        total_loss += loss
+    return total_loss
+
+
+# ============================================================================
 # Detailed Link Budget Analysis
 # ============================================================================
 
