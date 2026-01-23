@@ -676,14 +676,13 @@ class MeshForgeLauncher(
             target = user_home / '.reticulum' / 'config'
 
             if template.exists():
-                code, _ = self.dialog.yesno(
+                if self.dialog.yesno(
                     "Deploy Reticulum Config",
                     f"No Reticulum config found.\n\n"
                     f"Deploy template to:\n  {target}\n\n"
                     f"This sets up RNS with Meshtastic bridge on port 4403.\n"
                     f"You can edit it after deployment."
-                )
-                if code == 0:  # Yes
+                ):
                     try:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(template), str(target))
@@ -692,7 +691,7 @@ class MeshForgeLauncher(
                     except (OSError, PermissionError) as e:
                         self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
                         return
-                else:
+                else:  # User said No
                     return
             else:
                 self.dialog.msgbox(
@@ -714,7 +713,7 @@ class MeshForgeLauncher(
             self.dialog.msgbox("Error", "No text editor found (nano, vim, vi)")
             return
 
-        subprocess.run([editor, config_path])
+        subprocess.run([editor, config_path], timeout=None)  # Interactive editor
 
     # =========================================================================
     # AREDN Menu
@@ -760,10 +759,12 @@ class MeshForgeLauncher(
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
-                result = sock.connect_ex((host, 80))
-                sock.close()
-                if result == 0:
-                    return host
+                try:
+                    result = sock.connect_ex((host, 80))
+                    if result == 0:
+                        return host
+                finally:
+                    sock.close()
             except Exception:
                 continue
         return ""
@@ -774,7 +775,6 @@ class MeshForgeLauncher(
         print("=== AREDN Node Status ===\n")
 
         try:
-            sys.path.insert(0, str(self.src_dir))
             from utils.aredn import get_aredn_node
 
             node_ip = self._aredn_get_node_ip()
@@ -803,7 +803,7 @@ class MeshForgeLauncher(
                     print(f"  Load:      {', '.join(str(l) for l in node.loads)}")
             else:
                 print(f"Connected to {node_ip} but couldn't parse node info.")
-                print("Check: http://{node_ip}:8080/cgi-bin/sysinfo.json")
+                print(f"Check: http://{node_ip}:8080/cgi-bin/sysinfo.json")
 
         except ImportError:
             print("AREDN utilities not available.")
@@ -819,7 +819,6 @@ class MeshForgeLauncher(
         print("=== AREDN Neighbors ===\n")
 
         try:
-            sys.path.insert(0, str(self.src_dir))
             from utils.aredn import AREDNClient
 
             node_ip = self._aredn_get_node_ip()
@@ -855,7 +854,6 @@ class MeshForgeLauncher(
         print("=== AREDN Services ===\n")
 
         try:
-            sys.path.insert(0, str(self.src_dir))
             from utils.aredn import AREDNClient
 
             node_ip = self._aredn_get_node_ip()
@@ -917,7 +915,6 @@ class MeshForgeLauncher(
         print("Scanning 10.0.0.0/24 for AREDN nodes...\n")
 
         try:
-            sys.path.insert(0, str(self.src_dir))
             from utils.aredn import AREDNScanner
 
             scanner = AREDNScanner()
@@ -974,7 +971,7 @@ class MeshForgeLauncher(
             elif choice == "available":
                 self._view_available_hats()
             elif choice == "presets":
-                self._meshtasticd_lora_presets()
+                self._radio_presets_menu()
             elif choice == "channels":
                 self._channel_config_menu()
             elif choice == "meshtasticd":
@@ -1279,14 +1276,13 @@ class MeshForgeLauncher(
         for port in serial_ports:
             devices.append(f"Serial: {port}")
 
-        # BLE hint
-        devices.append("")
-        devices.append("BLE devices require scanning:")
-        devices.append("  meshtastic --ble-scan")
-
         if not devices:
             text = "No Meshtastic devices found.\n\nMake sure meshtasticd is running."
         else:
+            # BLE hint
+            devices.append("")
+            devices.append("BLE devices require scanning:")
+            devices.append("  meshtastic --ble-scan")
             text = "Found devices:\n\n" + "\n".join(devices)
 
         self.dialog.msgbox("Meshtastic Discovery", text)
@@ -1329,7 +1325,7 @@ class MeshForgeLauncher(
             print("Starting Gateway Bridge...")
             print("Press Ctrl+C to stop\n")
             try:
-                subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')])  # Interactive
+                subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')], timeout=None)  # Interactive
             except KeyboardInterrupt:
                 print("\nBridge stopped.")
             input("\nPress Enter to continue...")
@@ -1533,10 +1529,16 @@ General:
                     text=True, timeout=30, check=False
                 )
 
-                subprocess.run([
-                    'bash', '-c',
-                    f'curl -fsSL {repo_url}Release.key | gpg --dearmor > /etc/apt/trusted.gpg.d/meshtastic.gpg'
-                ], timeout=30, check=False)
+                # Download and install GPG key (no shell=True / bash -c)
+                key_result = subprocess.run(
+                    ['curl', '-fsSL', f'{repo_url}Release.key'],
+                    capture_output=True, timeout=30, check=False
+                )
+                if key_result.returncode == 0:
+                    subprocess.run(
+                        ['gpg', '--dearmor', '-o', '/etc/apt/trusted.gpg.d/meshtastic.gpg'],
+                        input=key_result.stdout, timeout=30, check=False
+                    )
 
                 self.dialog.infobox("Installing", "Updating package list...")
                 subprocess.run(['apt-get', 'update'], timeout=120, check=False)
@@ -1944,7 +1946,7 @@ WantedBy=multi-user.target
                 self.dialog.msgbox("Connection", f"Connection set to {host}")
 
     def _configure_hamclock(self):
-        """Configure HamClock settings."""
+        """Configure HamClock settings - test API connection."""
         host = self.dialog.inputbox(
             "HamClock Host",
             "Enter HamClock hostname or IP:",
@@ -1960,12 +1962,13 @@ WantedBy=multi-user.target
 
             if port:
                 try:
-                    sys.path.insert(0, str(self.src_dir))
-                    from commands import hamclock
-                    result = hamclock.configure(host, api_port=int(port))
-                    self.dialog.msgbox("Result", result.message)
+                    import urllib.request
+                    url = f"http://{host}:{port}/get_de.txt"
+                    req = urllib.request.urlopen(url, timeout=5)
+                    data = req.read().decode()
+                    self.dialog.msgbox("HamClock Connected", f"API: {host}:{port}\n\nDE Station:\n{data}")
                 except Exception as e:
-                    self.dialog.msgbox("Error", f"Configuration failed:\n{e}")
+                    self.dialog.msgbox("Error", f"Cannot reach HamClock at {host}:{port}\n\n{e}\n\nMake sure HamClock is running.")
 
     def _show_about(self):
         """Show about information."""
