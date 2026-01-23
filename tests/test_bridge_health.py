@@ -13,6 +13,8 @@ import pytest
 
 from gateway.bridge_health import (
     BridgeHealthMonitor,
+    DeliveryTracker,
+    DeliveryRecord,
     classify_error,
     ConnectionEvent,
     ErrorEvent,
@@ -248,3 +250,179 @@ class TestBridgeHealthMonitor:
         assert "meshtastic" in summary["connections"]
         assert "rns" in summary["connections"]
         assert "rate_per_min" in summary["messages"]
+
+
+class TestDeliveryTracker:
+    """Tests for LXMF delivery confirmation tracking."""
+
+    def test_track_message(self):
+        """Tracking a message records it as pending."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd\xef\x01', "Hello world")
+
+        stats = tracker.get_stats()
+        assert stats["total_sent"] == 1
+        assert stats["pending_count"] == 1
+        assert stats["confirmed"] == 0
+
+    def test_confirm_delivery(self):
+        """Confirming delivery updates stats."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd\xef\x01', "Test")
+
+        result = tracker.confirm_delivery("msg-1")
+        assert result is True
+
+        stats = tracker.get_stats()
+        assert stats["confirmed"] == 1
+        assert stats["pending_count"] == 0
+        assert stats["confirmation_rate_pct"] == 100.0
+
+    def test_confirm_unknown_message(self):
+        """Confirming unknown message returns False."""
+        tracker = DeliveryTracker()
+        assert tracker.confirm_delivery("nonexistent") is False
+
+    def test_confirm_failure(self):
+        """Recording failure updates stats."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd', "Test")
+
+        result = tracker.confirm_failure("msg-1", "no_path")
+        assert result is True
+
+        stats = tracker.get_stats()
+        assert stats["failed"] == 1
+        assert stats["pending_count"] == 0
+
+    def test_confirm_failure_unknown_returns_false(self):
+        """Failure of unknown message returns False."""
+        tracker = DeliveryTracker()
+        assert tracker.confirm_failure("nonexistent", "reason") is False
+
+    def test_check_timeouts(self):
+        """Messages past timeout are marked failed."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd', "Old message")
+
+        # Backdate the record
+        with tracker._lock:
+            tracker._pending["msg-1"].sent_at = time.time() - 400
+
+        timed_out = tracker.check_timeouts()
+        assert timed_out == 1
+
+        stats = tracker.get_stats()
+        assert stats["timed_out"] == 1
+        assert stats["pending_count"] == 0
+
+    def test_check_timeouts_ignores_recent(self):
+        """Recent messages are not timed out."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd', "Recent")
+
+        timed_out = tracker.check_timeouts()
+        assert timed_out == 0
+        assert tracker.get_stats()["pending_count"] == 1
+
+    def test_get_pending(self):
+        """Get pending returns current unconfirmed deliveries."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd\xef\x01\x23\x45\x67\x89', "First")
+        tracker.track_message("msg-2", b'\x11\x22\x33\x44\x55\x66\x77\x88', "Second")
+
+        pending = tracker.get_pending()
+        assert len(pending) == 2
+        assert all("msg_id" in p for p in pending)
+        assert all("age_seconds" in p for p in pending)
+
+    def test_get_recent_deliveries(self):
+        """Recent deliveries returns confirmed/failed history."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xab\xcd', "First")
+        tracker.track_message("msg-2", b'\xef\x01', "Second")
+
+        tracker.confirm_delivery("msg-1")
+        tracker.confirm_failure("msg-2", "timeout")
+
+        recent = tracker.get_recent_deliveries()
+        assert len(recent) == 2
+        # Most recent first
+        assert recent[0]["status"] == "failed"
+        assert recent[0]["failure_reason"] == "timeout"
+        assert recent[1]["status"] == "delivered"
+        assert recent[1]["latency_seconds"] is not None
+
+    def test_confirmation_rate(self):
+        """Confirmation rate calculated correctly."""
+        tracker = DeliveryTracker()
+        for i in range(10):
+            tracker.track_message(f"msg-{i}", b'\x00' * 8, f"Msg {i}")
+
+        # Confirm 7 out of 10
+        for i in range(7):
+            tracker.confirm_delivery(f"msg-{i}")
+        for i in range(7, 10):
+            tracker.confirm_failure(f"msg-{i}", "failed")
+
+        stats = tracker.get_stats()
+        assert stats["confirmation_rate_pct"] == 70.0
+
+    def test_destination_hash_as_hex(self):
+        """Destination hash stored as hex string."""
+        tracker = DeliveryTracker()
+        tracker.track_message("msg-1", b'\xde\xad\xbe\xef', "Test")
+
+        pending = tracker.get_pending()
+        assert pending[0]["destination"] == "deadbeef"
+
+    def test_content_preview_truncated(self):
+        """Long content is truncated to 50 chars."""
+        tracker = DeliveryTracker()
+        long_msg = "A" * 200
+        tracker.track_message("msg-1", b'\xab\xcd', long_msg)
+
+        with tracker._lock:
+            assert len(tracker._pending["msg-1"].content_preview) == 50
+
+    def test_thread_safety(self):
+        """Concurrent tracking doesn't corrupt state."""
+        tracker = DeliveryTracker()
+        errors = []
+
+        def worker(prefix):
+            try:
+                for i in range(50):
+                    msg_id = f"{prefix}-{i}"
+                    tracker.track_message(msg_id, b'\x00' * 8, f"msg {i}")
+                    if i % 2 == 0:
+                        tracker.confirm_delivery(msg_id)
+                    else:
+                        tracker.confirm_failure(msg_id, "test")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(f"t{i}",)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        stats = tracker.get_stats()
+        assert stats["total_sent"] == 250
+        assert stats["confirmed"] + stats["failed"] == 250
+        assert stats["pending_count"] == 0
+
+    def test_max_history_bounded(self):
+        """History deque is bounded to MAX_HISTORY."""
+        tracker = DeliveryTracker()
+
+        for i in range(600):
+            msg_id = f"msg-{i}"
+            tracker.track_message(msg_id, b'\x00' * 8, "test")
+            tracker.confirm_delivery(msg_id)
+
+        # History should be capped
+        with tracker._lock:
+            assert len(tracker._history) <= tracker.MAX_HISTORY

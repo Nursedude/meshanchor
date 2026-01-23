@@ -1,16 +1,21 @@
 """
 Bridge Health Monitor - Tracks gateway bridge reliability metrics.
 
-Monitors connection health, message flow, error rates, and provides
-status summaries for the TUI and diagnostics system.
+Monitors connection health, message flow, error rates, delivery
+confirmations, and provides status summaries for the TUI and diagnostics.
 
 Usage:
-    from gateway.bridge_health import BridgeHealthMonitor
+    from gateway.bridge_health import BridgeHealthMonitor, DeliveryTracker
 
     health = BridgeHealthMonitor()
     health.record_message_sent("mesh_to_rns")
     health.record_connection_event("meshtastic", "connected")
     print(health.get_summary())
+
+    tracker = DeliveryTracker()
+    tracker.track_message("msg-123", b'\\xab\\xcd', "Hello")
+    tracker.confirm_delivery("msg-123")
+    print(tracker.get_stats())
 """
 
 import logging
@@ -324,3 +329,209 @@ class BridgeHealthMonitor:
         errors = self.get_error_rate(window_seconds=60)
         error_count = sum(errors.values())
         return any_connected and error_count < 10
+
+
+@dataclass
+class DeliveryRecord:
+    """Tracks a single LXMF message delivery attempt."""
+    msg_id: str
+    destination_hash: str  # hex string of destination
+    content_preview: str   # first 50 chars of content
+    sent_at: float
+    status: str = "pending"  # "pending", "delivered", "failed"
+    confirmed_at: Optional[float] = None
+    failure_reason: str = ""
+
+
+class DeliveryTracker:
+    """Tracks LXMF message delivery confirmations.
+
+    Registers pending deliveries when LXMF messages are sent, and
+    updates their status when delivery callbacks fire from the
+    LXMF router.
+
+    Thread-safe. Maintains a bounded history of delivery attempts.
+    """
+
+    # Maximum tracked deliveries (prevent unbounded growth)
+    MAX_HISTORY = 500
+
+    # Delivery timeout (seconds) — consider failed if no confirmation
+    DELIVERY_TIMEOUT = 300  # 5 minutes
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._pending: Dict[str, DeliveryRecord] = {}
+        self._history: deque = deque(maxlen=self.MAX_HISTORY)
+        self._stats = {
+            "total_sent": 0,
+            "confirmed": 0,
+            "failed": 0,
+            "timed_out": 0,
+        }
+
+    def track_message(self, msg_id: str, destination_hash: bytes,
+                      content_preview: str = "") -> None:
+        """Register a new LXMF message for delivery tracking.
+
+        Args:
+            msg_id: Unique message identifier.
+            destination_hash: RNS destination hash (bytes).
+            content_preview: First portion of message content for display.
+        """
+        record = DeliveryRecord(
+            msg_id=msg_id,
+            destination_hash=destination_hash.hex() if isinstance(destination_hash, bytes) else str(destination_hash),
+            content_preview=content_preview[:50],
+            sent_at=time.time(),
+        )
+        with self._lock:
+            self._pending[msg_id] = record
+            self._stats["total_sent"] += 1
+            logger.debug(f"Tracking delivery: {msg_id} -> {record.destination_hash[:8]}...")
+
+    def confirm_delivery(self, msg_id: str) -> bool:
+        """Mark a message as successfully delivered.
+
+        Called by the LXMF delivery callback when recipient confirms.
+
+        Args:
+            msg_id: The message identifier.
+
+        Returns:
+            True if the message was found and updated.
+        """
+        with self._lock:
+            record = self._pending.pop(msg_id, None)
+            if record is None:
+                return False
+
+            record.status = "delivered"
+            record.confirmed_at = time.time()
+            self._history.append(record)
+            self._stats["confirmed"] += 1
+
+            latency = record.confirmed_at - record.sent_at
+            logger.info(
+                f"LXMF delivery confirmed: {msg_id} "
+                f"(latency: {latency:.1f}s)"
+            )
+            return True
+
+    def confirm_failure(self, msg_id: str, reason: str = "") -> bool:
+        """Mark a message delivery as failed.
+
+        Called by the LXMF failure callback.
+
+        Args:
+            msg_id: The message identifier.
+            reason: Failure reason from LXMF.
+
+        Returns:
+            True if the message was found and updated.
+        """
+        with self._lock:
+            record = self._pending.pop(msg_id, None)
+            if record is None:
+                return False
+
+            record.status = "failed"
+            record.confirmed_at = time.time()
+            record.failure_reason = reason
+            self._history.append(record)
+            self._stats["failed"] += 1
+
+            logger.warning(f"LXMF delivery failed: {msg_id} — {reason}")
+            return True
+
+    def check_timeouts(self) -> int:
+        """Check for timed-out pending deliveries.
+
+        Messages pending longer than DELIVERY_TIMEOUT are considered
+        failed (no confirmation received).
+
+        Returns:
+            Number of messages timed out.
+        """
+        now = time.time()
+        timed_out = []
+
+        with self._lock:
+            for msg_id, record in list(self._pending.items()):
+                if now - record.sent_at > self.DELIVERY_TIMEOUT:
+                    timed_out.append(msg_id)
+
+            for msg_id in timed_out:
+                record = self._pending.pop(msg_id)
+                record.status = "failed"
+                record.confirmed_at = now
+                record.failure_reason = "delivery_timeout"
+                self._history.append(record)
+                self._stats["timed_out"] += 1
+
+        if timed_out:
+            logger.debug(f"Delivery timeout: {len(timed_out)} messages")
+        return len(timed_out)
+
+    def get_pending(self) -> List[Dict[str, Any]]:
+        """Get list of messages awaiting delivery confirmation.
+
+        Returns:
+            List of pending delivery records with age in seconds.
+        """
+        now = time.time()
+        with self._lock:
+            return [
+                {
+                    "msg_id": r.msg_id,
+                    "destination": r.destination_hash[:8],
+                    "content_preview": r.content_preview,
+                    "age_seconds": round(now - r.sent_at, 1),
+                }
+                for r in self._pending.values()
+            ]
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get delivery confirmation statistics.
+
+        Returns:
+            Dict with total_sent, confirmed, failed, timed_out,
+            pending_count, confirmation_rate.
+        """
+        with self._lock:
+            pending = len(self._pending)
+            stats = dict(self._stats)
+
+        total = stats["total_sent"]
+        confirmed = stats["confirmed"]
+        rate = (confirmed / total * 100) if total > 0 else 0.0
+
+        return {
+            **stats,
+            "pending_count": pending,
+            "confirmation_rate_pct": round(rate, 1),
+        }
+
+    def get_recent_deliveries(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent delivery history.
+
+        Args:
+            limit: Maximum number of records to return.
+
+        Returns:
+            List of recent delivery records (newest first).
+        """
+        with self._lock:
+            records = list(self._history)[-limit:]
+
+        return [
+            {
+                "msg_id": r.msg_id,
+                "destination": r.destination_hash[:8],
+                "status": r.status,
+                "sent_at": r.sent_at,
+                "latency_seconds": round(r.confirmed_at - r.sent_at, 1) if r.confirmed_at else None,
+                "failure_reason": r.failure_reason or None,
+            }
+            for r in reversed(records)
+        ]
