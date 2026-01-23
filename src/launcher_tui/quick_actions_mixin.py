@@ -121,7 +121,7 @@ class QuickActionsMixin:
     def _qa_follow_logs(self):
         """Quick: follow meshtasticd journal logs."""
         subprocess.run(['clear'], check=False, timeout=5)
-        print("=== meshtasticd Logs (Ctrl+C to stop) ===\n")
+        print("=== meshtasticd Logs (Ctrl+C to stop, auto-exits after 2 min) ===\n")
         try:
             subprocess.run(
                 ['journalctl', '-fu', 'meshtasticd', '--no-pager', '-n', '50'],
@@ -196,14 +196,13 @@ class QuickActionsMixin:
 
         for port, desc in ports:
             try:
-                s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-                s.settimeout(1)
-                result = s.connect_ex(('127.0.0.1', port))
-                s.close()
-                if result == 0:
-                    print(f"  * {port:<6} {desc}")
-                else:
-                    print(f"  - {port:<6} {desc} (not listening)")
+                with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
+                    s.settimeout(1)
+                    result = s.connect_ex(('127.0.0.1', port))
+                    if result == 0:
+                        print(f"  * {port:<6} {desc}")
+                    else:
+                        print(f"  - {port:<6} {desc} (not listening)")
             except Exception:
                 print(f"  ? {port:<6} {desc} (check failed)")
 
