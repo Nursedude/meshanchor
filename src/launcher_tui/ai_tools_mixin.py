@@ -54,14 +54,72 @@ class AIToolsMixin:
             elif choice == "coverage":
                 self._generate_coverage_map()
 
+    def _maybe_auto_start_map(self):
+        """Start map server on TUI launch if user has enabled auto-open."""
+        import json
+        import socket
+
+        settings_file = self._get_map_settings_file()
+        if not settings_file.exists():
+            return
+
+        try:
+            with open(settings_file) as f:
+                settings = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        if not settings.get("auto_open_map", False):
+            return
+
+        # Check if server already running
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('localhost', 5000))
+            sock.close()
+            if result == 0:
+                return  # Already running
+        except OSError:
+            pass
+
+        # Start map server in background (no dialog, quiet)
+        try:
+            from utils.map_data_service import MapServer
+            server = MapServer(port=5000)
+            server.start_background()
+            # Store reference to prevent garbage collection
+            self._map_server = server
+        except Exception:
+            pass  # Non-fatal, don't interrupt startup
+
+    def _get_map_settings_file(self) -> Path:
+        """Get the map settings file path."""
+        from utils.paths import get_real_user_home
+        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "map_settings.json"
+
     def _open_live_map(self):
         """Open the live network map with real node data."""
         import json
         import socket
 
+        # Check current auto-open setting
+        auto_enabled = False
+        settings_file = self._get_map_settings_file()
+        if settings_file.exists():
+            try:
+                with open(settings_file) as f:
+                    auto_enabled = json.load(f).get("auto_open_map", False)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        auto_label = "ON" if auto_enabled else "OFF"
         choices = [
             ("browser", "Open map in browser (snapshot)"),
             ("server", "Start map server (live updates)"),
+            ("autostart", f"Auto-open on launch [{auto_label}]"),
             ("back", "Back"),
         ]
 
@@ -76,6 +134,10 @@ class AIToolsMixin:
 
         if choice == "server":
             self._start_map_server()
+            return
+
+        if choice == "autostart":
+            self._toggle_auto_map()
             return
 
         # Browser mode: collect data, inject into HTML, open
@@ -187,6 +249,47 @@ class AIToolsMixin:
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to start map server: {e}")
+
+    def _toggle_auto_map(self):
+        """Toggle the auto-open map on launch setting."""
+        import json
+
+        settings_file = self._get_map_settings_file()
+        settings = {}
+
+        if settings_file.exists():
+            try:
+                with open(settings_file) as f:
+                    settings = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        current = settings.get("auto_open_map", False)
+        settings["auto_open_map"] = not current
+
+        try:
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+
+            state = "ENABLED" if settings["auto_open_map"] else "DISABLED"
+            msg = (
+                f"Auto-open map: {state}\n\n"
+            )
+            if settings["auto_open_map"]:
+                msg += (
+                    "The map server will start automatically\n"
+                    "when MeshForge launches, and the map will\n"
+                    "be accessible at http://localhost:5000"
+                )
+            else:
+                msg += "Map server will not start automatically."
+
+            self.dialog.msgbox("Map Settings", msg)
+        except OSError as e:
+            self.dialog.msgbox("Error", f"Failed to save setting: {e}")
+
+        # Re-show the live map menu
+        self._open_live_map()
 
     def _intelligent_diagnostics(self):
         """Run intelligent diagnostics with symptom analysis."""
