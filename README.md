@@ -51,7 +51,7 @@ sudo python3 src/launcher_tui/main.py
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Working (requires API key) |
 | **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Working |
 | **AREDN** | Node discovery, link quality, service enumeration | Working |
-| **GTK4 Desktop** | Full GUI with 14 panels (map, diagnostics, radio, tools, etc.) | Working |
+| **GTK4 Desktop** | 14-panel GUI (exists, not actively developed) | Frozen |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 ### What's Planned (Not Yet Built)
@@ -76,7 +76,7 @@ sudo python3 src/launcher_tui/main.py
 graph TB
     subgraph User Interfaces
         TUI[Terminal UI<br>SSH-friendly, raspi-config style]
-        GTK[GTK4 Desktop<br>14-panel GUI]
+        BROWSER[Browser Maps<br>Live Leaflet.js NOC view]
         CLI[Standalone CLI<br>Zero-dependency RF tools]
     end
 
@@ -106,7 +106,7 @@ graph TB
     end
 
     TUI --> LAUNCHER
-    GTK --> LAUNCHER
+    TUI --> BROWSER
     LAUNCHER --> GATEWAY
     LAUNCHER --> MONITOR
     LAUNCHER --> MAPS
@@ -126,7 +126,7 @@ graph TB
     SDR --> UCONSOLE
 
     style TUI fill:#2d5016,color:#fff
-    style GTK fill:#2d5016,color:#fff
+    style BROWSER fill:#2d5016,color:#fff
     style CLI fill:#2d5016,color:#fff
     style GATEWAY fill:#1a3a5c,color:#fff
     style AI fill:#5c1a3a,color:#fff
@@ -237,9 +237,6 @@ sudo bash scripts/install_noc.sh
 # Or launch directly (if meshtasticd already installed)
 sudo python3 src/launcher_tui/main.py
 
-# GTK4 desktop (requires display)
-sudo python3 src/main_gtk.py
-
 # RF tools only (no sudo, no radio needed)
 python3 src/standalone.py
 ```
@@ -283,9 +280,9 @@ src/
 │   ├── main.py            # NOC dispatcher + menus
 │   ├── backend.py         # whiptail/dialog abstraction
 │   └── *_mixin.py         # Feature modules (RF, channels, AI, system)
-├── gtk_ui/                # GTK4 desktop GUI
+├── gtk_ui/                # GTK4 desktop (frozen, not actively developed)
 │   ├── app.py             # Main window (14 panels)
-│   └── panels/            # Map, diagnostics, radio, tools, HamClock...
+│   └── panels/            # Map, diagnostics, radio, tools...
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
