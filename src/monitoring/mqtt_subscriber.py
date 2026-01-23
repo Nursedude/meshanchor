@@ -132,6 +132,10 @@ class MQTTNodelessSubscriber:
         self._node_callbacks: List[Callable[[MQTTNode], None]] = []
         self._message_callbacks: List[Callable[[MQTTMessage], None]] = []
 
+        # Map cache persistence
+        self._last_cache_write: float = 0
+        self._cache_interval: int = 30  # Write cache every 30 seconds max
+
         # Stats
         self._stats = {
             "messages_received": 0,
@@ -361,8 +365,33 @@ class MQTTNodelessSubscriber:
                 # Encrypted payload - just track node existence
                 self._handle_encrypted_message(topic, payload)
 
+            # Periodically persist node data for map service
+            now = time.time()
+            if now - self._last_cache_write >= self._cache_interval:
+                self._persist_map_cache()
+                self._last_cache_write = now
+
         except Exception as e:
             logger.debug(f"Error processing MQTT message: {e}")
+
+    def _persist_map_cache(self):
+        """Write current node GeoJSON to disk for map data service.
+
+        The MapDataCollector reads this file to populate the live map
+        without needing a direct reference to this subscriber instance.
+        """
+        try:
+            cache_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file = cache_dir / "mqtt_nodes.json"
+
+            geojson = self.get_geojson()
+            if geojson.get("features"):
+                with open(cache_file, 'w') as f:
+                    json.dump(geojson, f)
+                logger.debug(f"Map cache: wrote {len(geojson['features'])} nodes")
+        except Exception as e:
+            logger.debug(f"Map cache write error: {e}")
 
     def _handle_json_message(self, topic: str, payload: bytes) -> None:
         """Handle JSON-formatted Meshtastic message."""

@@ -42,7 +42,7 @@ class MapDataCollector:
     4. Last-known cache — persisted state from previous runs
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
             self._cache_dir = cache_dir
         else:
@@ -56,6 +56,16 @@ class MapDataCollector:
         self._cache_file = self._cache_dir / "map_nodes.geojson"
         self._last_collect: Optional[float] = None
         self._cached_geojson: Optional[Dict] = None
+
+        # Node history database for position/state tracking over time
+        self._history = None
+        if enable_history:
+            try:
+                from utils.node_history import NodeHistoryDB
+                db_path = self._cache_dir / "node_history.db"
+                self._history = NodeHistoryDB(db_path=db_path)
+            except Exception as e:
+                logger.debug(f"Node history disabled: {e}")
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -120,13 +130,25 @@ class MapDataCollector:
         self._last_collect = time.time()
         self._save_cache(geojson)
 
+        # Record to history database
+        if self._history and geojson["features"]:
+            try:
+                self._history.record_observations(geojson["features"])
+            except Exception as e:
+                logger.debug(f"History recording error: {e}")
+
         return geojson
 
     def _collect_meshtasticd(self) -> List[Dict]:
-        """Collect nodes from meshtasticd via TCP:4403."""
+        """Collect nodes from meshtasticd via TCP:4403.
+
+        Strategy:
+        1. Try the Python TCP interface (structured data, most reliable)
+        2. Fall back to CLI parsing if Python module unavailable
+        """
         features = []
 
-        # Quick check if port is open
+        # Quick check if port is open before attempting connection
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
@@ -137,66 +159,194 @@ class MapDataCollector:
         except OSError:
             return []
 
+        # Strategy 1: Use Python TCP interface via connection manager
+        features = self._collect_via_tcp_interface()
+        if features:
+            return features
+
+        # Strategy 2: Fall back to CLI parsing
+        features = self._collect_via_cli()
+        if features:
+            logger.debug(f"meshtasticd (CLI): {len(features)} nodes with position")
+
+        return features
+
+    def _collect_via_tcp_interface(self) -> List[Dict]:
+        """Collect nodes using the meshtastic Python TCP interface.
+
+        Uses MeshtasticConnectionManager for safe locking and cleanup.
+        Returns list of GeoJSON features for nodes with valid positions.
+        """
         try:
-            # Use meshtastic CLI for node data (most reliable)
+            from utils.meshtastic_connection import get_connection_manager
+        except ImportError:
+            logger.debug("meshtastic_connection module not available")
+            return []
+
+        features = []
+        manager = get_connection_manager()
+
+        # Don't block if someone else holds the connection
+        if not manager.acquire_lock(timeout=5.0):
+            logger.debug("Could not acquire meshtasticd lock (in use)")
+            return []
+
+        try:
+            manager._wait_for_cooldown()
+            interface = manager._create_interface()
+
+            try:
+                if hasattr(interface, 'nodes') and interface.nodes:
+                    now = time.time()
+                    for node_id, node_data in interface.nodes.items():
+                        feature = self._parse_tcp_node(node_id, node_data, now)
+                        if feature:
+                            features.append(feature)
+
+                    if features:
+                        logger.debug(f"meshtasticd (TCP): {len(features)} nodes with position")
+            finally:
+                from utils.meshtastic_connection import safe_close_interface
+                safe_close_interface(interface)
+
+        except Exception as e:
+            logger.debug(f"TCP interface collection error: {e}")
+        finally:
+            manager.release_lock()
+
+        return features
+
+    def _parse_tcp_node(self, node_id: str, data: dict, now: float) -> Optional[Dict]:
+        """Parse a single node from the TCP interface nodes dict.
+
+        Handles both float (latitude) and integer (latitudeI) coordinate formats.
+        """
+        position = data.get('position', {})
+        if not position:
+            return None
+
+        # Extract coordinates - prefer float, fall back to integer / 1e7
+        lat = position.get('latitude')
+        if lat is None:
+            lat_i = position.get('latitudeI')
+            lat = lat_i / 1e7 if lat_i is not None else None
+
+        lon = position.get('longitude')
+        if lon is None:
+            lon_i = position.get('longitudeI')
+            lon = lon_i / 1e7 if lon_i is not None else None
+
+        # Skip nodes without valid coordinates
+        if lat is None or lon is None:
+            return None
+        if abs(lat) < 0.001 and abs(lon) < 0.001:
+            return None
+
+        # Extract user info
+        user = data.get('user', {})
+        device_metrics = data.get('deviceMetrics', {})
+
+        # Determine online status from lastHeard (15 min threshold)
+        last_heard = data.get('lastHeard', 0)
+        is_online = (now - last_heard) < 900 if last_heard else False
+
+        # Format last_seen as human-readable
+        if last_heard:
+            age_seconds = int(now - last_heard)
+            if age_seconds < 60:
+                last_seen = f"{age_seconds}s ago"
+            elif age_seconds < 3600:
+                last_seen = f"{age_seconds // 60}m ago"
+            elif age_seconds < 86400:
+                last_seen = f"{age_seconds // 3600}h ago"
+            else:
+                last_seen = f"{age_seconds // 86400}d ago"
+        else:
+            last_seen = "unknown"
+
+        # Format node_id
+        node_num = data.get('num', 0)
+        if isinstance(node_id, str) and node_id.startswith('!'):
+            formatted_id = node_id
+        elif node_num:
+            formatted_id = f"!{node_num:08x}"
+        else:
+            formatted_id = str(node_id)
+
+        return self._make_feature(
+            node_id=formatted_id,
+            name=user.get('longName', '') or user.get('shortName', ''),
+            lat=lat,
+            lon=lon,
+            network='meshtastic',
+            is_online=is_online,
+            snr=data.get('snr'),
+            battery=device_metrics.get('batteryLevel'),
+            hardware=user.get('hwModel', ''),
+            role=user.get('role', ''),
+            is_gateway=user.get('role', '') in ('ROUTER', 'ROUTER_CLIENT'),
+            via_mqtt=data.get('viaMqtt', False),
+            is_local=(data.get('hopsAway', 99) == 0),
+            last_seen=last_seen,
+        )
+
+    def _collect_via_cli(self) -> List[Dict]:
+        """Fall back to CLI parsing when Python TCP interface unavailable."""
+        try:
             result = subprocess.run(
                 ['meshtastic', '--host', 'localhost', '--info'],
                 capture_output=True, text=True, timeout=15
             )
             if result.returncode != 0:
                 return []
-
-            # Parse node info from CLI output
-            features = self._parse_meshtastic_info(result.stdout)
-            if features:
-                logger.debug(f"meshtasticd: {len(features)} nodes with position")
-
+            return self._parse_meshtastic_info(result.stdout)
         except FileNotFoundError:
             logger.debug("meshtastic CLI not found")
         except subprocess.TimeoutExpired:
             logger.debug("meshtastic CLI timed out")
         except Exception as e:
-            logger.debug(f"meshtasticd collection error: {e}")
-
-        return features
+            logger.debug(f"CLI collection error: {e}")
+        return []
 
     def _parse_meshtastic_info(self, output: str) -> List[Dict]:
         """Parse meshtastic --info output for node positions.
 
-        The output contains a Nodes section with position data in format:
-        Node ID | Name | Position | Battery | SNR | Last Heard
+        Handles JSON node data that some versions of the CLI output.
+        This is a fallback — the TCP interface is preferred.
         """
         features = []
-        in_nodes = False
         lines = output.split('\n')
 
         for line in lines:
-            # Look for node entries with position data
-            # Format varies but typically has lat/lon somewhere
-            if 'Latitude' in line or 'latitudeI' in line:
-                in_nodes = True
-
             # Try to parse JSON-like node data from --info output
-            if '{' in line and 'position' in line.lower():
+            if '{' in line and ('position' in line.lower() or 'latitude' in line.lower()):
                 try:
-                    # Some versions output JSON-ish data
                     start = line.index('{')
                     data = json.loads(line[start:])
                     if 'position' in data:
                         pos = data['position']
-                        lat = pos.get('latitude') or (pos.get('latitudeI', 0) / 1e7)
-                        lon = pos.get('longitude') or (pos.get('longitudeI', 0) / 1e7)
+                        lat = pos.get('latitude')
+                        if lat is None:
+                            lat_i = pos.get('latitudeI')
+                            lat = lat_i / 1e7 if lat_i else None
+                        lon = pos.get('longitude')
+                        if lon is None:
+                            lon_i = pos.get('longitudeI')
+                            lon = lon_i / 1e7 if lon_i else None
+
                         if lat and lon and not (abs(lat) < 0.001 and abs(lon) < 0.001):
+                            user = data.get('user', {})
+                            device_metrics = data.get('deviceMetrics', {})
                             feature = self._make_feature(
                                 node_id=data.get('num', data.get('id', 'unknown')),
-                                name=data.get('user', {}).get('longName', ''),
+                                name=user.get('longName', ''),
                                 lat=lat, lon=lon,
                                 network='meshtastic',
                                 is_online=True,
                                 snr=data.get('snr'),
-                                battery=data.get('deviceMetrics', {}).get('batteryLevel'),
-                                hardware=data.get('user', {}).get('hwModel', ''),
-                                role=data.get('user', {}).get('role', ''),
+                                battery=device_metrics.get('batteryLevel'),
+                                hardware=user.get('hwModel', ''),
+                                role=user.get('role', ''),
                             )
                             features.append(feature)
                 except (json.JSONDecodeError, ValueError, IndexError):
@@ -417,6 +567,11 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_map()
         elif self.path == '/api/status':
             self._serve_status()
+        elif self.path == '/api/nodes/history':
+            self._serve_history_stats()
+        elif self.path.startswith('/api/nodes/trajectory/'):
+            node_id = self.path.split('/api/nodes/trajectory/', 1)[1].rstrip('/')
+            self._serve_trajectory(node_id)
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -464,10 +619,56 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "time": datetime.now().isoformat(),
             "collector": self.collector is not None,
         }
+
+        # Include history stats if available
+        if self.collector and self.collector._history:
+            try:
+                status["history"] = self.collector._history.get_stats()
+            except Exception:
+                status["history"] = None
+
         data = json.dumps(status).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_history_stats(self):
+        """Serve node history summary and unique nodes list."""
+        if not self.collector or not self.collector._history:
+            self._serve_json({"error": "history not available", "nodes": []})
+            return
+
+        history = self.collector._history
+        result = {
+            "stats": history.get_stats(),
+            "nodes": history.get_unique_nodes(hours=24),
+        }
+        self._serve_json(result)
+
+    def _serve_trajectory(self, node_id: str):
+        """Serve trajectory GeoJSON for a specific node."""
+        if not self.collector or not self.collector._history:
+            self._serve_json({"error": "history not available"})
+            return
+
+        # URL decode the node_id (! becomes %21 in URLs)
+        from urllib.parse import unquote
+        node_id = unquote(node_id)
+
+        history = self.collector._history
+        geojson = history.get_trajectory_geojson(node_id, hours=24)
+        self._serve_json(geojson)
+
+    def _serve_json(self, obj: Any):
+        """Helper to serve a JSON response."""
+        data = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
 
@@ -482,8 +683,9 @@ class MapServer:
     Serves:
     - GET /              → node_map.html (the live map)
     - GET /api/nodes/geojson  → live node GeoJSON from all sources
-    - GET /api/status    → server health check
-    - GET /sw-tiles.js   → service worker for tile caching
+    - GET /api/nodes/history  → node history stats + unique nodes (24h)
+    - GET /api/nodes/trajectory/<id> → trajectory GeoJSON for a node
+    - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
 
     Usage:
