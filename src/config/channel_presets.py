@@ -512,8 +512,8 @@ class ChannelPresetManager:
         console.print(f"[green]Loaded preset: {selected}[/green]")
         return presets[selected]
 
-    def apply_preset_to_config(self, config, output_file='/etc/meshtasticd/config.yaml'):
-        """Apply preset configuration to meshtasticd config file"""
+    def apply_preset_to_config(self, config, output_file='/etc/meshtasticd/config.d/meshforge-channels.yaml'):
+        """Apply preset configuration to meshtasticd config.d/ overlay (never overwrites main config.yaml)."""
         console.print(f"\n[cyan]Applying configuration to {output_file}...[/cyan]")
 
         try:
@@ -551,9 +551,11 @@ class ChannelPresetManager:
             output_path = Path(output_file)
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Write config
+            # Write config overlay
             with open(output_file, 'w') as f:
-                yaml.dump(yaml_config, f, default_flow_style=False)
+                f.write("# MeshForge channel/LoRa preset overlay\n")
+                f.write("# Auto-generated - do not edit manually\n")
+                yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
 
             console.print(f"[green]Configuration saved to {output_file}[/green]")
             return True
