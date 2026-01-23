@@ -57,7 +57,7 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
 - [x] **Health scoring** — overall network health 0-100 based on node metrics
 - [x] **Predictive maintenance** — battery drain rate, node dropout patterns, reliability scoring
-- [ ] **Knowledge base expansion** — RNS troubleshooting, AREDN basics, RF fundamentals
+- [x] **Knowledge base expansion** — 35 entries + 6 guides (RNS, AREDN, RF, MQTT)
 
 ### Phase 5: TUI Polish
 
@@ -109,7 +109,8 @@ GTK → frozen (exists for fleet-host-2 monitor testing, not developed)
 - [x] Diagnostic rules expansion — 17 → 58 rules (connectivity, hardware, protocol, performance, resource, config, security)
 - [x] RF tools integration test — 20 cross-module tests (preset→multihop→antenna→health→trending→log_parser)
 - [x] Predictive maintenance — battery drain forecasting, dropout patterns, periodicity detection, solar detection
-- [x] 875 new tests across all modules (2107 total)
+- [x] Knowledge base expansion — 19→35 entries, 3→6 guides (RNS identity/transport/LXMF, AREDN overview/discovery/services, FSPL/antennas/propagation/ISM/terrain/solar/interference, MQTT)
+- [x] 919 new tests across all modules (2151 total)
 
 ---
 
