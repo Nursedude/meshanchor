@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Node Map - MeshForge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Network Map - MeshForge</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -14,72 +14,187 @@
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
+            background: #0a0e1a;
+            color: #e0e0e0;
+            overflow: hidden;
         }
         #map {
             width: 100%;
             height: 100vh;
         }
+
+        /* Dark theme map tiles */
+        .leaflet-container {
+            background: #0a0e1a;
+        }
+        .leaflet-control-zoom a {
+            background: #1a2332 !important;
+            color: #4fc3f7 !important;
+            border-color: #2a3a4a !important;
+        }
+        .leaflet-control-zoom a:hover {
+            background: #243444 !important;
+        }
+        .leaflet-control-attribution {
+            background: rgba(10, 14, 26, 0.8) !important;
+            color: #555 !important;
+            font-size: 10px !important;
+        }
+        .leaflet-control-attribution a {
+            color: #4fc3f7 !important;
+        }
+
+        /* Popups */
         .leaflet-popup-content-wrapper {
-            background: #16213e;
-            color: #eee;
-            border-radius: 8px;
+            background: #141e2e;
+            color: #e0e0e0;
+            border-radius: 10px;
+            border: 1px solid #2a3a4a;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         }
         .leaflet-popup-tip {
-            background: #16213e;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
         }
+
+        /* Node popup */
         .node-popup {
-            min-width: 200px;
+            min-width: 220px;
+            padding: 4px;
         }
         .node-popup h3 {
             color: #4fc3f7;
-            margin-bottom: 8px;
-            font-size: 16px;
+            margin-bottom: 6px;
+            font-size: 15px;
+            font-weight: 600;
         }
         .node-popup .network-badge {
             display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: bold;
-            margin-bottom: 8px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
         }
-        .network-meshtastic {
-            background: #2196f3;
-            color: white;
+        .badge-meshtastic { background: #1565c0; color: #e3f2fd; }
+        .badge-rns { background: #6a1b9a; color: #f3e5f5; }
+        .badge-aredn { background: #bf360c; color: #fbe9e7; }
+        .badge-both { background: linear-gradient(90deg, #1565c0 50%, #6a1b9a 50%); color: white; }
+
+        .node-popup .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+            font-size: 12px;
         }
-        .network-rns {
-            background: #9c27b0;
-            color: white;
+        .node-popup .info-label {
+            color: #6a7a8a;
+            white-space: nowrap;
         }
-        .network-aredn {
-            background: #ff5722;
-            color: white;
-        }
-        .network-both {
-            background: linear-gradient(90deg, #2196f3 50%, #9c27b0 50%);
-            color: white;
-        }
-        .node-popup .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 4px 0;
-            border-bottom: 1px solid #333;
-        }
-        .node-popup .info-row:last-child {
-            border-bottom: none;
-        }
-        .node-popup .label {
-            color: #888;
-        }
-        .node-popup .value {
-            color: #eee;
+        .node-popup .info-value {
+            color: #e0e0e0;
             font-weight: 500;
+            text-align: right;
         }
-        .status-online { color: #4caf50; }
-        .status-offline { color: #f44336; }
-        .status-gateway { color: #ff9800; }
+        .status-online { color: #66bb6a; }
+        .status-offline { color: #ef5350; }
+        .status-gateway { color: #ffa726; }
+
+        /* SNR bar */
+        .snr-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .snr-bar-track {
+            flex: 1;
+            height: 4px;
+            background: #1a2a3a;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .snr-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        /* Battery indicator */
+        .battery-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .battery-icon {
+            width: 20px;
+            height: 10px;
+            border: 1px solid #6a7a8a;
+            border-radius: 2px;
+            position: relative;
+            padding: 1px;
+        }
+        .battery-icon::after {
+            content: '';
+            position: absolute;
+            right: -3px;
+            top: 2px;
+            width: 2px;
+            height: 4px;
+            background: #6a7a8a;
+            border-radius: 0 1px 1px 0;
+        }
+        .battery-fill {
+            height: 100%;
+            border-radius: 1px;
+        }
+
+        /* Custom marker styles */
+        .node-marker {
+            background: transparent !important;
+            border: none !important;
+        }
+
+        /* Pulse animation for new/active nodes */
+        @keyframes pulse-ring {
+            0% { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(2.5); opacity: 0; }
+        }
+        @keyframes node-appear {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes gentle-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .node-marker-new svg {
+            animation: node-appear 0.5s ease-out forwards;
+        }
+        .node-marker-pulse::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            transform: translate(-50%, -50%);
+            animation: pulse-ring 2s ease-out infinite;
+            pointer-events: none;
+        }
+        .node-marker-alert svg {
+            animation: gentle-pulse 1.5s ease-in-out infinite;
+        }
+
+        /* Link lines */
+        .link-line {
+            stroke-linecap: round;
+        }
 
         /* Control panel */
         .control-panel {
@@ -87,50 +202,100 @@
             top: 10px;
             right: 10px;
             z-index: 1000;
-            background: #16213e;
-            border-radius: 8px;
-            padding: 15px;
-            min-width: 200px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 16px;
+            min-width: 210px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: transform 0.2s;
         }
-        .control-panel h4 {
+        .control-panel.collapsed {
+            min-width: auto;
+            padding: 8px 12px;
+        }
+        .control-panel.collapsed .panel-body {
+            display: none;
+        }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+        .panel-header h4 {
             color: #4fc3f7;
-            margin-bottom: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
-        .control-panel .stat-row {
+        .panel-toggle {
+            color: #4fc3f7;
+            font-size: 16px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 2px 6px;
+        }
+        .stat-row {
             display: flex;
             justify-content: space-between;
-            padding: 4px 0;
+            padding: 3px 0;
+            font-size: 12px;
         }
-        .control-panel .filter-row {
+        .stat-row .label { color: #6a7a8a; }
+        .stat-row .value { color: #e0e0e0; font-weight: 600; }
+        .stat-row .value.online { color: #66bb6a; }
+
+        .filter-section {
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid #333;
+            border-top: 1px solid #2a3a4a;
         }
-        .control-panel label {
+        .filter-section label {
             display: flex;
             align-items: center;
             gap: 8px;
             cursor: pointer;
-            padding: 4px 0;
+            padding: 3px 0;
+            font-size: 12px;
+            color: #aaa;
         }
-        .control-panel input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
+        .filter-section label:hover {
+            color: #e0e0e0;
         }
-        .btn-refresh {
+        .filter-section input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: #4fc3f7;
+        }
+
+        .btn-action {
             width: 100%;
-            margin-top: 10px;
-            padding: 8px;
-            background: #4fc3f7;
-            color: #16213e;
-            border: none;
-            border-radius: 4px;
+            margin-top: 8px;
+            padding: 7px 12px;
+            background: #1a2a3a;
+            color: #4fc3f7;
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
             cursor: pointer;
-            font-weight: bold;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
         }
-        .btn-refresh:hover {
-            background: #81d4fa;
+        .btn-action:hover {
+            background: #243444;
+            border-color: #4fc3f7;
+        }
+        .btn-action.primary {
+            background: #1565c0;
+            color: #e3f2fd;
+            border-color: #1976d2;
+        }
+        .btn-action.primary:hover {
+            background: #1976d2;
         }
 
         /* Legend */
@@ -139,42 +304,38 @@
             bottom: 30px;
             left: 10px;
             z-index: 1000;
-            background: #16213e;
-            border-radius: 8px;
-            padding: 10px 15px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .legend-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #4fc3f7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
         }
         .legend-item {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 3px 0;
+            padding: 2px 0;
+            font-size: 11px;
+            color: #aaa;
         }
-        .legend-marker {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-        }
-
-        /* Custom node marker styles */
-        .node-marker {
-            background: transparent !important;
-            border: none !important;
-        }
-        .node-marker svg {
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-        }
-
-        /* Legend shapes */
         .legend-shape {
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
         }
         .legend-shape svg {
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
         }
 
         /* Offline indicator */
@@ -184,45 +345,75 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: #ff5722;
+            background: #bf360c;
             color: white;
-            padding: 8px 16px;
+            padding: 6px 16px;
             border-radius: 20px;
-            font-weight: bold;
+            font-size: 12px;
+            font-weight: 600;
             display: none;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
-        .offline-indicator.visible {
-            display: block;
+        .offline-indicator.visible { display: block; }
+
+        /* Update indicator */
+        .update-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 11px;
+            color: #6a7a8a;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .update-indicator.active {
+            opacity: 1;
+        }
+        .update-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #66bb6a;
+            animation: gentle-pulse 1s ease-in-out infinite;
         }
 
-        /* Cache status in control panel */
-        .cache-status {
+        /* Coverage circles */
+        .coverage-circle {
+            fill-opacity: 0.08;
+            stroke-opacity: 0.3;
+            stroke-width: 1;
+        }
+
+        /* Touch-friendly: larger targets on mobile */
+        @media (max-width: 768px) {
+            .control-panel {
+                top: auto;
+                bottom: 10px;
+                right: 10px;
+                left: 10px;
+                min-width: auto;
+            }
+            .legend {
+                bottom: auto;
+                top: 10px;
+                left: 10px;
+            }
+        }
+
+        /* Cache status */
+        .cache-section {
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid #333;
-            font-size: 12px;
-        }
-        .cache-status .label {
-            color: #888;
-        }
-        .btn-cache {
-            width: 100%;
-            margin-top: 8px;
-            padding: 6px;
-            background: #333;
-            color: #eee;
-            border: 1px solid #555;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .btn-cache:hover {
-            background: #444;
-        }
-        .btn-cache:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+            border-top: 1px solid #2a3a4a;
+            font-size: 11px;
         }
     </style>
 </head>
@@ -231,549 +422,770 @@
 
     <!-- Offline mode indicator -->
     <div class="offline-indicator" id="offline-indicator">
-        Offline Mode - Using Cached Tiles
+        OFFLINE - Using Cached Tiles
     </div>
 
-    <div class="control-panel">
-        <h4>Node Statistics</h4>
-        <div class="stat-row">
-            <span>Total:</span>
-            <span id="stat-total">0</span>
-        </div>
-        <div class="stat-row">
-            <span>Meshtastic:</span>
-            <span id="stat-meshtastic">0</span>
-        </div>
-        <div class="stat-row">
-            <span>RNS:</span>
-            <span id="stat-rns">0</span>
-        </div>
-        <div class="stat-row">
-            <span>AREDN:</span>
-            <span id="stat-aredn">0</span>
-        </div>
-        <div class="stat-row">
-            <span>Online:</span>
-            <span id="stat-online" class="status-online">0</span>
-        </div>
+    <!-- Live update indicator -->
+    <div class="update-indicator" id="update-indicator">
+        <div class="update-dot"></div>
+        <span id="update-text">Live</span>
+    </div>
 
-        <div class="filter-row">
-            <label>
-                <input type="checkbox" id="filter-meshtastic" checked>
-                Show Meshtastic
-            </label>
-            <label>
-                <input type="checkbox" id="filter-rns" checked>
-                Show RNS
-            </label>
-            <label>
-                <input type="checkbox" id="filter-aredn" checked>
-                Show AREDN
-            </label>
-            <label>
-                <input type="checkbox" id="filter-online-only">
-                Online Only
-            </label>
+    <!-- Control Panel -->
+    <div class="control-panel" id="control-panel">
+        <div class="panel-header" onclick="togglePanel()">
+            <h4>MeshForge NOC</h4>
+            <button class="panel-toggle" id="panel-toggle">&#x25BC;</button>
         </div>
-
-        <button class="btn-refresh" onclick="refreshNodes()">Refresh</button>
-
-        <div class="cache-status" id="cache-status">
+        <div class="panel-body">
             <div class="stat-row">
-                <span class="label">Cached Tiles:</span>
-                <span id="cache-count">--</span>
+                <span class="label">Nodes:</span>
+                <span class="value" id="stat-total">0</span>
             </div>
             <div class="stat-row">
-                <span class="label">Cache Size:</span>
-                <span id="cache-size">--</span>
+                <span class="label">Online:</span>
+                <span class="value online" id="stat-online">0</span>
             </div>
-            <button class="btn-cache" id="btn-download-tiles" onclick="downloadCurrentArea()">
-                Cache Current View
-            </button>
-            <button class="btn-cache" onclick="clearTileCache()">
-                Clear Tile Cache
-            </button>
+            <div class="stat-row">
+                <span class="label">Meshtastic:</span>
+                <span class="value" id="stat-meshtastic">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="label">RNS:</span>
+                <span class="value" id="stat-rns">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="label">AREDN:</span>
+                <span class="value" id="stat-aredn">0</span>
+            </div>
+
+            <div class="filter-section">
+                <label><input type="checkbox" id="filter-meshtastic" checked> Meshtastic</label>
+                <label><input type="checkbox" id="filter-rns" checked> Reticulum</label>
+                <label><input type="checkbox" id="filter-aredn" checked> AREDN</label>
+                <label><input type="checkbox" id="filter-online-only"> Online only</label>
+                <label><input type="checkbox" id="filter-coverage"> Coverage circles</label>
+                <label><input type="checkbox" id="filter-links" checked> Link lines</label>
+            </div>
+
+            <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
+            <button class="btn-action" onclick="fitAllNodes()">Fit All</button>
+
+            <div class="cache-section" id="cache-section">
+                <div class="stat-row">
+                    <span class="label">Cached:</span>
+                    <span class="value" id="cache-count">--</span>
+                </div>
+                <button class="btn-action" onclick="downloadCurrentArea()">Cache View</button>
+            </div>
         </div>
     </div>
 
+    <!-- Legend -->
     <div class="legend">
-        <div style="font-weight: bold; margin-bottom: 5px; color: #4fc3f7; font-size: 12px;">Node Status</div>
+        <div class="legend-title">Node Types</div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#4caf50"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#66bb6a"/></svg></div>
             <span>Online</span>
         </div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#f44336"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#ef5350"/></svg></div>
             <span>Offline</span>
         </div>
-        <div style="font-weight: bold; margin: 8px 0 5px 0; color: #4fc3f7; font-size: 12px;">Node Type</div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9" fill="#ff9800"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9" fill="#ffa726"/></svg></div>
             <span>Gateway</span>
         </div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#2196f3"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,3 21,20 3,20" fill="#42a5f5"/></svg></div>
             <span>Router</span>
         </div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" fill="#9c27b0"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ab47bc"/></svg></div>
             <span>MQTT</span>
         </div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,12 12,22 2,12" fill="#00bcd4"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 22,12 12,22 2,12" fill="#26c6da"/></svg></div>
             <span>RNS</span>
         </div>
         <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 20,6 20,18 12,22 4,18 4,6" fill="#ff5722"/></svg></div>
+            <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 20,6 20,18 12,22 4,18 4,6" fill="#ff7043"/></svg></div>
             <span>AREDN</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#4caf50" stroke="#fff" stroke-width="2"/></svg></div>
-            <span>Local</span>
         </div>
     </div>
 
     <script>
-        // ============================================
-        // Service Worker Registration for Offline Tiles
-        // ============================================
-        let swRegistration = null;
+    // ============================================
+    // MeshForge Live Map Engine
+    // ============================================
 
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw-tiles.js')
-                .then(reg => {
-                    swRegistration = reg;
-                    console.log('[Map] Tile cache service worker registered');
-                    updateCacheStatus();
-                })
-                .catch(err => {
-                    console.warn('[Map] Service worker registration failed:', err);
-                    // Hide cache controls if SW not available
-                    document.getElementById('cache-status').style.display = 'none';
-                });
-        } else {
-            document.getElementById('cache-status').style.display = 'none';
+    // State management
+    const state = {
+        markers: new Map(),      // id -> { marker, feature, coverageCircle }
+        links: new Map(),        // "id1-id2" -> polyline
+        firstLoad: true,
+        lastUpdate: null,
+        updateCount: 0,
+        currentGeoJSON: null,
+        userHasPanned: false
+    };
+
+    // ============================================
+    // Service Worker for Offline Tiles
+    // ============================================
+    let swRegistration = null;
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw-tiles.js')
+            .then(reg => {
+                swRegistration = reg;
+                updateCacheStatus();
+            })
+            .catch(() => {
+                document.getElementById('cache-section').style.display = 'none';
+            });
+    } else {
+        document.getElementById('cache-section').style.display = 'none';
+    }
+
+    // Offline detection
+    function updateOnlineStatus() {
+        const indicator = document.getElementById('offline-indicator');
+        indicator.classList.toggle('visible', !navigator.onLine);
+    }
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    // ============================================
+    // Map Initialization
+    // ============================================
+    const map = L.map('map', {
+        zoomControl: true,
+        attributionControl: true
+    }).setView([20.0, -155.5], 8);
+
+    // Dark tile layer
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        maxZoom: 19,
+        subdomains: 'abcd',
+        errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='
+    }).addTo(map);
+
+    // Track user interaction
+    map.on('movestart', () => { state.userHasPanned = true; });
+
+    // Layer groups
+    const nodeLayer = L.layerGroup().addTo(map);
+    const linkLayer = L.layerGroup().addTo(map);
+    const coverageLayer = L.layerGroup().addTo(map);
+
+    // ============================================
+    // SVG Marker Icons
+    // ============================================
+    const markerSVG = {
+        gateway: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9"
+                         fill="${color}" opacity="0.9"/>
+            </svg>`,
+        router: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <polygon points="12,3 21,20 3,20"
+                         fill="${color}" opacity="0.9"/>
+            </svg>`,
+        rns: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <polygon points="12,2 22,12 12,22 2,12"
+                         fill="${color}" opacity="0.9"/>
+            </svg>`,
+        mqtt: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <rect x="4" y="4" width="16" height="16" rx="2"
+                      fill="${color}" opacity="0.9"/>
+            </svg>`,
+        aredn: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <polygon points="12,2 20,6 20,18 12,22 4,18 4,6"
+                         fill="${color}" opacity="0.9"/>
+            </svg>`,
+        default: (color, size) => `
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}">
+                <circle cx="12" cy="12" r="9"
+                        fill="${color}" opacity="0.9"/>
+            </svg>`
+    };
+
+    // ============================================
+    // Node Rendering
+    // ============================================
+
+    function getNodeColor(props) {
+        if (props.network === 'aredn') return props.is_online ? '#ff7043' : '#4a2010';
+        if (props.network === 'rns') return props.is_online ? '#26c6da' : '#1a3a40';
+        if (props.is_gateway) return '#ffa726';
+        if (props.via_mqtt) return '#ab47bc';
+        return props.is_online ? '#66bb6a' : '#ef5350';
+    }
+
+    function getNodeShape(props) {
+        if (props.is_gateway) return 'gateway';
+        if (props.network === 'aredn') return 'aredn';
+        if (props.network === 'rns') return 'rns';
+        if (props.via_mqtt) return 'mqtt';
+        if (props.role === 'ROUTER' || props.role === 'ROUTER_CLIENT' || props.role === 'REPEATER') return 'router';
+        return 'default';
+    }
+
+    function createMarkerIcon(props, isNew) {
+        const color = getNodeColor(props);
+        const shape = getNodeShape(props);
+        const isLocal = props.is_local;
+        const size = isLocal ? 28 : 20;
+
+        const svgFn = markerSVG[shape] || markerSVG.default;
+        let html = svgFn(color, size);
+
+        // Add local node ring
+        if (isLocal) {
+            html = `<svg viewBox="0 0 ${size+4} ${size+4}" width="${size+4}" height="${size+4}" style="position:absolute;top:-2px;left:-2px">
+                <circle cx="${(size+4)/2}" cy="${(size+4)/2}" r="${(size+4)/2-1}" fill="none" stroke="#fff" stroke-width="2" opacity="0.6"/>
+            </svg>` + html;
         }
 
-        // Offline detection
-        function updateOnlineStatus() {
-            const indicator = document.getElementById('offline-indicator');
-            if (!navigator.onLine) {
-                indicator.classList.add('visible');
-            } else {
-                indicator.classList.remove('visible');
-            }
+        const cls = ['node-marker'];
+        if (isNew) cls.push('node-marker-new');
+        if (props.battery !== null && props.battery < 20) cls.push('node-marker-alert');
+
+        return L.divIcon({
+            html: html,
+            className: cls.join(' '),
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2],
+            popupAnchor: [0, -size/2 - 4]
+        });
+    }
+
+    function createPopupContent(props, coords) {
+        const badgeClass = props.network === 'both' ? 'badge-both' :
+                          props.network === 'rns' ? 'badge-rns' :
+                          props.network === 'aredn' ? 'badge-aredn' : 'badge-meshtastic';
+
+        let snrHtml = '';
+        if (props.snr !== null && props.snr !== undefined) {
+            // SNR range: -20 to +15 dB for LoRa
+            const pct = Math.min(100, Math.max(0, ((props.snr + 20) / 35) * 100));
+            const snrColor = pct > 70 ? '#66bb6a' : pct > 40 ? '#ffa726' : '#ef5350';
+            snrHtml = `
+                <div class="info-label">SNR</div>
+                <div class="info-value">
+                    <div class="snr-bar">
+                        <span>${props.snr} dB</span>
+                        <div class="snr-bar-track"><div class="snr-bar-fill" style="width:${pct}%;background:${snrColor}"></div></div>
+                    </div>
+                </div>`;
         }
 
-        window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
-        updateOnlineStatus();
-
-        // Update cache statistics
-        async function updateCacheStatus() {
-            if (!swRegistration || !navigator.serviceWorker.controller) {
-                // Wait for controller
-                setTimeout(updateCacheStatus, 1000);
-                return;
-            }
-
-            try {
-                const channel = new MessageChannel();
-                channel.port1.onmessage = (event) => {
-                    const stats = event.data;
-                    if (!stats.error) {
-                        document.getElementById('cache-count').textContent = stats.tileCount;
-                        document.getElementById('cache-size').textContent = stats.estimatedSizeMB + ' MB';
-                    }
-                };
-                navigator.serviceWorker.controller.postMessage(
-                    { action: 'getCacheStats' },
-                    [channel.port2]
-                );
-            } catch (e) {
-                console.warn('[Map] Failed to get cache stats:', e);
-            }
+        let batteryHtml = '';
+        if (props.battery !== null && props.battery !== undefined) {
+            const battColor = props.battery > 50 ? '#66bb6a' : props.battery > 20 ? '#ffa726' : '#ef5350';
+            batteryHtml = `
+                <div class="info-label">Battery</div>
+                <div class="info-value">
+                    <div class="battery-indicator">
+                        <div class="battery-icon"><div class="battery-fill" style="width:${props.battery}%;background:${battColor}"></div></div>
+                        <span>${props.battery}%</span>
+                    </div>
+                </div>`;
         }
 
-        // Download tiles for current map view
-        async function downloadCurrentArea() {
-            if (!swRegistration || !navigator.serviceWorker.controller) {
-                alert('Tile caching not available');
-                return;
-            }
+        return `
+            <div class="node-popup">
+                <h3>${props.name || props.id || 'Unknown'}</h3>
+                <span class="network-badge ${badgeClass}">${props.network || 'mesh'}</span>
+                <div class="info-grid">
+                    <div class="info-label">Status</div>
+                    <div class="info-value ${props.is_online ? 'status-online' : 'status-offline'}">
+                        ${props.is_online ? '● Online' : '○ Offline'}
+                    </div>
+                    ${props.role ? `<div class="info-label">Role</div><div class="info-value">${props.role}</div>` : ''}
+                    ${props.is_gateway ? `<div class="info-label">Type</div><div class="info-value status-gateway">Gateway</div>` : ''}
+                    ${props.via_mqtt ? `<div class="info-label">Via</div><div class="info-value" style="color:#ab47bc">MQTT</div>` : ''}
+                    <div class="info-label">Last seen</div>
+                    <div class="info-value">${props.last_seen || 'Unknown'}</div>
+                    ${snrHtml}
+                    ${batteryHtml}
+                    ${props.hardware ? `<div class="info-label">Hardware</div><div class="info-value" style="font-size:11px">${props.hardware}</div>` : ''}
+                    <div class="info-label">Position</div>
+                    <div class="info-value" style="font-size:11px">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</div>
+                </div>
+            </div>`;
+    }
 
-            const btn = document.getElementById('btn-download-tiles');
-            btn.disabled = true;
-            btn.textContent = 'Downloading...';
+    // Estimate coverage radius in meters based on LoRa preset/role
+    function estimateCoverageRadius(props) {
+        if (props.is_gateway) return 5000;   // 5km for gateways
+        if (props.role === 'ROUTER' || props.role === 'REPEATER') return 3000;
+        if (props.network === 'aredn') return 8000;  // AREDN typically longer range
+        return 1500; // Default 1.5km for end nodes
+    }
 
-            const bounds = map.getBounds();
-            const zoom = map.getZoom();
+    // ============================================
+    // Incremental Update Engine
+    // ============================================
 
-            try {
-                const channel = new MessageChannel();
-                channel.port1.onmessage = (event) => {
-                    const result = event.data;
-                    btn.disabled = false;
-                    btn.textContent = 'Cache Current View';
+    function loadNodes(geojson) {
+        state.currentGeoJSON = geojson;
+        state.lastUpdate = Date.now();
+        state.updateCount++;
 
-                    if (result.error) {
-                        alert('Download failed: ' + result.error);
-                    } else {
-                        alert(`Downloaded ${result.downloaded} tiles (${result.failed} failed)`);
-                        updateCacheStatus();
-                    }
-                };
+        // Show update indicator
+        const indicator = document.getElementById('update-indicator');
+        indicator.classList.add('active');
+        document.getElementById('update-text').textContent =
+            `Live · ${geojson.features.length} nodes`;
+        setTimeout(() => indicator.classList.remove('active'), 3000);
 
-                navigator.serviceWorker.controller.postMessage({
-                    action: 'downloadTiles',
-                    data: {
-                        bounds: {
-                            north: bounds.getNorth(),
-                            south: bounds.getSouth(),
-                            east: bounds.getEast(),
-                            west: bounds.getWest()
-                        },
-                        minZoom: Math.max(1, zoom - 2),
-                        maxZoom: Math.min(18, zoom + 2)
-                    }
-                }, [channel.port2]);
-            } catch (e) {
-                btn.disabled = false;
-                btn.textContent = 'Cache Current View';
-                alert('Download failed: ' + e.message);
-            }
-        }
+        updateDisplay();
+    }
 
-        // Clear tile cache
-        async function clearTileCache() {
-            if (!swRegistration || !navigator.serviceWorker.controller) {
-                alert('Tile caching not available');
-                return;
-            }
+    function updateDisplay() {
+        if (!state.currentGeoJSON) return;
 
-            if (!confirm('Clear all cached map tiles?')) return;
+        const showMeshtastic = document.getElementById('filter-meshtastic').checked;
+        const showRNS = document.getElementById('filter-rns').checked;
+        const showAREDN = document.getElementById('filter-aredn').checked;
+        const onlineOnly = document.getElementById('filter-online-only').checked;
+        const showCoverage = document.getElementById('filter-coverage').checked;
+        const showLinks = document.getElementById('filter-links').checked;
 
-            const channel = new MessageChannel();
-            channel.port1.onmessage = (event) => {
-                if (event.data.success) {
-                    alert('Tile cache cleared');
-                    updateCacheStatus();
-                }
-            };
+        // Track which nodes are in this update
+        const activeIds = new Set();
+        let total = 0, meshtastic = 0, rns = 0, aredn = 0, online = 0;
 
-            navigator.serviceWorker.controller.postMessage(
-                { action: 'clearCache' },
-                [channel.port2]
-            );
-        }
-
-        // Periodically update cache status
-        setInterval(updateCacheStatus, 30000);
-
-        // ============================================
-        // Map Initialization
-        // ============================================
-
-        // Initialize map
-        const map = L.map('map').setView([20.0, -155.5], 8); // Default to Hawaii
-
-        // Add tile layer (dark mode) with error handling for offline
-        const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-            maxZoom: 19,
-            errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-        }).addTo(map);
-
-        // Node markers layer group
-        let nodeLayer = L.layerGroup().addTo(map);
-        let currentGeoJSON = null;
-
-        // SVG marker icons for different node types
-        const markerIcons = {
-            // Gateway: Star shape
-            gateway: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <polygon points="12,2 15,9 22,9 17,14 19,22 12,17 5,22 7,14 2,9 9,9"
-                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`,
-            // Router: Triangle
-            router: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <polygon points="12,2 22,20 2,20"
-                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`,
-            // RNS Node: Diamond
-            rns: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <polygon points="12,2 22,12 12,22 2,12"
-                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`,
-            // MQTT Node: Square
-            mqtt: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <rect x="3" y="3" width="18" height="18" rx="2"
-                          fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`,
-            // AREDN Node: Hexagon (represents mesh network topology)
-            aredn: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <polygon points="12,2 20,6 20,18 12,22 4,18 4,6"
-                             fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`,
-            // Default: Circle (for regular end nodes)
-            default: (color, isLocal) => `
-                <svg viewBox="0 0 24 24" width="${isLocal ? 32 : 24}" height="${isLocal ? 32 : 24}">
-                    <circle cx="12" cy="12" r="9"
-                            fill="${color}" stroke="${isLocal ? '#fff' : color}" stroke-width="${isLocal ? 2 : 1}"/>
-                </svg>`
-        };
-
-        // Create custom marker with shape based on node type
-        function createNodeMarker(feature) {
+        // Process each feature
+        state.currentGeoJSON.features.forEach(feature => {
             const props = feature.properties;
             const coords = feature.geometry.coordinates;
+            const id = props.id || `${coords[0]}_${coords[1]}`;
 
-            // Determine marker color
-            // Green=online, Red=offline, Orange=gateway, Purple=MQTT, Cyan=RNS, Deep Orange=AREDN
-            let color = props.is_online ? '#4caf50' : '#f44336';
-            if (props.is_gateway) color = '#ff9800';
-            if (props.via_mqtt) color = '#9c27b0';  // Purple for MQTT nodes
-            if (props.network === 'rns') color = props.is_online ? '#00bcd4' : '#607d8b';  // Cyan for RNS
-            if (props.network === 'aredn') color = props.is_online ? '#ff5722' : '#bf360c';  // Deep orange for AREDN
+            // Stats (count all regardless of filter)
+            total++;
+            if (props.network === 'meshtastic' || props.network === 'both') meshtastic++;
+            if (props.network === 'rns' || props.network === 'both') rns++;
+            if (props.network === 'aredn') aredn++;
+            if (props.is_online) online++;
 
-            // Determine marker shape based on node type
-            let iconType = 'default';
-            if (props.is_gateway) iconType = 'gateway';
-            else if (props.network === 'aredn') iconType = 'aredn';
-            else if (props.network === 'rns') iconType = 'rns';
-            else if (props.via_mqtt) iconType = 'mqtt';
-            else if (props.role === 'ROUTER' || props.role === 'ROUTER_CLIENT') iconType = 'router';
+            // Apply filters
+            if (onlineOnly && !props.is_online) return;
+            if (props.network === 'meshtastic' && !showMeshtastic) return;
+            if (props.network === 'rns' && !showRNS) return;
+            if (props.network === 'aredn' && !showAREDN) return;
 
-            // Get SVG icon
-            const iconFn = markerIcons[iconType] || markerIcons.default;
-            const svgHtml = iconFn(color, props.is_local);
-            const size = props.is_local ? 32 : 24;
+            activeIds.add(id);
 
-            // Create div icon
-            const icon = L.divIcon({
-                html: svgHtml,
-                className: 'node-marker',
-                iconSize: [size, size],
-                iconAnchor: [size/2, size/2],
-                popupAnchor: [0, -size/2]
-            });
+            // Check if marker already exists
+            const existing = state.markers.get(id);
 
-            const marker = L.marker([coords[1], coords[0]], { icon: icon });
+            if (existing) {
+                // Update existing marker (incremental)
+                const oldProps = existing.feature.properties;
+                const propsChanged = (
+                    oldProps.is_online !== props.is_online ||
+                    oldProps.snr !== props.snr ||
+                    oldProps.battery !== props.battery ||
+                    oldProps.last_seen !== props.last_seen
+                );
 
-            // Create popup content
-            const networkClass = props.network === 'both' ? 'network-both' :
-                                props.network === 'rns' ? 'network-rns' :
-                                props.network === 'aredn' ? 'network-aredn' : 'network-meshtastic';
+                if (propsChanged) {
+                    // Update icon if state changed
+                    existing.marker.setIcon(createMarkerIcon(props, false));
+                    existing.marker.setPopupContent(createPopupContent(props, coords));
+                }
 
-            const popupContent = `
-                <div class="node-popup">
-                    <h3>${props.name || 'Unknown'}</h3>
-                    <span class="network-badge ${networkClass}">${props.network.toUpperCase()}</span>
-                    <div class="info-row">
-                        <span class="label">Status:</span>
-                        <span class="value ${props.is_online ? 'status-online' : 'status-offline'}">
-                            ${props.is_online ? 'Online' : 'Offline'}
-                        </span>
-                    </div>
-                    ${props.is_gateway ? '<div class="info-row"><span class="label">Role:</span><span class="value status-gateway">Gateway</span></div>' : ''}
-                    ${props.via_mqtt ? '<div class="info-row"><span class="label">Source:</span><span class="value" style="color:#9c27b0">MQTT</span></div>' : ''}
-                    ${props.role ? `<div class="info-row"><span class="label">Role:</span><span class="value">${props.role}</span></div>` : ''}
-                    <div class="info-row">
-                        <span class="label">Last Seen:</span>
-                        <span class="value">${props.last_seen || 'Unknown'}</span>
-                    </div>
-                    ${props.snr !== null ? `<div class="info-row"><span class="label">SNR:</span><span class="value">${props.snr} dB</span></div>` : ''}
-                    ${props.battery !== null ? `<div class="info-row"><span class="label">Battery:</span><span class="value">${props.battery}%</span></div>` : ''}
-                    <div class="info-row">
-                        <span class="label">Position:</span>
-                        <span class="value">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</span>
-                    </div>
-                </div>
-            `;
+                // Update position if moved
+                const oldCoords = existing.feature.geometry.coordinates;
+                if (oldCoords[0] !== coords[0] || oldCoords[1] !== coords[1]) {
+                    existing.marker.setLatLng([coords[1], coords[0]]);
+                }
 
-            marker.bindPopup(popupContent);
-            return marker;
-        }
+                // Update coverage circle
+                if (showCoverage) {
+                    if (!existing.coverageCircle) {
+                        const radius = estimateCoverageRadius(props);
+                        const color = getNodeColor(props);
+                        existing.coverageCircle = L.circle([coords[1], coords[0]], {
+                            radius: radius,
+                            color: color,
+                            fillColor: color,
+                            fillOpacity: 0.06,
+                            weight: 1,
+                            opacity: 0.25,
+                            interactive: false
+                        }).addTo(coverageLayer);
+                    }
+                } else if (existing.coverageCircle) {
+                    coverageLayer.removeLayer(existing.coverageCircle);
+                    existing.coverageCircle = null;
+                }
 
-        // Load and display nodes
-        function loadNodes(geojson) {
-            currentGeoJSON = geojson;
-            updateDisplay();
-        }
-
-        // Update display based on filters
-        function updateDisplay() {
-            if (!currentGeoJSON) return;
-
-            const showMeshtastic = document.getElementById('filter-meshtastic').checked;
-            const showRNS = document.getElementById('filter-rns').checked;
-            const showAREDN = document.getElementById('filter-aredn').checked;
-            const onlineOnly = document.getElementById('filter-online-only').checked;
-
-            // Clear existing markers
-            nodeLayer.clearLayers();
-
-            // Stats
-            let total = 0, meshtastic = 0, rns = 0, aredn = 0, online = 0;
-
-            // Add filtered markers
-            currentGeoJSON.features.forEach(feature => {
-                const props = feature.properties;
-
-                // Count stats
-                total++;
-                if (props.network === 'meshtastic' || props.network === 'both') meshtastic++;
-                if (props.network === 'rns' || props.network === 'both') rns++;
-                if (props.network === 'aredn') aredn++;
-                if (props.is_online) online++;
-
-                // Apply filters
-                if (onlineOnly && !props.is_online) return;
-                if (props.network === 'meshtastic' && !showMeshtastic) return;
-                if (props.network === 'rns' && !showRNS) return;
-                if (props.network === 'aredn' && !showAREDN) return;
-                if (props.network === 'both' && !showMeshtastic && !showRNS) return;
-
-                const marker = createNodeMarker(feature);
+                existing.feature = feature;
+            } else {
+                // Create new marker
+                const isNew = !state.firstLoad;
+                const marker = L.marker([coords[1], coords[0]], {
+                    icon: createMarkerIcon(props, isNew)
+                });
+                marker.bindPopup(createPopupContent(props, coords));
                 nodeLayer.addLayer(marker);
-            });
 
-            // Update stats display
-            document.getElementById('stat-total').textContent = total;
-            document.getElementById('stat-meshtastic').textContent = meshtastic;
-            document.getElementById('stat-rns').textContent = rns;
-            document.getElementById('stat-aredn').textContent = aredn;
-            document.getElementById('stat-online').textContent = online;
-
-            // Fit bounds if we have nodes
-            if (nodeLayer.getLayers().length > 0) {
-                const bounds = nodeLayer.getBounds();
-                if (bounds.isValid()) {
-                    map.fitBounds(bounds, { padding: [50, 50] });
+                // Coverage circle
+                let coverageCircle = null;
+                if (showCoverage) {
+                    const radius = estimateCoverageRadius(props);
+                    const color = getNodeColor(props);
+                    coverageCircle = L.circle([coords[1], coords[0]], {
+                        radius: radius,
+                        color: color,
+                        fillColor: color,
+                        fillOpacity: 0.06,
+                        weight: 1,
+                        opacity: 0.25,
+                        interactive: false
+                    }).addTo(coverageLayer);
                 }
+
+                state.markers.set(id, { marker, feature, coverageCircle });
+            }
+        });
+
+        // Remove markers no longer in data
+        for (const [id, entry] of state.markers) {
+            if (!activeIds.has(id)) {
+                nodeLayer.removeLayer(entry.marker);
+                if (entry.coverageCircle) {
+                    coverageLayer.removeLayer(entry.coverageCircle);
+                }
+                state.markers.delete(id);
             }
         }
 
-        // Refresh nodes from server
-        async function refreshNodes() {
-            try {
-                // Try to fetch from local MeshForge API
-                const response = await fetch('/api/nodes/geojson');
-                if (response.ok) {
-                    const geojson = await response.json();
-                    loadNodes(geojson);
-                    return;
+        // Draw link lines between nodes that have SNR data (implies they can hear each other)
+        linkLayer.clearLayers();
+        if (showLinks && state.currentGeoJSON.features.length > 1) {
+            drawNodeLinks(state.currentGeoJSON.features, activeIds);
+        }
+
+        // Update stats
+        document.getElementById('stat-total').textContent = total;
+        document.getElementById('stat-meshtastic').textContent = meshtastic;
+        document.getElementById('stat-rns').textContent = rns;
+        document.getElementById('stat-aredn').textContent = aredn;
+        document.getElementById('stat-online').textContent = online;
+
+        // Fit bounds only on first load
+        if (state.firstLoad && nodeLayer.getLayers().length > 0) {
+            const bounds = nodeLayer.getBounds();
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 });
+            }
+            state.firstLoad = false;
+        }
+    }
+
+    function drawNodeLinks(features, activeIds) {
+        // Draw lines between gateway/router nodes and their nearby online nodes
+        // This creates a network topology visualization
+        const onlineNodes = features.filter(f =>
+            f.properties.is_online && activeIds.has(f.properties.id || `${f.geometry.coordinates[0]}_${f.geometry.coordinates[1]}`)
+        );
+
+        const gateways = onlineNodes.filter(f =>
+            f.properties.is_gateway || f.properties.role === 'ROUTER' || f.properties.role === 'REPEATER'
+        );
+
+        // Connect each regular node to nearest gateway/router (simplified topology)
+        const regularNodes = onlineNodes.filter(f =>
+            !f.properties.is_gateway && f.properties.role !== 'ROUTER' && f.properties.role !== 'REPEATER'
+        );
+
+        for (const node of regularNodes) {
+            let nearestGw = null;
+            let nearestDist = Infinity;
+
+            for (const gw of gateways) {
+                const dist = getDistance(
+                    node.geometry.coordinates[1], node.geometry.coordinates[0],
+                    gw.geometry.coordinates[1], gw.geometry.coordinates[0]
+                );
+                if (dist < nearestDist && dist < 50) { // Within 50km
+                    nearestDist = dist;
+                    nearestGw = gw;
                 }
-            } catch (e) {
-                console.log('API not available, using demo data');
             }
 
-            // Check for embedded data from MeshForge (injected into HTML)
-            if (window.meshforgeData) {
-                console.log('Using embedded MeshForge data');
-                loadNodes(window.meshforgeData);
+            if (nearestGw) {
+                const snr = node.properties.snr;
+                let color = '#2a3a4a'; // Default dim
+                let weight = 1;
+                let opacity = 0.3;
+
+                if (snr !== null && snr !== undefined) {
+                    if (snr >= 10) { color = '#66bb6a'; weight = 2; opacity = 0.6; }
+                    else if (snr >= 5) { color = '#a5d6a7'; weight = 1.5; opacity = 0.5; }
+                    else if (snr >= 0) { color = '#ffa726'; weight = 1.5; opacity = 0.5; }
+                    else if (snr >= -5) { color = '#ff7043'; weight = 1; opacity = 0.4; }
+                    else { color = '#ef5350'; weight = 1; opacity = 0.4; }
+                }
+
+                const line = L.polyline([
+                    [node.geometry.coordinates[1], node.geometry.coordinates[0]],
+                    [nearestGw.geometry.coordinates[1], nearestGw.geometry.coordinates[0]]
+                ], {
+                    color: color,
+                    weight: weight,
+                    opacity: opacity,
+                    dashArray: snr === null ? '4 4' : null,
+                    interactive: false
+                });
+                linkLayer.addLayer(line);
+            }
+        }
+
+        // Connect gateways to each other
+        for (let i = 0; i < gateways.length; i++) {
+            for (let j = i + 1; j < gateways.length; j++) {
+                const dist = getDistance(
+                    gateways[i].geometry.coordinates[1], gateways[i].geometry.coordinates[0],
+                    gateways[j].geometry.coordinates[1], gateways[j].geometry.coordinates[0]
+                );
+                if (dist < 100) { // Within 100km
+                    const line = L.polyline([
+                        [gateways[i].geometry.coordinates[1], gateways[i].geometry.coordinates[0]],
+                        [gateways[j].geometry.coordinates[1], gateways[j].geometry.coordinates[0]]
+                    ], {
+                        color: '#4fc3f7',
+                        weight: 2,
+                        opacity: 0.4,
+                        dashArray: '6 4',
+                        interactive: false
+                    });
+                    linkLayer.addLayer(line);
+                }
+            }
+        }
+    }
+
+    // Haversine distance in km
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    // ============================================
+    // User Actions
+    // ============================================
+
+    function fitAllNodes() {
+        if (nodeLayer.getLayers().length > 0) {
+            const bounds = nodeLayer.getBounds();
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 });
+            }
+        }
+    }
+
+    function togglePanel() {
+        const panel = document.getElementById('control-panel');
+        const toggle = document.getElementById('panel-toggle');
+        panel.classList.toggle('collapsed');
+        toggle.textContent = panel.classList.contains('collapsed') ? '\u25B2' : '\u25BC';
+    }
+
+    // ============================================
+    // Data Loading
+    // ============================================
+
+    async function refreshNodes() {
+        // 1. Check for embedded data (injected by GTK panel)
+        if (window.meshforgeData) {
+            loadNodes(window.meshforgeData);
+            return;
+        }
+
+        // 2. Try local API
+        try {
+            const response = await fetch('/api/nodes/geojson');
+            if (response.ok) {
+                loadNodes(await response.json());
                 return;
             }
+        } catch (e) { /* not available */ }
 
-            // Check URL params for inline data (fallback, limited by URL length)
-            const params = new URLSearchParams(window.location.search);
-            if (params.has('data')) {
-                try {
-                    const geojson = JSON.parse(decodeURIComponent(params.get('data')));
-                    console.log('Loaded ' + geojson.features.length + ' nodes from URL params');
-                    loadNodes(geojson);
-                    return;
-                } catch (e) {
-                    console.error('Failed to parse data param:', e);
-                }
-            }
-
-            // Demo data for development
-            const demoData = {
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                        "type": "Feature",
-                        "geometry": { "type": "Point", "coordinates": [-157.8583, 21.3069] },
-                        "properties": {
-                            "id": "mesh_!abcd1234",
-                            "name": "Honolulu Node",
-                            "network": "meshtastic",
-                            "is_online": true,
-                            "is_local": true,
-                            "is_gateway": false,
-                            "snr": 12.5,
-                            "battery": 85,
-                            "last_seen": "2m ago"
-                        }
-                    },
-                    {
-                        "type": "Feature",
-                        "geometry": { "type": "Point", "coordinates": [-156.4680, 20.7984] },
-                        "properties": {
-                            "id": "mesh_!efgh5678",
-                            "name": "Maui Repeater",
-                            "network": "meshtastic",
-                            "is_online": true,
-                            "is_local": false,
-                            "is_gateway": true,
-                            "snr": 8.0,
-                            "battery": 100,
-                            "last_seen": "5m ago"
-                        }
-                    },
-                    {
-                        "type": "Feature",
-                        "geometry": { "type": "Point", "coordinates": [-155.5000, 19.7297] },
-                        "properties": {
-                            "id": "rns_a1b2c3d4",
-                            "name": "Big Island RNS",
-                            "network": "rns",
-                            "is_online": true,
-                            "is_local": false,
-                            "is_gateway": false,
-                            "snr": null,
-                            "battery": null,
-                            "last_seen": "1m ago"
-                        }
-                    },
-                    {
-                        "type": "Feature",
-                        "geometry": { "type": "Point", "coordinates": [-159.3711, 22.0964] },
-                        "properties": {
-                            "id": "both_kauai",
-                            "name": "Kauai Gateway",
-                            "network": "both",
-                            "is_online": false,
-                            "is_local": false,
-                            "is_gateway": true,
-                            "snr": 5.5,
-                            "battery": 45,
-                            "last_seen": "2h ago"
-                        }
-                    }
-                ]
-            };
-
-            loadNodes(demoData);
+        // 3. Check URL params
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('data')) {
+            try {
+                loadNodes(JSON.parse(decodeURIComponent(params.get('data'))));
+                return;
+            } catch (e) { /* bad data */ }
         }
 
-        // Event listeners for filters
-        document.getElementById('filter-meshtastic').addEventListener('change', updateDisplay);
-        document.getElementById('filter-rns').addEventListener('change', updateDisplay);
-        document.getElementById('filter-aredn').addEventListener('change', updateDisplay);
-        document.getElementById('filter-online-only').addEventListener('change', updateDisplay);
+        // 4. Demo data for development/preview
+        loadNodes({
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-157.8583, 21.3069] },
+                    "properties": {
+                        "id": "!local01", "name": "Honolulu Gateway",
+                        "network": "meshtastic", "is_online": true, "is_local": true,
+                        "is_gateway": true, "via_mqtt": false,
+                        "snr": 12.5, "battery": 85, "last_seen": "now",
+                        "hardware": "Heltec V3", "role": "ROUTER"
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-157.7950, 21.2770] },
+                    "properties": {
+                        "id": "!node02", "name": "Diamond Head",
+                        "network": "meshtastic", "is_online": true, "is_local": false,
+                        "is_gateway": false, "via_mqtt": false,
+                        "snr": 8.0, "battery": 72, "last_seen": "2m ago",
+                        "hardware": "T-Beam", "role": "CLIENT"
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-157.9300, 21.3500] },
+                    "properties": {
+                        "id": "!node03", "name": "Pearl City Relay",
+                        "network": "meshtastic", "is_online": true, "is_local": false,
+                        "is_gateway": false, "via_mqtt": true,
+                        "snr": 5.5, "battery": 100, "last_seen": "1m ago",
+                        "hardware": "RAK4631", "role": "ROUTER_CLIENT"
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-156.4680, 20.7984] },
+                    "properties": {
+                        "id": "!maui01", "name": "Maui Repeater",
+                        "network": "meshtastic", "is_online": true, "is_local": false,
+                        "is_gateway": true, "via_mqtt": false,
+                        "snr": 6.0, "battery": 91, "last_seen": "5m ago",
+                        "hardware": "Meshtoad", "role": "ROUTER"
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-155.5000, 19.7297] },
+                    "properties": {
+                        "id": "rns_bigisland", "name": "Big Island RNS",
+                        "network": "rns", "is_online": true, "is_local": false,
+                        "is_gateway": false, "via_mqtt": false,
+                        "snr": null, "battery": null, "last_seen": "1m ago",
+                        "hardware": null, "role": null
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "geometry": { "type": "Point", "coordinates": [-159.3711, 22.0964] },
+                    "properties": {
+                        "id": "!kauai01", "name": "Kauai Node",
+                        "network": "meshtastic", "is_online": false, "is_local": false,
+                        "is_gateway": false, "via_mqtt": false,
+                        "snr": -2.5, "battery": 15, "last_seen": "3h ago",
+                        "hardware": "Heltec V3", "role": "CLIENT"
+                    }
+                }
+            ]
+        });
+    }
 
-        // Initial load
-        refreshNodes();
+    // ============================================
+    // Cache Management
+    // ============================================
 
-        // Auto-refresh every 30 seconds
+    async function updateCacheStatus() {
+        if (!swRegistration || !navigator.serviceWorker.controller) {
+            setTimeout(updateCacheStatus, 1000);
+            return;
+        }
+        try {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = (event) => {
+                if (!event.data.error) {
+                    document.getElementById('cache-count').textContent =
+                        `${event.data.tileCount} tiles`;
+                }
+            };
+            navigator.serviceWorker.controller.postMessage(
+                { action: 'getCacheStats' }, [channel.port2]
+            );
+        } catch (e) { /* ignore */ }
+    }
+
+    async function downloadCurrentArea() {
+        if (!swRegistration || !navigator.serviceWorker.controller) return;
+
+        const bounds = map.getBounds();
+        const zoom = map.getZoom();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (event) => {
+            if (!event.data.error) {
+                updateCacheStatus();
+            }
+        };
+        navigator.serviceWorker.controller.postMessage({
+            action: 'downloadTiles',
+            data: {
+                bounds: {
+                    north: bounds.getNorth(), south: bounds.getSouth(),
+                    east: bounds.getEast(), west: bounds.getWest()
+                },
+                minZoom: Math.max(1, zoom - 2),
+                maxZoom: Math.min(18, zoom + 2)
+            }
+        }, [channel.port2]);
+    }
+
+    // ============================================
+    // Filter Event Listeners
+    // ============================================
+    ['filter-meshtastic', 'filter-rns', 'filter-aredn', 'filter-online-only',
+     'filter-coverage', 'filter-links'].forEach(id => {
+        document.getElementById(id).addEventListener('change', () => {
+            // Reset markers to force rebuild with new settings
+            if (id === 'filter-coverage') {
+                // Clear all coverage circles and rebuild
+                coverageLayer.clearLayers();
+                state.markers.forEach(entry => { entry.coverageCircle = null; });
+            }
+            updateDisplay();
+        });
+    });
+
+    // ============================================
+    // Initialization
+    // ============================================
+    refreshNodes();
+
+    // Auto-refresh every 30 seconds (only if no embedded data pushing updates)
+    if (!window.meshforgeData) {
         setInterval(refreshNodes, 30000);
+    }
+
+    // Periodic cache status update
+    setInterval(updateCacheStatus, 60000);
     </script>
 </body>
 </html>

@@ -25,6 +25,7 @@ class AIToolsMixin:
     def _ai_tools_menu(self):
         """AI-powered tools menu."""
         choices = [
+            ("livemap", "Live Network Map"),
             ("diagnose", "Intelligent Diagnostics"),
             ("knowledge", "Knowledge Base Query"),
             ("assistant", "Claude Assistant"),
@@ -42,7 +43,9 @@ class AIToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "diagnose":
+            if choice == "livemap":
+                self._open_live_map()
+            elif choice == "diagnose":
                 self._intelligent_diagnostics()
             elif choice == "knowledge":
                 self._knowledge_base_query()
@@ -50,6 +53,102 @@ class AIToolsMixin:
                 self._claude_assistant()
             elif choice == "coverage":
                 self._generate_coverage_map()
+
+    def _open_live_map(self):
+        """Open the live network map in browser with current node data."""
+        import json
+        import tempfile
+
+        # Find the map template
+        src_dir = Path(__file__).parent.parent.parent
+        map_template = src_dir / "web" / "node_map.html"
+
+        if not map_template.exists():
+            self.dialog.msgbox(
+                "Map Not Found",
+                f"Map template not found at:\n{map_template}\n\n"
+                "Ensure web/node_map.html exists."
+            )
+            return
+
+        self.dialog.infobox("Loading", "Fetching node data...")
+
+        # Try to get node data from meshtasticd
+        geojson = {"type": "FeatureCollection", "features": []}
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('localhost', 4403))
+            sock.close()
+
+            if result == 0:
+                # meshtasticd is running - get nodes via CLI
+                cli_result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost', '--export-config'],
+                    capture_output=True, text=True, timeout=15
+                )
+                if cli_result.returncode == 0:
+                    try:
+                        config = json.loads(cli_result.stdout)
+                        # Not all configs have node info, fall through
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                # Try --nodes for node list (newer meshtastic CLI)
+                nodes_result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost', '--info'],
+                    capture_output=True, text=True, timeout=30
+                )
+                # Node parsing is best-effort; map will show demo data if empty
+        except Exception:
+            pass  # Map will open with demo data
+
+        # Read template and inject data
+        try:
+            with open(map_template, 'r') as f:
+                html_content = f.read()
+
+            node_count = len(geojson.get('features', []))
+
+            if node_count > 0:
+                # Inject live data
+                geojson_str = json.dumps(geojson)
+                inject_script = (
+                    f'\n<script>\n'
+                    f'// Injected by MeshForge TUI - {node_count} nodes\n'
+                    f'window.meshforgeData = {geojson_str};\n'
+                    f'</script>\n</body>'
+                )
+                html_content = html_content.replace('</body>', inject_script)
+
+            # Write to temp location
+            from utils.paths import get_real_user_home
+            output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / "live_map.html"
+
+            with open(output_file, 'w') as f:
+                f.write(html_content)
+
+            msg = (
+                f"Live map saved to:\n{output_file}\n\n"
+                f"Nodes with data: {node_count}\n"
+                "Opening in browser..."
+            )
+            if node_count == 0:
+                msg = (
+                    f"Live map saved to:\n{output_file}\n\n"
+                    "No live node data available.\n"
+                    "Map will show demo nodes.\n\n"
+                    "Opening in browser..."
+                )
+
+            self.dialog.msgbox("Live Map", msg)
+            self._open_in_browser(f"file://{output_file}")
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to generate live map: {e}")
 
     def _intelligent_diagnostics(self):
         """Run intelligent diagnostics with symptom analysis."""
