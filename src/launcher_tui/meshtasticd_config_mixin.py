@@ -26,6 +26,7 @@ class MeshtasticdConfigMixin:
         """Meshtasticd configuration menu."""
         while True:
             choices = [
+                ("web", "Web Client (Full Config)"),
                 ("status", "Service Status"),
                 ("owner", "Set Owner/Node Name"),
                 ("presets", "Radio Presets (LoRa)"),
@@ -46,7 +47,9 @@ class MeshtasticdConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
+            if choice == "web":
+                self._show_web_client_info()
+            elif choice == "status":
                 self._meshtasticd_status()
             elif choice == "owner":
                 self._set_owner_name()
@@ -62,6 +65,36 @@ class MeshtasticdConfigMixin:
                 self._edit_config_menu()
             elif choice == "restart":
                 self._restart_meshtasticd()
+
+    def _show_web_client_info(self):
+        """Show meshtasticd web client URL for full radio configuration."""
+        import socket
+        try:
+            local_ip = socket.gethostbyname(socket.gethostname())
+            if local_ip.startswith('127.'):
+                # Fallback: get IP from interface
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+        except Exception:
+            local_ip = "YOUR_PI_IP"
+
+        web_url = f"https://{local_ip}:9443"
+
+        self.dialog.msgbox(
+            "Meshtastic Web Client",
+            f"Full radio configuration via browser:\n\n"
+            f"  URL: {web_url}\n\n"
+            f"Set these to join your mesh network:\n"
+            f"  Config → LoRa → Region  (US, EU_868, etc.)\n"
+            f"  Config → LoRa → Preset  (LONG_FAST, etc.)\n"
+            f"  Config → Channels       (PSK, name)\n\n"
+            f"The web client gives full access to all\n"
+            f"meshtasticd settings, maps, and messaging.\n\n"
+            f"Note: Accept the self-signed certificate\n"
+            f"warning in your browser."
+        )
 
     def _meshtasticd_status(self):
         """Show meshtasticd service status."""
@@ -486,15 +519,14 @@ Press Cancel to keep current values."""
             return
 
         choices = [(str(cfg), cfg.name) for cfg in sorted(configs)]
-        choices.append(("back", "Back"))
 
         choice = self.dialog.menu(
             "Active Configs",
-            "Select config to edit:",
+            "Select config to edit (Cancel to go back):",
             choices
         )
 
-        if choice and choice != "back":
+        if choice:
             self._edit_file(choice)
 
     def _edit_available_d(self):
@@ -510,15 +542,14 @@ Press Cancel to keep current values."""
             return
 
         choices = [(str(cfg), cfg.name) for cfg in sorted(configs)]
-        choices.append(("back", "Back"))
 
         choice = self.dialog.menu(
             "Hardware Templates",
-            "Select template to edit:",
+            "Select template to view (Cancel to go back):",
             choices
         )
 
-        if choice and choice != "back":
+        if choice:
             self._edit_file(choice)
 
     def _restart_meshtasticd(self):

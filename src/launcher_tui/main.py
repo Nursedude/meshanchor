@@ -1892,12 +1892,27 @@ Made with aloha for the mesh community
             # Get destination
             dest = self.dialog.inputbox(
                 "Send Message",
-                "Destination (node ID or leave empty for broadcast):",
+                "Destination node ID (e.g. !abc12345)\n"
+                "Leave empty for broadcast to channel:",
                 ""
             )
 
             if dest is None:
                 return
+
+            # Validate destination format
+            if dest:
+                dest = dest.strip()
+                if not dest.startswith('!'):
+                    dest = '!' + dest
+                # Must be ! followed by hex chars
+                hex_part = dest[1:]
+                if not hex_part or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                    self.dialog.msgbox("Error",
+                        f"Invalid node ID: {dest}\n\n"
+                        "Format: !abc12345 (hex characters)\n"
+                        "Leave empty for broadcast.")
+                    return
 
             # Get message content
             content = self.dialog.inputbox(

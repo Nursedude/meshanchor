@@ -283,8 +283,16 @@ def send_message(
             # RNS messages go through gateway only
             try:
                 from commands import gateway
+                # Validate destination is valid hex before attempting conversion
+                if destination:
+                    clean_dest = destination.lstrip('!')
+                    if not all(c in '0123456789abcdefABCDEF' for c in clean_dest):
+                        return CommandResult.fail(
+                            f"Invalid RNS destination: {destination}\n"
+                            "Must be a hex hash (e.g. a1b2c3d4e5f6...)"
+                        )
                 for chunk in chunks:
-                    dest_bytes = bytes.fromhex(destination) if destination else None
+                    dest_bytes = bytes.fromhex(destination.lstrip('!')) if destination else None
                     result = gateway.send_to_rns(chunk, dest_bytes)
                     if not result.success:
                         send_error = result.message
