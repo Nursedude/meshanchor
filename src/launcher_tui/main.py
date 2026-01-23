@@ -142,6 +142,9 @@ class MeshForgeLauncher(
         # Check for service misconfiguration (SPI HAT with USB config)
         self._check_service_misconfig()
 
+        # Auto-start map server if configured
+        self._maybe_auto_start_map()
+
         self._run_main_menu()
 
     def _check_service_misconfig(self):
