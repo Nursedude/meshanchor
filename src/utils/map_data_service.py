@@ -42,7 +42,7 @@ class MapDataCollector:
     4. Last-known cache — persisted state from previous runs
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
             self._cache_dir = cache_dir
         else:
@@ -56,6 +56,16 @@ class MapDataCollector:
         self._cache_file = self._cache_dir / "map_nodes.geojson"
         self._last_collect: Optional[float] = None
         self._cached_geojson: Optional[Dict] = None
+
+        # Node history database for position/state tracking over time
+        self._history = None
+        if enable_history:
+            try:
+                from utils.node_history import NodeHistoryDB
+                db_path = self._cache_dir / "node_history.db"
+                self._history = NodeHistoryDB(db_path=db_path)
+            except Exception as e:
+                logger.debug(f"Node history disabled: {e}")
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -119,6 +129,13 @@ class MapDataCollector:
         self._cached_geojson = geojson
         self._last_collect = time.time()
         self._save_cache(geojson)
+
+        # Record to history database
+        if self._history and geojson["features"]:
+            try:
+                self._history.record_observations(geojson["features"])
+            except Exception as e:
+                logger.debug(f"History recording error: {e}")
 
         return geojson
 
@@ -550,6 +567,11 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_map()
         elif self.path == '/api/status':
             self._serve_status()
+        elif self.path == '/api/nodes/history':
+            self._serve_history_stats()
+        elif self.path.startswith('/api/nodes/trajectory/'):
+            node_id = self.path.split('/api/nodes/trajectory/', 1)[1].rstrip('/')
+            self._serve_trajectory(node_id)
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -597,10 +619,56 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "time": datetime.now().isoformat(),
             "collector": self.collector is not None,
         }
+
+        # Include history stats if available
+        if self.collector and self.collector._history:
+            try:
+                status["history"] = self.collector._history.get_stats()
+            except Exception:
+                status["history"] = None
+
         data = json.dumps(status).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_history_stats(self):
+        """Serve node history summary and unique nodes list."""
+        if not self.collector or not self.collector._history:
+            self._serve_json({"error": "history not available", "nodes": []})
+            return
+
+        history = self.collector._history
+        result = {
+            "stats": history.get_stats(),
+            "nodes": history.get_unique_nodes(hours=24),
+        }
+        self._serve_json(result)
+
+    def _serve_trajectory(self, node_id: str):
+        """Serve trajectory GeoJSON for a specific node."""
+        if not self.collector or not self.collector._history:
+            self._serve_json({"error": "history not available"})
+            return
+
+        # URL decode the node_id (! becomes %21 in URLs)
+        from urllib.parse import unquote
+        node_id = unquote(node_id)
+
+        history = self.collector._history
+        geojson = history.get_trajectory_geojson(node_id, hours=24)
+        self._serve_json(geojson)
+
+    def _serve_json(self, obj: Any):
+        """Helper to serve a JSON response."""
+        data = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
 
@@ -615,8 +683,9 @@ class MapServer:
     Serves:
     - GET /              → node_map.html (the live map)
     - GET /api/nodes/geojson  → live node GeoJSON from all sources
-    - GET /api/status    → server health check
-    - GET /sw-tiles.js   → service worker for tile caching
+    - GET /api/nodes/history  → node history stats + unique nodes (24h)
+    - GET /api/nodes/trajectory/<id> → trajectory GeoJSON for a node
+    - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
 
     Usage:
