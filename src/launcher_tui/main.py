@@ -88,6 +88,16 @@ class MeshForgeLauncher(
         self.dialog = DialogBackend()
         self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
+        self._setup_status_bar()
+
+    def _setup_status_bar(self) -> None:
+        """Initialize and attach the status bar to the dialog backend."""
+        try:
+            from status_bar import StatusBar
+            self._status_bar = StatusBar(version=__version__)
+            self.dialog.set_status_bar(self._status_bar)
+        except Exception:
+            self._status_bar = None
 
     def _detect_environment(self) -> dict:
         """Detect the current environment."""
