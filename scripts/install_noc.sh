@@ -1254,6 +1254,34 @@ if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────
+# SPI Reboot Gate: If SPI was just enabled, stop here cleanly
+# ─────────────────────────────────────────────────────────────────
+if [[ "$DAEMON_TYPE" == "spi-reboot-needed" ]]; then
+    echo ""
+    echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  NEXT STEPS                                               ║${NC}"
+    echo -e "${YELLOW}╠═══════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  1. Reboot now:     sudo reboot                           ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  2. After reboot, re-run installer to complete SPI setup: ║${NC}"
+    echo -e "${YELLOW}║     sudo bash /opt/meshforge/scripts/install_noc.sh       ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  The second run will:                                     ║${NC}"
+    echo -e "${YELLOW}║    • Detect SPI bus is active                             ║${NC}"
+    echo -e "${YELLOW}║    • Present HAT selection menu                           ║${NC}"
+    echo -e "${YELLOW}║    • Start meshtasticd                                    ║${NC}"
+    echo -e "${YELLOW}║    • Verify everything works                              ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}Software installed: meshtasticd, RNS, MeshForge${NC}"
+    echo -e "${CYAN}SPI enabled in boot config - reboot activates the bus${NC}"
+    echo ""
+    exit 0
+fi
+
+# ─────────────────────────────────────────────────────────────────
 # Post-Install Verification (CRITICAL - Issue #23)
 # See: .claude/foundations/install_reliability_triage.md
 # ─────────────────────────────────────────────────────────────────
@@ -1287,8 +1315,8 @@ else
     echo -e "${YELLOW}  Skipping verification${NC}"
 fi
 
-# Offer to start services
-if [[ -c /dev/tty ]]; then
+# Offer to start services (only if services can actually run)
+if [[ "$DAEMON_TYPE" != "spi-pending" && "$DAEMON_TYPE" != "placeholder" ]] && [[ -c /dev/tty ]]; then
     echo ""
     echo -e "${CYAN}Would you like to start MeshForge NOC now? [Y/n]${NC}"
     read -r response < /dev/tty
