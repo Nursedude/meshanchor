@@ -3,7 +3,7 @@
 MeshForge - GTK4 GUI Entry Point
 
 This is the graphical interface for systems with a display.
-For headless/SSH access, use main_tui.py instead.
+For headless/SSH access, use launcher_tui/main.py instead.
 
 Usage:
     sudo python3 src/main_gtk.py           # Run in foreground
@@ -124,16 +124,13 @@ def check_display():
         print("This GTK4 interface requires a display.")
         print()
         print("Options:")
-        print("  1. Use the TUI (Text UI) for SSH/headless access:")
-        print("     sudo python3 src/main_tui.py")
+        print("  1. Use the TUI for SSH/headless access:")
+        print("     sudo python3 src/launcher_tui/main.py")
         print()
-        print("  2. Use the original Rich terminal UI:")
-        print("     sudo python3 src/main.py")
-        print()
-        print("  3. Connect via Raspberry Pi Connect or VNC")
+        print("  2. Connect via Raspberry Pi Connect or VNC")
         print("     for remote desktop access, then run this again.")
         print()
-        print("  4. Set DISPLAY environment variable if using X11 forwarding:")
+        print("  3. Set DISPLAY environment variable if using X11 forwarding:")
         print("     export DISPLAY=:0")
         print("     sudo -E python3 src/main_gtk.py")
         print("=" * 60)
@@ -162,8 +159,8 @@ def check_gtk():
         print("  sudo apt install gir1.2-gtk-4.0 libadwaita-1-0")
         print("  sudo apt install gir1.2-adw-1")
         print()
-        print("Or use the TUI (Text UI) instead:")
-        print("  sudo python3 src/main_tui.py")
+        print("Or use the TUI instead:")
+        print("  sudo python3 src/launcher_tui/main.py")
         print("=" * 60)
         sys.exit(1)
 

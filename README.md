@@ -58,7 +58,7 @@ flowchart TB
 | **AI Diagnostics** | ✅ Working | Offline troubleshooting with knowledge base |
 | **Coverage Maps** | ✅ Working | Generate SNR-based link quality maps |
 | **RF Calculator** | ✅ Working | Link budgets, Fresnel zones, path loss |
-| **Multi-Interface** | ✅ Working | GTK, Rich CLI, Web, Standalone modes |
+| **Multi-Interface** | ✅ Working | GTK Desktop + Terminal UI (raspi-config style) |
 | **Reticulum Bridge** | 🔨 In Progress | RNS transport layer implemented, testing |
 | **Gateway Bridge** | 🔨 In Progress | Meshtastic↔RNS routing, needs validation |
 | **Health Monitoring** | 🔨 In Progress | Service orchestrator, recently unified |
@@ -81,10 +81,10 @@ Core NOC functionality for Meshtastic and Reticulum networks.
 [####################] AI Diagnostics Engine      ← Working offline
 [####################] RF Tools & Calculators     ← Solid
 [##################  ] Meshtastic Integration     ← SPI/USB working, config WIP
-[##############      ] Rich CLI Polish            ← Unified, needs testing
+[##############      ] Terminal UI Polish          ← Unified to 2 interfaces
 [############        ] RNS/Reticulum Bridge       ← Code exists, needs validation
 [##########          ] Gateway Message Routing    ← Architecture done, untested
-[########            ] GTK4 Desktop Polish        ← Functional, needs UX work
+[########            ] GTK4 Desktop Polish        ← Functional, maintenance mode
 ```
 
 **Current Focus**: Reliable installation that works first try. Everything else follows.
@@ -144,11 +144,10 @@ cd meshforge
 # Option 1: Full NOC stack (recommended)
 sudo bash scripts/install_noc.sh
 
-# Option 2: Minimal install
-pip3 install rich textual flask --break-system-packages
-sudo python3 src/launcher.py
+# Option 2: Launch directly (TUI works everywhere)
+sudo python3 src/launcher_tui/main.py
 
-# Option 3: Zero-dependency standalone
+# Option 3: Zero-dependency RF tools
 python3 src/standalone.py
 ```
 
@@ -174,10 +173,8 @@ MeshForge owns the complete stack from radio hardware to user interface:
 ```mermaid
 flowchart TB
     subgraph UI[User Interfaces]
-        GTK[GTK Desktop]
-        TUI[Rich TUI]
-        WEB[Web UI]
-        SA[Standalone]
+        GTK[GTK4 Desktop]
+        TUI[Terminal UI<br/>raspi-config style]
     end
 
     subgraph SERVICES[Core Services]
@@ -218,11 +215,10 @@ flowchart TB
 
 | Interface | Command | Use Case |
 |-----------|---------|----------|
-| **Auto-detect** | `sudo python3 src/launcher.py` | Recommended |
-| **Rich TUI** | `sudo python3 src/launcher_tui/main.py` | SSH, headless |
-| **Web UI** | `sudo python3 src/main_web.py` | Browser (port 8880) |
-| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical |
-| **Standalone** | `python3 src/standalone.py` | Zero dependencies |
+| **Auto-detect** | `sudo python3 src/launcher.py` | Detects environment, recommends best |
+| **Terminal UI** | `sudo python3 src/launcher_tui/main.py` | SSH, headless, serial - works everywhere |
+| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical with maps and panels |
+| **Standalone** | `python3 src/standalone.py` | Zero-dep RF tools and diagnostics |
 
 ## AI Diagnostics
 
