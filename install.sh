@@ -218,17 +218,17 @@ fi
 EOF
 chmod +x /usr/local/bin/meshforge-cli
 
-# Web UI access
-cat > /usr/local/bin/meshforge-web << 'EOF'
+# TUI access (raspi-config style)
+cat > /usr/local/bin/meshforge-tui << 'EOF'
 #!/bin/bash
 cd /opt/meshforge
 if [[ -f .no-venv ]]; then
-    exec sudo python3 src/main_web.py "$@"
+    exec sudo python3 src/launcher_tui/main.py "$@"
 else
-    exec sudo /opt/meshforge/venv/bin/python src/main_web.py "$@"
+    exec sudo /opt/meshforge/venv/bin/python src/launcher_tui/main.py "$@"
 fi
 EOF
-chmod +x /usr/local/bin/meshforge-web
+chmod +x /usr/local/bin/meshforge-tui
 
 # Legacy aliases for backwards compatibility
 ln -sf /usr/local/bin/meshforge /usr/local/bin/meshtasticd-installer 2>/dev/null || true

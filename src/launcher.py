@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Meshtasticd Manager - Launcher Wizard
+MeshForge Launcher
 
-This wizard helps users select the appropriate interface for their setup.
-It detects the environment and recommends the best option.
+Detects environment and launches the appropriate interface:
+  - GTK4 Desktop (if display available)
+  - Launcher TUI (raspi-config style, works everywhere)
+
 User preferences are saved for future launches.
 """
 
 import os
 import sys
-import shutil
 import subprocess
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ from pathlib import Path
 try:
     from __version__ import __version__
 except ImportError:
-    __version__ = "0.4.6-beta"
+    __version__ = "0.4.7-beta"
 
 # Import centralized path utility for sudo compatibility
 try:
@@ -47,7 +48,7 @@ except ImportError:
     print_health_summary = None
 
 # Config file location
-CONFIG_DIR = get_real_user_home() / '.config' / 'meshtasticd-installer'
+CONFIG_DIR = get_real_user_home() / '.config' / 'meshforge'
 CONFIG_FILE = CONFIG_DIR / 'preferences.json'
 
 
@@ -111,7 +112,6 @@ def run_setup_wizard():
             wizard.run_interactive_setup()
             wizard.mark_setup_complete()
         except ImportError:
-            # Fallback: try to import from different location
             try:
                 import importlib.util
                 spec = importlib.util.spec_from_file_location(
@@ -126,13 +126,11 @@ def run_setup_wizard():
             except Exception as e:
                 print(f"{Colors.YELLOW}Setup wizard not available: {e}{Colors.NC}")
                 print("Continuing to main launcher...\n")
-                # Mark as complete to avoid asking again
                 marker = get_real_user_home() / ".meshforge" / ".setup_complete"
                 marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.write_text("skipped")
     else:
         print(f"\n{Colors.DIM}Skipping setup. Run 'meshforge --setup' anytime.{Colors.NC}\n")
-        # Mark as complete
         marker = get_real_user_home() / ".meshforge" / ".setup_complete"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("skipped")
@@ -141,10 +139,8 @@ def run_setup_wizard():
 def print_banner():
     """Print the welcome banner"""
     print(f"""{Colors.CYAN}
-    MeshForge - Meshtasticd Manager v{__version__}
-    For Raspberry Pi OS & Linux
-
-    Choose your interface to get started
+    MeshForge NOC v{__version__}
+    Network Operations Center for Mesh Networks
 {Colors.NC}""")
 
 
@@ -175,7 +171,6 @@ def detect_environment():
         'display_type': None,
         'is_ssh': False,
         'has_gtk': False,
-        'has_textual': False,
         'is_root': os.geteuid() == 0,
         'terminal': os.environ.get('TERM', 'unknown'),
     }
@@ -201,39 +196,25 @@ def detect_environment():
     except (ImportError, ValueError):
         pass
 
-    # Check for Textual
-    try:
-        import textual
-        env['has_textual'] = True
-    except ImportError:
-        pass
-
     return env
 
 
 def print_environment_info(env):
     """Print detected environment information"""
-    print(f"\n{Colors.DIM}Environment Detection:{Colors.NC}")
+    print(f"{Colors.DIM}Environment:{Colors.NC}")
 
     if env['has_display']:
-        print(f"  {Colors.GREEN}+{Colors.NC} Display detected ({env['display_type']})")
+        print(f"  {Colors.GREEN}+{Colors.NC} Display: {env['display_type']}")
     else:
-        print(f"  {Colors.YELLOW}○{Colors.NC} No display detected")
+        print(f"  {Colors.YELLOW}○{Colors.NC} No display")
 
     if env['is_ssh']:
-        print(f"  {Colors.YELLOW}○{Colors.NC} Running via SSH")
-    else:
-        print(f"  {Colors.GREEN}+{Colors.NC} Local session")
+        print(f"  {Colors.YELLOW}○{Colors.NC} SSH session")
 
     if env['has_gtk']:
-        print(f"  {Colors.GREEN}+{Colors.NC} GTK4/libadwaita available")
+        print(f"  {Colors.GREEN}+{Colors.NC} GTK4/libadwaita")
     else:
-        print(f"  {Colors.YELLOW}○{Colors.NC} GTK4 not available")
-
-    if env['has_textual']:
-        print(f"  {Colors.GREEN}+{Colors.NC} Textual TUI available")
-    else:
-        print(f"  {Colors.YELLOW}○{Colors.NC} Textual not installed")
+        print(f"  {Colors.DIM}○{Colors.NC} GTK4 not available")
 
     print()
 
@@ -242,149 +223,76 @@ def get_recommendation(env):
     """Get the recommended interface based on environment"""
     if env['has_display'] and env['has_gtk'] and not env['is_ssh']:
         return '1'  # GTK4 GUI
-    elif env['has_textual']:
-        return '2'  # Textual TUI
-    elif env['is_ssh']:
-        return '3'  # Web Interface (good for SSH)
-    else:
-        return '4'  # Rich CLI
+    return '2'  # TUI (raspi-config style)
 
 
-def print_menu(env, recommended, saved_pref=None):
+def print_menu(env, recommended):
     """Print the interface selection menu"""
     print(f"{Colors.BOLD}=== INTERFACES ============================================{Colors.NC}\n")
-
-    # Show saved preference if any
-    if saved_pref:
-        pref_names = {'1': 'GTK4 GUI', '2': 'Textual TUI', '3': 'Web Interface', '4': 'Rich CLI'}
-        print(f"  {Colors.DIM}Saved preference: {pref_names.get(saved_pref, saved_pref)}{Colors.NC}\n")
 
     # Option 1: GTK4 GUI
     gtk_status = ""
     if not env['has_display']:
         gtk_status = f" {Colors.DIM}(no display){Colors.NC}"
     elif not env['has_gtk']:
-        gtk_status = f" {Colors.YELLOW}(requires installation){Colors.NC}"
+        gtk_status = f" {Colors.YELLOW}(not installed){Colors.NC}"
     elif env['is_ssh']:
         gtk_status = f" {Colors.YELLOW}(may not work over SSH){Colors.NC}"
 
-    rec1 = f" {Colors.GREEN}← Recommended{Colors.NC}" if recommended == '1' else ""
-    saved1 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '1' else ""
-    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.CYAN}GTK4 Graphical Interface{Colors.NC}{gtk_status}{rec1}{saved1}")
-    print(f"     {Colors.DIM}Modern desktop UI with libadwaita design{Colors.NC}")
+    rec1 = f" {Colors.GREEN}<- Recommended{Colors.NC}" if recommended == '1' else ""
+    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.CYAN}GTK4 Desktop{Colors.NC}{gtk_status}{rec1}")
+    print(f"     {Colors.DIM}Full graphical interface with maps, charts, panels{Colors.NC}")
     print()
 
-    # Option 2: Rich CLI (MOST COMPLETE - moved up)
-    rec2 = f" {Colors.GREEN}<- RECOMMENDED{Colors.NC}" if recommended == '2' or recommended == '4' else ""
-    saved2 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '2' or saved_pref == '4' else ""
-    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.GREEN}Rich CLI (Full Menu){Colors.NC}{rec2}{saved2}")
-    print(f"     {Colors.DIM}Complete feature set - Install, Configure, RF Tools, Diagnostics{Colors.NC}")
+    # Option 2: TUI (raspi-config style)
+    rec2 = f" {Colors.GREEN}<- Recommended{Colors.NC}" if recommended == '2' else ""
+    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.GREEN}Terminal UI{Colors.NC} (raspi-config style){rec2}")
+    print(f"     {Colors.DIM}Works everywhere: SSH, serial, local. Full feature set.{Colors.NC}")
     print()
 
-    # Option 3: Web Monitor (Lightweight NOC Dashboard)
-    rec3 = ""
-    saved3 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '3' else ""
-    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.CYAN}Web Monitor{Colors.NC}{rec3}{saved3}")
-    print(f"     {Colors.DIM}NOC dashboard at http://localhost:5000 (status only){Colors.NC}")
-    print()
-
-    # Option 4: Textual TUI (DEPRECATED - use Rich CLI instead)
-    saved4 = f" {Colors.CYAN}[saved]{Colors.NC}" if saved_pref == '4' else ""
-    print(f"  {Colors.BOLD}4{Colors.NC}. {Colors.DIM}Textual TUI{Colors.NC} {Colors.RED}[DEPRECATED]{Colors.NC}{saved4}")
-    print(f"     {Colors.DIM}Use option 2 (Rich CLI) instead - TUI has rendering issues{Colors.NC}")
-    print()
-
-    # Tools section
+    # Quick tools
     print(f"{Colors.BOLD}=== QUICK TOOLS ==========================================={Colors.NC}\n")
 
-    # Option 5: Diagnostics
-    print(f"  {Colors.BOLD}5{Colors.NC}. {Colors.YELLOW}Run Diagnostics{Colors.NC}")
+    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.YELLOW}Run Diagnostics{Colors.NC}")
     print(f"     {Colors.DIM}Check system health, services, and connectivity{Colors.NC}")
     print()
 
-    # Option 6: Gateway Bridge
-    print(f"  {Colors.BOLD}6{Colors.NC}. {Colors.YELLOW}Start Gateway Bridge{Colors.NC}")
-    print(f"     {Colors.DIM}RNS ↔ Meshtastic bridge (headless mode){Colors.NC}")
+    print(f"  {Colors.BOLD}4{Colors.NC}. {Colors.YELLOW}Start Gateway Bridge{Colors.NC}")
+    print(f"     {Colors.DIM}RNS <-> Meshtastic bridge (headless mode){Colors.NC}")
     print()
 
-    # Option 7: Monitor Mode
-    print(f"  {Colors.BOLD}7{Colors.NC}. {Colors.YELLOW}Monitor Mode{Colors.NC}")
+    print(f"  {Colors.BOLD}5{Colors.NC}. {Colors.YELLOW}Monitor Mode{Colors.NC}")
     print(f"     {Colors.DIM}Real-time node and message monitoring{Colors.NC}")
     print()
 
-    # Options section
+    # Options
     print(f"{Colors.BOLD}=== OPTIONS ==============================================={Colors.NC}\n")
 
-    # Install options
-    print(f"  {Colors.BOLD}i{Colors.NC}. Install missing dependencies")
-
-    # Setup wizard
+    if not env['has_gtk']:
+        print(f"  {Colors.BOLD}i{Colors.NC}. Install GTK4 dependencies")
     print(f"  {Colors.BOLD}w{Colors.NC}. Run setup wizard")
-
-    # Preference options
-    if saved_pref:
-        print(f"  {Colors.BOLD}c{Colors.NC}. Clear saved preference")
-    print(f"  {Colors.BOLD}s{Colors.NC}. Save preference after selecting")
-
     print(f"  {Colors.BOLD}q{Colors.NC}. Quit")
     print()
 
 
-def install_dependencies():
-    """Interactive dependency installation"""
-    print(f"\n{Colors.BOLD}Install Dependencies:{Colors.NC}\n")
-
-    print(f"  {Colors.BOLD}1{Colors.NC}. Install GTK4/libadwaita (for graphical interface)")
-    print(f"     {Colors.DIM}sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1{Colors.NC}")
-    print()
-
-    print(f"  {Colors.BOLD}2{Colors.NC}. Install Textual (for terminal UI)")
-    print(f"     {Colors.DIM}sudo pip install --break-system-packages --ignore-installed textual{Colors.NC}")
-    print()
-
-    print(f"  {Colors.BOLD}3{Colors.NC}. Install both")
-    print()
-
-    print(f"  {Colors.BOLD}0{Colors.NC}. Back")
-    print()
+def install_gtk():
+    """Install GTK4 dependencies"""
+    print(f"\n{Colors.CYAN}Installing GTK4 dependencies...{Colors.NC}")
+    print(f"{Colors.DIM}sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1{Colors.NC}\n")
 
     try:
-        choice = input(f"{Colors.CYAN}Select option [0]: {Colors.NC}").strip() or "0"
-    except (KeyboardInterrupt, EOFError):
-        print()
-        return
+        subprocess.run([
+            'sudo', 'apt', 'install', '-y',
+            'python3-gi', 'python3-gi-cairo',
+            'gir1.2-gtk-4.0', 'libadwaita-1-0', 'gir1.2-adw-1'
+        ], check=True, timeout=300)
+        print(f"{Colors.GREEN}GTK4 dependencies installed!{Colors.NC}")
+    except subprocess.CalledProcessError as e:
+        print(f"{Colors.RED}Failed to install GTK4 dependencies: {e}{Colors.NC}")
+    except subprocess.TimeoutExpired:
+        print(f"{Colors.RED}Installation timed out (5 min limit){Colors.NC}")
 
-    if choice == "0":
-        return
-
-    if choice in ["1", "3"]:
-        print(f"\n{Colors.CYAN}Installing GTK4 dependencies...{Colors.NC}")
-        try:
-            subprocess.run([
-                'sudo', 'apt', 'install', '-y',
-                'python3-gi', 'python3-gi-cairo',
-                'gir1.2-gtk-4.0', 'libadwaita-1-0', 'gir1.2-adw-1'
-            ], check=True, timeout=300)
-            print(f"{Colors.GREEN}GTK4 dependencies installed!{Colors.NC}")
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED}Failed to install GTK4 dependencies: {e}{Colors.NC}")
-        except subprocess.TimeoutExpired:
-            print(f"{Colors.RED}Installation timed out (5 min limit){Colors.NC}")
-
-    if choice in ["2", "3"]:
-        print(f"\n{Colors.CYAN}Installing Textual...{Colors.NC}")
-        try:
-            subprocess.run([
-                'sudo', 'pip', 'install', '--break-system-packages', '--ignore-installed', 'textual'
-            ], check=True, timeout=180)
-            print(f"{Colors.GREEN}Textual installed!{Colors.NC}")
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED}Failed to install Textual: {e}{Colors.NC}")
-        except subprocess.TimeoutExpired:
-            print(f"{Colors.RED}Installation timed out (3 min limit){Colors.NC}")
-
-    print(f"\n{Colors.GREEN}Installation complete! Returning to menu...{Colors.NC}")
-    input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
+    input(f"\n{Colors.DIM}Press Enter to continue...{Colors.NC}")
 
 
 def launch_interface(choice):
@@ -393,69 +301,42 @@ def launch_interface(choice):
 
     if choice == "1":
         # GTK4 GUI
-        print(f"\n{Colors.GREEN}Launching GTK4 Graphical Interface...{Colors.NC}\n")
+        print(f"\n{Colors.GREEN}Launching GTK4 Desktop...{Colors.NC}\n")
         os.execv(sys.executable, [sys.executable, str(src_dir / 'main_gtk.py')])
 
     elif choice == "2":
-        # Rich CLI (Full Menu) - most complete interface
-        print(f"\n{Colors.GREEN}Launching Rich CLI (Full Menu)...{Colors.NC}\n")
-        os.execv(sys.executable, [sys.executable, str(src_dir / 'main.py')])
+        # Launcher TUI (raspi-config style)
+        print(f"\n{Colors.GREEN}Launching Terminal UI...{Colors.NC}\n")
+        os.execv(sys.executable, [sys.executable, str(src_dir / 'launcher_tui' / 'main.py')])
 
     elif choice == "3":
-        # Web Monitor (Lightweight NOC Dashboard)
-        print(f"\n{Colors.GREEN}Launching Web Monitor...{Colors.NC}")
-        print(f"{Colors.CYAN}NOC Dashboard: http://localhost:5000{Colors.NC}")
-        print(f"{Colors.DIM}Build. Test. Deploy. Bridge. Monitor.{Colors.NC}\n")
-        os.execv(sys.executable, [sys.executable, str(src_dir / 'web_monitor.py')])
+        # Diagnostics
+        print(f"\n{Colors.GREEN}Running Diagnostics...{Colors.NC}\n")
+        subprocess.run([sys.executable, str(src_dir / 'cli' / 'diagnose.py')], timeout=600)
 
     elif choice == "4":
-        # Textual TUI (DEPRECATED)
-        print(f"\n{Colors.RED}╔════════════════════════════════════════════════════════════╗")
-        print(f"║  TUI IS DEPRECATED - Known rendering issues                 ║")
-        print(f"║  Use option 2 (Rich CLI) for full terminal experience       ║")
-        print(f"╚════════════════════════════════════════════════════════════╝{Colors.NC}\n")
-        try:
-            confirm = input(f"Launch anyway? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            confirm = 'n'
-        if confirm == 'y':
-            print(f"{Colors.YELLOW}Launching deprecated TUI...{Colors.NC}\n")
-            os.execv(sys.executable, [sys.executable, str(src_dir / 'main_tui.py')])
-        else:
-            print(f"{Colors.GREEN}Redirecting to Rich CLI...{Colors.NC}\n")
-            os.execv(sys.executable, [sys.executable, str(src_dir / 'main.py')])
-
-    elif choice == "5":
-        # Diagnostics - run as subprocess so we return to menu
-        print(f"\n{Colors.GREEN}Running Diagnostics...{Colors.NC}\n")
-        subprocess.run([sys.executable, str(src_dir / 'cli' / 'diagnose.py')], timeout=600)  # 10min max
-        return  # Return to menu loop
-
-    elif choice == "6":
-        # Gateway Bridge - run as subprocess
+        # Gateway Bridge
         print(f"\n{Colors.GREEN}Starting Gateway Bridge...{Colors.NC}")
-        print(f"{Colors.CYAN}RNS ↔ Meshtastic bridge running in headless mode{Colors.NC}")
         print(f"{Colors.DIM}Press Ctrl+C to stop{Colors.NC}\n")
         try:
             launch_gateway_bridge(src_dir)
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}Gateway stopped.{Colors.NC}")
-        return  # Return to menu loop
 
-    elif choice == "7":
-        # Monitor Mode - run as subprocess
+    elif choice == "5":
+        # Monitor Mode
         print(f"\n{Colors.GREEN}Starting Monitor Mode...{Colors.NC}\n")
         try:
-            subprocess.run([sys.executable, str(src_dir / 'monitor.py')])  # Interactive - user Ctrl+C to exit
+            subprocess.run([sys.executable, str(src_dir / 'monitor.py')], timeout=3600)
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}Monitor stopped.{Colors.NC}")
-        return  # Return to menu loop
+        except subprocess.TimeoutExpired:
+            print(f"\n{Colors.YELLOW}Monitor timed out after 1hr.{Colors.NC}")
 
 
 def launch_gateway_bridge(src_dir):
     """Launch the gateway bridge in headless mode"""
     try:
-        # Import and run the bridge
         sys.path.insert(0, str(src_dir))
         from gateway.rns_bridge import RNSMeshtasticBridge
         from gateway.config import GatewayConfig
@@ -481,14 +362,13 @@ def launch_gateway_bridge(src_dir):
             print(f"{Colors.GREEN}+ Gateway bridge running{Colors.NC}")
             print(f"{Colors.DIM}Stats: {bridge.get_routing_stats()}{Colors.NC}\n")
 
-            # Keep running until interrupted
             import time
             try:
                 while bridge.is_running:
                     time.sleep(5)
                     stats = bridge.get_routing_stats()
-                    print(f"\r{Colors.DIM}Messages: M→R:{stats.get('messages_mesh_to_rns', 0)} "
-                          f"R→M:{stats.get('messages_rns_to_mesh', 0)} "
+                    print(f"\r{Colors.DIM}M->R:{stats.get('messages_mesh_to_rns', 0)} "
+                          f"R->M:{stats.get('messages_rns_to_mesh', 0)} "
                           f"Bounced:{stats.get('bounced', 0)}{Colors.NC}", end='', flush=True)
             except KeyboardInterrupt:
                 print(f"\n\n{Colors.YELLOW}Stopping bridge...{Colors.NC}")
@@ -504,19 +384,12 @@ def launch_gateway_bridge(src_dir):
 
 
 def start_noc_services():
-    """
-    Start NOC managed services (meshtasticd, rnsd) if in local mode.
-
-    Returns:
-        bool: True if services ready, False if failed
-    """
+    """Start NOC managed services (meshtasticd, rnsd) if in local mode."""
     if not HAS_ORCHESTRATOR:
-        return True  # No orchestrator, skip service management
+        return True
 
-    # Check if NOC config exists
     noc_config_path = Path('/etc/meshforge/noc.yaml')
     if not noc_config_path.exists():
-        # No NOC config, running in legacy mode
         return True
 
     try:
@@ -524,38 +397,29 @@ def start_noc_services():
         with open(noc_config_path) as f:
             config = yaml.safe_load(f)
     except Exception:
-        return True  # Can't read config, proceed without orchestration
+        return True
 
     noc_mode = config.get('noc', {}).get('mode', 'client')
     if noc_mode != 'local':
-        return True  # Not managing services in client mode
+        return True
 
     print(f"{Colors.CYAN}Starting NOC services...{Colors.NC}")
 
     orch = ServiceOrchestrator()
     statuses = orch.get_all_status()
 
-    # Check what needs starting
-    services_to_start = []
     for name, status in statuses.items():
         if status.state == ServiceState.NOT_INSTALLED:
-            print(f"  {Colors.YELLOW}⚠ {name} not installed{Colors.NC}")
-        elif status.state in (ServiceState.STOPPED, ServiceState.FAILED):
-            services_to_start.append(name)
+            print(f"  {Colors.YELLOW}! {name} not installed{Colors.NC}")
         elif status.state == ServiceState.RUNNING:
-            print(f"  {Colors.GREEN}✓ {name} running{Colors.NC}")
+            print(f"  {Colors.GREEN}+ {name} running{Colors.NC}")
 
-    if not services_to_start:
-        return True
-
-    # Start services
     success = orch.startup()
 
     if success:
-        print(f"{Colors.GREEN}✓ NOC services ready{Colors.NC}")
+        print(f"{Colors.GREEN}+ NOC services ready{Colors.NC}")
     else:
-        print(f"{Colors.YELLOW}⚠ Some services failed to start{Colors.NC}")
-        print(f"  Run 'meshforge-noc --status' for details")
+        print(f"{Colors.YELLOW}! Some services failed to start{Colors.NC}")
 
     return success
 
@@ -568,12 +432,11 @@ def main():
         print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
         sys.exit(1)
 
-    # Start NOC services if in local mode (meshtasticd, rnsd)
-    # This ensures services are running before we try to connect
+    # Start NOC services if in local mode
     if '--no-services' not in sys.argv:
         start_noc_services()
 
-    # Check for first run - offer setup wizard
+    # Check for first run
     if '--setup' in sys.argv or check_first_run():
         run_setup_wizard()
 
@@ -581,58 +444,42 @@ def main():
     prefs = load_preferences()
     saved_interface = prefs.get('interface')
     auto_launch = prefs.get('auto_launch', False)
-    save_next = False
 
     # Auto-launch saved preference if set
-    if auto_launch and saved_interface in ['1', '2', '3', '4']:
+    if auto_launch and saved_interface in ['1', '2']:
         env = detect_environment()
-        # Verify dependencies are still available
         can_launch = True
         if saved_interface == '1' and not (env['has_display'] and env['has_gtk']):
-            can_launch = False
-        if saved_interface == '2' and not env['has_textual']:
             can_launch = False
 
         if can_launch:
             print(f"{Colors.GREEN}Auto-launching saved preference...{Colors.NC}")
-            print(f"{Colors.DIM}(Run with --wizard to change preference){Colors.NC}")
+            print(f"{Colors.DIM}(Run with --wizard to change){Colors.NC}")
             import time
             time.sleep(1)
             launch_interface(saved_interface)
         else:
-            print(f"{Colors.YELLOW}Saved interface not available, showing wizard...{Colors.NC}")
+            print(f"{Colors.YELLOW}Saved interface not available, showing menu...{Colors.NC}")
 
-    # Check for --wizard flag to force wizard
+    # Check for --wizard flag
     if '--wizard' in sys.argv:
         prefs['auto_launch'] = False
         save_preferences(prefs)
-        auto_launch = False
 
     while True:
-        # Clear screen (using subprocess for security)
-        import subprocess
-        subprocess.run(['clear'] if os.name == 'posix' else ['cls'], shell=False, check=False, timeout=5)
+        subprocess.run(['clear'] if os.name == 'posix' else ['cls'], check=False, timeout=5)
 
-        # Print banner and health summary
         print_banner()
         show_startup_health()
 
-        # Detect environment
         env = detect_environment()
         print_environment_info(env)
 
-        # Get recommendation
         recommended = get_recommendation(env)
+        print_menu(env, recommended)
 
-        # Default to saved preference if available
-        default_choice = saved_interface if saved_interface else recommended
-
-        # Print menu
-        print_menu(env, recommended, saved_interface)
-
-        # Get user choice
         try:
-            choice = input(f"{Colors.CYAN}Select option [{default_choice}]: {Colors.NC}").strip() or default_choice
+            choice = input(f"{Colors.CYAN}Select [{recommended}]: {Colors.NC}").strip() or recommended
         except (KeyboardInterrupt, EOFError):
             print(f"\n\n{Colors.YELLOW}A Hui Hou!{Colors.NC}")
             sys.exit(0)
@@ -641,33 +488,16 @@ def main():
             print(f"\n{Colors.YELLOW}A Hui Hou!{Colors.NC}")
             sys.exit(0)
 
-        elif choice.lower() == 'c':
-            # Clear saved preference
-            prefs.pop('interface', None)
-            prefs.pop('auto_launch', None)
-            save_preferences(prefs)
-            saved_interface = None
-            print(f"\n{Colors.GREEN}Preference cleared!{Colors.NC}")
-            input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
-
-        elif choice.lower() == 's':
-            # Enable save mode for next selection
-            save_next = True
-            print(f"\n{Colors.CYAN}Select an interface to save as your default...{Colors.NC}")
-            input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
-
         elif choice.lower() == 'i':
-            install_dependencies()
+            install_gtk()
 
         elif choice.lower() == 'w':
-            # Run setup wizard
             run_setup_wizard()
-            continue
 
-        elif choice in ['1', '2', '3', '4']:
-            # Main interfaces - validate and launch
+        elif choice in ['1', '2']:
+            # Validate GTK availability
             if choice == '1' and not env['has_display']:
-                print(f"\n{Colors.YELLOW}Warning: No display detected. GTK4 requires a display.{Colors.NC}")
+                print(f"\n{Colors.YELLOW}No display detected. GTK4 requires a display.{Colors.NC}")
                 try:
                     confirm = input(f"Continue anyway? [y/N]: ").strip().lower()
                     if confirm not in ['y', 'yes']:
@@ -676,58 +506,32 @@ def main():
                     continue
 
             if choice == '1' and not env['has_gtk']:
-                print(f"\n{Colors.YELLOW}GTK4 is not installed. Would you like to install it?{Colors.NC}")
+                print(f"\n{Colors.YELLOW}GTK4 not installed.{Colors.NC}")
                 try:
-                    confirm = input(f"Install GTK4 dependencies? [Y/n]: ").strip().lower()
+                    confirm = input(f"Install now? [Y/n]: ").strip().lower()
                     if confirm in ['', 'y', 'yes']:
-                        install_dependencies()
+                        install_gtk()
                         continue
                 except (KeyboardInterrupt, EOFError):
                     continue
 
-            if choice == '2' and not env['has_textual']:
-                print(f"\n{Colors.YELLOW}Textual is not installed. Would you like to install it?{Colors.NC}")
-                try:
-                    confirm = input(f"Install Textual? [Y/n]: ").strip().lower()
-                    if confirm in ['', 'y', 'yes']:
-                        subprocess.run([
-                            'sudo', 'pip', 'install', '--break-system-packages', '--ignore-installed', 'textual'
-                        ], check=True, timeout=120)
-                        print(f"{Colors.GREEN}Textual installed!{Colors.NC}")
-                except (KeyboardInterrupt, EOFError):
-                    continue
-                except subprocess.CalledProcessError:
-                    print(f"{Colors.RED}Failed to install Textual{Colors.NC}")
-                    input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
-                    continue
+            # Save preference
+            prefs['interface'] = choice
+            try:
+                confirm = input(f"\n{Colors.DIM}Remember this choice? [Y/n]: {Colors.NC}").strip().lower()
+                prefs['auto_launch'] = confirm in ['', 'y', 'yes']
+            except (KeyboardInterrupt, EOFError):
+                prefs['auto_launch'] = False
+            save_preferences(prefs)
 
-            # Save preference if requested
-            if save_next:
-                prefs['interface'] = choice
-                try:
-                    confirm = input(f"\n{Colors.CYAN}Auto-launch this interface next time? [Y/n]: {Colors.NC}").strip().lower()
-                    prefs['auto_launch'] = confirm in ['', 'y', 'yes']
-                except (KeyboardInterrupt, EOFError):
-                    prefs['auto_launch'] = False
-
-                save_preferences(prefs)
-                pref_names = {'1': 'GTK4 GUI', '2': 'Textual TUI', '3': 'Web Interface', '4': 'Rich CLI'}
-                print(f"{Colors.GREEN}Saved {pref_names.get(choice)} as default!{Colors.NC}")
-                if prefs['auto_launch']:
-                    print(f"{Colors.DIM}Use --wizard flag to change preference{Colors.NC}")
-                save_next = False
-
-            # Launch the interface
             launch_interface(choice)
 
-        elif choice in ['5', '6', '7']:
-            # Quick tools - run as subprocess, return to menu
+        elif choice in ['3', '4', '5']:
             launch_interface(choice)
-            # No extra prompt needed - tools handle their own "press enter"
 
         else:
-            print(f"\n{Colors.RED}Invalid option. Please try again.{Colors.NC}")
-            input(f"{Colors.DIM}Press Enter to continue...{Colors.NC}")
+            print(f"\n{Colors.RED}Invalid option.{Colors.NC}")
+            input(f"{Colors.DIM}Press Enter...{Colors.NC}")
 
 
 if __name__ == '__main__':

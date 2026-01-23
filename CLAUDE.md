@@ -20,8 +20,10 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 
 ```bash
 # Launch interfaces
-sudo python3 src/launcher.py      # Auto-detect UI
-python3 src/standalone.py         # Zero-dependency mode
+sudo python3 src/launcher.py            # Auto-detect (GTK or TUI)
+sudo python3 src/launcher_tui/main.py   # Terminal UI directly
+sudo python3 src/main_gtk.py            # GTK4 Desktop directly
+python3 src/standalone.py               # Zero-dependency RF tools
 
 # Verify changes
 python3 -m pytest tests/ -v       # Run tests
@@ -34,13 +36,15 @@ python3 -c "from src.__version__ import __version__; print(__version__)"
 
 ```
 src/
+├── gtk_ui/            # GTK4 Desktop (panels/)
+│   └── panels/        # UI panels (map, mqtt_dashboard, diagnostics)
+├── launcher_tui/      # Terminal UI (raspi-config style)
+│   └── main.py        # Primary CLI interface (whiptail/dialog)
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway bridge
 │   └── message_queue.py # Persistent message queue (SQLite)
 ├── monitoring/        # Network monitoring
 │   └── mqtt_subscriber.py # Nodeless MQTT monitoring
-├── gtk_ui/            # GTK4 Desktop (panels/)
-│   └── panels/        # UI panels (map, mqtt_dashboard, diagnostics)
 ├── utils/             # RF tools, common utilities
 │   ├── rf.py          # RF calculations (tested)
 │   ├── rf_fast.pyx    # Cython optimization
@@ -50,7 +54,8 @@ src/
 │   ├── knowledge_base.py    # Mesh networking knowledge
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
 │   └── coverage_map.py      # Folium map generator
-├── standalone.py      # Zero-dependency boot
+├── launcher.py        # Auto-detect: GTK or TUI
+├── standalone.py      # Zero-dependency RF tools
 └── __version__.py     # Version and changelog
 ```
 
@@ -137,7 +142,7 @@ Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md
 - `hamclock.py` (2,625) → Extract API client
 - `mesh_tools.py` (1,953) → Monitor
 
-*Note: rns.py (673) and main_web.py (1,314) successfully refactored.*
+*Note: Web UI, Rich CLI, Textual TUI removed in UI consolidation (7 UIs → 2).*
 
 ## Commit Style
 

@@ -39,18 +39,6 @@ class TestStatusConsistency:
         except ImportError:
             pytest.skip("GTK UI not available")
 
-    def test_tui_dashboard_uses_check_service(self):
-        """TUI dashboard should use check_service() for rnsd status."""
-        try:
-            from src.tui.panes import dashboard
-
-            # Verify module imports check_service
-            assert hasattr(dashboard, 'check_service') or \
-                   'check_service' in dir(dashboard), \
-                "TUI dashboard should import check_service"
-        except ImportError:
-            pytest.skip("TUI not available")
-
     def test_commands_rns_uses_check_service(self):
         """commands/rns.py should use check_service() for status."""
         from src.commands import rns
@@ -192,11 +180,12 @@ class TestMeshtasticdStatusConsistency:
 
         Issue #17: meshtasticd is a systemd service, so we trust systemctl only.
         """
-        # systemctl is-active meshtasticd returns "active"
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='active\n'
-        )
+        # First call: systemctl is-active → "active"
+        # Second call: systemctl show --property=SubState → "SubState=running"
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout='active\n'),
+            MagicMock(returncode=0, stdout='SubState=running\n'),
+        ]
 
         from src.utils.service_check import check_service
 
@@ -227,23 +216,6 @@ class TestMeshtasticdStatusConsistency:
 
 class TestNoOrphanedImplementations:
     """Verify no orphaned/duplicate status implementations exist."""
-
-    def test_no_duplicate_udp_check_in_tui(self):
-        """TUI should not have its own UDP port check implementation."""
-        try:
-            from src.tui.panes import dashboard
-            import inspect
-            source = inspect.getsource(dashboard)
-
-            # Look for signs of duplicate UDP implementation
-            # (checking for raw UDP socket code that should be in check_service)
-            if 'SOCK_DGRAM' in source and 'check_service' not in source:
-                pytest.fail(
-                    "TUI dashboard has raw UDP socket code - "
-                    "should use check_service() instead"
-                )
-        except ImportError:
-            pytest.skip("TUI not available")
 
     def test_no_duplicate_rnsd_check_in_commands_rns(self):
         """commands/rns.py should delegate to check_service, not implement own."""

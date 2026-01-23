@@ -13,7 +13,7 @@ import re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 
-# Validation functions (copied from main_web.py for standalone testing)
+# Validation functions for security testing
 
 def validate_journalctl_since(since_value):
     """Validate journalctl --since parameter to prevent injection."""
