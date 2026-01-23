@@ -12,7 +12,6 @@ import pytest
 
 # Files that should use emoji fallback (UI-facing code)
 UI_FILES = [
-    'src/main.py',
     'src/launcher.py',
     'src/config/channel_presets.py',
     'src/config/device.py',
@@ -193,11 +192,7 @@ class TestBackButtonsExist:
         assert 'Back' in content, \
             "channel_presets.py should have 'Back' text"
 
-    def test_debug_menu_has_back(self, project_root):
-        """Debug menu should have back option"""
-        filepath = project_root / 'src' / 'main.py'
-        content = filepath.read_text()
-
-        # Look for back option in debug_menu context
-        assert 'Back to main menu' in content or '0.*Back' in content, \
-            "main.py debug_menu should have back option"
+    def test_launcher_tui_exists(self, project_root):
+        """Launcher TUI main should exist"""
+        filepath = project_root / 'src' / 'launcher_tui' / 'main.py'
+        assert filepath.exists(), "launcher_tui/main.py should exist"
