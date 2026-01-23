@@ -26,9 +26,9 @@
 
 ## The Elevator Speech
 
-**MeshForge turns a Raspberry Pi into a mesh network operations center.** Plug in a LoRa radio, run the installer, and you have a gateway that bridges Meshtastic, Reticulum, and AREDN networks — with coverage maps, RF engineering tools, and AI-powered diagnostics built in.
+**MeshForge turns a Raspberry Pi into a mesh network operations center.** Plug in a LoRa radio, run the installer, and you have a gateway that bridges Meshtastic and Reticulum networks — with AREDN monitoring, coverage maps, RF engineering tools, and AI-powered diagnostics built in.
 
-It's the first open-source tool that unifies these three incompatible mesh ecosystems into a single operator console. SSH in from anywhere, manage your radios, monitor your network, and troubleshoot issues — all from one terminal.
+It's the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport) while providing unified monitoring across mesh ecosystems. SSH in from anywhere, manage your radios, monitor your network, and troubleshoot issues — all from one terminal.
 
 ```
 sudo python3 src/launcher_tui/main.py
@@ -357,15 +357,15 @@ See [CLAUDE.md](CLAUDE.md) for complete development guide.
 
 ## Resources
 
-| Resource | Link |
-|----------|------|
-| Development Blog | [nursedude.substack.com](https://nursedude.substack.com) |
-| Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) |
-| Reticulum Network | [reticulum.network](https://reticulum.network/) |
-| AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) |
-| MeshCore | [meshcore.co](https://meshcore.co/) |
-| RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) |
-| uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) |
+| Resource | Link | Relation |
+|----------|------|----------|
+| Development Blog | [nursedude.substack.com](https://nursedude.substack.com) | Project updates |
+| Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) | Primary radio network |
+| Reticulum Network | [reticulum.network](https://reticulum.network/) | Bridge target (encrypted transport) |
+| AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) | Monitoring integration |
+| RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) | Spectrum analysis (planned) |
+| uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) | Field hardware (Q2 2026) |
+| MeshCore | [meshcore.co](https://meshcore.co/) | Future research |
 
 ---
 
