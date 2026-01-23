@@ -8,7 +8,7 @@ Wants=meshtasticd.service
 Type=simple
 User=root
 WorkingDirectory=/opt/meshforge
-ExecStart=/usr/bin/python3 /opt/meshforge/src/main_web.py --host 0.0.0.0 --port 8880
+ExecStart=/usr/bin/python3 /opt/meshforge/src/launcher.py --no-services
 Restart=on-failure
 RestartSec=10
 

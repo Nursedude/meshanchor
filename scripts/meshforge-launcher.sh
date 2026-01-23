@@ -124,24 +124,9 @@ case "$1" in
         # Runs TUI inside GTK4 VTE widget with proper app_id
         exec python3 "$MESHFORGE_DIR/src/launcher_vte.py"
         ;;
-    web)
-        # Web UI can run without GUI, just needs network
-        if [ "$EUID" -eq 0 ]; then
-            exec python3 "$MESHFORGE_DIR/src/main_web.py"
-        else
-            exec sudo python3 "$MESHFORGE_DIR/src/main_web.py"
-        fi
-        ;;
     tui)
         # raspi-config style whiptail/dialog TUI
         launch_terminal "$MESHFORGE_DIR/src/launcher_tui/main.py"
-        ;;
-    tui-textual)
-        # Textual TUI (deprecated)
-        launch_terminal "$MESHFORGE_DIR/src/main_tui.py"
-        ;;
-    cli)
-        launch_terminal "$MESHFORGE_DIR/src/main.py"
         ;;
     help|--help|-h)
         show_help

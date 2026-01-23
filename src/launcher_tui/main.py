@@ -221,10 +221,6 @@ class MeshForgeLauncher(
             # Interfaces section
             if self.env['has_display'] and self.env['has_gtk']:
                 choices.append(("gtk", "GTK4 Desktop Interface"))
-            choices.append(("cli", "Rich CLI (Terminal Menu)"))
-            choices.append(("web", "Web Monitor Dashboard"))
-            choices.append(("webui", "Web Dashboard (Full UI)"))
-            choices.append(("standalone", "Standalone Mode (Zero-Dep)"))
 
             # Tools section
             choices.append(("---", "──────────── Tools ────────────"))
@@ -269,14 +265,6 @@ class MeshForgeLauncher(
         """Handle menu selection."""
         if choice == "gtk":
             self._launch_gtk()
-        elif choice == "cli":
-            self._launch_cli()
-        elif choice == "web":
-            self._launch_web()
-        elif choice == "webui":
-            self._launch_webui()
-        elif choice == "standalone":
-            self._launch_standalone()
         elif choice == "ai":
             self._ai_tools_menu()
         elif choice == "diag":
@@ -312,89 +300,6 @@ class MeshForgeLauncher(
         """Launch GTK interface."""
         self.dialog.infobox("Launching", "Starting GTK4 Desktop Interface...")
         os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_gtk.py')])
-
-    def _launch_cli(self):
-        """Launch CLI interface."""
-        self.dialog.infobox("Launching", "Starting Rich CLI...")
-        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main.py')])
-
-    def _launch_web(self):
-        """Launch Web monitor."""
-        # Get network IP for displaying to user
-        local_ip = self._get_local_ip()
-
-        access_info = (
-            "Starting Web Monitor...\n\n"
-            "Access URLs:\n"
-            f"  • This device:  http://localhost:5000\n"
-        )
-        if local_ip and local_ip != "127.0.0.1":
-            access_info += f"  • Network:      http://{local_ip}:5000\n"
-
-        access_info += (
-            "\nAPI Endpoints:\n"
-            "  • /api/status    - System status\n"
-            "  • /api/nodes     - Node list\n"
-            "  • /health        - Health check\n\n"
-            "Press Ctrl+C to stop the server."
-        )
-
-        self.dialog.msgbox("Web Monitor", access_info)
-        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'web_monitor.py')])
-
-    def _get_local_ip(self) -> str:
-        """Get local network IP address."""
-        import socket
-        try:
-            # Connect to external address to find local IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-
-    def _launch_webui(self):
-        """Launch full Web Dashboard (main_web.py)."""
-        local_ip = self._get_local_ip()
-
-        access_info = (
-            "Starting Web Dashboard (Full UI)...\n\n"
-            "This is the full-featured web interface with:\n"
-            "  • Node management and visualization\n"
-            "  • Service control panel\n"
-            "  • Real-time monitoring\n"
-            "  • Configuration editor\n\n"
-            "Access URLs:\n"
-            f"  • This device:  http://localhost:8880\n"
-        )
-        if local_ip and local_ip != "127.0.0.1":
-            access_info += f"  • Network:      http://{local_ip}:8880\n"
-            access_info += "\n(Use --host 0.0.0.0 for network access)\n"
-
-        access_info += "\nPress Ctrl+C to stop the server."
-
-        self.dialog.msgbox("Web Dashboard", access_info)
-        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'main_web.py')])
-
-    def _launch_standalone(self):
-        """Launch zero-dependency standalone mode."""
-        self.dialog.msgbox(
-            "Standalone Mode",
-            "Starting Standalone Mode...\n\n"
-            "Zero-dependency mode that works without:\n"
-            "  • GTK or GUI libraries\n"
-            "  • Rich terminal formatting\n"
-            "  • External service connections\n\n"
-            "Perfect for:\n"
-            "  • Minimal systems\n"
-            "  • Emergency recovery\n"
-            "  • Quick diagnostics\n"
-            "  • SSH over slow connections\n\n"
-            "Press Ctrl+C to exit."
-        )
-        os.execv(sys.executable, [sys.executable, str(self.src_dir / 'standalone.py')])
 
     # =========================================================================
     # System Diagnostics
@@ -993,7 +898,6 @@ class MeshForgeLauncher(
             (80, "HTTP"),
             (443, "HTTPS"),
             (4403, "Meshtasticd"),
-            (5000, "Flask/Web"),
             (8080, "HamClock"),
             (8082, "HamClock API"),
             (9443, "Meshtastic Web"),

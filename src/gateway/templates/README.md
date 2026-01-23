@@ -75,9 +75,6 @@ nano ~/.config/meshforge/gateway.json
 ```bash
 # Via MeshForge CLI
 python3 -m src.commands.gateway test
-
-# Via API
-curl -X POST http://localhost:5000/api/gateway/test
 ```
 
 5. Start the gateway:
@@ -85,9 +82,6 @@ curl -X POST http://localhost:5000/api/gateway/test
 ```bash
 # Via MeshForge CLI
 python3 -m src.commands.gateway start
-
-# Via API
-curl -X POST http://localhost:5000/api/gateway/start
 ```
 
 ## Configuration Reference
@@ -138,14 +132,8 @@ curl -X POST http://localhost:5000/api/gateway/start
 # Via journalctl (recommended for RPi)
 journalctl -t meshforge -f | grep gateway
 
-# Via API
-curl http://localhost:5000/api/gateway/status
-```
-
-### View Statistics
-
-```bash
-curl http://localhost:5000/api/gateway/stats
+# Via MeshForge CLI
+python3 -m src.commands.gateway status
 ```
 
 ## Troubleshooting

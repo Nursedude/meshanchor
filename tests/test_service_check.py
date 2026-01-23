@@ -119,11 +119,12 @@ class TestCheckService:
     def test_meshtasticd_available(self):
         """Test detection of available meshtasticd (Issue #17: systemctl only)."""
         with patch('subprocess.run') as mock_run:
-            # systemctl is-active meshtasticd returns "active"
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout='active\n'
-            )
+            # First call: systemctl is-active → "active"
+            # Second call: systemctl show --property=SubState → "SubState=running"
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout='active\n'),
+                MagicMock(returncode=0, stdout='SubState=running\n'),
+            ]
 
             status = check_service('meshtasticd')
 

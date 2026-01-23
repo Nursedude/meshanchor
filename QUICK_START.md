@@ -29,12 +29,10 @@ Run the installer:
 sudo meshtasticd-installer
 ```
 
-### Web UI Management (New in v3.2.7)
+### Terminal UI (SSH/headless)
 ```bash
-# Start browser-based management
-sudo python3 src/main_web.py
-
-# Access from any device: http://<your-pi-ip>:8880
+# raspi-config style interface - works everywhere
+sudo python3 src/launcher_tui/main.py
 ```
 
 Or use CLI options:

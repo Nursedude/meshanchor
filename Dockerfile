@@ -40,12 +40,6 @@ RUN useradd -m -s /bin/bash meshforge && \
 # Switch to non-root user
 USER meshforge
 
-# Expose web UI port
-EXPOSE 8880
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8880/api/status || exit 1
-
-# Default command - web UI
-CMD ["python3", "src/main_web.py", "--host", "0.0.0.0", "--port", "8880"]
+# Default command - standalone RF tools (no root needed)
+# For interactive TUI: docker run -it meshforge python3 src/launcher_tui/main.py
+CMD ["python3", "src/standalone.py", "--tools"]
