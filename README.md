@@ -5,14 +5,15 @@
 </p>
 
 <p align="center">
-  <strong>Mesh Network Operations Center</strong><br>
-  <em>Meshtastic + Reticulum + AREDN — One Terminal</em>
+  <strong>Turnkey Mesh Network Operations Center</strong><br>
+  <em>Meshtastic + Reticulum + AREDN — One Box, One Interface</em>
 </p>
 
 <p align="center">
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1302%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -23,91 +24,194 @@
 
 ---
 
-## What Is This
+## The Elevator Speech
 
-MeshForge is a terminal-native NOC for mesh radio networks. It manages Meshtastic, Reticulum (RNS), and AREDN from a single SSH-accessible interface. Install it on a Raspberry Pi, plug in your radio, and you have a full network operations center.
+**MeshForge turns a Raspberry Pi into a mesh network operations center.** Plug in a LoRa radio, run the installer, and you have a gateway that bridges Meshtastic and Reticulum networks — with AREDN monitoring, coverage maps, RF engineering tools, and AI-powered diagnostics built in.
 
-**First open-source tool to unify Meshtastic, RNS, and AREDN mesh ecosystems.**
+It's the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport) while providing unified monitoring across mesh ecosystems. SSH in from anywhere, manage your radios, monitor your network, and troubleshoot issues — all from one terminal.
 
 ```
 sudo python3 src/launcher_tui/main.py
 ```
 
+**Who it's for:** HAM operators, emergency communications teams, off-grid network builders, mesh enthusiasts who want a NOC without the enterprise price tag.
+
+---
+
+## What Works Today (v0.4.7-beta)
+
+| Category | Capabilities | Status |
+|----------|-------------|--------|
+| **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Working |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Working |
+| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Working |
+| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Working |
+| **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Working |
+| **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Working |
+| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Working (requires API key) |
+| **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Working |
+| **AREDN** | Node discovery, link quality, service enumeration | Working |
+| **GTK4 Desktop** | Full GUI with 14 panels (map, diagnostics, radio, tools, etc.) | Working |
+| **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
+
+### What's Planned (Not Yet Built)
+
+| Capability | Goal |
+|-----------|------|
+| Packet decode | Meshtastic protobuf + RNS frame analysis |
+| Traffic logging | MQTT tap, message flow recording |
+| SDR spectrum | RTL-SDR integration, 915MHz band scanning |
+| GPS tracking | Node position history, GPX/KML export |
+| Signal analysis | SNR/RSSI trending over time |
+| Multi-hop trace | Visualize routing paths across mesh |
+| Anomaly detection | Rogue node alerts, unusual traffic patterns |
+
+*The goal is Wireshark-grade visibility into mesh traffic. We're not there yet.*
+
+---
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph User Interfaces
+        TUI[Terminal UI<br>SSH-friendly, raspi-config style]
+        GTK[GTK4 Desktop<br>14-panel GUI]
+        CLI[Standalone CLI<br>Zero-dependency RF tools]
+    end
+
+    subgraph MeshForge Core
+        LAUNCHER[Launcher<br>Auto-detect display]
+        GATEWAY[Gateway Bridge<br>Message routing + SQLite queue]
+        MONITOR[MQTT Subscriber<br>Nodeless node tracking]
+        MAPS[Coverage Maps<br>Folium + offline tiles]
+        RF[RF Engine<br>Link budget, Fresnel, path loss]
+        DIAG[Diagnostics<br>Rule engine + knowledge base]
+        AI[AI Assistant<br>Standalone + PRO modes]
+    end
+
+    subgraph External Services
+        MESHTASTICD[meshtasticd<br>LoRa radio daemon]
+        RNSD[rnsd<br>Reticulum transport]
+        AREDN_NET[AREDN<br>IP mesh network]
+        MQTT[MQTT Broker<br>Node telemetry]
+        NOAA[NOAA SWPC<br>Space weather]
+    end
+
+    subgraph Hardware
+        SPI[SPI HAT<br>Meshtoad, MeshAdv]
+        USB[USB Radio<br>Heltec, T-Beam, RAK]
+        SDR[RTL-SDR<br>Spectrum analysis]
+        UCONSOLE[uConsole AIO V2<br>LoRa+SDR+GPS all-in-one]
+    end
+
+    TUI --> LAUNCHER
+    GTK --> LAUNCHER
+    LAUNCHER --> GATEWAY
+    LAUNCHER --> MONITOR
+    LAUNCHER --> MAPS
+    LAUNCHER --> RF
+    LAUNCHER --> DIAG
+    DIAG --> AI
+
+    GATEWAY --> MESHTASTICD
+    GATEWAY --> RNSD
+    MONITOR --> MQTT
+    MAPS --> MONITOR
+    RF --> NOAA
+
+    MESHTASTICD --> SPI
+    MESHTASTICD --> USB
+    MESHTASTICD --> UCONSOLE
+    SDR --> UCONSOLE
+
+    style TUI fill:#2d5016,color:#fff
+    style GTK fill:#2d5016,color:#fff
+    style CLI fill:#2d5016,color:#fff
+    style GATEWAY fill:#1a3a5c,color:#fff
+    style AI fill:#5c1a3a,color:#fff
+    style UCONSOLE fill:#5c4a1a,color:#fff
 ```
-MeshForge v0.4.7-beta
 
-  Status Overview
-  Radio (meshtastic CLI)
-  Services (start/stop/restart)
-  Logs (live follow, errors, analysis)
-  Network & Ports
-  RNS / Reticulum
-  AREDN Mesh
-  RF Tools & Calculator
-  Configuration
-  Hardware Detection
-  System Tools
-  Web Client URL
+### Data Flow: Multi-Mesh Bridge
+
+```mermaid
+sequenceDiagram
+    participant M as Meshtastic Node
+    participant D as meshtasticd
+    participant G as MeshForge Gateway
+    participant R as rnsd (Reticulum)
+    participant N as RNS Node
+
+    M->>D: LoRa packet (protobuf)
+    D->>G: TCP:4403 (mesh packet)
+    G->>G: Classify, queue (SQLite)
+    G->>R: LXMF message
+    R->>N: RNS transport
+
+    N->>R: RNS reply
+    R->>G: LXMF delivery
+    G->>D: TCP:4403 (mesh packet)
+    D->>M: LoRa broadcast
 ```
 
-Every menu item launches real Linux tools — `journalctl`, `systemctl`, `meshtastic`, `rnstatus`, `ss`, `ip` — directly in your terminal. No wrappers. No abstraction layers. Ctrl+C to stop anything.
+### Design Principles
+
+- **TUI is a dispatcher** — selects what to run, not how to run it
+- **Services run independently** — MeshForge connects, never embeds
+- **Standard Linux tools** — `systemctl`, `journalctl`, `meshtastic`, `rnstatus`
+- **Config overlays** — writes to `config.d/`, never overwrites defaults
+- **Graceful degradation** — missing dependencies disable features, don't crash
 
 ---
 
-## Capabilities
+## AI Intelligence
 
-### Radio Management
-- **Install meshtasticd** from official repos (Debian/Ubuntu/Pi OS)
-- **Configure LoRa** — region, presets, channels, TX power
-- **SPI HAT + USB** — auto-detect and configure hardware
-- **Web client** — access meshtasticd web UI at `https://localhost:9443`
-- **Direct CLI** — `--info`, `--nodes`, `--sendtext`, `--set-owner`, `--reboot`
+MeshForge includes two tiers of AI-powered network diagnostics:
 
-### Network Monitoring
-- **Live logs** — `journalctl -fu meshtasticd` with Ctrl+C to exit
-- **Node tracking** — MQTT subscriber, real-time telemetry
-- **Port inspection** — `ss -tlnp`, connection states, listeners
-- **Service health** — systemctl status for all mesh services
-- **Coverage maps** — SNR-based link quality maps (Folium → browser)
+### Standalone Mode (No Internet Required)
+- 20+ topic knowledge base covering mesh networking fundamentals
+- Rule-based diagnostic engine with pattern matching
+- Structured troubleshooting guides for common issues
+- Confidence scoring on diagnoses
+- Works completely offline — ideal for field deployment
 
-### Multi-Mesh Bridge
-- **Meshtastic ↔ RNS** — Gateway bridge on TCP port 4403
-- **Reticulum config** — Auto-deploy working template, edit in nano
-- **RNS tools** — `rnstatus`, `rnpath`, interface diagnostics
-- **AREDN** — Node status, neighbor links, services, network scan
+### PRO Mode (Claude API)
+- Natural language troubleshooting ("Why is my node offline?")
+- Log file analysis with suggested actions
+- Context-aware responses (knows your network topology)
+- Predictive issue detection
+- Expertise-level adaptation (novice → expert)
+- Falls back to Standalone when API unavailable
 
-### RF Engineering
-- **Link budget** calculator with receiver sensitivity
-- **Fresnel zone** analysis and clearance requirements
-- **Path loss** modeling (free space, terrain factors)
-- **Site planning** — coverage radius, antenna height optimization
-- **Space weather** — solar flux, K-index, band conditions (NOAA SWPC)
+```python
+from utils.claude_assistant import ClaudeAssistant
 
-### System Operations
-- **Network diagnostics** — ping, traceroute, DNS, route tables
-- **Hardware detection** — SPI/I2C/USB device scanning, `lsusb`
-- **Config overlays** — writes to `config.d/` (never overwrites `config.yaml`)
-- **AI diagnostics** — offline troubleshooting with local knowledge base
+assistant = ClaudeAssistant()  # Auto-detects mode
+response = assistant.ask("Node !abc123 has -15dB SNR, is that okay?")
+print(response.answer)
+print(response.suggested_actions)
+```
 
 ---
 
-## Roadmap: Network Analysis
+## uConsole: All-In-One Field Unit
 
-The goal is Wireshark-grade visibility into mesh traffic:
+MeshForge has first-class support for the [HackerGadgets uConsole AIO V2](https://hackergadgets.com/products/uconsole-aio-v2) — a portable mesh operations terminal:
 
-| Capability | Status | Implementation |
-|-----------|--------|----------------|
-| **Packet decode** | Planned | Meshtastic protobuf decode, RNS frame analysis |
-| **Traffic logging** | Planned | MQTT tap, message flow recording |
-| **SDR spectrum** | Planned | RTL-SDR integration, 915MHz band scanning |
-| **GPS tracking** | Planned | Node position history, track export (GPX/KML) |
-| **Signal analysis** | Planned | SNR/RSSI trending, link quality over time |
-| **Multi-hop trace** | Planned | Visualize routing paths across mesh |
-| **Anomaly detection** | Planned | Unusual traffic patterns, rogue node alerts |
+| Component | Capability |
+|-----------|-----------|
+| **SX1262 LoRa** | 860-960MHz, 22dBm, native Meshtastic via SPI |
+| **RTL-SDR** | RTL2832U + R860, 100KHz-1.74GHz spectrum |
+| **GPS/GNSS** | Multi-constellation (GPS/BDS/GLONASS) |
+| **RTC** | PCF85063A with battery backup |
+| **Ethernet** | RJ45 Gigabit (wired AREDN backhaul) |
+
+Auto-detection, GPIO power control, and meshtasticd config generation are implemented. Hardware arrives Q2 2026.
 
 ---
 
-## Hardware
+## Hardware Requirements
 
 | Component | Recommended | Minimum |
 |-----------|-------------|---------|
@@ -133,6 +237,9 @@ sudo bash scripts/install_noc.sh
 # Or launch directly (if meshtasticd already installed)
 sudo python3 src/launcher_tui/main.py
 
+# GTK4 desktop (requires display)
+sudo python3 src/main_gtk.py
+
 # RF tools only (no sudo, no radio needed)
 python3 src/standalone.py
 ```
@@ -141,35 +248,62 @@ python3 src/standalone.py
 
 | Port | Service | Protocol |
 |------|---------|----------|
-| **4403** | meshtasticd TCP API | Protobuf (RNS bridge connects here) |
+| **4403** | meshtasticd TCP API | Protobuf (gateway bridge connects here) |
 | **9443** | meshtasticd Web UI | HTTPS (browser access) |
 
 ---
 
-## Architecture
+## Coverage Maps
+
+Interactive network visualization powered by Folium:
+
+- **Node markers** with status, battery, RSSI, hardware info
+- **SNR-based link coloring** — green (excellent) → red (marginal)
+- **Coverage radius estimation** based on LoRa preset
+- **Offline tile caching** — works without internet in the field
+- **Multiple tile layers** — OpenStreetMap, Terrain, Satellite
+- **Heatmap generation** — node density visualization
+- **GeoJSON import/export** — interoperate with other tools
+
+```python
+from utils.coverage_map import CoverageMapGenerator
+
+gen = CoverageMapGenerator(offline=True)
+gen.add_nodes_from_geojson(node_data)
+gen.generate("field_coverage.html")  # Opens in any browser
+```
+
+---
+
+## Project Structure
 
 ```
-+---------------------------------------------+
-|              MeshForge TUI                   |
-|   Terminal-native NOC dispatcher             |
-|   (whiptail menus → real CLI tools)          |
-+-----+-----+-----+-----+-----+-----+--------+
-      |     |     |     |     |     |
-      v     v     v     v     v     v
-  systemctl  meshtastic  journalctl  rnstatus  ss/ip  nano
-      |          |           |          |        |      |
-+-----+----+ +--+---+ +----+---+ +----+---+ +--+--+ +-+-+
-|meshtasticd| | Radio| |  Logs  | |  rnsd  | | Net | |Cfg|
-|  (LoRa)   | | HAT  | |syslog  | |  RNS   | |stack| |.d/|
-+-----------+ +------+ +--------+ +--------+ +-----+ +---+
+src/
+├── launcher_tui/          # Terminal UI (primary interface)
+│   ├── main.py            # NOC dispatcher + menus
+│   ├── backend.py         # whiptail/dialog abstraction
+│   └── *_mixin.py         # Feature modules (RF, channels, AI, system)
+├── gtk_ui/                # GTK4 desktop GUI
+│   ├── app.py             # Main window (14 panels)
+│   └── panels/            # Map, diagnostics, radio, tools, HamClock...
+├── gateway/               # Multi-mesh bridge
+│   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
+│   ├── message_queue.py   # Persistent SQLite queue
+│   └── node_tracker.py    # Unified node discovery
+├── monitoring/            # Network monitoring
+│   └── mqtt_subscriber.py # Nodeless MQTT node tracking
+├── utils/                 # Core utilities
+│   ├── rf.py              # RF calculations (1302 tests)
+│   ├── coverage_map.py    # Folium map generator + tile cache
+│   ├── diagnostic_engine.py # Rule-based AI diagnostics
+│   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
+│   ├── knowledge_base.py   # 20+ mesh networking topics
+│   ├── uconsole.py        # uConsole AIO V2 hardware profile
+│   ├── aredn.py           # AREDN mesh client
+│   └── paths.py           # Sudo-safe path resolution
+├── standalone.py          # Zero-dependency RF tools
+└── __version__.py         # Version tracking
 ```
-
-**Design principles:**
-- TUI is a **dispatcher** — it selects what to run, not how to run it
-- All output goes to your terminal directly (no dialog boxes for data)
-- Every operation uses standard Linux tools (portable, debuggable)
-- Config writes go to `/etc/meshtasticd/config.d/` overlays (safe)
-- Services run independently — MeshForge connects, never embeds
 
 ---
 
@@ -177,7 +311,7 @@ python3 src/standalone.py
 
 ### meshtasticd
 
-MeshForge writes config overlays to `/etc/meshtasticd/config.d/`:
+MeshForge writes config overlays (never overwrites defaults):
 
 ```
 /etc/meshtasticd/
@@ -191,61 +325,23 @@ MeshForge writes config overlays to `/etc/meshtasticd/config.d/`:
 
 ### Reticulum
 
-The TUI auto-deploys a working RNS config from `templates/reticulum.conf`:
+Auto-deploys a working config from `templates/reticulum.conf`:
 - AutoInterface (LAN discovery)
 - Meshtastic Interface on `127.0.0.1:4403`
-- RNode LoRa (optional, uncomment for dedicated RNS radio)
-
-```bash
-# RNS menu → Edit Reticulum Config
-# Or manually:
-cp templates/reticulum.conf ~/.reticulum/config
-sudo systemctl restart rnsd
-```
-
----
-
-## Project Structure
-
-```
-src/
-├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus
-│   ├── backend.py         # whiptail/dialog abstraction
-│   └── *_mixin.py         # Feature modules (RF, channels, system)
-├── gateway/               # RNS-Meshtastic bridge
-│   ├── rns_bridge.py      # Gateway transport
-│   └── message_queue.py   # Persistent queue (SQLite)
-├── monitoring/            # Network monitoring
-│   └── mqtt_subscriber.py # Nodeless MQTT node tracking
-├── utils/                 # Core utilities
-│   ├── rf.py              # RF calculations (tested)
-│   ├── aredn.py           # AREDN mesh client
-│   ├── coverage_map.py    # Folium map generator
-│   ├── diagnostic_engine.py # AI diagnostics
-│   └── paths.py           # Sudo-safe path resolution
-├── config/                # Config management
-│   ├── yaml_editor.py     # Safe overlay writer
-│   ├── radio.py           # Radio hardware config
-│   └── channel_presets.py # Channel preset manager
-├── standalone.py          # Zero-dependency RF tools
-└── __version__.py         # Version tracking
-templates/
-└── reticulum.conf         # Working RNS config template
-```
+- RNode LoRa (optional, for dedicated RNS radio)
 
 ---
 
 ## Contributing
 
 ```bash
-# Run tests
+# Run all 1302 tests
 python3 -m pytest tests/ -v
 
-# Run linter
+# Security linter (MF001-MF004)
 python3 scripts/lint.py --all
 
-# Syntax check
+# Quick syntax check
 python3 -m py_compile src/launcher_tui/main.py
 ```
 
@@ -261,14 +357,15 @@ See [CLAUDE.md](CLAUDE.md) for complete development guide.
 
 ## Resources
 
-| Resource | Link |
-|----------|------|
-| Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) |
-| meshtasticd Install | [Linux Installation](https://meshtastic.org/docs/software/linux/installation/) |
-| Reticulum Network | [reticulum.network](https://reticulum.network/) |
-| AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) |
-| MeshCore | [meshcore.co](https://meshcore.co/) |
-| RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) |
+| Resource | Link | Relation |
+|----------|------|----------|
+| Development Blog | [nursedude.substack.com](https://nursedude.substack.com) | Project updates |
+| Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) | Primary radio network |
+| Reticulum Network | [reticulum.network](https://reticulum.network/) | Bridge target (encrypted transport) |
+| AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) | Monitoring integration |
+| RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) | Spectrum analysis (planned) |
+| uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) | Field hardware (Q2 2026) |
+| MeshCore | [meshcore.co](https://meshcore.co/) | Future research |
 
 ---
 
