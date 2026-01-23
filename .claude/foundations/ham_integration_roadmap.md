@@ -129,7 +129,7 @@ class StationIDTimer:
 - Hata model for urban/suburban
 - Add to RF calculator as option
 - Compare ideal vs. realistic
-**Files**: `src/utils/rf.py`, `src/tools/rf_tools.py`
+**Files**: `src/utils/rf.py`, `src/gtk_ui/panels/tools_mixins/rf_tools.py`
 
 ### 10. Aurora Forecast Visualization
 **Why**: VHF operators care about aurora openings

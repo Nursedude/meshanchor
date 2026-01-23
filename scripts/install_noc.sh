@@ -1143,8 +1143,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/meshforge/src
-# Orchestrator manages meshtasticd and rnsd
-ExecStart=/opt/meshforge/venv/bin/python -m core.orchestrator --start --monitor
+# Orchestrator manages meshtasticd and rnsd (graceful: stay up even if services missing)
+ExecStart=/opt/meshforge/venv/bin/python -m core.orchestrator --start --monitor --graceful
 ExecStop=/opt/meshforge/venv/bin/python -m core.orchestrator --stop
 Restart=on-failure
 RestartSec=10
@@ -1159,40 +1159,7 @@ systemctl daemon-reload
 
 echo -e "  ${GREEN}✓ System integration complete${NC}"
 
-# ─────────────────────────────────────────────────────────────────
-# Detect radio hardware (USB and SPI)
-# ─────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${CYAN}Detecting radio hardware...${NC}"
-
-RADIO_FOUND=false
-
-# Check USB radios
-for dev in /dev/ttyUSB* /dev/ttyACM*; do
-    if [[ -e "$dev" ]]; then
-        echo -e "  ${GREEN}✓ USB Radio: $dev${NC}"
-        RADIO_FOUND=true
-    fi
-done
-
-# Check SPI devices (MeshAdv-Pi-Hat, Waveshare, etc.)
-if [[ -e "/dev/spidev0.0" ]]; then
-    echo -e "  ${GREEN}✓ SPI Device: /dev/spidev0.0${NC}"
-    # Check if SPI is enabled in boot config
-    if grep -q "dtparam=spi=on" /boot/config.txt 2>/dev/null || \
-       grep -q "dtparam=spi=on" /boot/firmware/config.txt 2>/dev/null; then
-        echo -e "  ${GREEN}✓ SPI enabled in boot config${NC}"
-        echo -e "  ${DIM}  (MeshAdv-Pi-Hat, Waveshare SX126x, or similar)${NC}"
-        RADIO_FOUND=true
-    fi
-fi
-
-if ! $RADIO_FOUND; then
-    echo -e "  ${YELLOW}⚠ No radio device detected${NC}"
-    echo -e "  ${YELLOW}  Options:${NC}"
-    echo -e "  ${YELLOW}  - USB: Connect a Meshtastic radio via USB${NC}"
-    echo -e "  ${YELLOW}  - SPI HAT: Enable SPI with 'sudo raspi-config'${NC}"
-fi
+# Radio hardware already detected and configured above (ask_radio_type + SPI/USB setup)
 
 # ─────────────────────────────────────────────────────────────────
 # Summary
@@ -1204,11 +1171,29 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo -e "${CYAN}Installed Components:${NC}"
 if $INSTALL_MESHTASTICD; then
-    if [[ "$DAEMON_TYPE" == "native" ]]; then
-        echo -e "  ${GREEN}✓${NC} meshtasticd (native binary for SPI)"
-    else
-        echo -e "  ${GREEN}✓${NC} meshtastic (Python CLI for USB)"
-    fi
+    case "$DAEMON_TYPE" in
+        native)
+            echo -e "  ${GREEN}✓${NC} meshtasticd (native SPI - running)"
+            ;;
+        native-usb)
+            echo -e "  ${GREEN}✓${NC} meshtasticd (native USB serial - running)"
+            ;;
+        spi-reboot-needed)
+            echo -e "  ${YELLOW}⚠${NC} meshtasticd installed (SPI enabled - REBOOT REQUIRED)"
+            ;;
+        spi-pending)
+            echo -e "  ${YELLOW}⚠${NC} meshtasticd not available (native build required for SPI)"
+            ;;
+        usb-direct)
+            echo -e "  ${GREEN}✓${NC} meshtastic CLI (USB radio - no daemon needed)"
+            ;;
+        placeholder)
+            echo -e "  ${YELLOW}⚠${NC} meshtastic CLI (no radio configured yet)"
+            ;;
+        *)
+            echo -e "  ${GREEN}✓${NC} meshtastic (Python CLI)"
+            ;;
+    esac
 fi
 if $INSTALL_RNS; then
     echo -e "  ${GREEN}✓${NC} Reticulum (RNS)"
@@ -1241,8 +1226,8 @@ echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
 echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
 echo ""
 
-# Post-install note for network configuration
-if [[ "$DAEMON_TYPE" == "native" ]]; then
+# Post-install note for network configuration (native daemon has web UI)
+if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
     # Get IP address for web UI URL
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 
@@ -1266,6 +1251,34 @@ if [[ "$DAEMON_TYPE" == "native" ]]; then
     echo -e "  ${CYAN}Option 3: Quick profile${NC}"
     echo -e "  ${GREEN}sudo meshforge-lora --profile us_default${NC}"
     echo ""
+fi
+
+# ─────────────────────────────────────────────────────────────────
+# SPI Reboot Gate: If SPI was just enabled, stop here cleanly
+# ─────────────────────────────────────────────────────────────────
+if [[ "$DAEMON_TYPE" == "spi-reboot-needed" ]]; then
+    echo ""
+    echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  NEXT STEPS                                               ║${NC}"
+    echo -e "${YELLOW}╠═══════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  1. Reboot now:     sudo reboot                           ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  2. After reboot, re-run installer to complete SPI setup: ║${NC}"
+    echo -e "${YELLOW}║     sudo bash /opt/meshforge/scripts/install_noc.sh       ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}║  The second run will:                                     ║${NC}"
+    echo -e "${YELLOW}║    • Detect SPI bus is active                             ║${NC}"
+    echo -e "${YELLOW}║    • Present HAT selection menu                           ║${NC}"
+    echo -e "${YELLOW}║    • Start meshtasticd                                    ║${NC}"
+    echo -e "${YELLOW}║    • Verify everything works                              ║${NC}"
+    echo -e "${YELLOW}║                                                           ║${NC}"
+    echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}Software installed: meshtasticd, RNS, MeshForge${NC}"
+    echo -e "${CYAN}SPI enabled in boot config - reboot activates the bus${NC}"
+    echo ""
+    exit 0
 fi
 
 # ─────────────────────────────────────────────────────────────────
@@ -1302,8 +1315,8 @@ else
     echo -e "${YELLOW}  Skipping verification${NC}"
 fi
 
-# Offer to start services
-if [[ -c /dev/tty ]]; then
+# Offer to start services (only if services can actually run)
+if [[ "$DAEMON_TYPE" != "spi-pending" && "$DAEMON_TYPE" != "placeholder" ]] && [[ -c /dev/tty ]]; then
     echo ""
     echo -e "${CYAN}Would you like to start MeshForge NOC now? [Y/n]${NC}"
     read -r response < /dev/tty
