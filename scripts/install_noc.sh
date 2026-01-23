@@ -547,27 +547,69 @@ FALLBACK_CONFIG
                 fi
             fi
 
-            # Only create native configs if native binary is installed
+            # Only configure SPI if native binary is installed
             if $NATIVE_INSTALLED; then
-                # Find actual binary path
                 MESHTASTICD_BIN=$(command -v meshtasticd)
                 echo -e "  ${GREEN}✓ Binary at: ${MESHTASTICD_BIN}${NC}"
 
-                # CHECK if meshtasticd already has a valid config.yaml
-                # DO NOT overwrite if it exists and has content
-                if [[ -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
-                    # Check if it has Webserver section (sign of valid config)
-                    if grep -q "Webserver:" "$MESHTASTICD_CONFIG_DIR/config.yaml" 2>/dev/null; then
-                        echo -e "  ${GREEN}✓ Using existing config.yaml (from meshtasticd package)${NC}"
-                    else
-                        # Config exists but missing Webserver - might be corrupted
-                        echo -e "  ${YELLOW}⚠ config.yaml exists but may be incomplete${NC}"
-                        echo -e "  ${YELLOW}  Check: cat /etc/meshtasticd/config.yaml${NC}"
-                    fi
+                # ── Step 1: Check SPI bus is enabled ──
+                echo -e "  ${CYAN}Checking SPI bus...${NC}"
+                SPI_ENABLED=false
+                SPI_NEEDS_REBOOT=false
+
+                if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
+                    echo -e "  ${GREEN}✓ SPI bus active (/dev/spidev0.*)${NC}"
+                    SPI_ENABLED=true
                 else
-                    # No config.yaml - create minimal one
-                    echo -e "  ${CYAN}Creating minimal config.yaml...${NC}"
-                    cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'MINIMAL_CONFIG'
+                    # SPI device not present - check boot config
+                    BOOT_CONFIG=""
+                    if [[ -f /boot/firmware/config.txt ]]; then
+                        BOOT_CONFIG="/boot/firmware/config.txt"
+                    elif [[ -f /boot/config.txt ]]; then
+                        BOOT_CONFIG="/boot/config.txt"
+                    fi
+
+                    if [[ -n "$BOOT_CONFIG" ]]; then
+                        if grep -q "^dtparam=spi=on" "$BOOT_CONFIG" 2>/dev/null; then
+                            echo -e "  ${YELLOW}⚠ SPI enabled in config but device not loaded${NC}"
+                            echo -e "  ${YELLOW}  A reboot is required to activate SPI${NC}"
+                            SPI_NEEDS_REBOOT=true
+                        else
+                            echo -e "  ${YELLOW}⚠ SPI not enabled in ${BOOT_CONFIG}${NC}"
+                            echo -e "  ${CYAN}  Enabling SPI...${NC}"
+
+                            # Enable SPI in boot config
+                            if grep -q "^#dtparam=spi=on" "$BOOT_CONFIG" 2>/dev/null; then
+                                # Uncomment existing line
+                                sed -i 's/^#dtparam=spi=on/dtparam=spi=on/' "$BOOT_CONFIG"
+                            else
+                                # Add to [all] section or end of file
+                                echo "" >> "$BOOT_CONFIG"
+                                echo "# SPI enabled by MeshForge for LoRa HAT" >> "$BOOT_CONFIG"
+                                echo "dtparam=spi=on" >> "$BOOT_CONFIG"
+                            fi
+                            echo -e "  ${GREEN}✓ SPI enabled in ${BOOT_CONFIG}${NC}"
+                            SPI_NEEDS_REBOOT=true
+                        fi
+                    else
+                        echo -e "  ${YELLOW}⚠ Cannot find boot config to enable SPI${NC}"
+                        echo -e "  ${YELLOW}  Run: sudo raspi-config → Interface Options → SPI${NC}"
+                    fi
+
+                    if $SPI_NEEDS_REBOOT; then
+                        echo ""
+                        echo -e "  ${YELLOW}╔════════════════════════════════════════════════════╗${NC}"
+                        echo -e "  ${YELLOW}║  REBOOT REQUIRED to activate SPI bus              ║${NC}"
+                        echo -e "  ${YELLOW}║  After reboot, re-run this installer to continue  ║${NC}"
+                        echo -e "  ${YELLOW}╚════════════════════════════════════════════════════╝${NC}"
+                        echo ""
+                        echo -e "  ${CYAN}Run: sudo reboot${NC}"
+                        echo -e "  ${CYAN}Then: sudo bash /opt/meshforge/scripts/install_noc.sh${NC}"
+                        echo ""
+
+                        # Still create minimal config and service so re-run picks up where we left off
+                        if [[ ! -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
+                            cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'REBOOT_CONFIG'
 ---
 Lora:
   Module: auto
@@ -582,17 +624,127 @@ Webserver:
 General:
   MaxNodes: 200
   ConfigDirectory: /etc/meshtasticd/config.d/
-MINIMAL_CONFIG
-                    echo -e "  ${GREEN}✓ Created minimal config.yaml${NC}"
+REBOOT_CONFIG
+                        fi
+                        DAEMON_TYPE="spi-reboot-needed"
+                        # Skip HAT selection and service start until after reboot
+                        SPI_ENABLED=false
+                    fi
                 fi
 
-                # Don't auto-copy any HAT config - user selects via meshforge
-                echo -e "  ${YELLOW}Run 'sudo meshforge' to select your SPI HAT type${NC}"
-                echo -e "  ${CYAN}  Or manually: cp /etc/meshtasticd/available.d/<your-hat>.yaml /etc/meshtasticd/config.d/${NC}"
+                # ── Step 2: HAT selection (only if SPI is active) ──
+                if $SPI_ENABLED; then
+                    echo -e "  ${CYAN}Selecting SPI HAT configuration...${NC}"
 
-                # Create/update systemd service for native meshtasticd
-                # Use the actual binary path we found
-                cat > /etc/systemd/system/meshtasticd.service << NATIVE_SERVICE
+                    AVAIL_DIR="$MESHTASTICD_CONFIG_DIR/available.d"
+                    HAT_SELECTED=false
+
+                    # Check if a HAT config is already in config.d/
+                    EXISTING_HAT=""
+                    if [[ -d "$MESHTASTICD_CONFIG_DIR/config.d" ]]; then
+                        EXISTING_HAT=$(ls -1 "$MESHTASTICD_CONFIG_DIR/config.d/"*.yaml 2>/dev/null | head -1)
+                    fi
+
+                    if [[ -n "$EXISTING_HAT" ]]; then
+                        HAT_NAME=$(basename "$EXISTING_HAT")
+                        echo -e "  ${GREEN}✓ HAT config already active: ${HAT_NAME}${NC}"
+                        HAT_SELECTED=true
+                    elif [[ -d "$AVAIL_DIR" ]] && ls -1 "$AVAIL_DIR/"*.yaml &>/dev/null; then
+                        # Build HAT menu from available.d/
+                        declare -a HAT_OPTIONS=()
+                        while IFS= read -r hat_file; do
+                            hat_base=$(basename "$hat_file" .yaml)
+                            # Extract first comment line as description
+                            hat_desc=$(grep "^#" "$hat_file" 2>/dev/null | head -1 | sed 's/^# *//' || echo "$hat_base")
+                            [[ -z "$hat_desc" ]] && hat_desc="$hat_base"
+                            HAT_OPTIONS+=("$hat_base" "$hat_desc")
+                        done < <(ls -1 "$AVAIL_DIR/"*.yaml 2>/dev/null | sort)
+
+                        if [[ ${#HAT_OPTIONS[@]} -gt 0 ]]; then
+                            HAT_COUNT=$((${#HAT_OPTIONS[@]} / 2))
+
+                            if command -v whiptail &>/dev/null; then
+                                # Calculate menu height (min 10, max 20)
+                                MENU_H=$((HAT_COUNT + 7))
+                                [[ $MENU_H -lt 12 ]] && MENU_H=12
+                                [[ $MENU_H -gt 22 ]] && MENU_H=22
+
+                                SELECTED_HAT=$(whiptail --title "SPI HAT Selection" --menu \
+                                    "Which LoRa HAT is connected to this Pi?\n\nConfigs from: ${AVAIL_DIR}/" \
+                                    $MENU_H 70 $HAT_COUNT \
+                                    "${HAT_OPTIONS[@]}" \
+                                    3>&1 1>&2 2>&3) || SELECTED_HAT=""
+                            else
+                                # Fallback: numbered text menu
+                                echo "" >&2
+                                echo -e "  ${BOLD}Select your SPI HAT:${NC}" >&2
+                                i=1
+                                for ((idx=0; idx<${#HAT_OPTIONS[@]}; idx+=2)); do
+                                    echo "    $i) ${HAT_OPTIONS[$idx]} - ${HAT_OPTIONS[$((idx+1))]}" >&2
+                                    ((i++))
+                                done
+                                echo "" >&2
+                                read -rp "  Select [1-${HAT_COUNT}]: " hat_choice
+                                if [[ "$hat_choice" =~ ^[0-9]+$ ]] && [[ "$hat_choice" -ge 1 ]] && [[ "$hat_choice" -le "$HAT_COUNT" ]]; then
+                                    idx=$(( (hat_choice - 1) * 2 ))
+                                    SELECTED_HAT="${HAT_OPTIONS[$idx]}"
+                                fi
+                            fi
+
+                            if [[ -n "$SELECTED_HAT" ]]; then
+                                # Copy selected HAT config to config.d/
+                                mkdir -p "$MESHTASTICD_CONFIG_DIR/config.d"
+                                cp "$AVAIL_DIR/${SELECTED_HAT}.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+                                echo -e "  ${GREEN}✓ HAT config installed: ${SELECTED_HAT}.yaml${NC}"
+                                HAT_SELECTED=true
+                            else
+                                echo -e "  ${YELLOW}⚠ No HAT selected - meshtasticd may not start correctly${NC}"
+                                echo -e "  ${YELLOW}  Fix: cp /etc/meshtasticd/available.d/<your-hat>.yaml /etc/meshtasticd/config.d/${NC}"
+                            fi
+                        fi
+                    else
+                        echo -e "  ${YELLOW}⚠ No HAT templates found in ${AVAIL_DIR}/${NC}"
+                        echo -e "  ${YELLOW}  Templates are provided by the meshtasticd package${NC}"
+                        echo -e "  ${YELLOW}  Create config manually in /etc/meshtasticd/config.d/${NC}"
+                    fi
+
+                    # ── Step 3: Ensure config.yaml exists with Webserver section ──
+                    if [[ -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
+                        if grep -q "Webserver:" "$MESHTASTICD_CONFIG_DIR/config.yaml" 2>/dev/null; then
+                            echo -e "  ${GREEN}✓ config.yaml valid (Webserver section present)${NC}"
+                        else
+                            echo -e "  ${YELLOW}⚠ config.yaml missing Webserver section - adding${NC}"
+                            cat >> "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'ADD_WEBSERVER'
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+ADD_WEBSERVER
+                            echo -e "  ${GREEN}✓ Added Webserver section to config.yaml${NC}"
+                        fi
+                    else
+                        echo -e "  ${CYAN}Creating config.yaml...${NC}"
+                        cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'SPI_CONFIG'
+---
+Lora:
+  Module: auto
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 200
+  ConfigDirectory: /etc/meshtasticd/config.d/
+SPI_CONFIG
+                        echo -e "  ${GREEN}✓ Created config.yaml${NC}"
+                    fi
+
+                    # ── Step 4: Create systemd service ──
+                    cat > /etc/systemd/system/meshtasticd.service << NATIVE_SERVICE
 [Unit]
 Description=Meshtastic Daemon (Native SPI)
 Documentation=https://meshtastic.org
@@ -610,7 +762,55 @@ RestartSec=5
 WantedBy=multi-user.target
 NATIVE_SERVICE
 
-                DAEMON_TYPE="native"
+                    systemctl daemon-reload
+
+                    # ── Step 5: Start meshtasticd ──
+                    echo -e "  ${CYAN}Starting meshtasticd...${NC}"
+                    systemctl enable meshtasticd 2>/dev/null
+                    systemctl restart meshtasticd
+
+                    # ── Step 6: Verify service is running ──
+                    echo -e "  ${CYAN}Verifying meshtasticd...${NC}"
+                    sleep 3  # Give it time to start
+
+                    if systemctl is-active --quiet meshtasticd; then
+                        echo -e "  ${GREEN}✓ meshtasticd is running${NC}"
+
+                        # Check TCP port 4403
+                        SPI_VERIFY_OK=false
+                        for attempt in 1 2 3; do
+                            if timeout 2 bash -c "echo >/dev/tcp/localhost/4403" 2>/dev/null; then
+                                echo -e "  ${GREEN}✓ TCP port 4403 responding${NC}"
+                                SPI_VERIFY_OK=true
+                                break
+                            fi
+                            sleep 2
+                        done
+
+                        if ! $SPI_VERIFY_OK; then
+                            echo -e "  ${YELLOW}⚠ Port 4403 not responding yet (may need more time)${NC}"
+                            echo -e "  ${YELLOW}  Check: sudo journalctl -u meshtasticd -f${NC}"
+                        fi
+
+                        # Check HTTP port 9443
+                        if timeout 2 bash -c "echo >/dev/tcp/localhost/9443" 2>/dev/null; then
+                            echo -e "  ${GREEN}✓ Web UI port 9443 responding${NC}"
+                        else
+                            echo -e "  ${YELLOW}⚠ Web UI port 9443 not responding yet${NC}"
+                        fi
+                    else
+                        echo -e "  ${RED}✗ meshtasticd failed to start${NC}"
+                        echo -e "  ${YELLOW}  Check logs: sudo journalctl -u meshtasticd --no-pager -n 20${NC}"
+                        if ! $HAT_SELECTED; then
+                            echo -e "  ${YELLOW}  Likely cause: No HAT config in /etc/meshtasticd/config.d/${NC}"
+                        fi
+                    fi
+
+                    DAEMON_TYPE="native"
+                else
+                    # SPI not enabled / needs reboot - service not started
+                    DAEMON_TYPE=${DAEMON_TYPE:-"spi-pending"}
+                fi
             fi
             ;;
 
