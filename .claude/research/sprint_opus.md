@@ -55,7 +55,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 - [ ] **More diagnostic rules** — expand from 20+ to 50+ symptom patterns
 - [ ] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
-- [ ] **Health scoring** — overall network health 0-100 based on node metrics
+- [x] **Health scoring** — overall network health 0-100 based on node metrics
 - [ ] **Predictive maintenance** — battery drain rate, node dropout patterns
 - [ ] **Knowledge base expansion** — RNS troubleshooting, AREDN basics, RF fundamentals
 
@@ -104,7 +104,8 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] LoRa preset impact visualization — sensitivity, range, airtime, throughput, coverage zones, comparison table
 - [x] Multi-hop path loss — cumulative analysis, relay selection, preset comparison, path reports
 - [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
-- [x] 539 new tests across all modules (1831 total)
+- [x] Network health scoring — unified 0-100 score with connectivity, performance, reliability, freshness
+- [x] 606 new tests across all modules (1898 total)
 
 ---
 
