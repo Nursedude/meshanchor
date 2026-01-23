@@ -46,16 +46,16 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 ### Phase 3: RF Tools Enhancement
 
 - [x] **Coverage prediction with terrain** — SRTM data download + LOS calculation
-- [ ] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
-- [ ] **LoRa preset impact visualization** — show how preset choice affects coverage
-- [ ] **Multi-hop path loss** — calculate cumulative loss across relay chain
-- [ ] **Antenna pattern modeling** — basic dipole/yagi/omni patterns for site planning
+- [x] **Signal strength trending** — collect SNR/RSSI over time, identify patterns
+- [x] **LoRa preset impact visualization** — show how preset choice affects coverage
+- [x] **Multi-hop path loss** — calculate cumulative loss across relay chain
+- [x] **Antenna pattern modeling** — basic dipole/yagi/omni patterns for site planning
 
 ### Phase 4: AI Diagnostics Expansion
 
 - [ ] **More diagnostic rules** — expand from 20+ to 50+ symptom patterns
-- [ ] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
-- [ ] **Health scoring** — overall network health 0-100 based on node metrics
+- [x] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
+- [x] **Health scoring** — overall network health 0-100 based on node metrics
 - [ ] **Predictive maintenance** — battery drain rate, node dropout patterns
 - [ ] **Knowledge base expansion** — RNS troubleshooting, AREDN basics, RF fundamentals
 
@@ -97,7 +97,16 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Bridge integration test — full Mesh→RNS→Mesh round trip, routing, callbacks, edge cases
 - [x] LXMF delivery confirmation — DeliveryTracker with pending/confirmed/failed/timeout states
 - [x] Coverage prediction with terrain — SRTMProvider, LOSAnalyzer, Fresnel zones, diffraction, coverage grid
-- [x] 193 new tests for map + bridge + queue + integration + delivery + terrain pipeline (1485 total)
+- [x] Signal strength trending — SignalTrend, per-node windowed stats, event detection, hourly patterns
+- [x] MQTT subscriber hardening — input validation, payload limits, stale cleanup, reconnect jitter
+- [x] Data pipeline integration test — MQTT → MapCollector → History round trip (22 tests)
+- [x] Error handling audit — all critical paths verified, no bare except, no shell=True, all timeouts
+- [x] LoRa preset impact visualization — sensitivity, range, airtime, throughput, coverage zones, comparison table
+- [x] Multi-hop path loss — cumulative analysis, relay selection, preset comparison, path reports
+- [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
+- [x] Network health scoring — unified 0-100 score with connectivity, performance, reliability, freshness
+- [x] Log parsing patterns — 29 patterns for meshtasticd, rnsd, systemd, MeshForge with structured output
+- [x] 680 new tests across all modules (1972 total)
 
 ---
 
