@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Network Operations Center for the Decentralized Mesh Future</strong>
+  <strong>Network Operations Center for Mesh Networks</strong>
 </p>
 
 <p align="center">
@@ -15,255 +15,158 @@
 </p>
 
 <p align="center">
-  <a href="https://nursedude.substack.com">Follow on Substack</a> |
+  <a href="https://nursedude.substack.com">Development Blog</a> |
   <a href="https://github.com/Nursedude/meshforge/issues">Report Issues</a> |
   <a href="#contributing">Contribute</a>
 </p>
 
-## The Vision
+## What MeshForge Does
 
-**MeshForge is a Network Operations Center (NOC) that unifies fragmented mesh ecosystems into a single, coherent operating environment.**
+MeshForge manages Meshtastic mesh networks from a Raspberry Pi. It installs meshtasticd, configures your radio, monitors your nodes, and provides RF planning tools — all from a terminal interface that works over SSH.
 
-The mesh networking landscape is fractured. Meshtastic, Reticulum, MeshCore, AREDN - each powerful in isolation, but unable to interoperate. Emergency responders can't bridge networks. Communities build redundant infrastructure. The promise of resilient, decentralized communication remains unfulfilled.
+The long-term goal is bridging Meshtastic and Reticulum (RNS) networks. That bridge is in development. Today, MeshForge is a capable NOC for Meshtastic.
 
-MeshForge changes this.
+## What Works Today (v0.4.7-beta)
 
-```mermaid
-flowchart TB
-    subgraph MeshForge NOC
-        direction TB
-        M[Meshtastic<br/>LoRa Mesh] --> GW[Gateway Bridge]
-        MC[MeshCore<br/>Future] -.-> GW
-        GW --> R[Reticulum<br/>RNS Network]
-        GW --> A[AREDN<br/>Future]
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **meshtasticd Install** | Working | Automated install from [official repos](https://meshtastic.org/docs/software/linux/installation/) |
+| **SPI HAT + USB Support** | Working | Configures hardware, enables SPI/I2C |
+| **RF Calculator** | Working | Link budgets, Fresnel zones, path loss, site planning |
+| **Coverage Maps** | Working | Generate SNR-based link quality maps (Folium) |
+| **AI Diagnostics** | Working | Offline troubleshooting with knowledge base |
+| **Node Monitoring** | Working | MQTT subscriber, real-time node tracking |
+| **Service Management** | Working | Start/stop meshtasticd, check status, view logs |
+| **Terminal UI** | Working | raspi-config style — SSH, serial, local |
+| **GTK Desktop** | Working | Full graphical interface with maps and panels |
 
-        GW --> CORE[Unified Node View<br/>AI Diagnostics<br/>Coverage Analysis<br/>Health Monitoring]
-    end
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **RNS Bridge** | In Progress | Transport layer code exists, needs end-to-end testing |
+| **Gateway Routing** | In Progress | Meshtastic-to-RNS message passing, architecture done |
 
-    style GW fill:#4a9eff,stroke:#333,stroke-width:2px,color:#fff
-    style CORE fill:#2d5a3d,stroke:#333,stroke-width:2px,color:#fff
-```
+**"Working"** = You can install and use it without manual intervention.
+**"In Progress"** = Code exists but isn't validated end-to-end yet.
 
-**First open-source tool designed to bridge incompatible mesh protocols.**
+## Hardware Requirements
 
-## Current Capabilities (v0.4.7-beta)
+| Component | Recommended | Minimum |
+|-----------|-------------|---------|
+| **Computer** | Raspberry Pi 4/5 (4GB) | Pi 3B+ or Pi Zero 2W (512MB) |
+| **OS** | Raspberry Pi OS Bookworm (64-bit) | Debian 12+, Ubuntu 22.04+ |
+| **Radio (SPI)** | Meshtoad, MeshAdv-Pi-Hat | Any SX1262/SX1276 SPI HAT |
+| **Radio (USB)** | Heltec V3, T-Beam, RAK4631 | Any Meshtastic-compatible USB device |
+| **Internet** | Required for install only | Not needed for mesh operation |
 
-> **Honesty Note**: We're being transparent about what works TODAY vs what's in progress.
-> See our [development blog](https://nursedude.substack.com) for the full story.
-
-| Feature | Status | What This Means |
-|---------|--------|-----------------|
-| **Meshtastic Integration** | ✅ Working | SPI HAT and USB radio support via meshtasticd |
-| **Install Verification** | ✅ Working | Post-install checks confirm everything works |
-| **AI Diagnostics** | ✅ Working | Offline troubleshooting with knowledge base |
-| **Coverage Maps** | ✅ Working | Generate SNR-based link quality maps |
-| **RF Calculator** | ✅ Working | Link budgets, Fresnel zones, path loss |
-| **Multi-Interface** | ✅ Working | GTK Desktop + Terminal UI (raspi-config style) |
-| **Reticulum Bridge** | 🔨 In Progress | RNS transport layer implemented, testing |
-| **Gateway Bridge** | 🔨 In Progress | Meshtastic↔RNS routing, needs validation |
-| **Health Monitoring** | 🔨 In Progress | Service orchestrator, recently unified |
-
-**What "Working" means**: You can install it, run it, and it does what it says without manual intervention.
-
-**What "In Progress" means**: Code exists, but needs more testing before we call it reliable.
-
-## Roadmap
-
-MeshForge development follows a milestone-based approach. We ship when quality gates pass, not arbitrary dates.
-
-### Phase 1: Foundation (Current)
-**Status: Active Development**
-
-Core NOC functionality for Meshtastic and Reticulum networks.
-
-```
-[####################] Install & Verification     ← Just completed
-[####################] AI Diagnostics Engine      ← Working offline
-[####################] RF Tools & Calculators     ← Solid
-[##################  ] Meshtastic Integration     ← SPI/USB working, config WIP
-[##############      ] Terminal UI Polish          ← Unified to 2 interfaces
-[############        ] RNS/Reticulum Bridge       ← Code exists, needs validation
-[##########          ] Gateway Message Routing    ← Architecture done, untested
-[########            ] GTK4 Desktop Polish        ← Functional, maintenance mode
-```
-
-**Current Focus**: Reliable installation that works first try. Everything else follows.
-
-### Phase 2: Protocol Expansion & Connection Layer
-**Status: Research & Planning**
-
-Integrate additional mesh protocols and improve device connectivity.
-
-| Integration | Protocol | Priority | Notes |
-|-------------|----------|----------|-------|
-| **MeshCore** | Reticulum-based | High | Emerging protocol, RNS-compatible transport |
-| **AREDN** | TCP/IP over ham | Medium | Amateur Radio Emergency Data Network |
-| **QMesh** | Experimental | Low | Research phase |
-
-**Connection Abstraction Layer** *(inspired by [meshtastic/standalone-ui](https://github.com/meshtastic/standalone-ui))*:
-Unified interface for Serial, TCP, and USB connections - same code works regardless of connection type.
-
-| Feature | Description | Reference |
-|---------|-------------|-----------|
-| **DeviceController** | MVC pattern for device communication | standalone-ui ViewController |
-| **Unified Connection Interface** | Serial/TCP/USB abstraction | SerialClient, UARTClient pattern |
-| **Thread-safe Packet Queue** | MeshEnvelope-style encoding | Protobuf packet handling |
-| **Offline Map Caching** | Local tile storage for field use | FileLoader SD card integration |
-
-### Phase 3: Advanced NOC
-**Status: Design Phase**
-
-Enterprise-grade network operations capabilities.
-
-| Feature | Description |
-|---------|-------------|
-| **Wireshark Integration** | Packet capture and protocol analysis |
-| **Network Topology Discovery** | Automatic mesh mapping |
-| **Predictive Analytics** | Link failure prediction using ML |
-| **Multi-Gateway Coordination** | Distributed NOC architecture |
-| **Historical Analysis** | Long-term network health trends |
-| **Internationalization (i18n)** | Multi-language support for global HAM community |
-
-### Phase 4: Ecosystem
-**Status: Future**
-
-| Feature | Description |
-|---------|-------------|
-| **Plugin Architecture** | Third-party protocol adapters |
-| **Federation** | NOC-to-NOC communication |
-| **Mobile Companion** | iOS/Android status app |
-| **LVGL Embedded UI** | Lightweight interface for Pi Zero/embedded deployments |
+**Cost estimate**: Pi 4 (~$55) + SPI HAT (~$35) = ~$90 for a complete node.
 
 ## Quick Start
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
 
-# Option 1: Full NOC stack (recommended)
+# Install meshtasticd + MeshForge (Pi/Debian)
 sudo bash scripts/install_noc.sh
 
-# Option 2: Launch directly (TUI works everywhere)
+# Or launch directly (if meshtasticd already installed)
 sudo python3 src/launcher_tui/main.py
 
-# Option 3: Zero-dependency RF tools
+# RF tools only (no sudo, no radio needed)
 python3 src/standalone.py
 ```
 
-**First Launch:**
+The TUI will show a menu like:
 ```
-MeshForge v0.4.7-beta
+MeshForge v0.4.7-beta - Select an option:
 
-Services:
-  [OK] meshtasticd: running (port 4403)
-  [OK] Hardware: SX1262 detected
-  [--] rnsd: not configured (optional)
-
-Network:
-  [OK] Nodes visible: 3
-
-Ready! [Continue] [Configure] [Troubleshoot]
+  GTK4 Desktop Interface
+  AI Tools
+  System Diagnostics
+  Network Tools
+  RF Tools
+  Site Planner
+  Start Gateway Bridge
+  Node Monitor
+  Meshtasticd Config
+  Service Management
+  Hardware Detection
+  Settings
+  About MeshForge
+  Exit
 ```
+
+## meshtasticd Installation
+
+MeshForge installs meshtasticd from the [official Meshtastic repositories](https://meshtastic.org/docs/software/linux/installation/):
+
+| Platform | Method |
+|----------|--------|
+| **Pi OS 64-bit / Debian 12+** | OpenSUSE Build Service (apt) |
+| **Pi OS 32-bit (armhf)** | Raspbian OBS repository |
+| **Ubuntu 22.04+** | Launchpad PPA (`ppa:meshtastic/beta`) |
+
+Config file: `/etc/meshtasticd/config.yaml`
 
 ## Architecture
 
-MeshForge owns the complete stack from radio hardware to user interface:
+MeshForge manages the service stack and provides user interfaces:
 
-```mermaid
-flowchart TB
-    subgraph UI[User Interfaces]
-        GTK[GTK4 Desktop]
-        TUI[Terminal UI<br/>raspi-config style]
-    end
-
-    subgraph SERVICES[Core Services]
-        MTD[meshtasticd<br/>Radio Control]
-        RNS[rnsd<br/>Reticulum Stack]
-        ORC[Orchestrator<br/>Health Monitor]
-    end
-
-    subgraph BRIDGE[Gateway Bridge]
-        PROTO[Protocol Translation<br/>Meshtastic ↔ RNS]
-    end
-
-    subgraph INTEL[Intelligence Layer]
-        DIAG[Diagnostics Engine]
-        KB[Knowledge Base]
-        AI[Claude AI]
-    end
-
-    UI --> SERVICES
-    SERVICES --> BRIDGE
-    BRIDGE --> INTEL
-
-    style UI fill:#4a9eff,stroke:#333,color:#fff
-    style SERVICES fill:#6b8e23,stroke:#333,color:#fff
-    style BRIDGE fill:#ff6b6b,stroke:#333,color:#fff
-    style INTEL fill:#9b59b6,stroke:#333,color:#fff
+```
++------------------+     +------------------+
+|   GTK Desktop    |     |   Terminal UI    |
+|   (panels/maps)  |     |  (raspi-config)  |
++--------+---------+     +--------+---------+
+         |                         |
+         +------------+------------+
+                      |
+         +------------+------------+
+         |     MeshForge Core      |
+         |  Service management     |
+         |  RF tools, diagnostics  |
+         |  Coverage mapping       |
+         +------------+------------+
+                      |
+         +------------+------------+
+         |                         |
++--------+---------+  +-----------+---------+
+|   meshtasticd    |  |       rnsd          |
+|   (LoRa radio)   |  |  (Reticulum stack)  |
++------------------+  +---------------------+
 ```
 
-**Supported Hardware:**
-
-| Category | Devices |
-|----------|---------|
-| **SPI HATs** | Meshtoad, MeshAdv-Pi-Hat, RAK WisLink, Waveshare SX126x |
-| **USB Radios** | T-Beam, Heltec V3/V4, RAK4631, MeshStick, T-Deck |
-| **Platforms** | Raspberry Pi 5/4/3/Zero 2W, Debian/Ubuntu x86_64 |
+**Two interfaces:**
+- **GTK4 Desktop** — Maps, charts, panels. Requires display.
+- **Terminal UI** — whiptail/dialog menus. Works over SSH, serial, anywhere.
 
 ## Interface Options
 
 | Interface | Command | Use Case |
 |-----------|---------|----------|
-| **Auto-detect** | `sudo python3 src/launcher.py` | Detects environment, recommends best |
-| **Terminal UI** | `sudo python3 src/launcher_tui/main.py` | SSH, headless, serial - works everywhere |
-| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical with maps and panels |
-| **Standalone** | `python3 src/standalone.py` | Zero-dep RF tools and diagnostics |
+| **Auto-detect** | `sudo python3 src/launcher.py` | Display? GTK. No display? TUI. |
+| **Terminal UI** | `sudo python3 src/launcher_tui/main.py` | SSH, headless, serial |
+| **GTK Desktop** | `sudo python3 src/main_gtk.py` | Full graphical |
+| **Standalone** | `python3 src/standalone.py` | Zero-dep RF tools |
 
-## AI Diagnostics
-
-MeshForge includes intelligent troubleshooting that works offline or with Claude AI:
-
-```
-SYMPTOM: Connection refused to meshtasticd
-
-ANALYSIS:
-  [FAIL] Port 4403 not responding
-  [FAIL] systemctl shows inactive
-
-LIKELY CAUSE: Service not running (85% confidence)
-
-SUGGESTED FIXES:
-  1. sudo systemctl start meshtasticd
-  2. Check logs: journalctl -u meshtasticd -n 50
-  3. Verify USB/SPI device connected
-```
-
-| Mode | Capability |
-|------|------------|
-| **Standalone** | Rule-based diagnostics with knowledge base (offline) |
-| **PRO** | Claude AI for natural language queries |
-
-## Who Uses MeshForge?
+## Who Is This For?
 
 | User | Use Case |
 |------|----------|
-| **HAM Operators** | Building resilient off-grid networks |
-| **Emergency Services** | ARES/RACES mesh interoperability |
-| **Off-Grid Communities** | Connecting isolated mesh systems |
-| **Network Engineers** | LoRa protocol research and bridging |
-| **Researchers** | Mesh network behavior analysis |
+| **HAM Operators** | Managing Meshtastic nodes, RF planning |
+| **Emergency Comms** | ARES/RACES mesh network deployment |
+| **Off-Grid Communities** | Running mesh networks without internet |
+| **Tinkerers** | Learning LoRa, building mesh coverage |
+
+## What's Next
+
+1. **Gateway bridge validation** — End-to-end Meshtastic-to-RNS message passing
+2. **Install reliability** — Verify first-run works on fresh Pi
+3. **MeshCore research** — Emerging Reticulum-based protocol
 
 ## Contributing
 
-MeshForge is built by the mesh community, for the mesh community.
-
-**Development Setup:**
 ```bash
-# Install pre-commit hooks
-cp scripts/hooks/pre-commit .git/hooks/
-chmod +x .git/hooks/pre-commit
-
 # Run tests
 python3 -m pytest tests/ -v
 
@@ -271,28 +174,28 @@ python3 -m pytest tests/ -v
 python3 scripts/lint.py --all
 ```
 
-**Key Guidelines:**
-- Use `get_real_user_home()` instead of `Path.home()` (MF001)
-- No `shell=True` in subprocess calls (MF002)
-- Explicit exception handling (MF003)
-- Include timeouts on subprocess calls (MF004)
+**Key rules:**
+- `get_real_user_home()` not `Path.home()` (MF001)
+- No `shell=True` in subprocess (MF002)
+- Explicit exception types (MF003)
+- Timeouts on subprocess calls (MF004)
 
-See `CLAUDE.md` for complete development patterns.
+See [CLAUDE.md](CLAUDE.md) for complete patterns.
 
 **Get Involved:**
-- Follow development on [Substack](https://nursedude.substack.com)
-- Report issues on [GitHub](https://github.com/Nursedude/meshforge/issues)
-- Join [Discussions](https://github.com/Nursedude/meshforge/discussions)
+- [Development Blog](https://nursedude.substack.com)
+- [Issues](https://github.com/Nursedude/meshforge/issues)
+- [Discussions](https://github.com/Nursedude/meshforge/discussions)
 
 ## Resources
 
 | Resource | Link |
 |----------|------|
 | Meshtastic | [meshtastic.org](https://meshtastic.org/docs/) |
+| meshtasticd Install | [Linux Installation](https://meshtastic.org/docs/software/linux/installation/) |
 | Reticulum | [reticulum.network](https://reticulum.network/) |
 | MeshCore | [meshcore.co](https://meshcore.co/) |
 | AREDN | [arednmesh.org](https://www.arednmesh.org/) |
-| NomadNet | [github.com/markqvist/NomadNet](https://github.com/markqvist/NomadNet) |
 
 ## License
 
@@ -303,7 +206,6 @@ GPL-3.0 - See [LICENSE](LICENSE)
 <p align="center">
   <img src="assets/shaka-simple.svg" alt="Shaka" width="32" height="32"/><br>
   <strong>MeshForge</strong><br>
-  Network Operations Center for the Decentralized Mesh Future<br>
   <em>Made with aloha for the mesh community</em><br>
   WH6GXZ | Hawaii
 </p>
