@@ -532,12 +532,14 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 FALLBACK_CONFIG
                         echo -e "  ${GREEN}✓ Created placeholder config.yaml${NC}"
                     fi
@@ -618,12 +620,14 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 REBOOT_CONFIG
                         fi
                         DAEMON_TYPE="spi-reboot-needed"
@@ -717,7 +721,7 @@ REBOOT_CONFIG
                             cat >> "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'ADD_WEBSERVER'
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 ADD_WEBSERVER
                             echo -e "  ${GREEN}✓ Added Webserver section to config.yaml${NC}"
@@ -733,12 +737,14 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
-  MaxNodes: 200
+  MaxNodes: 400
+  MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 SPI_CONFIG
                         echo -e "  ${GREEN}✓ Created config.yaml${NC}"
                     fi
@@ -792,12 +798,8 @@ NATIVE_SERVICE
                             echo -e "  ${YELLOW}  Check: sudo journalctl -u meshtasticd -f${NC}"
                         fi
 
-                        # Check HTTP port 9443
-                        if timeout 2 bash -c "echo >/dev/tcp/localhost/9443" 2>/dev/null; then
-                            echo -e "  ${GREEN}✓ Web UI port 9443 responding${NC}"
-                        else
-                            echo -e "  ${YELLOW}⚠ Web UI port 9443 not responding yet${NC}"
-                        fi
+                        # Web client served on same port (4403)
+                        echo -e "  ${GREEN}✓ Web client available on port 4403${NC}"
                     else
                         echo -e "  ${RED}✗ meshtasticd failed to start${NC}"
                         echo -e "  ${YELLOW}  Check logs: sudo journalctl -u meshtasticd --no-pager -n 20${NC}"
@@ -847,7 +849,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
   RootPath: /usr/share/meshtasticd/web
 
 General:
@@ -1138,10 +1140,10 @@ cat > /usr/local/bin/meshforge-web << 'WEB_CMD'
 # Open or display the meshtasticd web client URL
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LOCAL_IP" ] && LOCAL_IP="localhost"
-URL="https://${LOCAL_IP}:9443"
+URL="http://${LOCAL_IP}:4403"
 
 # Check if meshtasticd web server is responding
-if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/9443" 2>/dev/null; then
+if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/4403" 2>/dev/null; then
     echo "Meshtastic Web Client: ${URL}"
     echo ""
     echo "  Full radio configuration in your browser:"
@@ -1159,7 +1161,7 @@ if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/9443" 2>/dev/null; then
         echo "  ${URL}"
     fi
 else
-    echo "ERROR: meshtasticd web server not responding on port 9443"
+    echo "ERROR: meshtasticd web server not responding on port 4403"
     echo ""
     echo "  Check: sudo systemctl status meshtasticd"
     echo "  Start: sudo systemctl start meshtasticd"
@@ -1346,13 +1348,13 @@ fi
 # Show web client URL if meshtasticd is running (the primary config interface)
 if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
-    if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/9443" 2>/dev/null; then
+    if timeout 2 bash -c "echo >/dev/tcp/${LOCAL_IP}/4403" 2>/dev/null; then
         echo ""
         echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
         echo -e "${GREEN}║  Meshtastic Web Client Ready                              ║${NC}"
         echo -e "${GREEN}╠═══════════════════════════════════════════════════════════╣${NC}"
         echo -e "${GREEN}║                                                           ║${NC}"
-        echo -e "${GREEN}║  ${NC}${BOLD}https://${LOCAL_IP}:9443${NC}${GREEN}                              ║${NC}"
+        echo -e "${GREEN}║  ${NC}${BOLD}http://${LOCAL_IP}:4403${NC}${GREEN}                                ║${NC}"
         echo -e "${GREEN}║                                                           ║${NC}"
         echo -e "${GREEN}║  Configure your radio:                                    ║${NC}"
         echo -e "${GREEN}║    Config → LoRa     (Region, Preset, TX Power)           ║${NC}"

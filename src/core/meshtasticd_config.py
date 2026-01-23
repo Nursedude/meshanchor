@@ -83,7 +83,7 @@ Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
+  Port: 4403
 """
     },
     "rak-hat-spi": {
@@ -209,9 +209,16 @@ class MeshtasticdConfig:
 Logging:
   LogLevel: info
 
-# Server settings (for TCP connections from MeshForge)
+# Server settings (for TCP connections and web client)
 Webserver:
-  Port: 9443
+  Port: 4403
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 400
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
 """
         self.main_config.write_text(config_content)
         logger.info(f"Created main config: {self.main_config}")

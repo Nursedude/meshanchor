@@ -80,7 +80,7 @@ class MeshtasticdConfigMixin:
         except Exception:
             local_ip = "YOUR_PI_IP"
 
-        web_url = f"https://{local_ip}:9443"
+        web_url = f"http://{local_ip}:4403"
 
         self.dialog.msgbox(
             "Meshtastic Web Client",
@@ -91,9 +91,7 @@ class MeshtasticdConfigMixin:
             f"  Config → LoRa → Preset  (LONG_FAST, etc.)\n"
             f"  Config → Channels       (PSK, name)\n\n"
             f"The web client gives full access to all\n"
-            f"meshtasticd settings, maps, and messaging.\n\n"
-            f"Note: Accept the self-signed certificate\n"
-            f"warning in your browser."
+            f"meshtasticd settings, maps, and messaging."
         )
 
     def _meshtasticd_status(self):
