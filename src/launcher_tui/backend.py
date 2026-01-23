@@ -20,6 +20,15 @@ class DialogBackend:
         self.width = 78
         self.height = 22
         self.list_height = 14
+        self._status_bar = None
+
+    def set_status_bar(self, status_bar) -> None:
+        """Set a StatusBar instance for persistent --backtitle display.
+
+        Args:
+            status_bar: StatusBar instance (from status_bar module).
+        """
+        self._status_bar = status_bar
 
     def _detect_backend(self) -> Optional[str]:
         """Detect available dialog backend."""
@@ -51,8 +60,18 @@ class DialogBackend:
         os.close(fd)
 
         try:
+            # Inject --backtitle from status bar if available
+            full_args = list(args)
+            if self._status_bar is not None:
+                try:
+                    backtitle = self._status_bar.get_status_line()
+                    if backtitle:
+                        full_args = ['--backtitle', backtitle] + full_args
+                except Exception:
+                    pass  # Status bar failure must never block UI
+
             # Build command with proper shell quoting
-            cmd_parts = [self.backend] + [str(a) for a in args]
+            cmd_parts = [self.backend] + [str(a) for a in full_args]
             escaped_cmd = ' '.join(shlex.quote(p) for p in cmd_parts)
 
             # Use os.system for proper terminal inheritance

@@ -53,11 +53,11 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 
 ### Phase 4: AI Diagnostics Expansion
 
-- [ ] **More diagnostic rules** — expand from 20+ to 50+ symptom patterns
+- [x] **More diagnostic rules** — expanded from 17 to 58 symptom patterns (7 categories)
 - [x] **Log parsing patterns** — extract common errors from journalctl/meshtasticd logs
 - [x] **Health scoring** — overall network health 0-100 based on node metrics
-- [ ] **Predictive maintenance** — battery drain rate, node dropout patterns
-- [ ] **Knowledge base expansion** — RNS troubleshooting, AREDN basics, RF fundamentals
+- [x] **Predictive maintenance** — battery drain rate, node dropout patterns, reliability scoring
+- [x] **Knowledge base expansion** — 35 entries + 6 guides (RNS, AREDN, RF, MQTT)
 
 ### Phase 5: TUI Polish
 
@@ -106,7 +106,11 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Antenna pattern modeling — dipole, ground plane, Yagi, patch with gain patterns and coverage profiles
 - [x] Network health scoring — unified 0-100 score with connectivity, performance, reliability, freshness
 - [x] Log parsing patterns — 29 patterns for meshtasticd, rnsd, systemd, MeshForge with structured output
-- [x] 680 new tests across all modules (1972 total)
+- [x] Diagnostic rules expansion — 17 → 58 rules (connectivity, hardware, protocol, performance, resource, config, security)
+- [x] RF tools integration test — 20 cross-module tests (preset→multihop→antenna→health→trending→log_parser)
+- [x] Predictive maintenance — battery drain forecasting, dropout patterns, periodicity detection, solar detection
+- [x] Knowledge base expansion — 19→35 entries, 3→6 guides (RNS identity/transport/LXMF, AREDN overview/discovery/services, FSPL/antennas/propagation/ISM/terrain/solar/interference, MQTT)
+- [x] 919 new tests across all modules (2151 total)
 
 ---
 

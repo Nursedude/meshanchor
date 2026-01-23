@@ -92,6 +92,10 @@ class KnowledgeBase:
         self._load_hardware_knowledge()
         self._load_troubleshooting_guides()
         self._load_best_practices()
+        self._load_rns_troubleshooting()
+        self._load_aredn_knowledge()
+        self._load_rf_fundamentals_extended()
+        self._load_mqtt_knowledge()
 
         # Build index
         self._build_keyword_index()
@@ -914,6 +918,859 @@ RELIABILITY:
 4. Regular backups of config files
 """,
             keywords=["best practices", "deployment", "setup", "configuration", "security"],
+            expertise_level="intermediate",
+        ))
+
+    def _load_rns_troubleshooting(self) -> None:
+        """Load RNS troubleshooting knowledge."""
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RETICULUM,
+            title="RNS Identity Management",
+            content="""
+RNS identities are persistent cryptographic keysets stored on disk.
+
+Identity Location:
+- Default: ~/.reticulum/storage/identities/
+- Each identity is a 512-bit Curve25519 keyset
+- Identity hash = first 128 bits of SHA-256 of public key
+- This hash IS the network address
+
+Creating Identity:
+  import RNS
+  identity = RNS.Identity()  # Generates new keypair
+  identity.to_file("/path/to/identity")
+
+Loading Identity:
+  identity = RNS.Identity.from_file("/path/to/identity")
+
+Common Issues:
+1. Lost identity file = lost network address
+   - Other nodes can't reach you at old address
+   - Must re-announce with new identity
+   - Solution: Back up identity files!
+
+2. Duplicate identity (cloned SD card):
+   - Two nodes with same keys = routing confusion
+   - Delete identity on one and restart rnsd
+   - Fresh identity will be generated
+
+3. Identity not announcing:
+   - Check destination is registered
+   - Verify rnsd is running
+   - Check interface connectivity
+
+For MeshForge:
+- Gateway bridge needs stable identity
+- Back up: ~/.reticulum/storage/
+- Identity hash displayed in bridge status
+""",
+            keywords=["identity", "keys", "address", "hash", "announce", "backup", "cryptographic"],
+            related_entries=["RNS Cryptography", "RNS Node Discovery"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RETICULUM,
+            title="RNS Transport and Routing",
+            content="""
+RNS Transport handles multi-hop routing across heterogeneous networks.
+
+Transport Nodes:
+- Regular node: Only communicates with direct neighbors
+- Transport node: Relays traffic between non-adjacent nodes
+- Enable transport: transport_enabled = Yes in config
+
+Path Table:
+- Maintained automatically by Transport layer
+- Entries: destination_hash -> next_hop_interface
+- Paths expire after 2 hours (configurable)
+- Refreshed by announces and traffic
+
+Routing Process:
+1. Source sends packet with destination hash
+2. Each transport node checks path table
+3. If path known: forward to next hop
+4. If unknown: packet is dropped (no flooding)
+
+Path Discovery:
+- Passive: Listen for announces
+- Active: Transport.request_path(destination_hash)
+- Path requests propagate through transport network
+- Response contains full path back
+
+Rate Limiting:
+- Announces rate-limited to prevent flooding
+- Default: 1 announce per 600 seconds per destination
+- Can be adjusted but don't set too low
+
+For MeshForge gateway:
+- Should run as transport node for better connectivity
+- Monitor Transport.path_table for network topology
+- High path_table churn = network instability
+""",
+            keywords=["transport", "routing", "path", "hop", "relay", "table", "forward"],
+            related_entries=["RNS Node Discovery", "RNS Interfaces"],
+            expertise_level="expert",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RETICULUM,
+            title="LXMF Message Protocol",
+            content="""
+LXMF (Lightweight Extensible Message Format) is the messaging layer on RNS.
+
+Message Types:
+- Single packet: Small messages (<500 bytes), delivered directly
+- Resource transfer: Larger messages, uses RNS Links for reliable delivery
+- Propagation: Messages stored at intermediate nodes for offline recipients
+
+Delivery Modes:
+1. Direct: Source → Destination (both must be online)
+2. Propagated: Source → Propagation Node → Destination (async delivery)
+
+Propagation Nodes:
+- Store messages for offline destinations
+- Forward when destination comes online
+- Message TTL (time to live) prevents indefinite storage
+- Multiple propagation nodes for redundancy
+
+Message Structure:
+- Source identity (sender)
+- Destination identity (recipient)
+- Timestamp
+- Content (plaintext or encrypted payload)
+- Signature (proves sender authenticity)
+
+For MeshForge bridge:
+- Meshtastic messages converted to LXMF format
+- DeliveryTracker monitors confirmation callbacks
+- Timeout = assume delivery failed
+- Queue re-attempts automatically
+
+Common Issues:
+- Message never delivered: Destination offline + no propagation node
+- Duplicate messages: Retry logic without deduplication
+- Large messages fail: Split into chunks or use resource transfer
+""",
+            keywords=["lxmf", "message", "delivery", "propagation", "offline", "format"],
+            related_entries=["Reticulum Network Stack", "RNS Transport and Routing"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_guide(TroubleshootingGuide(
+            problem="rnsd_not_starting",
+            description="rnsd daemon fails to start or crashes on startup",
+            prerequisites=["Reticulum installed", "Python 3 available"],
+            steps=[
+                TroubleshootingStep(
+                    instruction="Check rnsd service status",
+                    command="sudo systemctl status rnsd",
+                    expected_result="Active: active (running)",
+                    if_fail="Check error message in status output",
+                ),
+                TroubleshootingStep(
+                    instruction="Check for config file errors",
+                    command="cat ~/.reticulum/config",
+                    expected_result="Valid YAML/config format with interfaces defined",
+                    if_fail="Delete config and restart — fresh config will be generated",
+                ),
+                TroubleshootingStep(
+                    instruction="Verify Python RNS package is installed",
+                    command="python3 -c 'import RNS; print(RNS.__version__)'",
+                    expected_result="Version number printed (e.g., 0.7.3)",
+                    if_fail="Install: pip3 install rns",
+                ),
+                TroubleshootingStep(
+                    instruction="Check for port conflicts on AutoInterface",
+                    command="ss -ulnp | grep 29716",
+                    expected_result="Nothing or only rnsd using the port",
+                    if_fail="Kill conflicting process: kill <PID>",
+                ),
+                TroubleshootingStep(
+                    instruction="Check interface device exists",
+                    command="ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null",
+                    expected_result="Device file exists if using SerialInterface",
+                    if_fail="Connect device and check dmesg for USB errors",
+                ),
+                TroubleshootingStep(
+                    instruction="Try running rnsd in foreground for debug output",
+                    command="rnsd -v",
+                    expected_result="Verbose output showing interface initialization",
+                ),
+            ],
+            related_problems=["no_connection_meshtasticd", "serial_port_issues"],
+        ))
+
+        self._add_guide(TroubleshootingGuide(
+            problem="rns_path_failure",
+            description="Cannot reach RNS destination — path not found",
+            prerequisites=["rnsd running", "At least one interface active"],
+            steps=[
+                TroubleshootingStep(
+                    instruction="Check if destination has announced recently",
+                    command="rnpath <destination_hash>",
+                    expected_result="Path found with hop count",
+                    if_fail="Destination may be offline or out of range",
+                ),
+                TroubleshootingStep(
+                    instruction="Check your interfaces are active",
+                    command="rnstatus",
+                    expected_result="Interfaces shown with RX/TX byte counts",
+                    if_fail="Interface may be misconfigured or disconnected",
+                ),
+                TroubleshootingStep(
+                    instruction="Verify transport nodes are available",
+                    expected_result="At least one transport node should be reachable",
+                    if_fail="Run a transport node yourself or find one on the network",
+                ),
+                TroubleshootingStep(
+                    instruction="Wait for path discovery (especially on mesh)",
+                    expected_result="Paths can take minutes to propagate on LoRa",
+                    if_fail="Try requesting path explicitly: rnpath -r <hash>",
+                ),
+                TroubleshootingStep(
+                    instruction="Check if announce is reaching network",
+                    command="rnid -a",
+                    expected_result="Announce sent successfully",
+                ),
+            ],
+            related_problems=["rnsd_not_starting", "weak_signal"],
+        ))
+
+        self._add_guide(TroubleshootingGuide(
+            problem="rns_interface_config",
+            description="RNS interface configuration issues",
+            prerequisites=["rnsd installed", "Hardware connected"],
+            steps=[
+                TroubleshootingStep(
+                    instruction="Generate fresh default config if needed",
+                    command="rnsd --config-generate",
+                    expected_result="Config file created at ~/.reticulum/config",
+                ),
+                TroubleshootingStep(
+                    instruction="For RNode: verify device detection",
+                    command="rnodeconf -a /dev/ttyUSB0",
+                    expected_result="RNode info displayed",
+                    if_fail="Device may not be an RNode — check firmware",
+                ),
+                TroubleshootingStep(
+                    instruction="For TCP interface: check connectivity",
+                    command="nc -zv <host> <port>",
+                    expected_result="Connection succeeded",
+                    if_fail="Check host:port and network/firewall",
+                ),
+                TroubleshootingStep(
+                    instruction="Verify config syntax (common YAML errors)",
+                    expected_result="Correct indentation (2 spaces), no tabs",
+                    if_fail="YAML is whitespace-sensitive — check indentation",
+                ),
+                TroubleshootingStep(
+                    instruction="Check interface enabled flag",
+                    expected_result="interface_enabled = True for each interface",
+                    if_fail="Set interface_enabled = True and restart rnsd",
+                ),
+            ],
+        ))
+
+    def _load_aredn_knowledge(self) -> None:
+        """Load AREDN (Amateur Radio Emergency Data Network) knowledge."""
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.NETWORKING,
+            title="AREDN Network Overview",
+            content="""
+AREDN (Amateur Radio Emergency Data Network) is a mesh network using
+modified WiFi routers on ham radio frequencies.
+
+Key Differences from Meshtastic:
+- Uses WiFi hardware (802.11), not LoRa
+- Much higher bandwidth (Mbps vs kbps)
+- Shorter range per hop (typically 1-5 km)
+- Requires ham radio license (Technician or higher)
+- Operates on 2.4 GHz, 5.8 GHz, or 3.4 GHz bands
+
+Network Architecture:
+- Nodes are modified WiFi routers (Ubiquiti, Mikrotik, GL.iNet)
+- OLSR routing protocol (automatic mesh routing)
+- Each node has mesh RF + local LAN ports
+- Services hosted on connected computers (chat, VoIP, video)
+
+For MeshForge:
+- AREDN is a MONITORING target, not a bridge
+- MeshForge discovers AREDN nodes via OLSR data
+- Read-only: MeshForge does not inject traffic
+- Useful for operators managing both networks
+
+AREDN API:
+- Each node has web UI at http://localnode.local.mesh
+- OLSR topology: http://node.local.mesh:9090/links
+- Node list: http://node.local.mesh:8080/cgi-bin/sysinfo.json
+""",
+            keywords=["aredn", "amateur radio", "emergency", "wifi", "olsr", "mesh", "ham"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.NETWORKING,
+            title="AREDN Node Discovery",
+            content="""
+MeshForge discovers AREDN nodes through the OLSR protocol.
+
+OLSR (Optimized Link State Routing):
+- Proactive routing protocol for mobile ad-hoc networks
+- Nodes broadcast topology information
+- Each node maintains full network map
+- Uses Multi-Point Relays (MPR) to reduce flooding
+
+Discovery Methods:
+
+1. OLSR Topology Data:
+   - URL: http://<node>:9090/links
+   - Returns JSON with link quality, neighbor list
+   - Updated every 2-10 seconds
+
+2. Node System Info:
+   - URL: http://<node>:8080/cgi-bin/sysinfo.json
+   - Returns: hostname, firmware, services, GPS position
+   - Rich data for map display
+
+3. Network-wide scan:
+   - Query one node's OLSR for all known hosts
+   - Walk the topology to discover entire network
+   - Typically completes in seconds (IP-based, fast)
+
+MeshForge Integration:
+- Polls AREDN nodes periodically (configurable interval)
+- Extracts: node names, positions, link quality, services
+- Displays on map alongside Meshtastic nodes
+- Different icon/color to distinguish network types
+
+Limitations:
+- Must be on same network (direct or tunnel)
+- AREDN nodes that block API access won't be discovered
+- GPS data optional (many AREDN nodes don't have GPS)
+""",
+            keywords=["aredn", "olsr", "discovery", "topology", "scan", "api"],
+            related_entries=["AREDN Network Overview"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.NETWORKING,
+            title="AREDN Services",
+            content="""
+AREDN nodes can host and access various network services.
+
+Common Services:
+- Chat: MeshChat (web-based group messaging)
+- VoIP: Asterisk PBX for voice calls
+- Video: IP cameras and streaming
+- File sharing: FTP/SFTP servers
+- Web: Hosted websites and dashboards
+
+Service Advertisement:
+- Nodes advertise services in OLSR data
+- Format: protocol://host:port/path
+- Other nodes auto-discover available services
+- Accessible from any node on the mesh
+
+For Emergency Communications:
+- Voice: Multiple VoIP servers for redundancy
+- Messaging: MeshChat for text-based coordination
+- Situational Awareness: Shared maps and status boards
+- Infrastructure: DNS, NTP, monitoring
+
+MeshForge can display:
+- Which services are available on which nodes
+- Service uptime/availability
+- Network paths to service nodes
+- This is read-only monitoring
+
+Hardware Needed:
+- Ubiquiti NanoStation (sector), Rocket (backbone)
+- Mikrotik hAP ac3 (node+services)
+- GL.iNet (compact, low power)
+- Any device with AREDN firmware support
+""",
+            keywords=["aredn", "services", "voip", "chat", "meshchat", "video", "emergency"],
+            related_entries=["AREDN Network Overview", "AREDN Node Discovery"],
+            expertise_level="intermediate",
+        ))
+
+    def _load_rf_fundamentals_extended(self) -> None:
+        """Load extended RF fundamentals knowledge."""
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Free Space Path Loss (FSPL)",
+            content="""
+FSPL is the theoretical signal loss over distance in free space.
+
+Formula:
+  FSPL(dB) = 20*log10(d_km) + 20*log10(f_MHz) + 32.44
+
+For LoRa at 915 MHz:
+  FSPL = 20*log10(d_km) + 91.67
+
+Example losses:
+- 1 km: 91.7 dB
+- 5 km: 105.6 dB
+- 10 km: 111.7 dB
+- 50 km: 125.6 dB
+
+Real-World vs FSPL:
+- FSPL assumes perfect free space (no obstacles)
+- Real world adds 10-40 dB from terrain, foliage, buildings
+- Use FSPL as best-case baseline
+- Add margin: 10-20 dB for suburban, 20-40 dB for dense urban
+
+Link Budget:
+  Received Power = TX Power + TX Antenna Gain + RX Antenna Gain - FSPL - Losses
+  Link Margin = Received Power - Receiver Sensitivity
+
+For reliable links:
+- 10+ dB link margin recommended
+- 20+ dB for critical infrastructure links
+""",
+            keywords=["fspl", "path loss", "free space", "distance", "formula", "link budget"],
+            related_entries=["SNR (Signal-to-Noise Ratio)", "Signal Quality Classification"],
+            expertise_level="expert",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Antenna Types for LoRa",
+            content="""
+Different antenna types for different deployment scenarios.
+
+OMNIDIRECTIONAL (360° coverage):
+- Stock whip: 2-3 dBi, basic included antenna
+- Ground plane: 3-5 dBi, requires ground plane radials
+- Collinear: 5-8 dBi, stacked elements, taller
+- Good for: Base stations serving all directions
+
+DIRECTIONAL (focused beam):
+- Yagi-Uda: 8-15 dBi, traditional beam antenna
+- Patch/Panel: 6-12 dBi, flat, low profile
+- Sector: 8-15 dBi, 60-120° beam width
+- Good for: Point-to-point links, known direction
+
+Key Trade-offs:
+- Higher gain = narrower beam (less coverage area)
+- Yagi: Maximum distance, minimum coverage angle
+- Omni: Full coverage, moderate distance
+- Sector: Compromise between the two
+
+Practical Selection:
+- Hilltop relay: Omnidirectional (serve all nodes below)
+- Long backhaul link: Yagi-to-Yagi (maximum range)
+- Coastal base: Sector aimed at coverage area
+- Mobile/portable: Stock whip (compact, omnidirectional)
+
+Gain vs Range (approximate):
+- Every 6 dB gain doubles range
+- 3 dBi → 5 dBi → 10 dBi → 15 dBi
+- 5 km → 7 km → 14 km → 28 km (ideal conditions)
+
+Installation Tips:
+- LoRa uses vertical polarization — mount vertically
+- Keep antenna away from metal surfaces
+- Higher is almost always better
+- Weatherproof all outdoor connections
+""",
+            keywords=["antenna", "yagi", "omnidirectional", "directional", "gain", "beam",
+                     "collinear", "sector", "patch", "dbi"],
+            related_entries=["Antenna Testing", "Fresnel Zone"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="RF Propagation Models",
+            content="""
+Models for predicting signal coverage in real-world environments.
+
+Free Space (Friis):
+- Theoretical baseline, no obstacles
+- FSPL = 20*log10(d) + 20*log10(f) + 32.44
+- Good for: LOS over water, air-to-ground
+
+Two-Ray Ground Reflection:
+- Accounts for ground reflection
+- More accurate than Friis for long distances
+- Breakpoint distance where model transitions
+- Good for: Flat terrain, rural
+
+Hata/Okumura:
+- Urban propagation model
+- Accounts for building clutter
+- Classified: urban, suburban, open
+- Good for: City deployments
+
+Longley-Rice (ITM):
+- Terrain-aware model using elevation data
+- Accounts for diffraction over hills
+- Used by FCC for broadcast coverage
+- Good for: Hilly terrain, mixed environments
+
+Knife-Edge Diffraction:
+- Signal bending over obstacles
+- Loss depends on how deep into Fresnel zone
+- Single obstacle: 6-20 dB additional loss
+- Multiple obstacles: losses are cumulative
+
+For MeshForge:
+- FSPL for quick estimates
+- Terrain model (SRTM) for coverage prediction
+- LOSAnalyzer checks Fresnel zone clearance
+- Real measurements always trump models
+""",
+            keywords=["propagation", "model", "friis", "hata", "terrain", "diffraction",
+                     "prediction", "coverage"],
+            related_entries=["Free Space Path Loss (FSPL)", "Fresnel Zone"],
+            expertise_level="expert",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="ISM Band Regulations",
+            content="""
+ISM (Industrial, Scientific, Medical) bands for license-free LoRa use.
+
+US (FCC Part 15):
+- 902-928 MHz (915 MHz center)
+- Max 1W (30 dBm) conducted power
+- Up to 6 dBi antenna without power reduction
+- Frequency hopping or digital modulation required
+- No duty cycle limit (but fair use applies)
+
+EU (ETSI):
+- 863-870 MHz (868 MHz center)
+- Max 25 mW (14 dBm) ERP at 868.0-868.6 MHz
+- Max 500 mW (27 dBm) at 869.4-869.65 MHz
+- STRICT 1% or 10% duty cycle limits
+- Duty cycle is legally enforced
+
+Australia/NZ (ANZ):
+- 915-928 MHz
+- Max 1W (30 dBm) EIRP
+- Similar to US but EIRP not conducted
+
+Japan:
+- 920-928 MHz
+- Max 20 mW (13 dBm)
+- Very restrictive power limits
+
+Key Terms:
+- Conducted power: Power at antenna connector
+- EIRP: Conducted + antenna gain
+- ERP: EIRP - 2.15 dB (referenced to dipole)
+- Duty cycle: % time transmitting in any hour
+
+For Meshtastic:
+- Region set in firmware determines frequency and power
+- WRONG region = illegal operation
+- Meshtastic enforces regulatory limits in firmware
+""",
+            keywords=["ism", "regulation", "fcc", "etsi", "power", "duty cycle", "legal",
+                     "frequency", "band", "915", "868"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="LoRa Link Budget Calculation",
+            content="""
+Link budget determines whether a radio link is viable.
+
+Full Link Budget Equation:
+  Received Power = TX Power
+                  + TX Antenna Gain
+                  - TX Cable Loss
+                  - Path Loss (FSPL + extras)
+                  + RX Antenna Gain
+                  - RX Cable Loss
+
+  Link Margin = Received Power - Receiver Sensitivity
+
+Example (LONG_FAST, 10 km, stock antennas):
+  TX Power:        +20 dBm
+  TX Antenna:      +2.15 dBi
+  TX Cable:        -1.0 dB
+  FSPL (10km):     -111.7 dB
+  Extra losses:    -10.0 dB (foliage, terrain)
+  RX Antenna:      +2.15 dBi
+  RX Cable:        -1.0 dB
+  ────────────────────────────
+  Received:        -99.4 dBm
+  RX Sensitivity:  -134.5 dBm (SF11, BW250kHz)
+  Link Margin:     +35.1 dB  ← Excellent!
+
+Sensitivity by Preset:
+  SHORT_FAST (SF7):   -124.0 dBm
+  MEDIUM_FAST (SF9):  -130.5 dBm
+  LONG_FAST (SF11):   -134.5 dBm
+  LONG_SLOW (SF12):   -137.0 dBm
+
+Rules of Thumb:
+- Every 6 dB margin ≈ double the reliability
+- Want 10+ dB margin for reliable links
+- 20+ dB margin for infrastructure backbone
+- 0 dB margin = 50/50 whether packet gets through
+""",
+            keywords=["link budget", "calculation", "sensitivity", "margin", "power",
+                     "received", "transmit"],
+            related_entries=["Free Space Path Loss (FSPL)", "LoRa Spreading Factor"],
+            expertise_level="expert",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="RF Interference and Noise",
+            content="""
+Sources of RF interference affecting LoRa performance.
+
+Common Interference Sources:
+- Other LoRa devices on same channel
+- WiFi (2.4 GHz can leak into adjacent bands)
+- Microwave ovens (2.45 GHz)
+- LED lights (switching noise)
+- Solar inverters (switching noise)
+- Industrial equipment
+- Other ISM band users
+
+Noise Floor:
+- Thermal noise: -174 dBm/Hz (fundamental physics)
+- LoRa bandwidth noise: -174 + 10*log10(BW)
+  - 125 kHz BW: -123 dBm noise floor
+  - 250 kHz BW: -120 dBm noise floor
+  - 500 kHz BW: -117 dBm noise floor
+- Man-made noise adds to this baseline
+- Urban: +10-30 dB above thermal
+- Rural: +5-10 dB above thermal
+
+Identifying Interference:
+- Sudden SNR drop without distance change
+- High CRC error rate
+- Intermittent connectivity (interference duty-cycled)
+- Time-of-day patterns (e.g., worse when neighbors home)
+
+Mitigation:
+- Change channel/frequency
+- Use higher spreading factor (more processing gain)
+- Improve antenna filtering (SAW filter)
+- Move antenna away from noise source
+- Shield receiver from nearby interference
+- Use directional antenna (rejects off-axis noise)
+""",
+            keywords=["interference", "noise", "noise floor", "rfi", "emi", "spurious",
+                     "thermal", "snr degradation"],
+            related_entries=["SNR (Signal-to-Noise Ratio)", "Channel Utilization"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Terrain Effects on RF Propagation",
+            content="""
+Terrain significantly affects LoRa signal propagation.
+
+Terrain Types and Losses:
+- Open flat: 0-5 dB extra loss (FSPL-like)
+- Rolling hills: 5-15 dB (diffraction over ridges)
+- Mountains: 15-40 dB (complete blockage possible)
+- Forest/dense vegetation: 5-20 dB (absorption)
+- Urban/buildings: 10-30 dB (reflection, absorption)
+- Water/ocean: -2 to +3 dB (can improve via reflection)
+
+Line of Sight (LOS):
+- LOS = unobstructed path between antennas
+- Critical for reliable LoRa links
+- Check with elevation profile tools
+- Earth's curvature matters for long links:
+  - Visible horizon at 10m height: ~11 km
+  - At 30m height: ~20 km
+  - At 100m height: ~36 km
+
+Diffraction:
+- Signals bend around obstacles (knife-edge effect)
+- Loss depends on clearance ratio to Fresnel zone
+- 0% clearance (on obstacle): ~6 dB loss
+- -50% clearance (behind obstacle): ~16 dB loss
+- Multiple obstacles: losses roughly additive
+
+Practical Tips:
+- Elevation is king — get as high as possible
+- Hilltop relays can cover entire valleys
+- Coastal deployments benefit from water reflection
+- Forest links: mount antennas ABOVE tree canopy
+- Urban: use rooftop placement, not window
+- Check terrain profiles before deploying
+
+MeshForge Coverage Prediction:
+- Uses SRTM elevation data (30m resolution)
+- LOSAnalyzer checks Fresnel zone clearance
+- Coverage grid shows predicted viable areas
+- Accounts for Earth curvature and diffraction
+""",
+            keywords=["terrain", "elevation", "hill", "mountain", "forest", "urban",
+                     "line of sight", "los", "diffraction", "srtm"],
+            related_entries=["Fresnel Zone", "RF Propagation Models"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.RF_FUNDAMENTALS,
+            title="Solar Power for Remote Nodes",
+            content="""
+Solar power design for remote mesh nodes (relay stations, repeaters).
+
+Power Budget (typical Meshtastic node):
+- Sleep mode: 10-30 mA (most of the time)
+- RX active: 50-80 mA
+- TX active: 150-400 mA (depends on power level)
+- Average: ~50-100 mA at 3.7V = 0.2-0.4W
+
+Daily Energy Need:
+- Average 75 mA × 3.7V × 24h = 6.7 Wh/day
+- Add 50% margin for weather: ~10 Wh/day
+
+Solar Panel Sizing:
+- Peak sun hours varies by location
+  - Hawaii: 5-6 hours
+  - Mainland US: 3-5 hours
+  - Northern Europe: 2-3 hours
+- Panel watts × peak hours × 0.7 (efficiency) = daily Wh
+- For 10 Wh/day in Hawaii: 10 / (5.5 × 0.7) = 2.6W panel
+- Recommended: 5-10W panel for reliability margin
+
+Battery Sizing:
+- Want 2-3 days autonomy (cloudy weather)
+- 10 Wh/day × 3 days = 30 Wh storage needed
+- 18650 cell = ~10 Wh (3.7V × 2.6Ah)
+- Need 3 cells for 3-day autonomy
+- Or 1× 18650 with daily solar replenishment
+
+Charge Controllers:
+- TP4056 module: Simple, cheap, single cell
+- CN3065: Solar-optimized, prevents overcharge
+- MPPT controller: Maximum efficiency, more expensive
+- Most T-Beam boards have built-in charging
+
+Installation Tips:
+- Angle panel toward equator at latitude angle
+- Keep panel clean (dust = 20-30% loss)
+- Weatherproof all connections (marine-grade)
+- Mount panel above potential shade paths
+- Use anti-corrosion on all contacts
+- Consider battery temperature (Li-ion hates heat)
+""",
+            keywords=["solar", "power", "battery", "remote", "charging", "panel",
+                     "18650", "repeater", "off-grid"],
+            related_entries=["Common Meshtastic Hardware"],
+            expertise_level="intermediate",
+        ))
+
+    def _load_mqtt_knowledge(self) -> None:
+        """Load MQTT knowledge."""
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.MQTT,
+            title="MQTT for Meshtastic",
+            content="""
+MQTT bridges Meshtastic mesh traffic to the internet.
+
+How it Works:
+- Nodes with MQTT enabled publish messages to broker
+- Other internet-connected nodes subscribe to same topics
+- Effectively extends mesh range via internet backbone
+- Bridge between local RF mesh and global MQTT network
+
+Topic Structure:
+  msh/{region}/{channel_id}/{app}/{node_id}
+  Example: msh/US/2/json/!abc123
+
+Message Format (JSON uplink):
+  {
+    "from": 1234567890,
+    "to": 4294967295,  // broadcast
+    "channel": 0,
+    "type": "text",
+    "payload": "Hello mesh!",
+    "sender": "!abc123",
+    "timestamp": 1706000000
+  }
+
+Common Brokers:
+- mqtt.meshtastic.org (default, public)
+- Your own Mosquitto instance (private, recommended)
+- HiveMQ Cloud (hosted, free tier)
+
+Privacy Considerations:
+- Default channel key is public knowledge
+- Messages on default key are readable by ANYONE
+- Use custom channel key for private communications
+- Self-hosted broker for maximum privacy
+
+For MeshForge:
+- mqtt_subscriber.py connects to broker
+- Parses node positions and telemetry
+- Feeds map data service for visualization
+- Supports TLS for secure connections
+""",
+            keywords=["mqtt", "broker", "publish", "subscribe", "topic", "internet",
+                     "bridge", "json", "meshtastic"],
+            related_entries=["Meshtastic Channels"],
+            expertise_level="intermediate",
+        ))
+
+        self._add_entry(KnowledgeEntry(
+            topic=KnowledgeTopic.MQTT,
+            title="MQTT Broker Setup",
+            content="""
+Setting up your own MQTT broker for mesh privacy and control.
+
+Mosquitto (recommended):
+  # Install
+  sudo apt install mosquitto mosquitto-clients
+
+  # Config: /etc/mosquitto/mosquitto.conf
+  listener 1883
+  allow_anonymous true  # For testing only!
+
+  # With authentication:
+  listener 1883
+  password_file /etc/mosquitto/passwd
+  allow_anonymous false
+
+  # Generate password file:
+  sudo mosquitto_passwd -c /etc/mosquitto/passwd meshforge
+
+TLS Configuration:
+  listener 8883
+  cafile /etc/mosquitto/certs/ca.crt
+  certfile /etc/mosquitto/certs/server.crt
+  keyfile /etc/mosquitto/certs/server.key
+  require_certificate false  # Client certs optional
+
+Testing:
+  # Subscribe to all Meshtastic traffic:
+  mosquitto_sub -h localhost -t 'msh/#' -v
+
+  # Publish test message:
+  mosquitto_pub -h localhost -t 'test' -m 'hello'
+
+For MeshForge MQTT subscriber:
+  Configure in settings:
+  - broker_host: localhost (or remote host)
+  - broker_port: 1883 (or 8883 for TLS)
+  - username/password if authentication enabled
+  - topic_root: msh/US/2/json/#
+""",
+            keywords=["mqtt", "broker", "mosquitto", "setup", "tls", "authentication",
+                     "password", "configuration"],
+            related_entries=["MQTT for Meshtastic"],
             expertise_level="intermediate",
         ))
 
