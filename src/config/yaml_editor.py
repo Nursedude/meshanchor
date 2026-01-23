@@ -702,7 +702,7 @@ class ConfigYamlEditor:
                 self.config['Webserver'] = {}
             web = self.config['Webserver']
 
-            console.print(f"[dim]Current: Port = {web.get('Port', 9443)}, RootPath = {web.get('RootPath', '/usr/share/meshtasticd/web')}[/dim]\n")
+            console.print(f"[dim]Current: Port = {web.get('Port', 4403)}, RootPath = {web.get('RootPath', '/usr/share/meshtasticd/web')}[/dim]\n")
 
             console.print("  [bold]1[/bold]. Set Port")
             console.print("  [bold]2[/bold]. Set Root Path")
@@ -715,7 +715,7 @@ class ConfigYamlEditor:
                 return
 
             if choice == "1":
-                web['Port'] = IntPrompt.ask("HTTPS Port", default=web.get('Port', 9443))
+                web['Port'] = IntPrompt.ask("HTTP Port", default=web.get('Port', 4403))
                 self.modified = True
             elif choice == "2":
                 web['RootPath'] = Prompt.ask("Web Root Path",

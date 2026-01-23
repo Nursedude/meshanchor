@@ -159,16 +159,16 @@ def check_meshtastic_connection():
     except Exception as e:
         print_status("meshtasticd API", False, str(e))
 
-    # Check port 9443 (web interface)
+    # Check port 4403 (web interface - same as API port)
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
-        result = sock.connect_ex(('127.0.0.1', 9443))
+        result = sock.connect_ex(('127.0.0.1', 4403))
         sock.close()
         if result == 0:
-            print_status("meshtasticd web UI", True, "listening on 9443")
+            print_status("meshtasticd web UI", True, "listening on 4403")
         else:
-            print_status("meshtasticd web UI", False, "not reachable on 9443")
+            print_status("meshtasticd web UI", False, "not reachable on 4403")
     except Exception as e:
         print_status("meshtasticd web UI", False, str(e))
 

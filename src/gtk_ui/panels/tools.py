@@ -272,7 +272,7 @@ class ToolsPanel(SystemMonitorMixin, NetworkToolsMixin, NetworkDiagnosticsMixin,
         diag_buttons2.append(rns_port_btn)
 
         mesh_port_btn = Gtk.Button(label="Check Meshtastic Ports")
-        mesh_port_btn.set_tooltip_text("Check meshtasticd ports 4403, 9443")
+        mesh_port_btn.set_tooltip_text("Check meshtasticd port 4403")
         mesh_port_btn.connect("clicked", self._on_check_mesh_ports)
         diag_buttons2.append(mesh_port_btn)
 
