@@ -355,7 +355,8 @@ class PersistentMessageQueue:
 
         # Check for duplicates
         if deduplicate and self._is_duplicate(content_hash, destination):
-            self._stats["deduplicated"] += 1
+            with self._lock:
+                self._stats["deduplicated"] += 1
             logger.debug(f"Duplicate message suppressed: {content_hash}")
             return None
 
@@ -370,7 +371,8 @@ class PersistentMessageQueue:
                 shed = self._shed_overflow(count=max(1, depth - self._max_queue_size + 1))
                 if shed == 0:
                     # Cannot shed anything — all messages are higher priority or in_progress
-                    self._stats["shed_rejected"] += 1
+                    with self._lock:
+                        self._stats["shed_rejected"] += 1
                     logger.warning(
                         f"Queue full ({depth}/{self._max_queue_size}), "
                         f"cannot enqueue message to {destination}"
@@ -403,7 +405,8 @@ class PersistentMessageQueue:
                 data["retry_after"], data["error_message"], data["content_hash"]
             ))
 
-        self._stats["enqueued"] += 1
+        with self._lock:
+            self._stats["enqueued"] += 1
         logger.debug(f"Message enqueued: {msg_id} -> {destination}")
 
         return msg_id
@@ -454,7 +457,8 @@ class PersistentMessageQueue:
             """, (datetime.now().isoformat(), msg_id))
 
             if cursor.rowcount > 0:
-                self._stats["delivered"] += 1
+                with self._lock:
+                    self._stats["delivered"] += 1
                 return True
             return False
 
@@ -479,7 +483,8 @@ class PersistentMessageQueue:
             if message.retry_count >= message.max_retries:
                 # Move to dead letter
                 message.status = MessageStatus.DEAD_LETTER
-                self._stats["failed"] += 1
+                with self._lock:
+                    self._stats["failed"] += 1
                 logger.warning(f"Message {msg_id} moved to dead letter after {message.retry_count} retries")
             else:
                 # Schedule retry with backoff
@@ -487,7 +492,8 @@ class PersistentMessageQueue:
                 delay = self.RETRY_DELAYS[delay_idx]
                 message.retry_after = datetime.now() + timedelta(seconds=delay)
                 message.status = MessageStatus.PENDING
-                self._stats["retried"] += 1
+                with self._lock:
+                    self._stats["retried"] += 1
                 logger.debug(f"Message {msg_id} scheduled for retry in {delay}s")
 
             # Update in database
@@ -567,10 +573,10 @@ class PersistentMessageQueue:
 
     def start_processing(self, interval: float = 1.0) -> None:
         """Start background processing thread."""
-        if self._processing:
-            return
-
-        self._processing = True
+        with self._lock:
+            if self._processing:
+                return
+            self._processing = True
         self._stop_event.clear()
 
         def process_loop():
@@ -671,7 +677,8 @@ class PersistentMessageQueue:
             )
 
             shed_count = len(ids)
-            self._stats["shed"] += shed_count
+            with self._lock:
+                self._stats["shed"] += shed_count
             logger.info(f"Queue overflow: shed {shed_count} low-priority messages")
             return shed_count
 

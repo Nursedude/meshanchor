@@ -138,6 +138,7 @@ class ServiceOrchestrator:
         self.SERVICES = dict(self.__class__.SERVICES)
         self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
+        self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
         self._callbacks: Dict[str, List[Callable]] = {
             'service_started': [],
@@ -654,6 +655,7 @@ class ServiceOrchestrator:
             return
 
         self._running = True
+        self._stop_event.clear()
         self._monitor_thread = threading.Thread(
             target=self._monitor_loop,
             args=(interval,),
@@ -665,6 +667,7 @@ class ServiceOrchestrator:
     def stop_monitoring(self):
         """Stop health monitoring."""
         self._running = False
+        self._stop_event.set()
         if self._monitor_thread:
             self._monitor_thread.join(timeout=5)
         logger.info("Health monitoring stopped")
@@ -714,7 +717,8 @@ class ServiceOrchestrator:
                                 f"{int(self.RESTART_COOLDOWN - (time.time() - last_fail))}s)"
                             )
 
-            time.sleep(interval)
+            if self._stop_event.wait(interval):
+                break
 
     # ─────────────────────────────────────────────────────────────
     # Event System

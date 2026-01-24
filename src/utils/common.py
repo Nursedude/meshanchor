@@ -71,7 +71,7 @@ class SettingsManager:
         self._config_dir = config_dir or CONFIG_DIR
         self._settings_file = self._config_dir / f"{name}.json"
         self._settings: Dict[str, Any] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock allows reset() to call save() under lock
         self.load()
 
     @property
@@ -165,7 +165,7 @@ class SettingsManager:
         """Reset settings to defaults and save."""
         with self._lock:
             self._settings = self._defaults.copy()
-        self.save()
+            self.save()
 
     def all(self) -> Dict[str, Any]:
         """Get a copy of all current settings.

@@ -1100,13 +1100,16 @@ class MeshForgeLauncher(
     def _open_web_client(self):
         """Show/open meshtasticd web client for full radio configuration."""
         import socket
+        local_ip = "localhost"
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
+            try:
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+            finally:
+                s.close()
         except Exception:
-            local_ip = "localhost"
+            pass
 
         web_url = f"https://{local_ip}:9443"
 
@@ -1114,9 +1117,11 @@ class MeshForgeLauncher(
         port_ok = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            port_ok = sock.connect_ex((local_ip, 9443)) == 0
-            sock.close()
+            try:
+                sock.settimeout(2)
+                port_ok = sock.connect_ex((local_ip, 9443)) == 0
+            finally:
+                sock.close()
         except Exception:
             pass
 
@@ -1175,9 +1180,11 @@ class MeshForgeLauncher(
         for port, desc in ports:
             try:
                 s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-                s.settimeout(1)
-                result = s.connect_ex(('127.0.0.1', port))
-                s.close()
+                try:
+                    s.settimeout(1)
+                    result = s.connect_ex(('127.0.0.1', port))
+                finally:
+                    s.close()
                 if result == 0:
                     print(f"  \033[0;32m●\033[0m {port:<6} {desc}")
                 else:
@@ -1189,9 +1196,11 @@ class MeshForgeLauncher(
         print()
         try:
             s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
+            try:
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+            finally:
+                s.close()
             print(f"  Local IP: {local_ip}")
         except Exception:
             print("  Local IP: Unable to determine")
@@ -1201,9 +1210,11 @@ class MeshForgeLauncher(
         print("Connectivity:")
         try:
             s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-            s.settimeout(3)
-            result = s.connect_ex(('8.8.8.8', 53))
-            s.close()
+            try:
+                s.settimeout(3)
+                result = s.connect_ex(('8.8.8.8', 53))
+            finally:
+                s.close()
             if result == 0:
                 print(f"  \033[0;32m●\033[0m Internet (Google DNS)")
             else:
@@ -1297,10 +1308,12 @@ class MeshForgeLauncher(
         import socket
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            if sock.connect_ex(('localhost', 4403)) == 0:
-                devices.append("TCP: localhost:4403 (meshtasticd)")
-            sock.close()
+            try:
+                sock.settimeout(2)
+                if sock.connect_ex(('localhost', 4403)) == 0:
+                    devices.append("TCP: localhost:4403 (meshtasticd)")
+            finally:
+                sock.close()
         except Exception:
             pass
 
