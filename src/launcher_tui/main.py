@@ -341,12 +341,22 @@ class MeshForgeLauncher(
     def _radio_run(self, cmd: list, title: str):
         """Run a meshtastic CLI command and show output in terminal."""
         subprocess.run(['clear'], check=False, timeout=5)
-        print(f"=== {title} ===\n")
-        result = subprocess.run(cmd, timeout=30)
-        if result.returncode != 0:
-            print(f"\nCommand failed (exit {result.returncode})")
-            print("Is meshtasticd running? Check: systemctl status meshtasticd")
-        input("\nPress Enter to continue...")
+        print(f"=== {title} ===")
+        print("(Ctrl+C to abort)\n")
+        try:
+            result = subprocess.run(cmd, timeout=30)
+            if result.returncode != 0:
+                print(f"\nCommand failed (exit {result.returncode})")
+                print("Is meshtasticd running? Check: systemctl status meshtasticd")
+        except subprocess.TimeoutExpired:
+            print("\n\nCommand timed out (30s). Radio may not be connected.")
+            print("Check: systemctl status meshtasticd")
+        except KeyboardInterrupt:
+            print("\n\nAborted.")
+        try:
+            input("\nPress Enter to continue...")
+        except KeyboardInterrupt:
+            print()
 
     def _radio_send_message(self):
         """Send a mesh message via meshtastic CLI."""
@@ -1144,8 +1154,16 @@ class MeshForgeLauncher(
     def _run_terminal_status(self):
         """Run meshforge-status (terminal-native one-shot status)."""
         subprocess.run(['clear'], check=False, timeout=5)
-        subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
-        input("\nPress Enter to continue...")
+        try:
+            subprocess.run([sys.executable, str(self.src_dir / 'cli' / 'status.py')], timeout=30)
+        except subprocess.TimeoutExpired:
+            print("\n\nStatus check timed out (30s).")
+        except KeyboardInterrupt:
+            print("\n\nAborted.")
+        try:
+            input("\nPress Enter to return to menu...")
+        except KeyboardInterrupt:
+            print()
 
     def _run_terminal_network(self):
         """Show network diagnostics directly in terminal."""
@@ -1212,7 +1230,10 @@ class MeshForgeLauncher(
 
         print()
         print("-" * 50)
-        input("\nPress Enter to continue...")
+        try:
+            input("\nPress Enter to return to menu...")
+        except KeyboardInterrupt:
+            print()
 
     def _view_meshforge_logs(self):
         """View MeshForge application logs."""
