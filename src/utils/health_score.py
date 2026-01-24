@@ -39,6 +39,7 @@ Usage:
     print(f"  Freshness:    {snapshot.freshness_score}")
 """
 
+import threading
 import time
 import math
 from collections import deque
@@ -211,6 +212,9 @@ class HealthScorer:
             'freshness': weight_freshness,
         }
 
+        # Thread safety
+        self._lock = threading.Lock()
+
         # Current state
         self._services: Dict[str, ServiceStatus] = {}
         self._nodes: Dict[str, NodeMetrics] = {}
@@ -230,8 +234,9 @@ class HealthScorer:
             running: Whether the service is running.
             critical: Whether this service is critical for operation.
         """
-        self._services[name] = ServiceStatus(
-            name=name, running=running, critical=critical)
+        with self._lock:
+            self._services[name] = ServiceStatus(
+                name=name, running=running, critical=critical)
 
     def report_node_metrics(self, node_id: str,
                            snr: Optional[float] = None,
@@ -249,14 +254,15 @@ class HealthScorer:
             channel_util: Channel utilization percentage (0-100).
             last_seen: Timestamp of last contact (default: now).
         """
-        self._nodes[node_id] = NodeMetrics(
-            node_id=node_id,
-            snr=snr,
-            rssi=rssi,
-            battery_level=battery_level,
-            channel_util=channel_util,
-            last_seen=last_seen or time.time(),
-        )
+        with self._lock:
+            self._nodes[node_id] = NodeMetrics(
+                node_id=node_id,
+                snr=snr,
+                rssi=rssi,
+                battery_level=battery_level,
+                channel_util=channel_util,
+                last_seen=last_seen or time.time(),
+            )
 
     def report_message_stats(self, sent: int = 0, delivered: int = 0,
                             failed: int = 0) -> None:
@@ -267,8 +273,9 @@ class HealthScorer:
             delivered: Successfully delivered messages.
             failed: Failed messages.
         """
-        self._message_stats = MessageStats(
-            sent=sent, delivered=delivered, failed=failed)
+        with self._lock:
+            self._message_stats = MessageStats(
+                sent=sent, delivered=delivered, failed=failed)
 
     def report_error(self, timestamp: Optional[float] = None) -> None:
         """Report an error occurrence for error rate calculation.
@@ -276,8 +283,9 @@ class HealthScorer:
         Args:
             timestamp: When the error occurred (default: now).
         """
-        self._error_window.append(timestamp or time.time())
-        self._error_count += 1
+        with self._lock:
+            self._error_window.append(timestamp or time.time())
+            self._error_count += 1
 
     def _score_connectivity(self) -> Tuple[float, Dict[str, Any]]:
         """Calculate connectivity subscore.
@@ -521,38 +529,39 @@ class HealthScorer:
         Returns:
             HealthSnapshot with overall and per-category scores.
         """
-        conn_score, conn_details = self._score_connectivity()
-        perf_score, perf_details = self._score_performance()
-        rel_score, rel_details = self._score_reliability()
-        fresh_score, fresh_details = self._score_freshness()
+        with self._lock:
+            conn_score, conn_details = self._score_connectivity()
+            perf_score, perf_details = self._score_performance()
+            rel_score, rel_details = self._score_reliability()
+            fresh_score, fresh_details = self._score_freshness()
 
-        # Weighted average
-        overall = (
-            conn_score * self.weights['connectivity'] +
-            perf_score * self.weights['performance'] +
-            rel_score * self.weights['reliability'] +
-            fresh_score * self.weights['freshness']
-        )
+            # Weighted average
+            overall = (
+                conn_score * self.weights['connectivity'] +
+                perf_score * self.weights['performance'] +
+                rel_score * self.weights['reliability'] +
+                fresh_score * self.weights['freshness']
+            )
 
-        snapshot = HealthSnapshot(
-            overall_score=clamp(overall),
-            connectivity_score=conn_score,
-            performance_score=perf_score,
-            reliability_score=rel_score,
-            freshness_score=fresh_score,
-            status=score_to_status(overall),
-            details={
-                'connectivity': conn_details,
-                'performance': perf_details,
-                'reliability': rel_details,
-                'freshness': fresh_details,
-            }
-        )
+            snapshot = HealthSnapshot(
+                overall_score=clamp(overall),
+                connectivity_score=conn_score,
+                performance_score=perf_score,
+                reliability_score=rel_score,
+                freshness_score=fresh_score,
+                status=score_to_status(overall),
+                details={
+                    'connectivity': conn_details,
+                    'performance': perf_details,
+                    'reliability': rel_details,
+                    'freshness': fresh_details,
+                }
+            )
 
-        # Store in history
-        self._history.append(snapshot)
+            # Store in history
+            self._history.append(snapshot)
 
-        return snapshot
+            return snapshot
 
     def get_trend(self, window: int = 10) -> Optional[str]:
         """Determine health trend from recent history.

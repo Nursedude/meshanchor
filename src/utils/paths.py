@@ -155,3 +155,23 @@ class SystemPaths:
         for pattern in ['ttyUSB*', 'ttyACM*', 'ttyAMA*']:
             ports.extend(cls.SERIAL_DEVICES.glob(pattern))
         return sorted(ports)
+
+
+# ============================================================================
+# Atomic file operations
+# ============================================================================
+
+def atomic_write_text(path: Path, content: str) -> None:
+    """Write text to a file atomically using temp-file-then-rename.
+
+    On POSIX systems, os.replace() is atomic, so either the old file
+    remains intact or the new content is fully written. No partial writes.
+
+    Args:
+        path: Target file path.
+        content: Text content to write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    tmp_path.write_text(content)
+    tmp_path.replace(path)  # Atomic on POSIX

@@ -24,6 +24,7 @@ Usage:
 
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -169,6 +170,7 @@ class MaintenancePredictor:
     MAX_STATUS_EVENTS = 1000
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._battery_history: Dict[str, List[BatterySample]] = {}
         self._status_history: Dict[str, List[StatusEvent]] = {}
 
@@ -184,19 +186,20 @@ class MaintenancePredictor:
             voltage: Optional battery voltage
             timestamp: Optional Unix timestamp (defaults to now)
         """
-        if node_id not in self._battery_history:
-            self._battery_history[node_id] = []
+        with self._lock:
+            if node_id not in self._battery_history:
+                self._battery_history[node_id] = []
 
-        sample = BatterySample(
-            timestamp=timestamp or time.time(),
-            percentage=max(0.0, min(100.0, percentage)),
-            voltage=voltage,
-        )
-        self._battery_history[node_id].append(sample)
+            sample = BatterySample(
+                timestamp=timestamp or time.time(),
+                percentage=max(0.0, min(100.0, percentage)),
+                voltage=voltage,
+            )
+            self._battery_history[node_id].append(sample)
 
-        # Trim to max size
-        if len(self._battery_history[node_id]) > self.MAX_BATTERY_SAMPLES:
-            self._battery_history[node_id] = self._battery_history[node_id][-self.MAX_BATTERY_SAMPLES:]
+            # Trim to max size
+            if len(self._battery_history[node_id]) > self.MAX_BATTERY_SAMPLES:
+                self._battery_history[node_id] = self._battery_history[node_id][-self.MAX_BATTERY_SAMPLES:]
 
     def record_status(self, node_id: str, online: bool,
                       timestamp: Optional[float] = None) -> None:
@@ -208,18 +211,19 @@ class MaintenancePredictor:
             online: True if node came online, False if went offline
             timestamp: Optional Unix timestamp (defaults to now)
         """
-        if node_id not in self._status_history:
-            self._status_history[node_id] = []
+        with self._lock:
+            if node_id not in self._status_history:
+                self._status_history[node_id] = []
 
-        event = StatusEvent(
-            timestamp=timestamp or time.time(),
-            online=online,
-        )
-        self._status_history[node_id].append(event)
+            event = StatusEvent(
+                timestamp=timestamp or time.time(),
+                online=online,
+            )
+            self._status_history[node_id].append(event)
 
-        # Trim to max size
-        if len(self._status_history[node_id]) > self.MAX_STATUS_EVENTS:
-            self._status_history[node_id] = self._status_history[node_id][-self.MAX_STATUS_EVENTS:]
+            # Trim to max size
+            if len(self._status_history[node_id]) > self.MAX_STATUS_EVENTS:
+                self._status_history[node_id] = self._status_history[node_id][-self.MAX_STATUS_EVENTS:]
 
     def get_battery_forecast(self, node_id: str) -> BatteryForecast:
         """
@@ -231,7 +235,8 @@ class MaintenancePredictor:
         Returns:
             BatteryForecast with drain rate and time-to-thresholds
         """
-        samples = self._battery_history.get(node_id, [])
+        with self._lock:
+            samples = list(self._battery_history.get(node_id, []))
 
         if len(samples) < MIN_BATTERY_SAMPLES:
             current = samples[-1] if samples else BatterySample(time.time(), 0.0)
@@ -314,7 +319,8 @@ class MaintenancePredictor:
         Returns:
             DropoutPattern with frequency, periodicity, and reliability info
         """
-        events = self._status_history.get(node_id, [])
+        with self._lock:
+            events = list(self._status_history.get(node_id, []))
 
         if len(events) < MIN_STATUS_SAMPLES:
             return DropoutPattern(

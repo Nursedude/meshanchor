@@ -328,15 +328,16 @@ class GPSManager:
             logger.debug(f"Failed to load cached position: {e}")
 
     def _save_position(self, position: Position) -> None:
-        """Persist position to disk.
+        """Persist position to disk atomically.
 
         Args:
             position: Position to save.
         """
         try:
-            self._config_path.parent.mkdir(parents=True, exist_ok=True)
-            self._config_path.write_text(json.dumps(position.to_dict(), indent=2))
-        except OSError as e:
+            from utils.paths import atomic_write_text
+            atomic_write_text(self._config_path,
+                              json.dumps(position.to_dict(), indent=2))
+        except (ImportError, OSError) as e:
             logger.debug(f"Failed to save position: {e}")
 
     def get_position(self, force_refresh: bool = False) -> Optional[Position]:

@@ -92,7 +92,12 @@ def setup_structured_logging(
             from utils.paths import get_real_user_home
             log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
         except ImportError:
-            log_dir = Path.home() / ".config" / "meshforge" / "logs"
+            import os as _os
+            sudo_user = _os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                log_dir = Path(f'/home/{sudo_user}/.config/meshforge/logs')
+            else:
+                log_dir = Path.home() / ".config" / "meshforge" / "logs"
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "meshforge_structured.jsonl"

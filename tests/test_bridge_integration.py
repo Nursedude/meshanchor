@@ -612,8 +612,8 @@ class TestPersistentQueueIntegration:
             pq = PersistentMessageQueue(db_path=str(Path(tmpdir) / "test.db"))
             bridge._persistent_queue = pq
 
-            # Add an enqueue_message method mock since the bridge calls it
-            pq.enqueue_message = MagicMock(return_value="test-id")
+            # Mock enqueue since the bridge calls it on failed delivery
+            pq.enqueue = MagicMock(return_value="test-id")
 
             msg = BridgedMessage(
                 source_network="meshtastic",
@@ -628,7 +628,7 @@ class TestPersistentQueueIntegration:
                 bridge._process_mesh_to_rns(msg)
 
             # Persistent queue should have been called
-            pq.enqueue_message.assert_called_once()
+            pq.enqueue.assert_called_once()
 
     def test_failed_rns_to_mesh_requeues(self, bridge):
         """Failed RNS→Mesh requeues to persistent queue."""
@@ -638,7 +638,7 @@ class TestPersistentQueueIntegration:
             from gateway.message_queue import PersistentMessageQueue
             pq = PersistentMessageQueue(db_path=str(Path(tmpdir) / "test.db"))
             bridge._persistent_queue = pq
-            pq.enqueue_message = MagicMock(return_value="test-id")
+            pq.enqueue = MagicMock(return_value="test-id")
 
             msg = BridgedMessage(
                 source_network="rns",
@@ -649,7 +649,7 @@ class TestPersistentQueueIntegration:
 
             bridge._process_rns_to_mesh(msg)
 
-            pq.enqueue_message.assert_called_once()
+            pq.enqueue.assert_called_once()
 
 
 class TestEdgeCases:

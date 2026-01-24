@@ -178,9 +178,9 @@ class NodeInventory:
             return
 
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            from utils.paths import atomic_write_text
             data = {nid: node.to_dict() for nid, node in self._nodes.items()}
-            self._path.write_text(json.dumps(data, indent=2))
+            atomic_write_text(self._path, json.dumps(data, indent=2))
             self._last_save = now
             self._dirty = False
             logger.debug(f"Saved {len(self._nodes)} nodes to {self._path}")

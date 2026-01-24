@@ -132,6 +132,7 @@ class RNSMeshtasticBridge:
         # Meshtastic interface and connection manager
         self._mesh_interface = None
         self._conn_manager = None
+        self._pubsub_handler = None
 
         # Statistics
         self.stats = {
@@ -694,11 +695,12 @@ class RNSMeshtasticBridge:
                 self._connected_mesh = False
                 return
 
-            # Subscribe to messages
+            # Subscribe to messages (store reference for proper unsubscribe)
             def on_receive(packet, interface):
                 self._on_meshtastic_receive(packet)
 
-            pub.subscribe(on_receive, "meshtastic.receive")
+            self._pubsub_handler = on_receive
+            pub.subscribe(self._pubsub_handler, "meshtastic.receive")
 
             # Get initial node list
             self._update_meshtastic_nodes()
@@ -1156,12 +1158,15 @@ class RNSMeshtasticBridge:
             return False
 
         try:
-            self._persistent_queue.enqueue_message(
-                content=msg.content,
+            self._persistent_queue.enqueue(
+                payload={
+                    'message': msg.content,
+                    'source_id': msg.source_id,
+                    'destination_id': msg.destination_id or "",
+                    'metadata': msg.metadata or {},
+                },
                 destination=destination,
-                source_id=msg.source_id,
-                destination_id=msg.destination_id or "",
-                metadata=msg.metadata or {},
+                priority=MessagePriority.HIGH,
             )
             logger.debug(f"Failed message re-queued to persistent storage ({destination})")
             return True
@@ -1248,7 +1253,9 @@ class RNSMeshtasticBridge:
         # Unsubscribe from pub/sub to avoid stale callbacks
         try:
             from pubsub import pub
-            pub.unsubscribe(self._on_meshtastic_receive, "meshtastic.receive")
+            if self._pubsub_handler:
+                pub.unsubscribe(self._pubsub_handler, "meshtastic.receive")
+                self._pubsub_handler = None
         except Exception:
             pass
 
