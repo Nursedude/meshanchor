@@ -8,6 +8,7 @@ Quick Actions:
     s - Service status (all services at a glance)
     n - Node list (meshtastic --nodes)
     i - Node inventory (tracked nodes)
+    G - GPS position / distance to nodes
     l - Follow logs (journalctl meshtasticd)
     r - Restart meshtasticd
     R - Restart rnsd
@@ -29,6 +30,7 @@ QUICK_ACTIONS = [
     ('s', 'Service status overview', '_qa_service_status'),
     ('n', 'Node list (meshtastic --nodes)', '_qa_node_list'),
     ('i', 'Node inventory (tracked nodes)', '_qa_node_inventory'),
+    ('G', 'GPS position / distance to nodes', '_qa_gps_position'),
     ('l', 'Follow logs (meshtasticd)', '_qa_follow_logs'),
     ('r', 'Restart meshtasticd', '_qa_restart_meshtasticd'),
     ('R', 'Restart rnsd', '_qa_restart_rnsd'),
@@ -283,6 +285,57 @@ class QuickActionsMixin:
             print("Error: Node inventory module not available.")
         except Exception as e:
             logger.debug(f"Node inventory quick action failed: {e}")
+            print(f"Error: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_gps_position(self):
+        """Quick: show GPS position and distance to nodes."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== GPS Position ===\n")
+
+        try:
+            from utils.gps_integration import GPSManager
+            from utils.paths import get_real_user_home
+
+            config_path = get_real_user_home() / ".config" / "meshforge" / "operator_position.json"
+            gps = GPSManager(config_path=config_path)
+
+            # Try to get nodes for distance calculation
+            nodes = []
+            try:
+                from utils.node_inventory import NodeInventory
+                inv_path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+                inv = NodeInventory(path=inv_path)
+                for node in inv.get_all_nodes():
+                    if node.has_position:
+                        nodes.append({
+                            'id': node.node_id,
+                            'name': node.display_name,
+                            'lat': node.lat,
+                            'lon': node.lon,
+                        })
+            except Exception:
+                pass  # Node inventory not available
+
+            # Display position report
+            report = gps.format_position_report(nodes=nodes if nodes else None)
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+
+            # Show gpsd status
+            print()
+            if gps.gpsd_available:
+                print("  gpsd: connected")
+            else:
+                print("  gpsd: not available")
+                if not gps.has_position:
+                    print("  Tip: Set position manually in Tools > GPS")
+
+        except ImportError:
+            print("Error: GPS integration module not available.")
+        except Exception as e:
+            logger.debug(f"GPS quick action failed: {e}")
             print(f"Error: {e}")
 
         print()
