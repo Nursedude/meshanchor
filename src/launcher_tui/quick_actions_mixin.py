@@ -15,6 +15,7 @@ Quick Actions:
     p - Port/network check
     g - Generate status report
     d - Run diagnostics
+    c - Channel activity scan
 """
 
 import sys
@@ -37,6 +38,7 @@ QUICK_ACTIONS = [
     ('p', 'Port / network check', '_qa_port_check'),
     ('g', 'Generate status report', '_qa_generate_report'),
     ('d', 'Run diagnostics', '_qa_run_diagnostics'),
+    ('c', 'Channel activity scan', '_qa_channel_scan'),
 ]
 
 
@@ -370,6 +372,36 @@ class QuickActionsMixin:
         except ImportError:
             print("Error: Diagnostic engine not available.")
         except Exception as e:
+            print(f"Error: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_channel_scan(self):
+        """Quick: show channel activity scan."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Channel Activity ===\n")
+
+        try:
+            from utils.channel_scan import ChannelMonitor
+
+            monitor = ChannelMonitor()
+
+            # Try to query device for channel config
+            channels = monitor.query_device_channels()
+            if not channels:
+                print("  (Could not query device channels)")
+                print("  Showing activity from MQTT monitoring only.")
+                print()
+
+            # Display activity report
+            report = monitor.get_activity_report()
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+
+        except ImportError:
+            print("Error: Channel scan module not available.")
+        except Exception as e:
+            logger.debug(f"Channel scan quick action failed: {e}")
             print(f"Error: {e}")
 
         print()

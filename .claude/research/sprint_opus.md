@@ -72,7 +72,7 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] **Offline-first data sync** — queue telemetry when internet is down, sync when back
 - [x] **GPS integration** — operator position on map, distance to nodes
 - [x] **Emergency mode** — simplified EMCOMM menu (broadcast, direct, SOS beacon, status)
-- [ ] **Channel scan** — detect active channels in range
+- [x] **Channel scan** — detect active channels in range
 - [x] **Node inventory** — persistent registry with search, stats, pruning, JSON/markdown export
 
 ---
@@ -119,8 +119,9 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Emergency mode — EMCOMM menu (broadcast, direct, SOS beacon, node status, position, messages)
 - [x] Offline-first data sync — SQLite queue, connectivity monitor, pluggable handlers, retry/dead-letter
 - [x] GPS integration — gpsd reader, haversine/bearing, distance-to-nodes, position persistence
-- [x] Quick actions expansion — node inventory ('i') and GPS position ('G') shortcuts added
-- [x] 1282 new tests across all modules (2517 total)
+- [x] Quick actions expansion — node inventory ('i'), GPS ('G'), channel scan ('c') shortcuts
+- [x] Channel scan — activity monitor with per-channel rates, type breakdown, MQTT topic detection
+- [x] 1344 new tests across all modules (2579 total)
 
 ---
 
