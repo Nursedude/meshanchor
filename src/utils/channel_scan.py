@@ -149,10 +149,13 @@ class ChannelActivity:
         else:
             self.other_count += 1
 
-        # Add to timestamps (keep last hour only)
+        # Add to timestamps (keep last hour only, capped for memory safety)
         self.timestamps.append(now)
         cutoff = now - RECENT_WINDOW_SEC
         self.timestamps = [t for t in self.timestamps if t > cutoff]
+        # Cap at 5000 entries to prevent memory growth under extreme load
+        if len(self.timestamps) > 5000:
+            self.timestamps = self.timestamps[-5000:]
 
     def reset(self) -> None:
         """Reset all activity counters."""

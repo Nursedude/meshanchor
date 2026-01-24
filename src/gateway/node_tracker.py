@@ -807,8 +807,8 @@ instance_control_port = 37429
                 'nodes': nodes_data
             }
 
-            with open(cache_file, 'w') as f:
-                json.dump(cache_data, f, indent=2)
+            from utils.paths import atomic_write_text
+            atomic_write_text(cache_file, json.dumps(cache_data, indent=2))
 
             # Also save to /tmp for web API access (cross-process sharing)
             try:
@@ -816,7 +816,11 @@ instance_control_port = 37429
                 if os.path.islink(tmp_path):
                     logger.warning(f"Refusing to write to symlink: {tmp_path}")
                 else:
-                    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                    fd = os.open(
+                        tmp_path,
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                        0o644
+                    )
                     with os.fdopen(fd, 'w') as f:
                         json.dump(cache_data, f)
             except Exception as e:
