@@ -370,6 +370,7 @@ class UnifiedNodeTracker:
     """
 
     OFFLINE_THRESHOLD = 3600  # 1 hour
+    MAX_NODES = 10000  # Prevent unbounded memory growth
 
     @classmethod
     def get_cache_file(cls) -> Path:
@@ -381,6 +382,7 @@ class UnifiedNodeTracker:
         self._lock = threading.RLock()
         self._callbacks: List[Callable] = []
         self._running = False
+        self._stop_event = threading.Event()
         self._cleanup_thread = None
         self._rns_thread = None
         self._reticulum = None
@@ -392,6 +394,7 @@ class UnifiedNodeTracker:
     def start(self):
         """Start the node tracker"""
         self._running = True
+        self._stop_event.clear()
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
 
@@ -530,7 +533,8 @@ instance_control_port = 37429
         last_check = 0
 
         while self._running:
-            time.sleep(1)
+            if self._stop_event.wait(1):
+                break
 
             # Periodic check for new RNS destinations
             current_time = time.time()
@@ -569,6 +573,7 @@ instance_control_port = 37429
         """
         logger.info("Stopping node tracker...")
         self._running = False
+        self._stop_event.set()
 
         # Wait for cleanup thread to finish
         if hasattr(self, '_cleanup_thread') and self._cleanup_thread and self._cleanup_thread.is_alive():
@@ -593,10 +598,34 @@ instance_control_port = 37429
                 # Merge data
                 self._merge_node(existing, node)
             else:
+                # Evict oldest offline nodes if at capacity
+                if len(self._nodes) >= self.MAX_NODES:
+                    self._evict_stale_nodes()
                 self._nodes[node.id] = node
                 logger.debug(f"Added new node: {node.id} ({node.name})")
 
             self._notify_callbacks("update", node)
+
+    def _evict_stale_nodes(self):
+        """Evict oldest offline nodes to stay within MAX_NODES. Called under _lock."""
+        offline = [
+            (nid, n) for nid, n in self._nodes.items()
+            if not n.is_online
+        ]
+        if not offline:
+            # All online — evict oldest by last_seen
+            offline = list(self._nodes.items())
+
+        # Sort by last_seen ascending (oldest first)
+        offline.sort(key=lambda x: x[1].last_seen or datetime.min)
+
+        # Evict 10% to avoid frequent evictions
+        evict_count = max(1, len(self._nodes) // 10)
+        for nid, _ in offline[:evict_count]:
+            del self._nodes[nid]
+
+        if evict_count > 0:
+            logger.info(f"Evicted {evict_count} stale nodes (capacity: {self.MAX_NODES})")
 
     def remove_node(self, node_id: str):
         """Remove a node"""
@@ -736,7 +765,8 @@ instance_control_port = 37429
     def _cleanup_loop(self):
         """Periodically mark offline nodes and save cache"""
         while self._running:
-            time.sleep(60)
+            if self._stop_event.wait(60):
+                break
 
             with self._lock:
                 now = datetime.now()

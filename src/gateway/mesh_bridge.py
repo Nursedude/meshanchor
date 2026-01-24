@@ -57,6 +57,7 @@ class MeshtasticPresetBridge:
 
         # State
         self._running = False
+        self._stop_event = threading.Event()
         self._primary_connected = False
         self._secondary_connected = False
 
@@ -83,6 +84,7 @@ class MeshtasticPresetBridge:
         self._status_callbacks = []
 
         # Statistics
+        self._stats_lock = threading.Lock()
         self.stats = {
             'messages_primary_to_secondary': 0,
             'messages_secondary_to_primary': 0,
@@ -114,6 +116,7 @@ class MeshtasticPresetBridge:
         logger.info(f"  Secondary: {self.bridge_config.secondary.preset} @ {self.bridge_config.secondary.host}:{self.bridge_config.secondary.port}")
 
         self._running = True
+        self._stop_event.clear()
         self.stats['start_time'] = datetime.now()
 
         # Start connection threads
@@ -158,6 +161,7 @@ class MeshtasticPresetBridge:
 
         logger.info("Stopping mesh bridge...")
         self._running = False
+        self._stop_event.set()
 
         # Disconnect interfaces
         self._disconnect_primary()
@@ -217,12 +221,14 @@ class MeshtasticPresetBridge:
                 if not self._primary_connected:
                     self._connect_primary()
 
-                time.sleep(1)
+                if self._stop_event.wait(1):
+                    break
 
             except Exception as e:
                 logger.error(f"Primary loop error: {e}")
                 self._primary_connected = False
-                time.sleep(5)
+                if self._stop_event.wait(5):
+                    break
 
     def _secondary_loop(self):
         """Main loop for secondary Meshtastic connection"""
@@ -231,12 +237,14 @@ class MeshtasticPresetBridge:
                 if not self._secondary_connected:
                     self._connect_secondary()
 
-                time.sleep(1)
+                if self._stop_event.wait(1):
+                    break
 
             except Exception as e:
                 logger.error(f"Secondary loop error: {e}")
                 self._secondary_connected = False
-                time.sleep(5)
+                if self._stop_event.wait(5):
+                    break
 
     def _bridge_loop(self):
         """Main loop for forwarding messages"""
@@ -260,13 +268,15 @@ class MeshtasticPresetBridge:
 
             except Exception as e:
                 logger.error(f"Bridge loop error: {e}")
-                time.sleep(1)
+                if self._stop_event.wait(1):
+                    break
 
     def _cleanup_loop(self):
         """Cleanup stale dedup entries"""
         while self._running:
             try:
-                time.sleep(10)
+                if self._stop_event.wait(10):
+                    break
 
                 cutoff = datetime.now() - timedelta(seconds=self.bridge_config.dedup_window_sec)
 

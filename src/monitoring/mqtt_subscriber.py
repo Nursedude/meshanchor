@@ -151,6 +151,7 @@ class MQTTNodelessSubscriber:
         self._cleanup_interval: int = 600  # Check every 10 minutes
 
         # Stats
+        self._stats_lock = threading.Lock()
         self._stats = {
             "messages_received": 0,
             "messages_rejected": 0,
@@ -372,7 +373,8 @@ class MQTTNodelessSubscriber:
             if self._stop_event.is_set():
                 break
 
-            self._stats["reconnect_attempts"] += 1
+            with self._stats_lock:
+                self._stats["reconnect_attempts"] += 1
 
             if self._connect():
                 logger.info("Reconnection successful")
@@ -388,12 +390,14 @@ class MQTTNodelessSubscriber:
 
             # Payload size defense
             if len(payload) > MAX_PAYLOAD_BYTES:
-                self._stats["messages_rejected"] += 1
+                with self._stats_lock:
+                    self._stats["messages_rejected"] += 1
                 logger.debug(f"Rejected oversized payload: {len(payload)} bytes")
                 return
 
-            self._stats["messages_received"] += 1
-            self._stats["last_message_time"] = datetime.now()
+            with self._stats_lock:
+                self._stats["messages_received"] += 1
+                self._stats["last_message_time"] = datetime.now()
 
             # Try to decode JSON payload
             if "/json/" in topic:
@@ -473,7 +477,8 @@ class MQTTNodelessSubscriber:
         with self._nodes_lock:
             if node_id not in self._nodes:
                 self._nodes[node_id] = MQTTNode(node_id=node_id)
-                self._stats["nodes_discovered"] += 1
+                with self._stats_lock:
+                    self._stats["nodes_discovered"] += 1
             else:
                 self._nodes[node_id].last_seen = datetime.now()
             return self._nodes[node_id]
@@ -667,7 +672,8 @@ class MQTTNodelessSubscriber:
                 del self._nodes[node_id]
 
         if stale_ids:
-            self._stats["nodes_pruned"] += len(stale_ids)
+            with self._stats_lock:
+                self._stats["nodes_pruned"] += len(stale_ids)
             logger.debug(f"Pruned {len(stale_ids)} stale nodes")
 
     # Public API
