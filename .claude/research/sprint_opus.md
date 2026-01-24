@@ -64,13 +64,13 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] **Menu reorganization** — group by workflow (Monitor → Operate → Networks → Tools)
 - [x] **First-run wizard** — detect fresh install, guide through radio setup
 - [x] **Status bar** — persistent backtitle showing: services, bridge status, node count
-- [x] **Quick actions** — single-key shortcuts (s/n/l/r/R/p/g/d) for common operations
+- [x] **Quick actions** — single-key shortcuts (s/n/i/G/l/r/R/p/g/d) for common operations
 - [x] **Export/report** — generate network status report (markdown, all subsystems)
 
 ### Phase 6: Field Operations
 
-- [ ] **Offline-first data sync** — queue telemetry when internet is down, sync when back
-- [ ] **GPS integration** — operator position on map, distance to nodes
+- [x] **Offline-first data sync** — queue telemetry when internet is down, sync when back
+- [x] **GPS integration** — operator position on map, distance to nodes
 - [x] **Emergency mode** — simplified EMCOMM menu (broadcast, direct, SOS beacon, status)
 - [ ] **Channel scan** — detect active channels in range
 - [x] **Node inventory** — persistent registry with search, stats, pruning, JSON/markdown export
@@ -117,7 +117,10 @@ GTK → frozen (exists for moc2 monitor testing, not developed)
 - [x] Code review hardening — socket leak fix, silent exception logging, ASCII safety, unused imports
 - [x] Node inventory — persistent registry with search, stats, pruning, JSON persistence, markdown export
 - [x] Emergency mode — EMCOMM menu (broadcast, direct, SOS beacon, node status, position, messages)
-- [x] 1112 new tests across all modules (2347 total)
+- [x] Offline-first data sync — SQLite queue, connectivity monitor, pluggable handlers, retry/dead-letter
+- [x] GPS integration — gpsd reader, haversine/bearing, distance-to-nodes, position persistence
+- [x] Quick actions expansion — node inventory ('i') and GPS position ('G') shortcuts added
+- [x] 1282 new tests across all modules (2517 total)
 
 ---
 
