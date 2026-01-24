@@ -29,10 +29,15 @@ def get_real_user_home() -> Path:
     When running with sudo, Path.home() returns /root. This function
     checks for SUDO_USER to get the original user's home.
     """
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
-        return Path(f'/home/{sudo_user}')
-    return Path.home()
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        candidate = Path(f'/home/{sudo_user}')
+        return candidate
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        candidate = Path(f'/home/{logname}')
+        return candidate
+    return Path('/root')
 
 # VTE 2.91 is the GIR binding version - works with both GTK3 and GTK4
 # The library (libvte-2.91-gtk4-0) provides GTK4 support

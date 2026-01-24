@@ -135,8 +135,11 @@ class NodeMonitor:
         self._lock = threading.Lock()
         self._state = ConnectionState.DISCONNECTED
         self._running = False
+        self._stop_event = threading.Event()
         self._reconnect_thread = None
         self._holds_global_lock = False  # Track if we hold the global connection lock
+        self.MAX_NODES = 5000
+        self.STALE_NODE_HOURS = 72
 
         # Callbacks
         self.on_node_update: Optional[Callable[[NodeInfo], None]] = None
@@ -287,6 +290,7 @@ class NodeMonitor:
             timeout: Seconds to wait for threads to finish
         """
         self._running = False
+        self._stop_event.set()  # Wake any sleeping reconnect waits
         self.state = ConnectionState.DISCONNECTED  # Set state first to prevent reconnect attempts
 
         # Wait for reconnect thread to finish if running
@@ -469,6 +473,10 @@ class NodeMonitor:
                 with self._lock:
                     is_new = node_info.node_id not in self._nodes
                     self._nodes[node_info.node_id] = node_info
+                    needs_cleanup = len(self._nodes) > self.MAX_NODES
+
+                if needs_cleanup:
+                    self._cleanup_stale_nodes()
 
                 if is_new and self.on_node_added:
                     self.on_node_added(node_info)
@@ -486,17 +494,45 @@ class NodeMonitor:
         self.state = ConnectionState.RECONNECTING
 
         def reconnect_loop():
+            import random
             delay = 1
             max_delay = 30
             while self._running and self._state == ConnectionState.RECONNECTING:
                 logger.info(f"Attempting reconnect in {delay}s...")
-                time.sleep(delay)
+                if self._stop_event.wait(delay):
+                    break  # Stop event set, exit cleanly
                 if self.connect(timeout=5):
                     break
-                delay = min(delay * 2, max_delay)
+                delay = min(delay * (1.5 + random.random() * 0.5), max_delay)
 
         self._reconnect_thread = threading.Thread(target=reconnect_loop, daemon=True)
         self._reconnect_thread.start()
+
+    def _cleanup_stale_nodes(self) -> int:
+        """Remove nodes not heard from in STALE_NODE_HOURS. Returns count removed."""
+        now = datetime.now()
+        cutoff_seconds = self.STALE_NODE_HOURS * 3600
+        removed = 0
+        with self._lock:
+            stale = [
+                nid for nid, n in self._nodes.items()
+                if n.last_heard and (now - n.last_heard).total_seconds() > cutoff_seconds
+            ]
+            for nid in stale:
+                del self._nodes[nid]
+                removed += 1
+            # Hard cap to prevent unbounded growth
+            if len(self._nodes) > self.MAX_NODES:
+                sorted_nodes = sorted(
+                    self._nodes.items(),
+                    key=lambda x: x[1].last_heard or datetime.min
+                )
+                for nid, _ in sorted_nodes[:len(self._nodes) - self.MAX_NODES]:
+                    del self._nodes[nid]
+                    removed += 1
+        if removed:
+            logger.info(f"Cleaned up {removed} stale nodes")
+        return removed
 
     def get_nodes(self, refresh: bool = False) -> List[NodeInfo]:
         """Get all known nodes

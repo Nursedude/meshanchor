@@ -19,6 +19,7 @@ Usage:
 
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
@@ -1847,11 +1848,13 @@ For MeshForge MQTT subscriber:
 
 # Singleton instance
 _kb: Optional[KnowledgeBase] = None
+_kb_lock = threading.Lock()
 
 
 def get_knowledge_base() -> KnowledgeBase:
-    """Get the global knowledge base instance."""
+    """Get the global knowledge base instance (thread-safe)."""
     global _kb
-    if _kb is None:
-        _kb = KnowledgeBase()
-    return _kb
+    with _kb_lock:
+        if _kb is None:
+            _kb = KnowledgeBase()
+        return _kb

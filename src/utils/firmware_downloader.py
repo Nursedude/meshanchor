@@ -24,10 +24,15 @@ try:
 except ImportError:
     def get_real_user_home():
         import os
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user:
-            return Path(f"/home/{sudo_user}")
-        return Path.home()
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            candidate = Path(f"/home/{sudo_user}")
+            return candidate
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            candidate = Path(f"/home/{logname}")
+            return candidate
+        return Path('/root')
 
 
 @dataclass
