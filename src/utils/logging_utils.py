@@ -122,7 +122,7 @@ def setup_logging(
     """
     Configure the MeshForge logging system.
 
-    Call this once at application startup (in launcher.py or main_gtk.py).
+    Call this once at application startup (in launcher.py or launcher_tui/main.py).
 
     Args:
         log_level: Default log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -381,33 +381,3 @@ def log_exception(logger: logging.Logger, msg: str = "Unexpected error") -> None
     logger.error(traceback.format_exc())
 
 
-def create_panel_logger(panel_name: str) -> logging.Logger:
-    """
-    Create a logger specifically for GTK panels with standard naming.
-
-    Args:
-        panel_name: Name of the panel (e.g., "hamclock", "radio_config")
-
-    Returns:
-        Configured logger
-    """
-    logger = get_logger(f"gtk_ui.panels.{panel_name}")
-    logger.setLevel(_component_levels.get(panel_name.lower(), _global_log_level))
-    return logger
-
-
-# Utility function for debugging button connections
-def log_signal_connection(widget: Any, signal_name: str, handler_name: str) -> None:
-    """
-    Log when a signal is connected to help debug button/event issues.
-
-    Usage:
-        button.connect("clicked", self._on_click)
-        log_signal_connection(button, "clicked", "_on_click")
-    """
-    logger = logging.getLogger("gtk_ui.signals")
-    widget_type = type(widget).__name__
-    widget_label = ""
-    if hasattr(widget, 'get_label'):
-        widget_label = f" ('{widget.get_label()}')"
-    logger.debug(f"Connected: {widget_type}{widget_label}.{signal_name} -> {handler_name}")
