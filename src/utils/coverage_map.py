@@ -26,9 +26,8 @@ Usage:
 import json
 import logging
 import math
-import os
-import hashlib
 import urllib.request
+from html import escape as html_escape
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -307,7 +306,9 @@ def download_tile(url: str, cache_path: Path) -> bool:
     """Download a tile to cache."""
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(url, str(cache_path))
+        req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge/1.0'})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            cache_path.write_bytes(response.read())
         return True
     except Exception as e:
         logger.debug(f"Failed to download tile: {e}")
@@ -845,21 +846,26 @@ class CoverageMapGenerator:
         status = "Online" if node.is_online else "Offline"
         status_color = "green" if node.is_online else "gray"
 
+        # Escape all external data to prevent XSS
+        name = html_escape(str(node.name)) if node.name else "Unknown"
+        node_id = html_escape(str(node.id)) if node.id else ""
+        network = html_escape(str(node.network).upper()) if node.network else ""
+
         html = f"""
         <div style="font-family: sans-serif; min-width: 200px;">
-            <h4 style="margin: 0 0 8px 0;">{node.name}</h4>
+            <h4 style="margin: 0 0 8px 0;">{name}</h4>
             <div style="color: {status_color}; font-weight: bold; margin-bottom: 8px;">
                 ● {status}
             </div>
             <table style="font-size: 12px; border-collapse: collapse;">
-                <tr><td><b>ID:</b></td><td>{node.id}</td></tr>
-                <tr><td><b>Network:</b></td><td>{node.network.upper()}</td></tr>
+                <tr><td><b>ID:</b></td><td>{node_id}</td></tr>
+                <tr><td><b>Network:</b></td><td>{network}</td></tr>
         """
 
         if node.hardware:
-            html += f'<tr><td><b>Hardware:</b></td><td>{node.hardware}</td></tr>'
+            html += f'<tr><td><b>Hardware:</b></td><td>{html_escape(str(node.hardware))}</td></tr>'
         if node.role:
-            html += f'<tr><td><b>Role:</b></td><td>{node.role}</td></tr>'
+            html += f'<tr><td><b>Role:</b></td><td>{html_escape(str(node.role))}</td></tr>'
         if node.snr is not None:
             html += f'<tr><td><b>SNR:</b></td><td>{node.snr:.1f} dB</td></tr>'
         if node.rssi is not None:
@@ -869,7 +875,7 @@ class CoverageMapGenerator:
         if node.altitude is not None:
             html += f'<tr><td><b>Altitude:</b></td><td>{node.altitude:.0f}m</td></tr>'
         if node.last_seen:
-            html += f'<tr><td><b>Last seen:</b></td><td>{node.last_seen}</td></tr>'
+            html += f'<tr><td><b>Last seen:</b></td><td>{html_escape(str(node.last_seen))}</td></tr>'
         if node.via_mqtt:
             html += '<tr><td><b>Via:</b></td><td>MQTT</td></tr>'
 

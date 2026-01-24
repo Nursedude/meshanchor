@@ -8,7 +8,6 @@ import threading
 import time
 import logging
 import subprocess
-import os
 from queue import Queue, Empty, Full
 from datetime import datetime
 from typing import Optional, Callable, Dict, Any
@@ -441,7 +440,8 @@ class RNSMeshtasticBridge:
                 for _ in range(30):
                     if RNS.Transport.has_path(destination_hash):
                         break
-                    time.sleep(0.1)
+                    if self._stop_event.wait(0.1):
+                        return False
 
             if not RNS.Transport.has_path(destination_hash):
                 return False
@@ -675,7 +675,7 @@ class RNSMeshtasticBridge:
 
             except Exception as e:
                 logger.error(f"Bridge loop error: {e}")
-                time.sleep(1)
+                self._stop_event.wait(1)
 
     def _connect_meshtastic(self):
         """Connect to Meshtastic via TCP using singleton connection manager"""
@@ -1295,7 +1295,7 @@ class RNSMeshtasticBridge:
             from utils.meshtastic_connection import wait_for_cooldown
             wait_for_cooldown()
         except ImportError:
-            time.sleep(2)  # Fallback cooldown
+            self._stop_event.wait(2)  # Interruptible fallback cooldown
 
     def _test_meshtastic(self) -> bool:
         """Test Meshtastic connection"""
