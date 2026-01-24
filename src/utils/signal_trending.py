@@ -26,6 +26,7 @@ Usage:
 """
 
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -192,10 +193,17 @@ class SignalTrend:
         self.node_id = node_id
         self.max_samples = max_samples
         self._samples: List[SignalSample] = []
+        self._lock = threading.Lock()
 
     @property
     def sample_count(self) -> int:
-        return len(self._samples)
+        with self._lock:
+            return len(self._samples)
+
+    def _snapshot(self) -> List[SignalSample]:
+        """Return a thread-safe copy of samples for analysis."""
+        with self._lock:
+            return list(self._samples)
 
     def add_sample(self, timestamp: float,
                    snr: Optional[float] = None,
@@ -211,11 +219,12 @@ class SignalTrend:
             return  # No data to record
 
         sample = SignalSample(timestamp=timestamp, snr=snr, rssi=rssi)
-        self._samples.append(sample)
+        with self._lock:
+            self._samples.append(sample)
 
-        # Evict oldest if over limit
-        if len(self._samples) > self.max_samples:
-            self._samples = self._samples[-self.max_samples:]
+            # Evict oldest if over limit
+            if len(self._samples) > self.max_samples:
+                self._samples = self._samples[-self.max_samples:]
 
     def add_samples_bulk(self, samples: List[Tuple[float, Optional[float], Optional[float]]]) -> int:
         """Add multiple samples at once.
@@ -227,14 +236,15 @@ class SignalTrend:
             Number of samples actually added.
         """
         added = 0
-        for ts, snr, rssi in samples:
-            if snr is not None or rssi is not None:
-                self._samples.append(SignalSample(timestamp=ts, snr=snr, rssi=rssi))
-                added += 1
+        with self._lock:
+            for ts, snr, rssi in samples:
+                if snr is not None or rssi is not None:
+                    self._samples.append(SignalSample(timestamp=ts, snr=snr, rssi=rssi))
+                    added += 1
 
-        # Trim to max
-        if len(self._samples) > self.max_samples:
-            self._samples = self._samples[-self.max_samples:]
+            # Trim to max
+            if len(self._samples) > self.max_samples:
+                self._samples = self._samples[-self.max_samples:]
 
         return added
 
@@ -255,7 +265,9 @@ class SignalTrend:
             now = time.time()
 
         cutoff = now - window_seconds
-        window_samples = [s for s in self._samples if s.timestamp >= cutoff]
+        with self._lock:
+            samples_snapshot = list(self._samples)
+        window_samples = [s for s in samples_snapshot if s.timestamp >= cutoff]
 
         stats = WindowStats(
             window_name=window_name or f"{window_seconds}s",
@@ -307,13 +319,14 @@ class SignalTrend:
             Tuple of (direction, rate_db_per_hour).
             Direction: 'improving', 'stable', 'degrading', 'insufficient_data'
         """
-        if len(self._samples) < MIN_SAMPLES_FOR_TREND:
+        samples = self._snapshot()
+        if len(samples) < MIN_SAMPLES_FOR_TREND:
             return ('insufficient_data', 0.0)
 
         # Prefer SNR, fall back to RSSI
-        values_with_time = [(s.timestamp, s.snr) for s in self._samples if s.has_snr]
+        values_with_time = [(s.timestamp, s.snr) for s in samples if s.has_snr]
         if len(values_with_time) < MIN_SAMPLES_FOR_TREND:
-            values_with_time = [(s.timestamp, s.rssi) for s in self._samples if s.has_rssi]
+            values_with_time = [(s.timestamp, s.rssi) for s in samples if s.has_rssi]
 
         if len(values_with_time) < MIN_SAMPLES_FOR_TREND:
             return ('insufficient_data', 0.0)
@@ -390,16 +403,17 @@ class SignalTrend:
             List of SignalEvent objects, ordered by time.
         """
         events: List[SignalEvent] = []
+        samples = self._snapshot()
 
-        if len(self._samples) < 2:
+        if len(samples) < 2:
             return events
 
         # Check SNR events
-        snr_samples = [(s.timestamp, s.snr) for s in self._samples if s.has_snr]
+        snr_samples = [(s.timestamp, s.snr) for s in samples if s.has_snr]
         events.extend(self._detect_metric_events(snr_samples, 'snr', threshold_db))
 
         # Check RSSI events
-        rssi_samples = [(s.timestamp, s.rssi) for s in self._samples if s.has_rssi]
+        rssi_samples = [(s.timestamp, s.rssi) for s in samples if s.has_rssi]
         events.extend(self._detect_metric_events(rssi_samples, 'rssi', threshold_db))
 
         events.sort(key=lambda e: e.timestamp)
@@ -420,8 +434,9 @@ class SignalTrend:
         # Bin samples by hour
         hourly_snr: Dict[int, List[float]] = {h: [] for h in range(24)}
         hourly_rssi: Dict[int, List[float]] = {h: [] for h in range(24)}
+        samples = self._snapshot()
 
-        for sample in self._samples:
+        for sample in samples:
             hour = time_mod.localtime(sample.timestamp).tm_hour
             if sample.has_snr:
                 hourly_snr[hour].append(sample.snr)
@@ -476,7 +491,8 @@ class SignalTrend:
             now = time.time()
 
         # Basic info
-        total = len(self._samples)
+        samples = self._snapshot()
+        total = len(samples)
         if total == 0:
             return NodeSignalReport(
                 node_id=self.node_id,
@@ -488,10 +504,10 @@ class SignalTrend:
                 stability_score=50,
             )
 
-        time_span = (self._samples[-1].timestamp - self._samples[0].timestamp) / 3600.0
+        time_span = (samples[-1].timestamp - samples[0].timestamp) / 3600.0
 
         # Current values (most recent sample)
-        latest = self._samples[-1]
+        latest = samples[-1]
 
         # Trend
         direction, rate = self.get_trend(now)

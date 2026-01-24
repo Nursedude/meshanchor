@@ -385,7 +385,12 @@ class MapDataCollector:
             from utils.paths import get_real_user_home
             cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
         except ImportError:
-            cache_path = Path.home() / ".config" / "meshforge" / "node_cache.json"
+            import os as _os
+            sudo_user = _os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                cache_path = Path(f'/home/{sudo_user}/.config/meshforge/node_cache.json')
+            else:
+                cache_path = Path.home() / ".config" / "meshforge" / "node_cache.json"
 
         if cache_path.exists():
             try:
@@ -695,7 +700,7 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
+    def __init__(self, port: int = 5000, host: str = "127.0.0.1"):
         self.port = port
         self.host = host
         self.collector = MapDataCollector()
