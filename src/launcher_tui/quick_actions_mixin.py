@@ -7,6 +7,7 @@ operation, avoiding deep menu navigation for frequent tasks.
 Quick Actions:
     s - Service status (all services at a glance)
     n - Node list (meshtastic --nodes)
+    i - Node inventory (tracked nodes)
     l - Follow logs (journalctl meshtasticd)
     r - Restart meshtasticd
     R - Restart rnsd
