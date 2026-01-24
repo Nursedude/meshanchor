@@ -28,7 +28,7 @@ import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,7 @@ class GPSReader:
 
                 # Read responses until we get a TPV (position) fix
                 buffer = b""
+                max_buffer = 65536  # 64KB limit
                 deadline = time.time() + self._timeout
                 while time.time() < deadline:
                     try:
@@ -203,6 +204,9 @@ class GPSReader:
                         if not data:
                             break
                         buffer += data
+                        if len(buffer) > max_buffer:
+                            logger.debug("gpsd buffer overflow, aborting")
+                            break
 
                         # Process complete JSON lines
                         while b"\n" in buffer:
@@ -305,7 +309,9 @@ class GPSManager:
             if sudo_user and sudo_user != 'root':
                 config_dir = Path(f'/home/{sudo_user}/.config/meshforge')
             else:
-                config_dir = Path.home() / ".config" / "meshforge"
+                config_dir = Path('/tmp/meshforge')
+                logger.warning(
+                    "Cannot determine real user home; using /tmp/meshforge")
         return config_dir / "operator_position.json"
 
     def _load_cached(self) -> None:

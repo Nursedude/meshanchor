@@ -30,7 +30,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -176,6 +176,7 @@ class OfflineSyncQueue:
         """
         self._db_path = db_path or self._get_default_path()
         self._lock = threading.Lock()
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
     def _get_default_path(self) -> Path:
@@ -189,7 +190,9 @@ class OfflineSyncQueue:
             if sudo_user and sudo_user != 'root':
                 data_dir = Path(f'/home/{sudo_user}/.local/share/meshforge')
             else:
-                data_dir = Path.home() / ".local" / "share" / "meshforge"
+                data_dir = Path('/tmp/meshforge')
+                logger.warning(
+                    "Cannot determine real user home; using /tmp/meshforge")
         return data_dir / "offline_sync.db"
 
     def _init_db(self) -> None:
@@ -225,11 +228,27 @@ class OfflineSyncQueue:
             conn.commit()
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get a database connection."""
-        conn = sqlite3.connect(str(self._db_path), timeout=5.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        """Get or create the persistent database connection.
+
+        Since all access is serialized by self._lock, a single
+        connection is safe and avoids file descriptor leaks.
+        check_same_thread=False is safe because the lock prevents
+        concurrent access.
+        """
+        if self._conn is None:
+            self._conn = sqlite3.connect(
+                str(self._db_path), timeout=5.0,
+                check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+        return self._conn
+
+    def close(self) -> None:
+        """Close the database connection."""
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def enqueue(self, category: SyncCategory, payload: dict,
                 destination: str = "") -> str:
@@ -594,18 +613,33 @@ class SyncEngine:
     def sync_cycle(self) -> Dict[str, int]:
         """Run one sync cycle: check connectivity, sync pending data.
 
+        Thread-safe: only one sync cycle can run at a time.
+
         Returns:
             Dict with 'synced', 'failed', 'skipped' counts.
         """
         result = {'synced': 0, 'failed': 0, 'skipped': 0}
 
-        # Check connectivity
+        # Check connectivity (thread-safe, cached)
         if not self._connectivity.is_online:
             pending = self._queue.get_pending_count()
             if pending > 0:
                 logger.debug(
                     f"Offline: {pending} records queued for sync")
             return result
+
+        # Serialize sync cycles to prevent concurrent handler calls
+        if not self._lock.acquire(blocking=False):
+            return result  # Another cycle is running
+
+        try:
+            return self._do_sync_cycle()
+        finally:
+            self._lock.release()
+
+    def _do_sync_cycle(self) -> Dict[str, int]:
+        """Internal sync cycle (must hold self._lock)."""
+        result = {'synced': 0, 'failed': 0, 'skipped': 0}
 
         # Dequeue batch
         records = self._queue.dequeue_batch()
