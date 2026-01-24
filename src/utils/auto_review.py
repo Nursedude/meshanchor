@@ -420,7 +420,7 @@ class ReviewAgent:
             docstring_char = None
 
             # Check if this is an entry point file (needs standalone utilities)
-            entry_point_files = ['launcher.py', 'launcher_vte.py', 'launcher_tui',
+            entry_point_files = ['launcher.py', 'launcher_tui',
                                  'monitor.py', 'standalone.py', 'setup_wizard.py']
             is_entry_point = any(ep in str(file_path) for ep in entry_point_files)
 

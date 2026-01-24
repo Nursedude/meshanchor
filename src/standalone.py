@@ -63,18 +63,6 @@ class DependencyStatus:
             self.available['rich'] = False
             self.messages['rich'] = "pip install rich"
 
-        # GTK4 - for GUI
-        try:
-            import gi
-            gi.require_version('Gtk', '4.0')
-            from gi.repository import Gtk
-            self.available['gtk'] = True
-            self.messages['gtk'] = "GTK4 available"
-        except (ImportError, ValueError):
-            self.available['gtk'] = False
-            self.messages['gtk'] = "apt install python3-gi gir1.2-gtk-4.0"
-
-
         # Meshtastic - for device communication
         try:
             import meshtastic
@@ -516,16 +504,7 @@ def main_menu(deps: DependencyStatus):
         print("  3. Network Simulator    - Topology planning, link quality")
         print("  4. Device Scanner       - USB, Serial, SPI, I2C devices")
         print("---------------------------------------------------------")
-        print("                   FULL INTERFACES")
-        print("---------------------------------------------------------")
-
-        if deps.available['gtk']:
-            print("  g. GTK4 Desktop UI      [Available]")
-        else:
-            print("  g. GTK4 Desktop UI      [Not installed]")
-
         print("  t. Launcher TUI         [raspi-config style]")
-
         print("---------------------------------------------------------")
         print("  d. Check dependencies")
         print("  q. Quit")
@@ -550,13 +529,6 @@ def main_menu(deps: DependencyStatus):
             tools.device_scanner()
         elif choice == 'd':
             deps.print_status()
-        elif choice == 'g':
-            if deps.available['gtk']:
-                print("\nLaunching GTK4 Desktop UI...")
-                os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'main_gtk.py')])
-            else:
-                print("\nGTK4 not available. Install with:")
-                print("  sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1")
         elif choice == 't':
             print("\nLaunching TUI...")
             os.execv(sys.executable, [sys.executable, str(SRC_DIR / 'launcher_tui' / 'main.py')])

@@ -4,8 +4,7 @@ MeshForge Launcher - raspi-config Style TUI
 
 A whiptail/dialog based launcher that works:
 - Over SSH (no display required)
-- With GTK when display available
-- On any terminal
+- On any terminal (local or remote)
 
 Uses whiptail (Debian/Ubuntu default) with dialog fallback.
 Falls back to basic terminal menu if neither available.
@@ -114,7 +113,6 @@ class MeshForgeLauncher(
             'has_display': False,
             'display_type': None,
             'is_ssh': False,
-            'has_gtk': False,
             'is_root': os.geteuid() == 0,
         }
 
@@ -128,16 +126,6 @@ class MeshForgeLauncher(
         # Check for SSH
         if os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'):
             env['is_ssh'] = True
-
-        # Check for GTK4
-        try:
-            import gi
-            gi.require_version('Gtk', '4.0')
-            gi.require_version('Adw', '1')
-            from gi.repository import Gtk, Adw
-            env['has_gtk'] = True
-        except (ImportError, ValueError):
-            pass
 
         return env
 

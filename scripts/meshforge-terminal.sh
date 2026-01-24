@@ -1,11 +1,10 @@
 #!/bin/bash
 # MeshForge Terminal Launcher
-# Launches TUI with proper taskbar icon support
+# Launches TUI in a terminal emulator with proper taskbar icon support
 #
 # Priority:
-# 1. VTE GTK4 wrapper (best icon support, native GTK window)
-# 2. xterm with -class (proven to work with WM_CLASS)
-# 3. Other terminals as fallback
+# 1. xterm with -class (proven to work with WM_CLASS)
+# 2. Desktop-specific terminals as fallback
 #
 # Note: gnome-terminal --class is broken (Debian bug #238145)
 
@@ -13,7 +12,6 @@ MESHFORGE_DIR="/opt/meshforge"
 ICON_NAME="org.meshforge.app"
 TITLE="MeshForge"
 TUI_CMD="sudo python3 $MESHFORGE_DIR/src/launcher_tui/main.py"
-VTE_CMD="python3 $MESHFORGE_DIR/src/launcher_vte.py"
 
 # Log file for debugging launch issues
 LOG_FILE="/tmp/meshforge-launch.log"
@@ -45,18 +43,6 @@ show_error() {
 # Check if display is available
 has_display() {
     [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]
-}
-
-# Check if VTE launcher is available and working
-has_vte() {
-    [ -f "$MESHFORGE_DIR/src/launcher_vte.py" ] && \
-    python3 -c "import gi; gi.require_version('Vte', '2.91'); from gi.repository import Vte" 2>/dev/null
-}
-
-# VTE GTK4 wrapper (best option - native GTK window with proper app_id)
-launch_vte() {
-    log_msg "Launching VTE wrapper"
-    exec $VTE_CMD
 }
 
 # xterm with proper class (WORKS - xterm respects -class and -name flags)
@@ -134,28 +120,21 @@ check_installation
 if has_display; then
     log_msg "Display available, checking terminal options..."
 
-    # Option 1: VTE wrapper (native GTK window with proper app_id)
-    if has_vte; then
-        launch_vte
-        exit $?
-    fi
-    log_msg "VTE not available"
-
-    # Option 2: xterm (proven WM_CLASS support)
+    # Option 1: xterm (proven WM_CLASS support)
     if command -v xterm &>/dev/null; then
         launch_xterm
         exit $?
     fi
     log_msg "xterm not available"
 
-    # Option 3: lxterminal (Raspberry Pi default)
+    # Option 2: lxterminal (Raspberry Pi default)
     if command -v lxterminal &>/dev/null; then
         launch_lxterminal
         exit $?
     fi
     log_msg "lxterminal not available"
 
-    # Option 4: Desktop-specific terminals
+    # Option 3: Desktop-specific terminals
     if command -v xfce4-terminal &>/dev/null; then
         launch_xfce
         exit $?
