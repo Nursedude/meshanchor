@@ -381,6 +381,10 @@ class DiagnosticEngine:
         # Callbacks for auto-recovery
         self._recovery_handlers: Dict[str, Callable] = {}
 
+        # Persistent DB connection (reused to avoid open/close per operation)
+        self._db_conn = None
+        self._db_lock = threading.Lock()
+
         # Load built-in rules
         self._load_mesh_rules()
 
@@ -403,39 +407,51 @@ class DiagnosticEngine:
         db_dir.mkdir(parents=True, exist_ok=True)
         return db_dir / "diagnostic_history.db"
 
+    def _get_connection(self):
+        """Get persistent SQLite connection (creates if needed).
+
+        Uses a single connection to avoid open/close churn under load.
+        All access is serialized via _db_lock.
+        """
+        import sqlite3
+        if self._db_conn is None:
+            self._db_conn = sqlite3.connect(
+                str(self._get_db_path()),
+                check_same_thread=False
+            )
+        return self._db_conn
+
     def _init_db(self):
         """Initialize SQLite database for persistent history."""
-        import sqlite3
         try:
-            db_path = self._get_db_path()
-            conn = sqlite3.connect(str(db_path))
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS diagnoses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    symptom_message TEXT NOT NULL,
-                    symptom_category TEXT NOT NULL,
-                    symptom_severity TEXT NOT NULL,
-                    symptom_source TEXT,
-                    likely_cause TEXT NOT NULL,
-                    confidence REAL,
-                    evidence TEXT,
-                    suggestions TEXT,
-                    auto_recoverable BOOLEAN,
-                    rule_name TEXT
-                )
-            ''')
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_diagnoses_timestamp
-                ON diagnoses(timestamp DESC)
-            ''')
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_diagnoses_category
-                ON diagnoses(symptom_category)
-            ''')
-            conn.commit()
-            conn.close()
-            logger.debug(f"Diagnostic history DB initialized at {db_path}")
+            with self._db_lock:
+                conn = self._get_connection()
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS diagnoses (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        symptom_message TEXT NOT NULL,
+                        symptom_category TEXT NOT NULL,
+                        symptom_severity TEXT NOT NULL,
+                        symptom_source TEXT,
+                        likely_cause TEXT NOT NULL,
+                        confidence REAL,
+                        evidence TEXT,
+                        suggestions TEXT,
+                        auto_recoverable BOOLEAN,
+                        rule_name TEXT
+                    )
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_diagnoses_timestamp
+                    ON diagnoses(timestamp DESC)
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_diagnoses_category
+                    ON diagnoses(symptom_category)
+                ''')
+                conn.commit()
+            logger.debug(f"Diagnostic history DB initialized at {self._get_db_path()}")
         except Exception as e:
             logger.warning(f"Failed to initialize diagnostic history DB: {e}")
             self._persist_history = False
@@ -445,29 +461,28 @@ class DiagnosticEngine:
         if not self._persist_history:
             return
 
-        import sqlite3
         import json
         try:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            conn.execute('''
-                INSERT INTO diagnoses
-                (symptom_message, symptom_category, symptom_severity, symptom_source,
-                 likely_cause, confidence, evidence, suggestions, auto_recoverable, rule_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                symptom.message,
-                symptom.category.value,
-                symptom.severity.value,
-                symptom.source,
-                diagnosis.likely_cause,
-                diagnosis.confidence,
-                json.dumps(diagnosis.evidence),
-                json.dumps(diagnosis.suggestions),
-                diagnosis.auto_recoverable,
-                rule_name,
-            ))
-            conn.commit()
-            conn.close()
+            with self._db_lock:
+                conn = self._get_connection()
+                conn.execute('''
+                    INSERT INTO diagnoses
+                    (symptom_message, symptom_category, symptom_severity, symptom_source,
+                     likely_cause, confidence, evidence, suggestions, auto_recoverable, rule_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    symptom.message,
+                    symptom.category.value,
+                    symptom.severity.value,
+                    symptom.source,
+                    diagnosis.likely_cause,
+                    diagnosis.confidence,
+                    json.dumps(diagnosis.evidence),
+                    json.dumps(diagnosis.suggestions),
+                    diagnosis.auto_recoverable,
+                    rule_name,
+                ))
+                conn.commit()
         except Exception as e:
             logger.debug(f"Failed to save diagnosis: {e}")
 
@@ -490,25 +505,25 @@ class DiagnosticEngine:
         import sqlite3
         import json
         try:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            conn.row_factory = sqlite3.Row
+            with self._db_lock:
+                conn = self._get_connection()
+                conn.row_factory = sqlite3.Row
 
-            query = '''
-                SELECT * FROM diagnoses
-                WHERE timestamp > datetime('now', ? || ' hours')
-            '''
-            params = [f'-{since_hours}']
+                query = '''
+                    SELECT * FROM diagnoses
+                    WHERE timestamp > datetime('now', ? || ' hours')
+                '''
+                params = [f'-{since_hours}']
 
-            if category:
-                query += " AND symptom_category = ?"
-                params.append(category.value)
+                if category:
+                    query += " AND symptom_category = ?"
+                    params.append(category.value)
 
-            query += " ORDER BY timestamp DESC LIMIT ?"
-            params.append(limit)
+                query += " ORDER BY timestamp DESC LIMIT ?"
+                params.append(limit)
 
-            cursor = conn.execute(query, params)
-            rows = cursor.fetchall()
-            conn.close()
+                cursor = conn.execute(query, params)
+                rows = cursor.fetchall()
 
             results = []
             for row in rows:
@@ -547,25 +562,25 @@ class DiagnosticEngine:
 
         import sqlite3
         try:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            conn.row_factory = sqlite3.Row
+            with self._db_lock:
+                conn = self._get_connection()
+                conn.row_factory = sqlite3.Row
 
-            cursor = conn.execute('''
-                SELECT
-                    likely_cause,
-                    symptom_category,
-                    COUNT(*) as occurrence_count,
-                    MAX(timestamp) as last_seen,
-                    MIN(timestamp) as first_seen
-                FROM diagnoses
-                WHERE timestamp > datetime('now', ? || ' hours')
-                GROUP BY likely_cause, symptom_category
-                HAVING COUNT(*) >= ?
-                ORDER BY occurrence_count DESC
-            ''', (f'-{hours}', threshold))
+                cursor = conn.execute('''
+                    SELECT
+                        likely_cause,
+                        symptom_category,
+                        COUNT(*) as occurrence_count,
+                        MAX(timestamp) as last_seen,
+                        MIN(timestamp) as first_seen
+                    FROM diagnoses
+                    WHERE timestamp > datetime('now', ? || ' hours')
+                    GROUP BY likely_cause, symptom_category
+                    HAVING COUNT(*) >= ?
+                    ORDER BY occurrence_count DESC
+                ''', (f'-{hours}', threshold))
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
             return [
                 {
@@ -594,16 +609,15 @@ class DiagnosticEngine:
         if not self._persist_history:
             return 0
 
-        import sqlite3
         try:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.execute('''
-                DELETE FROM diagnoses
-                WHERE timestamp < datetime('now', ? || ' days')
-            ''', (f'-{older_than_days}',))
-            deleted = cursor.rowcount
-            conn.commit()
-            conn.close()
+            with self._db_lock:
+                conn = self._get_connection()
+                cursor = conn.execute('''
+                    DELETE FROM diagnoses
+                    WHERE timestamp < datetime('now', ? || ' days')
+                ''', (f'-{older_than_days}',))
+                deleted = cursor.rowcount
+                conn.commit()
             return deleted
         except Exception as e:
             logger.warning(f"Failed to clear history: {e}")

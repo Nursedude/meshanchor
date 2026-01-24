@@ -9,7 +9,7 @@ import time
 import logging
 import subprocess
 import os
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
@@ -909,9 +909,14 @@ class RNSMeshtasticBridge:
                 except Exception as e:
                     logger.debug(f"Could not store incoming message: {e}")
 
-                # Queue for bridging if enabled
+                # Queue for bridging if enabled (non-blocking to prevent deadlock)
                 if self._should_bridge(msg):
-                    self._mesh_to_rns_queue.put(msg)
+                    try:
+                        self._mesh_to_rns_queue.put_nowait(msg)
+                    except Full:
+                        logger.warning("Mesh→RNS queue full, dropping message")
+                        with self._stats_lock:
+                            self.stats['errors'] += 1
 
                 # Notify callbacks
                 self._notify_message(msg)
@@ -954,9 +959,14 @@ class RNSMeshtasticBridge:
             except Exception as e:
                 logger.debug(f"Could not store incoming RNS message: {e}")
 
-            # Queue for bridging if enabled
+            # Queue for bridging if enabled (non-blocking to prevent deadlock)
             if self._should_bridge(msg):
-                self._rns_to_mesh_queue.put(msg)
+                try:
+                    self._rns_to_mesh_queue.put_nowait(msg)
+                except Full:
+                    logger.warning("RNS→Mesh queue full, dropping message")
+                    with self._stats_lock:
+                        self.stats['errors'] += 1
 
             # Notify callbacks
             self._notify_message(msg)

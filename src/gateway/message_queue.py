@@ -689,8 +689,13 @@ class PersistentMessageQueue:
         try:
             purged = self.purge_old(days=1)
             stale = self.cleanup_stale()
-            if purged > 0 or stale > 0:
-                logger.debug(f"Auto-cleanup: purged {purged} old, unstuck {stale} stale")
+            lifecycle_purged = self.purge_lifecycle_history(days=7)
+            if purged > 0 or stale > 0 or lifecycle_purged > 0:
+                logger.debug(
+                    f"Auto-cleanup: purged {purged} old, "
+                    f"unstuck {stale} stale, "
+                    f"{lifecycle_purged} lifecycle entries"
+                )
         except Exception as e:
             logger.debug(f"Auto-cleanup error: {e}")
 

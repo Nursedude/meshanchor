@@ -423,8 +423,8 @@ class MQTTNodelessSubscriber:
 
             geojson = self.get_geojson()
             if geojson.get("features"):
-                with open(cache_file, 'w') as f:
-                    json.dump(geojson, f)
+                from utils.paths import atomic_write_text
+                atomic_write_text(cache_file, json.dumps(geojson))
                 logger.debug(f"Map cache: wrote {len(geojson['features'])} nodes")
         except Exception as e:
             logger.debug(f"Map cache write error: {e}")
@@ -516,8 +516,8 @@ class MQTTNodelessSubscriber:
         if "hops_away" in data:
             node.hops_away = data["hops_away"]
 
-        # Notify callbacks
-        for callback in self._node_callbacks:
+        # Notify callbacks (snapshot for thread-safe iteration)
+        for callback in list(self._node_callbacks):
             try:
                 callback(node)
             except Exception as e:
@@ -621,8 +621,8 @@ class MQTTNodelessSubscriber:
         with self._messages_lock:
             self._messages.append(msg)
 
-        # Notify callbacks
-        for callback in self._message_callbacks:
+        # Notify callbacks (snapshot for thread-safe iteration)
+        for callback in list(self._message_callbacks):
             try:
                 callback(msg)
             except Exception as e:
