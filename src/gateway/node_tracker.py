@@ -760,7 +760,6 @@ instance_control_port = 37429
                 data = json.load(f)
 
             for node_data in data.get('nodes', []):
-                # Reconstruct node (simplified - positions may be stale)
                 node = UnifiedNode(
                     id=node_data['id'],
                     network=node_data['network'],
@@ -772,6 +771,20 @@ instance_control_port = 37429
                     role=node_data.get('role'),
                     is_online=False,  # Assume offline until we hear from them
                 )
+                # Restore last_seen from cache
+                if node_data.get('last_seen'):
+                    try:
+                        node.last_seen = datetime.fromisoformat(node_data['last_seen'])
+                    except (ValueError, TypeError):
+                        pass
+                # Restore position from cache
+                pos_data = node_data.get('position')
+                if pos_data and isinstance(pos_data, dict):
+                    node.position = Position(
+                        latitude=pos_data.get('latitude', 0.0),
+                        longitude=pos_data.get('longitude', 0.0),
+                        altitude=pos_data.get('altitude', 0.0),
+                    )
                 self._nodes[node.id] = node
 
             logger.info(f"Loaded {len(self._nodes)} nodes from cache")
@@ -799,8 +812,13 @@ instance_control_port = 37429
 
             # Also save to /tmp for web API access (cross-process sharing)
             try:
-                with open('/tmp/meshforge_rns_nodes.json', 'w') as f:
-                    json.dump(cache_data, f)
+                tmp_path = '/tmp/meshforge_rns_nodes.json'
+                if os.path.islink(tmp_path):
+                    logger.warning(f"Refusing to write to symlink: {tmp_path}")
+                else:
+                    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                    with os.fdopen(fd, 'w') as f:
+                        json.dump(cache_data, f)
             except Exception as e:
                 logger.debug(f"Could not save web API cache: {e}")
 

@@ -1529,10 +1529,10 @@ class DiagnosticEngine:
         Returns:
             Diagnosis with cause, evidence, and suggestions
         """
-        # Find matching rules
+        # Find matching rules (match by category only)
         matching_rules = []
         for rule in self._rules:
-            if rule.category == symptom.category or rule.category == Category.CONNECTIVITY:
+            if rule.category == symptom.category:
                 if re.search(rule.pattern, symptom.message, re.IGNORECASE):
                     matching_rules.append(rule)
 
@@ -1602,8 +1602,8 @@ class DiagnosticEngine:
                 if s == symptom:
                     continue
                 if s.timestamp >= cutoff:
-                    # Same category or connectivity issues
-                    if s.category == symptom.category or s.category == Category.CONNECTIVITY:
+                    # Same category symptoms are related
+                    if s.category == symptom.category:
                         related.append(s)
 
         return related[:5]  # Limit to 5 most relevant
