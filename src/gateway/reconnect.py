@@ -129,7 +129,8 @@ class ReconnectStrategy:
     def execute_with_retry(
         self,
         func: Callable[[], T],
-        on_failure: Optional[Callable[[Exception], None]] = None
+        on_failure: Optional[Callable[[Exception], None]] = None,
+        stop_event: Optional[threading.Event] = None
     ) -> T:
         """
         Execute a function with automatic retry on failure.
@@ -137,6 +138,7 @@ class ReconnectStrategy:
         Args:
             func: The function to execute.
             on_failure: Optional callback for each failure.
+            stop_event: If provided, wait is interruptible for clean shutdown.
 
         Returns:
             The result of the function.
@@ -147,6 +149,8 @@ class ReconnectStrategy:
         last_exception = None
 
         while self.should_retry():
+            if stop_event and stop_event.is_set():
+                break
             try:
                 result = func()
                 self.record_success()
@@ -163,7 +167,7 @@ class ReconnectStrategy:
                         f"Retry {self.attempts}/{self.config.max_attempts} "
                         f"after error: {e}"
                     )
-                    self.wait()
+                    self.wait(stop_event)
 
         # All retries exhausted
         logger.error(

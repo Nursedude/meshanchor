@@ -36,17 +36,22 @@ if str(_launcher_dir) not in sys.path:
 try:
     from __version__ import __version__
 except ImportError:
-    __version__ = "0.4.6-beta"
+    __version__ = "0.4.7-beta"
 
 # Import centralized path utility
 try:
     from utils.paths import get_real_user_home
 except ImportError:
     def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            candidate = Path(f'/home/{sudo_user}')
+            return candidate
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            candidate = Path(f'/home/{logname}')
+            return candidate
+        return Path('/root')
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md

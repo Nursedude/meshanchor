@@ -33,10 +33,15 @@ except ImportError:
     # Fallback if utils not available
     def get_real_user_home():
         import os
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user:
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            candidate = Path(f'/home/{sudo_user}')
+            return candidate
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            candidate = Path(f'/home/{logname}')
+            return candidate
+        return Path('/root')
 
 
 class SystemToolsMixin:
@@ -299,6 +304,16 @@ class SystemToolsMixin:
         )
 
         if not port:
+            return
+
+        # Validate port is a valid number
+        try:
+            port_num = int(port.strip())
+            if not (1 <= port_num <= 65535):
+                raise ValueError
+            port = str(port_num)
+        except (ValueError, TypeError):
+            self.dialog.msgbox("Error", "Port must be a number between 1 and 65535")
             return
 
         subprocess.run(['clear'], check=False, timeout=5)
@@ -1075,13 +1090,21 @@ class SystemToolsMixin:
                 "/tmp/meshforge_logs.txt"
             )
             if filename:
-                print(f"=== Exporting to {filename} ===\n")
-                with open(filename, 'w') as f:
+                export_path = Path(filename).resolve()
+                safe_dirs = [Path('/tmp'), get_real_user_home(), Path('/var/log')]
+                if not any(str(export_path).startswith(str(d.resolve())) for d in safe_dirs):
+                    self.dialog.msgbox(
+                        "Error",
+                        "Export path must be under /tmp, home directory, or /var/log"
+                    )
+                    return
+                print(f"=== Exporting to {export_path} ===\n")
+                with open(str(export_path), 'w') as f:
                     subprocess.run(
                         ['journalctl', '-u', 'meshtasticd', '-u', 'rnsd', '-n', '1000', '--no-pager'],
                         stdout=f, timeout=60
                     )
-                print(f"Logs exported to: {filename}")
+                print(f"Logs exported to: {export_path}")
 
         elif cmd_type == 'rotate':
             print("=== Rotating Logs ===\n")

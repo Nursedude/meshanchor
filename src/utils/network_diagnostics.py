@@ -43,10 +43,13 @@ except ImportError:
     except ImportError:
         # Ultimate fallback - handle sudo case
         def get_real_user_home():
-            sudo_user = os.environ.get('SUDO_USER')
-            if sudo_user and sudo_user != 'root':
+            sudo_user = os.environ.get('SUDO_USER', '')
+            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
                 return Path(f'/home/{sudo_user}')
-            return Path.home()
+            logname = os.environ.get('LOGNAME', '')
+            if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+                return Path(f'/home/{logname}')
+            return Path('/root')
 
 
 # Diagnostic data directory
