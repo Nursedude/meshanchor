@@ -394,13 +394,35 @@ def get_cli(
     port: int = 4403,
     device: Optional[str] = None,
 ) -> MeshtasticCLI:
-    """Get or create default CLI instance."""
+    """Get or create default CLI instance.
+
+    If an instance already exists with different parameters, logs a warning
+    and returns the existing instance. Use reset_cli() to force recreation.
+    """
     global _default_cli
 
     if _default_cli is None:
         _default_cli = MeshtasticCLI(host=host, port=port, device=device)
+    else:
+        # Warn if parameters differ from existing instance
+        if (_default_cli.host != host or _default_cli.port != port
+                or _default_cli.device != device):
+            logger.warning(
+                f"get_cli() called with different params "
+                f"(host={host}, port={port}, device={device}) "
+                f"but instance already exists with "
+                f"(host={_default_cli.host}, port={_default_cli.port}, "
+                f"device={_default_cli.device}). "
+                f"Use reset_cli() to force recreation."
+            )
 
     return _default_cli
+
+
+def reset_cli() -> None:
+    """Reset the default CLI singleton, forcing recreation on next get_cli() call."""
+    global _default_cli
+    _default_cli = None
 
 
 def quick_send(message: str, destination: str = "^all") -> bool:
