@@ -97,7 +97,8 @@ def setup_structured_logging(
             if sudo_user and sudo_user != 'root':
                 log_dir = Path(f'/home/{sudo_user}/.config/meshforge/logs')
             else:
-                log_dir = Path.home() / ".config" / "meshforge" / "logs"
+                # Avoid Path.home() which returns /root under sudo (MF001)
+                log_dir = Path('/tmp/meshforge/logs')
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "meshforge_structured.jsonl"

@@ -103,6 +103,7 @@ class RNSMeshtasticBridge:
         # Reconnection strategies (exponential backoff with jitter)
         self._mesh_reconnect = ReconnectStrategy.for_meshtastic()
         self._rns_reconnect = ReconnectStrategy.for_rns()
+        self._stop_event = threading.Event()
 
         # Health monitoring
         self.health = BridgeHealthMonitor()
@@ -257,6 +258,7 @@ class RNSMeshtasticBridge:
 
         logger.info("Stopping bridge...")
         self._running = False
+        self._stop_event.set()  # Wake any sleeping reconnect waits
 
         # Stop persistent queue processing
         if self._persistent_queue:
@@ -333,11 +335,12 @@ class RNSMeshtasticBridge:
                 # Direct message
                 if not RNS.Transport.has_path(destination_hash):
                     RNS.Transport.request_path(destination_hash)
-                    # Wait briefly for path
+                    # Wait briefly for path (interruptible on shutdown)
                     for _ in range(50):
                         if RNS.Transport.has_path(destination_hash):
                             break
-                        time.sleep(0.1)
+                        if self._stop_event.wait(0.1):
+                            break
 
                 if not RNS.Transport.has_path(destination_hash):
                     logger.warning("No path to destination")
@@ -558,7 +561,7 @@ class RNSMeshtasticBridge:
                     if not self._mesh_reconnect.should_retry():
                         logger.warning("Meshtastic reconnection: max attempts reached, resetting")
                         self._mesh_reconnect.reset()
-                        time.sleep(self._mesh_reconnect.config.max_delay)
+                        self._stop_event.wait(self._mesh_reconnect.config.max_delay)
                         continue
 
                     logger.info(f"Attempting Meshtastic connection "
@@ -572,13 +575,13 @@ class RNSMeshtasticBridge:
                         logger.info("Meshtastic connection established")
                     else:
                         self._mesh_reconnect.record_failure()
-                        self._mesh_reconnect.wait()
+                        self._mesh_reconnect.wait(self._stop_event)
                         continue
 
                 if self._connected_mesh:
                     self._poll_meshtastic()
 
-                time.sleep(1)
+                self._stop_event.wait(1)
 
             except (BrokenPipeError, ConnectionResetError, OSError) as e:
                 category = self.health.record_error("meshtastic", e)
@@ -586,14 +589,14 @@ class RNSMeshtasticBridge:
                 self._handle_connection_lost()
                 self.health.record_connection_event("meshtastic", "disconnected", str(e))
                 self._mesh_reconnect.record_failure()
-                self._mesh_reconnect.wait()
+                self._mesh_reconnect.wait(self._stop_event)
             except Exception as e:
                 category = self.health.record_error("meshtastic", e)
                 logger.error(f"Meshtastic loop error ({category}): {e}")
                 self._connected_mesh = False
                 self.health.record_connection_event("meshtastic", "error", str(e))
                 self._mesh_reconnect.record_failure()
-                self._mesh_reconnect.wait()
+                self._mesh_reconnect.wait(self._stop_event)
 
     def _rns_loop(self):
         """Main loop for RNS connection with auto-reconnect.
@@ -605,14 +608,14 @@ class RNSMeshtasticBridge:
             try:
                 # Don't retry if RNS init failed permanently (e.g., signal handler issue)
                 if self._rns_init_failed_permanently:
-                    time.sleep(30)
+                    self._stop_event.wait(30)
                     continue
 
                 if not self._connected_rns:
                     if not self._rns_reconnect.should_retry():
                         logger.warning("RNS reconnection: max attempts reached, resetting")
                         self._rns_reconnect.reset()
-                        time.sleep(self._rns_reconnect.config.max_delay)
+                        self._stop_event.wait(self._rns_reconnect.config.max_delay)
                         continue
 
                     logger.info(f"Attempting RNS connection "
@@ -626,12 +629,12 @@ class RNSMeshtasticBridge:
                         logger.info("RNS connection established")
                     else:
                         self._rns_reconnect.record_failure()
-                        self._rns_reconnect.wait()
+                        self._rns_reconnect.wait(self._stop_event)
                         continue
 
                 if self._connected_rns:
                     # RNS handles its own event loop
-                    time.sleep(1)
+                    self._stop_event.wait(1)
 
             except Exception as e:
                 category = self.health.record_error("rns", e)
@@ -644,7 +647,7 @@ class RNSMeshtasticBridge:
                     self._rns_init_failed_permanently = True
                 else:
                     self._rns_reconnect.record_failure()
-                    self._rns_reconnect.wait()
+                    self._rns_reconnect.wait(self._stop_event)
 
     def _bridge_loop(self):
         """Main loop for message bridging"""

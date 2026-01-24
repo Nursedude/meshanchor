@@ -390,7 +390,8 @@ class MapDataCollector:
             if sudo_user and sudo_user != 'root':
                 cache_path = Path(f'/home/{sudo_user}/.config/meshforge/node_cache.json')
             else:
-                cache_path = Path.home() / ".config" / "meshforge" / "node_cache.json"
+                # Avoid Path.home() which returns /root under sudo (MF001)
+                cache_path = Path('/tmp/meshforge/node_cache.json')
 
         if cache_path.exists():
             try:

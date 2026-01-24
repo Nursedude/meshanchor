@@ -6,6 +6,7 @@ for both Meshtastic and RNS connections.
 """
 
 import random
+import threading
 import time
 import logging
 from dataclasses import dataclass, field
@@ -82,16 +83,23 @@ class ReconnectStrategy:
 
         return max(0.0, base_delay + jitter)
 
-    def wait(self) -> float:
+    def wait(self, stop_event: Optional[threading.Event] = None) -> float:
         """
-        Wait for the current backoff delay.
+        Wait for the current backoff delay, interruptible via stop_event.
+
+        Args:
+            stop_event: If provided, wait is interrupted when event is set,
+                        allowing fast shutdown instead of sleeping up to max_delay.
 
         Returns:
-            The actual delay slept.
+            The actual delay slept (may be shorter if interrupted).
         """
         delay = self.get_delay()
         logger.debug(f"Reconnect backoff: waiting {delay:.2f}s (attempt {self.attempts})")
-        time.sleep(delay)
+        if stop_event:
+            stop_event.wait(delay)  # Returns immediately if event is set
+        else:
+            time.sleep(delay)
         return delay
 
     def record_failure(self) -> None:

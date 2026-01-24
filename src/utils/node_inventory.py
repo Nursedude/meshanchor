@@ -145,7 +145,8 @@ class NodeInventory:
             if sudo_user and sudo_user != 'root':
                 config_dir = Path(f'/home/{sudo_user}/.config/meshforge')
             else:
-                config_dir = Path.home() / ".config" / "meshforge"
+                # Avoid Path.home() which returns /root under sudo (MF001)
+                config_dir = Path('/tmp/meshforge')
         return config_dir / "node_inventory.json"
 
     def _load(self) -> None:
