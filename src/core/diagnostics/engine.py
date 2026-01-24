@@ -1692,6 +1692,7 @@ class DiagnosticEngine:
         """Start background health monitoring."""
         self._monitor_interval = interval
         self._monitor_running = True
+        self._monitor_stop_event = threading.Event()
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
         logger.info(f"Background monitoring started (interval: {interval}s)")
@@ -1699,6 +1700,8 @@ class DiagnosticEngine:
     def stop_monitoring(self):
         """Stop background monitoring."""
         self._monitor_running = False
+        if hasattr(self, '_monitor_stop_event'):
+            self._monitor_stop_event.set()
         if self._monitor_thread and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=5)
         logger.info("Background monitoring stopped")
@@ -1712,7 +1715,8 @@ class DiagnosticEngine:
                 self._run_network_checks()
             except Exception as e:
                 logger.error(f"Monitor loop error: {e}")
-            time.sleep(self._monitor_interval)
+            if self._monitor_stop_event.wait(self._monitor_interval):
+                break
 
     # === Wizard Support ===
 

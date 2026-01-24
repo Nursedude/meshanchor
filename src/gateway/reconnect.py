@@ -169,7 +169,10 @@ class ReconnectStrategy:
                     )
                     self.wait(stop_event)
 
-        # All retries exhausted
+        # All retries exhausted or interrupted
+        if last_exception is None:
+            # Interrupted before first attempt (stop_event set early)
+            raise ConnectionError("Connection interrupted before first attempt")
         logger.error(
             f"All {self.config.max_attempts} retry attempts exhausted"
         )

@@ -195,6 +195,7 @@ class RNSMeshtasticTransport:
 
         # State
         self._running = False
+        self._stop_event = threading.Event()
         self._connected = False
         self._interface = None
 
@@ -242,6 +243,7 @@ class RNSMeshtasticTransport:
             return False
 
         self._running = True
+        self._stop_event.clear()
         self.stats.start_time = datetime.now()
 
         # Start worker threads
@@ -277,6 +279,7 @@ class RNSMeshtasticTransport:
 
         logger.info("Stopping transport...")
         self._running = False
+        self._stop_event.set()
 
         # Disconnect from Meshtastic
         self._disconnect()
@@ -542,7 +545,8 @@ class RNSMeshtasticTransport:
         """Worker thread for cleaning up stale fragments"""
         while self._running:
             try:
-                time.sleep(5)  # Check every 5 seconds
+                if self._stop_event.wait(5):
+                    break
 
                 timeout = timedelta(seconds=self.config.fragment_timeout_sec)
                 now = datetime.now()

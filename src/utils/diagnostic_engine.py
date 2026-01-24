@@ -1573,7 +1573,8 @@ class DiagnosticEngine:
         # Find related symptoms
         related = self._find_related_symptoms(symptom)
         if related:
-            self._stats["correlations_found"] += 1
+            with self._lock:
+                self._stats["correlations_found"] += 1
             confidence = min(1.0, confidence + 0.1 * len(related))
 
         # Build diagnosis
@@ -1644,7 +1645,8 @@ class DiagnosticEngine:
             try:
                 handler = self._recovery_handlers[diagnosis.recovery_action]
                 handler(diagnosis)
-                self._stats["auto_recoveries"] += 1
+                with self._lock:
+                    self._stats["auto_recoveries"] += 1
                 logger.info(f"Auto-recovery initiated: {diagnosis.recovery_action}")
             except Exception as e:
                 logger.error(f"Auto-recovery failed: {e}")
