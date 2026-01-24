@@ -309,6 +309,8 @@ def fresnel_radius(distance_km: float, freq_ghz: float) -> float:
     Returns:
         Fresnel zone radius in meters
     """
+    if distance_km <= 0 or freq_ghz <= 0:
+        return 0.0
     return 17.3 * math.sqrt(distance_km / (4 * freq_ghz))
 
 
@@ -320,8 +322,10 @@ def free_space_path_loss(distance_m: float, freq_mhz: float) -> float:
         freq_mhz: Frequency in MHz
 
     Returns:
-        Path loss in dB
+        Path loss in dB (0.0 if distance or frequency is zero/negative)
     """
+    if distance_m <= 0 or freq_mhz <= 0:
+        return 0.0
     return 20 * math.log10(distance_m) + 20 * math.log10(freq_mhz) - 27.55
 
 

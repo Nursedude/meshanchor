@@ -365,17 +365,28 @@ def _get_tiles_for_area(lat: float, lon: float, radius_km: float, zoom: int) -> 
     """Get list of tile coordinates covering an area."""
     # Convert radius to degrees (approximate)
     lat_deg = radius_km / 111.0
-    lon_deg = radius_km / (111.0 * math.cos(math.radians(lat)))
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    lon_deg = radius_km / (111.0 * cos_lat)
 
     min_lat, max_lat = lat - lat_deg, lat + lat_deg
     min_lon, max_lon = lon - lon_deg, lon + lon_deg
 
+    # Get tile bounds (note: y increases southward)
+    x_min, _ = _latlon_to_tile(min_lat, min_lon, zoom)
+    x_max, _ = _latlon_to_tile(max_lat, max_lon, zoom)
+    _, y_min = _latlon_to_tile(max_lat, min_lon, zoom)
+    _, y_max = _latlon_to_tile(min_lat, max_lon, zoom)
+
+    # Ensure correct ordering
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+
     tiles = []
-    for tile_lat in [min_lat, lat, max_lat]:
-        for tile_lon in [min_lon, lon, max_lon]:
-            x, y = _latlon_to_tile(tile_lat, tile_lon, zoom)
-            if (x, y) not in tiles:
-                tiles.append((x, y))
+    for x in range(x_min, x_max + 1):
+        for y in range(y_min, y_max + 1):
+            tiles.append((x, y))
 
     return tiles
 
@@ -383,7 +394,9 @@ def _get_tiles_for_area(lat: float, lon: float, radius_km: float, zoom: int) -> 
 def _latlon_to_tile(lat: float, lon: float, zoom: int) -> Tuple[int, int]:
     """Convert lat/lon to tile coordinates."""
     n = 2 ** zoom
-    x = int((lon + 180) / 360 * n)
+    x = int((lon + 180) / 360 * n) % n
+    # Clamp to Mercator limits to avoid math domain errors
+    lat = max(-85.0511, min(85.0511, lat))
     lat_rad = math.radians(lat)
     y = int((1 - math.log(math.tan(lat_rad) + 1/math.cos(lat_rad)) / math.pi) / 2 * n)
     return x, y
@@ -624,8 +637,8 @@ class CoverageMapGenerator:
             # Default to center of continental US
             return (39.8283, -98.5795)
 
-        lats = [n.latitude for n in self._nodes if n.latitude]
-        lons = [n.longitude for n in self._nodes if n.longitude]
+        lats = [n.latitude for n in self._nodes if n.latitude is not None]
+        lons = [n.longitude for n in self._nodes if n.longitude is not None]
 
         if not lats or not lons:
             return (39.8283, -98.5795)
@@ -637,8 +650,8 @@ class CoverageMapGenerator:
         if not self._nodes:
             return None
 
-        lats = [n.latitude for n in self._nodes if n.latitude]
-        lons = [n.longitude for n in self._nodes if n.longitude]
+        lats = [n.latitude for n in self._nodes if n.latitude is not None]
+        lons = [n.longitude for n in self._nodes if n.longitude is not None]
 
         if not lats or not lons:
             return None
