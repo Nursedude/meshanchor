@@ -3,26 +3,11 @@ Version=1.0
 Type=Application
 Name=MeshForge
 GenericName=Mesh Network Manager
-Comment=LoRa Mesh Network Development & Operations Suite
+Comment=LoRa Mesh Network Operations Suite (NOC)
 Exec=/opt/meshforge/scripts/meshforge-terminal.sh
 Icon=org.meshforge.app
 Terminal=false
-Categories=Network;System;
-Keywords=meshtastic;lora;mesh;radio;network;
+Categories=Network;System;HamRadio;
+Keywords=meshtastic;lora;mesh;radio;network;reticulum;
 StartupNotify=true
 StartupWMClass=org.meshforge.app
-Actions=tui;gtk;web;
-
-[Desktop Action tui]
-Name=TUI Menu (Direct)
-Exec=/opt/meshforge/scripts/meshforge-launcher.sh tui
-Terminal=true
-
-[Desktop Action gtk]
-Name=GTK Desktop Interface
-Exec=/opt/meshforge/scripts/meshforge-launcher.sh gtk
-
-[Desktop Action web]
-Name=Web Monitor
-Exec=/opt/meshforge/scripts/meshforge-launcher.sh web
-Terminal=true

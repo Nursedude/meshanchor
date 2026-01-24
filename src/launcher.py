@@ -2,9 +2,8 @@
 """
 MeshForge Launcher
 
-Detects environment and launches the appropriate interface:
-  - GTK4 Desktop (if display available)
-  - Launcher TUI (raspi-config style, works everywhere)
+Detects environment and launches the TUI interface (raspi-config style).
+Works everywhere: SSH, serial, local terminal.
 
 User preferences are saved for future launches.
 """
@@ -175,7 +174,6 @@ def detect_environment():
         'has_display': False,
         'display_type': None,
         'is_ssh': False,
-        'has_gtk': False,
         'is_root': os.geteuid() == 0,
         'terminal': os.environ.get('TERM', 'unknown'),
     }
@@ -191,16 +189,6 @@ def detect_environment():
     if os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'):
         env['is_ssh'] = True
 
-    # Check for GTK4
-    try:
-        import gi
-        gi.require_version('Gtk', '4.0')
-        gi.require_version('Adw', '1')
-        from gi.repository import Gtk, Adw
-        env['has_gtk'] = True
-    except (ImportError, ValueError):
-        pass
-
     return env
 
 
@@ -211,93 +199,48 @@ def print_environment_info(env):
     if env['has_display']:
         print(f"  {Colors.GREEN}+{Colors.NC} Display: {env['display_type']}")
     else:
-        print(f"  {Colors.YELLOW}○{Colors.NC} No display")
+        print(f"  {Colors.YELLOW}○{Colors.NC} No display (TUI works fine)")
 
     if env['is_ssh']:
         print(f"  {Colors.YELLOW}○{Colors.NC} SSH session")
-
-    if env['has_gtk']:
-        print(f"  {Colors.GREEN}+{Colors.NC} GTK4/libadwaita")
-    else:
-        print(f"  {Colors.DIM}○{Colors.NC} GTK4 not available")
 
     print()
 
 
 def get_recommendation(env):
     """Get the recommended interface based on environment"""
-    if env['has_display'] and env['has_gtk'] and not env['is_ssh']:
-        return '1'  # GTK4 GUI
-    return '2'  # TUI (raspi-config style)
+    return '1'  # TUI (raspi-config style) - works everywhere
 
 
 def print_menu(env, recommended):
     """Print the interface selection menu"""
-    print(f"{Colors.BOLD}=== INTERFACES ============================================{Colors.NC}\n")
+    print(f"{Colors.BOLD}=== INTERFACE ============================================={Colors.NC}\n")
 
-    # Option 1: GTK4 GUI
-    gtk_status = ""
-    if not env['has_display']:
-        gtk_status = f" {Colors.DIM}(no display){Colors.NC}"
-    elif not env['has_gtk']:
-        gtk_status = f" {Colors.YELLOW}(not installed){Colors.NC}"
-    elif env['is_ssh']:
-        gtk_status = f" {Colors.YELLOW}(may not work over SSH){Colors.NC}"
-
-    rec1 = f" {Colors.GREEN}<- Recommended{Colors.NC}" if recommended == '1' else ""
-    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.CYAN}GTK4 Desktop{Colors.NC}{gtk_status}{rec1}")
-    print(f"     {Colors.DIM}Full graphical interface with maps, charts, panels{Colors.NC}")
-    print()
-
-    # Option 2: TUI (raspi-config style)
-    rec2 = f" {Colors.GREEN}<- Recommended{Colors.NC}" if recommended == '2' else ""
-    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.GREEN}Terminal UI{Colors.NC} (raspi-config style){rec2}")
+    print(f"  {Colors.BOLD}1{Colors.NC}. {Colors.GREEN}Terminal UI{Colors.NC} (raspi-config style) {Colors.GREEN}<- Recommended{Colors.NC}")
     print(f"     {Colors.DIM}Works everywhere: SSH, serial, local. Full feature set.{Colors.NC}")
     print()
 
     # Quick tools
     print(f"{Colors.BOLD}=== QUICK TOOLS ==========================================={Colors.NC}\n")
 
-    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.YELLOW}Run Diagnostics{Colors.NC}")
+    print(f"  {Colors.BOLD}2{Colors.NC}. {Colors.YELLOW}Run Diagnostics{Colors.NC}")
     print(f"     {Colors.DIM}Check system health, services, and connectivity{Colors.NC}")
     print()
 
-    print(f"  {Colors.BOLD}4{Colors.NC}. {Colors.YELLOW}Start Gateway Bridge{Colors.NC}")
+    print(f"  {Colors.BOLD}3{Colors.NC}. {Colors.YELLOW}Start Gateway Bridge{Colors.NC}")
     print(f"     {Colors.DIM}RNS <-> Meshtastic bridge (headless mode){Colors.NC}")
     print()
 
-    print(f"  {Colors.BOLD}5{Colors.NC}. {Colors.YELLOW}Monitor Mode{Colors.NC}")
+    print(f"  {Colors.BOLD}4{Colors.NC}. {Colors.YELLOW}Monitor Mode{Colors.NC}")
     print(f"     {Colors.DIM}Real-time node and message monitoring{Colors.NC}")
     print()
 
     # Options
     print(f"{Colors.BOLD}=== OPTIONS ==============================================={Colors.NC}\n")
 
-    if not env['has_gtk']:
-        print(f"  {Colors.BOLD}i{Colors.NC}. Install GTK4 dependencies")
     print(f"  {Colors.BOLD}w{Colors.NC}. Run setup wizard")
     print(f"  {Colors.BOLD}q{Colors.NC}. Quit")
     print()
-
-
-def install_gtk():
-    """Install GTK4 dependencies"""
-    print(f"\n{Colors.CYAN}Installing GTK4 dependencies...{Colors.NC}")
-    print(f"{Colors.DIM}sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1{Colors.NC}\n")
-
-    try:
-        subprocess.run([
-            'sudo', 'apt', 'install', '-y',
-            'python3-gi', 'python3-gi-cairo',
-            'gir1.2-gtk-4.0', 'libadwaita-1-0', 'gir1.2-adw-1'
-        ], check=True, timeout=300)
-        print(f"{Colors.GREEN}GTK4 dependencies installed!{Colors.NC}")
-    except subprocess.CalledProcessError as e:
-        print(f"{Colors.RED}Failed to install GTK4 dependencies: {e}{Colors.NC}")
-    except subprocess.TimeoutExpired:
-        print(f"{Colors.RED}Installation timed out (5 min limit){Colors.NC}")
-
-    input(f"\n{Colors.DIM}Press Enter to continue...{Colors.NC}")
 
 
 def launch_interface(choice):
@@ -305,21 +248,16 @@ def launch_interface(choice):
     src_dir = Path(__file__).parent
 
     if choice == "1":
-        # GTK4 GUI
-        print(f"\n{Colors.GREEN}Launching GTK4 Desktop...{Colors.NC}\n")
-        os.execv(sys.executable, [sys.executable, str(src_dir / 'main_gtk.py')])
-
-    elif choice == "2":
         # Launcher TUI (raspi-config style)
         print(f"\n{Colors.GREEN}Launching Terminal UI...{Colors.NC}\n")
         os.execv(sys.executable, [sys.executable, str(src_dir / 'launcher_tui' / 'main.py')])
 
-    elif choice == "3":
+    elif choice == "2":
         # Diagnostics
         print(f"\n{Colors.GREEN}Running Diagnostics...{Colors.NC}\n")
         subprocess.run([sys.executable, str(src_dir / 'cli' / 'diagnose.py')], timeout=600)
 
-    elif choice == "4":
+    elif choice == "3":
         # Gateway Bridge
         print(f"\n{Colors.GREEN}Starting Gateway Bridge...{Colors.NC}")
         print(f"{Colors.DIM}Press Ctrl+C to stop{Colors.NC}\n")
@@ -328,7 +266,7 @@ def launch_interface(choice):
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}Gateway stopped.{Colors.NC}")
 
-    elif choice == "5":
+    elif choice == "4":
         # Monitor Mode
         print(f"\n{Colors.GREEN}Starting Monitor Mode...{Colors.NC}\n")
         try:
@@ -444,11 +382,9 @@ def main():
         print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
         sys.exit(1)
 
-    # Direct interface flags (skip menu)
-    if '--gtk' in sys.argv:
-        launch_interface('1')
+    # Direct interface flag (skip menu)
     if '--tui' in sys.argv:
-        launch_interface('2')
+        launch_interface('1')
 
     # Start NOC services if in local mode
     if '--no-services' not in sys.argv:
@@ -464,20 +400,12 @@ def main():
     auto_launch = prefs.get('auto_launch', False)
 
     # Auto-launch saved preference if set
-    if auto_launch and saved_interface in ['1', '2']:
-        env = detect_environment()
-        can_launch = True
-        if saved_interface == '1' and not (env['has_display'] and env['has_gtk']):
-            can_launch = False
-
-        if can_launch:
-            print(f"{Colors.GREEN}Auto-launching saved preference...{Colors.NC}")
-            print(f"{Colors.DIM}(Run with --wizard to change){Colors.NC}")
-            import time
-            time.sleep(1)
-            launch_interface(saved_interface)
-        else:
-            print(f"{Colors.YELLOW}Saved interface not available, showing menu...{Colors.NC}")
+    if auto_launch and saved_interface == '1':
+        print(f"{Colors.GREEN}Auto-launching TUI...{Colors.NC}")
+        print(f"{Colors.DIM}(Run with --wizard to change){Colors.NC}")
+        import time
+        time.sleep(1)
+        launch_interface('1')
 
     # Check for --wizard flag
     if '--wizard' in sys.argv:
@@ -506,45 +434,21 @@ def main():
             print(f"\n{Colors.YELLOW}A Hui Hou!{Colors.NC}")
             sys.exit(0)
 
-        elif choice.lower() == 'i':
-            install_gtk()
-
         elif choice.lower() == 'w':
             run_setup_wizard()
 
-        elif choice in ['1', '2']:
-            # Validate GTK availability
-            if choice == '1' and not env['has_display']:
-                print(f"\n{Colors.YELLOW}No display detected. GTK4 requires a display.{Colors.NC}")
-                try:
-                    confirm = input(f"Continue anyway? [y/N]: ").strip().lower()
-                    if confirm not in ['y', 'yes']:
-                        continue
-                except (KeyboardInterrupt, EOFError):
-                    continue
-
-            if choice == '1' and not env['has_gtk']:
-                print(f"\n{Colors.YELLOW}GTK4 not installed.{Colors.NC}")
-                try:
-                    confirm = input(f"Install now? [Y/n]: ").strip().lower()
-                    if confirm in ['', 'y', 'yes']:
-                        install_gtk()
-                        continue
-                except (KeyboardInterrupt, EOFError):
-                    continue
-
+        elif choice == '1':
             # Save preference
-            prefs['interface'] = choice
+            prefs['interface'] = '1'
             try:
                 confirm = input(f"\n{Colors.DIM}Remember this choice? [Y/n]: {Colors.NC}").strip().lower()
                 prefs['auto_launch'] = confirm in ['', 'y', 'yes']
             except (KeyboardInterrupt, EOFError):
                 prefs['auto_launch'] = False
             save_preferences(prefs)
+            launch_interface('1')
 
-            launch_interface(choice)
-
-        elif choice in ['3', '4', '5']:
+        elif choice in ['2', '3', '4']:
             launch_interface(choice)
 
         else:
