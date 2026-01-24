@@ -12,6 +12,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -78,6 +79,7 @@ class AnalyticsStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
         self._lock = threading.Lock()
+        self._last_cleanup = 0.0  # epoch time of last auto-cleanup
         self._init_db()
 
     def _init_db(self):
@@ -153,8 +155,23 @@ class AnalyticsStore:
             finally:
                 conn.close()
 
+    # Auto-cleanup interval: once per hour
+    AUTO_CLEANUP_INTERVAL = 3600
+
+    def _maybe_cleanup(self):
+        """Periodically clean up old analytics data to prevent unbounded disk growth."""
+        now = time.time()
+        if now - self._last_cleanup < self.AUTO_CLEANUP_INTERVAL:
+            return
+        self._last_cleanup = now
+        try:
+            self.cleanup_old_data(days=30)
+        except Exception as e:
+            logger.debug(f"Analytics auto-cleanup error: {e}")
+
     def record_link_budget(self, sample: LinkBudgetSample):
         """Record a link budget measurement."""
+        self._maybe_cleanup()
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -175,6 +192,7 @@ class AnalyticsStore:
 
     def record_network_health(self, metrics: NetworkHealthMetrics):
         """Record network health snapshot."""
+        self._maybe_cleanup()
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -195,6 +213,7 @@ class AnalyticsStore:
 
     def record_coverage(self, stats: CoverageStats):
         """Record coverage snapshot."""
+        self._maybe_cleanup()
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             try:

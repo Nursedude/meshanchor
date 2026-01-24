@@ -370,6 +370,22 @@ class DeliveryTracker:
             "timed_out": 0,
         }
 
+    def _force_timeout_oldest(self) -> None:
+        """Force-timeout the oldest pending record to make room.
+
+        Called under _lock when _pending exceeds MAX_HISTORY.
+        Prevents unbounded memory growth if check_timeouts() is delayed.
+        """
+        if not self._pending:
+            return
+        oldest_id = min(self._pending, key=lambda k: self._pending[k].sent_at)
+        record = self._pending.pop(oldest_id)
+        record.status = "failed"
+        record.confirmed_at = time.time()
+        record.failure_reason = "evicted_overflow"
+        self._history.append(record)
+        self._stats["timed_out"] += 1
+
     def track_message(self, msg_id: str, destination_hash: bytes,
                       content_preview: str = "") -> None:
         """Register a new LXMF message for delivery tracking.
@@ -386,6 +402,9 @@ class DeliveryTracker:
             sent_at=time.time(),
         )
         with self._lock:
+            # Prevent unbounded growth if check_timeouts() is delayed
+            if len(self._pending) >= self.MAX_HISTORY:
+                self._force_timeout_oldest()
             self._pending[msg_id] = record
             self._stats["total_sent"] += 1
             logger.debug(f"Tracking delivery: {msg_id} -> {record.destination_hash[:8]}...")
