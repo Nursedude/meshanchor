@@ -11,14 +11,12 @@
 # Options:
 #   UPGRADE_SYSTEM=yes      - Automatically upgrade all system packages
 #   SKIP_UPGRADE=yes        - Skip the system upgrade prompt entirely
-#   INSTALL_GTK=yes         - Install GTK4/libadwaita for desktop GUI
-#   INSTALL_DESKTOP=yes     - Create desktop entry for MeshForge
 #   BREAK_SYSTEM_PACKAGES=yes - Use pip --break-system-packages instead of venv
 #   USE_VENV=no             - Same as BREAK_SYSTEM_PACKAGES=yes
 #
 # Examples:
-#   # Install with system upgrade and desktop GUI
-#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo UPGRADE_SYSTEM=yes INSTALL_GTK=yes bash
+#   # Install with system upgrade
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
 #
 #   # Install without upgrade prompt
 #   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo SKIP_UPGRADE=yes bash
@@ -48,7 +46,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Detect OS and architecture
-echo -e "${CYAN}[1/5] Detecting system...${NC}"
+echo -e "${CYAN}[1/7] Detecting system...${NC}"
 OS=$(uname -s)
 ARCH=$(uname -m)
 echo "  OS: $OS"
@@ -91,27 +89,13 @@ else
 fi
 
 # Install system dependencies
-echo -e "${CYAN}[4/8] Installing required dependencies...${NC}"
+echo -e "${CYAN}[4/7] Installing required dependencies...${NC}"
 apt-get install -y -qq python3 python3-pip python3-venv git wget curl &>/dev/null
 echo -e "${GREEN}  ✓ Core dependencies installed${NC}"
 
-# Install GTK4/libadwaita for desktop GUI (optional but recommended)
-echo -e "${CYAN}[5/8] Installing GUI dependencies...${NC}"
-if [[ "${INSTALL_GTK}" == "yes" ]] || [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
-    echo "  Installing GTK4/libadwaita for desktop GUI..."
-    apt-get install -y -qq python3-gi python3-gi-cairo gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1 &>/dev/null || {
-        echo -e "${YELLOW}  ⊘ GTK4 not available (headless mode OK)${NC}"
-    }
-    # Install WebKit for embedded web views (optional)
-    apt-get install -y -qq gir1.2-webkit2-4.1 &>/dev/null || true
-    echo -e "${GREEN}  ✓ GUI dependencies installed${NC}"
-else
-    echo -e "${YELLOW}  ⊘ Skipped (no display detected - use INSTALL_GTK=yes to force)${NC}"
-fi
-
 # Clone or update repository
 INSTALL_DIR="/opt/meshforge"
-echo -e "${CYAN}[6/8] Setting up MeshForge...${NC}"
+echo -e "${CYAN}[5/7] Setting up MeshForge...${NC}"
 
 if [[ -d "$INSTALL_DIR" ]]; then
     echo "  Updating existing installation..."
@@ -130,7 +114,7 @@ fi
 echo -e "${GREEN}  ✓ Repository ready${NC}"
 
 # Install Python dependencies
-echo -e "${CYAN}[7/8] Installing Python dependencies...${NC}"
+echo -e "${CYAN}[6/7] Installing Python dependencies...${NC}"
 
 # Check for PEP 668 (externally-managed-environment) - Debian Bookworm, RPi OS
 PEP668_DETECTED=false
@@ -180,7 +164,7 @@ else
 fi
 
 # Create symlink for easy access
-echo -e "${CYAN}[8/8] Creating system commands...${NC}"
+echo -e "${CYAN}[7/7] Creating system commands...${NC}"
 
 # Main launcher wizard (default)
 cat > /usr/local/bin/meshforge << 'EOF'
@@ -194,30 +178,6 @@ fi
 EOF
 chmod +x /usr/local/bin/meshforge
 
-# Direct GTK GUI access
-cat > /usr/local/bin/meshforge-gtk << 'EOF'
-#!/bin/bash
-cd /opt/meshforge
-if [[ -f .no-venv ]]; then
-    exec sudo python3 src/main_gtk.py "$@"
-else
-    exec sudo /opt/meshforge/venv/bin/python src/main_gtk.py "$@"
-fi
-EOF
-chmod +x /usr/local/bin/meshforge-gtk
-
-# Direct CLI access
-cat > /usr/local/bin/meshforge-cli << 'EOF'
-#!/bin/bash
-cd /opt/meshforge
-if [[ -f .no-venv ]]; then
-    exec sudo python3 src/main.py "$@"
-else
-    exec sudo /opt/meshforge/venv/bin/python src/main.py "$@"
-fi
-EOF
-chmod +x /usr/local/bin/meshforge-cli
-
 # TUI access (raspi-config style)
 cat > /usr/local/bin/meshforge-tui << 'EOF'
 #!/bin/bash
@@ -230,31 +190,7 @@ fi
 EOF
 chmod +x /usr/local/bin/meshforge-tui
 
-# Legacy aliases for backwards compatibility
-ln -sf /usr/local/bin/meshforge /usr/local/bin/meshtasticd-installer 2>/dev/null || true
-ln -sf /usr/local/bin/meshforge-cli /usr/local/bin/meshtasticd-cli 2>/dev/null || true
-
-echo -e "${GREEN}  ✓ Commands created: meshforge, meshforge-gtk, meshforge-cli, meshforge-web${NC}"
-
-# Create desktop entry if display is available
-if [[ "${INSTALL_DESKTOP}" == "yes" ]] || [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
-    echo -e "${CYAN}Creating desktop entry...${NC}"
-    mkdir -p /usr/share/applications
-    cat > /usr/share/applications/meshforge.desktop << 'EOF'
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=MeshForge
-Comment=LoRa Mesh Network Operations Suite
-Exec=/usr/local/bin/meshforge-gtk
-Icon=/opt/meshforge/assets/shaka.svg
-Terminal=false
-Categories=Network;HamRadio;Settings;
-Keywords=meshtastic;lora;mesh;radio;
-EOF
-    chmod 644 /usr/share/applications/meshforge.desktop
-    echo -e "${GREEN}  ✓ Desktop entry created${NC}"
-fi
+echo -e "${GREEN}  ✓ Commands created: meshforge, meshforge-tui${NC}"
 
 # Success message
 echo ""
@@ -263,10 +199,8 @@ echo -e "${GREEN}║         MeshForge Installation Complete!                  �
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Quick Start:${NC}"
-echo "  ${GREEN}sudo meshforge${NC}         - Launch interface wizard"
-echo "  ${GREEN}sudo meshforge-gtk${NC}     - GTK desktop application"
-echo "  ${GREEN}sudo meshforge-web${NC}     - Web UI (browser access)"
-echo "  ${GREEN}sudo meshforge-cli${NC}     - Rich CLI interface"
+echo "  ${GREEN}sudo meshforge${NC}         - Launch TUI (raspi-config style)"
+echo "  ${GREEN}sudo meshforge-tui${NC}     - Same as above (explicit)"
 echo ""
 echo -e "${CYAN}Features:${NC}"
 echo "  • Meshtastic + Reticulum (RNS) gateway bridge"

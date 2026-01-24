@@ -2,7 +2,7 @@
 AI Tools Mixin for MeshForge Launcher TUI.
 
 Provides AI-powered diagnostics, knowledge base queries, and coverage map
-generation for the TUI launcher. Brings GTK AI features to terminal users.
+generation for the TUI launcher.
 
 Features:
 - Intelligent Diagnostics (rule-based symptom analysis)

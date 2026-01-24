@@ -1,90 +1,18 @@
 #!/bin/bash
 # MeshForge Launcher Script
-# This script handles launching MeshForge with proper privileges
+# Launches the TUI (raspi-config style) interface
 
 MESHFORGE_DIR="/opt/meshforge"
 
-# For GUI apps, we need to preserve DISPLAY/WAYLAND environment
-# pkexec strips these, so we use a different approach
+# Function to launch TUI with sudo
+launch_tui() {
+    local script="$MESHFORGE_DIR/src/launcher_tui/main.py"
 
-# Check if we're running in a terminal
-is_interactive_terminal() {
-    [ -t 0 ] && [ -t 1 ]
-}
-
-# Get graphical sudo - try various methods
-get_graphical_sudo() {
-    local script="$1"
-
-    # Method 1: If pkexec is available and polkit is configured
-    if command -v pkexec &>/dev/null && [ -f /usr/share/polkit-1/actions/org.meshforge.policy ]; then
-        # Allow root to connect to X server first
-        xhost +local:root 2>/dev/null || true
-        # pkexec with env preservation via wrapper
-        exec pkexec env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-            XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
-            XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-            python3 "$script"
-    fi
-
-    # Method 2: Try zenity/kdialog for password prompt
-    if command -v zenity &>/dev/null; then
-        local password
-        password=$(zenity --password --title="MeshForge Authentication" 2>/dev/null)
-        if [ -n "$password" ]; then
-            xhost +local:root 2>/dev/null || true
-            echo "$password" | sudo -S -E python3 "$script"
-            return $?
-        fi
-    fi
-
-    # Method 3: Try ssh-askpass style
-    if [ -n "$SSH_ASKPASS" ] || command -v ssh-askpass &>/dev/null; then
-        export SUDO_ASKPASS="${SSH_ASKPASS:-$(command -v ssh-askpass)}"
-        xhost +local:root 2>/dev/null || true
-        exec sudo -A -E python3 "$script"
-    fi
-
-    # Fallback: open terminal for password
-    exec x-terminal-emulator -e "sudo python3 $script"
-}
-
-# Function to launch with sudo in a way that preserves display
-launch_gui() {
-    local script="$1"
-
-    # If we're already root, just run
     if [ "$EUID" -eq 0 ]; then
-        exec python3 "$script"
+        exec python3 "$script" "$@"
+    else
+        exec sudo python3 "$script" "$@"
     fi
-
-    # If we have a display but no terminal, use graphical sudo
-    if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-        if ! is_interactive_terminal; then
-            get_graphical_sudo "$script"
-            return $?
-        fi
-
-        # For Wayland with terminal
-        if [ -n "$WAYLAND_DISPLAY" ]; then
-            exec sudo -E python3 "$script"
-        fi
-        # For X11 with terminal
-        if [ -n "$DISPLAY" ]; then
-            # Allow root to connect to X server
-            xhost +local:root 2>/dev/null || true
-            exec sudo -E python3 "$script"
-        fi
-    fi
-
-    # Fallback: run in terminal
-    exec x-terminal-emulator -e "sudo python3 $script"
-}
-
-# Function to launch terminal apps
-launch_terminal() {
-    local script="$1"
-    exec sudo python3 "$script"
 }
 
 # Show usage help
@@ -94,45 +22,28 @@ show_help() {
     echo "Usage: meshforge [command]"
     echo ""
     echo "Commands:"
-    echo "  (none)    raspi-config style menu (default)"
-    echo "  tui       raspi-config style TUI launcher"
-    echo "  vte       VTE terminal wrapper (best taskbar icon)"
-    echo "  gtk       Launch GTK graphical interface"
-    echo "  cli       Launch Rich CLI menu"
-    echo "  web       Launch web interface"
+    echo "  (none)    Launch TUI menu (default)"
+    echo "  tui       Same as default"
     echo "  help      Show this help message"
     echo ""
-    echo "The default launcher uses whiptail/dialog for a"
+    echo "The launcher uses whiptail/dialog for a"
     echo "raspi-config style interface that works over SSH."
     echo ""
-    echo "For best taskbar icon support on desktop, use 'vte' mode."
-    echo ""
     echo "Examples:"
-    echo "  meshforge          # raspi-config style menu"
-    echo "  meshforge vte      # TUI with proper taskbar icon"
-    echo "  meshforge gtk      # Launch GTK directly"
-    echo "  meshforge cli      # Launch Rich CLI"
+    echo "  meshforge          # Launch TUI menu"
+    echo "  sudo meshforge     # Launch with privileges"
 }
 
 # Determine which interface to launch
 case "$1" in
-    gtk)
-        launch_gui "$MESHFORGE_DIR/src/main_gtk.py"
-        ;;
-    vte)
-        # VTE terminal wrapper (best taskbar icon support)
-        # Runs TUI inside GTK4 VTE widget with proper app_id
-        exec python3 "$MESHFORGE_DIR/src/launcher_vte.py"
-        ;;
     tui)
-        # raspi-config style whiptail/dialog TUI
-        launch_terminal "$MESHFORGE_DIR/src/launcher_tui/main.py"
+        shift
+        launch_tui "$@"
         ;;
     help|--help|-h)
         show_help
         ;;
     *)
-        # Default: raspi-config style TUI
-        launch_terminal "$MESHFORGE_DIR/src/launcher_tui/main.py"
+        launch_tui "$@"
         ;;
 esac
