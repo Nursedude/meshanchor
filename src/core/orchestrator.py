@@ -669,9 +669,13 @@ class ServiceOrchestrator:
             self._monitor_thread.join(timeout=5)
         logger.info("Health monitoring stopped")
 
+    # Cooldown period before resetting restart counters (seconds)
+    RESTART_COOLDOWN = 300  # 5 minutes
+
     def _monitor_loop(self, interval: int):
         """Background health check loop."""
         restart_counts: Dict[str, int] = {name: 0 for name in self.SERVICES}
+        last_failure_time: Dict[str, float] = {}
 
         while self._running:
             for service_name in self.STARTUP_ORDER:
@@ -684,16 +688,30 @@ class ServiceOrchestrator:
 
                     if self.config.get('restart_on_failure', True):
                         max_attempts = self.config.get('max_restart_attempts', 3)
+
+                        # Reset counter after cooldown period (allow self-healing)
+                        last_fail = last_failure_time.get(service_name, 0)
+                        if (restart_counts[service_name] >= max_attempts
+                                and time.time() - last_fail > self.RESTART_COOLDOWN):
+                            logger.info(
+                                f"Cooldown expired for {service_name}, "
+                                f"resetting restart counter"
+                            )
+                            restart_counts[service_name] = 0
+
                         if restart_counts[service_name] < max_attempts:
                             logger.info(f"Attempting restart of {service_name}")
                             if self.restart_service(service_name):
                                 restart_counts[service_name] = 0
                             else:
                                 restart_counts[service_name] += 1
+                                last_failure_time[service_name] = time.time()
                                 self._emit('service_failed', service_name)
                         else:
                             logger.error(
-                                f"{service_name} exceeded max restart attempts"
+                                f"{service_name} exceeded max restart attempts "
+                                f"(cooldown resets in "
+                                f"{int(self.RESTART_COOLDOWN - (time.time() - last_fail))}s)"
                             )
 
             time.sleep(interval)

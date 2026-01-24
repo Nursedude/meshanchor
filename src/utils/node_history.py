@@ -184,6 +184,14 @@ class NodeHistoryDB:
             ))
             self._last_recorded[node_id] = now
 
+        # Prune stale entries to prevent unbounded memory growth
+        if len(self._last_recorded) > 10000:
+            cutoff = now - self.retention_seconds
+            self._last_recorded = {
+                k: v for k, v in self._last_recorded.items()
+                if v > cutoff
+            }
+
         if not to_insert:
             return 0
 
