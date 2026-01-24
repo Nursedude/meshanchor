@@ -119,9 +119,13 @@ class RNSMeshtasticBridge:
         self._rns_thread = None
         self._bridge_thread = None
 
-        # Callbacks
+        # Callbacks (protected by _callbacks_lock for thread-safe registration)
         self._message_callbacks = []
         self._status_callbacks = []
+        self._callbacks_lock = threading.Lock()
+
+        # Thread-safe stats updates
+        self._stats_lock = threading.Lock()
 
         # RNS components (lazy loaded)
         self._reticulum = None
@@ -311,7 +315,8 @@ class RNSMeshtasticBridge:
                 return self._send_via_cli(message, destination, channel)
         except Exception as e:
             logger.error(f"Failed to send to Meshtastic: {e}")
-            self.stats['errors'] += 1
+            with self._stats_lock:
+                self.stats['errors'] += 1
             return False
 
     def send_to_rns(self, message: str, destination_hash: bytes = None) -> bool:
@@ -387,7 +392,8 @@ class RNSMeshtasticBridge:
 
         except Exception as e:
             logger.error(f"Failed to send to RNS: {e}")
-            self.stats['errors'] += 1
+            with self._stats_lock:
+                self.stats['errors'] += 1
             return False
 
     def _queue_send_meshtastic(self, payload: Dict) -> bool:
@@ -505,11 +511,13 @@ class RNSMeshtasticBridge:
 
     def register_message_callback(self, callback: Callable):
         """Register callback for bridged messages"""
-        self._message_callbacks.append(callback)
+        with self._callbacks_lock:
+            self._message_callbacks.append(callback)
 
     def register_status_callback(self, callback: Callable):
         """Register callback for status changes"""
-        self._status_callbacks.append(callback)
+        with self._callbacks_lock:
+            self._status_callbacks.append(callback)
 
     def test_connection(self) -> dict:
         """Test connectivity to both networks"""
@@ -1001,7 +1009,8 @@ class RNSMeshtasticBridge:
 
         # Handle bounced messages
         if result.bounced:
-            self.stats['bounced'] += 1
+            with self._stats_lock:
+                self.stats['bounced'] += 1
             logger.info(
                 f"Message bounced (confidence {result.confidence:.2f}): "
                 f"{msg.source_id[:8]}... -> {result.bounce_reason}"
@@ -1117,20 +1126,23 @@ class RNSMeshtasticBridge:
 
             if self.send_to_rns(content, destination_hash):
                 logger.info(f"Bridge Mesh→RNS: {content[:50]}...")
-                self.stats['messages_mesh_to_rns'] += 1
+                with self._stats_lock:
+                    self.stats['messages_mesh_to_rns'] += 1
                 self.health.record_message_sent("mesh_to_rns")
             else:
                 if msg.is_broadcast:
                     logger.debug(f"Mesh→RNS broadcast not sent (no propagation node): {content[:30]}...")
                 else:
                     logger.warning(f"Failed to bridge Mesh→RNS: {content[:30]}...")
-                    self.stats['errors'] += 1
+                    with self._stats_lock:
+                        self.stats['errors'] += 1
                     requeued = self._requeue_failed_message(msg, "rns")
                     self.health.record_message_failed("mesh_to_rns", requeued=requeued)
 
         except Exception as e:
             logger.error(f"Error bridging Mesh→RNS: {e}")
-            self.stats['errors'] += 1
+            with self._stats_lock:
+                self.stats['errors'] += 1
             self.health.record_error("rns", e)
             self._requeue_failed_message(msg, "rns")
             self.health.record_message_failed("mesh_to_rns", requeued=True)
@@ -1185,17 +1197,20 @@ class RNSMeshtasticBridge:
 
             if self.send_to_meshtastic(content, channel=self.config.meshtastic.channel):
                 logger.info(f"Bridge RNS→Mesh: {content[:50]}...")
-                self.stats['messages_rns_to_mesh'] += 1
+                with self._stats_lock:
+                    self.stats['messages_rns_to_mesh'] += 1
                 self.health.record_message_sent("rns_to_mesh")
             else:
                 logger.warning("Failed to bridge RNS→Mesh")
-                self.stats['errors'] += 1
+                with self._stats_lock:
+                    self.stats['errors'] += 1
                 requeued = self._requeue_failed_message(msg, "meshtastic")
                 self.health.record_message_failed("rns_to_mesh", requeued=requeued)
 
         except Exception as e:
             logger.error(f"Error bridging RNS→Mesh: {e}")
-            self.stats['errors'] += 1
+            with self._stats_lock:
+                self.stats['errors'] += 1
             self.health.record_error("meshtastic", e)
             self._requeue_failed_message(msg, "meshtastic")
             self.health.record_message_failed("rns_to_mesh", requeued=True)
@@ -1333,7 +1348,8 @@ class RNSMeshtasticBridge:
         Issue #17 Phase 3: Emit messages to event bus so UI panels can subscribe
         and display RX messages without being directly coupled to the bridge.
         """
-        callbacks = list(self._message_callbacks)  # Snapshot to avoid race condition
+        with self._callbacks_lock:
+            callbacks = list(self._message_callbacks)
         for callback in callbacks:
             try:
                 callback(msg)
@@ -1363,7 +1379,8 @@ class RNSMeshtasticBridge:
 
     def _notify_status(self, status: str):
         """Notify status callbacks (thread-safe snapshot)"""
-        callbacks = list(self._status_callbacks)  # Snapshot to avoid race condition
+        with self._callbacks_lock:
+            callbacks = list(self._status_callbacks)
         for callback in callbacks:
             try:
                 callback(status, self.get_status())

@@ -111,7 +111,9 @@ class SettingsManager:
             return self._settings.copy()
 
     def save(self) -> bool:
-        """Save current settings to file.
+        """Save current settings to file atomically.
+
+        Uses temp-file-then-rename to prevent partial writes on crash.
 
         Returns:
             True if save was successful
@@ -119,10 +121,11 @@ class SettingsManager:
         with self._lock:
             try:
                 self._config_dir.mkdir(parents=True, exist_ok=True)
-                with open(self._settings_file, 'w') as f:
-                    json.dump(self._settings, f, indent=2)
+                content = json.dumps(self._settings, indent=2)
+                from utils.paths import atomic_write_text
+                atomic_write_text(self._settings_file, content)
                 return True
-            except IOError as e:
+            except (IOError, OSError) as e:
                 logger.error(f"Error saving {self._settings_file}: {e}")
                 return False
 
@@ -387,6 +390,7 @@ def debounce(wait_ms: int):
                 if timer is not None:
                     timer.cancel()
                 timer = threading.Timer(wait_ms / 1000.0, lambda: fn(*args, **kwargs))
+                timer.daemon = True
                 timer.start()
 
         return debounced
