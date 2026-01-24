@@ -129,6 +129,16 @@ class EmergencyModeMixin:
         full_msg = f"{EMCOMM_PREFIX}{msg.strip()}"
         dest_clean = dest.strip()
 
+        # Validate node ID format: !hex or ^all
+        import re
+        if not re.match(r'^(![\da-fA-F]{6,16}|\^all)$', dest_clean):
+            self.dialog.msgbox(
+                "Invalid Destination",
+                f"'{dest_clean}' is not a valid node ID.\n"
+                "Use format: !abc12345 or ^all"
+            )
+            return
+
         # Confirm
         if not self.dialog.yesno(
             "Confirm Direct Message",

@@ -134,6 +134,8 @@ class ServiceOrchestrator:
 
     def __init__(self, config_path: Optional[Path] = None):
         """Initialize orchestrator."""
+        # Instance-level copy to avoid mutating shared class attribute
+        self.SERVICES = dict(self.__class__.SERVICES)
         self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
         self._monitor_thread: Optional[threading.Thread] = None
