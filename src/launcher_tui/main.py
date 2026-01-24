@@ -71,6 +71,7 @@ from service_discovery_mixin import ServiceDiscoveryMixin
 from first_run_mixin import FirstRunMixin
 from system_tools_mixin import SystemToolsMixin
 from quick_actions_mixin import QuickActionsMixin
+from emergency_mode_mixin import EmergencyModeMixin
 
 
 class MeshForgeLauncher(
@@ -82,7 +83,8 @@ class MeshForgeLauncher(
     ServiceDiscoveryMixin,
     FirstRunMixin,
     SystemToolsMixin,
-    QuickActionsMixin
+    QuickActionsMixin,
+    EmergencyModeMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -231,18 +233,24 @@ class MeshForgeLauncher(
         """Display the main NOC menu."""
         while True:
             choices = [
+                # Monitor
                 ("status", "Status Overview"),
                 ("quick", "Quick Actions (shortcuts)"),
-                ("radio", "Radio (meshtastic CLI)"),
-                ("services", "Services (start/stop/restart)"),
                 ("logs", "Logs (live follow, errors, analysis)"),
                 ("network", "Network & Ports"),
+                # Operate
+                ("radio", "Radio (meshtastic CLI)"),
+                ("services", "Services (start/stop/restart)"),
+                ("emcomm", "EMERGENCY MODE (field ops)"),
+                # Mesh Networks
                 ("rns", "RNS / Reticulum"),
                 ("aredn", "AREDN Mesh"),
+                # Tools & Config
                 ("rf", "RF Tools & Calculator"),
                 ("config", "Configuration"),
                 ("hardware", "Hardware Detection"),
                 ("system", "System Tools (full Linux CLI)"),
+                # Meta
                 ("web", "Web Client URL"),
                 ("about", "About"),
                 ("quit", "Exit"),
@@ -269,6 +277,8 @@ class MeshForgeLauncher(
             self._radio_menu()
         elif choice == "services":
             self._service_menu()
+        elif choice == "emcomm":
+            self._emergency_mode()
         elif choice == "logs":
             self._logs_menu()
         elif choice == "network":

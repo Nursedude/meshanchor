@@ -13,6 +13,7 @@ Run with: pytest tests/test_status_bar.py -v
 """
 
 import pytest
+import subprocess
 import sys
 import os
 import time
@@ -105,7 +106,7 @@ class TestServiceChecks:
 
     @patch('subprocess.run')
     def test_timeout_returns_unknown(self, mock_run):
-        mock_run.side_effect = TimeoutError()
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd='systemctl', timeout=3)
         bar = StatusBar()
         result = bar._check_systemd_active('meshtasticd')
         assert result == SYM_UNKNOWN

@@ -205,6 +205,62 @@ class TestQuickActionMethods:
         # Should complete without error
 
 
+    @patch('builtins.input', return_value='')
+    def test_node_inventory_empty(self, mock_input):
+        """Node inventory action works with empty inventory."""
+        launcher = MockLauncher()
+        with patch('subprocess.run'):
+            launcher._qa_node_inventory()
+        # Should complete without error
+
+    @patch('builtins.input', return_value='')
+    def test_node_inventory_with_nodes(self, mock_input):
+        """Node inventory displays tracked nodes."""
+        launcher = MockLauncher()
+        import tempfile
+        import json
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inv_path = Path(tmpdir) / "node_inventory.json"
+            # Pre-populate inventory file
+            import time
+            inv_data = {
+                "!abc12345": {
+                    "node_id": "!abc12345",
+                    "short_name": "Node1",
+                    "long_name": "Hilltop Node",
+                    "hardware": "RAK4631",
+                    "role": "router",
+                    "last_snr": -5.0,
+                    "last_rssi": -90,
+                    "last_seen": time.time(),
+                    "first_seen": time.time() - 3600,
+                    "update_count": 10,
+                }
+            }
+            inv_path.write_text(json.dumps(inv_data))
+
+            with patch('subprocess.run'):
+                with patch('utils.paths.get_real_user_home',
+                           return_value=Path(tmpdir)):
+                    # Patch .config/meshforge path
+                    config_dir = Path(tmpdir) / ".config" / "meshforge"
+                    config_dir.mkdir(parents=True)
+                    real_inv = config_dir / "node_inventory.json"
+                    real_inv.write_text(json.dumps(inv_data))
+
+                    launcher._qa_node_inventory()
+
+    @patch('builtins.input', return_value='')
+    def test_node_inventory_import_error(self, mock_input):
+        """Node inventory handles missing module gracefully."""
+        launcher = MockLauncher()
+        with patch('subprocess.run'):
+            with patch.dict(sys.modules, {'utils.node_inventory': None}):
+                launcher._qa_node_inventory()
+
+
 class TestStatusBarInvalidation:
     """Test that service restarts invalidate the status bar cache."""
 

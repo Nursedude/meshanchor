@@ -7,12 +7,15 @@ operation, avoiding deep menu navigation for frequent tasks.
 Quick Actions:
     s - Service status (all services at a glance)
     n - Node list (meshtastic --nodes)
+    i - Node inventory (tracked nodes)
+    G - GPS position / distance to nodes
     l - Follow logs (journalctl meshtasticd)
     r - Restart meshtasticd
     R - Restart rnsd
     p - Port/network check
     g - Generate status report
     d - Run diagnostics
+    c - Channel activity scan
 """
 
 import sys
@@ -27,12 +30,15 @@ logger = logging.getLogger(__name__)
 QUICK_ACTIONS = [
     ('s', 'Service status overview', '_qa_service_status'),
     ('n', 'Node list (meshtastic --nodes)', '_qa_node_list'),
+    ('i', 'Node inventory (tracked nodes)', '_qa_node_inventory'),
+    ('G', 'GPS position / distance to nodes', '_qa_gps_position'),
     ('l', 'Follow logs (meshtasticd)', '_qa_follow_logs'),
     ('r', 'Restart meshtasticd', '_qa_restart_meshtasticd'),
     ('R', 'Restart rnsd', '_qa_restart_rnsd'),
     ('p', 'Port / network check', '_qa_port_check'),
     ('g', 'Generate status report', '_qa_generate_report'),
     ('d', 'Run diagnostics', '_qa_run_diagnostics'),
+    ('c', 'Channel activity scan', '_qa_channel_scan'),
 ]
 
 
@@ -121,7 +127,7 @@ class QuickActionsMixin:
     def _qa_follow_logs(self):
         """Quick: follow meshtasticd journal logs."""
         subprocess.run(['clear'], check=False, timeout=5)
-        print("=== meshtasticd Logs (Ctrl+C to stop) ===\n")
+        print("=== meshtasticd Logs (Ctrl+C to stop, auto-exits after 2 min) ===\n")
         try:
             subprocess.run(
                 ['journalctl', '-fu', 'meshtasticd', '--no-pager', '-n', '50'],
@@ -196,14 +202,13 @@ class QuickActionsMixin:
 
         for port, desc in ports:
             try:
-                s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-                s.settimeout(1)
-                result = s.connect_ex(('127.0.0.1', port))
-                s.close()
-                if result == 0:
-                    print(f"  * {port:<6} {desc}")
-                else:
-                    print(f"  - {port:<6} {desc} (not listening)")
+                with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
+                    s.settimeout(1)
+                    result = s.connect_ex(('127.0.0.1', port))
+                    if result == 0:
+                        print(f"  * {port:<6} {desc}")
+                    else:
+                        print(f"  - {port:<6} {desc} (not listening)")
             except Exception:
                 print(f"  ? {port:<6} {desc} (check failed)")
 
@@ -231,6 +236,109 @@ class QuickActionsMixin:
             print("Error: Report generator module not available.")
         except Exception as e:
             print(f"Error generating report: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_node_inventory(self):
+        """Quick: show tracked node inventory."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Node Inventory ===\n")
+
+        try:
+            from utils.node_inventory import NodeInventory
+            from utils.paths import get_real_user_home
+
+            path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+            inv = NodeInventory(path=path)
+
+            stats = inv.get_stats()
+            print(f"  Total nodes:    {stats['total']}")
+            print(f"  Online:         {stats['online']}")
+            print(f"  Offline:        {stats['offline']}")
+            print(f"  Stale (>7d):    {stats['stale']}")
+            print(f"  With position:  {stats['with_position']}")
+
+            if stats['total'] > 0:
+                # Show node list (non-stale only)
+                nodes = [n for n in inv.get_all_nodes() if not n.is_stale]
+                if nodes:
+                    print(f"\n  {'ID':<12} {'Name':<20} {'Status':<8} {'SNR':>5}  {'Hardware'}")
+                    print(f"  {'-'*12} {'-'*20} {'-'*8} {'-'*5}  {'-'*12}")
+                    for node in nodes[:25]:  # Cap at 25 for readability
+                        name = node.display_name[:20]
+                        nid = node.node_id[:12]
+                        status = node.status
+                        snr = f"{node.last_snr:.1f}" if node.last_snr is not None else "  -"
+                        hw = node.hardware[:12] if node.hardware else "-"
+                        print(f"  {nid:<12} {name:<20} {status:<8} {snr:>5}  {hw}")
+                    if len(nodes) > 25:
+                        print(f"\n  ... and {len(nodes) - 25} more nodes")
+
+                # Role breakdown
+                if stats['roles']:
+                    roles_str = ", ".join(f"{r}: {c}" for r, c in stats['roles'].items())
+                    print(f"\n  Roles: {roles_str}")
+            else:
+                print("\n  No nodes tracked yet.")
+                print("  Nodes are added when received via MQTT or meshtastic CLI.")
+
+        except ImportError:
+            print("Error: Node inventory module not available.")
+        except Exception as e:
+            logger.debug(f"Node inventory quick action failed: {e}")
+            print(f"Error: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_gps_position(self):
+        """Quick: show GPS position and distance to nodes."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== GPS Position ===\n")
+
+        try:
+            from utils.gps_integration import GPSManager
+            from utils.paths import get_real_user_home
+
+            config_path = get_real_user_home() / ".config" / "meshforge" / "operator_position.json"
+            gps = GPSManager(config_path=config_path)
+
+            # Try to get nodes for distance calculation
+            nodes = []
+            try:
+                from utils.node_inventory import NodeInventory
+                inv_path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+                inv = NodeInventory(path=inv_path)
+                for node in inv.get_all_nodes():
+                    if node.has_position:
+                        nodes.append({
+                            'id': node.node_id,
+                            'name': node.display_name,
+                            'lat': node.lat,
+                            'lon': node.lon,
+                        })
+            except Exception:
+                pass  # Node inventory not available
+
+            # Display position report
+            report = gps.format_position_report(nodes=nodes if nodes else None)
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+
+            # Show gpsd status
+            print()
+            if gps.gpsd_available:
+                print("  gpsd: connected")
+            else:
+                print("  gpsd: not available")
+                if not gps.has_position:
+                    print("  Tip: Set position manually in Tools > GPS")
+
+        except ImportError:
+            print("Error: GPS integration module not available.")
+        except Exception as e:
+            logger.debug(f"GPS quick action failed: {e}")
+            print(f"Error: {e}")
 
         print()
         input("Press Enter to continue...")
@@ -264,6 +372,36 @@ class QuickActionsMixin:
         except ImportError:
             print("Error: Diagnostic engine not available.")
         except Exception as e:
+            print(f"Error: {e}")
+
+        print()
+        input("Press Enter to continue...")
+
+    def _qa_channel_scan(self):
+        """Quick: show channel activity scan."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Channel Activity ===\n")
+
+        try:
+            from utils.channel_scan import ChannelMonitor
+
+            monitor = ChannelMonitor()
+
+            # Try to query device for channel config
+            channels = monitor.query_device_channels()
+            if not channels:
+                print("  (Could not query device channels)")
+                print("  Showing activity from MQTT monitoring only.")
+                print()
+
+            # Display activity report
+            report = monitor.get_activity_report()
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+
+        except ImportError:
+            print("Error: Channel scan module not available.")
+        except Exception as e:
+            logger.debug(f"Channel scan quick action failed: {e}")
             print(f"Error: {e}")
 
         print()

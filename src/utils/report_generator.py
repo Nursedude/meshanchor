@@ -24,8 +24,7 @@ Usage:
 """
 
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -273,8 +272,8 @@ class ReportGenerator:
 
             # Health summary
             summary = engine.get_health_summary()
-            lines.append(f"**System Health:** {summary['overall_health']}")
-            lines.append(f"- Symptoms last hour: {summary['symptoms_last_hour']}")
+            lines.append(f"**System Health:** {summary.get('overall_health', 'unknown')}")
+            lines.append(f"- Symptoms last hour: {summary.get('symptoms_last_hour', 0)}")
             lines.append(f"- Total diagnosed: {summary['stats'].get('diagnoses_made', 0)}")
             lines.append(f"- Auto-recoveries: {summary['stats'].get('auto_recoveries', 0)}")
 
@@ -329,8 +328,8 @@ class ReportGenerator:
                     lines.append(f"| {preset} | {impact.max_range_los_km:.1f} km | "
                                  f"{impact.sensitivity_dbm:.1f} dBm | "
                                  f"{impact.throughput_bps:.0f} bps |")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Preset {preset} analysis failed: {e}")
 
         except ImportError:
             lines.append("*RF analysis module not available.*")
@@ -366,8 +365,8 @@ class ReportGenerator:
                     if score < 40:
                         recommendations.append(
                             ("soon", f"{cat.title()} score is low ({score:.0f}/100) — needs attention"))
-        except (ImportError, Exception):
-            pass
+        except Exception as e:
+            logger.debug(f"Error collecting health recommendations: {e}")
 
         try:
             from utils.predictive_maintenance import MaintenancePredictor
@@ -375,8 +374,8 @@ class ReportGenerator:
             if predictor:
                 for rec in predictor.get_maintenance_recommendations()[:5]:
                     recommendations.append((rec.priority, f"{rec.node_id}: {rec.action}"))
-        except (ImportError, Exception):
-            pass
+        except Exception as e:
+            logger.debug(f"Error collecting maintenance recommendations: {e}")
 
         if recommendations:
             # Sort by priority
@@ -384,7 +383,8 @@ class ReportGenerator:
             recommendations.sort(key=lambda r: priority_order.get(r[0], 4))
 
             for priority, action in recommendations:
-                icon = {'urgent': '🔴', 'soon': '🟡', 'scheduled': '🔵', 'monitor': '⚪'}.get(priority, '•')
+                icon = {'urgent': '[!!!]', 'soon': '[!!]',
+                        'scheduled': '[!]', 'monitor': '[?]'}.get(priority, '-')
                 lines.append(f"- {icon} **[{priority.upper()}]** {action}")
         else:
             lines.append("No actionable recommendations at this time. Network is healthy.")
