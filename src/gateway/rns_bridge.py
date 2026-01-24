@@ -326,6 +326,10 @@ class RNSMeshtasticBridge:
             logger.warning("Not connected to RNS")
             return False
 
+        if self._lxmf_source is None:
+            logger.warning("LXMF source not initialized (partial RNS init)")
+            return False
+
         try:
             import RNS
             import LXMF

@@ -11,6 +11,7 @@ config files, not root's.
 
 from pathlib import Path
 import os
+import tempfile
 
 
 # ============================================================================
@@ -49,9 +50,13 @@ def get_real_username() -> str:
     Returns:
         The real username string
     """
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
         return sudo_user
+
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        return logname
 
     return os.environ.get('USER', 'unknown')
 
@@ -123,11 +128,33 @@ class MeshForgePaths:
 
     @classmethod
     def ensure_user_dirs(cls) -> None:
-        """Create user directories if they don't exist"""
-        cls.get_config_dir().mkdir(parents=True, exist_ok=True)
-        cls.get_data_dir().mkdir(parents=True, exist_ok=True)
-        cls.get_cache_dir().mkdir(parents=True, exist_ok=True)
-        cls.get_plugins_dir().mkdir(parents=True, exist_ok=True)
+        """Create user directories if they don't exist.
+
+        When running under sudo, chown created dirs to the real user
+        so they remain accessible without sudo later.
+        """
+        dirs = [
+            cls.get_config_dir(),
+            cls.get_data_dir(),
+            cls.get_cache_dir(),
+            cls.get_plugins_dir(),
+        ]
+        for d in dirs:
+            d.mkdir(parents=True, exist_ok=True)
+
+        # Fix ownership if running under sudo
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            try:
+                import pwd
+                pw = pwd.getpwnam(sudo_user)
+                uid, gid = pw.pw_uid, pw.pw_gid
+                for d in dirs:
+                    # Only chown if currently root-owned
+                    if d.stat().st_uid == 0:
+                        os.chown(str(d), uid, gid)
+            except (KeyError, OSError):
+                pass  # Non-critical: dirs still usable by root
 
 
 class SystemPaths:
@@ -172,16 +199,31 @@ def atomic_write_text(path: Path, content: str) -> None:
     On POSIX systems, os.replace() is atomic, so either the old file
     remains intact or the new content is fully written. No partial writes.
 
+    Uses a unique temp file (via tempfile) to avoid collisions between
+    concurrent writers targeting the same path.
+
     Args:
         path: Target file path.
         content: Text content to write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    fd = None
+    tmp_path = None
     try:
-        tmp_path.write_text(content)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=f'.{path.name}.',
+            suffix='.tmp'
+        )
+        tmp_path = Path(tmp_name)
+        os.write(fd, content.encode('utf-8'))
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
         tmp_path.replace(path)  # Atomic on POSIX
     except Exception:
-        if tmp_path.exists():
+        if fd is not None:
+            os.close(fd)
+        if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
         raise

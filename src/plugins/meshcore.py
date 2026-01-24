@@ -21,6 +21,7 @@ Usage:
 """
 
 import logging
+import threading
 import time
 import re
 from dataclasses import dataclass, field
@@ -85,6 +86,7 @@ class MeshCorePlugin(ProtocolPlugin):
         self._nodes: Dict[str, MeshCoreNode] = {}
         self._config: Optional[MeshCoreConfig] = None
         self._message_callbacks: List[Callable] = []
+        self._stats_lock = threading.Lock()
         self._stats = {
             "messages_sent": 0,
             "messages_received": 0,
@@ -139,7 +141,8 @@ class MeshCorePlugin(ProtocolPlugin):
         Returns:
             True if connection successful, False otherwise
         """
-        self._stats["connect_attempts"] += 1
+        with self._stats_lock:
+            self._stats["connect_attempts"] += 1
         conn_type = kwargs.get("type", "serial")
         self._config = MeshCoreConfig(
             connection_type=conn_type,
@@ -288,7 +291,8 @@ class MeshCorePlugin(ProtocolPlugin):
     def _process_tcp_message(self, message: str):
         """Process a message received via TCP."""
         logger.debug(f"MeshCore: Received: {message}")
-        self._stats["messages_received"] += 1
+        with self._stats_lock:
+            self._stats["messages_received"] += 1
 
         try:
             # Parse message format: NODE_ID:TYPE:DATA
@@ -396,7 +400,8 @@ class MeshCorePlugin(ProtocolPlugin):
         # Validate destination
         if destination != "broadcast" and not self._validate_node_id(destination):
             logger.error(f"Invalid destination node ID: {destination}")
-            self._stats["messages_failed"] += 1
+            with self._stats_lock:
+                self._stats["messages_failed"] += 1
             return False
 
         # Validate message length (MeshCore limit)
@@ -405,11 +410,13 @@ class MeshCorePlugin(ProtocolPlugin):
             message = message[:200]
 
         try:
-            self._stats["last_activity"] = datetime.now()
+            with self._stats_lock:
+                self._stats["last_activity"] = datetime.now()
 
             if self._config.simulation_mode:
                 logger.info(f"MeshCore [SIM]: {destination} <- {message}")
-                self._stats["messages_sent"] += 1
+                with self._stats_lock:
+                    self._stats["messages_sent"] += 1
                 return True
 
             # Send via TCP if connected
@@ -418,12 +425,14 @@ class MeshCorePlugin(ProtocolPlugin):
 
             # Actual send for other transports
             logger.info(f"MeshCore: Sending to {destination}: {message}")
-            self._stats["messages_sent"] += 1
+            with self._stats_lock:
+                self._stats["messages_sent"] += 1
             return True
 
         except Exception as e:
             logger.error(f"MeshCore send failed: {e}")
-            self._stats["messages_failed"] += 1
+            with self._stats_lock:
+                self._stats["messages_failed"] += 1
             return False
 
     def _send_tcp(self, destination: str, message: str) -> bool:
@@ -432,12 +441,14 @@ class MeshCorePlugin(ProtocolPlugin):
             # Format: DEST:MSG:DATA\n
             packet = f"{destination}:MSG:{message}\n"
             self._device.sendall(packet.encode('utf-8'))
-            self._stats["messages_sent"] += 1
+            with self._stats_lock:
+                self._stats["messages_sent"] += 1
             logger.info(f"MeshCore: Sent to {destination} via TCP")
             return True
         except Exception as e:
             logger.error(f"MeshCore TCP send failed: {e}")
-            self._stats["messages_failed"] += 1
+            with self._stats_lock:
+                self._stats["messages_failed"] += 1
             return False
 
     def _validate_node_id(self, node_id: str) -> bool:
@@ -465,8 +476,9 @@ class MeshCorePlugin(ProtocolPlugin):
         This can be used for cross-protocol bridging between
         MeshCore and Meshtastic networks.
         """
-        self._stats["messages_received"] += 1
-        self._stats["last_activity"] = datetime.now()
+        with self._stats_lock:
+            self._stats["messages_received"] += 1
+            self._stats["last_activity"] = datetime.now()
 
         # Notify all registered callbacks
         for callback in self._message_callbacks:
