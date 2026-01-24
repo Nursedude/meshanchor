@@ -28,12 +28,17 @@ def get_real_user_home() -> Path:
     Returns:
         Path to the real user's home directory
     """
-    # Check SUDO_USER first
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user and sudo_user != 'root':
+    # Check SUDO_USER first (with path traversal protection)
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
         return Path(f'/home/{sudo_user}')
 
-    # Fallback to current user
+    # Try LOGNAME as secondary
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        return Path(f'/home/{logname}')
+
+    # Fallback to current user (may be /root under sudo)
     return Path.home()
 
 
@@ -173,5 +178,10 @@ def atomic_write_text(path: Path, content: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + '.tmp')
-    tmp_path.write_text(content)
-    tmp_path.replace(path)  # Atomic on POSIX
+    try:
+        tmp_path.write_text(content)
+        tmp_path.replace(path)  # Atomic on POSIX
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise

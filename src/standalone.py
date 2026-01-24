@@ -33,7 +33,7 @@ if str(SRC_DIR) not in sys.path:
 try:
     from __version__ import __version__
 except ImportError:
-    __version__ = "4.3.0"
+    __version__ = "0.4.7-beta"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

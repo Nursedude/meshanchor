@@ -268,14 +268,20 @@ class MQTTNodelessSubscriber:
             self._client.tls_set_context(context)
             logger.debug("TLS configured for MQTT")
         except Exception as e:
-            logger.warning(f"TLS setup warning: {e}")
-            # Fall back to insecure TLS
-            try:
-                self._client.tls_set(cert_reqs=ssl.CERT_NONE)
-                self._client.tls_insecure_set(True)
-                logger.warning("Using insecure TLS (cert verification disabled)")
-            except Exception as e2:
-                logger.error(f"TLS setup failed: {e2}")
+            logger.warning(f"TLS context setup warning: {e}")
+            # Only allow insecure TLS if explicitly configured
+            if self._config.get("tls_insecure", False):
+                try:
+                    self._client.tls_set(cert_reqs=ssl.CERT_NONE)
+                    self._client.tls_insecure_set(True)
+                    logger.warning("Using insecure TLS (user-configured tls_insecure=true)")
+                except Exception as e2:
+                    logger.error(f"TLS insecure fallback failed: {e2}")
+            else:
+                logger.error(
+                    f"TLS setup failed: {e}. "
+                    "Set tls_insecure=true in config to bypass certificate verification."
+                )
 
     def _disconnect(self) -> None:
         """Disconnect from MQTT broker."""
@@ -514,7 +520,9 @@ class MQTTNodelessSubscriber:
             if hop is not None:
                 node.hop_start = hop
         if "hops_away" in data:
-            node.hops_away = data["hops_away"]
+            hops = self._safe_int(data["hops_away"], 0, 15)
+            if hops is not None:
+                node.hops_away = hops
 
         # Notify callbacks (snapshot for thread-safe iteration)
         for callback in list(self._node_callbacks):

@@ -368,22 +368,26 @@ Always prioritize safety - never suggest actions that could damage hardware
                 degraded = monitor.get_degraded()
                 if degraded:
                     parts.append(f"DEGRADED: {', '.join(degraded)}")
-        except (ImportError, Exception):
+        except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"Failed to get latency context: {e}")
 
         # Recent diagnostics
         try:
-            from utils.diagnostic_engine import get_engine
-            engine = get_engine()
+            from utils.diagnostic_engine import get_diagnostic_engine
+            engine = get_diagnostic_engine()
             recent = engine.get_recent_diagnoses(limit=3)
             if recent:
                 diag_parts = [
-                    f"{d.category.name}:{d.symptom[:40]}"
+                    f"{d.symptom.category.name}:{d.symptom.message[:40]}"
                     for d in recent
                 ]
                 parts.append(f"recent_diag=[{'; '.join(diag_parts)}]")
-        except (ImportError, Exception):
+        except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"Failed to get diagnostic context: {e}")
 
         return ", ".join(parts)
 
