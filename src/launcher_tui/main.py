@@ -807,7 +807,7 @@ class MeshForgeLauncher(
             if choice == "status":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Status ===\n")
-                self._run_rns_tool(['rnstatus', '-s'], 'rnstatus')
+                self._run_rns_tool(['rnstatus'], 'rnstatus')
                 input("\nPress Enter to continue...")
             elif choice == "paths":
                 subprocess.run(['clear'], check=False, timeout=5)
