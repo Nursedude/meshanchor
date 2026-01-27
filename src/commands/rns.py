@@ -829,6 +829,99 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
         return CommandResult.fail(f"Path test failed: {e}")
 
 
+def get_path_info(destination_hash: str) -> CommandResult:
+    """
+    Get detailed path information for an RNS destination.
+
+    Queries the running RNS instance for path metrics including
+    hop count, next hop, and interface used.
+
+    Args:
+        destination_hash: Hex string of destination hash (32 hex chars)
+
+    Returns:
+        CommandResult with path details (hops, next_hop, interface, etc.)
+    """
+    if not re.match(r'^[0-9a-fA-F]{32}$', destination_hash):
+        return CommandResult.fail(
+            "Invalid hash format",
+            error="Hash must be 32 hex characters"
+        )
+
+    try:
+        import RNS
+
+        dest_bytes = bytes.fromhex(destination_hash)
+        has_path = RNS.Transport.has_path(dest_bytes)
+
+        if not has_path:
+            return CommandResult.fail(
+                "No path known",
+                data={
+                    'destination': destination_hash,
+                    'has_path': False,
+                    'note': 'Use rnprobe or test_path() to discover paths'
+                }
+            )
+
+        info = {
+            'destination': destination_hash,
+            'has_path': True,
+            'hops': None,
+            'next_hop': None,
+            'expires': None,
+            'interface': None,
+        }
+
+        # Query path table for detailed info
+        if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
+            path_entry = RNS.Transport.path_table.get(dest_bytes)
+            if path_entry and isinstance(path_entry, (list, tuple)):
+                # Path table entry format: (timestamp, next_hop, interface, hops, expires, ...)
+                # Format may vary by RNS version
+                if len(path_entry) > 0:
+                    info['timestamp'] = path_entry[0] if isinstance(path_entry[0], (int, float)) else None
+                if len(path_entry) > 1:
+                    next_hop = path_entry[1]
+                    if isinstance(next_hop, bytes):
+                        info['next_hop'] = next_hop.hex()
+                if len(path_entry) > 2:
+                    iface = path_entry[2]
+                    if hasattr(iface, 'name'):
+                        info['interface'] = iface.name
+                    elif isinstance(iface, str):
+                        info['interface'] = iface
+                if len(path_entry) > 3:
+                    if isinstance(path_entry[3], int):
+                        info['hops'] = path_entry[3]
+                if len(path_entry) > 4:
+                    if isinstance(path_entry[4], (int, float)):
+                        info['expires'] = path_entry[4]
+
+        # Check if identity is known
+        if hasattr(RNS.Identity, 'recall') and callable(RNS.Identity.recall):
+            try:
+                identity = RNS.Identity.recall(dest_bytes)
+                info['identity_known'] = identity is not None
+            except Exception:
+                info['identity_known'] = False
+
+        return CommandResult.ok(
+            f"Path info for {destination_hash[:8]}...",
+            data=info
+        )
+
+    except ImportError:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pip install rns"
+        )
+    except (SystemExit, KeyboardInterrupt, GeneratorExit):
+        raise
+    except BaseException as e:
+        return CommandResult.fail(f"Path info failed: {e}")
+
+
 # ============================================================================
 # INTERFACE TEMPLATES
 # ============================================================================

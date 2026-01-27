@@ -79,7 +79,13 @@
 
 ### Reticulum/RNS (In Progress)
 - [x] Basic panel structure
-- [x] Interface management
+- [x] Interface management (CRUD, templates, enable/disable)
+- [x] Config management (read/write/validate/backup/restore)
+- [x] Service control (start/stop/restart rnsd)
+- [x] Path testing & diagnostics (rnprobe, get_path_info, check_connectivity)
+- [x] Node discovery (list_known_destinations, discover_nodes)
+- [x] Identity management (rnid integration in TUI)
+- [x] RNS tool availability checks in TUI diagnostics
 - [ ] LXMF messaging UI
 - [ ] Store-and-forward queue
 - [ ] Gateway configuration wizard
