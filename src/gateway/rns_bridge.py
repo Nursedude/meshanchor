@@ -772,8 +772,25 @@ class RNSMeshtasticBridge:
                     self._reticulum = RNS.Reticulum(configdir=config_dir)
                 except OSError as e:
                     if hasattr(e, 'errno') and e.errno == 98:
-                        logger.warning("RNS port conflict - will use shared transport if available")
+                        # Port conflict - re-check for RNS processes
+                        # (rnsd may have started between our initial check and bind)
+                        from utils.gateway_diagnostic import handle_address_in_use_error
+                        diag = handle_address_in_use_error(e, logger)
+
                         self._reticulum = None
+                        self._connected_rns = False
+
+                        if diag['rns_pids']:
+                            # rnsd started after our initial check - defer to it
+                            logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), deferring to rnsd")
+                            self._rns_via_rnsd = True
+                            self._rns_init_failed_permanently = True
+                        else:
+                            # Stale socket or unknown process - transient, will retry
+                            logger.warning("RNS port in use by unknown process (stale socket?)")
+                            logger.info("Will retry after backoff - port may become available")
+                            # Don't set _rns_init_failed_permanently - allow retry
+                        return
                     else:
                         raise
                 except Exception as e:
