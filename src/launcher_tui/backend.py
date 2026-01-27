@@ -74,7 +74,9 @@ class DialogBackend:
             # Run with stderr redirected to file to capture selection
             # whiptail/dialog opens /dev/tty directly for ncurses display
             with open(tmp_path, 'w') as stderr_file:
-                result = subprocess.run(cmd_parts, stderr=stderr_file)  # Interactive
+                # Interactive: user controls timing, but timeout prevents orphaned
+                # processes if terminal disconnects or dialog crashes
+                result = subprocess.run(cmd_parts, stderr=stderr_file, timeout=3600)
 
             # Read the captured selection
             with open(tmp_path, 'r') as f:
