@@ -437,6 +437,10 @@ class SystemToolsMixin:
         if not host:
             return
 
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+            return
+
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"=== DNS Lookup: {host} ===\n")
 
@@ -479,6 +483,10 @@ class SystemToolsMixin:
         if not host:
             return
 
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+            return
+
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"=== Traceroute to {host} ===\n")
         print("(Ctrl+C to stop)\n")
@@ -507,6 +515,10 @@ class SystemToolsMixin:
         )
 
         if not host:
+            return
+
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
             return
 
         count = self.dialog.inputbox(

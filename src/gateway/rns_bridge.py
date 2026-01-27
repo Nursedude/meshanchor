@@ -167,6 +167,10 @@ class RNSMeshtasticBridge:
             except Exception as e:
                 logger.warning(f"Failed to initialize persistent queue: {e}")
 
+        # Pre-compile routing rule regexes to avoid re-compilation per message
+        # and catch invalid patterns at startup rather than at runtime
+        self._compiled_rules = self._compile_routing_rules()
+
         # Routing classifier with confidence scoring
         self._classifier = None
         self._last_classification: Optional[ClassificationResult] = None
@@ -1149,8 +1153,39 @@ class RNSMeshtasticBridge:
 
         return False
 
+    def _compile_routing_rules(self) -> dict:
+        """Pre-compile regex patterns from routing rules at init time.
+
+        Returns a dict mapping rule name to compiled filter patterns.
+        Invalid patterns are logged and skipped — the rule will never match.
+        """
+        compiled = {}
+        for rule in self.config.routing_rules:
+            filters = {}
+            for field in ('source_filter', 'dest_filter', 'message_filter'):
+                pattern = getattr(rule, field, '')
+                if pattern:
+                    try:
+                        filters[field] = re.compile(pattern)
+                    except re.error as e:
+                        logger.warning(
+                            f"Invalid regex in rule '{rule.name}' "
+                            f"field '{field}': {e} — rule will be skipped"
+                        )
+                        filters[field] = None  # Mark as broken
+            compiled[rule.name] = filters
+        return compiled
+
+    # Maximum input length for regex matching to bound execution time
+    _REGEX_INPUT_LIMIT = 512
+
     def _should_bridge_legacy(self, msg: BridgedMessage) -> bool:
         """Legacy routing logic (fallback when classifier unavailable)."""
+        # Re-compile if routing rules changed since last compile
+        current_names = {r.name for r in self.config.routing_rules}
+        if current_names != set(self._compiled_rules.keys()):
+            self._compiled_rules = self._compile_routing_rules()
+
         for rule in self.config.routing_rules:
             if not rule.enabled:
                 continue
@@ -1161,27 +1196,38 @@ class RNSMeshtasticBridge:
             if msg.source_network == "rns" and rule.direction == "mesh_to_rns":
                 continue
 
-            # Apply regex filters
-            try:
-                # Source filter
-                if rule.source_filter:
-                    if not msg.source_id or not re.search(rule.source_filter, msg.source_id):
-                        continue
+            # Get pre-compiled filters for this rule
+            filters = self._compiled_rules.get(rule.name, {})
 
-                # Destination filter
-                if rule.dest_filter:
-                    dest = msg.destination_id or ""
-                    if not re.search(rule.dest_filter, dest):
-                        continue
-
-                # Message content filter
-                if rule.message_filter:
-                    if not msg.content or not re.search(rule.message_filter, msg.content):
-                        continue
-
-            except re.error as e:
-                logger.warning(f"Invalid regex in rule '{rule.name}': {e}")
+            # Skip rule entirely if any of its patterns failed to compile
+            if any(v is None for v in filters.values()):
                 continue
+
+            # Apply pre-compiled regex filters with bounded input
+            # Source filter
+            if rule.source_filter:
+                compiled = filters.get('source_filter')
+                if not compiled or not msg.source_id:
+                    continue
+                if not compiled.search(msg.source_id[:self._REGEX_INPUT_LIMIT]):
+                    continue
+
+            # Destination filter
+            if rule.dest_filter:
+                compiled = filters.get('dest_filter')
+                if not compiled:
+                    continue
+                dest = (msg.destination_id or "")[:self._REGEX_INPUT_LIMIT]
+                if not compiled.search(dest):
+                    continue
+
+            # Message content filter
+            if rule.message_filter:
+                compiled = filters.get('message_filter')
+                if not compiled or not msg.content:
+                    continue
+                if not compiled.search(msg.content[:self._REGEX_INPUT_LIMIT]):
+                    continue
 
             # All filters passed - this rule matches
             return True

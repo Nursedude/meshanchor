@@ -11,6 +11,7 @@ Falls back to basic terminal menu if neither available.
 """
 
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -119,6 +120,30 @@ class MeshForgeLauncher(
         if self._meshtastic_path is None:
             self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
         return self._meshtastic_path
+
+    @staticmethod
+    def _validate_hostname(host: str) -> bool:
+        """Validate hostname or IP address for use in network commands.
+
+        Prevents flag injection (args starting with '-') and restricts
+        to safe characters. Used before passing user input to ping,
+        DNS lookup, or other network tools.
+        """
+        if not host or len(host) > 253:
+            return False
+        if host.startswith('-'):
+            return False
+        # Allow hostnames, IPv4, IPv6 — alphanumeric, dots, hyphens, colons
+        return bool(re.match(r'^[a-zA-Z0-9.\-:]+$', host))
+
+    @staticmethod
+    def _validate_port(port_str: str) -> bool:
+        """Validate a network port number string."""
+        try:
+            port = int(port_str)
+            return 1 <= port <= 65535
+        except (ValueError, TypeError):
+            return False
 
     def _setup_status_bar(self) -> None:
         """Initialize and attach the status bar to the dialog backend."""
@@ -1671,6 +1696,10 @@ class MeshForgeLauncher(
         if not host:
             return
 
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+            return
+
         self.dialog.infobox("Pinging", f"Pinging {host}...")
 
         try:
@@ -1744,6 +1773,10 @@ class MeshForgeLauncher(
         )
 
         if not host:
+            return
+
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname.")
             return
 
         try:
@@ -2561,6 +2594,10 @@ WantedBy=multi-user.target
         )
 
         if host:
+            if not self._validate_hostname(host):
+                self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+                return
+
             port = self.dialog.inputbox(
                 "HamClock API Port",
                 "Enter API port (default 8082):",
@@ -2568,6 +2605,10 @@ WantedBy=multi-user.target
             )
 
             if port:
+                if not self._validate_port(port):
+                    self.dialog.msgbox("Error", "Invalid port number (1-65535).")
+                    return
+
                 try:
                     import urllib.request
                     url = f"http://{host}:{port}/get_de.txt"
