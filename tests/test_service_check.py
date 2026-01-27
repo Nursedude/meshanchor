@@ -226,3 +226,20 @@ class TestKnownServices:
         # rnsd uses UDP shared instance port (37428)
         assert config['port'] == 37428
         assert config['port_type'] == 'udp'
+
+    def test_nomadnet_config(self):
+        """Test NomadNet configuration in KNOWN_SERVICES."""
+        assert 'nomadnet' in KNOWN_SERVICES
+        config = KNOWN_SERVICES['nomadnet']
+        # NomadNet uses RNS shared instance, no dedicated port
+        assert config['port'] is None
+        assert config['is_systemd'] is False
+        assert 'nomadnetwork' in config['fix_hint']
+        assert config['description'] == 'NomadNet mesh messaging client'
+
+    def test_all_known_services_have_required_fields(self):
+        """Test that all services have required configuration fields."""
+        required_fields = {'port', 'systemd_name', 'is_systemd', 'description', 'fix_hint'}
+        for name, config in KNOWN_SERVICES.items():
+            for field in required_fields:
+                assert field in config, f"Service '{name}' missing required field '{field}'"
