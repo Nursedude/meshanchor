@@ -244,7 +244,7 @@ Press Cancel to keep current values."""
             self.dialog.msgbox("Error", f"Failed to set owner name:\n{e}")
 
     def _radio_presets_menu(self):
-        """Radio/LoRa preset selection."""
+        """Radio/LoRa preset selection via meshtastic CLI."""
         # Define modem presets with descriptions
         presets = [
             ("SHORT_TURBO", "500kHz SF7  - Max speed, <1km"),
@@ -270,31 +270,56 @@ Press Cancel to keep current values."""
             self._apply_radio_preset(choice)
 
     def _apply_radio_preset(self, preset: str):
-        """Apply a radio preset."""
-        # Preset parameters
-        preset_params = {
-            "SHORT_TURBO": {"bw": 500, "sf": 7, "cr": 5},
-            "SHORT_FAST": {"bw": 250, "sf": 7, "cr": 5},
+        """Apply a radio preset via meshtastic CLI (not config.d YAML)."""
+        # Preset display info (for confirmation dialog only)
+        preset_info = {
+            "SHORT_TURBO": {"bw": 500, "sf": 7, "cr": 8},
+            "SHORT_FAST": {"bw": 250, "sf": 7, "cr": 8},
             "SHORT_SLOW": {"bw": 125, "sf": 7, "cr": 8},
-            "MEDIUM_FAST": {"bw": 250, "sf": 10, "cr": 5},
-            "MEDIUM_SLOW": {"bw": 125, "sf": 10, "cr": 5},
-            "LONG_FAST": {"bw": 250, "sf": 11, "cr": 5},
+            "MEDIUM_FAST": {"bw": 250, "sf": 10, "cr": 8},
+            "MEDIUM_SLOW": {"bw": 125, "sf": 10, "cr": 8},
+            "LONG_FAST": {"bw": 250, "sf": 11, "cr": 8},
             "LONG_MODERATE": {"bw": 125, "sf": 11, "cr": 8},
             "LONG_SLOW": {"bw": 125, "sf": 12, "cr": 8},
         }
 
-        params = preset_params.get(preset, {})
-        if not params:
+        info = preset_info.get(preset, {})
+        if not info:
             return
+
+        # Ask for frequency slot
+        slot_input = self.dialog.inputbox(
+            "Frequency Slot",
+            f"Set frequency slot (channel_num) for {preset}:\n\n"
+            "Slot determines the center frequency.\n"
+            "US: 0=903.875 MHz (default), 12=903.625 (Regional)\n"
+            "Must match your mesh network's slot.\n\n"
+            "Leave empty or 0 for default:",
+            "0"
+        )
+
+        if slot_input is None:  # Cancelled
+            return
+
+        try:
+            freq_slot = int(slot_input) if slot_input.strip() else 0
+        except ValueError:
+            freq_slot = 0
+
+        # Build confirmation text
+        confirm_text = (
+            f"Apply {preset} preset?\n\n"
+            f"Bandwidth: {info['bw']} kHz\n"
+            f"Spreading Factor: SF{info['sf']}\n"
+            f"Coding Rate: 4/{info['cr']}\n"
+            f"Frequency Slot: {freq_slot}\n\n"
+            "Applied via meshtastic CLI (--set lora.modem_preset).\n"
+            "Region must already be set (use Web Client)."
+        )
 
         confirm = self.dialog.yesno(
             "Apply Preset",
-            f"Apply {preset} preset?\n\n"
-            f"Bandwidth: {params['bw']} kHz\n"
-            f"Spreading Factor: SF{params['sf']}\n"
-            f"Coding Rate: 4/{params['cr']}\n\n"
-            "This saves to config.d/ (main config.yaml preserved)\n"
-            "and restarts the service.",
+            confirm_text,
             default_no=True
         )
 
@@ -304,33 +329,57 @@ Press Cancel to keep current values."""
         self.dialog.infobox("Applying", f"Applying {preset} preset...")
 
         try:
-            import yaml
-            overlay_path = Path('/etc/meshtasticd/config.d/meshforge-lora-preset.yaml')
-            overlay_path.parent.mkdir(parents=True, exist_ok=True)
+            from core.meshtastic_cli import get_cli
+            cli = get_cli()
 
-            # Write only the LoRa override to config.d/
-            overlay = {
-                'Lora': {
-                    'Bandwidth': params['bw'],
-                    'SpreadFactor': params['sf'],
-                    'CodingRate': params['cr'],
-                }
-            }
+            # Apply modem preset
+            result = cli.set_lora_preset(preset)
+            if not result.success:
+                self.dialog.msgbox("Error",
+                    f"Failed to set modem preset:\n{result.error}\n\n"
+                    "Ensure meshtastic CLI is installed and\n"
+                    "meshtasticd is running with region set.")
+                return
 
-            with open(overlay_path, 'w') as f:
-                f.write(f"# MeshForge LoRa preset: {preset}\n")
-                f.write("# Overrides Lora section from config.yaml\n\n")
-                yaml.dump(overlay, f, default_flow_style=False)
-
-            # Restart service
-            subprocess.run(['systemctl', 'restart', 'meshtasticd'],
-                           capture_output=True, timeout=30)
+            # Apply frequency slot
+            slot_result = cli.set_channel_num(freq_slot)
+            slot_msg = ""
+            if not slot_result.success:
+                slot_msg = f"\nFrequency slot: FAILED ({slot_result.error})"
+            else:
+                slot_msg = f"\nFrequency slot: {freq_slot}"
 
             self.dialog.msgbox("Success",
                 f"{preset} preset applied!\n\n"
-                f"Config: {config_path}\n"
-                f"Backup: {backup_path}\n\n"
-                "Service restarted.")
+                f"Modem preset: {preset}{slot_msg}\n\n"
+                "Settings applied via meshtastic CLI.\n"
+                "Device will reboot to apply changes.")
+
+        except ImportError:
+            # Fallback: direct subprocess call
+            try:
+                result = subprocess.run(
+                    ['meshtastic', '--host', 'localhost:4403',
+                     '--set', 'lora.modem_preset', preset],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode != 0:
+                    self.dialog.msgbox("Error",
+                        f"Failed to apply preset:\n{result.stderr or result.stdout}")
+                    return
+
+                subprocess.run(
+                    ['meshtastic', '--host', 'localhost:4403',
+                     '--set', 'lora.channel_num', str(freq_slot)],
+                    capture_output=True, text=True, timeout=30
+                )
+
+                self.dialog.msgbox("Success",
+                    f"{preset} preset applied!\n"
+                    f"Frequency slot: {freq_slot}")
+
+            except Exception as e:
+                self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")

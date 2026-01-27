@@ -308,17 +308,18 @@ src/
 
 ### meshtasticd
 
-MeshForge writes config overlays (never overwrites defaults):
+MeshForge writes hardware config overlays (never overwrites defaults):
 
 ```
 /etc/meshtasticd/
 ├── config.yaml                    # Package default (DO NOT EDIT)
 └── config.d/
-    ├── meshforge-lora-preset.yaml # LoRa region/preset
-    ├── meshforge-radio.yaml       # Radio hardware (SPI/USB)
-    ├── meshforge-channels.yaml    # Channel configuration
+    ├── lora-*.yaml                # Hardware config (SPI pins, module)
     └── meshforge-overrides.yaml   # Custom overrides
 ```
+
+LoRa modem presets and frequency slots are applied via the meshtastic
+CLI (`--set lora.modem_preset`, `--set lora.channel_num`), not config.d.
 
 ### Reticulum
 

@@ -288,6 +288,10 @@ class MeshtasticCLI:
         """Set LoRa modem preset (e.g., LONG_FAST, MEDIUM_SLOW)."""
         return self.run(['--set', 'lora.modem_preset', preset])
 
+    def set_channel_num(self, channel_num: int) -> CLIResult:
+        """Set LoRa frequency slot (channel_num)."""
+        return self.run(['--set', 'lora.channel_num', str(channel_num)])
+
     def set_hop_limit(self, hops: int) -> CLIResult:
         """Set hop limit for messages."""
         return self.run(['--set', 'lora.hop_limit', str(hops)])
