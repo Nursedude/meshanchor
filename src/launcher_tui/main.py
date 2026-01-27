@@ -347,7 +347,7 @@ class MeshForgeLauncher(
             elif choice == "channels":
                 self._radio_run([cli, '--ch-index', '0', '--ch-getall'], "Channels")
             elif choice == "position":
-                self._radio_run([cli, '--pos-fields', 'lat', 'lon', 'alt'], "Position")
+                self._radio_run([cli, '--get', 'position'], "Position")
             elif choice == "send":
                 self._radio_send_message()
             elif choice == "set-region":
