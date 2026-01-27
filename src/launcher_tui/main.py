@@ -411,12 +411,22 @@ class MeshForgeLauncher(
                     print("Try manually: sudo apt install pipx")
                     input("\nPress Enter to continue...")
                     return
-                subprocess.run(['pipx', 'ensurepath'],
-                               capture_output=True, timeout=15)
-                print()
+
+            # Ensure pipx bin dir is in PATH for this session
+            print("Ensuring pipx paths...\n")
+            subprocess.run(['pipx', 'ensurepath'], timeout=15)
+
+            # Add common pipx bin dirs to current process PATH
+            for bindir in [
+                Path.home() / '.local' / 'bin',
+                Path('/root/.local/bin'),
+                Path('/usr/local/bin'),
+            ]:
+                if bindir.is_dir() and str(bindir) not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = f"{bindir}:{os.environ.get('PATH', '')}"
 
             # Install meshtastic with CLI extras (live output)
-            print("Installing meshtastic CLI via pipx...\n")
+            print("\nInstalling meshtastic CLI via pipx...\n")
             result = subprocess.run(
                 ['pipx', 'install', 'meshtastic[cli]', '--force'],
                 timeout=300
@@ -432,7 +442,13 @@ class MeshForgeLauncher(
             if result.returncode == 0:
                 # Clear cached path so it gets re-resolved
                 self._meshtastic_path = None
-                print("\n** meshtastic CLI installed successfully! **")
+                cli_path = shutil.which('meshtastic')
+                if cli_path:
+                    print(f"\n** meshtastic CLI installed: {cli_path} **")
+                else:
+                    print("\n** meshtastic installed but not found in PATH **")
+                    print("You may need to log out and back in,")
+                    print("or run: eval \"$(pipx ensurepath)\"")
             else:
                 print("\nInstallation failed.")
                 print("Try manually: pipx install meshtastic")
