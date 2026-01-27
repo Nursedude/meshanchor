@@ -1030,6 +1030,36 @@ def apply_template(template_name: str, interface_name: str, overrides: Dict[str,
 
 
 # ============================================================================
+# RNS CLIENT INITIALIZATION
+# ============================================================================
+
+def _init_rns_client():
+    """Initialize RNS as a client connecting to the running rnsd instance.
+
+    Creates a client-only config with no interfaces to avoid
+    "Address already in use" errors when rnsd already owns the ports.
+    See: .claude/foundations/persistent_issues.md Issue #12
+    """
+    import RNS
+    import tempfile
+
+    client_config_dir = Path(tempfile.gettempdir()) / "meshforge_rns_client"
+    client_config_dir.mkdir(exist_ok=True)
+    client_config_file = client_config_dir / "config"
+
+    client_config_file.write_text(
+        "# MeshForge RNS Client Config (auto-generated)\n"
+        "# Connects to existing rnsd without creating interfaces\n\n"
+        "[reticulum]\n"
+        "share_instance = Yes\n"
+        "shared_instance_port = 37428\n"
+        "instance_control_port = 37429\n"
+    )
+
+    return RNS.Reticulum(configdir=str(client_config_dir))
+
+
+# ============================================================================
 # RNS NODE DISCOVERY
 # ============================================================================
 
@@ -1074,9 +1104,8 @@ def list_known_destinations() -> CommandResult:
     try:
         import RNS
 
-        # Try to connect to the running rnsd instance
-        # This will use the shared instance if one is running
-        reticulum = RNS.Reticulum()
+        # Connect as client to avoid "Address already in use" when rnsd owns ports
+        reticulum = _init_rns_client()
 
         nodes = []
 
@@ -1184,8 +1213,8 @@ def discover_nodes(timeout: int = 30) -> CommandResult:
         import RNS
         import time
 
-        # Connect to rnsd
-        reticulum = RNS.Reticulum()
+        # Connect as client to avoid "Address already in use" when rnsd owns ports
+        reticulum = _init_rns_client()
 
         initial_count = 0
         if hasattr(RNS.Identity, 'known_destinations'):

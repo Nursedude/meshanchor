@@ -1118,10 +1118,14 @@ class MeshForgeLauncher(
                 print(f"Try: sudo cat {config_path}")
         else:
             print(f"No Reticulum config found at: {config_path}")
-            print(f"\nRNS config resolution (checked in order):")
+            user_home = get_real_user_home()
+            print(f"\nMeshForge checks (in order):")
             print(f"  1. /etc/reticulum/config")
-            print(f"  2. {get_real_user_home()}/.config/reticulum/config")
-            print(f"  3. {get_real_user_home()}/.reticulum/config")
+            print(f"  2. {user_home}/.config/reticulum/config")
+            print(f"  3. {user_home}/.reticulum/config")
+            if str(user_home) != str(Path.home()):
+                print(f"\nNote: rnsd (running as root) uses: {Path.home()}/.reticulum/config")
+                print(f"  For shared use, place config in /etc/reticulum/config")
             print(f"\nTo create: use 'Edit Reticulum Config' to deploy template")
             print(f"Template:  templates/reticulum.conf")
 
