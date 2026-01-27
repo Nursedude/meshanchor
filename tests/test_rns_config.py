@@ -83,6 +83,43 @@ class TestRNSConfigValidation:
         is_valid, errors = validate_interface_section(section)
         assert not is_valid, "Interface without type should fail"
 
+    def test_meshtastic_interface_valid(self):
+        """Test Meshtastic_Interface type is recognized as valid."""
+        from src.utils.rns_config import validate_interface_section
+
+        section = """
+[[Meshtastic Bridge]]
+  type = Meshtastic_Interface
+  interface_enabled = True
+"""
+        is_valid, errors = validate_interface_section(section)
+        assert is_valid, f"Meshtastic_Interface should be valid: {errors}"
+
+    def test_pipe_interface_valid(self):
+        """Test PipeInterface type is recognized as valid."""
+        from src.utils.rns_config import validate_interface_section
+
+        section = """
+[[Pipe Link]]
+  type = PipeInterface
+  interface_enabled = True
+"""
+        is_valid, errors = validate_interface_section(section)
+        assert is_valid, f"PipeInterface should be valid: {errors}"
+
+    def test_unknown_interface_type_rejected(self):
+        """Test that unknown interface types are rejected."""
+        from src.utils.rns_config import validate_interface_section
+
+        section = """
+[[Bad Interface]]
+  type = FakeInterface
+  interface_enabled = True
+"""
+        is_valid, errors = validate_interface_section(section)
+        assert not is_valid, "Unknown interface type should be rejected"
+        assert any("Unknown interface type" in e for e in errors)
+
 
 class TestRNSConfigBackup:
     """Test config backup functionality"""

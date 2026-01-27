@@ -80,4 +80,5 @@ SERVICE_PORTS = {
     'hamclock': HAMCLOCK_PORT,
     'mqtt': MQTT_PORT,
     'openwebrx': OPENWEBRX_PORT,
+    'nomadnet': None,  # NomadNet uses RNS shared instance, no dedicated port
 }
