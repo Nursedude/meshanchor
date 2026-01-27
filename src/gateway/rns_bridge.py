@@ -97,6 +97,7 @@ class RNSMeshtasticBridge:
         self._running = False
         self._connected_mesh = False
         self._connected_rns = False
+        self._rns_via_rnsd = False  # True when rnsd handles RNS (bridge defers)
         self._rns_init_failed_permanently = False  # True if RNS can't be initialized from this thread
 
         # Reconnection strategies (exponential backoff with jitter)
@@ -289,6 +290,7 @@ class RNSMeshtasticBridge:
             'enabled': self.config.enabled,
             'meshtastic_connected': self._connected_mesh,
             'rns_connected': self._connected_rns,
+            'rns_via_rnsd': self._rns_via_rnsd,
             'uptime_seconds': uptime,
             'statistics': self.stats.copy(),
             'node_stats': self.node_tracker.get_stats(),
@@ -756,10 +758,11 @@ class RNSMeshtasticBridge:
                 # rnsd is running - DON'T try to initialize RNS (it would conflict)
                 # MeshForge gateway bridge cannot coexist with rnsd
                 # Use rnsd + NomadNet for RNS-based communications instead
-                logger.info(f"rnsd detected (PID: {rns_pids[0]}), skipping gateway RNS initialization")
-                logger.info("Gateway bridge RNS features disabled - use NomadNet for RNS messaging")
+                logger.info(f"rnsd detected (PID: {rns_pids[0]}), deferring RNS to rnsd")
+                logger.info("Bridge RNS features deferred - rnsd handles transport")
                 self._reticulum = None
                 self._connected_rns = False
+                self._rns_via_rnsd = True
                 self._rns_init_failed_permanently = True  # Don't retry
                 return  # Skip all RNS/LXMF operations - rnsd handles them
             else:
