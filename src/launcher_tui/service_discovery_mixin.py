@@ -8,6 +8,7 @@ Provides unified discovery of all mesh network services:
 - USB devices (serial ports)
 """
 
+import re
 import socket
 import subprocess
 from typing import Dict, List, Optional, Tuple
@@ -153,6 +154,11 @@ class ServiceDiscoveryMixin:
         )
 
         if not network:
+            return
+
+        # Validate network range — allow CIDR (192.168.1.0/24) or plain IP
+        if not re.match(r'^[0-9./]+$', network) or len(network) > 18:
+            self.dialog.msgbox("Error", "Invalid network range.")
             return
 
         self.dialog.infobox("Scanning", f"Scanning {network} for Meshtastic devices...\nThis may take a minute...")
