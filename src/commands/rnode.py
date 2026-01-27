@@ -410,8 +410,8 @@ def check_rns_config(port: str) -> bool:
     Returns:
         True if port is in RNS config
     """
-    from utils.paths import get_real_user_home
-    config_path = get_real_user_home() / '.reticulum' / 'config'
+    from utils.paths import ReticulumPaths
+    config_path = ReticulumPaths.get_config_file()
 
     if not config_path.exists():
         return False

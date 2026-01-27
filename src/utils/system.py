@@ -695,15 +695,24 @@ def get_config_dir(app_name: str = 'meshforge') -> Path:
 
 
 def get_rns_config_dir() -> Path:
-    """
-    Get Reticulum configuration directory - cross-platform.
+    """Get Reticulum configuration directory using RNS's own resolution.
+
+    RNS checks: /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
+    On Windows: %APPDATA%/Reticulum
+
+    NOTE: RNS uses the effective user's home (os.path.expanduser("~")),
+    NOT get_real_user_home(). This is intentional - see ReticulumPaths.
 
     Returns:
-        Path to ~/.reticulum or %APPDATA%/Reticulum
+        Path to RNS config directory
     """
+    from utils.paths import ReticulumPaths
     if platform.system() == 'Windows':
-        return Path(os.environ.get('APPDATA', get_real_user_home())) / 'Reticulum'
-    return get_real_user_home() / '.reticulum'
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            return Path(appdata) / 'Reticulum'
+        return ReticulumPaths.get_config_dir()
+    return ReticulumPaths.get_config_dir()
 
 
 def get_rns_interfaces_dir() -> Path:

@@ -2,11 +2,73 @@
 
 > **Branch**: `claude/fix-address-in-use-FktgY`
 > **Date**: 2026-01-27
-> **Status**: PAUSED - Need deeper RNS understanding before continuing
+> **Status**: RNS path resolution fixed, config validation added, bridge hardened
 
 ---
 
-## What Was Fixed (committed & pushed)
+## Session 2: Config Path Resolution & Validation (Current)
+
+### Root Cause Found: Wrong Config Path Resolution
+
+MeshForge was using `get_real_user_home() / ".reticulum"` for RNS config paths.
+This returns `/home/<user>/.reticulum` when running with sudo, but RNS itself
+uses `os.path.expanduser("~")` which resolves to `/root/.reticulum` when
+running as root. Since rnsd runs as root (systemd), the config is in `/root/`.
+
+**RNS config resolution order** (from `RNS/Reticulum.py`):
+1. User-specified `configdir` parameter
+2. `/etc/reticulum/config` (system-wide)
+3. `~/.config/reticulum/config` (XDG-style)
+4. `~/.reticulum/config` (traditional fallback)
+
+Where `~` = effective user's home (NOT real user when sudo).
+
+### What Was Fixed
+
+#### 1. ReticulumPaths class (utils/paths.py)
+- Now mirrors RNS's own config resolution logic
+- Uses `Path.home()` (effective user), NOT `get_real_user_home()`
+- Checks all 3 RNS locations: /etc/reticulum, ~/.config/reticulum, ~/.reticulum
+- Clear docstring explaining WHY this differs from MeshForge's path strategy
+
+#### 2. All RNS path references across codebase (12 files)
+- `commands/rns.py` → uses `ReticulumPaths`
+- `config/rns_config.py` → uses `ReticulumPaths`
+- `utils/rns_config.py` → uses `ReticulumPaths`
+- `utils/system.py` → uses `ReticulumPaths`
+- `utils/diagnostic_engine.py` → uses `ReticulumPaths`
+- `utils/gateway_diagnostic.py` → uses `ReticulumPaths`
+- `core/diagnostics/engine.py` → uses `ReticulumPaths`
+- `cli/diagnose.py` → uses `ReticulumPaths`
+- `commands/rnode.py` → uses `ReticulumPaths`
+- `launcher_tui/main.py` → uses `ReticulumPaths`
+- `gateway/rns_bridge.py` → uses `ReticulumPaths`
+
+#### 3. Proactive RNS config validation in TUI
+- `_validate_rns_config_content()` - Checks for:
+  - Missing `[reticulum]` section
+  - Missing `share_instance = Yes` (client apps can't connect without it)
+  - No interfaces configured
+  - No Meshtastic_Interface (needed for mesh bridging)
+- `_check_rns_setup()` - Called on RNS menu entry:
+  - If no config: offers to deploy template
+  - If config exists: validates and shows issues
+- New "Check RNS Setup" menu option
+- "No shared instance" error now checks config and shows specific issues
+
+#### 4. Bridge RNS initialization hardened
+- `_init_rns_main_thread()` now lets RNS use its own config resolution
+- Removed temp config hack (was creating `/tmp/meshforge_rns_bridge/config`)
+- Logs the resolved config path for debugging
+- Still correctly handles: reinitialise, errno 98, ImportError
+
+#### 5. Test updated
+- `test_get_config_path_as_sudo` now correctly expects RNS config to be in
+  effective user's home (not real user's home)
+
+---
+
+## Session 1: Error Handling (Previous - committed & pushed)
 
 ### 1. TUI: Better error messages for rnpath/rnstatus
 - Captures both stdout AND stderr (RNS logs errors to stdout)
@@ -18,8 +80,7 @@
 ### 2. Bridge: RNS initialization from main thread
 - Added `_init_rns_main_thread()` called from `start()` before spawning threads
 - Fixes "signal only works in main thread" error that permanently blocked RNS
-- When rnsd running: connects as client with `share_instance = Yes` config
-- Handles `OSError("reinitialise")` when node_tracker already initialized the singleton
+- Handles `OSError("reinitialise")` when node_tracker already initialized
 - Sets `_rns_pre_initialized` flag so `_connect_rns()` skips to LXMF setup
 
 ### 3. Bridge: errno 98 handling
@@ -30,89 +91,85 @@
 
 ---
 
-## What Is Still Broken
+## RNS Architecture Knowledge (Learned)
 
-### The Real Problem: Incomplete /root/.reticulum/config
+### Shared Instance Model
+- **rnsd** creates a shared instance (domain socket or TCP port 37428)
+- Other programs calling `RNS.Reticulum()` auto-detect the shared instance
+- When detected, they connect as clients via LocalInterface (no interface binding)
+- Requires `share_instance = Yes` in config
+- Multiple programs share rnsd's interfaces transparently
 
-The user's rnsd config at `/root/.reticulum/config` only has:
-```ini
-[[Default Interface]]
-    type = AutoInterface
-    enabled = Yes
-```
+### Config Path Resolution (Critical)
+- RNS uses `os.path.expanduser("~")` → effective user's home
+- When running as root (rnsd, sudo): `~` = `/root/`
+- When running as user: `~` = `/home/<user>/`
+- **MeshForge config** uses `get_real_user_home()` (persists across sudo)
+- **RNS config** uses `Path.home()` (matches RNS's own resolution)
 
-**Missing**:
-1. `[reticulum]` section with `share_instance = Yes` - without this, rnstatus
-   and client apps can't connect to rnsd's shared instance
-2. `[[Meshtastic Interface]]` with `type = Meshtastic_Interface` and
-   `tcp_port = 127.0.0.1:4403` - without this, RNS has NO path to
-   Meshtastic/LongFast
+### Interface Types
+| Type | Purpose | Config Key |
+|------|---------|------------|
+| AutoInterface | Zero-config UDP multicast local discovery | type = AutoInterface |
+| TCPServerInterface | Accept TCP connections | listen_ip, listen_port |
+| TCPClientInterface | Connect to TCP server | target_host, target_port |
+| SerialInterface | Direct serial link | port, speed |
+| RNodeInterface | LoRa via RNode hardware | port, frequency, txpower, etc. |
+| Meshtastic_Interface | RNS over Meshtastic LoRa (plugin) | tcp_port, data_speed, hop_limit |
 
-The complete working template exists at `templates/reticulum.conf` and has
-both sections. It needs to be deployed to `/root/.reticulum/config`.
+### Interface Modes
+- `full` (default): All discovery, meshing, transport
+- `gateway`: Like full, plus discovers paths on behalf of connected nodes
+- `ap`, `ptp`, `roaming`, `boundary`: Special topology modes
 
-### Environment Facts
-- `.reticulum` config lives in `/root/` (rnsd runs as root)
-- meshtasticd is running on port 4403
-- rnsd is running (PID 2543) but without shared instance or Meshtastic interface
-- The `Meshtastic_Interface` plugin from github.com/landandair/RNS_Over_Meshtastic
-  must be installed in RNS's interfaces directory
-- NomadNet config exists (`[node]` section with `enable_node = yes`)
-
----
-
-## Wrong Assumptions Made This Session
-
-1. **Assumed .reticulum was in user home** - It's in /root. Wasted time adding
-   `--config` overrides and `sudo -u $SUDO_USER` privilege drops that were wrong.
-   Both were reverted.
-
-2. **Didn't understand shared instance** - Treated "rnsd running" as sufficient.
-   Without `share_instance = Yes` in config, rnsd doesn't expose the shared
-   instance socket that rnstatus/rnpath/client apps need.
-
-3. **Didn't understand Meshtastic_Interface** - Assumed the MeshForge bridge
-   was purely application-layer translation. Actually, RNS needs the
-   `Meshtastic_Interface` plugin configured as an interface in
-   `~/.reticulum/config` to bridge RNS packets over Meshtastic's LoRa.
-
----
-
-## Knowledge Gaps to Fill Before Next Session
-
-### RNS Architecture (MUST UNDERSTAND)
-- **Shared Instance model**: How rnsd exposes its instance to other programs
-  (port 37428, instance_control_port 37429). How clients connect. What config
-  controls this.
-- **Interface types**: AutoInterface (UDP multicast), TCPServer/Client,
-  RNodeInterface, SerialInterface, Meshtastic_Interface (plugin). How they
-  compose.
-- **Transport mode**: `enable_transport = Yes/No` - what it means for routing
-- **RNS singleton**: One Reticulum instance per process. Can't reinitialize.
-  How shared instance works across processes.
-
-### RNS Ecosystem Apps
-- **NomadNet**: Terminal mesh messenger. Uses LXMF. Has its own config at
-  `~/.nomadnetwork/config`. The user has a `[node]` section.
-- **Sideband**: Mobile/desktop RNS messenger
-- **MeshChat**: Another mesh chat app
-- **rnsh**: SSH over RNS
-- All connect to rnsd's shared instance
+### Transport Mode
+- `enable_transport = Yes`: Node routes traffic for others, passes announces
+- Only for stationary, always-on systems
+- Without transport: node only communicates directly
 
 ### Meshtastic_Interface Plugin
-- Source: https://github.com/landandair/RNS_Over_Meshtastic
-- Installs as `Meshtastic_Interface.py` in RNS's Interfaces directory
-- Config options: `tcp_port`, `port` (serial), `ble_port`, `data_speed`,
-  `mode` (gateway/client), `hop_limit`
-- `data_speed` values: 0=LONG_FAST, 6=SHORT_FAST, 8=SHORT_TURBO
-- This is how RNS talks to Meshtastic - NOT through the MeshForge bridge
+- Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- Install: Copy `Meshtastic_Interface.py` to `~/.reticulum/interfaces/`
+- Connection methods: serial (port), BLE (ble_port), TCP (tcp_port)
+- `data_speed` presets: 0=LONG_FAST, 6=SHORT_FAST, 8=SHORT_TURBO (recommended)
+- `mode = gateway`: bridges RNS packets over Meshtastic LoRa
 
 ### MeshForge Bridge vs Meshtastic_Interface
-- **Meshtastic_Interface**: RNS interface plugin. RNS sends/receives RNS
-  packets THROUGH Meshtastic's LoRa as a transport. Native RNS protocol.
-- **MeshForge Bridge**: Application-layer translator. Converts between
-  Meshtastic text messages and LXMF messages. Different purpose.
-- Both can coexist. The Meshtastic_Interface is the foundation layer.
+- **Meshtastic_Interface**: Transport layer. RNS packets → Meshtastic LoRa → RNS
+- **MeshForge Bridge**: Application layer. LXMF messages ↔ Meshtastic text messages
+- Both can coexist. Meshtastic_Interface is the foundation layer.
+
+### RNS Ecosystem Apps (all connect to rnsd shared instance)
+- **NomadNet** (`pip install nomadnet`): Terminal mesh browser, LXMF messaging
+- **Sideband** (`pip install sbapp`): Mobile/desktop LXMF client
+- **MeshChat** (`pip install meshchat`): Mesh chat application
+- **rnsh**: SSH over RNS
+- **LXST**: Real-time streaming (in development)
+
+### RNS CLI Utilities
+- `rnsd`: Daemon - keeps interfaces open, handles transport
+- `rnstatus`: Shows interface status (like ifconfig for RNS)
+- `rnpath`: Path table and path testing
+- `rnprobe`: Probe a destination
+- `rncp`: Copy files over RNS
+- `rnid`: Identity management
+- `rnx`: Execute commands over RNS
+
+---
+
+## Remaining Work
+
+### On User's Production System
+1. **Deploy correct config**: Copy `templates/reticulum.conf` to
+   `/root/.reticulum/config` (the TUI now offers this automatically)
+2. **Install Meshtastic_Interface plugin**: Copy to `/root/.reticulum/interfaces/`
+3. **Restart rnsd**: `sudo systemctl restart rnsd`
+4. **Verify**: `rnstatus` should show interfaces and shared instance
+
+### Code Improvements (Future)
+- TUI could check for Meshtastic_Interface plugin in `_check_rns_setup()`
+- Setup wizard could offer full RNS setup (install, config, plugin, service)
+- Bridge could validate RNS config before starting
 
 ---
 
@@ -120,25 +177,12 @@ both sections. It needs to be deployed to `/root/.reticulum/config`.
 
 | File | Purpose |
 |------|---------|
+| `src/utils/paths.py` | **ReticulumPaths** - RNS config resolution (FIXED) |
 | `templates/reticulum.conf` | Complete working RNS config with Meshtastic_Interface |
 | `config_templates/rns_meshtastic_gateway.conf` | Detailed gateway config with comments |
-| `src/gateway/templates/rns/meshtastic_bridge.conf` | Bridge-specific RNS config |
-| `.claude/research/rns_complete.md` | RNS API reference and architecture |
+| `src/gateway/rns_bridge.py` | Main bridge - RNS init from main thread |
+| `src/launcher_tui/main.py` | TUI - RNS menu with config validation |
+| `src/commands/rns.py` | RNS commands module |
+| `.claude/research/rns_complete.md` | RNS API reference |
 | `.claude/research/rns_integration.md` | Integration patterns |
 | `.claude/research/rns_comprehensive.md` | Comprehensive RNS docs |
-| `.claude/foundations/persistent_issues.md` | Known issues including Path.home() |
-
----
-
-## Next Steps When Resuming
-
-1. **Read RNS documentation thoroughly** - https://reticulum.network/manual/
-   Focus on: shared instance, interface types, transport mode, config format
-2. **Verify Meshtastic_Interface is installed** - Check if the plugin exists
-   in RNS's Interfaces directory (`/usr/local/lib/python3.13/dist-packages/RNS/Interfaces/`)
-3. **Deploy correct config** - Copy `templates/reticulum.conf` to
-   `/root/.reticulum/config` (after backup)
-4. **Restart rnsd** and verify `rnstatus` works
-5. **Test bridge** with proper RNS config in place
-6. **Consider**: Should the TUI setup wizard check for and offer to fix
-   the RNS config?

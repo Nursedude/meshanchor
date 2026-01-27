@@ -23,7 +23,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 
-from utils.paths import get_real_user_home
+from utils.paths import ReticulumPaths
 
 logger = logging.getLogger(__name__)
 
@@ -368,8 +368,8 @@ class RNSConfigGenerator:
             Path to written config file
         """
         if path is None:
-            config_dir = get_real_user_home() / ".reticulum"
-            config_path = config_dir / "config"
+            config_path = ReticulumPaths.get_config_file()
+            config_dir = config_path.parent
         else:
             config_path = Path(path).expanduser()
             config_dir = config_path.parent
@@ -392,7 +392,7 @@ class RNSConfigGenerator:
 
     def get_config_path(self) -> Path:
         """Get default RNS config path."""
-        return get_real_user_home() / ".reticulum" / "config"
+        return ReticulumPaths.get_config_file()
 
     def read_existing_config(self) -> Optional[str]:
         """Read existing RNS configuration if present."""
