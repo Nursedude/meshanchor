@@ -807,12 +807,18 @@ class MeshForgeLauncher(
             if choice == "status":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Status ===\n")
-                self._run_rns_tool(['rnstatus'], 'rnstatus')
+                rns_config = str(get_real_user_home() / ".reticulum")
+                self._run_rns_tool(
+                    ['rnstatus', '--config', rns_config], 'rnstatus'
+                )
                 input("\nPress Enter to continue...")
             elif choice == "paths":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Path Table ===\n")
-                self._run_rns_tool(['rnpath', '-t'], 'rnpath')
+                rns_config = str(get_real_user_home() / ".reticulum")
+                self._run_rns_tool(
+                    ['rnpath', '-t', '--config', rns_config], 'rnpath'
+                )
                 input("\nPress Enter to continue...")
             elif choice == "bridge":
                 self._run_bridge()
@@ -942,6 +948,11 @@ class MeshForgeLauncher(
                 print("\nError: RNS port conflict (Address already in use)")
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
+            elif "no shared" in combined.lower():
+                # rnsd not running or not reachable
+                if result.stdout:
+                    print(result.stdout, end='')
+                print("\nStart rnsd: sudo systemctl start rnsd")
             else:
                 # Generic failure - show output and suggestions
                 if result.stdout:
