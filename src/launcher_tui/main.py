@@ -318,7 +318,7 @@ class MeshForgeLauncher(
                 ("nodes", "Node List (meshtastic --nodes)"),
                 ("channels", "Channel Info"),
                 ("send", "Send Message"),
-                ("position", "Position Info"),
+                ("position", "Position (view/set)"),
                 ("set-region", "Set Region"),
                 ("set-name", "Set Node Name"),
                 ("reboot", "Reboot Radio"),
@@ -347,7 +347,7 @@ class MeshForgeLauncher(
             elif choice == "channels":
                 self._radio_run([cli, '--ch-index', '0', '--ch-getall'], "Channels")
             elif choice == "position":
-                self._radio_run([cli, '--get', 'position'], "Position")
+                self._radio_position_menu()
             elif choice == "send":
                 self._radio_send_message()
             elif choice == "set-region":
@@ -550,6 +550,76 @@ class MeshForgeLauncher(
         if short:
             cmd.extend(['--set-owner-short', short[:4]])
         self._radio_run(cmd, "Setting Node Name")
+
+    def _radio_position_menu(self):
+        """Position submenu: view settings or set fixed lat/lon."""
+        choices = [
+            ("view", "View position settings"),
+            ("set", "Set fixed position (lat/lon)"),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "Position",
+            "View or set node position:",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        cli = self._get_meshtastic_cli()
+
+        if choice == "view":
+            self._radio_run([cli, '--get', 'position'], "Position Settings")
+        elif choice == "set":
+            lat = self.dialog.inputbox(
+                "Latitude",
+                "Enter latitude (decimal degrees):\n\n"
+                "Example: 19.435175",
+                ""
+            )
+            if not lat:
+                return
+
+            lon = self.dialog.inputbox(
+                "Longitude",
+                "Enter longitude (decimal degrees):\n\n"
+                "Example: -155.213842",
+                ""
+            )
+            if not lon:
+                return
+
+            # Validate numeric input
+            try:
+                lat_f = float(lat.strip())
+                lon_f = float(lon.strip())
+            except ValueError:
+                self.dialog.msgbox("Error", "Invalid coordinates. Use decimal degrees.")
+                return
+
+            if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
+                self.dialog.msgbox("Error",
+                    "Coordinates out of range.\n\n"
+                    "Latitude: -90 to 90\n"
+                    "Longitude: -180 to 180")
+                return
+
+            confirm = self.dialog.yesno(
+                "Confirm Position",
+                f"Set fixed position?\n\n"
+                f"Latitude:  {lat_f}\n"
+                f"Longitude: {lon_f}",
+                default_no=True
+            )
+            if not confirm:
+                return
+
+            self._radio_run(
+                [cli, '--setlat', str(lat_f), '--setlon', str(lon_f)],
+                "Setting Position"
+            )
 
     def _radio_reboot(self):
         """Reboot the radio via meshtastic CLI."""
