@@ -82,7 +82,12 @@ def print_status(status: dict):
     """Print bridge status."""
     running = status.get('running', False)
     mesh = "connected" if status.get('meshtastic_connected') else "disconnected"
-    rns = "connected" if status.get('rns_connected') else "disconnected"
+    if status.get('rns_connected'):
+        rns = "connected"
+    elif status.get('rns_via_rnsd'):
+        rns = "via rnsd (transport handled by rnsd)"
+    else:
+        rns = "disconnected"
 
     print(f"\n{'='*50}")
     print(f"Gateway Status: {'RUNNING' if running else 'STOPPED'}")
@@ -99,7 +104,8 @@ def print_status(status: dict):
     if node_stats:
         print(f"Nodes tracked: {node_stats.get('total', 0)}")
 
-    print(f"{'='*50}\n")
+    print(f"{'='*50}")
+    print("Press Ctrl+C to stop and return to menu\n")
 
 
 def on_message(msg):
@@ -162,6 +168,18 @@ def main():
         bridge_started = True
         print("Gateway started successfully!")
         print("Press Ctrl+C to stop\n")
+
+        # Wait for connections before showing initial status
+        print("Waiting for connections...", end="", flush=True)
+        for _ in range(10):
+            if not running:
+                break
+            status = bridge.get_status()
+            if status.get('meshtastic_connected') and status.get('rns_connected'):
+                break
+            time.sleep(1)
+            print(".", end="", flush=True)
+        print()
 
         # Print initial status
         print_status(bridge.get_status())
