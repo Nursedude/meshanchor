@@ -307,7 +307,13 @@ class MeshForgeLauncher(
     def _radio_menu(self):
         """Radio tools using meshtastic CLI directly."""
         while True:
-            choices = [
+            # Check if CLI is available and show install option if not
+            has_cli = shutil.which('meshtastic') is not None
+
+            choices = []
+            if not has_cli:
+                choices.append(("install-cli", "** Install meshtastic CLI **"))
+            choices.extend([
                 ("info", "Radio Info (meshtastic --info)"),
                 ("nodes", "Node List (meshtastic --nodes)"),
                 ("channels", "Channel Info"),
@@ -317,16 +323,21 @@ class MeshForgeLauncher(
                 ("set-name", "Set Node Name"),
                 ("reboot", "Reboot Radio"),
                 ("back", "Back"),
-            ]
+            ])
 
+            status = "" if has_cli else "\n[CLI not installed]\n"
             choice = self.dialog.menu(
                 "Radio Tools",
-                "Meshtastic radio control (terminal-native):",
+                f"Meshtastic radio control (terminal-native):{status}",
                 choices
             )
 
             if choice is None or choice == "back":
                 break
+
+            if choice == "install-cli":
+                self._install_meshtastic_cli()
+                continue
 
             cli = self._get_meshtastic_cli()
             if choice == "info":
@@ -370,7 +381,7 @@ class MeshForgeLauncher(
             print()
 
     def _offer_install_meshtastic_cli(self):
-        """Offer to install meshtastic CLI when it's missing."""
+        """Offer to install meshtastic CLI when it's missing (from error handler)."""
         install = self.dialog.yesno(
             "Meshtastic CLI Not Found",
             "The 'meshtastic' CLI is not installed.\n\n"
@@ -379,61 +390,69 @@ class MeshForgeLauncher(
             "Install meshtastic CLI now?",
             default_no=False
         )
+        if install:
+            self._install_meshtastic_cli()
 
-        if not install:
-            return
-
-        self.dialog.infobox("Installing", "Installing meshtastic CLI via pipx...")
+    def _install_meshtastic_cli(self):
+        """Install meshtastic CLI via pipx with live terminal output."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Installing Meshtastic CLI ===\n")
 
         try:
             # Ensure pipx is available
             if not shutil.which('pipx'):
-                subprocess.run(
+                print("Installing pipx...\n")
+                result = subprocess.run(
                     ['apt-get', 'install', '-y', 'pipx'],
-                    capture_output=True, timeout=60
+                    timeout=60
                 )
-                subprocess.run(
-                    ['pipx', 'ensurepath'],
-                    capture_output=True, timeout=15
-                )
+                if result.returncode != 0:
+                    print("\nFailed to install pipx.")
+                    print("Try manually: sudo apt install pipx")
+                    input("\nPress Enter to continue...")
+                    return
+                subprocess.run(['pipx', 'ensurepath'],
+                               capture_output=True, timeout=15)
+                print()
 
-            # Install meshtastic with CLI extras
+            # Install meshtastic with CLI extras (live output)
+            print("Installing meshtastic CLI via pipx...\n")
             result = subprocess.run(
                 ['pipx', 'install', 'meshtastic[cli]', '--force'],
-                capture_output=True, text=True, timeout=120
+                timeout=300
             )
 
             if result.returncode != 0:
-                # Retry without extras
+                print("\nRetrying without [cli] extras...\n")
                 result = subprocess.run(
                     ['pipx', 'install', 'meshtastic', '--force'],
-                    capture_output=True, text=True, timeout=120
+                    timeout=300
                 )
 
             if result.returncode == 0:
                 # Clear cached path so it gets re-resolved
                 self._meshtastic_path = None
-                self.dialog.msgbox("Installed",
-                    "meshtastic CLI installed successfully.\n\n"
-                    "You can now use Radio Tools.")
+                print("\n** meshtastic CLI installed successfully! **")
             else:
-                self.dialog.msgbox("Install Failed",
-                    f"Failed to install meshtastic CLI.\n\n"
-                    f"{result.stderr[:200] if result.stderr else result.stdout[:200]}\n\n"
-                    "Try manually: pipx install meshtastic")
+                print("\nInstallation failed.")
+                print("Try manually: pipx install meshtastic")
 
         except FileNotFoundError:
-            self.dialog.msgbox("Install Failed",
-                "pipx not found and could not be installed.\n\n"
-                "Try manually:\n"
-                "  sudo apt install pipx\n"
-                "  pipx install meshtastic")
+            print("pipx not found.")
+            print("Try: sudo apt install pipx && pipx install meshtastic")
         except KeyboardInterrupt:
-            self.dialog.msgbox("Cancelled", "Installation cancelled.")
+            print("\n\nInstallation cancelled.")
+        except subprocess.TimeoutExpired:
+            print("\n\nInstallation timed out.")
+            print("Try manually: pipx install meshtastic")
         except Exception as e:
-            self.dialog.msgbox("Install Failed",
-                f"Installation error:\n{e}\n\n"
-                "Try manually: pipx install meshtastic")
+            print(f"\nInstallation error: {e}")
+            print("Try manually: pipx install meshtastic")
+
+        try:
+            input("\nPress Enter to continue...")
+        except KeyboardInterrupt:
+            print()
 
     def _radio_send_message(self):
         """Send a mesh message via meshtastic CLI."""
