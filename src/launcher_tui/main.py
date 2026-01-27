@@ -918,8 +918,9 @@ class MeshForgeLauncher(
     def _run_rns_tool(self, cmd: list, tool_name: str):
         """Run an RNS CLI tool with address-in-use error detection.
 
-        Captures stderr to detect specific error patterns and provides
-        actionable diagnostics instead of generic error messages.
+        Captures both stdout and stderr to detect specific error patterns.
+        RNS logs errors to stdout in some configurations, so both streams
+        must be checked for the 'Address already in use' pattern.
 
         Args:
             cmd: Command and arguments to run
@@ -927,24 +928,33 @@ class MeshForgeLauncher(
         """
         try:
             result = subprocess.run(
-                cmd, stderr=subprocess.PIPE, text=True, timeout=15
+                cmd, capture_output=True, text=True, timeout=15
             )
-            if result.returncode != 0:
-                stderr = result.stderr or ""
-                if "address already in use" in stderr.lower():
-                    print(f"\nError: RNS port conflict (Address already in use)")
-                    print("Another process is bound to the RNS AutoInterface port.\n")
-                    self._diagnose_rns_port_conflict()
-                else:
-                    print(f"\n{tool_name} failed. Possible causes:")
-                    print("  - rnsd not running: sudo systemctl start rnsd")
-                    print("  - RNS not installed: pip3 install rns")
-                    if stderr.strip():
-                        # Show last 3 lines of stderr for context
-                        err_lines = stderr.strip().split('\n')[-3:]
-                        print(f"\nDetails:")
-                        for line in err_lines:
-                            print(f"  {line}")
+            # RNS tools may log errors to stdout or stderr depending on config
+            combined = (result.stdout or "") + (result.stderr or "")
+
+            if result.returncode == 0:
+                # Success - show normal output
+                if result.stdout:
+                    print(result.stdout, end='')
+            elif "address already in use" in combined.lower():
+                # Suppress noisy traceback, show actionable diagnostics
+                print("\nError: RNS port conflict (Address already in use)")
+                print("Another process is bound to the RNS AutoInterface port.\n")
+                self._diagnose_rns_port_conflict()
+            else:
+                # Generic failure - show output and suggestions
+                if result.stdout:
+                    print(result.stdout, end='')
+                print(f"\n{tool_name} failed. Possible causes:")
+                print("  - rnsd not running: sudo systemctl start rnsd")
+                print("  - RNS not installed: pip3 install rns")
+                if result.stderr and result.stderr.strip():
+                    # Show last 3 lines of stderr for context
+                    err_lines = result.stderr.strip().split('\n')[-3:]
+                    print("\nDetails:")
+                    for line in err_lines:
+                        print(f"  {line}")
         except FileNotFoundError:
             print(f"\n{tool_name} not found. Is RNS installed?")
             print("Install: pip3 install rns")
