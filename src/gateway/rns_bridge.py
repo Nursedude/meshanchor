@@ -41,7 +41,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Import centralized path utility
-from utils.paths import get_real_user_home
+# get_real_user_home: for MeshForge-specific files (identity, LXMF storage)
+# ReticulumPaths: for RNS config paths (mirrors RNS's own resolution)
+from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import service checker for pre-flight checks (Issue #3)
 try:
@@ -756,8 +758,10 @@ class RNSMeshtasticBridge:
         main thread. If we defer to the background _rns_loop thread,
         initialization fails with 'signal only works in main thread'.
 
-        This pre-initializes RNS so _connect_rns() can skip straight to
-        LXMF setup without hitting the signal handler error.
+        When rnsd is running, we connect as a client to its shared instance.
+        RNS's own config resolution finds the config at:
+          /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
+        When running as root (via sudo or systemd), ~ = /root/.
         """
         import threading as _threading
         if _threading.current_thread() is not _threading.main_thread():
@@ -773,32 +777,28 @@ class RNSMeshtasticBridge:
         from utils.gateway_diagnostic import find_rns_processes
         rns_pids = find_rns_processes()
 
+        # Determine config directory: explicit config > RNS default resolution
+        config_dir = self.config.rns.config_dir or None
+        if config_dir:
+            logger.info(f"Using explicit RNS config dir: {config_dir}")
+        else:
+            # Let RNS resolve its own config path (matches rnsd's resolution)
+            rns_config = ReticulumPaths.get_config_file()
+            logger.info(f"RNS config path: {rns_config} "
+                       f"(exists: {rns_config.exists()})")
+
         try:
             if rns_pids:
-                # rnsd running - connect as client to avoid port conflicts
+                # rnsd running - RNS will auto-connect to shared instance
+                # as long as the config has share_instance = Yes
                 logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
-                           "initializing RNS as client")
+                           "initializing RNS as shared instance client")
                 self._rns_via_rnsd = True
-                import tempfile
-                client_config_dir = (
-                    Path(tempfile.gettempdir()) / "meshforge_rns_bridge"
-                )
-                client_config_dir.mkdir(exist_ok=True)
-                (client_config_dir / "config").write_text(
-                    "# MeshForge Bridge Client Config (auto-generated)\n"
-                    "# Connects to existing rnsd without creating interfaces\n\n"
-                    "[reticulum]\n"
-                    "share_instance = Yes\n"
-                    "shared_instance_port = 37428\n"
-                    "instance_control_port = 37429\n"
-                )
-                self._reticulum = RNS.Reticulum(
-                    configdir=str(client_config_dir)
-                )
-            else:
-                # No rnsd - initialize standalone RNS
-                config_dir = self.config.rns.config_dir or None
-                self._reticulum = RNS.Reticulum(configdir=config_dir)
+
+            # Initialize RNS - let it use its own config resolution
+            # When rnsd is running with share_instance=Yes, RNS auto-connects
+            # to the shared instance via LocalInterface (domain socket/TCP 37428)
+            self._reticulum = RNS.Reticulum(configdir=config_dir)
 
             self._rns_pre_initialized = True
             logger.info("RNS pre-initialized from main thread")
@@ -807,8 +807,7 @@ class RNSMeshtasticBridge:
                 logger.warning(f"RNS port conflict during pre-init: {e}")
                 # Will be retried in _connect_rns() background thread
             elif "reinitialise" in str(e).lower() or "already running" in str(e).lower():
-                # RNS raises OSError for reinitialise - node_tracker already
-                # initialized the singleton, so RNS transport is available
+                # RNS singleton already exists (node_tracker initialized it)
                 self._rns_pre_initialized = True
                 logger.info("RNS already initialized (node tracker), "
                            "bridge will use existing instance")
@@ -817,7 +816,6 @@ class RNSMeshtasticBridge:
         except Exception as e:
             err_msg = str(e).lower()
             if "reinitialise" in err_msg or "already running" in err_msg:
-                # node_tracker already initialized RNS - use existing instance
                 self._rns_pre_initialized = True
                 logger.info("RNS already initialized (node tracker), "
                            "bridge will use existing instance")

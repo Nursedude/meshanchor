@@ -262,7 +262,8 @@ class GatewayDiagnostic:
 
     def check_rns_config(self) -> CheckResult:
         """Check RNS configuration file."""
-        config_path = get_real_user_home() / ".reticulum" / "config"
+        from utils.paths import ReticulumPaths
+        config_path = ReticulumPaths.get_config_file()
 
         if not config_path.exists():
             return CheckResult(
@@ -383,7 +384,8 @@ class GatewayDiagnostic:
 
     def check_meshtastic_interface(self) -> CheckResult:
         """Check Meshtastic_Interface.py for RNS."""
-        interface_path = get_real_user_home() / ".reticulum" / "interfaces" / "Meshtastic_Interface.py"
+        from utils.paths import ReticulumPaths
+        interface_path = ReticulumPaths.get_interfaces_dir() / "Meshtastic_Interface.py"
 
         if interface_path.exists():
             # Check file size (should be > 10KB for real interface)

@@ -34,26 +34,37 @@ except ImportError:
 # PATH UTILITIES
 # ============================================================================
 
-from utils.paths import get_real_user_home
+from utils.paths import get_real_user_home, ReticulumPaths
 
 
 def get_config_path() -> Path:
-    """Get path to RNS config file."""
-    return get_real_user_home() / ".reticulum" / "config"
+    """Get path to RNS config file.
+
+    Uses ReticulumPaths which mirrors RNS's own config resolution:
+    /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
+    """
+    return ReticulumPaths.get_config_file()
 
 
 def get_config_dir() -> Path:
     """Get path to RNS config directory."""
-    return get_real_user_home() / ".reticulum"
+    return ReticulumPaths.get_config_dir()
 
 
 def get_identity_path() -> Path:
-    """Get path to MeshForge gateway identity."""
+    """Get path to MeshForge gateway identity.
+
+    This is a MeshForge-specific file, so uses get_real_user_home()
+    (not RNS paths) to store in the real user's config dir.
+    """
     return get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
 
 
 def get_lxmf_storage_path() -> Path:
-    """Get path to LXMF message storage."""
+    """Get path to LXMF message storage.
+
+    This is a MeshForge-specific directory, so uses get_real_user_home().
+    """
     return get_real_user_home() / ".config" / "meshforge" / "lxmf_storage"
 
 

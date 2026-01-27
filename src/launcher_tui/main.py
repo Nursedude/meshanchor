@@ -39,7 +39,7 @@ except ImportError:
 
 # Import centralized path utility
 try:
-    from utils.paths import get_real_user_home
+    from utils.paths import get_real_user_home, ReticulumPaths
 except ImportError:
     def get_real_user_home() -> Path:
         sudo_user = os.environ.get('SUDO_USER', '')
@@ -51,6 +51,20 @@ except ImportError:
             candidate = Path(f'/home/{logname}')
             return candidate
         return Path('/root')
+
+    class ReticulumPaths:
+        @classmethod
+        def get_config_dir(cls) -> Path:
+            if Path('/etc/reticulum/config').is_file():
+                return Path('/etc/reticulum')
+            xdg = Path.home() / '.config' / 'reticulum'
+            if (xdg / 'config').is_file():
+                return xdg
+            return Path.home() / '.reticulum'
+
+        @classmethod
+        def get_config_file(cls) -> Path:
+            return cls.get_config_dir() / 'config'
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
@@ -785,6 +799,9 @@ class MeshForgeLauncher(
 
     def _rns_menu(self):
         """Reticulum Network Stack tools."""
+        # Proactive config check on first entry
+        self._check_rns_setup()
+
         while True:
             choices = [
                 ("status", "RNS Status (rnstatus)"),
@@ -792,6 +809,7 @@ class MeshForgeLauncher(
                 ("bridge", "Gateway Bridge (start/stop)"),
                 ("config", "View Reticulum Config"),
                 ("edit", "Edit Reticulum Config"),
+                ("check", "Check RNS Setup"),
                 ("back", "Back"),
             ]
 
@@ -820,73 +838,65 @@ class MeshForgeLauncher(
                 self._view_rns_config()
             elif choice == "edit":
                 self._edit_rns_config()
+            elif choice == "check":
+                self._check_rns_setup()
 
     def _view_rns_config(self):
         """View current Reticulum config."""
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Reticulum Configuration ===\n")
 
-        # Try common config locations
-        config_paths = [
-            get_real_user_home() / '.reticulum' / 'config',
-            Path('/root/.reticulum/config'),
-            Path('/etc/reticulum/config'),
-        ]
+        config_path = ReticulumPaths.get_config_file()
 
-        found = False
-        for cfg in config_paths:
-            if cfg.exists():
-                print(f"Config: {cfg}\n")
-                try:
-                    content = cfg.read_text()
-                    print(content)
-                    found = True
-                    break
-                except PermissionError:
-                    print(f"Permission denied reading {cfg}")
-                    print(f"Try: sudo cat {cfg}")
+        if config_path.exists():
+            print(f"Config: {config_path}\n")
+            try:
+                content = config_path.read_text()
+                print(content)
 
-        if not found:
-            print("No Reticulum config found.")
-            print("\nExpected locations:")
-            for p in config_paths:
-                print(f"  {p}")
-            print("\nInstall RNS: pip3 install rns")
-            print("Template:    templates/reticulum.conf")
+                # Show validation warnings inline
+                issues = self._validate_rns_config_content(content)
+                if issues:
+                    print("\n--- Config Issues ---")
+                    for issue in issues:
+                        print(f"  ! {issue}")
+            except PermissionError:
+                print(f"Permission denied reading {config_path}")
+                print(f"Try: sudo cat {config_path}")
+        else:
+            print(f"No Reticulum config found at: {config_path}")
+            print(f"\nRNS config resolution (checked in order):")
+            print(f"  1. /etc/reticulum/config")
+            print(f"  2. {Path.home()}/.config/reticulum/config")
+            print(f"  3. {Path.home()}/.reticulum/config")
+            print(f"\nTo create: use 'Edit Reticulum Config' to deploy template")
+            print(f"Template:  templates/reticulum.conf")
 
         input("\nPress Enter to continue...")
 
     def _edit_rns_config(self):
         """Edit Reticulum config with available editor. Deploys template if no config exists."""
-        user_home = get_real_user_home()
-        config_paths = [
-            user_home / '.reticulum' / 'config',
-            Path('/root/.reticulum/config'),
-        ]
+        config_path = ReticulumPaths.get_config_file()
 
-        config_path = None
-        for cfg in config_paths:
-            if cfg.exists():
-                config_path = str(cfg)
-                break
-
-        if not config_path:
+        if not config_path.exists():
             # Offer to deploy from template
             template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
-            target = user_home / '.reticulum' / 'config'
+            target = config_path  # Deploy to where RNS will look
 
             if template.exists():
                 if self.dialog.yesno(
                     "Deploy Reticulum Config",
                     f"No Reticulum config found.\n\n"
                     f"Deploy template to:\n  {target}\n\n"
-                    f"This sets up RNS with Meshtastic bridge on port 4403.\n"
+                    f"This sets up RNS with:\n"
+                    f"  - share_instance = Yes (required for rnstatus)\n"
+                    f"  - AutoInterface (local network discovery)\n"
+                    f"  - Meshtastic_Interface on port 4403\n\n"
                     f"You can edit it after deployment."
                 ):
                     try:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(str(template), str(target))
-                        config_path = str(target)
                         print(f"\nDeployed: {target}")
                     except (OSError, PermissionError) as e:
                         self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
@@ -913,7 +923,104 @@ class MeshForgeLauncher(
             self.dialog.msgbox("Error", "No text editor found (nano, vim, vi)")
             return
 
-        subprocess.run([editor, config_path], timeout=None)  # Interactive editor
+        subprocess.run([editor, str(config_path)], timeout=None)
+
+    def _validate_rns_config_content(self, content: str) -> list:
+        """Validate RNS config content and return list of issues found.
+
+        Checks for common misconfigurations that cause rnstatus/rnpath failures:
+        - Missing [reticulum] section
+        - Missing share_instance = Yes (required for client apps to connect)
+        - No interfaces configured
+        - No Meshtastic_Interface (needed for mesh bridging)
+        """
+        issues = []
+        content_lower = content.lower()
+
+        # Check [reticulum] section exists
+        if '[reticulum]' not in content_lower:
+            issues.append("Missing [reticulum] section")
+
+        # Check share_instance (required for rnstatus/rnpath to connect to rnsd)
+        has_share = False
+        for line in content.split('\n'):
+            stripped = line.strip().lower()
+            if stripped.startswith('#'):
+                continue
+            if 'share_instance' in stripped:
+                if 'yes' in stripped or 'true' in stripped:
+                    has_share = True
+                break
+        if not has_share:
+            issues.append("share_instance not set to Yes (rnstatus/client apps won't connect)")
+
+        # Check for at least one active interface
+        has_interface = False
+        has_meshtastic = False
+        in_comment = False
+        for line in content.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                continue
+            if stripped.startswith('[[') and stripped.endswith(']]'):
+                has_interface = True
+            if 'meshtastic_interface' in stripped.lower() and 'type' in stripped.lower():
+                has_meshtastic = True
+
+        if not has_interface:
+            issues.append("No interfaces configured")
+
+        if not has_meshtastic:
+            issues.append("No Meshtastic_Interface configured (needed for mesh bridging)")
+
+        return issues
+
+    def _check_rns_setup(self) -> bool:
+        """Check RNS setup and offer to fix common issues.
+
+        Called when entering the RNS menu. Returns True if setup looks OK
+        or user chose to continue anyway, False if user wants to go back.
+        """
+        config_path = ReticulumPaths.get_config_file()
+
+        if not config_path.exists():
+            template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+            if template.exists():
+                if self.dialog.yesno(
+                    "RNS Not Configured",
+                    f"No Reticulum config found at:\n  {config_path}\n\n"
+                    f"RNS tools (rnstatus, rnpath) and the gateway bridge\n"
+                    f"require a config file to function.\n\n"
+                    f"Deploy the MeshForge template?\n"
+                    f"(Sets up shared instance + Meshtastic bridge)"
+                ):
+                    try:
+                        config_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(template), str(config_path))
+                        self.dialog.msgbox(
+                            "Config Deployed",
+                            f"Deployed to: {config_path}\n\n"
+                            f"Restart rnsd to apply:\n"
+                            f"  sudo systemctl restart rnsd"
+                        )
+                    except (OSError, PermissionError) as e:
+                        self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
+            return True  # Continue to menu either way
+
+        # Config exists - validate it
+        try:
+            content = config_path.read_text()
+            issues = self._validate_rns_config_content(content)
+            if issues:
+                msg = f"Config: {config_path}\n\nIssues found:\n"
+                for issue in issues:
+                    msg += f"  - {issue}\n"
+                msg += f"\nUse 'Edit Reticulum Config' to fix these issues."
+                self.dialog.msgbox("RNS Config Issues", msg)
+        except PermissionError:
+            pass  # Can't read config, will fail naturally when tools run
+
+        return True
 
     def _run_rns_tool(self, cmd: list, tool_name: str):
         """Run an RNS CLI tool with address-in-use error detection.
@@ -943,14 +1050,29 @@ class MeshForgeLauncher(
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
             elif "no shared" in combined.lower():
-                # rnsd not running or not reachable from this config
-                if result.stdout:
-                    print(result.stdout, end='')
-                if result.stderr and result.stderr.strip():
-                    print(result.stderr, end='')
-                print("\nStart rnsd: sudo systemctl start rnsd")
-                print("If rnsd is running, check: /root/.reticulum/config")
-                print("  Ensure: share_instance = Yes")
+                # rnsd not running or share_instance not enabled
+                print("\nNo shared RNS instance available.")
+                # Check if config has share_instance
+                cfg_path = ReticulumPaths.get_config_file()
+                if cfg_path.exists():
+                    try:
+                        cfg_content = cfg_path.read_text()
+                        issues = self._validate_rns_config_content(cfg_content)
+                        if issues:
+                            print(f"\nConfig issues ({cfg_path}):")
+                            for issue in issues:
+                                print(f"  - {issue}")
+                            print("\nFix config: use 'Edit Reticulum Config' menu")
+                        else:
+                            print(f"\nConfig looks OK ({cfg_path})")
+                            print("rnsd may not be running:")
+                            print("  sudo systemctl start rnsd")
+                    except PermissionError:
+                        print(f"\nCannot read config: {cfg_path}")
+                        print("  Run MeshForge with sudo")
+                else:
+                    print(f"\nNo config found at: {cfg_path}")
+                    print("Use 'Edit Reticulum Config' to deploy template")
             else:
                 # Generic failure - show output and suggestions
                 if result.stdout:
