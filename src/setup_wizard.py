@@ -441,7 +441,11 @@ class SetupWizard:
         if (rns_status and rns_status.state == WizardServiceState.RUNNING and
             nomad_status and nomad_status.state == WizardServiceState.RUNNING):
             # Both running - check if nomadnet is configured to use shared instance
-            config_path = self._get_real_home() / ".reticulum" / "config"
+            try:
+                from utils.paths import ReticulumPaths
+                config_path = ReticulumPaths.get_config_file()
+            except ImportError:
+                config_path = self._get_real_home() / ".reticulum" / "config"
             if config_path.exists():
                 try:
                     config_text = config_path.read_text()
