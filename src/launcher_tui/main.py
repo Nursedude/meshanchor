@@ -832,6 +832,10 @@ class MeshForgeLauncher(
             choices = [
                 ("status", "RNS Status (rnstatus)"),
                 ("paths", "RNS Path Table (rnpath)"),
+                ("probe", "Probe Destination (rnprobe)"),
+                ("identity", "Identity Info (rnid)"),
+                ("nodes", "Known Destinations"),
+                ("diag", "RNS Diagnostics"),
                 ("bridge", "Gateway Bridge (start/stop)"),
                 ("config", "View Reticulum Config"),
                 ("edit", "Edit Reticulum Config"),
@@ -858,6 +862,14 @@ class MeshForgeLauncher(
                 print("=== RNS Path Table ===\n")
                 self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                 input("\nPress Enter to continue...")
+            elif choice == "probe":
+                self._rns_probe_destination()
+            elif choice == "identity":
+                self._rns_identity_info()
+            elif choice == "nodes":
+                self._rns_known_destinations()
+            elif choice == "diag":
+                self._rns_diagnostics()
             elif choice == "bridge":
                 self._run_bridge()
             elif choice == "config":
@@ -866,6 +878,221 @@ class MeshForgeLauncher(
                 self._edit_rns_config()
             elif choice == "check":
                 self._check_rns_setup()
+
+    def _rns_probe_destination(self):
+        """Probe an RNS destination to test reachability."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Probe RNS Destination ===\n")
+        print("Probe tests reachability of a destination on the RNS network.")
+        print("Enter the full destination hash (32 hex chars), or a partial hash.\n")
+
+        dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+        if not dest_hash or dest_hash.lower() == 'q':
+            return
+
+        # Validate hex format to prevent flag injection
+        if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
+            print("Error: Hash must contain only hex characters (0-9, a-f).")
+            input("\nPress Enter to continue...")
+            return
+
+        print(f"\nProbing {dest_hash}...\n")
+        self._run_rns_tool(['rnprobe', dest_hash], 'rnprobe')
+        input("\nPress Enter to continue...")
+
+    def _rns_identity_info(self):
+        """Show RNS identity information."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== RNS Identity Info ===\n")
+
+        while True:
+            choices = [
+                ("show", "Show local identity"),
+                ("path", "Show identity file paths"),
+                ("recall", "Recall identity by hash"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "RNS Identity",
+                "Identity management:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "show":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Local RNS Identity ===\n")
+                # rnid with no args shows the local identity
+                self._run_rns_tool(['rnid'], 'rnid')
+
+                # Also show MeshForge gateway identity path
+                try:
+                    from commands.rns import get_identity_path
+                    gw_id = get_identity_path()
+                    print(f"\nMeshForge gateway identity: {gw_id}")
+                    if gw_id.exists():
+                        print("  Status: exists")
+                    else:
+                        print("  Status: not created (starts on first bridge run)")
+                except ImportError:
+                    pass
+                input("\nPress Enter to continue...")
+
+            elif choice == "path":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== RNS Identity Paths ===\n")
+                config_dir = ReticulumPaths.get_config_dir()
+                identity_path = config_dir / 'identity'
+                print(f"RNS config dir:    {config_dir}")
+                print(f"RNS identity file: {identity_path}")
+                if identity_path.exists():
+                    stat = identity_path.stat()
+                    print(f"  Size: {stat.st_size} bytes")
+                    from datetime import datetime
+                    mtime = datetime.fromtimestamp(stat.st_mtime)
+                    print(f"  Modified: {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    print("  Not found (created on first rnsd start)")
+
+                # Show gateway identity
+                try:
+                    from commands.rns import get_identity_path
+                    gw_id = get_identity_path()
+                    print(f"\nMeshForge gateway:  {gw_id}")
+                    if gw_id.exists():
+                        stat = gw_id.stat()
+                        print(f"  Size: {stat.st_size} bytes")
+                    else:
+                        print("  Not created yet")
+                except ImportError:
+                    pass
+                input("\nPress Enter to continue...")
+
+            elif choice == "recall":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Recall RNS Identity ===\n")
+                print("Look up a known identity by its destination hash.\n")
+                dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+                if dest_hash and dest_hash.lower() != 'q':
+                    # Validate hex format to prevent flag injection
+                    if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
+                        print("Error: Hash must contain only hex characters (0-9, a-f).")
+                    else:
+                        self._run_rns_tool(['rnid', '--recall', dest_hash], 'rnid')
+                input("\nPress Enter to continue...")
+
+    def _rns_known_destinations(self):
+        """Show known RNS destinations from the running rnsd instance."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Known RNS Destinations ===\n")
+
+        try:
+            from commands.rns import list_known_destinations
+            result = list_known_destinations()
+
+            if result.success:
+                nodes = result.data.get('nodes', [])
+                count = result.data.get('count', 0)
+
+                if count == 0:
+                    print("No known destinations yet.")
+                    print("\nNodes appear when they announce or when you request paths.")
+                    print("Make sure rnsd is running: sudo systemctl start rnsd")
+                else:
+                    print(f"Found {count} destination(s):\n")
+                    print(f"{'Hash':>10}  {'Hops':>5}  {'Source':<20}  {'Name'}")
+                    print("-" * 60)
+                    for node in nodes:
+                        short = node.get('short_hash', '?')
+                        hops = node.get('hops', -1)
+                        hops_str = str(hops) if hops >= 0 else '?'
+                        source = node.get('source', 'unknown')
+                        name = node.get('name', '')
+                        print(f"{short:>10}  {hops_str:>5}  {source:<20}  {name}")
+            else:
+                print(f"Error: {result.message}")
+                fix_hint = (result.data or {}).get('fix_hint', '')
+                if fix_hint:
+                    print(f"Fix: {fix_hint}")
+        except ImportError:
+            # Fallback: use rnstatus which also shows some destination info
+            print("Commands module not available, falling back to rnstatus...\n")
+            self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
+
+        input("\nPress Enter to continue...")
+
+    def _rns_diagnostics(self):
+        """Run comprehensive RNS diagnostics."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== RNS Diagnostics ===\n")
+
+        try:
+            from commands.rns import check_connectivity, get_status
+        except ImportError:
+            print("RNS commands module not available.")
+            print("Run from MeshForge root: sudo python3 src/launcher_tui/main.py")
+            input("\nPress Enter to continue...")
+            return
+
+        # 1. Service status
+        print("[1/4] Checking rnsd service...")
+        status = get_status()
+        status_data = status.data or {}
+        running = status_data.get('rnsd_running', False)
+        print(f"  rnsd: {'RUNNING' if running else 'NOT RUNNING'}")
+        if status_data.get('rnsd_pid'):
+            print(f"  PID: {status_data['rnsd_pid']}")
+        if status_data.get('service_state'):
+            print(f"  State: {status_data['service_state']}")
+
+        # 2. Config check
+        print("\n[2/4] Checking configuration...")
+        config_exists = status_data.get('config_exists', False)
+        print(f"  Config: {'found' if config_exists else 'MISSING'}")
+        if config_exists:
+            iface_count = status_data.get('interface_count', 0)
+            print(f"  Interfaces: {iface_count}")
+
+        # 3. Identity check
+        print("\n[3/4] Checking identity...")
+        identity_exists = status_data.get('identity_exists', False)
+        print(f"  Gateway identity: {'found' if identity_exists else 'not created'}")
+        config_dir = ReticulumPaths.get_config_dir()
+        rns_identity = config_dir / 'identity'
+        print(f"  RNS identity: {'found' if rns_identity.exists() else 'not created'}")
+
+        # 4. Full connectivity check
+        print("\n[4/4] Running connectivity check...")
+        conn = check_connectivity()
+        conn_data = conn.data or {}
+        print(f"  RNS importable: {'yes' if conn_data.get('can_import_rns') else 'NO'}")
+        if conn_data.get('rns_version'):
+            print(f"  RNS version: {conn_data['rns_version']}")
+        print(f"  Config valid: {'yes' if conn_data.get('config_valid') else 'NO'}")
+        print(f"  Interfaces enabled: {conn_data.get('interfaces_enabled', 0)}")
+
+        # Summary
+        issues = conn_data.get('issues', [])
+        if issues:
+            print(f"\n--- Issues Found ({len(issues)}) ---")
+            for issue in issues:
+                print(f"  ! {issue}")
+        else:
+            print("\n--- All checks passed ---")
+
+        # RNS tool availability
+        print("\n--- RNS Tool Availability ---")
+        for tool in ['rnsd', 'rnstatus', 'rnpath', 'rnprobe', 'rnid', 'rncp', 'rnx']:
+            path = shutil.which(tool)
+            if path:
+                print(f"  {tool}: {path}")
+            else:
+                print(f"  {tool}: not found")
+
+        input("\nPress Enter to continue...")
 
     def _view_rns_config(self):
         """View current Reticulum config."""
