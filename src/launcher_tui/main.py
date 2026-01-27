@@ -807,18 +807,12 @@ class MeshForgeLauncher(
             if choice == "status":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Status ===\n")
-                result = subprocess.run(['rnstatus', '-s'], timeout=15)
-                if result.returncode != 0:
-                    print("\nrnstatus not found or rnsd not running.")
-                    print("Install: pip3 install rns")
-                    print("Start:   sudo systemctl start rnsd")
+                self._run_rns_tool(['rnstatus', '-s'], 'rnstatus')
                 input("\nPress Enter to continue...")
             elif choice == "paths":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Path Table ===\n")
-                result = subprocess.run(['rnpath', '-t'], timeout=15)
-                if result.returncode != 0:
-                    print("\nrnpath not available. Is RNS installed?")
+                self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                 input("\nPress Enter to continue...")
             elif choice == "bridge":
                 self._run_bridge()
@@ -920,6 +914,62 @@ class MeshForgeLauncher(
             return
 
         subprocess.run([editor, config_path], timeout=None)  # Interactive editor
+
+    def _run_rns_tool(self, cmd: list, tool_name: str):
+        """Run an RNS CLI tool with address-in-use error detection.
+
+        Captures stderr to detect specific error patterns and provides
+        actionable diagnostics instead of generic error messages.
+
+        Args:
+            cmd: Command and arguments to run
+            tool_name: Display name for error messages (e.g., "rnpath")
+        """
+        try:
+            result = subprocess.run(
+                cmd, stderr=subprocess.PIPE, text=True, timeout=15
+            )
+            if result.returncode != 0:
+                stderr = result.stderr or ""
+                if "address already in use" in stderr.lower():
+                    print(f"\nError: RNS port conflict (Address already in use)")
+                    print("Another process is bound to the RNS AutoInterface port.\n")
+                    self._diagnose_rns_port_conflict()
+                else:
+                    print(f"\n{tool_name} failed. Possible causes:")
+                    print("  - rnsd not running: sudo systemctl start rnsd")
+                    print("  - RNS not installed: pip3 install rns")
+                    if stderr.strip():
+                        # Show last 3 lines of stderr for context
+                        err_lines = stderr.strip().split('\n')[-3:]
+                        print(f"\nDetails:")
+                        for line in err_lines:
+                            print(f"  {line}")
+        except FileNotFoundError:
+            print(f"\n{tool_name} not found. Is RNS installed?")
+            print("Install: pip3 install rns")
+        except subprocess.TimeoutExpired:
+            print(f"\n{tool_name} timed out. RNS may be unresponsive.")
+            print("Try restarting rnsd: sudo systemctl restart rnsd")
+
+    def _diagnose_rns_port_conflict(self):
+        """Print diagnostic info for RNS Address-in-use port conflicts."""
+        try:
+            rnsd_check = subprocess.run(
+                ['pgrep', '-f', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if rnsd_check.returncode == 0:
+                pid = rnsd_check.stdout.strip().split('\n')[0]
+                print(f"rnsd is running (PID: {pid}) but may need a restart:")
+                print("  sudo systemctl restart rnsd")
+            else:
+                print("No rnsd found. A stale process may be holding the port.")
+                print("  Find it:    sudo lsof -i UDP:29716")
+                print("  Kill stale: pkill -f rnsd")
+                print("  Or wait ~30s for the socket to timeout")
+        except Exception:
+            print("  Try: sudo systemctl restart rnsd")
 
     # =========================================================================
     # AREDN Menu
