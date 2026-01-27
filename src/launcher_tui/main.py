@@ -789,7 +789,7 @@ class MeshForgeLauncher(
             choices = [
                 ("status", "RNS Status (rnstatus)"),
                 ("paths", "RNS Path Table (rnpath)"),
-                ("bridge", "Start Gateway Bridge"),
+                ("bridge", "Gateway Bridge (start/stop)"),
                 ("config", "View Reticulum Config"),
                 ("edit", "Edit Reticulum Config"),
                 ("back", "Back"),
@@ -1570,21 +1570,175 @@ class MeshForgeLauncher(
             self.dialog.msgbox("Error", str(e))
 
     def _run_bridge(self):
-        """Start gateway bridge."""
-        if self.dialog.yesno(
-            "Gateway Bridge",
-            "Start the RNS ↔ Meshtastic gateway bridge?\n\n"
-            "This will bridge messages between Reticulum and Meshtastic networks.",
-            default_no=True
-        ):
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("Starting Gateway Bridge...")
-            print("Press Ctrl+C to stop\n")
-            try:
-                subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')], timeout=None)  # Interactive
-            except KeyboardInterrupt:
-                print("\nBridge stopped.")
+        """Gateway bridge start/stop/status menu."""
+        while True:
+            # Check if bridge is already running
+            bridge_running = self._is_bridge_running()
+
+            if bridge_running:
+                choices = [
+                    ("status", "Bridge Status"),
+                    ("logs", "View Bridge Logs"),
+                    ("stop", "Stop Bridge"),
+                    ("back", "Back"),
+                ]
+                subtitle = "Gateway bridge is RUNNING (background)"
+            else:
+                choices = [
+                    ("start", "Start Bridge (background)"),
+                    ("start-fg", "Start Bridge (foreground, live logs)"),
+                    ("back", "Back"),
+                ]
+                subtitle = "Gateway bridge is STOPPED"
+
+            choice = self.dialog.menu(
+                "Gateway Bridge",
+                f"RNS <-> Meshtastic bridge:\n\n{subtitle}",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "start":
+                self._start_bridge_background()
+            elif choice == "start-fg":
+                self._start_bridge_foreground()
+            elif choice == "status":
+                self._show_bridge_status()
+            elif choice == "stop":
+                self._stop_bridge()
+            elif choice == "logs":
+                self._show_bridge_logs()
+
+    def _is_bridge_running(self) -> bool:
+        """Check if the gateway bridge process is running."""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'bridge_cli.py'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _start_bridge_background(self):
+        """Start gateway bridge as a background process."""
+        if self._is_bridge_running():
+            self.dialog.msgbox("Already Running", "Gateway bridge is already running.")
+            return
+
+        self.dialog.infobox("Starting", "Starting gateway bridge in background...")
+
+        try:
+            log_path = Path('/tmp/meshforge-gateway.log')
+            log_file = open(log_path, 'w')
+            subprocess.Popen(
+                [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True
+            )
+
+            # Wait briefly and verify it started
+            import time
+            time.sleep(3)
+
+            if self._is_bridge_running():
+                self.dialog.msgbox("Started",
+                    "Gateway bridge started in background.\n\n"
+                    f"Logs: {log_path}\n\n"
+                    "Use 'Stop Bridge' to shut it down.")
+            else:
+                # Read log for error info
+                try:
+                    error_text = log_path.read_text()[-300:]
+                except Exception:
+                    error_text = "(no log output)"
+                self.dialog.msgbox("Failed",
+                    f"Bridge failed to start.\n\n{error_text}")
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to start bridge:\n{e}")
+
+    def _start_bridge_foreground(self):
+        """Start gateway bridge in foreground with live output."""
+        if self._is_bridge_running():
+            self.dialog.msgbox("Already Running",
+                "Gateway bridge is already running in background.\n\n"
+                "Stop it first to run in foreground.")
+            return
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("Starting Gateway Bridge (foreground)...")
+        print("Press Ctrl+C to stop\n")
+        try:
+            subprocess.run(
+                [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
+                timeout=None
+            )
+        except KeyboardInterrupt:
+            print("\nBridge stopped.")
+        try:
             input("\nPress Enter to continue...")
+        except KeyboardInterrupt:
+            print()
+
+    def _stop_bridge(self):
+        """Stop the background gateway bridge."""
+        if not self._is_bridge_running():
+            self.dialog.msgbox("Not Running", "Gateway bridge is not running.")
+            return
+
+        if not self.dialog.yesno("Stop Bridge", "Stop the gateway bridge?"):
+            return
+
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'bridge_cli.py'],
+                capture_output=True, timeout=10
+            )
+            import time
+            time.sleep(1)
+
+            if self._is_bridge_running():
+                # Force kill
+                subprocess.run(
+                    ['pkill', '-9', '-f', 'bridge_cli.py'],
+                    capture_output=True, timeout=10
+                )
+
+            self.dialog.msgbox("Stopped", "Gateway bridge stopped.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to stop bridge:\n{e}")
+
+    def _show_bridge_status(self):
+        """Show gateway bridge log tail."""
+        log_path = Path('/tmp/meshforge-gateway.log')
+        if not log_path.exists():
+            self.dialog.msgbox("No Logs", "No gateway log found.")
+            return
+
+        try:
+            lines = log_path.read_text().strip().split('\n')
+            # Show last 30 lines
+            tail = '\n'.join(lines[-30:])
+            self.dialog.msgbox("Bridge Status (last 30 lines)", tail)
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read log:\n{e}")
+
+    def _show_bridge_logs(self):
+        """Show full gateway bridge logs in less."""
+        log_path = Path('/tmp/meshforge-gateway.log')
+        if not log_path.exists():
+            self.dialog.msgbox("No Logs", "No gateway log found.")
+            return
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        try:
+            subprocess.run(['less', '-R', '-X', '+G', str(log_path)], timeout=300)
+        except KeyboardInterrupt:
+            pass
 
     def _service_menu(self):
         """Service management menu - terminal-native."""
