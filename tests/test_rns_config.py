@@ -119,11 +119,8 @@ class TestRNSConfigBackup:
 class TestRNSConfigPath:
     """Test config path handling for root/user scenarios.
 
-    RNS config paths use the EFFECTIVE user's home (Path.home()), not
-    get_real_user_home(). This is correct because RNS itself uses
-    os.path.expanduser("~") and rnsd runs as root. When MeshForge
-    runs with sudo, the effective user is root, so RNS config is
-    at /root/.reticulum/ - matching what rnsd uses.
+    RNS config lives in the real user's home (~/.reticulum), not /root.
+    Uses get_real_user_home() so it resolves correctly under sudo.
     """
 
     def test_get_config_path_as_user(self):
@@ -135,17 +132,15 @@ class TestRNSConfigPath:
             assert '.reticulum' in str(path)
 
     def test_get_config_path_as_sudo(self):
-        """Test config path uses effective user home (root) under sudo.
-
-        RNS config intentionally resolves to /root/.reticulum/ when
-        running as root, because rnsd uses the same path. This ensures
-        MeshForge TUI sees the same config that rnsd is using.
-        """
+        """Test config path resolves to real user's home under sudo"""
         from src.utils.rns_config import get_rns_config_path
 
-        # Under sudo, effective user is root, so RNS config is in /root/
-        path = get_rns_config_path()
-        assert '.reticulum' in str(path)
+        with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+            with patch('os.geteuid', return_value=0):
+                path = get_rns_config_path()
+                assert '.reticulum' in str(path)
+                # Should be in real user's home, not root
+                assert str(path) != '/root/.reticulum/config'
         # Path uses RNS's resolution logic, which depends on effective user
 
 
