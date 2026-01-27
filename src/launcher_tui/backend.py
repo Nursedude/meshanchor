@@ -49,11 +49,9 @@ class DialogBackend:
 
         whiptail uses stderr for returning selection.
         newt library opens /dev/tty directly for ncurses display.
-        We use os.system for proper terminal inheritance and redirect
-        stderr to a temp file to capture the selection.
+        stderr is redirected to a temp file to capture the selection.
         """
         import tempfile
-        import shlex
 
         # Create temp file to capture selection output
         fd, tmp_path = tempfile.mkstemp(suffix='.txt', prefix='meshforge_')
@@ -70,21 +68,19 @@ class DialogBackend:
                 except Exception:
                     pass  # Status bar failure must never block UI
 
-            # Build command with proper shell quoting
+            # Build command as list args (safe, no shell needed)
             cmd_parts = [self.backend] + [str(a) for a in full_args]
-            escaped_cmd = ' '.join(shlex.quote(p) for p in cmd_parts)
 
-            # Use os.system for proper terminal inheritance
-            # stderr redirected to file captures selection
-            # newt library opens /dev/tty directly for display
-            exit_code = os.system(f'{escaped_cmd} 2>{shlex.quote(tmp_path)}')
+            # Run with stderr redirected to file to capture selection
+            # whiptail/dialog opens /dev/tty directly for ncurses display
+            with open(tmp_path, 'w') as stderr_file:
+                result = subprocess.run(cmd_parts, stderr=stderr_file)  # Interactive
 
             # Read the captured selection
             with open(tmp_path, 'r') as f:
                 output = f.read().strip()
 
-            # os.system returns wait status, extract exit code
-            return os.waitstatus_to_exitcode(exit_code) if hasattr(os, 'waitstatus_to_exitcode') else (exit_code >> 8), output
+            return result.returncode, output
 
         except Exception as e:
             return 1, str(e)

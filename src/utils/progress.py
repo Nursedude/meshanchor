@@ -16,20 +16,20 @@ from rich.progress import (
 console = Console()
 
 
-def run_with_progress(command, description, shell=False, timeout=600):
+def run_with_progress(command, description, timeout=600):
     """Run a command with a progress spinner
 
     Args:
         command: Command to run (string or list)
         description: Description to show during progress
-        shell: Use shell execution
         timeout: Maximum time to wait (seconds)
 
     Returns:
         dict: {success: bool, stdout: str, stderr: str, returncode: int}
     """
-    if isinstance(command, str) and not shell:
-        command = command.split()
+    if isinstance(command, str):
+        import shlex
+        command = shlex.split(command)
 
     with Progress(
         SpinnerColumn(),
@@ -43,7 +43,6 @@ def run_with_progress(command, description, shell=False, timeout=600):
         try:
             process = subprocess.Popen(
                 command,
-                shell=shell,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -74,7 +73,7 @@ def run_with_progress(command, description, shell=False, timeout=600):
             }
 
 
-def run_with_live_progress(command, description, shell=False, timeout=600):
+def run_with_live_progress(command, description, timeout=600):
     """Run a command with live progress bar and streaming output
 
     Parses apt-get style progress and shows a progress bar.
@@ -82,14 +81,14 @@ def run_with_live_progress(command, description, shell=False, timeout=600):
     Args:
         command: Command to run (string or list)
         description: Description to show during progress
-        shell: Use shell execution
         timeout: Maximum time to wait (seconds)
 
     Returns:
         dict: {success: bool, stdout: str, stderr: str, returncode: int}
     """
-    if isinstance(command, str) and not shell:
-        command = command.split()
+    if isinstance(command, str):
+        import shlex
+        command = shlex.split(command)
 
     stdout_lines = []
 
@@ -107,7 +106,6 @@ def run_with_live_progress(command, description, shell=False, timeout=600):
         try:
             process = subprocess.Popen(
                 command,
-                shell=shell,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -204,17 +202,16 @@ def multi_step_progress(steps):
             step_name = step.get('name', f'Step {i+1}')
             command = step.get('command')
             optional = step.get('optional', False)
-            shell = step.get('shell', False)
 
             progress.update(overall_task, description=f"[cyan]{step_name}[/cyan]")
 
             try:
-                if isinstance(command, str) and not shell:
-                    command = command.split()
+                if isinstance(command, str):
+                    import shlex
+                    command = shlex.split(command)
 
                 process = subprocess.Popen(
                     command,
-                    shell=shell,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True

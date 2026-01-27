@@ -433,7 +433,7 @@ class MeshForgeLauncher(
 
             # Add common pipx bin dirs to current process PATH
             for bindir in [
-                Path.home() / '.local' / 'bin',
+                get_real_user_home() / '.local' / 'bin',
                 Path('/root/.local/bin'),
                 Path('/usr/local/bin'),
             ]:
@@ -868,8 +868,8 @@ class MeshForgeLauncher(
             print(f"No Reticulum config found at: {config_path}")
             print(f"\nRNS config resolution (checked in order):")
             print(f"  1. /etc/reticulum/config")
-            print(f"  2. {Path.home()}/.config/reticulum/config")
-            print(f"  3. {Path.home()}/.reticulum/config")
+            print(f"  2. {get_real_user_home()}/.config/reticulum/config")
+            print(f"  3. {get_real_user_home()}/.reticulum/config")
             print(f"\nTo create: use 'Edit Reticulum Config' to deploy template")
             print(f"Template:  templates/reticulum.conf")
 
@@ -1823,14 +1823,19 @@ class MeshForgeLauncher(
         self.dialog.infobox("Starting", "Starting gateway bridge in background...")
 
         try:
-            log_path = Path('/tmp/meshforge-gateway.log')
-            log_file = open(log_path, 'w')
+            import tempfile
+            log_fd, log_path_str = tempfile.mkstemp(
+                suffix='.log', prefix='meshforge-gateway-'
+            )
+            log_path = Path(log_path_str)
+            log_file = os.fdopen(log_fd, 'w')
             subprocess.Popen(
                 [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 start_new_session=True
             )
+            log_file.close()
 
             # Wait briefly and verify it started
             import time

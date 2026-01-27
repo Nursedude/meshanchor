@@ -255,8 +255,8 @@ class TestDialogBackendIntegration:
         backend = DialogBackend()
         assert backend._status_bar is None
 
-    @patch('os.system', return_value=0)
-    def test_backtitle_injected(self, mock_system):
+    @patch('subprocess.run', return_value=MagicMock(returncode=0))
+    def test_backtitle_injected(self, mock_run):
         """When status bar is set, --backtitle should be in the command."""
         from backend import DialogBackend
         backend = DialogBackend()
@@ -270,12 +270,12 @@ class TestDialogBackendIntegration:
         # Call a dialog method (msgbox for simplicity)
         backend.msgbox("Test", "Hello")
 
-        # Verify os.system was called with --backtitle in the command
-        call_args = mock_system.call_args[0][0]
+        # Verify subprocess.run was called with --backtitle in the args list
+        call_args = mock_run.call_args[0][0]
         assert '--backtitle' in call_args
 
-    @patch('os.system', return_value=0)
-    def test_no_backtitle_without_bar(self, mock_system):
+    @patch('subprocess.run', return_value=MagicMock(returncode=0))
+    def test_no_backtitle_without_bar(self, mock_run):
         """Without status bar, no --backtitle in command."""
         from backend import DialogBackend
         backend = DialogBackend()
@@ -283,11 +283,11 @@ class TestDialogBackendIntegration:
 
         backend.msgbox("Test", "Hello")
 
-        call_args = mock_system.call_args[0][0]
+        call_args = mock_run.call_args[0][0]
         assert '--backtitle' not in call_args
 
-    @patch('os.system', return_value=0)
-    def test_status_bar_exception_doesnt_crash(self, mock_system):
+    @patch('subprocess.run', return_value=MagicMock(returncode=0))
+    def test_status_bar_exception_doesnt_crash(self, mock_run):
         """Status bar failure must never block dialog display."""
         from backend import DialogBackend
         backend = DialogBackend()
@@ -300,10 +300,10 @@ class TestDialogBackendIntegration:
 
         # Should still work without error
         backend.msgbox("Test", "Hello")
-        mock_system.assert_called_once()
+        mock_run.assert_called_once()
 
         # --backtitle should NOT be in the command (graceful fallback)
-        call_args = mock_system.call_args[0][0]
+        call_args = mock_run.call_args[0][0]
         assert '--backtitle' not in call_args
 
 
