@@ -102,7 +102,6 @@ class TestEnvironmentDetection:
         assert 'has_display' in env
         assert 'display_type' in env
         assert 'is_ssh' in env
-        assert 'has_gtk' in env
         assert 'is_root' in env
         assert 'terminal' in env
 
@@ -197,10 +196,9 @@ class TestRecommendation:
 
         env = {
             'has_display': False,
-            'has_gtk': False,
             'is_ssh': True,
         }
-        assert get_recommendation(env) == '2'
+        assert get_recommendation(env) == '1'
 
     def test_recommend_tui_no_display(self):
         """TUI recommended when no display available"""
@@ -210,23 +208,21 @@ class TestRecommendation:
 
         env = {
             'has_display': False,
-            'has_gtk': False,
             'is_ssh': False,
         }
-        assert get_recommendation(env) == '2'
+        assert get_recommendation(env) == '1'
 
-    def test_recommend_tui_when_gtk_unavailable(self):
-        """TUI recommended when display exists but GTK not installed"""
+    def test_recommend_tui_always(self):
+        """TUI always recommended (GTK4 frozen)"""
         import sys
         sys.path.insert(0, 'src')
         from launcher import get_recommendation
 
         env = {
             'has_display': True,
-            'has_gtk': False,
             'is_ssh': False,
         }
-        assert get_recommendation(env) == '2'
+        assert get_recommendation(env) == '1'
 
 
 class TestFirstRun:
@@ -290,7 +286,7 @@ class TestMenuPrinting:
         assert 'X11' in captured.out
 
     def test_print_menu_shows_options(self, capsys):
-        """print_menu shows interface options"""
+        """print_menu shows TUI and quick tools"""
         import sys
         sys.path.insert(0, 'src')
         from launcher import print_menu
@@ -299,15 +295,16 @@ class TestMenuPrinting:
             'has_display': True,
             'display_type': 'X11',
             'is_ssh': False,
-            'has_gtk': True,
         }
 
         print_menu(env, recommended='1')
         captured = capsys.readouterr()
 
-        # Check that the two interfaces are shown
-        assert 'GTK4' in captured.out or 'Desktop' in captured.out
+        # TUI is now the only interface (GTK4 frozen)
         assert 'Terminal' in captured.out or 'TUI' in captured.out
+        # Quick tools should also be shown
+        assert 'Diagnostics' in captured.out
+        assert 'Gateway' in captured.out or 'Bridge' in captured.out
 
 
 class TestVersionImport:

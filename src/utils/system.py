@@ -415,19 +415,19 @@ def get_os_type():
         return 'unknown'
 
 
-def run_command(command, shell=False, capture_output=True, stream_output=False, stderr_to_null=False):
+def run_command(command, capture_output=True, stream_output=False, stderr_to_null=False):
     """Run a system command and return the result
 
     Args:
         command: Command to run (string or list)
-        shell: Use shell execution (avoid for security)
         capture_output: Capture stdout/stderr
         stream_output: Print output in real-time (for interactive commands)
         stderr_to_null: Redirect stderr to /dev/null (suppress errors)
     """
     try:
-        if isinstance(command, str) and not shell:
-            command = command.split()
+        if isinstance(command, str):
+            import shlex
+            command = shlex.split(command)
 
         if stream_output:
             # Stream output in real-time for better user feedback
@@ -436,7 +436,6 @@ def run_command(command, shell=False, capture_output=True, stream_output=False, 
             try:
                 process = subprocess.Popen(
                     command,
-                    shell=shell,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -483,7 +482,6 @@ def run_command(command, shell=False, capture_output=True, stream_output=False, 
         else:
             # Build subprocess arguments
             run_kwargs = {
-                'shell': shell,
                 'text': True,
                 'timeout': 300
             }
