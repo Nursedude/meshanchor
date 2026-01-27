@@ -97,6 +97,13 @@ class MeshForgeLauncher(
         self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
         self._setup_status_bar()
+        self._meshtastic_path = None  # Cached CLI path
+
+    def _get_meshtastic_cli(self) -> str:
+        """Find the meshtastic CLI binary path, with caching."""
+        if self._meshtastic_path is None:
+            self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
+        return self._meshtastic_path
 
     def _setup_status_bar(self) -> None:
         """Initialize and attach the status bar to the dialog backend."""
@@ -321,14 +328,15 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            cli = self._get_meshtastic_cli()
             if choice == "info":
-                self._radio_run(['meshtastic', '--info'], "Radio Info")
+                self._radio_run([cli, '--info'], "Radio Info")
             elif choice == "nodes":
-                self._radio_run(['meshtastic', '--nodes'], "Node List")
+                self._radio_run([cli, '--nodes'], "Node List")
             elif choice == "channels":
-                self._radio_run(['meshtastic', '--ch-index', '0', '--ch-getall'], "Channels")
+                self._radio_run([cli, '--ch-index', '0', '--ch-getall'], "Channels")
             elif choice == "position":
-                self._radio_run(['meshtastic', '--pos-fields', 'lat', 'lon', 'alt'], "Position")
+                self._radio_run([cli, '--pos-fields', 'lat', 'lon', 'alt'], "Position")
             elif choice == "send":
                 self._radio_send_message()
             elif choice == "set-region":
@@ -348,6 +356,9 @@ class MeshForgeLauncher(
             if result.returncode != 0:
                 print(f"\nCommand failed (exit {result.returncode})")
                 print("Is meshtasticd running? Check: systemctl status meshtasticd")
+        except FileNotFoundError:
+            print("meshtastic CLI not found.")
+            print("Install: pip install meshtastic")
         except subprocess.TimeoutExpired:
             print("\n\nCommand timed out (30s). Radio may not be connected.")
             print("Check: systemctl status meshtasticd")
@@ -374,18 +385,14 @@ class MeshForgeLauncher(
             ""
         )
 
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Sending Message ===\n")
-
-        cmd = ['meshtastic', '--sendtext', msg]
+        cmd = [self._get_meshtastic_cli(), '--sendtext', msg]
         if dest and dest.strip():
             dest = dest.strip()
             if not dest.startswith('!'):
                 dest = '!' + dest
             cmd.extend(['--dest', dest])
 
-        subprocess.run(cmd, timeout=30)
-        input("\nPress Enter to continue...")
+        self._radio_run(cmd, "Sending Message")
 
     def _radio_set_region(self):
         """Set LoRa region via meshtastic CLI."""
@@ -417,10 +424,10 @@ class MeshForgeLauncher(
             return
 
         if self.dialog.yesno("Confirm", f"Set region to {choice}?\n\nRadio will restart."):
-            subprocess.run(['clear'], check=False, timeout=5)
-            print(f"=== Setting Region: {choice} ===\n")
-            subprocess.run(['meshtastic', '--set', 'lora.region', choice], timeout=30)
-            input("\nPress Enter to continue...")
+            self._radio_run(
+                [self._get_meshtastic_cli(), '--set', 'lora.region', choice],
+                f"Setting Region: {choice}"
+            )
 
     def _radio_set_name(self):
         """Set node long name via meshtastic CLI."""
@@ -438,21 +445,18 @@ class MeshForgeLauncher(
             name[:4]
         )
 
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Setting Node Name ===\n")
-        cmd = ['meshtastic', '--set-owner', name]
+        cmd = [self._get_meshtastic_cli(), '--set-owner', name]
         if short:
             cmd.extend(['--set-owner-short', short[:4]])
-        subprocess.run(cmd, timeout=30)
-        input("\nPress Enter to continue...")
+        self._radio_run(cmd, "Setting Node Name")
 
     def _radio_reboot(self):
         """Reboot the radio via meshtastic CLI."""
         if self.dialog.yesno("Reboot Radio", "Reboot the Meshtastic radio?\n\nThis restarts the firmware.", default_no=True):
-            subprocess.run(['clear'], check=False, timeout=5)
-            print("=== Rebooting Radio ===\n")
-            subprocess.run(['meshtastic', '--reboot'], timeout=30)
-            input("\nPress Enter to continue...")
+            self._radio_run(
+                [self._get_meshtastic_cli(), '--reboot'],
+                "Rebooting Radio"
+            )
 
     # =========================================================================
     # Logs Menu - Terminal-native log viewing
