@@ -87,13 +87,10 @@ class MeshtasticPaths:
 class ReticulumPaths:
     """Paths related to Reticulum/RNS configuration.
 
-    IMPORTANT: Unlike MeshForge paths, RNS paths use the EFFECTIVE user's
-    home (Path.home()), NOT get_real_user_home(). This is because RNS itself
-    uses os.path.expanduser("~") to find its config. When rnsd runs as root
-    (via systemd), the config is in /root/.reticulum/. When MeshForge runs
-    with sudo, the effective user is root, so RNS tools also look in /root/.
+    Uses get_real_user_home() so that .reticulum resolves to the real
+    user's home (e.g. /home/user/.reticulum) even when running under sudo.
 
-    RNS config resolution order (mirrors RNS.Reticulum.__init__):
+    Resolution order (mirrors RNS.Reticulum.__init__):
       1. /etc/reticulum/config (system-wide)
       2. ~/.config/reticulum/config (XDG-style)
       3. ~/.reticulum/config (traditional fallback)
@@ -101,7 +98,7 @@ class ReticulumPaths:
 
     @classmethod
     def get_config_dir(cls) -> Path:
-        """Get Reticulum config directory using RNS's own resolution logic.
+        """Get Reticulum config directory.
 
         Checks locations in the same order as RNS.Reticulum.__init__:
           1. /etc/reticulum/ (system-wide)
@@ -113,7 +110,7 @@ class ReticulumPaths:
             return Path('/etc/reticulum')
 
         # XDG-style user config
-        user_home = Path.home()
+        user_home = get_real_user_home()
         xdg_dir = user_home / '.config' / 'reticulum'
         if xdg_dir.is_dir() and (xdg_dir / 'config').is_file():
             return xdg_dir
