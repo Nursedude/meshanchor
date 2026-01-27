@@ -807,18 +807,12 @@ class MeshForgeLauncher(
             if choice == "status":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Status ===\n")
-                rns_config = str(get_real_user_home() / ".reticulum")
-                self._run_rns_tool(
-                    ['rnstatus', '--config', rns_config], 'rnstatus'
-                )
+                self._run_rns_tool(['rnstatus'], 'rnstatus')
                 input("\nPress Enter to continue...")
             elif choice == "paths":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Path Table ===\n")
-                rns_config = str(get_real_user_home() / ".reticulum")
-                self._run_rns_tool(
-                    ['rnpath', '-t', '--config', rns_config], 'rnpath'
-                )
+                self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                 input("\nPress Enter to continue...")
             elif choice == "bridge":
                 self._run_bridge()
@@ -928,21 +922,10 @@ class MeshForgeLauncher(
         RNS logs errors to stdout in some configurations, so both streams
         must be checked for the 'Address already in use' pattern.
 
-        When running under sudo, drops privileges to the real user so the
-        RNS tools can connect to rnsd's shared instance (which runs as the
-        regular user, not root).
-
         Args:
             cmd: Command and arguments to run
             tool_name: Display name for error messages (e.g., "rnpath")
         """
-        # If running as root via sudo, run RNS tools as the real user
-        # so they can connect to the user's rnsd shared instance
-        import os
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and os.geteuid() == 0:
-            cmd = ['sudo', '-u', sudo_user] + cmd
-
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=15
@@ -960,10 +943,14 @@ class MeshForgeLauncher(
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
             elif "no shared" in combined.lower():
-                # rnsd not running or not reachable
+                # rnsd not running or not reachable from this config
                 if result.stdout:
                     print(result.stdout, end='')
+                if result.stderr and result.stderr.strip():
+                    print(result.stderr, end='')
                 print("\nStart rnsd: sudo systemctl start rnsd")
+                print("If rnsd is running, check: /root/.reticulum/config")
+                print("  Ensure: share_instance = Yes")
             else:
                 # Generic failure - show output and suggestions
                 if result.stdout:
