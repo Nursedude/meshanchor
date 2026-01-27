@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 # Import centralized path utility for sudo compatibility
-from utils.paths import get_real_user_home
+from utils.paths import get_real_user_home, ReticulumPaths
 
 # Backward compatibility alias
 _get_real_user_home = get_real_user_home
@@ -676,7 +676,7 @@ class DiagnosticEngine:
     def _check_rns_config(self) -> CheckResult:
         """Check RNS configuration file."""
         start = time.time()
-        config_path = _get_real_user_home() / '.reticulum' / 'config'
+        config_path = ReticulumPaths.get_config_file()
 
         if config_path.exists():
             try:
@@ -755,7 +755,7 @@ class DiagnosticEngine:
     def _check_meshtastic_interface_file(self) -> CheckResult:
         """Check for Meshtastic_Interface.py in RNS config."""
         start = time.time()
-        rns_dir = _get_real_user_home() / '.reticulum'
+        rns_dir = ReticulumPaths.get_config_dir()
         interface_file = rns_dir / 'Meshtastic_Interface.py'
 
         if interface_file.exists():

@@ -85,12 +85,41 @@ class MeshtasticPaths:
 
 
 class ReticulumPaths:
-    """Paths related to Reticulum/RNS configuration"""
+    """Paths related to Reticulum/RNS configuration.
+
+    IMPORTANT: Unlike MeshForge paths, RNS paths use the EFFECTIVE user's
+    home (Path.home()), NOT get_real_user_home(). This is because RNS itself
+    uses os.path.expanduser("~") to find its config. When rnsd runs as root
+    (via systemd), the config is in /root/.reticulum/. When MeshForge runs
+    with sudo, the effective user is root, so RNS tools also look in /root/.
+
+    RNS config resolution order (mirrors RNS.Reticulum.__init__):
+      1. /etc/reticulum/config (system-wide)
+      2. ~/.config/reticulum/config (XDG-style)
+      3. ~/.reticulum/config (traditional fallback)
+    """
 
     @classmethod
     def get_config_dir(cls) -> Path:
-        """Get Reticulum config directory"""
-        return get_real_user_home() / '.reticulum'
+        """Get Reticulum config directory using RNS's own resolution logic.
+
+        Checks locations in the same order as RNS.Reticulum.__init__:
+          1. /etc/reticulum/ (system-wide)
+          2. ~/.config/reticulum/ (XDG-style)
+          3. ~/.reticulum/ (traditional, default)
+        """
+        # System-wide config
+        if Path('/etc/reticulum').is_dir() and Path('/etc/reticulum/config').is_file():
+            return Path('/etc/reticulum')
+
+        # XDG-style user config
+        user_home = Path.home()
+        xdg_dir = user_home / '.config' / 'reticulum'
+        if xdg_dir.is_dir() and (xdg_dir / 'config').is_file():
+            return xdg_dir
+
+        # Traditional fallback
+        return user_home / '.reticulum'
 
     @classmethod
     def get_config_file(cls) -> Path:
@@ -99,7 +128,7 @@ class ReticulumPaths:
 
     @classmethod
     def get_interfaces_dir(cls) -> Path:
-        """Get interfaces directory"""
+        """Get RNS custom interfaces directory (for plugins like Meshtastic_Interface)"""
         return cls.get_config_dir() / 'interfaces'
 
 

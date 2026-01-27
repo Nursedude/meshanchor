@@ -20,7 +20,7 @@ _src_dir = Path(__file__).parent.parent
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from utils.paths import get_real_user_home
+from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import centralized service checker
 try:
@@ -216,8 +216,7 @@ def check_rns_config():
 
     # Check for config file - use real user home for sudo compatibility
     config_locations = [
-        get_real_user_home() / '.reticulum' / 'config',
-        Path('/etc/reticulum/config'),
+        ReticulumPaths.get_config_file(),
     ]
 
     config_found = False
