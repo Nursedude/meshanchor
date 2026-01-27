@@ -595,7 +595,12 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin', '')
+        if origin.startswith(('http://localhost', 'http://127.0.0.1',
+                              'https://localhost', 'https://127.0.0.1')):
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -673,7 +678,12 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin', '')
+        if origin.startswith(('http://localhost', 'http://127.0.0.1',
+                              'https://localhost', 'https://127.0.0.1')):
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -761,7 +771,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
     parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
     args = parser.parse_args()
 
