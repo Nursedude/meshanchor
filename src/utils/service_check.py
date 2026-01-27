@@ -110,6 +110,13 @@ KNOWN_SERVICES = {
         'description': 'MQTT broker',
         'fix_hint': 'Start with: sudo systemctl start mosquitto',
     },
+    'nomadnet': {
+        'port': None,  # NomadNet uses RNS shared instance, no dedicated port
+        'systemd_name': 'nomadnet',
+        'is_systemd': False,  # NomadNet is a user-space app, NOT a systemd service
+        'description': 'NomadNet mesh messaging client',
+        'fix_hint': 'Start with: nomadnetwork (run as user, not root)',
+    },
 }
 
 
