@@ -806,6 +806,12 @@ class RNSMeshtasticBridge:
             if hasattr(e, 'errno') and e.errno == 98:
                 logger.warning(f"RNS port conflict during pre-init: {e}")
                 # Will be retried in _connect_rns() background thread
+            elif "reinitialise" in str(e).lower() or "already running" in str(e).lower():
+                # RNS raises OSError for reinitialise - node_tracker already
+                # initialized the singleton, so RNS transport is available
+                self._rns_pre_initialized = True
+                logger.info("RNS already initialized (node tracker), "
+                           "bridge will use existing instance")
             else:
                 logger.warning(f"RNS pre-init failed: {e}")
         except Exception as e:
