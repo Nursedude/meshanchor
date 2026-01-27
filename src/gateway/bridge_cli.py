@@ -175,7 +175,9 @@ def main():
             if not running:
                 break
             status = bridge.get_status()
-            if status.get('meshtastic_connected') and status.get('rns_connected'):
+            mesh_ok = status.get('meshtastic_connected')
+            rns_ok = status.get('rns_connected') or status.get('rns_via_rnsd')
+            if mesh_ok and rns_ok:
                 break
             time.sleep(1)
             print(".", end="", flush=True)
