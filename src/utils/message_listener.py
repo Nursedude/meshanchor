@@ -74,6 +74,7 @@ class MessageListener:
         self.store_messages = store_messages
         self._status = ListenerStatus(state=DISCONNECTED)
         self._running = False
+        self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._interface = None
         self._owns_connection = False  # Track if we created the connection
@@ -111,6 +112,7 @@ class MessageListener:
             return True
 
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
             daemon=True,
@@ -125,6 +127,7 @@ class MessageListener:
     def stop(self):
         """Stop listening for messages."""
         self._running = False
+        self._stop_event.set()
 
         # Unsubscribe from pubsub
         try:
@@ -194,9 +197,10 @@ class MessageListener:
             self._status.error = None
             logger.info("Message listener connected and subscribed")
 
-            # Keep thread alive while running
+            # Keep thread alive while running (interruptible via stop_event)
             while self._running:
-                time.sleep(1)
+                if self._stop_event.wait(1):
+                    break
 
                 # Only check connection health if we own it
                 if self._owns_connection and self._interface:

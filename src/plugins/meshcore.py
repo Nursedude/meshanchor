@@ -80,6 +80,8 @@ class MeshCoreConfig:
 class MeshCorePlugin(ProtocolPlugin):
     """MeshCore protocol support for MeshForge."""
 
+    MAX_NODES = 5000  # Prevent unbounded memory growth
+
     def __init__(self):
         self._connected = False
         self._device = None
@@ -175,7 +177,8 @@ class MeshCorePlugin(ProtocolPlugin):
         """Connect in simulation mode for testing."""
         logger.info("MeshCore: Connecting in simulation mode")
         self._connected = True
-        self._stats["last_activity"] = datetime.now()
+        with self._stats_lock:
+            self._stats["last_activity"] = datetime.now()
 
         # Add some simulated nodes
         self._add_simulated_nodes()
@@ -227,7 +230,8 @@ class MeshCorePlugin(ProtocolPlugin):
                 # Store socket reference
                 self._device = sock
                 self._connected = True
-                self._stats["last_activity"] = datetime.now()
+                with self._stats_lock:
+                    self._stats["last_activity"] = datetime.now()
 
                 # Start receive thread
                 self._stop_receive = threading.Event()
@@ -269,7 +273,8 @@ class MeshCorePlugin(ProtocolPlugin):
                     break
 
                 buffer += data
-                self._stats["last_activity"] = datetime.now()
+                with self._stats_lock:
+                    self._stats["last_activity"] = datetime.now()
 
                 # Process complete messages (newline-delimited)
                 while b'\n' in buffer:
@@ -362,6 +367,10 @@ class MeshCorePlugin(ProtocolPlugin):
             ),
         ]
         for node in test_nodes:
+            if len(self._nodes) >= self.MAX_NODES:
+                # Evict oldest-seen node
+                oldest_id = min(self._nodes, key=lambda k: self._nodes[k].last_seen)
+                del self._nodes[oldest_id]
             self._nodes[node.node_id] = node
 
     def disconnect(self) -> None:
@@ -380,7 +389,8 @@ class MeshCorePlugin(ProtocolPlugin):
         self._connected = False
         self._device = None
         self._nodes.clear()
-        self._stats["last_activity"] = datetime.now()
+        with self._stats_lock:
+            self._stats["last_activity"] = datetime.now()
         logger.info("Disconnected from MeshCore device")
 
     def send_message(self, destination: str, message: str) -> bool:
