@@ -233,31 +233,6 @@ class TestKnowledgeBase:
         assert isinstance(results, list)
 
 
-class TestRegionEnumMap:
-    """Tests for the REGION_ENUM_MAP constant."""
 
-    def test_region_enum_map_exists(self):
-        """Test that REGION_ENUM_MAP is defined."""
-        try:
-            # Direct import to avoid GTK dependency
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                "radio_config_simple",
-                os.path.join(os.path.dirname(__file__), '..', 'src', 'gtk_ui', 'panels', 'radio_config_simple.py')
-            )
-            # Can't fully load due to GTK, but we can check the file content
-            with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'gtk_ui', 'panels', 'radio_config_simple.py')) as f:
-                content = f.read()
-                assert "REGION_ENUM_MAP" in content
-                assert "1: \"US\"" in content or "1: 'US'" in content
-        except Exception:
-            pytest.skip("Could not check radio_config_simple.py")
-
-    def test_region_enum_map_values(self):
-        """Test that REGION_ENUM_MAP has expected values."""
-        with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'gtk_ui', 'panels', 'radio_config_simple.py')) as f:
-            content = f.read()
-            # Check for key regions
-            assert "US" in content
-            assert "EU_868" in content
-            assert "ANZ" in content
+# TestRegionEnumMap removed: referenced deleted GTK4 file
+# (src/gtk_ui/panels/radio_config_simple.py - GTK4 UI is frozen)

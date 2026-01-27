@@ -1069,7 +1069,7 @@ class SystemDiagnostics:
             return
 
         # Clear screen and run
-        os.system('clear')
+        subprocess.run(['clear'], check=False, timeout=5)
         console.print(f"[bold cyan]═══ {title} ═══[/bold cyan]\n")
 
         # Interactive tools (top, htop, btop, journalctl -f)
