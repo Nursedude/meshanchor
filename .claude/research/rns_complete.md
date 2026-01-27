@@ -290,31 +290,39 @@ RNS -> Queue -> Translate -> Meshtastic API -> Mesh
 
 ```python
 # STATUS
-get_status()           # RNS daemon status
-get_nodes()            # Discovered nodes
-get_interfaces()       # Active interfaces
+get_status()                 # ✅ RNS daemon status
+list_known_destinations()    # ✅ Discovered nodes (path_table + known_destinations)
+list_interfaces()            # ✅ Configured interfaces
+discover_nodes()             # ✅ Active announce-based discovery
 
-# MESSAGES
-send_message()         # Send LXMF message
-get_messages()         # Get inbox/outbox
-mark_read()            # Mark as read
+# MESSAGES (LXMF - Phase 2)
+send_message()         # ❌ Pending - LXMF send
+get_messages()         # ❌ Pending - LXMF inbox/outbox
+mark_read()            # ❌ Pending - LXMF read status
 
 # CONFIG
-read_config()          # Read ~/.reticulum/config
-write_config()         # Write config (with backup)
-add_interface()        # Add new interface
-remove_interface()     # Remove interface
-validate_config()      # Validate syntax
+read_config()          # ✅ Read ~/.reticulum/config
+write_config()         # ✅ Write config (with backup)
+create_default_config() # ✅ Create default config
+get_backups()          # ✅ List config backups
+restore_backup()       # ✅ Restore from backup
+add_interface()        # ✅ Add new interface
+remove_interface()     # ✅ Remove interface
+enable_interface()     # ✅ Enable interface
+disable_interface()    # ✅ Disable interface
+validate_config()      # ✅ Validate syntax
+get_interface_templates() # ✅ Pre-built templates
+apply_template()       # ✅ Apply interface template
 
 # SERVICE
-start_rnsd()           # Start daemon
-stop_rnsd()            # Stop daemon
-restart_rnsd()         # Restart daemon
+start_rnsd()           # ✅ Start daemon
+stop_rnsd()            # ✅ Stop daemon
+restart_rnsd()         # ✅ Restart daemon
 
 # DIAGNOSTICS
-test_path()            # Test path to node
-check_connectivity()   # Test network
-get_path_info()        # Path metrics
+test_path()            # ✅ Test path to node
+check_connectivity()   # ✅ Full network test
+get_path_info()        # ✅ Path metrics (hops, next_hop, interface)
 ```
 
 ---
@@ -347,10 +355,10 @@ get_path_info()        # Path metrics
 ## 8. Implementation Priority
 
 **Phase 1 - Config Management**:
-- [ ] Read/write ~/.reticulum/config
-- [ ] Interface CRUD operations
-- [ ] Config validation
-- [ ] Backup/restore
+- [x] Read/write ~/.reticulum/config
+- [x] Interface CRUD operations
+- [x] Config validation
+- [x] Backup/restore
 
 **Phase 2 - Messaging**:
 - [ ] LXMF send/receive via commands layer
@@ -358,7 +366,7 @@ get_path_info()        # Path metrics
 - [ ] Delivery confirmation
 
 **Phase 3 - Reliability Testing**:
-- [ ] Path testing
+- [x] Path testing (test_path, get_path_info, rnprobe integration)
 - [ ] Latency measurements
 - [ ] Link quality tracking
 
