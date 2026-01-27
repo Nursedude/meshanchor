@@ -428,6 +428,8 @@ class MeshForgeLauncher(
                 "Try manually:\n"
                 "  sudo apt install pipx\n"
                 "  pipx install meshtastic")
+        except KeyboardInterrupt:
+            self.dialog.msgbox("Cancelled", "Installation cancelled.")
         except Exception as e:
             self.dialog.msgbox("Install Failed",
                 f"Installation error:\n{e}\n\n"
