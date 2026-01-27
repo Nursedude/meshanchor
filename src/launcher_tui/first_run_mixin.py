@@ -340,7 +340,7 @@ class FirstRunMixin:
                 # Save to settings
                 try:
                     from utils.common import SettingsManager
-                    settings = SettingsManager()
+                    settings = SettingsManager("meshforge")
                     settings.set("callsign", callsign.upper())
                     settings.save()
                     self.dialog.msgbox("Saved", f"Callsign set to: {callsign.upper()}")
