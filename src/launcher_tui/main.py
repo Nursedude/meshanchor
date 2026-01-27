@@ -928,10 +928,21 @@ class MeshForgeLauncher(
         RNS logs errors to stdout in some configurations, so both streams
         must be checked for the 'Address already in use' pattern.
 
+        When running under sudo, drops privileges to the real user so the
+        RNS tools can connect to rnsd's shared instance (which runs as the
+        regular user, not root).
+
         Args:
             cmd: Command and arguments to run
             tool_name: Display name for error messages (e.g., "rnpath")
         """
+        # If running as root via sudo, run RNS tools as the real user
+        # so they can connect to the user's rnsd shared instance
+        import os
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and os.geteuid() == 0:
+            cmd = ['sudo', '-u', sudo_user] + cmd
+
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=15
