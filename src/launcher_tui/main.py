@@ -57,10 +57,11 @@ except ImportError:
         def get_config_dir(cls) -> Path:
             if Path('/etc/reticulum/config').is_file():
                 return Path('/etc/reticulum')
-            xdg = Path.home() / '.config' / 'reticulum'
+            home = get_real_user_home()
+            xdg = home / '.config' / 'reticulum'
             if (xdg / 'config').is_file():
                 return xdg
-            return Path.home() / '.reticulum'
+            return home / '.reticulum'
 
         @classmethod
         def get_config_file(cls) -> Path:

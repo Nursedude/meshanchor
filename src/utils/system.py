@@ -695,13 +695,10 @@ def get_config_dir(app_name: str = 'meshforge') -> Path:
 
 
 def get_rns_config_dir() -> Path:
-    """Get Reticulum configuration directory using RNS's own resolution.
+    """Get Reticulum configuration directory.
 
-    RNS checks: /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
-    On Windows: %APPDATA%/Reticulum
-
-    NOTE: RNS uses the effective user's home (os.path.expanduser("~")),
-    NOT get_real_user_home(). This is intentional - see ReticulumPaths.
+    Delegates to ReticulumPaths which uses get_real_user_home()
+    so .reticulum resolves to /home/user/.reticulum under sudo.
 
     Returns:
         Path to RNS config directory
