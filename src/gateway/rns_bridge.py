@@ -99,6 +99,7 @@ class RNSMeshtasticBridge:
         self._connected_rns = False
         self._rns_via_rnsd = False  # True when rnsd handles RNS (bridge defers)
         self._rns_init_failed_permanently = False  # True if RNS can't be initialized from this thread
+        self._rns_pre_initialized = False  # True if RNS was initialized from main thread
 
         # Reconnection strategies (exponential backoff with jitter)
         self._mesh_reconnect = ReconnectStrategy.for_meshtastic()
@@ -218,6 +219,10 @@ class RNSMeshtasticBridge:
 
         # Start node tracker
         self.node_tracker.start()
+
+        # Pre-initialize RNS from main thread (signal handlers require it)
+        # Must happen before spawning _rns_loop background thread
+        self._init_rns_main_thread()
 
         # Start network threads
         if self.config.enabled:
@@ -744,65 +749,132 @@ class RNSMeshtasticBridge:
         self._mesh_interface = None
         self._connected_mesh = False
 
+    def _init_rns_main_thread(self):
+        """Pre-initialize RNS from the main thread.
+
+        RNS.Reticulum() registers signal handlers that only work in the
+        main thread. If we defer to the background _rns_loop thread,
+        initialization fails with 'signal only works in main thread'.
+
+        This pre-initializes RNS so _connect_rns() can skip straight to
+        LXMF setup without hitting the signal handler error.
+        """
+        import threading as _threading
+        if _threading.current_thread() is not _threading.main_thread():
+            logger.warning("RNS pre-init skipped (not main thread)")
+            return
+
+        try:
+            import RNS
+        except ImportError:
+            logger.info("RNS not installed, will be handled in _connect_rns")
+            return
+
+        from utils.gateway_diagnostic import find_rns_processes
+        rns_pids = find_rns_processes()
+
+        try:
+            if rns_pids:
+                # rnsd running - connect as client to avoid port conflicts
+                logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
+                           "initializing RNS as client")
+                self._rns_via_rnsd = True
+                import tempfile
+                client_config_dir = (
+                    Path(tempfile.gettempdir()) / "meshforge_rns_bridge"
+                )
+                client_config_dir.mkdir(exist_ok=True)
+                (client_config_dir / "config").write_text(
+                    "# MeshForge Bridge Client Config (auto-generated)\n"
+                    "# Connects to existing rnsd without creating interfaces\n\n"
+                    "[reticulum]\n"
+                    "share_instance = Yes\n"
+                    "shared_instance_port = 37428\n"
+                    "instance_control_port = 37429\n"
+                )
+                self._reticulum = RNS.Reticulum(
+                    configdir=str(client_config_dir)
+                )
+            else:
+                # No rnsd - initialize standalone RNS
+                config_dir = self.config.rns.config_dir or None
+                self._reticulum = RNS.Reticulum(configdir=config_dir)
+
+            self._rns_pre_initialized = True
+            logger.info("RNS pre-initialized from main thread")
+        except OSError as e:
+            if hasattr(e, 'errno') and e.errno == 98:
+                logger.warning(f"RNS port conflict during pre-init: {e}")
+                # Will be retried in _connect_rns() background thread
+            else:
+                logger.warning(f"RNS pre-init failed: {e}")
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "reinitialise" in err_msg or "already running" in err_msg:
+                # node_tracker already initialized RNS - use existing instance
+                self._rns_pre_initialized = True
+                logger.info("RNS already initialized (node tracker), "
+                           "bridge will use existing instance")
+            else:
+                logger.warning(f"RNS pre-init failed: {e}")
+
     def _connect_rns(self):
-        """Initialize RNS and LXMF"""
+        """Initialize RNS and LXMF.
+
+        If RNS was pre-initialized from the main thread (via _init_rns_main_thread),
+        skips Reticulum initialization and proceeds directly to LXMF setup.
+        Otherwise falls back to initialization here (may fail in background thread
+        due to signal handler requirements).
+        """
         try:
             import RNS
             import LXMF
 
-            # Check if rnsd is already running BEFORE trying to initialize
-            from utils.gateway_diagnostic import find_rns_processes
-            rns_pids = find_rns_processes()
-
-            if rns_pids:
-                # rnsd is running - DON'T try to initialize RNS (it would conflict)
-                # MeshForge gateway bridge cannot coexist with rnsd
-                # Use rnsd + NomadNet for RNS-based communications instead
-                logger.info(f"rnsd detected (PID: {rns_pids[0]}), deferring RNS to rnsd")
-                logger.info("Bridge RNS features deferred - rnsd handles transport")
-                self._reticulum = None
-                self._connected_rns = False
-                self._rns_via_rnsd = True
-                self._rns_init_failed_permanently = True  # Don't retry
-                return  # Skip all RNS/LXMF operations - rnsd handles them
+            # If RNS was pre-initialized from main thread, skip to LXMF setup
+            if self._rns_pre_initialized:
+                logger.info("RNS pre-initialized, proceeding to LXMF setup")
             else:
-                # No rnsd - initialize RNS ourselves
-                config_dir = self.config.rns.config_dir or None
-                try:
-                    self._reticulum = RNS.Reticulum(configdir=config_dir)
-                except OSError as e:
-                    if hasattr(e, 'errno') and e.errno == 98:
-                        # Port conflict - re-check for RNS processes
-                        # (rnsd may have started between our initial check and bind)
-                        from utils.gateway_diagnostic import handle_address_in_use_error
-                        diag = handle_address_in_use_error(e, logger)
+                # RNS was NOT pre-initialized - try here (fallback path)
+                # This may fail with 'signal only works in main thread'
+                from utils.gateway_diagnostic import find_rns_processes
+                rns_pids = find_rns_processes()
 
-                        self._reticulum = None
-                        self._connected_rns = False
+                if rns_pids:
+                    logger.info(f"rnsd detected (PID: {rns_pids[0]}), deferring RNS to rnsd")
+                    logger.info("Bridge RNS features deferred - rnsd handles transport")
+                    self._reticulum = None
+                    self._connected_rns = False
+                    self._rns_via_rnsd = True
+                    self._rns_init_failed_permanently = True
+                    return
+                else:
+                    config_dir = self.config.rns.config_dir or None
+                    try:
+                        self._reticulum = RNS.Reticulum(configdir=config_dir)
+                    except OSError as e:
+                        if hasattr(e, 'errno') and e.errno == 98:
+                            from utils.gateway_diagnostic import handle_address_in_use_error
+                            diag = handle_address_in_use_error(e, logger)
 
-                        if diag['rns_pids']:
-                            # rnsd started after our initial check - defer to it
-                            logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), deferring to rnsd")
-                            self._rns_via_rnsd = True
-                            self._rns_init_failed_permanently = True
+                            self._reticulum = None
+                            self._connected_rns = False
+
+                            if diag['rns_pids']:
+                                logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), deferring to rnsd")
+                                self._rns_via_rnsd = True
+                                self._rns_init_failed_permanently = True
+                            else:
+                                logger.warning("RNS port in use by unknown process (stale socket?)")
+                                logger.info("Will retry after backoff - port may become available")
+                            return
                         else:
-                            # Stale socket or unknown process - transient, will retry
-                            logger.warning("RNS port in use by unknown process (stale socket?)")
-                            logger.info("Will retry after backoff - port may become available")
-                            # Don't set _rns_init_failed_permanently - allow retry
-                        return
-                    else:
-                        raise
-                except Exception as e:
-                    if "reinitialise" in str(e).lower() or "already running" in str(e).lower():
-                        logger.info("RNS already running in this process, using shared instance")
-                        self._reticulum = None
-                        # Don't retry - RNS singleton is already active
-                        self._rns_init_failed_permanently = True
-                        self._connected_rns = True  # Mark as connected since RNS is available
-                        return  # Skip LXMF setup - the existing RNS instance handles it
-                    else:
-                        raise
+                            raise
+                    except Exception as e:
+                        if "reinitialise" in str(e).lower() or "already running" in str(e).lower():
+                            logger.info("RNS already running in this process, using shared instance")
+                            # RNS singleton is active - proceed to LXMF setup
+                        else:
+                            raise
 
             # Create or load identity
             identity_path = get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
