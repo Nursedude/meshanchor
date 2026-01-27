@@ -13,20 +13,20 @@ from pathlib import Path
 from datetime import datetime
 from typing import Tuple, List, Dict, Any, Optional
 
-# Import centralized path utility for sudo compatibility
-from utils.paths import get_real_user_home
+# Import centralized path utility
+from utils.paths import ReticulumPaths
 
 logger = logging.getLogger(__name__)
 
 
 def get_rns_config_path() -> Path:
-    """
-    Get the correct RNS config path.
+    """Get the RNS config path using RNS's own resolution logic.
 
-    When running as sudo, returns the real user's config path,
-    not root's, to maintain consistency.
+    RNS checks: /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
+    When running as root (via sudo or systemd), ~ = /root/.
+    This matches what rnsd and RNS CLI tools use.
     """
-    return get_real_user_home() / ".reticulum" / "config"
+    return ReticulumPaths.get_config_file()
 
 
 def validate_rns_config(config: str) -> Tuple[bool, List[str]]:

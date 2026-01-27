@@ -205,8 +205,8 @@ def check_meshtasticd_clients() -> Optional[str]:
 
 def check_rns_config_exists() -> Optional[str]:
     """Check if RNS config exists at standard location."""
-    from utils.paths import get_real_user_home
-    config_path = get_real_user_home() / ".reticulum" / "config"
+    from utils.paths import ReticulumPaths
+    config_path = ReticulumPaths.get_config_file()
     if config_path.exists():
         return f"RNS config exists at {config_path}"
     return None
@@ -214,8 +214,8 @@ def check_rns_config_exists() -> Optional[str]:
 
 def check_rns_config_missing() -> Optional[str]:
     """Check if RNS config is missing."""
-    from utils.paths import get_real_user_home
-    config_path = get_real_user_home() / ".reticulum" / "config"
+    from utils.paths import ReticulumPaths
+    config_path = ReticulumPaths.get_config_file()
     if not config_path.exists():
         return f"RNS config missing at {config_path}"
     return None
