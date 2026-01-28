@@ -46,6 +46,10 @@ class MockLauncher(QuickActionsMixin):
         self.dialog = MockDialog()
         self._status_bar = None
 
+    @staticmethod
+    def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
+        pass
+
 
 class TestQuickActionDefinitions:
     """Test QUICK_ACTIONS list structure."""

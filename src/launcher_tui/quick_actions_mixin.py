@@ -103,7 +103,7 @@ class QuickActionsMixin:
             print(f"  ? {'rns_bridge':<18} unknown")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_node_list(self):
         """Quick: show meshtastic node list."""
@@ -123,7 +123,7 @@ class QuickActionsMixin:
         except Exception as e:
             print(f"Error: {e}")
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_follow_logs(self):
         """Quick: follow meshtasticd journal logs."""
@@ -140,7 +140,7 @@ class QuickActionsMixin:
             pass  # User pressed Ctrl+C
         except Exception as e:
             print(f"Error: {e}")
-            input("Press Enter to continue...")
+            self._wait_for_enter("Press Enter to continue...")
 
     def _qa_restart_meshtasticd(self):
         """Quick: restart meshtasticd service."""
@@ -163,7 +163,7 @@ class QuickActionsMixin:
             self._status_bar.invalidate()
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_restart_rnsd(self):
         """Quick: restart rnsd service."""
@@ -186,7 +186,7 @@ class QuickActionsMixin:
             self._status_bar.invalidate()
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_port_check(self):
         """Quick: check network ports."""
@@ -214,7 +214,7 @@ class QuickActionsMixin:
                 print(f"  ? {port:<6} {desc} (check failed)")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_generate_report(self):
         """Quick: generate and display a status report."""
@@ -230,7 +230,11 @@ class QuickActionsMixin:
                 print(line)
                 # Pause every 40 lines
                 if (i + 1) % 40 == 0 and i + 1 < len(lines):
-                    resp = input("\n--- More (Enter=continue, q=quit) ---\n")
+                    try:
+                        resp = input("\n--- More (Enter=continue, q=quit) ---\n")
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        break
                     if resp.strip().lower() == 'q':
                         break
         except ImportError:
@@ -239,7 +243,7 @@ class QuickActionsMixin:
             print(f"Error generating report: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_node_inventory(self):
         """Quick: show tracked node inventory."""
@@ -291,7 +295,7 @@ class QuickActionsMixin:
             print(f"Error: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_gps_position(self):
         """Quick: show GPS position and distance to nodes."""
@@ -342,7 +346,7 @@ class QuickActionsMixin:
             print(f"Error: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_run_diagnostics(self):
         """Quick: run diagnostic engine health check."""
@@ -376,7 +380,7 @@ class QuickActionsMixin:
             print(f"Error: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _qa_channel_scan(self):
         """Quick: show channel activity scan."""
@@ -406,4 +410,4 @@ class QuickActionsMixin:
             print(f"Error: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")

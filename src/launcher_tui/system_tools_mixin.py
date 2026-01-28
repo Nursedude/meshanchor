@@ -177,7 +177,7 @@ class SystemToolsMixin:
         except Exception as e:
             print(f"\nError: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Process Management
@@ -256,7 +256,7 @@ class SystemToolsMixin:
             print(f"Error: {e}")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _show_mesh_processes(self):
         """Show mesh-related processes."""
@@ -293,7 +293,7 @@ class SystemToolsMixin:
             print(f"Error: {e}")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _fuser_port_check(self):
         """Check what's using a specific port."""
@@ -347,7 +347,7 @@ class SystemToolsMixin:
             print(f"Error: {e}")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Network Diagnostics
@@ -415,7 +415,7 @@ class SystemToolsMixin:
                 print(f"Error: {e}")
 
             print("\n" + "=" * 60)
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif cmd_type == 'dns':
             self._dns_lookup()
@@ -470,7 +470,7 @@ class SystemToolsMixin:
                 print(f"Resolution failed: {e}")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _traceroute(self):
         """Run traceroute to a host."""
@@ -504,7 +504,7 @@ class SystemToolsMixin:
         else:
             print("No traceroute tool found. Install: sudo apt install traceroute")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _ping_test(self):
         """Interactive ping test."""
@@ -546,7 +546,7 @@ class SystemToolsMixin:
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _wifi_status(self):
         """Show WiFi status."""
@@ -568,7 +568,7 @@ class SystemToolsMixin:
             print("No WiFi tools found. Install: sudo apt install iw")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Hardware Information
@@ -636,7 +636,7 @@ class SystemToolsMixin:
                 print(f"Error: {e}")
 
             print("\n" + "=" * 60)
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif cmd_type == 'gpio':
             self._gpio_status()
@@ -669,7 +669,7 @@ class SystemToolsMixin:
             print("No GPIO interface found.")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _spi_i2c_status(self):
         """Show SPI and I2C status."""
@@ -706,7 +706,7 @@ class SystemToolsMixin:
             print("  No I2C devices found")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Performance Tools
@@ -764,7 +764,7 @@ class SystemToolsMixin:
                 print(f"Error: {e}")
 
             print("\n" + "=" * 60)
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif cmd_type == 'vmstat_live':
             print("=== vmstat 1 (Live - Ctrl+C to stop) ===\n")
@@ -772,7 +772,7 @@ class SystemToolsMixin:
                 subprocess.run(['vmstat', '1'], timeout=None)
             except KeyboardInterrupt:
                 print("\n\nStopped.")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif cmd_type == 'stress':
             self._stress_test_menu()
@@ -822,7 +822,7 @@ class SystemToolsMixin:
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Storage Tools
@@ -912,7 +912,7 @@ class SystemToolsMixin:
                 print("ncdu not found. Install: sudo apt install ncdu")
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Service Management
@@ -1010,7 +1010,7 @@ class SystemToolsMixin:
                     subprocess.run(['systemctl', 'status', unit, '--no-pager'], timeout=10)
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Advanced Log Analysis
@@ -1133,7 +1133,7 @@ class SystemToolsMixin:
                 subprocess.run(['sudo', 'journalctl', '--vacuum-time=2d'], timeout=60)
 
         print("\n" + "=" * 60)
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Drop to Shell
@@ -1164,4 +1164,4 @@ class SystemToolsMixin:
             subprocess.run([shell], timeout=None)
         except Exception as e:
             print(f"Shell error: {e}")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
