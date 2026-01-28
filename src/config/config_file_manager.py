@@ -1174,7 +1174,14 @@ Logging:
         console.print(f"\n[cyan]Setting position to {latitude}, {longitude}...[/cyan]")
 
         try:
-            cmd = ['meshtastic', '--host', 'localhost', '--setlat', str(latitude), '--setlon', str(longitude)]
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+            if not cli_path:
+                console.print("[red]meshtastic CLI not found[/red]")
+                console.print("[dim]Install with: pipx install meshtastic[cli][/dim]")
+                return False
+
+            cmd = [cli_path, '--host', 'localhost', '--setlat', str(latitude), '--setlon', str(longitude)]
             if altitude is not None:
                 cmd.extend(['--setalt', str(altitude)])
 
@@ -1191,12 +1198,12 @@ Logging:
                     console.print(f"[dim]{result.stderr.strip()}[/dim]")
                 console.print("\n[yellow]Troubleshooting:[/yellow]")
                 console.print("  - Is meshtasticd running? Check: systemctl status meshtasticd")
-                console.print("  - Is meshtastic CLI installed? pip install meshtastic")
+                console.print("  - Is meshtastic CLI installed? pipx install meshtastic[cli]")
                 return False
 
         except FileNotFoundError:
             console.print("[red]meshtastic CLI not found[/red]")
-            console.print("[dim]Install with: pip install meshtastic[/dim]")
+            console.print("[dim]Install with: pipx install meshtastic[cli][/dim]")
             return False
         except subprocess.TimeoutExpired:
             console.print("[red]Command timed out (30s)[/red]")

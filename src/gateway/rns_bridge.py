@@ -1468,8 +1468,14 @@ class RNSMeshtasticBridge:
     def _test_meshtastic_cli(self) -> bool:
         """Test Meshtastic CLI availability"""
         try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+            if not cli_path:
+                logger.debug("Meshtastic CLI not found")
+                return False
+
             result = subprocess.run(
-                ['meshtastic', '--info'],
+                [cli_path, '--info'],
                 capture_output=True,
                 timeout=10
             )
@@ -1489,7 +1495,9 @@ class RNSMeshtasticBridge:
     def _send_via_cli(self, message: str, destination: str = None, channel: int = 0) -> bool:
         """Send via Meshtastic CLI as fallback"""
         try:
-            cmd = ['meshtastic', '--host', self.config.meshtastic.host, '--sendtext', message]
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli() or 'meshtastic'
+            cmd = [cli_path, '--host', self.config.meshtastic.host, '--sendtext', message]
             if destination:
                 cmd.extend(['--dest', destination])
             if channel > 0:
