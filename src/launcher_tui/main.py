@@ -830,9 +830,6 @@ class MeshForgeLauncher(
 
     def _rns_menu(self):
         """Reticulum Network Stack tools."""
-        # Proactive config check on first entry
-        self._check_rns_setup()
-
         while True:
             choices = [
                 ("status", "RNS Status (rnstatus)"),
@@ -1452,26 +1449,30 @@ class MeshForgeLauncher(
         if not has_interface:
             issues.append("No interfaces configured")
 
-        if not has_meshtastic:
-            issues.append("No Meshtastic_Interface configured (needed for mesh bridging)")
+        # Check Meshtastic_Interface status: config reference + plugin file
+        # Only flag as issue if plugin is missing entirely or config references
+        # a plugin that isn't installed. Having the plugin installed but not
+        # configured is fine - user can enable it when ready.
+        plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
+        plugin_installed = plugin_path.exists()
 
-        # Check if Meshtastic_Interface.py plugin is installed
-        if has_meshtastic:
-            plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
-            if not plugin_path.exists():
-                issues.append(
-                    f"Meshtastic_Interface.py plugin not installed at "
-                    f"{ReticulumPaths.get_interfaces_dir()}/\n"
-                    f"    Install from: https://github.com/landandair/RNS_Over_Meshtastic"
-                )
+        if not has_meshtastic and not plugin_installed:
+            issues.append("No Meshtastic_Interface configured (needed for mesh bridging)")
+        elif has_meshtastic and not plugin_installed:
+            issues.append(
+                f"Meshtastic_Interface.py plugin not installed at "
+                f"{ReticulumPaths.get_interfaces_dir()}/\n"
+                f"    Install from: https://github.com/landandair/RNS_Over_Meshtastic"
+            )
 
         return issues
 
     def _check_rns_setup(self) -> bool:
         """Check RNS setup and offer to fix common issues.
 
-        Called when entering the RNS menu. Returns True if setup looks OK
-        or user chose to continue anyway, False if user wants to go back.
+        Available via 'Check RNS Setup' menu item. Returns True if setup
+        looks OK or user chose to continue anyway, False if user wants
+        to go back.
         """
         config_path = ReticulumPaths.get_config_file()
 
