@@ -92,6 +92,7 @@ from first_run_mixin import FirstRunMixin
 from system_tools_mixin import SystemToolsMixin
 from quick_actions_mixin import QuickActionsMixin
 from emergency_mode_mixin import EmergencyModeMixin
+from rns_interfaces_mixin import RNSInterfacesMixin
 
 
 class MeshForgeLauncher(
@@ -104,7 +105,8 @@ class MeshForgeLauncher(
     FirstRunMixin,
     SystemToolsMixin,
     QuickActionsMixin,
-    EmergencyModeMixin
+    EmergencyModeMixin,
+    RNSInterfacesMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -838,6 +840,7 @@ class MeshForgeLauncher(
                 ("nodes", "Known Destinations"),
                 ("diag", "RNS Diagnostics"),
                 ("bridge", "Gateway Bridge (start/stop)"),
+                ("ifaces", "Manage Interfaces"),
                 ("config", "View Reticulum Config"),
                 ("edit", "Edit Reticulum Config"),
                 ("check", "Check RNS Setup"),
@@ -873,6 +876,8 @@ class MeshForgeLauncher(
                 self._rns_diagnostics()
             elif choice == "bridge":
                 self._run_bridge()
+            elif choice == "ifaces":
+                self._rns_interfaces_menu()
             elif choice == "config":
                 self._view_rns_config()
             elif choice == "edit":
