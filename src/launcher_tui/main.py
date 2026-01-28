@@ -2543,6 +2543,7 @@ class MeshForgeLauncher(
             if choice == "status":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Service Status ===\n")
+                warnings = []
                 for svc in ['meshtasticd', 'rnsd', 'meshforge']:
                     try:
                         result = subprocess.run(
@@ -2550,8 +2551,23 @@ class MeshForgeLauncher(
                             capture_output=True, text=True, timeout=5
                         )
                         status = result.stdout.strip()
+
+                        # Check boot persistence
+                        boot_info = ""
+                        try:
+                            enabled_result = subprocess.run(
+                                ['systemctl', 'is-enabled', svc],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            is_enabled = enabled_result.returncode == 0
+                            if status == 'active' and not is_enabled:
+                                boot_info = "  (not enabled at boot)"
+                                warnings.append(svc)
+                        except Exception:
+                            pass
+
                         if status == 'active':
-                            print(f"  \033[0;32m●\033[0m {svc:<18} running")
+                            print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
                         elif status == 'failed':
                             print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
                         else:
@@ -2559,6 +2575,12 @@ class MeshForgeLauncher(
                     except Exception:
                         print(f"  ? {svc:<18} unknown")
                 print()
+
+                # Surface actionable warning
+                if warnings:
+                    print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
+                    print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
+
                 # Show failed service logs
                 for svc in ['meshtasticd', 'rnsd']:
                     try:
