@@ -198,6 +198,9 @@ def validate_config(content: str) -> Tuple[bool, List[str]]:
                 errors.append(f"Line {line_num}: Malformed section header: {stripped}")
 
     # Check for valid interface types
+    # Use line-anchored regex to only match 'type' as a standalone key,
+    # not as a suffix of other keys (e.g., 'connection_type = tcp').
+    # Skip comment lines starting with '#'.
     valid_types = [
         'AutoInterface', 'TCPServerInterface', 'TCPClientInterface',
         'BackboneInterface', 'SerialInterface', 'RNodeInterface',
@@ -205,7 +208,7 @@ def validate_config(content: str) -> Tuple[bool, List[str]]:
         'Meshtastic_Interface', 'UDPInterface', 'PipeInterface'
     ]
 
-    for match in re.finditer(r'type\s*=\s*(\w+)', content):
+    for match in re.finditer(r'^\s*(?!#)type\s*=\s*(\w+)', content, re.MULTILINE):
         iface_type = match.group(1)
         if iface_type not in valid_types:
             errors.append(f"Unknown interface type: {iface_type}")

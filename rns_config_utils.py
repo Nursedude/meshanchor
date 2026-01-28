@@ -182,13 +182,16 @@ def validate_interface_section(section: str) -> Tuple[bool, List[str]]:
         return False, errors
 
     # Extract type and validate
-    type_match = re.search(r'type\s*=\s*(\w+)', section, re.IGNORECASE)
+    # Use line-anchored regex to only match 'type' as a standalone key,
+    # not as a suffix of other keys (e.g., 'connection_type = tcp').
+    type_match = re.search(r'^\s*(?!#)type\s*=\s*(\w+)', section, re.MULTILINE | re.IGNORECASE)
     if type_match:
         iface_type = type_match.group(1)
         valid_types = [
             'AutoInterface', 'TCPServerInterface', 'TCPClientInterface',
-            'UDPInterface', 'RNodeInterface', 'SerialInterface',
-            'KISSInterface', 'AX25KISSInterface', 'I2PInterface'
+            'BackboneInterface', 'UDPInterface', 'RNodeInterface',
+            'SerialInterface', 'KISSInterface', 'AX25KISSInterface',
+            'I2PInterface', 'Meshtastic_Interface', 'PipeInterface'
         ]
         if iface_type not in valid_types:
             errors.append(f"Unknown interface type: {iface_type}")

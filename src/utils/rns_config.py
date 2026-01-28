@@ -95,7 +95,9 @@ def validate_interface_section(section: str) -> Tuple[bool, List[str]]:
         errors.append("Interface section missing required 'type' field")
 
     # Extract type and validate it's a known type
-    type_match = re.search(r'type\s*=\s*(\w+)', section, re.IGNORECASE)
+    # Use line-anchored regex to only match 'type' as a standalone key,
+    # not as a suffix of other keys (e.g., 'connection_type = tcp').
+    type_match = re.search(r'^\s*(?!#)type\s*=\s*(\w+)', section, re.MULTILINE | re.IGNORECASE)
     if type_match:
         iface_type = type_match.group(1)
         valid_types = [
