@@ -753,27 +753,34 @@ class DiagnosticEngine:
             )
 
     def _check_meshtastic_interface_file(self) -> CheckResult:
-        """Check for Meshtastic_Interface.py in RNS config."""
+        """Check for Meshtastic_Interface.py plugin in RNS interfaces directory.
+
+        The plugin must be in the 'interfaces/' subdirectory of the RNS config dir
+        (e.g., ~/.reticulum/interfaces/ or /etc/reticulum/interfaces/).
+        Source: https://github.com/landandair/RNS_Over_Meshtastic
+        """
         start = time.time()
-        rns_dir = ReticulumPaths.get_config_dir()
-        interface_file = rns_dir / 'Meshtastic_Interface.py'
+        interface_file = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
 
         if interface_file.exists():
             return CheckResult(
-                name="Meshtastic Interface",
+                name="Meshtastic Interface Plugin",
                 category=CheckCategory.RNS,
                 status=CheckStatus.PASS,
-                message="Interface file found",
+                message=f"Installed at {interface_file}",
                 details={"path": str(interface_file)},
                 duration_ms=(time.time() - start) * 1000
             )
         else:
             return CheckResult(
-                name="Meshtastic Interface",
+                name="Meshtastic Interface Plugin",
                 category=CheckCategory.RNS,
-                status=CheckStatus.SKIP,
-                message="Not installed (optional)",
-                fix_hint="Install RNS_Over_Meshtastic_Gateway for LoRa bridge",
+                status=CheckStatus.WARN,
+                message="Not installed - required for RNS over Meshtastic bridging",
+                fix_hint=(
+                    "Install from: https://github.com/landandair/RNS_Over_Meshtastic\n"
+                    f"Copy Meshtastic_Interface.py to: {ReticulumPaths.get_interfaces_dir()}/"
+                ),
                 duration_ms=(time.time() - start) * 1000
             )
 

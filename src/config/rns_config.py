@@ -93,6 +93,60 @@ class RNodeConfig:
 
 
 @dataclass
+class MeshtasticInterfaceConfig:
+    """Meshtastic_Interface configuration for RNS over Meshtastic LoRa.
+
+    Requires the Meshtastic_Interface.py plugin from:
+    https://github.com/landandair/RNS_Over_Meshtastic
+
+    Plugin must be installed to ~/.reticulum/interfaces/ (or /etc/reticulum/interfaces/).
+
+    Connection types (choose one):
+      - port: USB serial (e.g., /dev/ttyUSB0, /dev/ttyACM0)
+      - ble_port: Bluetooth LE (e.g., short_1234)
+      - tcp_port: TCP to meshtasticd (e.g., 127.0.0.1:4403)
+
+    data_speed presets:
+      0 = LONG_FAST (8s delay, default Meshtastic)
+      4 = MEDIUM_FAST (4s)
+      5 = SHORT_SLOW (3s)
+      6 = SHORT_FAST (1s)
+      8 = SHORT_TURBO (0.4s, recommended for RNS)
+    """
+    name: str = "Meshtastic Gateway"
+    enabled: bool = True
+    mode: str = "gateway"
+    # Connection - set exactly one
+    port: Optional[str] = None          # USB serial: /dev/ttyUSB0
+    ble_port: Optional[str] = None      # Bluetooth LE
+    tcp_port: Optional[str] = "127.0.0.1:4403"  # TCP to meshtasticd
+    # LoRa settings
+    data_speed: int = 8                 # SHORT_TURBO (recommended)
+    hop_limit: int = 3                  # Mesh hops 1-7
+    bitrate: int = 500                  # Estimated bps
+
+    def to_config_section(self) -> str:
+        """Generate config section for ~/.reticulum/config."""
+        lines = [f"[[{self.name}]]"]
+        lines.append(f"    type = Meshtastic_Interface")
+        lines.append(f"    enabled = {'yes' if self.enabled else 'no'}")
+        lines.append(f"    mode = {self.mode}")
+
+        # Connection type (only include the one that's set)
+        if self.port:
+            lines.append(f"    port = {self.port}")
+        elif self.ble_port:
+            lines.append(f"    ble_port = {self.ble_port}")
+        elif self.tcp_port:
+            lines.append(f"    tcp_port = {self.tcp_port}")
+
+        lines.append(f"    data_speed = {self.data_speed}")
+        lines.append(f"    hop_limit = {self.hop_limit}")
+        lines.append(f"    bitrate = {self.bitrate}")
+        return '\n'.join(lines) + '\n'
+
+
+@dataclass
 class TCPServerConfig:
     """TCP Server interface configuration."""
     name: str = "TCP Server"
@@ -183,6 +237,40 @@ class RNSConfigGenerator:
     def get_modulation_preset(self, preset_name: str) -> Dict[str, int]:
         """Get modulation parameters for a preset."""
         return MODULATION_PRESETS.get(preset_name, MODULATION_PRESETS["rns_default"])
+
+    def create_meshtastic_interface(
+        self,
+        name: str = "Meshtastic Gateway",
+        port: Optional[str] = None,
+        ble_port: Optional[str] = None,
+        tcp_port: Optional[str] = "127.0.0.1:4403",
+        data_speed: int = 8,
+        hop_limit: int = 3,
+        mode: str = "gateway"
+    ) -> MeshtasticInterfaceConfig:
+        """Create Meshtastic_Interface configuration.
+
+        Bridges RNS over Meshtastic LoRa network. Requires the
+        Meshtastic_Interface.py plugin installed in ~/.reticulum/interfaces/.
+
+        Args:
+            name: Interface display name
+            port: USB serial port (e.g., /dev/ttyUSB0)
+            ble_port: Bluetooth LE device ID
+            tcp_port: TCP address for meshtasticd (default: 127.0.0.1:4403)
+            data_speed: LoRa preset (8=SHORT_TURBO recommended)
+            hop_limit: Mesh hop limit 1-7
+            mode: Interface mode (gateway or client)
+        """
+        return MeshtasticInterfaceConfig(
+            name=name,
+            port=port,
+            ble_port=ble_port,
+            tcp_port=tcp_port,
+            data_speed=data_speed,
+            hop_limit=hop_limit,
+            mode=mode
+        )
 
     def create_rnode_interface(
         self,

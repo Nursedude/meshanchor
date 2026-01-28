@@ -23,7 +23,7 @@ Test Files:     7
 MeshForge architecture has been enhanced through collaboration:
 - **Dude AI (Claude)**: Primary architect - MeshForge NOC
 - **Gemini Pro**: Windows integration patterns from RNS Gateway
-- **Reference**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- **Reference**: https://github.com/landandair/RNS_Over_Meshtastic
 
 ---
 
