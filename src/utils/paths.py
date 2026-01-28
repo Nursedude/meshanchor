@@ -18,6 +18,16 @@ import tempfile
 # Core utility functions - use these instead of Path.home()
 # ============================================================================
 
+def _resolve_home_for_user(username: str) -> Path:
+    """Resolve the home directory for a username via pwd (not hardcoded /home)."""
+    try:
+        import pwd
+        return Path(pwd.getpwnam(username).pw_dir)
+    except (KeyError, ImportError):
+        # Fallback if user not in passwd or pwd unavailable (non-POSIX)
+        return Path(f'/home/{username}')
+
+
 def get_real_user_home() -> Path:
     """
     Get the real user's home directory, even when running as root via sudo.
@@ -32,12 +42,12 @@ def get_real_user_home() -> Path:
     # Check SUDO_USER first (with path traversal protection)
     sudo_user = os.environ.get('SUDO_USER', '')
     if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-        return Path(f'/home/{sudo_user}')
+        return _resolve_home_for_user(sudo_user)
 
     # Try LOGNAME as secondary
     logname = os.environ.get('LOGNAME', '')
     if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-        return Path(f'/home/{logname}')
+        return _resolve_home_for_user(logname)
 
     # Fallback to current user (may be /root under sudo)
     return Path.home()
