@@ -110,13 +110,14 @@ class QuickActionsMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Node List ===\n")
         try:
+            cli_path = self._get_meshtastic_cli()
             subprocess.run(
-                ['meshtastic', '--nodes'],
+                [cli_path, '--nodes'],
                 timeout=30
             )
         except FileNotFoundError:
             print("Error: 'meshtastic' CLI not installed.")
-            print("Install with: pip install meshtastic")
+            print("Install with: pipx install meshtastic[cli]")
         except subprocess.TimeoutExpired:
             print("Error: Command timed out. Is meshtasticd running?")
         except Exception as e:

@@ -82,8 +82,12 @@ class MeshtasticCLI:
             logger.warning("meshtastic CLI not found in PATH")
 
     def _find_cli(self) -> Optional[str]:
-        """Find meshtastic CLI in PATH."""
-        return shutil.which('meshtastic')
+        """Find meshtastic CLI using centralized path resolver."""
+        try:
+            from utils.cli import find_meshtastic_cli
+            return find_meshtastic_cli()
+        except ImportError:
+            return shutil.which('meshtastic')
 
     def _build_base_args(self) -> List[str]:
         """Build base CLI arguments for connection."""

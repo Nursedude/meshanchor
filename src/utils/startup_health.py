@@ -221,9 +221,13 @@ def detect_hardware() -> HardwareHealth:
 def get_node_count() -> int:
     """Get count of visible nodes."""
     try:
-        # Try to get node count from meshtastic CLI
+        from utils.cli import find_meshtastic_cli
+        cli_path = find_meshtastic_cli()
+        if not cli_path:
+            return 0
+
         result = subprocess.run(
-            ['meshtastic', '--host', 'localhost', '--info'],
+            [cli_path, '--host', 'localhost', '--info'],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:

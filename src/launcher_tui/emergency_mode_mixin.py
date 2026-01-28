@@ -88,8 +88,9 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"Broadcasting: {full_msg}\n")
         try:
+            cli_path = self._get_meshtastic_cli()
             subprocess.run(
-                ['meshtastic', '--sendtext', full_msg],
+                [cli_path, '--sendtext', full_msg],
                 timeout=30
             )
             print("\nMessage sent.")
@@ -151,8 +152,9 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"Sending to {dest_clean}: {full_msg}\n")
         try:
+            cli_path = self._get_meshtastic_cli()
             subprocess.run(
-                ['meshtastic', '--dest', dest_clean, '--sendtext', full_msg],
+                [cli_path, '--dest', dest_clean, '--sendtext', full_msg],
                 timeout=30
             )
             print("\nMessage sent.")
@@ -170,13 +172,14 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== NODES ONLINE ===\n")
         try:
+            cli_path = self._get_meshtastic_cli()
             subprocess.run(
-                ['meshtastic', '--nodes'],
+                [cli_path, '--nodes'],
                 timeout=30
             )
         except FileNotFoundError:
             print("ERROR: meshtastic CLI not available.")
-            print("Install: pip install meshtastic")
+            print("Install: pipx install meshtastic[cli]")
         except subprocess.TimeoutExpired:
             print("ERROR: Command timed out.")
         except Exception as e:
@@ -228,8 +231,9 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== MY POSITION ===\n")
         try:
+            cli_path = self._get_meshtastic_cli()
             subprocess.run(
-                ['meshtastic', '--get', 'position'],
+                [cli_path, '--get', 'position'],
                 timeout=30
             )
         except FileNotFoundError:
@@ -282,8 +286,9 @@ class EmergencyModeMixin:
                 count += 1
                 print(f"  [{count}] Sending beacon... ", end="", flush=True)
                 try:
+                    cli_path = self._get_meshtastic_cli()
                     result = subprocess.run(
-                        ['meshtastic', '--sendtext', beacon_msg],
+                        [cli_path, '--sendtext', beacon_msg],
                         capture_output=True, timeout=30
                     )
                     if result.returncode == 0:

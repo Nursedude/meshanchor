@@ -249,7 +249,18 @@ class DeviceBackupManager:
 
     def _run_meshtastic_cmd(self, args: List[str], host: str, port: int) -> str:
         """Run meshtastic CLI command and return output."""
-        cmd = ["meshtastic", "--host", host, "--port", str(port)] + args
+        try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+        except ImportError:
+            import shutil
+            cli_path = shutil.which('meshtastic')
+
+        if not cli_path:
+            logger.error("[Backup] meshtastic CLI not found")
+            return ""
+
+        cmd = [cli_path, "--host", host, "--port", str(port)] + args
         logger.debug(f"[Backup] Running: {' '.join(cmd)}")
 
         try:

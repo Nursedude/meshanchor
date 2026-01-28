@@ -19,8 +19,10 @@ def find_meshtastic_cli():
 
     Checks multiple locations where meshtastic CLI might be installed:
     - System PATH (via shutil.which)
-    - pipx installation paths (/root/.local/bin, /home/pi/.local/bin, ~/.local/bin)
-    - Common installation locations
+    - SUDO_USER's ~/.local/bin (pip/pipx install as user, run with sudo)
+    - /root/.local/bin (pip install as root)
+    - All /home/*/.local/bin directories (fallback scan)
+    - /usr/local/bin (system-wide pip install)
 
     Returns:
         str: Full path to meshtastic CLI, or None if not found
@@ -30,21 +32,36 @@ def find_meshtastic_cli():
     if cli_path:
         return cli_path
 
-    # Check common pipx installation paths
-    pipx_paths = [
+    # Priority: check the real user's home first (handles sudo case)
+    # When running with sudo, the CLI is usually in the invoking user's ~/.local/bin
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user and sudo_user != 'root':
+        user_path = f'/home/{sudo_user}/.local/bin/meshtastic'
+        if os.path.isfile(user_path) and os.access(user_path, os.X_OK):
+            return user_path
+
+    # Check common known locations
+    known_paths = [
         '/root/.local/bin/meshtastic',
-        '/home/pi/.local/bin/meshtastic',
         os.path.expanduser('~/.local/bin/meshtastic'),
+        '/usr/local/bin/meshtastic',
     ]
 
-    # Also check for the original user's home if running with sudo
-    sudo_user = os.environ.get('SUDO_USER')
-    if sudo_user:
-        pipx_paths.append(f'/home/{sudo_user}/.local/bin/meshtastic')
-
-    for path in pipx_paths:
+    for path in known_paths:
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
+
+    # Fallback: scan all user home directories in /home/
+    try:
+        home_base = Path('/home')
+        if home_base.is_dir():
+            for user_dir in home_base.iterdir():
+                if user_dir.is_dir():
+                    candidate = user_dir / '.local' / 'bin' / 'meshtastic'
+                    if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                        return str(candidate)
+    except (PermissionError, OSError):
+        pass
 
     return None
 

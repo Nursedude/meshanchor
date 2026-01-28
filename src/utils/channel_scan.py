@@ -238,8 +238,14 @@ class ChannelMonitor:
         """
         channels = []
         try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+            if not cli_path:
+                logger.debug("meshtastic CLI not available")
+                return channels
+
             result = subprocess.run(
-                ['meshtastic', '--info'],
+                [cli_path, '--info'],
                 capture_output=True, text=True, timeout=15
             )
             if result.returncode == 0:
