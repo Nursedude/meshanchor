@@ -669,7 +669,7 @@ class DiagnosticEngine:
                 category=CheckCategory.RNS,
                 status=CheckStatus.FAIL,
                 message="Not installed",
-                fix_hint="pip3 install rns",
+                fix_hint="pipx install rns",
                 duration_ms=(time.time() - start) * 1000
             )
 

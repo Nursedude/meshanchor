@@ -175,7 +175,7 @@ DEPENDENCY_CONTRACTS: Dict[str, DependencyContract] = {
         min_version='0.6.0',
         required_attrs=['__version__', 'Reticulum', 'Identity', 'Destination', 'Transport'],
         required_callables=[],
-        fix_hint="pip install --upgrade rns"
+        fix_hint="pipx install rns  (or pipx upgrade rns)"
     ),
     'LXMF': DependencyContract(
         package_name='lxmf',

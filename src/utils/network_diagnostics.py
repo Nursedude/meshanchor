@@ -471,7 +471,7 @@ class NetworkDiagnostics:
                 self.update_health(
                     "rns", HealthStatus.UNHEALTHY,
                     "RNS not installed",
-                    fix_hint="Install RNS: pip install rns"
+                    fix_hint="Install RNS: pipx install rns"
                 )
         except Exception as e:
             self.update_health("rns", HealthStatus.UNKNOWN, f"Check failed: {e}")
