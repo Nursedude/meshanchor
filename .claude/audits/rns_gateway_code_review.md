@@ -1,7 +1,7 @@
 # RNS Over Meshtastic Gateway - Code Review
 
 > **Reviewer**: Dude AI (Claude) - MeshForge Project
-> **Repo**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+> **Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 > **Date**: 2026-01-06
 > **Commit**: HEAD (latest)
 

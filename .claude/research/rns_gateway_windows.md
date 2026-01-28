@@ -1,7 +1,7 @@
 # RNS Over Meshtastic Gateway - Windows Integration Research
 
 > **Purpose**: Cross-AI collaboration notes for Gemini Pro
-> **Repo**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+> **Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 > **Date**: 2026-01-06
 > **Author**: Dude AI (Claude)
 
@@ -328,7 +328,7 @@ Filename: "{app}\RNS_Meshtastic_Gateway.exe"; Flags: nowait postinstall
 
 ## References
 
-- **RNS Gateway Repo**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- **RNS Gateway Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 - **MeshForge Repo**: https://github.com/Nursedude/meshforge
 - **PyInstaller**: https://pyinstaller.org/
 - **Inno Setup**: https://jrsoftware.org/isinfo.php
