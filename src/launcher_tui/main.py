@@ -2526,6 +2526,7 @@ class MeshForgeLauncher(
                 ("meshtasticd", "Manage meshtasticd"),
                 ("rnsd", "Manage rnsd"),
                 ("restart-mesh", "Restart meshtasticd"),
+                ("start-rns", "Start rnsd"),
                 ("restart-rns", "Restart rnsd"),
                 ("install", "Install meshtasticd"),
                 ("back", "Back"),
@@ -2544,7 +2545,17 @@ class MeshForgeLauncher(
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Service Status ===\n")
                 warnings = []
+                use_direct_rnsd = not self._has_systemd_unit('rnsd')
+
                 for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+                    # Special handling for rnsd without systemd unit
+                    if svc == 'rnsd' and use_direct_rnsd:
+                        if self._is_rnsd_running():
+                            print(f"  \033[0;32m●\033[0m {svc:<18} running (process)")
+                        else:
+                            print(f"  \033[2m○\033[0m {svc:<18} stopped")
+                        continue
+
                     try:
                         result = subprocess.run(
                             ['systemctl', 'is-active', svc],
@@ -2581,8 +2592,8 @@ class MeshForgeLauncher(
                     print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
                     print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
 
-                # Show failed service logs
-                for svc in ['meshtasticd', 'rnsd']:
+                # Show failed service logs (only for systemd services)
+                for svc in ['meshtasticd']:
                     try:
                         r = subprocess.run(['systemctl', 'is-active', svc],
                                            capture_output=True, text=True, timeout=5)
@@ -2595,6 +2606,21 @@ class MeshForgeLauncher(
                             print()
                     except Exception:
                         pass
+
+                # Show rnsd failure logs if systemd-managed and failed
+                if not use_direct_rnsd:
+                    try:
+                        r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                           capture_output=True, text=True, timeout=5)
+                        if r.stdout.strip() == 'failed':
+                            print(f"\033[0;31mrnsd failure:\033[0m")
+                            subprocess.run(
+                                ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],
+                                timeout=10
+                            )
+                            print()
+                    except Exception:
+                        pass
                 self._wait_for_enter()
             elif choice == "restart-mesh":
                 subprocess.run(['clear'], check=False, timeout=5)
@@ -2602,11 +2628,28 @@ class MeshForgeLauncher(
                 subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
                 subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
                 self._wait_for_enter()
+            elif choice == "start-rns":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Starting rnsd...\n")
+                # Use direct process control if no systemd unit
+                if not self._has_systemd_unit('rnsd'):
+                    self._start_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'start', 'rnsd'], timeout=30)
+                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                self._wait_for_enter()
             elif choice == "restart-rns":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("Restarting rnsd...\n")
-                subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
-                subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                # Use direct process control if no systemd unit
+                if not self._has_systemd_unit('rnsd'):
+                    self._stop_rnsd_direct()
+                    import time
+                    time.sleep(0.5)
+                    self._start_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
+                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
                 self._wait_for_enter()
             elif choice == "install":
                 self._install_native_meshtasticd()
@@ -2868,50 +2911,211 @@ WantedBy=multi-user.target
 
             self._service_action(service_name, choice)
 
+    def _has_systemd_unit(self, service_name: str) -> bool:
+        """Check if a service has a systemd unit file."""
+        try:
+            result = subprocess.run(
+                ['systemctl', 'cat', service_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _is_rnsd_running(self) -> bool:
+        """Check if rnsd is running as a process."""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-x', 'rnsd'],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _start_rnsd_direct(self) -> bool:
+        """Start rnsd directly as a background process.
+
+        Returns True if started successfully.
+        """
+        # Check if already running
+        if self._is_rnsd_running():
+            print("rnsd is already running.")
+            return True
+
+        # Check if rnsd binary exists
+        rnsd_path = shutil.which('rnsd')
+        if not rnsd_path:
+            print("\033[0;31mError:\033[0m rnsd not found in PATH.")
+            print("Install Reticulum: pip install rns")
+            return False
+
+        try:
+            # Start rnsd as a background daemon
+            # rnsd itself daemonizes when run without -f flag
+            print("Starting rnsd daemon...")
+            result = subprocess.run(
+                ['rnsd'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            # rnsd daemonizes and returns quickly
+            # Check if it actually started
+            import time
+            time.sleep(0.5)
+            if self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd started successfully.")
+                return True
+            else:
+                print(f"\033[0;31mError:\033[0m rnsd failed to start.")
+                if result.stderr:
+                    print(result.stderr)
+                return False
+        except subprocess.TimeoutExpired:
+            # If it times out, check if running anyway (daemon fork)
+            if self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd started successfully.")
+                return True
+            print("\033[0;31mError:\033[0m rnsd start timed out.")
+            return False
+        except Exception as e:
+            print(f"\033[0;31mError:\033[0m Failed to start rnsd: {e}")
+            return False
+
+    def _stop_rnsd_direct(self) -> bool:
+        """Stop rnsd process directly.
+
+        Returns True if stopped successfully.
+        """
+        if not self._is_rnsd_running():
+            print("rnsd is not running.")
+            return True
+
+        try:
+            print("Stopping rnsd...")
+            # Use pkill to stop rnsd gracefully
+            result = subprocess.run(
+                ['pkill', '-TERM', '-x', 'rnsd'],
+                capture_output=True,
+                timeout=10
+            )
+            import time
+            time.sleep(0.5)
+            if not self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd stopped.")
+                return True
+            # If still running, try SIGKILL
+            subprocess.run(['pkill', '-KILL', '-x', 'rnsd'], timeout=5)
+            time.sleep(0.3)
+            if not self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd stopped (forced).")
+                return True
+            print("\033[0;31mError:\033[0m Could not stop rnsd.")
+            return False
+        except Exception as e:
+            print(f"\033[0;31mError:\033[0m Failed to stop rnsd: {e}")
+            return False
+
     def _service_action(self, service_name: str, action: str):
-        """Perform service action using direct systemctl."""
+        """Perform service action using systemctl or direct process control.
+
+        For rnsd: Uses direct process control if no systemd unit exists.
+        For other services: Uses systemctl.
+        """
         subprocess.run(['clear'], check=False, timeout=5)
+
+        # Check if rnsd needs direct process handling
+        use_direct_rnsd = (service_name == 'rnsd' and
+                          not self._has_systemd_unit('rnsd'))
 
         if action == "status":
             print(f"=== {service_name} status ===\n")
-            subprocess.run(
-                ['systemctl', 'status', service_name, '--no-pager', '-l'],
-                timeout=10
-            )
+            if use_direct_rnsd:
+                # Show process status for rnsd
+                if self._is_rnsd_running():
+                    print(f"\033[0;32m●\033[0m rnsd is \033[0;32mrunning\033[0m")
+                    # Show process info
+                    try:
+                        subprocess.run(
+                            ['pgrep', '-a', '-x', 'rnsd'],
+                            timeout=5
+                        )
+                    except Exception:
+                        pass
+                else:
+                    print(f"\033[0;31m○\033[0m rnsd is \033[0;31mnot running\033[0m")
+                    print("\nTo start: Select 'Start Service' from the menu")
+            else:
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
             self._wait_for_enter()
 
         elif action == "start":
             print(f"Starting {service_name}...\n")
-            subprocess.run(['systemctl', 'start', service_name], timeout=30)
-            subprocess.run(
-                ['systemctl', 'status', service_name, '--no-pager', '-l'],
-                timeout=10
-            )
+            if use_direct_rnsd:
+                self._start_rnsd_direct()
+            else:
+                subprocess.run(['systemctl', 'start', service_name], timeout=30)
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
             self._wait_for_enter()
 
         elif action == "stop":
             if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
                 subprocess.run(['clear'], check=False, timeout=5)
                 print(f"Stopping {service_name}...\n")
-                subprocess.run(['systemctl', 'stop', service_name], timeout=30)
-                print(f"{service_name} stopped.")
+                if use_direct_rnsd:
+                    self._stop_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'stop', service_name], timeout=30)
+                    print(f"{service_name} stopped.")
                 self._wait_for_enter()
 
         elif action == "restart":
             print(f"Restarting {service_name}...\n")
-            subprocess.run(['systemctl', 'restart', service_name], timeout=30)
-            subprocess.run(
-                ['systemctl', 'status', service_name, '--no-pager', '-l'],
-                timeout=10
-            )
+            if use_direct_rnsd:
+                self._stop_rnsd_direct()
+                import time
+                time.sleep(0.5)
+                self._start_rnsd_direct()
+            else:
+                subprocess.run(['systemctl', 'restart', service_name], timeout=30)
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
             self._wait_for_enter()
 
         elif action == "logs":
             print(f"=== {service_name} logs (last 30) ===\n")
-            subprocess.run(
-                ['journalctl', '-u', service_name, '-n', '30', '--no-pager'],
-                timeout=15
-            )
+            if use_direct_rnsd:
+                # rnsd logs go to ~/.reticulum/logfile by default
+                try:
+                    log_path = get_real_user_home() / '.reticulum' / 'logfile'
+                    if log_path.exists():
+                        print(f"Log file: {log_path}\n")
+                        subprocess.run(
+                            ['tail', '-n', '30', str(log_path)],
+                            timeout=10
+                        )
+                    else:
+                        print("No log file found at ~/.reticulum/logfile")
+                        print("rnsd may log to stdout or syslog depending on config.")
+                except Exception as e:
+                    print(f"Could not read logs: {e}")
+            else:
+                subprocess.run(
+                    ['journalctl', '-u', service_name, '-n', '30', '--no-pager'],
+                    timeout=15
+                )
             self._wait_for_enter()
 
     def _hardware_menu(self):
