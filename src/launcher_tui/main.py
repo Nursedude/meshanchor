@@ -1450,16 +1450,14 @@ class MeshForgeLauncher(
             issues.append("No interfaces configured")
 
         # Check Meshtastic_Interface status: config reference + plugin file
+        # Only flag as issue if plugin is missing entirely or config references
+        # a plugin that isn't installed. Having the plugin installed but not
+        # configured is fine - user can enable it when ready.
         plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
         plugin_installed = plugin_path.exists()
 
         if not has_meshtastic and not plugin_installed:
             issues.append("No Meshtastic_Interface configured (needed for mesh bridging)")
-        elif not has_meshtastic and plugin_installed:
-            issues.append(
-                "Meshtastic_Interface.py plugin is installed but not enabled in config\n"
-                "    Add a [[Meshtastic Interface]] section to use mesh bridging"
-            )
         elif has_meshtastic and not plugin_installed:
             issues.append(
                 f"Meshtastic_Interface.py plugin not installed at "
