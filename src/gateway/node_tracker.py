@@ -512,7 +512,7 @@ instance_control_port = 37429
 
         except ImportError:
             logger.info("RNS module not installed. To enable RNS node discovery:")
-            logger.info("  1. Install RNS: pip install rns")
+            logger.info("  1. Install RNS: pipx install rns")
             logger.info("  2. Start rnsd: sudo systemctl start rnsd")
             logger.info("  3. Restart MeshForge")
         except Exception as e:

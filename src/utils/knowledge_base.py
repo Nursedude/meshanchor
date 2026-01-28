@@ -1080,7 +1080,7 @@ Common Issues:
                     instruction="Verify Python RNS package is installed",
                     command="python3 -c 'import RNS; print(RNS.__version__)'",
                     expected_result="Version number printed (e.g., 0.7.3)",
-                    if_fail="Install: pip3 install rns",
+                    if_fail="Install: pipx install rns",
                 ),
                 TroubleshootingStep(
                     instruction="Check for port conflicts on AutoInterface",

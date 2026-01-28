@@ -1370,7 +1370,7 @@ class MeshForgeLauncher(
                 self.dialog.msgbox(
                     "No Config",
                     "No Reticulum config found and template missing.\n\n"
-                    "Install RNS first: pip3 install rns\n"
+                    "Install RNS first: pipx install rns\n"
                     "Then run rnsd once to generate default config."
                 )
                 return
@@ -1607,7 +1607,7 @@ class MeshForgeLauncher(
                     print(result.stdout, end='')
                 print(f"\n{tool_name} failed. Possible causes:")
                 print("  - rnsd not running: sudo systemctl start rnsd")
-                print("  - RNS not installed: pip3 install rns")
+                print("  - RNS not installed: pipx install rns")
                 if result.stderr and result.stderr.strip():
                     # Show last 3 lines of stderr for context
                     err_lines = result.stderr.strip().split('\n')[-3:]
@@ -1616,7 +1616,7 @@ class MeshForgeLauncher(
                         print(f"  {line}")
         except FileNotFoundError:
             print(f"\n{tool_name} not found. Is RNS installed?")
-            print("Install: pip3 install rns")
+            print("Install: pipx install rns")
         except subprocess.TimeoutExpired:
             print(f"\n{tool_name} timed out. RNS may be unresponsive.")
             print("Try restarting rnsd: sudo systemctl restart rnsd")
