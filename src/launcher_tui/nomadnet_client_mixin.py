@@ -197,7 +197,7 @@ class NomadNetClientMixin:
         except Exception:
             print("  rnsd:      (check failed)")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # ------------------------------------------------------------------
     # Launch text UI
@@ -380,7 +380,7 @@ class NomadNetClientMixin:
             print(f"  3. {user_home}/.nomadnetwork/config")
             print("\nRun 'Launch Text UI' to create the default config.")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _edit_nomadnet_config(self):
         """Edit NomadNet config with available editor."""
@@ -491,7 +491,7 @@ class NomadNetClientMixin:
                 if result.returncode != 0:
                     print("\nFailed to install pipx.")
                     print("Try manually: sudo apt install pipx")
-                    input("\nPress Enter to continue...")
+                    self._wait_for_enter()
                     return
 
             # Ensure pipx bin dir is in PATH for this session
@@ -539,7 +539,7 @@ class NomadNetClientMixin:
             print("Try manually: pipx install nomadnet")
 
         try:
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
         except (EOFError, KeyboardInterrupt):
             pass
 

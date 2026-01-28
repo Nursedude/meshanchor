@@ -120,6 +120,14 @@ class MeshForgeLauncher(
         self._meshtastic_path = None  # Cached CLI path
         self._bridge_log_path = None  # Path to active bridge log file
 
+    @staticmethod
+    def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
+        """Wait for user to press Enter, handling Ctrl+C gracefully."""
+        try:
+            input(msg)
+        except (KeyboardInterrupt, EOFError):
+            print()  # Clean newline after ^C
+
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
         if self._meshtastic_path is None:
@@ -425,7 +433,7 @@ class MeshForgeLauncher(
         except KeyboardInterrupt:
             print("\n\nAborted.")
         try:
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
         except KeyboardInterrupt:
             print()
 
@@ -458,7 +466,7 @@ class MeshForgeLauncher(
                 if result.returncode != 0:
                     print("\nFailed to install pipx.")
                     print("Try manually: sudo apt install pipx")
-                    input("\nPress Enter to continue...")
+                    self._wait_for_enter()
                     return
 
             # Ensure pipx bin dir is in PATH for this session
@@ -515,7 +523,7 @@ class MeshForgeLauncher(
             print("Try manually: pipx install meshtastic")
 
         try:
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
         except KeyboardInterrupt:
             print()
 
@@ -742,32 +750,32 @@ class MeshForgeLauncher(
                     ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
                     timeout=30
                 )
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "mesh-50":
                 print("=== meshtasticd (last 50 lines) ===\n")
                 subprocess.run(
                     ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
                     timeout=15
                 )
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "rns-50":
                 print("=== rnsd (last 50 lines) ===\n")
                 subprocess.run(
                     ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
                     timeout=15
                 )
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "boot":
                 print("=== Boot messages (this boot) ===\n")
                 subprocess.run(
                     ['journalctl', '-b', '-n', '100', '--no-pager'],
                     timeout=15
                 )
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "kernel":
                 print("=== Kernel messages (dmesg) ===\n")
                 subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "meshforge":
                 self._view_meshforge_logs()
 
@@ -805,22 +813,22 @@ class MeshForgeLauncher(
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Listening Ports ===\n")
                 subprocess.run(['ss', '-tlnp'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "ifaces":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Network Interfaces ===\n")
                 subprocess.run(['ip', '-c', 'addr'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "conns":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Active Connections ===\n")
                 subprocess.run(['ss', '-tunp'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "routes":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Routing Table ===\n")
                 subprocess.run(['ip', 'route'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "ping":
                 self._ping_test()
             elif choice == "dns":
@@ -864,12 +872,12 @@ class MeshForgeLauncher(
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Status ===\n")
                 self._run_rns_tool(['rnstatus'], 'rnstatus')
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "paths":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== RNS Path Table ===\n")
                 self._run_rns_tool(['rnpath', '-t'], 'rnpath')
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "probe":
                 self._rns_probe_destination()
             elif choice == "identity":
@@ -898,19 +906,23 @@ class MeshForgeLauncher(
         print("Probe tests reachability of a destination on the RNS network.")
         print("Enter the full destination hash (32 hex chars), or a partial hash.\n")
 
-        dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+        try:
+            dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
         if not dest_hash or dest_hash.lower() == 'q':
             return
 
         # Validate hex format to prevent flag injection
         if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
             print("Error: Hash must contain only hex characters (0-9, a-f).")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         print(f"\nProbing {dest_hash}...\n")
         self._run_rns_tool(['rnprobe', dest_hash], 'rnprobe')
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _rns_identity_info(self):
         """Show RNS identity information."""
@@ -951,7 +963,7 @@ class MeshForgeLauncher(
                         print("  Status: not created (starts on first bridge run)")
                 except ImportError:
                     pass
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
 
             elif choice == "path":
                 subprocess.run(['clear'], check=False, timeout=5)
@@ -981,20 +993,24 @@ class MeshForgeLauncher(
                         print("  Not created yet")
                 except ImportError:
                     pass
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
 
             elif choice == "recall":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("=== Recall RNS Identity ===\n")
                 print("Look up a known identity by its destination hash.\n")
-                dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+                try:
+                    dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    print()
+                    continue
                 if dest_hash and dest_hash.lower() != 'q':
                     # Validate hex format to prevent flag injection
                     if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
                         print("Error: Hash must contain only hex characters (0-9, a-f).")
                     else:
                         self._run_rns_tool(['rnid', '--recall', dest_hash], 'rnid')
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
 
     def _rns_known_destinations(self):
         """Show known RNS destinations from the running rnsd instance."""
@@ -1034,7 +1050,7 @@ class MeshForgeLauncher(
             print("Commands module not available, falling back to rnstatus...\n")
             self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _rns_diagnostics(self):
         """Run comprehensive RNS diagnostics."""
@@ -1046,7 +1062,7 @@ class MeshForgeLauncher(
         except ImportError:
             print("RNS commands module not available.")
             print("Run from MeshForge root: sudo python3 src/launcher_tui/main.py")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         # 1. Service status
@@ -1104,7 +1120,7 @@ class MeshForgeLauncher(
             else:
                 print(f"  {tool}: not found")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     @staticmethod
     def _is_root_owned_rns_config(config_path: Path) -> bool:
@@ -1338,7 +1354,7 @@ class MeshForgeLauncher(
             print(f"  Source: https://github.com/landandair/RNS_Over_Meshtastic")
             print(f"  Use 'Install Meshtastic Interface' from the RNS menu to install.")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _edit_rns_config(self):
         """Edit Reticulum config with available editor. Deploys template if no config exists."""
@@ -1712,7 +1728,7 @@ class MeshForgeLauncher(
                 print("No AREDN node found on local network.")
                 print("\nTried: localnode.local.mesh, 10.0.0.1")
                 print("\nIs your AREDN node connected?")
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
                 return
 
             print(f"Connecting to {node_ip}...\n")
@@ -1741,7 +1757,7 @@ class MeshForgeLauncher(
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _aredn_neighbors(self):
         """Show AREDN neighbor links."""
@@ -1754,7 +1770,7 @@ class MeshForgeLauncher(
             node_ip = self._aredn_get_node_ip()
             if not node_ip:
                 print("No AREDN node found. Is it connected?")
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
                 return
 
             client = AREDNClient(node_ip)
@@ -1776,7 +1792,7 @@ class MeshForgeLauncher(
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _aredn_services(self):
         """Show AREDN advertised services."""
@@ -1789,7 +1805,7 @@ class MeshForgeLauncher(
             node_ip = self._aredn_get_node_ip()
             if not node_ip:
                 print("No AREDN node found.")
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
                 return
 
             client = AREDNClient(node_ip)
@@ -1816,7 +1832,7 @@ class MeshForgeLauncher(
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _aredn_web(self):
         """Show AREDN web UI URL."""
@@ -1864,7 +1880,7 @@ class MeshForgeLauncher(
         except Exception as e:
             print(f"Error: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # =========================================================================
     # Config Menu - meshtasticd config.d/ management
@@ -1929,7 +1945,7 @@ class MeshForgeLauncher(
             print("  sudo apt install meshtasticd")
             print("  # or run the MeshForge installer")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _view_config_overlays(self):
         """Show config.d/ overlay files."""
@@ -1940,7 +1956,7 @@ class MeshForgeLauncher(
         if not config_d.exists():
             print("config.d/ directory not found.")
             print("Create it: sudo mkdir -p /etc/meshtasticd/config.d")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         overlays = sorted(config_d.glob('*.yaml'))
@@ -1963,7 +1979,7 @@ class MeshForgeLauncher(
                 except PermissionError:
                     print("  (permission denied)")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _view_available_hats(self):
         """Show available HAT configurations from meshtasticd package."""
@@ -1975,7 +1991,7 @@ class MeshForgeLauncher(
             print("available.d/ not found.")
             print("meshtasticd package should provide this.")
             print("\nInstall: sudo apt install meshtasticd")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         configs = sorted(available_d.glob('*.yaml'))
@@ -1992,7 +2008,7 @@ class MeshForgeLauncher(
             print("  sudo systemctl restart meshtasticd")
             print("\nWARNING: Only ONE Lora config should be in config.d/")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _open_web_client(self):
         """Show/open meshtasticd web client for full radio configuration."""
@@ -2078,13 +2094,13 @@ class MeshForgeLauncher(
             else:
                 print("No status output available.")
                 try:
-                    input("\nPress Enter to continue...")
+                    self._wait_for_enter()
                 except KeyboardInterrupt:
                     print()
         except subprocess.TimeoutExpired:
             print("\n\nStatus check timed out (30s).")
             try:
-                input("\nPress Enter to return to menu...")
+                self._wait_for_enter("\nPress Enter to return to menu...")
             except KeyboardInterrupt:
                 print()
         except KeyboardInterrupt:
@@ -2156,7 +2172,7 @@ class MeshForgeLauncher(
         print()
         print("-" * 50)
         try:
-            input("\nPress Enter to return to menu...")
+            self._wait_for_enter("\nPress Enter to return to menu...")
         except KeyboardInterrupt:
             print()
 
@@ -2184,7 +2200,7 @@ class MeshForgeLauncher(
             print(f"=== MeshForge Log: {latest_log.name} ===\n")
             print('\n'.join(lines))
             print("\n" + "=" * 50)
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to read log: {e}")
 
@@ -2418,7 +2434,7 @@ class MeshForgeLauncher(
         except KeyboardInterrupt:
             print("\nBridge stopped.")
         try:
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
         except KeyboardInterrupt:
             print()
 
@@ -2557,19 +2573,19 @@ class MeshForgeLauncher(
                             print()
                     except Exception:
                         pass
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "restart-mesh":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("Restarting meshtasticd...\n")
                 subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
                 subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "restart-rns":
                 subprocess.run(['clear'], check=False, timeout=5)
                 print("Restarting rnsd...\n")
                 subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
                 subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
             elif choice == "install":
                 self._install_native_meshtasticd()
             else:
@@ -2840,7 +2856,7 @@ WantedBy=multi-user.target
                 ['systemctl', 'status', service_name, '--no-pager', '-l'],
                 timeout=10
             )
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif action == "start":
             print(f"Starting {service_name}...\n")
@@ -2849,7 +2865,7 @@ WantedBy=multi-user.target
                 ['systemctl', 'status', service_name, '--no-pager', '-l'],
                 timeout=10
             )
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif action == "stop":
             if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
@@ -2857,7 +2873,7 @@ WantedBy=multi-user.target
                 print(f"Stopping {service_name}...\n")
                 subprocess.run(['systemctl', 'stop', service_name], timeout=30)
                 print(f"{service_name} stopped.")
-                input("\nPress Enter to continue...")
+                self._wait_for_enter()
 
         elif action == "restart":
             print(f"Restarting {service_name}...\n")
@@ -2866,7 +2882,7 @@ WantedBy=multi-user.target
                 ['systemctl', 'status', service_name, '--no-pager', '-l'],
                 timeout=10
             )
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
         elif action == "logs":
             print(f"=== {service_name} logs (last 30) ===\n")
@@ -2874,7 +2890,7 @@ WantedBy=multi-user.target
                 ['journalctl', '-u', service_name, '-n', '30', '--no-pager'],
                 timeout=15
             )
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
 
     def _hardware_menu(self):
         """Hardware detection and configuration menu."""
@@ -2946,7 +2962,7 @@ WantedBy=multi-user.target
         else:
             print("  (not found)")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _enable_spi(self):
         """Enable SPI interface for HAT-based radios."""
@@ -3187,8 +3203,12 @@ Made with aloha for the mesh community
 
 def main():
     """Main entry point."""
-    launcher = MeshForgeLauncher()
-    launcher.run()
+    try:
+        launcher = MeshForgeLauncher()
+        launcher.run()
+    except KeyboardInterrupt:
+        print("\n\nExiting MeshForge...")
+        sys.exit(0)
 
 
 if __name__ == '__main__':
