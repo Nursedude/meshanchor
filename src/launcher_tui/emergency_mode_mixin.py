@@ -101,7 +101,7 @@ class EmergencyModeMixin:
         except Exception as e:
             print(f"ERROR: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _emcomm_direct(self):
         """Send a direct message to a specific node."""
@@ -165,7 +165,7 @@ class EmergencyModeMixin:
         except Exception as e:
             print(f"ERROR: {e}")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     def _emcomm_status(self):
         """Show which nodes are currently online."""
@@ -186,7 +186,7 @@ class EmergencyModeMixin:
             print(f"ERROR: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _emcomm_messages(self):
         """Show recent messages from the mesh."""
@@ -224,7 +224,7 @@ class EmergencyModeMixin:
             print(f"  Error: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _emcomm_position(self):
         """Show current GPS position."""
@@ -244,7 +244,7 @@ class EmergencyModeMixin:
             print(f"ERROR: {e}")
 
         print()
-        input("Press Enter to continue...")
+        self._wait_for_enter("Press Enter to continue...")
 
     def _emcomm_sos_beacon(self):
         """Send repeating SOS beacon messages."""
@@ -308,4 +308,4 @@ class EmergencyModeMixin:
         except KeyboardInterrupt:
             print(f"\n\nSOS Beacon stopped after {count} transmission(s).")
 
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
