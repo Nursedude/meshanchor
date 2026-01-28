@@ -114,6 +114,7 @@ class MeshForgeLauncher(
         self.env = self._detect_environment()
         self._setup_status_bar()
         self._meshtastic_path = None  # Cached CLI path
+        self._bridge_log_path = None  # Path to active bridge log file
 
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
@@ -1094,6 +1095,69 @@ class MeshForgeLauncher(
 
         input("\nPress Enter to continue...")
 
+    @staticmethod
+    def _is_root_owned_rns_config(config_path: Path) -> bool:
+        """Check if the RNS config is in a root-only location (/root/)."""
+        try:
+            return str(config_path.resolve()).startswith('/root/')
+        except OSError:
+            return str(config_path).startswith('/root/')
+
+    def _migrate_rns_config_to_etc(self, source: Path) -> bool:
+        """Migrate RNS config from root-owned location to /etc/reticulum/config.
+
+        Copies the config to /etc/reticulum/config (system-wide, preferred location),
+        sets world-readable permissions, and renames the old file to avoid confusion.
+
+        Returns True if migration succeeded.
+        """
+        target = Path('/etc/reticulum/config')
+        if target.exists():
+            self.dialog.msgbox(
+                "Cannot Migrate",
+                f"Config already exists at:\n  {target}\n\n"
+                f"Remove it first if you want to migrate from:\n  {source}"
+            )
+            return False
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(source), str(target))
+            target.chmod(0o644)
+            # Rename old config so rnsd picks up the /etc/ one
+            backup = source.with_suffix('.migrated')
+            source.rename(backup)
+            return True
+        except (OSError, PermissionError) as e:
+            self.dialog.msgbox("Error", f"Failed to migrate config:\n{e}")
+            return False
+
+    def _deploy_rns_template(self) -> Optional[Path]:
+        """Deploy RNS template to /etc/reticulum/config (system-wide).
+
+        Returns the path where the config was deployed, or None on failure.
+        """
+        template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+        if not template.exists():
+            return None
+
+        # Always deploy to /etc/reticulum/ (system-wide, first in search order)
+        target = Path('/etc/reticulum/config')
+        if target.exists():
+            self.dialog.msgbox(
+                "Config Exists",
+                f"Config already exists at:\n  {target}\n\n"
+                f"Use 'Edit Reticulum Config' to modify it."
+            )
+            return None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(template), str(target))
+            target.chmod(0o644)  # World-readable so all users and rnsd can read it
+            return target
+        except (OSError, PermissionError) as e:
+            self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
+            return None
+
     def _view_rns_config(self):
         """View current Reticulum config."""
         subprocess.run(['clear'], check=False, timeout=5)
@@ -1102,7 +1166,13 @@ class MeshForgeLauncher(
         config_path = ReticulumPaths.get_config_file()
 
         if config_path.exists():
-            print(f"Config: {config_path}\n")
+            # Warn if config is in root-only location
+            if self._is_root_owned_rns_config(config_path):
+                print(f"Config: {config_path}")
+                print(f"  ** This config is in /root/ - not editable without sudo **")
+                print(f"  ** Use 'Edit Reticulum Config' to migrate to /etc/reticulum/ **\n")
+            else:
+                print(f"Config: {config_path}\n")
             try:
                 content = config_path.read_text()
                 print(content)
@@ -1120,12 +1190,12 @@ class MeshForgeLauncher(
             print(f"No Reticulum config found at: {config_path}")
             user_home = get_real_user_home()
             print(f"\nMeshForge checks (in order):")
-            print(f"  1. /etc/reticulum/config")
+            print(f"  1. /etc/reticulum/config  (system-wide, preferred)")
             print(f"  2. {user_home}/.config/reticulum/config")
             print(f"  3. {user_home}/.reticulum/config")
-            if str(user_home) != str(Path.home()):
-                print(f"\nNote: rnsd (running as root) uses: {Path.home()}/.reticulum/config")
-                print(f"  For shared use, place config in /etc/reticulum/config")
+            if os.geteuid() == 0 and os.environ.get('SUDO_USER'):
+                print(f"\nNote: rnsd (running as root) uses /root/.reticulum/config")
+                print(f"  For shared use, deploy to /etc/reticulum/config")
             print(f"\nTo create: use 'Edit Reticulum Config' to deploy template")
             print(f"Template:  templates/reticulum.conf")
 
@@ -1136,11 +1206,11 @@ class MeshForgeLauncher(
         config_path = ReticulumPaths.get_config_file()
 
         if not config_path.exists():
-            # Offer to deploy from template
+            # Offer to deploy from template to /etc/reticulum/config (system-wide)
             template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
-            target = config_path  # Deploy to where RNS will look
 
             if template.exists():
+                target = Path('/etc/reticulum/config')
                 if self.dialog.yesno(
                     "Deploy Reticulum Config",
                     f"No Reticulum config found.\n\n"
@@ -1151,12 +1221,10 @@ class MeshForgeLauncher(
                     f"  - Meshtastic_Interface on port 4403\n\n"
                     f"You can edit it after deployment."
                 ):
-                    try:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(template), str(target))
-                        print(f"\nDeployed: {target}")
-                    except (OSError, PermissionError) as e:
-                        self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
+                    deployed = self._deploy_rns_template()
+                    if deployed:
+                        config_path = deployed
+                    else:
                         return
                 else:  # User said No
                     return
@@ -1168,6 +1236,25 @@ class MeshForgeLauncher(
                     "Then run rnsd once to generate default config."
                 )
                 return
+
+        # If config is in /root/, offer to migrate to /etc/reticulum/
+        if self._is_root_owned_rns_config(config_path):
+            if self.dialog.yesno(
+                "Migrate Config",
+                f"Config is at:\n  {config_path}\n\n"
+                f"This location requires root access to edit.\n\n"
+                f"Migrate to /etc/reticulum/config?\n"
+                f"(System-wide location, accessible by rnsd and all users)"
+            ):
+                if self._migrate_rns_config_to_etc(config_path):
+                    config_path = Path('/etc/reticulum/config')
+                    self.dialog.msgbox(
+                        "Migrated",
+                        f"Config moved to: {config_path}\n\n"
+                        f"Restart rnsd to apply:\n"
+                        f"  sudo systemctl restart rnsd"
+                    )
+                # If migration failed, continue with original path
 
         # Find editor
         editor = None
@@ -1243,26 +1330,44 @@ class MeshForgeLauncher(
         if not config_path.exists():
             template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
             if template.exists():
+                target = Path('/etc/reticulum/config')
                 if self.dialog.yesno(
                     "RNS Not Configured",
-                    f"No Reticulum config found at:\n  {config_path}\n\n"
+                    f"No Reticulum config found.\n\n"
                     f"RNS tools (rnstatus, rnpath) and the gateway bridge\n"
                     f"require a config file to function.\n\n"
-                    f"Deploy the MeshForge template?\n"
+                    f"Deploy MeshForge template to:\n"
+                    f"  {target}\n\n"
                     f"(Sets up shared instance + Meshtastic bridge)"
                 ):
-                    try:
-                        config_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(template), str(config_path))
+                    deployed = self._deploy_rns_template()
+                    if deployed:
                         self.dialog.msgbox(
                             "Config Deployed",
-                            f"Deployed to: {config_path}\n\n"
+                            f"Deployed to: {deployed}\n\n"
                             f"Restart rnsd to apply:\n"
                             f"  sudo systemctl restart rnsd"
                         )
-                    except (OSError, PermissionError) as e:
-                        self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
+                        config_path = deployed
             return True  # Continue to menu either way
+
+        # Config exists - check if it's in a root-only location
+        if self._is_root_owned_rns_config(config_path):
+            if self.dialog.yesno(
+                "Config in /root/",
+                f"RNS config found at:\n  {config_path}\n\n"
+                f"This location requires root access to edit.\n\n"
+                f"Migrate to /etc/reticulum/config?\n"
+                f"(System-wide location, accessible by all users)"
+            ):
+                if self._migrate_rns_config_to_etc(config_path):
+                    config_path = Path('/etc/reticulum/config')
+                    self.dialog.msgbox(
+                        "Migrated",
+                        f"Config moved to: {config_path}\n\n"
+                        f"Restart rnsd to apply:\n"
+                        f"  sudo systemctl restart rnsd"
+                    )
 
         # Config exists - validate it
         try:
@@ -1275,7 +1380,12 @@ class MeshForgeLauncher(
                 msg += f"\nUse 'Edit Reticulum Config' to fix these issues."
                 self.dialog.msgbox("RNS Config Issues", msg)
         except PermissionError:
-            pass  # Can't read config, will fail naturally when tools run
+            self.dialog.msgbox(
+                "Permission Denied",
+                f"Cannot read config at:\n  {config_path}\n\n"
+                f"Run MeshForge with sudo to access this file,\n"
+                f"or use 'Edit Reticulum Config' to migrate it."
+            )
 
         return True
 
@@ -2092,6 +2202,7 @@ class MeshForgeLauncher(
                 suffix='.log', prefix='meshforge-gateway-'
             )
             log_path = Path(log_path_str)
+            self._bridge_log_path = log_path
             log_file = os.fdopen(log_fd, 'w')
             subprocess.Popen(
                 [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
@@ -2173,10 +2284,34 @@ class MeshForgeLauncher(
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to stop bridge:\n{e}")
 
+    def _find_bridge_log(self) -> Optional[Path]:
+        """Find the gateway bridge log file.
+
+        Checks the stored path from the current session first, then searches
+        /tmp for the most recent meshforge-gateway-*.log file.
+        """
+        if self._bridge_log_path and self._bridge_log_path.exists():
+            return self._bridge_log_path
+
+        # Search for most recent gateway log in /tmp
+        try:
+            logs = sorted(
+                Path('/tmp').glob('meshforge-gateway-*.log'),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+        except OSError:
+            logs = []
+        if logs:
+            self._bridge_log_path = logs[0]
+            return logs[0]
+
+        return None
+
     def _show_bridge_status(self):
         """Show gateway bridge log tail."""
-        log_path = Path('/tmp/meshforge-gateway.log')
-        if not log_path.exists():
+        log_path = self._find_bridge_log()
+        if not log_path:
             self.dialog.msgbox("No Logs", "No gateway log found.")
             return
 
@@ -2184,14 +2319,14 @@ class MeshForgeLauncher(
             lines = log_path.read_text().strip().split('\n')
             # Show last 30 lines
             tail = '\n'.join(lines[-30:])
-            self.dialog.msgbox("Bridge Status (last 30 lines)", tail)
+            self.dialog.msgbox(f"Bridge Status (last 30 lines)\n{log_path}", tail)
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to read log:\n{e}")
 
     def _show_bridge_logs(self):
         """Show full gateway bridge logs in less."""
-        log_path = Path('/tmp/meshforge-gateway.log')
-        if not log_path.exists():
+        log_path = self._find_bridge_log()
+        if not log_path:
             self.dialog.msgbox("No Logs", "No gateway log found.")
             return
 
