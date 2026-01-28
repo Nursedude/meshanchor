@@ -57,9 +57,33 @@ def check_service(name):
             ['systemctl', 'is-active', name],
             capture_output=True, text=True, timeout=5
         )
-        return result.stdout.strip()
+        status = result.stdout.strip()
+
+        # If meshforge systemd service isn't active, check for interactive process
+        if name == 'meshforge' and status != 'active':
+            if _is_meshforge_process_running():
+                return 'interactive'
+
+        return status
     except Exception:
         return 'unknown'
+
+
+def _is_meshforge_process_running():
+    """Check if MeshForge is running as an interactive process (not systemd)."""
+    try:
+        result = subprocess.run(
+            ['pgrep', '-af', 'python.*meshforge|python.*launcher'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            # Filter out this status script itself
+            for line in result.stdout.strip().split('\n'):
+                if line and 'status.py' not in line:
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 def check_port(port):
@@ -240,9 +264,11 @@ def print_status(brief=False, as_json=False):
     if brief:
         for name, info in services.items():
             status = info['status']
-            icon = '●' if status == 'active' else '○'
-            color = C.ok if status == 'active' else C.err
-            print(f"  {color(icon)} {name:<15} {status}")
+            is_up = status in ('active', 'interactive')
+            icon = '●' if is_up else '○'
+            color = C.ok if is_up else C.err
+            label = 'running' if is_up else status
+            print(f"  {color(icon)} {name:<15} {label}")
         return
 
     # Full output
@@ -257,6 +283,9 @@ def print_status(brief=False, as_json=False):
         if status == 'active':
             icon = C.ok('●')
             state = C.ok('running')
+        elif status == 'interactive':
+            icon = C.ok('●')
+            state = C.ok('running') + C.dim(' (interactive)')
         elif status == 'inactive':
             icon = C.dim('○')
             state = C.dim('stopped')
