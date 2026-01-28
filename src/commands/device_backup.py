@@ -141,6 +141,18 @@ def create_backup(
     }
 
     try:
+        # Find meshtastic CLI
+        try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+        except ImportError:
+            import shutil
+            cli_path = shutil.which('meshtastic')
+
+        if not cli_path:
+            result['error'] = "meshtastic CLI not found - install with: pipx install meshtastic[cli]"
+            return result
+
         # Determine connection args
         if connection.startswith('/dev/'):
             conn_args = ['--port', connection]
@@ -151,7 +163,7 @@ def create_backup(
 
         # Get device info first
         info_result = subprocess.run(
-            ['meshtastic'] + conn_args + ['--info'],
+            [cli_path] + conn_args + ['--info'],
             capture_output=True, text=True, timeout=30
         )
 
@@ -182,7 +194,7 @@ def create_backup(
 
         # Export full config
         export_result = subprocess.run(
-            ['meshtastic'] + conn_args + ['--export-config'],
+            [cli_path] + conn_args + ['--export-config'],
             capture_output=True, text=True, timeout=30
         )
 
@@ -320,6 +332,18 @@ def restore_backup(
                 result['restored_items'].append(f"Would restore: {len(backup.channels)} channel(s)")
             return result
 
+        # Find meshtastic CLI
+        try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+        except ImportError:
+            import shutil
+            cli_path = shutil.which('meshtastic')
+
+        if not cli_path:
+            result['error'] = "meshtastic CLI not found - install with: pipx install meshtastic[cli]"
+            return result
+
         # Determine connection args
         if connection.startswith('/dev/'):
             conn_args = ['--port', connection]
@@ -334,7 +358,7 @@ def restore_backup(
                 if 'url' in channel:
                     url = channel['url']
                     cmd_result = subprocess.run(
-                        ['meshtastic'] + conn_args + ['--seturl', url],
+                        [cli_path] + conn_args + ['--seturl', url],
                         capture_output=True, text=True, timeout=30
                     )
                     if cmd_result.returncode == 0:
@@ -349,7 +373,7 @@ def restore_backup(
 
             if long_name:
                 cmd_result = subprocess.run(
-                    ['meshtastic'] + conn_args + ['--set-owner', long_name],
+                    [cli_path] + conn_args + ['--set-owner', long_name],
                     capture_output=True, text=True, timeout=30
                 )
                 if cmd_result.returncode == 0:
@@ -357,7 +381,7 @@ def restore_backup(
 
             if short_name:
                 cmd_result = subprocess.run(
-                    ['meshtastic'] + conn_args + ['--set-owner-short', short_name],
+                    [cli_path] + conn_args + ['--set-owner-short', short_name],
                     capture_output=True, text=True, timeout=30
                 )
                 if cmd_result.returncode == 0:

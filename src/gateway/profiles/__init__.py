@@ -244,8 +244,23 @@ class ProfileManager:
                 'command': None
             }
 
+        # Find meshtastic CLI
+        try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+        except ImportError:
+            import shutil
+            cli_path = shutil.which('meshtastic')
+
+        if not cli_path:
+            return {
+                'success': False,
+                'message': "meshtastic CLI not found. Install with: pipx install meshtastic[cli]",
+                'command': None
+            }
+
         # Build command
-        cmd = ['meshtastic', '--configure', str(path)]
+        cmd = [cli_path, '--configure', str(path)]
 
         if port:
             cmd.extend(['--port', port])

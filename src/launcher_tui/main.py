@@ -123,7 +123,11 @@ class MeshForgeLauncher(
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
         if self._meshtastic_path is None:
-            self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
+            try:
+                from utils.cli import find_meshtastic_cli
+                self._meshtastic_path = find_meshtastic_cli() or 'meshtastic'
+            except ImportError:
+                self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
         return self._meshtastic_path
 
     @staticmethod
@@ -353,7 +357,7 @@ class MeshForgeLauncher(
         """Radio tools using meshtastic CLI directly."""
         while True:
             # Check if CLI is available and show install option if not
-            has_cli = shutil.which('meshtastic') is not None
+            has_cli = self._get_meshtastic_cli() != 'meshtastic'
 
             choices = []
             if not has_cli:
@@ -487,8 +491,8 @@ class MeshForgeLauncher(
             if result.returncode == 0:
                 # Clear cached path so it gets re-resolved
                 self._meshtastic_path = None
-                cli_path = shutil.which('meshtastic')
-                if cli_path:
+                cli_path = self._get_meshtastic_cli()
+                if cli_path and cli_path != 'meshtastic':
                     print(f"\n** meshtastic CLI installed: {cli_path} **")
                 else:
                     print("\n** meshtastic installed but not found in PATH **")

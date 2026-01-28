@@ -293,8 +293,14 @@ class MapDataCollector:
     def _collect_via_cli(self) -> List[Dict]:
         """Fall back to CLI parsing when Python TCP interface unavailable."""
         try:
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+            if not cli_path:
+                logger.debug("meshtastic CLI not found")
+                return []
+
             result = subprocess.run(
-                ['meshtastic', '--host', 'localhost', '--info'],
+                [cli_path, '--host', 'localhost', '--info'],
                 capture_output=True, text=True, timeout=15
             )
             if result.returncode != 0:

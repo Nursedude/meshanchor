@@ -666,8 +666,9 @@ class AIToolsMixin:
                 return []
 
             # Try to get node list via meshtastic CLI
+            cli_path = self._get_meshtastic_cli()
             result = subprocess.run(
-                ['meshtastic', '--host', 'localhost', '--info'],
+                [cli_path, '--host', 'localhost', '--info'],
                 capture_output=True, text=True, timeout=30
             )
 
