@@ -417,7 +417,8 @@ class MeshtasticPresetBridge:
 
             # Check for duplicate
             if self._is_duplicate(msg):
-                self.stats['duplicates_suppressed'] += 1
+                with self._stats_lock:
+                    self.stats['duplicates_suppressed'] += 1
                 return
 
             # Queue for forwarding
@@ -451,7 +452,8 @@ class MeshtasticPresetBridge:
             self._secondary_connected,
             "secondary"
         )
-        self.stats['messages_primary_to_secondary'] += 1
+        with self._stats_lock:
+            self.stats['messages_primary_to_secondary'] += 1
 
     def _forward_to_primary(self, msg: BridgedMeshMessage):
         """Forward message to primary interface"""
@@ -461,7 +463,8 @@ class MeshtasticPresetBridge:
             self._primary_connected,
             "primary"
         )
-        self.stats['messages_secondary_to_primary'] += 1
+        with self._stats_lock:
+            self.stats['messages_secondary_to_primary'] += 1
 
     def _forward_message(self, msg: BridgedMeshMessage, interface, connected: bool, dest_name: str):
         """Forward a message to the specified interface"""
@@ -490,7 +493,8 @@ class MeshtasticPresetBridge:
 
         except Exception as e:
             logger.error(f"Failed to forward to {dest_name}: {e}")
-            self.stats['errors'] += 1
+            with self._stats_lock:
+                self.stats['errors'] += 1
 
     def _notify_message(self, msg: BridgedMeshMessage):
         """Notify message callbacks"""
