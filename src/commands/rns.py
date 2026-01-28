@@ -649,7 +649,7 @@ def start_rnsd() -> CommandResult:
     except FileNotFoundError:
         return CommandResult.not_available(
             "rnsd not installed",
-            fix_hint="Install with: pip install rns"
+            fix_hint="Install with: pipx install rns"
         )
     except Exception as e:
         return CommandResult.fail(f"Start failed: {e}")
@@ -841,7 +841,7 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
     except ImportError:
         return CommandResult.not_available(
             "RNS not installed",
-            fix_hint="pip install rns"
+            fix_hint="pipx install rns"
         )
     except Exception as e:
         # Catch pyo3 PanicException and other RNS errors
@@ -933,7 +933,7 @@ def get_path_info(destination_hash: str) -> CommandResult:
     except ImportError:
         return CommandResult.not_available(
             "RNS not installed",
-            fix_hint="pip install rns"
+            fix_hint="pipx install rns"
         )
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
@@ -1204,7 +1204,7 @@ def list_known_destinations() -> CommandResult:
     except ImportError:
         return CommandResult.not_available(
             "RNS not installed",
-            fix_hint="pip install rns"
+            fix_hint="pipx install rns"
         )
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
@@ -1308,7 +1308,7 @@ def discover_nodes(timeout: int = 30) -> CommandResult:
     except ImportError:
         return CommandResult.not_available(
             "RNS not installed",
-            fix_hint="pip install rns"
+            fix_hint="pipx install rns"
         )
     except Exception as e:
         return CommandResult.fail(f"Discovery failed: {e}")

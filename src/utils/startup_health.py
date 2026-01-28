@@ -158,7 +158,7 @@ def check_rnsd() -> ServiceHealth:
             running=False,
             status_text="check failed",
             optional=True,
-            fix_hint="Install Reticulum: pip3 install rns"
+            fix_hint="Install Reticulum: pipx install rns"
         )
 
 
