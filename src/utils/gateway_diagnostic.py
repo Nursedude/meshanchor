@@ -668,17 +668,26 @@ class GatewayDiagnostic:
         if not failures:
             lines.append("\n✓ All critical checks passed!")
 
+            # Check if Meshtastic_Interface.py plugin is installed
+            plugin_path = ReticulumPaths.get_interfaces_dir() / "Meshtastic_Interface.py"
+            if not plugin_path.exists():
+                lines.append(f"\n⚠  Meshtastic_Interface.py plugin NOT installed")
+                lines.append(f"   Required for RNS over Meshtastic bridging")
+                lines.append(f"   Install from: github.com/landandair/RNS_Over_Meshtastic")
+                lines.append(f"   Copy to: {ReticulumPaths.get_interfaces_dir()}/")
+
             # Recommend connection type
+            config_path = ReticulumPaths.get_config_file()
             if conn_types['serial']:
                 lines.append(f"\n📻 Recommended: Use Serial connection")
                 lines.append(f"   Device: {conn_types['serial'][0]}")
-                lines.append(f"   Add to ~/.reticulum/config:")
+                lines.append(f"   Add to {config_path}:")
                 lines.append(f"   [[Meshtastic Interface]]")
                 lines.append(f"     type = Meshtastic_Interface")
                 lines.append(f"     port = {conn_types['serial'][0]}")
             elif conn_types['tcp']:
                 lines.append(f"\n📡 Recommended: Use TCP connection")
-                lines.append(f"   Add to ~/.reticulum/config:")
+                lines.append(f"   Add to {config_path}:")
                 lines.append(f"   [[Meshtastic Interface]]")
                 lines.append(f"     type = Meshtastic_Interface")
                 lines.append(f"     tcp_port = 127.0.0.1:4403")

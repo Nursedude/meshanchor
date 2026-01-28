@@ -2,25 +2,35 @@
 
 User-editable templates for Reticulum Network Stack configuration.
 
+**Do NOT overwrite existing configs** - these are starting points only.
+Copy to your config location and edit as needed.
+
 ## Quick Start
 
 1. Choose a template based on your role:
    - **Server**: `regional_server.conf` - Hosts the network
    - **Client**: `regional_client.conf` - Connects to a server
+   - **RNode only**: `basic_rnode.conf` - Simple LoRa setup
+   - **Meshtastic bridge**: `meshtastic_bridge.conf` - RNS + Meshtastic
 
 2. Copy to your Reticulum config directory:
    ```bash
+   # System-wide (preferred, used by rnsd service)
+   sudo cp regional_server.conf /etc/reticulum/config
+
+   # Or user-only
    cp regional_server.conf ~/.reticulum/config
    ```
 
 3. Edit with your settings:
    ```bash
-   nano ~/.reticulum/config
+   nano /etc/reticulum/config
    ```
 
 4. Start Reticulum:
    ```bash
-   rnsd
+   sudo systemctl restart rnsd
+   # or: rnsd
    ```
 
 ## Templates
@@ -32,10 +42,33 @@ User-editable templates for Reticulum Network Stack configuration.
 | `basic_rnode.conf` | Simple RNode-only setup |
 | `meshtastic_bridge.conf` | Bridge between RNS and Meshtastic |
 
-## Interface Types
+## All RNS Interface Types
 
-### TCPServerInterface
-Allows other nodes to connect to this machine over TCP/IP.
+### AutoInterface (zero-config LAN discovery)
+```
+[[Default Interface]]
+    type = AutoInterface
+    enabled = Yes
+    # devices = wlan0,eth0
+    # ignored_devices = tun0
+    # group_id = mynet
+    # discovery_scope = link
+```
+
+### Meshtastic_Interface (RNS over Meshtastic LoRa)
+Requires plugin: https://github.com/landandair/RNS_Over_Meshtastic
+```
+[[Meshtastic Interface]]
+    type = Meshtastic_Interface
+    enabled = true
+    mode = gateway
+    tcp_port = 127.0.0.1:4403
+    data_speed = 0
+    hop_limit = 3
+```
+Connection options: `port` (USB serial), `ble_port` (Bluetooth LE), `tcp_port` (meshtasticd)
+
+### TCPServerInterface (host entry point)
 ```
 [[My Server]]
     type = TCPServerInterface
@@ -44,8 +77,7 @@ Allows other nodes to connect to this machine over TCP/IP.
     listen_port = 4242
 ```
 
-### TCPClientInterface
-Connects to a remote TCPServerInterface.
+### TCPClientInterface (connect to remote)
 ```
 [[Remote Server]]
     type = TCPClientInterface
@@ -54,8 +86,16 @@ Connects to a remote TCPServerInterface.
     target_port = 4242
 ```
 
-### RNodeInterface
-Connects to an RNode device for LoRa communication.
+### BackboneInterface (high-performance, Linux only)
+```
+[[Backbone]]
+    type = BackboneInterface
+    enabled = yes
+    listen_ip = 0.0.0.0
+    listen_port = 4242
+```
+
+### RNodeInterface (direct LoRa)
 ```
 [[My RNode]]
     type = RNodeInterface
@@ -68,22 +108,63 @@ Connects to an RNode device for LoRa communication.
     codingrate = 5
 ```
 
+### SerialInterface (raw serial link)
+```
+[[Serial Link]]
+    type = SerialInterface
+    enabled = yes
+    port = /dev/ttyUSB0
+    speed = 115200
+    databits = 8
+    parity = none
+    stopbits = 1
+```
+
+### KISSInterface (packet radio TNC)
+```
+[[Packet Radio]]
+    type = KISSInterface
+    enabled = yes
+    port = /dev/ttyUSB1
+    speed = 9600
+```
+
+### UDPInterface (broadcast over IP)
+```
+[[UDP Broadcast]]
+    type = UDPInterface
+    enabled = yes
+    listen_ip = 0.0.0.0
+    listen_port = 4966
+    forward_ip = 255.255.255.255
+    forward_port = 4966
+```
+
+### I2PInterface (anonymous overlay)
+```
+[[I2P]]
+    type = I2PInterface
+    enabled = yes
+    peers = destination.b32.i2p
+```
+
+## Public RNS Community Nodes
+
+| Host | Port | Region |
+|------|------|--------|
+| dublin.connect.reticulum.network | 4965 | Ireland (official testnet) |
+| reticulum.betweentheborders.com | 4242 | USA |
+| rns.acehoss.net | 4242 | USA |
+| sydney.reticulum.au | 4242 | Australia |
+
 ## US Frequency Slots (902-928 MHz)
 
 | Slot | Frequency (MHz) | Notes |
 |------|-----------------|-------|
 | 0 | 903.875 | Default |
-| 1 | 903.875 | Same as 0 |
 | 2 | 906.125 | |
-| 3 | 908.375 | |
-| 4 | 910.625 | |
-| 5 | 912.875 | |
 | 6 | 915.125 | |
-| 7 | 917.375 | |
 | 8 | 919.625 | |
-| 9 | 921.875 | |
-| 10 | 924.125 | |
-| 11 | 926.375 | |
 | 12 | 903.625 | Regional |
 
 ## Modulation Presets
@@ -100,30 +181,26 @@ Connects to an RNode device for LoRa communication.
 
 ### RNode not detected
 ```bash
-# Check USB connection
 ls -la /dev/ttyACM* /dev/ttyUSB*
-
-# Check permissions
 sudo usermod -a -G dialout $USER
-# Then logout and login
+# logout and login
 ```
 
 ### Can't connect to server
 ```bash
-# Test TCP connection
 nc -zv 192.168.86.38 4242
-
-# Check firewall
 sudo ufw allow 4242/tcp
 ```
 
 ### No LoRa traffic
-- Verify both nodes use same frequency
+- Verify both nodes use same frequency, SF, BW, CR
 - Check antenna connections
 - Reduce TX power if very close (< 10m)
 
 ## See Also
 
-- [Reticulum Manual](https://markqvist.github.io/Reticulum/manual/)
-- [RNode Documentation](https://unsigned.io/rnode/)
-- [MeshForge Gateway Guide](https://github.com/Nursedude/meshforge)
+- [Reticulum Manual](https://reticulum.network/manual/)
+- [RNS Interfaces](https://reticulum.network/manual/interfaces.html)
+- [NomadNet](https://github.com/markqvist/nomadnet) - Terminal mesh messenger
+- [RNS Over Meshtastic](https://github.com/landandair/RNS_Over_Meshtastic) - Meshtastic plugin
+- [MeshForge](https://github.com/Nursedude/meshforge) - NOC for mesh networks

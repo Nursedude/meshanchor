@@ -128,7 +128,7 @@ Where `~` = effective user's home (NOT real user when sudo).
 - Without transport: node only communicates directly
 
 ### Meshtastic_Interface Plugin
-- Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- Source: https://github.com/landandair/RNS_Over_Meshtastic
 - Install: Copy `Meshtastic_Interface.py` to `~/.reticulum/interfaces/`
 - Connection methods: serial (port), BLE (ble_port), TCP (tcp_port)
 - `data_speed` presets: 0=LONG_FAST, 6=SHORT_FAST, 8=SHORT_TURBO (recommended)
@@ -166,10 +166,14 @@ Where `~` = effective user's home (NOT real user when sudo).
 3. **Restart rnsd**: `sudo systemctl restart rnsd`
 4. **Verify**: `rnstatus` should show interfaces and shared instance
 
-### Code Improvements (Future)
-- TUI could check for Meshtastic_Interface plugin in `_check_rns_setup()`
-- Setup wizard could offer full RNS setup (install, config, plugin, service)
-- Bridge could validate RNS config before starting
+### Code Improvements
+- [x] TUI checks for Meshtastic_Interface plugin in `_check_rns_setup()` (2026-01-28)
+- [x] TUI offers to install plugin from GitHub via `_install_meshtastic_interface_plugin()` (2026-01-28)
+- [x] Config validation checks for plugin file when Meshtastic_Interface is configured (2026-01-28)
+- [x] Diagnostics engine uses correct plugin path (`interfaces/` subdir) (2026-01-28)
+- [x] `create_default_config()` includes Meshtastic_Interface (2026-01-28)
+- [x] `MeshtasticInterfaceConfig` dataclass added to config generator (2026-01-28)
+- [ ] Bridge could validate RNS config before starting
 
 ---
 

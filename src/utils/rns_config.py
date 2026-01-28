@@ -100,9 +100,9 @@ def validate_interface_section(section: str) -> Tuple[bool, List[str]]:
         iface_type = type_match.group(1)
         valid_types = [
             'AutoInterface', 'TCPServerInterface', 'TCPClientInterface',
-            'UDPInterface', 'RNodeInterface', 'SerialInterface',
-            'KISSInterface', 'AX25KISSInterface', 'I2PInterface',
-            'Meshtastic_Interface', 'PipeInterface'
+            'BackboneInterface', 'UDPInterface', 'RNodeInterface',
+            'SerialInterface', 'KISSInterface', 'AX25KISSInterface',
+            'I2PInterface', 'Meshtastic_Interface', 'PipeInterface'
         ]
         if iface_type not in valid_types:
             errors.append(f"Unknown interface type: {iface_type}")
