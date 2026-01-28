@@ -69,6 +69,10 @@ class MockLauncher(EmergencyModeMixin):
     def __init__(self):
         self.dialog = MockDialog()
 
+    @staticmethod
+    def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
+        pass
+
 
 class TestEmergencyModeMenu:
     """Test emergency mode menu structure."""

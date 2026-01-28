@@ -70,14 +70,14 @@ class RNSInterfacesMixin:
 
         result = self._rns_cmd_list_interfaces()
         if result is None:
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         interfaces = result.data.get('interfaces', [])
         if not interfaces:
             print("No interfaces found in the Reticulum config.\n")
             print("Use 'Add Interface from Template' to create one.")
-            input("\nPress Enter to continue...")
+            self._wait_for_enter()
             return
 
         for idx, iface in enumerate(interfaces, 1):
@@ -96,7 +96,7 @@ class RNSInterfacesMixin:
             print()
 
         print(f"Total: {len(interfaces)} interface(s)")
-        input("\nPress Enter to continue...")
+        self._wait_for_enter()
 
     # ------------------------------------------------------------------
     # Add interface (template-based)
