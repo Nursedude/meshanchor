@@ -358,8 +358,9 @@ Press Cancel to keep current values."""
         except ImportError:
             # Fallback: direct subprocess call
             try:
+                cli_path = self._get_meshtastic_cli()
                 result = subprocess.run(
-                    ['meshtastic', '--host', 'localhost:4403',
+                    [cli_path, '--host', 'localhost:4403',
                      '--set', 'lora.modem_preset', preset],
                     capture_output=True, text=True, timeout=30
                 )
@@ -369,7 +370,7 @@ Press Cancel to keep current values."""
                     return
 
                 subprocess.run(
-                    ['meshtastic', '--host', 'localhost:4403',
+                    [cli_path, '--host', 'localhost:4403',
                      '--set', 'lora.channel_num', str(freq_slot)],
                     capture_output=True, text=True, timeout=30
                 )

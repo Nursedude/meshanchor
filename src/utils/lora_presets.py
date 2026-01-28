@@ -477,12 +477,14 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
     except Exception as e:
         log_attempt("meshtasticd systemd service", False, str(e))
 
-    # Check if meshtastic CLI is available
-    meshtastic_cli_available = True
+    # Check if meshtastic CLI is available using centralized finder
     try:
-        subprocess.run(['which', 'meshtastic'], capture_output=True, timeout=5)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        meshtastic_cli_available = False
+        from utils.cli import find_meshtastic_cli as _find_cli
+        _meshtastic_cli_path = _find_cli()
+    except ImportError:
+        import shutil
+        _meshtastic_cli_path = shutil.which('meshtastic')
+    meshtastic_cli_available = _meshtastic_cli_path is not None
 
     def run_meshtastic_cmd(args: list, timeout: int = 10) -> tuple:
         """Run meshtastic CLI with detailed error handling.
@@ -495,7 +497,7 @@ def detect_meshtastic_settings(verbose: bool = False) -> Optional[Dict]:
 
         try:
             result = subprocess.run(
-                ['meshtastic'] + args,
+                [_meshtastic_cli_path] + args,
                 capture_output=True,
                 text=True,
                 timeout=timeout

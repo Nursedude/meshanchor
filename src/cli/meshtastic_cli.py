@@ -261,7 +261,8 @@ class MeshtasticCLI:
         console.print("\n[bold cyan]Meshtastic CLI Help[/bold cyan]\n")
         # Run without connection args for help
         try:
-            result = subprocess.run(["meshtastic", "-h"], capture_output=True, text=True, timeout=15)
+            cli_path = self._cli_path or 'meshtastic'
+            result = subprocess.run([cli_path, "-h"], capture_output=True, text=True, timeout=15)
             console.print(result.stdout)
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")

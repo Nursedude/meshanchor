@@ -110,12 +110,25 @@ def get_local_ip():
         return "localhost"
 
 
+def _find_cli():
+    """Find meshtastic CLI path using centralized resolver."""
+    try:
+        from utils.cli import find_meshtastic_cli
+        return find_meshtastic_cli()
+    except ImportError:
+        import shutil
+        return shutil.which('meshtastic')
+
+
 def get_radio_info():
     """Get meshtastic radio info via CLI."""
     info = {}
     try:
+        cli_path = _find_cli()
+        if not cli_path:
+            return info
         result = subprocess.run(
-            ['meshtastic', '--info'],
+            [cli_path, '--info'],
             capture_output=True, text=True, timeout=15
         )
         if result.returncode == 0:
@@ -140,8 +153,11 @@ def get_radio_info():
 def get_node_count():
     """Get number of known nodes."""
     try:
+        cli_path = _find_cli()
+        if not cli_path:
+            return None
         result = subprocess.run(
-            ['meshtastic', '--nodes'],
+            [cli_path, '--nodes'],
             capture_output=True, text=True, timeout=15
         )
         if result.returncode == 0:

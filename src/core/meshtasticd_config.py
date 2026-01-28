@@ -393,7 +393,11 @@ General:
 
     def is_python_cli_installed(self) -> bool:
         """Check if Python meshtastic CLI is installed."""
-        return shutil.which("meshtastic") is not None
+        try:
+            from utils.cli import find_meshtastic_cli
+            return find_meshtastic_cli() is not None
+        except ImportError:
+            return shutil.which("meshtastic") is not None
 
     def get_native_deb_url(self, arch: str = "arm64") -> str:
         """

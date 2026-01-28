@@ -322,7 +322,14 @@ class RadioConfigurator:
         console.print(f"\n[cyan]Setting position to {lat}, {lon}...[/cyan]")
 
         try:
-            cmd = ['meshtastic', '--host', host, '--setlat', str(lat), '--setlon', str(lon)]
+            from utils.cli import find_meshtastic_cli
+            cli_path = find_meshtastic_cli()
+            if not cli_path:
+                console.print("[red]meshtastic CLI not found[/red]")
+                console.print("[dim]Install with: pipx install meshtastic[cli][/dim]")
+                return False
+
+            cmd = [cli_path, '--host', host, '--setlat', str(lat), '--setlon', str(lon)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
@@ -335,7 +342,7 @@ class RadioConfigurator:
 
         except FileNotFoundError:
             console.print("[red]meshtastic CLI not found[/red]")
-            console.print("[dim]Install with: pip install meshtastic[/dim]")
+            console.print("[dim]Install with: pipx install meshtastic[cli][/dim]")
             return False
         except subprocess.TimeoutExpired:
             console.print("[red]Command timed out[/red]")
