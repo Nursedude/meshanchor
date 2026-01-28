@@ -80,7 +80,7 @@ class ServiceDiscoveryMixin:
         mesh_status = check_service('meshtasticd')
         services.append(DiscoveredService(
             name="meshtasticd",
-            status="running" if mesh_status.running else "stopped",
+            status="running" if mesh_status.available else "stopped",
             address="localhost:4403",
             service_type="meshtastic",
             details=mesh_status.message or ""
@@ -90,7 +90,7 @@ class ServiceDiscoveryMixin:
         rns_status = check_service('rnsd')
         services.append(DiscoveredService(
             name="rnsd",
-            status="running" if rns_status.running else "stopped",
+            status="running" if rns_status.available else "stopped",
             address="UDP 37428",
             service_type="rns",
             details=rns_status.message or ""
@@ -100,7 +100,7 @@ class ServiceDiscoveryMixin:
         hc_status = check_service('hamclock')
         services.append(DiscoveredService(
             name="HamClock",
-            status="running" if hc_status.running else "stopped",
+            status="running" if hc_status.available else "stopped",
             address="localhost:8080",
             service_type="hamclock",
             details=hc_status.message or ""
@@ -271,17 +271,36 @@ class ServiceDiscoveryMixin:
         lines = ["MeshForge Service Status\n"]
         lines.append("=" * 40)
 
+        warnings = []
         for svc_id, svc_name in services:
             status = check_service(svc_id)
-            icon = "✓" if status.running else "✗"
-            state = "Running" if status.running else "Stopped"
+            icon = "✓" if status.available else "✗"
+            state = "running" if status.available else "stopped"
             lines.append(f"\n{icon} {svc_name}")
             lines.append(f"  Status: {state}")
+
+            # Check boot persistence for running services
+            if status.available:
+                try:
+                    from utils.service_check import check_systemd_service
+                    _, is_enabled = check_systemd_service(svc_id)
+                    if not is_enabled:
+                        lines.append(f"  Boot: not enabled (won't start on reboot)")
+                        warnings.append(svc_id)
+                    else:
+                        lines.append(f"  Boot: enabled")
+                except ImportError:
+                    pass
+
             if status.message:
                 lines.append(f"  Info: {status.message}")
 
-        # Add quick actions hint
-        lines.append("\n" + "-" * 40)
+        if warnings:
+            lines.append("\n" + "-" * 40)
+            lines.append(f"Fix: sudo systemctl enable {' '.join(warnings)}")
+        else:
+            lines.append("\n" + "-" * 40)
+
         lines.append("Use Service Manager to start/stop services")
 
         self.dialog.msgbox("Service Status", "\n".join(lines))

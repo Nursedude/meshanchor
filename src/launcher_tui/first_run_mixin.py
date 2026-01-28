@@ -283,7 +283,7 @@ class FirstRunMixin:
             status = check_service(svc_id)
             if status.available:
                 lines.append(f"\n✓ {svc_name}")
-                lines.append(f"  Status: Running")
+                lines.append(f"  Status: running")
             else:
                 all_running = False
                 lines.append(f"\n✗ {svc_name}")
