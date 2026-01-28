@@ -24,21 +24,47 @@
 
 ---
 
-## The Elevator Speech
+## What is MeshForge?
 
-**MeshForge turns a Raspberry Pi into a mesh network operations center.** Plug in a LoRa radio, run the installer, and you have a gateway that bridges Meshtastic and Reticulum networks — with AREDN monitoring, coverage maps, RF engineering tools, and AI-powered diagnostics built in.
+**MeshForge turns a Raspberry Pi into a mesh network operations center.**
 
-It's the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport) while providing unified monitoring across mesh ecosystems. SSH in from anywhere, manage your radios, monitor your network, and troubleshoot issues — all from one terminal.
+Plug in a LoRa radio, run the installer, and you get:
+- A **gateway** bridging Meshtastic and Reticulum networks
+- **Coverage maps** with SNR-based link quality
+- **RF engineering tools** for site planning
+- **AI diagnostics** that work offline
 
-```
+It's the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport). SSH in from anywhere and manage everything from one terminal.
+
+```bash
 sudo python3 src/launcher_tui/main.py
 ```
 
-**Who it's for:** HAM operators, emergency communications teams, off-grid network builders, mesh enthusiasts who want a NOC without the enterprise price tag.
+**Built for:** HAM operators, emergency comms teams, off-grid builders, and mesh enthusiasts.
 
 ---
 
-## What Works Today (v0.4.7-beta)
+## Quick Start
+
+```bash
+git clone https://github.com/Nursedude/meshforge.git
+cd meshforge
+sudo bash scripts/install_noc.sh    # Full install
+```
+
+Or if you already have meshtasticd:
+```bash
+sudo python3 src/launcher_tui/main.py
+```
+
+RF tools only (no sudo, no radio):
+```bash
+python3 src/standalone.py
+```
+
+---
+
+## What Works (v0.4.7-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
@@ -51,22 +77,18 @@ sudo python3 src/launcher_tui/main.py
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Working (requires API key) |
 | **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Working |
 | **AREDN** | Node discovery, link quality, service enumeration | Working |
-| **GTK4 Desktop** | 14-panel GUI (exists, not actively developed) | Frozen |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
-### What's Planned (Not Yet Built)
+### Roadmap
 
-| Capability | Goal |
-|-----------|------|
-| Packet decode | Meshtastic protobuf + RNS frame analysis |
-| Traffic logging | MQTT tap, message flow recording |
-| SDR spectrum | RTL-SDR integration, 915MHz band scanning |
-| GPS tracking | Node position history, GPX/KML export |
-| Signal analysis | SNR/RSSI trending over time |
-| Multi-hop trace | Visualize routing paths across mesh |
-| Anomaly detection | Rogue node alerts, unusual traffic patterns |
+| Feature | Status |
+|---------|--------|
+| Packet decode (protobuf + RNS frames) | Planned |
+| SDR spectrum analysis (RTL-SDR) | Planned |
+| GPS tracking + GPX export | Planned |
+| Multi-hop path visualization | Planned |
 
-*The goal is Wireshark-grade visibility into mesh traffic. We're not there yet.*
+*Goal: Wireshark-grade visibility into mesh traffic.*
 
 ---
 
@@ -211,42 +233,18 @@ Auto-detection, GPIO power control, and meshtasticd config generation are implem
 
 ---
 
-## Hardware Requirements
+## Hardware
 
-| Component | Recommended | Minimum |
-|-----------|-------------|---------|
-| **Computer** | Raspberry Pi 4/5 (4GB) | Pi 3B+ or Pi Zero 2W |
-| **OS** | Raspberry Pi OS Bookworm (64-bit) | Debian 12+, Ubuntu 22.04+ |
-| **Radio (SPI)** | Meshtoad, MeshAdv-Pi-Hat | Any SX1262/SX1276 SPI HAT |
-| **Radio (USB)** | Heltec V3, T-Beam, RAK4631 | Any Meshtastic USB device |
-| **SDR (optional)** | RTL-SDR Blog V4 | Any RTL2832U dongle |
+**Minimum:** Raspberry Pi 3B+ or Pi Zero 2W + any Meshtastic radio
 
-**Minimal node**: Pi 4 ($55) + SPI HAT ($35) = **$90**
+| Component | Options |
+|-----------|---------|
+| **Computer** | Raspberry Pi 4/5 (recommended), Pi 3B+, Pi Zero 2W |
+| **OS** | Raspberry Pi OS Bookworm 64-bit, Debian 12+, Ubuntu 22.04+ |
+| **Radio (SPI)** | Meshtoad, MeshAdv-Pi-Hat, Waveshare SX1262 |
+| **Radio (USB)** | Heltec V3, T-Beam, RAK4631 |
 
----
-
-## Install
-
-```bash
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge
-
-# Full install (meshtasticd + MeshForge + dependencies)
-sudo bash scripts/install_noc.sh
-
-# Or launch directly (if meshtasticd already installed)
-sudo python3 src/launcher_tui/main.py
-
-# RF tools only (no sudo, no radio needed)
-python3 src/standalone.py
-```
-
-### Port Map
-
-| Port | Service | Protocol |
-|------|---------|----------|
-| **4403** | meshtasticd TCP API | Protobuf (gateway bridge connects here) |
-| **9443** | meshtasticd Web UI | HTTPS (browser access) |
+**Cost:** ~$90 (Pi 4 + SPI HAT)
 
 ---
 
@@ -280,9 +278,6 @@ src/
 │   ├── main.py            # NOC dispatcher + menus
 │   ├── backend.py         # whiptail/dialog abstraction
 │   └── *_mixin.py         # Feature modules (RF, channels, AI, system)
-├── gtk_ui/                # GTK4 desktop (frozen, not actively developed)
-│   ├── app.py             # Main window (14 panels)
-│   └── panels/            # Map, diagnostics, radio, tools...
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -328,28 +323,38 @@ Auto-deploys a working config from `templates/reticulum.conf`:
 - Meshtastic Interface on `127.0.0.1:4403`
 - RNode LoRa (optional, for dedicated RNS radio)
 
+### Ports
+
+| Port | Service |
+|------|---------|
+| 4403 | meshtasticd TCP API |
+| 9443 | meshtasticd Web UI |
+
 ---
 
 ## Contributing
 
 ```bash
-# Run all 1302 tests
-python3 -m pytest tests/ -v
-
-# Security linter (MF001-MF004)
-python3 scripts/lint.py --all
-
-# Quick syntax check
-python3 -m py_compile src/launcher_tui/main.py
+python3 -m pytest tests/ -v      # Run tests
+python3 scripts/lint.py --all    # Security linter
 ```
 
-**Code rules:**
-- `get_real_user_home()` not `Path.home()` — works under sudo (MF001)
-- No `shell=True` in subprocess — no command injection (MF002)
-- Explicit exception types — no bare `except:` (MF003)
-- Timeouts on all subprocess calls (MF004)
+**Code rules:** No `shell=True`, no bare `except:`, use `get_real_user_home()` not `Path.home()`.
 
-See [CLAUDE.md](CLAUDE.md) for complete development guide.
+See [CLAUDE.md](CLAUDE.md) for details.
+
+---
+
+## Branches
+
+| Branch | Purpose | Stability |
+|--------|---------|-----------|
+| `main` | Gateway bridge, production features | Stable |
+| `alpha` | Map development, experimental | Testing |
+
+```bash
+git checkout alpha    # Switch to experimental
+```
 
 ---
 
