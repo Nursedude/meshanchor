@@ -89,28 +89,28 @@ class SetupWizard:
             'display': 'Reticulum Network Stack',
             'check_cmd': ['rnsd', '--version'],
             'systemd': 'rnsd.service',
-            'install_hint': 'pip install rns',
+            'install_hint': 'pipx install rns',
         },
         {
             'name': 'nomadnet',
             'display': 'NomadNet',
             'check_cmd': ['nomadnet', '--version'],
             'systemd': None,
-            'install_hint': 'pip install nomadnet',
+            'install_hint': 'pipx install nomadnet',
         },
         {
             'name': 'meshchat',
             'display': 'MeshChat',
             'check_cmd': ['meshchat', '--version'],
             'systemd': None,
-            'install_hint': 'pip install meshchat',
+            'install_hint': 'pipx install meshchat',
         },
         {
             'name': 'lxmf',
             'display': 'LXMF (messaging)',
             'check_cmd': ['lxmd', '--version'],
             'systemd': None,
-            'install_hint': 'pip install lxmf',
+            'install_hint': 'pipx install lxmf',
         },
     ]
 

@@ -12,7 +12,7 @@ mode to serve pages and propagate LXMF messages.
 Config directory resolution (mirrors NomadNet upstream):
   /etc/nomadnetwork  ->  ~/.config/nomadnetwork  ->  ~/.nomadnetwork
 
-Requires:  pip install nomadnet   (pulls in rns + lxmf automatically)
+Requires:  pipx install nomadnet   (pulls in rns + lxmf automatically)
 """
 
 import os
@@ -114,7 +114,7 @@ class NomadNetClientMixin:
         # Installation
         nn_path = shutil.which('nomadnet')
         if not nn_path:
-            # Check user local bin (pip install --user)
+            # Check user local bin (pipx / pip install --user)
             user_home = get_real_user_home()
             candidate = user_home / '.local' / 'bin' / 'nomadnet'
             if candidate.exists():
@@ -135,7 +135,7 @@ class NomadNetClientMixin:
                 pass
         else:
             print("  NOT INSTALLED")
-            print("  Install:   pip install nomadnet")
+            print("  Install:   pipx install nomadnet")
             print("             (installs rns + lxmf automatically)")
 
         # Process
@@ -456,7 +456,7 @@ class NomadNetClientMixin:
     # ------------------------------------------------------------------
 
     def _install_nomadnet(self):
-        """Install NomadNet via pip."""
+        """Install NomadNet via pipx (isolated environment)."""
         if self._is_nomadnet_installed():
             self.dialog.msgbox("Already Installed", "NomadNet is already installed.")
             return
@@ -465,7 +465,7 @@ class NomadNetClientMixin:
             "Install NomadNet",
             "Install NomadNet RNS client?\n\n"
             "This will run:\n"
-            "  pip install nomadnet\n\n"
+            "  pipx install nomadnet\n\n"
             "NomadNet pulls in RNS and LXMF automatically.\n\n"
             "It provides:\n"
             "  - Text UI with micron page browser\n"
@@ -479,11 +479,38 @@ class NomadNetClientMixin:
 
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Installing NomadNet ===\n")
-        print("Running: pip install nomadnet\n")
 
         try:
+            # Ensure pipx is available
+            if not shutil.which('pipx'):
+                print("Installing pipx...\n")
+                result = subprocess.run(
+                    ['apt-get', 'install', '-y', 'pipx'],
+                    timeout=60
+                )
+                if result.returncode != 0:
+                    print("\nFailed to install pipx.")
+                    print("Try manually: sudo apt install pipx")
+                    input("\nPress Enter to continue...")
+                    return
+
+            # Ensure pipx bin dir is in PATH for this session
+            print("Ensuring pipx paths...\n")
+            subprocess.run(['pipx', 'ensurepath'], timeout=15)
+
+            # Add common pipx bin dirs to current process PATH
+            for bindir in [
+                get_real_user_home() / '.local' / 'bin',
+                Path('/root/.local/bin'),
+                Path('/usr/local/bin'),
+            ]:
+                if bindir.is_dir() and str(bindir) not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = f"{bindir}:{os.environ.get('PATH', '')}"
+
+            # Install nomadnet via pipx (live output)
+            print("\nInstalling NomadNet via pipx...\n")
             result = subprocess.run(
-                ['pip', 'install', 'nomadnet'],
+                ['pipx', 'install', 'nomadnet'],
                 timeout=300
             )
 
@@ -493,27 +520,28 @@ class NomadNetClientMixin:
                     nn_path = shutil.which('nomadnet')
                     print(f"NomadNet installed at: {nn_path}")
                 else:
-                    # Try pipx as fallback hint
                     print("\nnomadnet not found in PATH.")
-                    print("You may need to:")
-                    print("  - Restart your shell, or")
-                    print("  - Use: pipx install nomadnet")
+                    print("You may need to log out and back in,")
+                    print("or run: eval \"$(pipx ensurepath)\"")
             else:
                 print(f"\nInstallation failed (exit code {result.returncode}).")
-                print("\nAlternatives:")
-                print("  pip install --user nomadnet")
-                print("  pipx install nomadnet")
-                print("  pip3 install nomadnet")
+                print("Try manually: pipx install nomadnet")
         except FileNotFoundError:
-            print("pip not found. Try:")
-            print("  sudo apt install python3-pip")
-            print("  pip3 install nomadnet")
+            print("pipx not found.")
+            print("Try: sudo apt install pipx && pipx install nomadnet")
+        except KeyboardInterrupt:
+            print("\n\nInstallation cancelled.")
         except subprocess.TimeoutExpired:
             print("\nInstallation timed out. Check your internet connection.")
+            print("Try manually: pipx install nomadnet")
         except Exception as e:
             print(f"\nInstallation error: {e}")
+            print("Try manually: pipx install nomadnet")
 
-        input("\nPress Enter to continue...")
+        try:
+            input("\nPress Enter to continue...")
+        except (EOFError, KeyboardInterrupt):
+            pass
 
     # ------------------------------------------------------------------
     # Helpers
@@ -557,7 +585,7 @@ class NomadNetClientMixin:
             self.dialog.msgbox(
                 "Not Installed",
                 "NomadNet is not installed.\n\n"
-                "Install with: pip install nomadnet\n"
+                "Install with: pipx install nomadnet\n"
                 "Or use the Install option from this menu.",
             )
             return None

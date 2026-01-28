@@ -115,7 +115,7 @@ class ServiceOrchestrator:
             # rnstatus -s fails on fresh installs before interfaces are configured.
             startup_delay=3,
             required=True,
-            install_command=['pip3', 'install', 'rns'],
+            install_command=['pipx', 'install', 'rns'],
             dependencies=['meshtasticd'],  # Start after meshtasticd
         ),
         'mosquitto': ServiceConfig(
@@ -624,7 +624,7 @@ class ServiceOrchestrator:
         """Get actionable install command for a missing service."""
         hints = {
             'meshtasticd': 'sudo apt install meshtasticd (add repo first: see meshforge docs)',
-            'rnsd': 'pip3 install rns && sudo systemctl enable rnsd',
+            'rnsd': 'pipx install rns && sudo systemctl enable rnsd',
             'mosquitto': 'sudo apt install mosquitto',
         }
         return hints.get(service_name, f'Install {service_name}')

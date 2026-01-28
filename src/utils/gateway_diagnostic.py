@@ -247,7 +247,7 @@ class GatewayDiagnostic:
                 name="RNS Installation",
                 status=CheckStatus.FAIL,
                 message="RNS not installed",
-                fix_hint="pip3 install --user rns"
+                fix_hint="pipx install rns"
             )
         except (SystemExit, KeyboardInterrupt, GeneratorExit):
             raise
@@ -257,7 +257,7 @@ class GatewayDiagnostic:
                 name="RNS Installation",
                 status=CheckStatus.WARN,
                 message=f"RNS installed but error: {e}",
-                fix_hint="Try: pip3 install --user --upgrade rns cffi"
+                fix_hint="Try: pipx install rns  (or pipx upgrade rns)"
             )
 
     def check_rns_config(self) -> CheckResult:

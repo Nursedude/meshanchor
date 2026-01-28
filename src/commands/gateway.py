@@ -579,7 +579,7 @@ def check_prerequisites() -> CommandResult:
         import RNS
         checks['rns_package'] = True
     except ImportError:
-        issues.append("RNS package not installed (pip install rns)")
+        issues.append("RNS package not installed (pipx install rns)")
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
