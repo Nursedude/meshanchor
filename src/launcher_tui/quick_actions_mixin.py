@@ -74,6 +74,7 @@ class QuickActionsMixin:
         print("=== Quick Service Status ===\n")
 
         services = ['meshtasticd', 'rnsd', 'mosquitto', 'meshforge']
+        warnings = []
         for svc in services:
             try:
                 result = subprocess.run(
@@ -81,8 +82,25 @@ class QuickActionsMixin:
                     capture_output=True, text=True, timeout=5
                 )
                 status = result.stdout.strip()
+
+                # Check boot persistence
+                boot_info = ""
+                try:
+                    enabled_result = subprocess.run(
+                        ['systemctl', 'is-enabled', svc],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    is_enabled = enabled_result.returncode == 0
+                    if status == 'active' and not is_enabled:
+                        boot_info = "  (not enabled at boot)"
+                        warnings.append(svc)
+                    elif status == 'active' and is_enabled:
+                        boot_info = ""
+                except Exception:
+                    pass
+
                 if status == 'active':
-                    print(f"  * {svc:<18} running")
+                    print(f"  * {svc:<18} running{boot_info}")
                 elif status == 'failed':
                     print(f"  ! {svc:<18} FAILED")
                 else:
@@ -90,7 +108,7 @@ class QuickActionsMixin:
             except Exception:
                 print(f"  ? {svc:<18} unknown")
 
-        # Bridge process
+        # Bridge process (not a systemd service — no boot persistence check)
         try:
             result = subprocess.run(
                 ['pgrep', '-f', 'rns_bridge'],
@@ -101,6 +119,11 @@ class QuickActionsMixin:
             print(f"  {sym} {'rns_bridge':<18} {bridge_status}")
         except Exception:
             print(f"  ? {'rns_bridge':<18} unknown")
+
+        # Surface actionable warning for services that won't survive reboot
+        if warnings:
+            print(f"\n  Warning: {', '.join(warnings)} running but won't start on reboot.")
+            print(f"  Fix: sudo systemctl enable {' '.join(warnings)}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")
