@@ -5,7 +5,7 @@ Provides TUI handlers to list, add, remove, enable/disable, and apply
 templates for Reticulum network interfaces.  All heavy lifting is
 delegated to the backend in commands.rns (add_interface, remove_interface,
 enable_interface, disable_interface, list_interfaces, get_interface_templates,
-apply_template).
+apply_template, apply_multi_template).
 """
 
 import re
@@ -121,7 +121,10 @@ class RNSInterfacesMixin:
         # Build menu of templates
         choices = []
         for key, tpl in templates.items():
-            label = f"{tpl['type']} - {tpl['description']}"
+            if tpl.get('multi_interface'):
+                label = f"Multi - {tpl['description']}"
+            else:
+                label = f"{tpl['type']} - {tpl['description']}"
             # Truncate long descriptions for whiptail
             if len(label) > 60:
                 label = label[:57] + "..."
@@ -138,6 +141,11 @@ class RNSInterfacesMixin:
             return
 
         template = templates[tpl_choice]
+
+        # Multi-interface templates have a different flow
+        if template.get('multi_interface'):
+            self._rns_add_multi_interface(rns_mod, tpl_choice, template)
+            return
 
         # Ask for a name
         default_name = template.get('name', tpl_choice)
@@ -175,6 +183,72 @@ class RNSInterfacesMixin:
             )
         else:
             self.dialog.msgbox("Error", f"Failed to add interface:\n{result.message}")
+
+    def _rns_add_multi_interface(self, rns_mod, tpl_key: str, template: dict):
+        """Handle adding a multi-interface template (e.g. dual-radio Meshtastic)."""
+        iface_defs = template.get('interfaces', [])
+        if not iface_defs:
+            self.dialog.msgbox("Error", "Template has no interface definitions.")
+            return
+
+        # Show overview of what will be created
+        overview_lines = [f"{template['name']}\n"]
+        for i, idef in enumerate(iface_defs, 1):
+            overview_lines.append(f"  Radio {i}: {idef['default_name']}")
+            overview_lines.append(f"    type = {idef['type']}")
+            for k, v in idef['settings'].items():
+                overview_lines.append(f"    {k} = {v}")
+            overview_lines.append("")
+        overview_lines.append("Proceed? (settings can be customised next)")
+
+        if not self.dialog.yesno(template['name'], "\n".join(overview_lines)):
+            return
+
+        # Collect user config for each interface
+        interface_configs = []
+        for i, idef in enumerate(iface_defs, 1):
+            default_name = idef['default_name']
+            iface_name = self.dialog.inputbox(
+                f"Radio {i} Name",
+                f"Name for radio {i} ({idef['type']}):\n"
+                f"(alphanumeric, spaces, dashes allowed)",
+                default_name,
+            )
+            if not iface_name:
+                return
+            iface_name = iface_name.strip()
+            if not iface_name or not re.match(r'^[\w\s\-]+$', iface_name):
+                self.dialog.msgbox(
+                    "Invalid Name",
+                    "Name must contain only alphanumeric characters,\n"
+                    "spaces, and dashes.",
+                )
+                return
+
+            # Let user customise this radio's settings
+            settings = dict(idef.get('settings', {}))
+            settings = self._rns_edit_interface_settings(idef['type'], settings)
+            if settings is None:
+                return  # user cancelled
+
+            interface_configs.append({
+                'name': iface_name,
+                'overrides': settings,
+            })
+
+        # Apply all interfaces
+        result = rns_mod.apply_multi_template(tpl_key, interface_configs)
+        if result.success:
+            added = result.data.get('added', [])
+            names_str = "\n".join(f"  - [[{n}]]" for n in added)
+            self.dialog.msgbox(
+                "Interfaces Added",
+                f"Added {len(added)} interfaces:\n{names_str}\n\n"
+                f"Restart rnsd to apply:\n"
+                f"  sudo systemctl restart rnsd",
+            )
+        else:
+            self.dialog.msgbox("Error", f"Failed:\n{result.message}")
 
     def _rns_edit_interface_settings(self, iface_type: str, settings: dict):
         """Let the user edit key settings for an interface template.

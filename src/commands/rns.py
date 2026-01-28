@@ -996,6 +996,33 @@ def get_interface_templates() -> CommandResult:
                 'hop_limit': '3'
             }
         },
+        'meshtastic_dual': {
+            'name': 'Meshtastic Dual-Radio Gateway',
+            'description': 'Two radios: Short Turbo + Long Fast',
+            'multi_interface': True,
+            'interfaces': [
+                {
+                    'default_name': 'Meshtastic Short Turbo',
+                    'type': 'Meshtastic_Interface',
+                    'settings': {
+                        'mode': 'gateway',
+                        'tcp_port': '127.0.0.1:4403',
+                        'data_speed': '8',
+                        'hop_limit': '3',
+                    }
+                },
+                {
+                    'default_name': 'Meshtastic Long Fast',
+                    'type': 'Meshtastic_Interface',
+                    'settings': {
+                        'mode': 'gateway',
+                        'tcp_port': '127.0.0.1:4404',
+                        'data_speed': '0',
+                        'hop_limit': '3',
+                    }
+                }
+            ]
+        },
         'rnode': {
             'name': 'RNode LoRa',
             'description': 'Direct LoRa via RNode hardware',
@@ -1039,6 +1066,13 @@ def apply_template(template_name: str, interface_name: str, overrides: Dict[str,
         )
 
     template = templates[template_name]
+
+    if template.get('multi_interface'):
+        return CommandResult.fail(
+            f"Template '{template_name}' is a multi-interface template. "
+            f"Use apply_multi_template() instead."
+        )
+
     settings = template['settings'].copy()
 
     # Apply overrides
@@ -1046,6 +1080,70 @@ def apply_template(template_name: str, interface_name: str, overrides: Dict[str,
         settings.update(overrides)
 
     return add_interface(interface_name, template['type'], settings)
+
+
+def apply_multi_template(
+    template_name: str,
+    interface_configs: List[Dict[str, Any]],
+) -> CommandResult:
+    """
+    Apply a multi-interface template to create several interfaces at once.
+
+    Args:
+        template_name: Name of template (e.g. meshtastic_dual)
+        interface_configs: List of dicts with 'name' and optional 'overrides'
+            for each interface defined in the template.
+
+    Returns:
+        CommandResult indicating success (all added) or failure
+    """
+    templates_result = get_interface_templates()
+    templates = templates_result.data.get('templates', {})
+
+    if template_name not in templates:
+        return CommandResult.fail(
+            f"Unknown template: {template_name}",
+            data={'available': list(templates.keys())}
+        )
+
+    template = templates[template_name]
+    if not template.get('multi_interface'):
+        return CommandResult.fail(
+            f"Template '{template_name}' is not a multi-interface template. "
+            f"Use apply_template() instead."
+        )
+
+    iface_defs = template.get('interfaces', [])
+    if len(interface_configs) != len(iface_defs):
+        return CommandResult.fail(
+            f"Expected {len(iface_defs)} interface configs, got {len(interface_configs)}"
+        )
+
+    added = []
+    for iface_def, user_cfg in zip(iface_defs, interface_configs):
+        name = user_cfg.get('name', iface_def['default_name'])
+        settings = iface_def['settings'].copy()
+        overrides = user_cfg.get('overrides')
+        if overrides:
+            settings.update(overrides)
+
+        result = add_interface(name, iface_def['type'], settings)
+        if not result.success:
+            cleanup_hint = ""
+            if added:
+                cleanup_hint = (
+                    f"\n\nAlready added: {', '.join(added)}"
+                    f"\nTo clean up, remove them via Manage Interfaces > Remove."
+                )
+            return CommandResult.fail(
+                f"Failed adding [[{name}]]: {result.message}{cleanup_hint}"
+            )
+        added.append(name)
+
+    return CommandResult.ok(
+        f"Added {len(added)} interfaces: {', '.join(added)}",
+        data={'added': added}
+    )
 
 
 # ============================================================================
