@@ -1158,6 +1158,118 @@ class MeshForgeLauncher(
             self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
             return None
 
+    def _check_meshtastic_plugin(self) -> bool:
+        """Check if Meshtastic_Interface.py plugin is installed.
+
+        The plugin bridges RNS over Meshtastic LoRa and must be in
+        the RNS interfaces directory (e.g., ~/.reticulum/interfaces/ or
+        /etc/reticulum/interfaces/).
+
+        Returns True if plugin is installed.
+        """
+        plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
+        return plugin_path.exists()
+
+    def _install_meshtastic_interface_plugin(self):
+        """Download and install Meshtastic_Interface.py plugin from GitHub.
+
+        Clones the RNS_Over_Meshtastic_Gateway repository and copies the
+        Meshtastic_Interface.py file to the RNS interfaces directory.
+        """
+        interfaces_dir = ReticulumPaths.get_interfaces_dir()
+        plugin_path = interfaces_dir / 'Meshtastic_Interface.py'
+
+        if plugin_path.exists():
+            self.dialog.msgbox(
+                "Already Installed",
+                f"Meshtastic_Interface.py is already installed at:\n"
+                f"  {plugin_path}\n\n"
+                f"Size: {plugin_path.stat().st_size} bytes"
+            )
+            return
+
+        if not self.dialog.yesno(
+            "Install Meshtastic Interface Plugin",
+            "The Meshtastic_Interface.py plugin is required for\n"
+            "bridging RNS over Meshtastic LoRa mesh networks.\n\n"
+            "Source: github.com/Nursedude/RNS_Over_Meshtastic_Gateway\n\n"
+            f"Install to:\n  {plugin_path}\n\n"
+            "Requires: git and internet connection.\n\n"
+            "Install now?"
+        ):
+            return
+
+        # Clone repo to temp dir and copy plugin
+        import tempfile
+        tmp_dir = tempfile.mkdtemp(prefix='meshforge_rns_plugin_')
+        clone_url = "https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway.git"
+
+        try:
+            # Clone the repository
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1', clone_url, tmp_dir],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode != 0:
+                self.dialog.msgbox(
+                    "Clone Failed",
+                    f"Failed to clone repository:\n{result.stderr}\n\n"
+                    f"Manual install:\n"
+                    f"  git clone {clone_url}\n"
+                    f"  cp RNS_Over_Meshtastic_Gateway/Meshtastic_Interface.py \\\n"
+                    f"    {interfaces_dir}/"
+                )
+                return
+
+            # Find the plugin file
+            source_file = Path(tmp_dir) / 'Meshtastic_Interface.py'
+            if not source_file.exists():
+                self.dialog.msgbox(
+                    "Plugin Not Found",
+                    f"Meshtastic_Interface.py not found in repository.\n\n"
+                    f"Check: {clone_url}"
+                )
+                return
+
+            # Create interfaces directory and copy plugin
+            interfaces_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(source_file), str(plugin_path))
+            plugin_path.chmod(0o644)
+
+            self.dialog.msgbox(
+                "Plugin Installed",
+                f"Meshtastic_Interface.py installed to:\n"
+                f"  {plugin_path}\n\n"
+                f"Restart rnsd to load the new interface:\n"
+                f"  sudo systemctl restart rnsd"
+            )
+
+        except FileNotFoundError:
+            self.dialog.msgbox(
+                "Git Not Found",
+                "git is required to download the plugin.\n\n"
+                "Install git: sudo apt install git\n\n"
+                "Or manually download from:\n"
+                f"  {clone_url}"
+            )
+        except subprocess.TimeoutExpired:
+            self.dialog.msgbox(
+                "Timeout",
+                "Download timed out. Check your internet connection."
+            )
+        except (OSError, PermissionError) as e:
+            self.dialog.msgbox(
+                "Install Failed",
+                f"Failed to install plugin:\n{e}\n\n"
+                f"Try running with sudo, or manually copy:\n"
+                f"  sudo cp Meshtastic_Interface.py {interfaces_dir}/"
+            )
+        finally:
+            # Clean up temp dir
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def _view_rns_config(self):
         """View current Reticulum config."""
         subprocess.run(['clear'], check=False, timeout=5)
@@ -1198,6 +1310,18 @@ class MeshForgeLauncher(
                 print(f"  For shared use, deploy to /etc/reticulum/config")
             print(f"\nTo create: use 'Edit Reticulum Config' to deploy template")
             print(f"Template:  templates/reticulum.conf")
+
+        # Show Meshtastic_Interface plugin status
+        plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
+        print(f"\n--- Meshtastic Interface Plugin ---")
+        if plugin_path.exists():
+            print(f"  Installed: {plugin_path}")
+            print(f"  Size: {plugin_path.stat().st_size} bytes")
+        else:
+            print(f"  NOT INSTALLED")
+            print(f"  Expected at: {plugin_path}")
+            print(f"  Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway")
+            print(f"  Use 'Install Meshtastic Interface' from the RNS menu to install.")
 
         input("\nPress Enter to continue...")
 
@@ -1277,6 +1401,7 @@ class MeshForgeLauncher(
         - Missing share_instance = Yes (required for client apps to connect)
         - No interfaces configured
         - No Meshtastic_Interface (needed for mesh bridging)
+        - Meshtastic_Interface.py plugin not installed
         """
         issues = []
         content_lower = content.lower()
@@ -1301,7 +1426,6 @@ class MeshForgeLauncher(
         # Check for at least one active interface
         has_interface = False
         has_meshtastic = False
-        in_comment = False
         for line in content.split('\n'):
             stripped = line.strip()
             if stripped.startswith('#'):
@@ -1316,6 +1440,16 @@ class MeshForgeLauncher(
 
         if not has_meshtastic:
             issues.append("No Meshtastic_Interface configured (needed for mesh bridging)")
+
+        # Check if Meshtastic_Interface.py plugin is installed
+        if has_meshtastic:
+            plugin_path = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
+            if not plugin_path.exists():
+                issues.append(
+                    f"Meshtastic_Interface.py plugin not installed at "
+                    f"{ReticulumPaths.get_interfaces_dir()}/\n"
+                    f"    Install from: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway"
+                )
 
         return issues
 
@@ -1386,6 +1520,19 @@ class MeshForgeLauncher(
                 f"Run MeshForge with sudo to access this file,\n"
                 f"or use 'Edit Reticulum Config' to migrate it."
             )
+
+        # Check for Meshtastic_Interface.py plugin (separate from config validation)
+        if not self._check_meshtastic_plugin():
+            if self.dialog.yesno(
+                "Meshtastic Interface Plugin Missing",
+                "The Meshtastic_Interface.py plugin is not installed.\n\n"
+                "This plugin is required for bridging RNS over\n"
+                "Meshtastic LoRa mesh networks.\n\n"
+                f"Expected at:\n"
+                f"  {ReticulumPaths.get_interfaces_dir()}/Meshtastic_Interface.py\n\n"
+                "Download and install it now?"
+            ):
+                self._install_meshtastic_interface_plugin()
 
         return True
 
