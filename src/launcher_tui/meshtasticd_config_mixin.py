@@ -130,8 +130,8 @@ class MeshtasticdConfigMixin:
 
             text = f"""Meshtasticd Service Status:
 
-Service: {'RUNNING' if is_running else 'STOPPED'}
-Enabled: {'Yes' if is_enabled else 'No'}
+Service: {'running' if is_running else 'stopped'}
+Boot:    {'enabled' if is_enabled else 'not enabled (will not start on reboot)'}
 
 Config File: {config_path}
 Config Exists: {'Yes' if config_exists else 'No'}
