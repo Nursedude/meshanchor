@@ -128,7 +128,7 @@ Where `~` = effective user's home (NOT real user when sudo).
 - Without transport: node only communicates directly
 
 ### Meshtastic_Interface Plugin
-- Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- Source: https://github.com/landandair/RNS_Over_Meshtastic
 - Install: Copy `Meshtastic_Interface.py` to `~/.reticulum/interfaces/`
 - Connection methods: serial (port), BLE (ble_port), TCP (tcp_port)
 - `data_speed` presets: 0=LONG_FAST, 6=SHORT_FAST, 8=SHORT_TURBO (recommended)

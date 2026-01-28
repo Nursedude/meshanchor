@@ -97,7 +97,7 @@ class MeshtasticInterfaceConfig:
     """Meshtastic_Interface configuration for RNS over Meshtastic LoRa.
 
     Requires the Meshtastic_Interface.py plugin from:
-    https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+    https://github.com/landandair/RNS_Over_Meshtastic
 
     Plugin must be installed to ~/.reticulum/interfaces/ (or /etc/reticulum/interfaces/).
 

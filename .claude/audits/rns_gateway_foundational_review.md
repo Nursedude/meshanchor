@@ -2,7 +2,7 @@
 
 > **Reviewer**: Dude AI (Claude) - MeshForge Architect
 > **Date**: 2026-01-06
-> **Repo**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+> **Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 > **Commit**: f0041e8 (main branch)
 > **Framework**: Dude AI Foundational Principles
 

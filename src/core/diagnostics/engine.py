@@ -757,7 +757,7 @@ class DiagnosticEngine:
 
         The plugin must be in the 'interfaces/' subdirectory of the RNS config dir
         (e.g., ~/.reticulum/interfaces/ or /etc/reticulum/interfaces/).
-        Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+        Source: https://github.com/landandair/RNS_Over_Meshtastic
         """
         start = time.time()
         interface_file = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
@@ -778,7 +778,7 @@ class DiagnosticEngine:
                 status=CheckStatus.WARN,
                 message="Not installed - required for RNS over Meshtastic bridging",
                 fix_hint=(
-                    "Install from: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway\n"
+                    "Install from: https://github.com/landandair/RNS_Over_Meshtastic\n"
                     f"Copy Meshtastic_Interface.py to: {ReticulumPaths.get_interfaces_dir()}/"
                 ),
                 duration_ms=(time.time() - start) * 1000

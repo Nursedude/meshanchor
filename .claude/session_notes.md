@@ -11,7 +11,7 @@
 
 ## Active Research Links
 
-- **RNS Gateway**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- **RNS Gateway**: https://github.com/landandair/RNS_Over_Meshtastic
 - **MeshForge**: https://github.com/Nursedude/meshforge
 
 ---

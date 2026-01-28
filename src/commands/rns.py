@@ -200,7 +200,8 @@ def validate_config(content: str) -> Tuple[bool, List[str]]:
     # Check for valid interface types
     valid_types = [
         'AutoInterface', 'TCPServerInterface', 'TCPClientInterface',
-        'SerialInterface', 'RNodeInterface', 'I2PInterface',
+        'BackboneInterface', 'SerialInterface', 'RNodeInterface',
+        'KISSInterface', 'AX25KISSInterface', 'I2PInterface',
         'Meshtastic_Interface', 'UDPInterface', 'PipeInterface'
     ]
 
@@ -271,7 +272,7 @@ def create_default_config() -> CommandResult:
 
   # RNS over Meshtastic - bridges RNS to LoRa mesh network
   # Requires: Meshtastic_Interface.py plugin in ~/.reticulum/interfaces/
-  # Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+  # Source: https://github.com/landandair/RNS_Over_Meshtastic
   # Connection: TCP to local meshtasticd on port 4403
   [[Meshtastic Interface]]
     type = Meshtastic_Interface

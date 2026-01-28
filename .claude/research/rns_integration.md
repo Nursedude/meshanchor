@@ -13,7 +13,7 @@ MeshForge can become a unified **Mesh Network Operations Center** by integrating
 ## Primary Reference Repository
 
 ### RNS_Over_Meshtastic_Gateway
-- **URL**: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway
+- **URL**: https://github.com/landandair/RNS_Over_Meshtastic
 - **Purpose**: Bridges Reticulum Network Stack with Meshtastic hardware
 - **Version**: 1.1.0
 - **Contributors**: Mark Qvist, Claude, Gemini Pro

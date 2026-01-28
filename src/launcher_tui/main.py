@@ -1192,7 +1192,7 @@ class MeshForgeLauncher(
             "Install Meshtastic Interface Plugin",
             "The Meshtastic_Interface.py plugin is required for\n"
             "bridging RNS over Meshtastic LoRa mesh networks.\n\n"
-            "Source: github.com/Nursedude/RNS_Over_Meshtastic_Gateway\n\n"
+            "Source: github.com/landandair/RNS_Over_Meshtastic\n\n"
             f"Install to:\n  {plugin_path}\n\n"
             "Requires: git and internet connection.\n\n"
             "Install now?"
@@ -1202,7 +1202,7 @@ class MeshForgeLauncher(
         # Clone repo to temp dir and copy plugin
         import tempfile
         tmp_dir = tempfile.mkdtemp(prefix='meshforge_rns_plugin_')
-        clone_url = "https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway.git"
+        clone_url = "https://github.com/landandair/RNS_Over_Meshtastic.git"
 
         try:
             # Clone the repository
@@ -1218,17 +1218,21 @@ class MeshForgeLauncher(
                     f"Failed to clone repository:\n{result.stderr}\n\n"
                     f"Manual install:\n"
                     f"  git clone {clone_url}\n"
-                    f"  cp RNS_Over_Meshtastic_Gateway/Meshtastic_Interface.py \\\n"
+                    f"  cp RNS_Over_Meshtastic/Interface/Meshtastic_Interface.py \\\n"
                     f"    {interfaces_dir}/"
                 )
                 return
 
-            # Find the plugin file
-            source_file = Path(tmp_dir) / 'Meshtastic_Interface.py'
+            # Find the plugin file (in Interface/ subfolder per upstream repo)
+            source_file = Path(tmp_dir) / 'Interface' / 'Meshtastic_Interface.py'
+            if not source_file.exists():
+                # Fallback: check repo root in case structure changes
+                source_file = Path(tmp_dir) / 'Meshtastic_Interface.py'
             if not source_file.exists():
                 self.dialog.msgbox(
                     "Plugin Not Found",
                     f"Meshtastic_Interface.py not found in repository.\n\n"
+                    f"Expected at: Interface/Meshtastic_Interface.py\n"
                     f"Check: {clone_url}"
                 )
                 return
@@ -1320,7 +1324,7 @@ class MeshForgeLauncher(
         else:
             print(f"  NOT INSTALLED")
             print(f"  Expected at: {plugin_path}")
-            print(f"  Source: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway")
+            print(f"  Source: https://github.com/landandair/RNS_Over_Meshtastic")
             print(f"  Use 'Install Meshtastic Interface' from the RNS menu to install.")
 
         input("\nPress Enter to continue...")
@@ -1448,7 +1452,7 @@ class MeshForgeLauncher(
                 issues.append(
                     f"Meshtastic_Interface.py plugin not installed at "
                     f"{ReticulumPaths.get_interfaces_dir()}/\n"
-                    f"    Install from: https://github.com/Nursedude/RNS_Over_Meshtastic_Gateway"
+                    f"    Install from: https://github.com/landandair/RNS_Over_Meshtastic"
                 )
 
         return issues
