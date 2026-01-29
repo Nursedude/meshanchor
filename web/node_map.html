@@ -5,8 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Network Map - MeshForge</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -575,10 +579,323 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
+
+        /* Phase 4: Marker cluster styles - dark theme */
+        .marker-cluster {
+            background-clip: padding-box;
+            border-radius: 50%;
+        }
+        .marker-cluster div {
+            width: 30px;
+            height: 30px;
+            margin-left: 5px;
+            margin-top: 5px;
+            text-align: center;
+            border-radius: 50%;
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+            line-height: 30px;
+        }
+        .marker-cluster-small {
+            background-color: rgba(102, 187, 106, 0.4);
+        }
+        .marker-cluster-small div {
+            background-color: rgba(102, 187, 106, 0.8);
+        }
+        .marker-cluster-medium {
+            background-color: rgba(255, 167, 38, 0.4);
+        }
+        .marker-cluster-medium div {
+            background-color: rgba(255, 167, 38, 0.8);
+        }
+        .marker-cluster-large {
+            background-color: rgba(79, 195, 247, 0.4);
+        }
+        .marker-cluster-large div {
+            background-color: rgba(79, 195, 247, 0.8);
+        }
+
+        /* Phase 4: Topology view container */
+        #topology-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 500;
+            background: #0a0e1a;
+            display: none;
+        }
+        #topology-view.active {
+            display: block;
+        }
+        #topology-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Topology nodes */
+        .topo-node {
+            cursor: pointer;
+        }
+        .topo-node circle {
+            stroke: #1a2a3a;
+            stroke-width: 2;
+            transition: all 0.2s;
+        }
+        .topo-node:hover circle {
+            stroke: #4fc3f7;
+            stroke-width: 3;
+        }
+        .topo-node text {
+            fill: #e0e0e0;
+            font-size: 10px;
+            pointer-events: none;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+        .topo-label {
+            fill: #aaa;
+            font-size: 9px;
+            pointer-events: none;
+        }
+
+        /* Topology links */
+        .topo-link {
+            fill: none;
+            stroke-opacity: 0.6;
+            transition: stroke-opacity 0.2s;
+        }
+        .topo-link:hover {
+            stroke-opacity: 1;
+        }
+        .topo-link-gateway {
+            stroke: #4fc3f7;
+            stroke-dasharray: 5,3;
+        }
+        .topo-link-mesh {
+            stroke: #66bb6a;
+        }
+        .topo-link-rns {
+            stroke: #ab47bc;
+        }
+        .topo-link-aredn {
+            stroke: #ff7043;
+        }
+
+        /* Topology legend */
+        .topo-legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            z-index: 510;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .topo-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .topo-legend-line {
+            width: 20px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        /* Phase 4: Message flow animation */
+        @keyframes message-flow {
+            0% { offset-distance: 0%; opacity: 1; }
+            100% { offset-distance: 100%; opacity: 0.5; }
+        }
+        .message-particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4fc3f7;
+            box-shadow: 0 0 8px #4fc3f7;
+            pointer-events: none;
+            z-index: 600;
+        }
+
+        /* Message flow path overlay */
+        .flow-path {
+            fill: none;
+            stroke-width: 3;
+            stroke-linecap: round;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .flow-path.active {
+            opacity: 1;
+        }
+        .flow-path-meshtastic { stroke: #66bb6a; }
+        .flow-path-rns { stroke: #ab47bc; }
+        .flow-path-gateway { stroke: #ffa726; }
+
+        /* Message queue panel */
+        .message-queue-panel {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1000;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            max-width: 280px;
+            max-height: 200px;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            display: none;
+        }
+        .message-queue-panel.visible {
+            display: block;
+        }
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            border-bottom: 1px solid #1a2a3a;
+            font-size: 11px;
+        }
+        .queue-item:last-child {
+            border-bottom: none;
+        }
+        .queue-network {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .queue-network.meshtastic { background: #66bb6a; }
+        .queue-network.rns { background: #ab47bc; }
+        .queue-network.gateway { background: #ffa726; }
+        .queue-direction {
+            color: #6a7a8a;
+        }
+        .queue-target {
+            color: #e0e0e0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* View toggle buttons */
+        .view-toggle {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            gap: 2px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 3px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .view-toggle-btn {
+            padding: 6px 12px;
+            background: transparent;
+            color: #6a7a8a;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+        }
+        .view-toggle-btn:hover {
+            color: #e0e0e0;
+            background: #1a2a3a;
+        }
+        .view-toggle-btn.active {
+            background: #1565c0;
+            color: #e3f2fd;
+        }
+
+        /* Cluster summary tooltip */
+        .cluster-tooltip {
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 10px 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .cluster-tooltip h4 {
+            color: #4fc3f7;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .cluster-tooltip .stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #aaa;
+            padding: 2px 0;
+        }
+        .cluster-tooltip .stat-value {
+            color: #e0e0e0;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+
+    <!-- Phase 4: D3.js Topology View -->
+    <div id="topology-view">
+        <svg id="topology-svg"></svg>
+        <div class="topo-legend">
+            <div class="legend-title">Network Links</div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#66bb6a"></div>
+                <span>Meshtastic</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ab47bc"></div>
+                <span>Reticulum</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ff7043"></div>
+                <span>AREDN</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ffa726;background:repeating-linear-gradient(90deg,#ffa726,#ffa726 5px,transparent 5px,transparent 8px)"></div>
+                <span>Gateway Bridge</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Phase 4: View Toggle (Map / Topology) -->
+    <div class="view-toggle">
+        <button class="view-toggle-btn active" id="view-map-btn" onclick="switchView('map')">
+            <span>&#x1F5FA;</span> Map
+        </button>
+        <button class="view-toggle-btn" id="view-topo-btn" onclick="switchView('topology')">
+            <span>&#x26A1;</span> Topology
+        </button>
+    </div>
+
+    <!-- Phase 4: Message Queue Panel -->
+    <div class="message-queue-panel" id="message-queue-panel">
+        <div class="legend-title">Message Queue</div>
+        <div id="queue-items"></div>
+    </div>
 
     <!-- Offline mode indicator -->
     <div class="offline-indicator" id="offline-indicator">
@@ -628,6 +945,8 @@
                 <label><input type="checkbox" id="filter-links" checked> Link lines</label>
                 <label><input type="checkbox" id="filter-link-anim" checked> Animate links</label>
                 <label><input type="checkbox" id="filter-heatmap"> Signal heatmap</label>
+                <label><input type="checkbox" id="filter-clustering"> Cluster view</label>
+                <label><input type="checkbox" id="filter-messages"> Message flow</label>
             </div>
 
             <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
@@ -815,14 +1134,19 @@
 
     // State management
     const state = {
-        markers: new Map(),      // id -> { marker, feature, coverageCircle }
+        markers: new Map(),      // id -> { marker, feature, coverageCircle, network }
         links: new Map(),        // "id1-id2" -> { line, overlay, snr, lastActivity }
         firstLoad: true,
         lastUpdate: null,
         updateCount: 0,
         currentGeoJSON: null,
         userHasPanned: false,
-        linkAnimationsEnabled: true
+        linkAnimationsEnabled: true,
+        // Phase 4 additions
+        currentView: 'map',      // 'map' or 'topology'
+        topology: null,          // D3 force simulation
+        messageQueue: [],        // pending messages
+        flowAnimations: []       // active message flow animations
     };
 
     // ============================================
@@ -876,7 +1200,36 @@
     const linkLayer = L.layerGroup().addTo(map);
     const coverageLayer = L.layerGroup().addTo(map);
     const terrainLayer = L.layerGroup().addTo(map);
+    const messageFlowLayer = L.layerGroup().addTo(map);
     let heatmapLayer = null; // Lazy initialized when needed
+
+    // Phase 4: Network-specific layers for filtering
+    const layers = {
+        meshtastic: L.layerGroup().addTo(map),
+        rns: L.layerGroup().addTo(map),
+        aredn: L.layerGroup().addTo(map),
+        gateway: L.layerGroup().addTo(map)
+    };
+
+    // Phase 4: Cluster groups for each network
+    const clusterGroups = {
+        meshtastic: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'meshtastic')
+        }),
+        rns: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'rns')
+        }),
+        aredn: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'aredn')
+        }),
+        gateway: L.markerClusterGroup({
+            maxClusterRadius: 30,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'gateway')
+        })
+    };
 
     // Selected node for terrain analysis
     let selectedNode = null;
@@ -916,6 +1269,422 @@
                         fill="${color}" opacity="0.9"/>
             </svg>`
     };
+
+    // ============================================
+    // Phase 4: Cluster Icon Creation
+    // ============================================
+
+    function createClusterIcon(cluster, network) {
+        const count = cluster.getChildCount();
+        const markers = cluster.getAllChildMarkers();
+
+        // Calculate cluster health (% online)
+        let online = 0;
+        markers.forEach(m => {
+            const entry = Array.from(state.markers.values()).find(e => e.marker === m);
+            if (entry && entry.feature.properties.is_online) online++;
+        });
+        const healthPct = count > 0 ? Math.round((online / count) * 100) : 0;
+
+        // Color based on network
+        const colors = {
+            meshtastic: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+        const color = colors[network] || '#4fc3f7';
+
+        // Size based on count
+        const size = count < 10 ? 'small' : count < 50 ? 'medium' : 'large';
+
+        return L.divIcon({
+            html: `<div style="background:${color}">${count}</div>`,
+            className: `marker-cluster marker-cluster-${size}`,
+            iconSize: L.point(40, 40)
+        });
+    }
+
+    // ============================================
+    // Phase 4: View Switching (Map <-> Topology)
+    // ============================================
+
+    function switchView(view) {
+        state.currentView = view;
+
+        const mapEl = document.getElementById('map');
+        const topoEl = document.getElementById('topology-view');
+        const mapBtn = document.getElementById('view-map-btn');
+        const topoBtn = document.getElementById('view-topo-btn');
+
+        if (view === 'topology') {
+            mapEl.style.display = 'none';
+            topoEl.classList.add('active');
+            mapBtn.classList.remove('active');
+            topoBtn.classList.add('active');
+            renderTopology();
+        } else {
+            mapEl.style.display = 'block';
+            topoEl.classList.remove('active');
+            mapBtn.classList.add('active');
+            topoBtn.classList.remove('active');
+            if (state.topology) {
+                state.topology.stop();
+            }
+        }
+    }
+
+    // ============================================
+    // Phase 4: D3.js Force-Directed Topology View
+    // ============================================
+
+    function renderTopology() {
+        if (!state.currentGeoJSON || !state.currentGeoJSON.features.length) return;
+
+        const svg = d3.select('#topology-svg');
+        svg.selectAll('*').remove();
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Build nodes and links from GeoJSON
+        const nodes = [];
+        const links = [];
+        const nodeMap = new Map();
+
+        state.currentGeoJSON.features.forEach((f, i) => {
+            const props = f.properties;
+            const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
+            const node = {
+                id: props.id,
+                name: props.name || props.id,
+                network: network,
+                isOnline: props.is_online,
+                isGateway: props.is_gateway,
+                snr: props.snr,
+                battery: props.battery,
+                x: width / 2 + (Math.random() - 0.5) * 200,
+                y: height / 2 + (Math.random() - 0.5) * 200
+            };
+            nodes.push(node);
+            nodeMap.set(props.id, node);
+        });
+
+        // Create links - gateways connect to all nearby nodes of different networks
+        const gateways = nodes.filter(n => n.isGateway);
+        const regularNodes = nodes.filter(n => !n.isGateway);
+
+        // Connect regular nodes to nearest gateway or router
+        regularNodes.forEach(node => {
+            let nearest = null;
+            let minDist = Infinity;
+
+            gateways.forEach(gw => {
+                // In topology view, use index distance as proxy
+                const dist = Math.abs(nodes.indexOf(node) - nodes.indexOf(gw));
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = gw;
+                }
+            });
+
+            if (nearest) {
+                links.push({
+                    source: node,
+                    target: nearest,
+                    type: node.network === nearest.network ? 'mesh' : 'gateway',
+                    strength: node.isOnline && nearest.isOnline ? 0.3 : 0.1
+                });
+            }
+        });
+
+        // Connect gateways to each other (bridge links)
+        for (let i = 0; i < gateways.length; i++) {
+            for (let j = i + 1; j < gateways.length; j++) {
+                links.push({
+                    source: gateways[i],
+                    target: gateways[j],
+                    type: 'gateway',
+                    strength: 0.2
+                });
+            }
+        }
+
+        // Connect nodes within same network
+        const byNetwork = {};
+        regularNodes.forEach(n => {
+            if (!byNetwork[n.network]) byNetwork[n.network] = [];
+            byNetwork[n.network].push(n);
+        });
+
+        Object.values(byNetwork).forEach(networkNodes => {
+            for (let i = 0; i < networkNodes.length && i < 20; i++) {
+                const next = (i + 1) % networkNodes.length;
+                if (i !== next) {
+                    links.push({
+                        source: networkNodes[i],
+                        target: networkNodes[next],
+                        type: networkNodes[i].network,
+                        strength: 0.15
+                    });
+                }
+            }
+        });
+
+        // Create force simulation
+        state.topology = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(links).id(d => d.id).distance(80).strength(d => d.strength))
+            .force('charge', d3.forceManyBody().strength(-150))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(30));
+
+        // Create container groups
+        const g = svg.append('g');
+
+        // Zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([0.2, 4])
+            .on('zoom', (event) => g.attr('transform', event.transform));
+        svg.call(zoom);
+
+        // Draw links
+        const linkColors = {
+            meshtastic: '#66bb6a',
+            mesh: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+
+        const link = g.append('g')
+            .selectAll('line')
+            .data(links)
+            .join('line')
+            .attr('class', d => `topo-link topo-link-${d.type}`)
+            .attr('stroke', d => linkColors[d.type] || '#2a3a4a')
+            .attr('stroke-width', d => d.type === 'gateway' ? 2 : 1.5)
+            .attr('stroke-dasharray', d => d.type === 'gateway' ? '5,3' : null);
+
+        // Draw nodes
+        const nodeColors = {
+            meshtastic: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+
+        const node = g.append('g')
+            .selectAll('g')
+            .data(nodes)
+            .join('g')
+            .attr('class', 'topo-node')
+            .call(d3.drag()
+                .on('start', dragStarted)
+                .on('drag', dragged)
+                .on('end', dragEnded));
+
+        node.append('circle')
+            .attr('r', d => d.isGateway ? 16 : 12)
+            .attr('fill', d => d.isOnline ? nodeColors[d.network] || '#4fc3f7' : '#3a3a3a')
+            .attr('opacity', d => d.isOnline ? 0.9 : 0.5);
+
+        // Add gateway star indicator
+        node.filter(d => d.isGateway)
+            .append('text')
+            .attr('y', 1)
+            .attr('fill', '#fff')
+            .attr('font-size', '14px')
+            .text('★');
+
+        // Node labels
+        node.append('text')
+            .attr('class', 'topo-label')
+            .attr('dy', 25)
+            .text(d => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name);
+
+        // Tooltip on hover
+        node.append('title')
+            .text(d => `${d.name}\nNetwork: ${d.network}\nStatus: ${d.isOnline ? 'Online' : 'Offline'}${d.snr ? '\nSNR: ' + d.snr + ' dB' : ''}${d.battery ? '\nBattery: ' + d.battery + '%' : ''}`);
+
+        // Simulation tick
+        state.topology.on('tick', () => {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        function dragStarted(event, d) {
+            if (!event.active) state.topology.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragEnded(event, d) {
+            if (!event.active) state.topology.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    }
+
+    // ============================================
+    // Phase 4: Message Flow Visualization
+    // ============================================
+
+    function animateMessageFlow(sourceId, targetId, network = 'meshtastic') {
+        const sourceEntry = state.markers.get(sourceId);
+        const targetEntry = state.markers.get(targetId);
+
+        if (!sourceEntry || !targetEntry) return;
+
+        const sourceLatLng = sourceEntry.marker.getLatLng();
+        const targetLatLng = targetEntry.marker.getLatLng();
+
+        // Find gateway if cross-network
+        const sourceNetwork = sourceEntry.feature.properties.network;
+        const targetNetwork = targetEntry.feature.properties.network;
+        const isCrossNetwork = sourceNetwork !== targetNetwork;
+
+        // Create flow path
+        const path = isCrossNetwork
+            ? createCrossNetworkPath(sourceEntry, targetEntry)
+            : [[sourceLatLng.lat, sourceLatLng.lng], [targetLatLng.lat, targetLatLng.lng]];
+
+        const flowLine = L.polyline(path, {
+            color: isCrossNetwork ? '#ffa726' : (network === 'rns' ? '#ab47bc' : '#66bb6a'),
+            weight: 4,
+            opacity: 0,
+            dashArray: '8,8',
+            className: 'flow-path'
+        }).addTo(messageFlowLayer);
+
+        // Animate the line
+        setTimeout(() => flowLine.setStyle({ opacity: 0.8 }), 50);
+
+        // Create particle
+        const particle = L.circleMarker(sourceLatLng, {
+            radius: 6,
+            fillColor: isCrossNetwork ? '#ffa726' : '#4fc3f7',
+            fillOpacity: 1,
+            stroke: true,
+            color: '#fff',
+            weight: 2
+        }).addTo(messageFlowLayer);
+
+        // Animate particle along path
+        let progress = 0;
+        const duration = 2000;
+        const startTime = Date.now();
+
+        function animateParticle() {
+            const elapsed = Date.now() - startTime;
+            progress = Math.min(elapsed / duration, 1);
+
+            if (progress < 1) {
+                const idx = Math.floor(progress * (path.length - 1));
+                const nextIdx = Math.min(idx + 1, path.length - 1);
+                const segmentProgress = (progress * (path.length - 1)) - idx;
+
+                const lat = path[idx][0] + (path[nextIdx][0] - path[idx][0]) * segmentProgress;
+                const lng = path[idx][1] + (path[nextIdx][1] - path[idx][1]) * segmentProgress;
+
+                particle.setLatLng([lat, lng]);
+                requestAnimationFrame(animateParticle);
+            } else {
+                // Cleanup
+                setTimeout(() => {
+                    messageFlowLayer.removeLayer(flowLine);
+                    messageFlowLayer.removeLayer(particle);
+                }, 500);
+            }
+        }
+
+        requestAnimationFrame(animateParticle);
+
+        // Add to flow animations list
+        state.flowAnimations.push({ flowLine, particle });
+    }
+
+    function createCrossNetworkPath(source, target) {
+        // Find the nearest gateway to create a path through
+        const sourceLatLng = source.marker.getLatLng();
+        const targetLatLng = target.marker.getLatLng();
+
+        let gatewayLatLng = null;
+        let minDist = Infinity;
+
+        state.markers.forEach((entry) => {
+            if (entry.feature.properties.is_gateway) {
+                const gwLatLng = entry.marker.getLatLng();
+                const dist = getDistance(sourceLatLng.lat, sourceLatLng.lng, gwLatLng.lat, gwLatLng.lng);
+                if (dist < minDist) {
+                    minDist = dist;
+                    gatewayLatLng = gwLatLng;
+                }
+            }
+        });
+
+        if (gatewayLatLng) {
+            return [
+                [sourceLatLng.lat, sourceLatLng.lng],
+                [gatewayLatLng.lat, gatewayLatLng.lng],
+                [targetLatLng.lat, targetLatLng.lng]
+            ];
+        }
+
+        return [[sourceLatLng.lat, sourceLatLng.lng], [targetLatLng.lat, targetLatLng.lng]];
+    }
+
+    // Load and display message queue
+    async function loadMessageQueue() {
+        try {
+            const response = await fetch('/api/messages/queue');
+            if (response.ok) {
+                const data = await response.json();
+                state.messageQueue = data.messages || [];
+                renderMessageQueue();
+
+                // Animate recent messages
+                if (document.getElementById('filter-messages').checked) {
+                    state.messageQueue.slice(0, 3).forEach((msg, i) => {
+                        setTimeout(() => {
+                            if (msg.source && msg.target) {
+                                animateMessageFlow(msg.source, msg.target, msg.network);
+                            }
+                        }, i * 1000);
+                    });
+                }
+            }
+        } catch (e) {
+            // Message queue API not available
+        }
+    }
+
+    function renderMessageQueue() {
+        const container = document.getElementById('queue-items');
+        if (!container) return;
+
+        if (state.messageQueue.length === 0) {
+            container.innerHTML = '<div style="color:#6a7a8a;font-size:11px">No pending messages</div>';
+            return;
+        }
+
+        container.innerHTML = state.messageQueue.slice(0, 10).map(msg => `
+            <div class="queue-item">
+                <div class="queue-network ${msg.network || 'meshtastic'}"></div>
+                <span class="queue-direction">→</span>
+                <span class="queue-target">${msg.target_name || msg.target || 'Unknown'}</span>
+            </div>
+        `).join('');
+    }
 
     // ============================================
     // Node Rendering
@@ -1139,7 +1908,17 @@
                 });
                 marker.bindPopup(createPopupContent(props, coords));
                 marker.on('click', () => selectNodeForTerrain(feature));
-                nodeLayer.addLayer(marker);
+
+                // Determine network for clustering
+                const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
+                const useClustering = document.getElementById('filter-clustering').checked;
+
+                // Add to appropriate layer
+                if (useClustering && clusterGroups[network]) {
+                    clusterGroups[network].addLayer(marker);
+                } else {
+                    nodeLayer.addLayer(marker);
+                }
 
                 // Coverage circle
                 let coverageCircle = null;
@@ -1157,19 +1936,36 @@
                     }).addTo(coverageLayer);
                 }
 
-                state.markers.set(id, { marker, feature, coverageCircle });
+                state.markers.set(id, { marker, feature, coverageCircle, network });
             }
         });
 
         // Remove markers no longer in data
+        const useClustering = document.getElementById('filter-clustering').checked;
         for (const [id, entry] of state.markers) {
             if (!activeIds.has(id)) {
                 nodeLayer.removeLayer(entry.marker);
+                // Also remove from cluster groups
+                if (entry.network && clusterGroups[entry.network]) {
+                    clusterGroups[entry.network].removeLayer(entry.marker);
+                }
                 if (entry.coverageCircle) {
                     coverageLayer.removeLayer(entry.coverageCircle);
                 }
                 state.markers.delete(id);
             }
+        }
+
+        // Manage cluster layer visibility
+        if (useClustering) {
+            Object.keys(clusterGroups).forEach(net => {
+                if (!map.hasLayer(clusterGroups[net])) {
+                    map.addLayer(clusterGroups[net]);
+                }
+            });
+        } else {
+            // Hide cluster groups when not clustering
+            Object.keys(clusterGroups).forEach(net => map.removeLayer(clusterGroups[net]));
         }
 
         // Draw link lines between nodes that have SNR data (implies they can hear each other)
@@ -2592,6 +3388,65 @@
 
     // Periodic cache status update
     setInterval(updateCacheStatus, 60000);
+
+    // Phase 4: Filter event listeners for clustering and messages
+    ['filter-clustering', 'filter-messages'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', () => {
+                if (id === 'filter-clustering') {
+                    // When toggling clustering, clear and rebuild markers
+                    nodeLayer.clearLayers();
+                    Object.values(clusterGroups).forEach(cg => cg.clearLayers());
+                    state.markers.forEach((entry, id) => {
+                        state.markers.delete(id);
+                    });
+                    state.markers.clear();
+                }
+                updateDisplay();
+
+                // Toggle message queue panel visibility
+                if (id === 'filter-messages') {
+                    const panel = document.getElementById('message-queue-panel');
+                    panel.classList.toggle('visible', el.checked);
+                    if (el.checked) {
+                        loadMessageQueue();
+                    }
+                }
+            });
+        }
+    });
+
+    // Phase 4: Handle window resize for topology view
+    window.addEventListener('resize', () => {
+        if (state.currentView === 'topology') {
+            renderTopology();
+        }
+    });
+
+    // Phase 4: Load message queue periodically
+    setInterval(() => {
+        if (document.getElementById('filter-messages').checked) {
+            loadMessageQueue();
+        }
+    }, 30000);
+
+    // Phase 4: Update topology when data refreshes (if in topology view)
+    const originalRefreshNodes = refreshNodes;
+    refreshNodes = async function() {
+        await originalRefreshNodes();
+        if (state.currentView === 'topology') {
+            renderTopology();
+        }
+    };
+
+    // Phase 4: Public API for external integration
+    window.meshforgeMap = {
+        getState: () => state,
+        switchView: switchView,
+        refreshNodes: refreshNodes,
+        animateMessageFlow: animateMessageFlow
+    };
     </script>
 </body>
 </html>
