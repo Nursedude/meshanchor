@@ -500,8 +500,9 @@ class MeshForgeLauncher(
             def run_pipx_cmd(args, timeout_sec=300):
                 """Run pipx command, as real user if running via sudo."""
                 if run_as_user:
-                    # Run as the real user, not root
-                    cmd = ['sudo', '-u', run_as_user] + args
+                    # Run as the real user with login shell (-i) to set HOME correctly
+                    # Without -i, HOME stays as /root and pipx installs there
+                    cmd = ['sudo', '-i', '-u', run_as_user] + args
                 else:
                     cmd = args
                 return subprocess.run(cmd, timeout=timeout_sec)

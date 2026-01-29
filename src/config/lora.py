@@ -817,7 +817,9 @@ class LoRaConfigurator:
             try:
                 if run_as_user:
                     console.print(f"[dim]Running: pipx install 'meshtastic[cli]' (as {run_as_user})[/dim]")
-                    pipx_cmd = ['sudo', '-u', run_as_user, 'pipx', 'install', 'meshtastic[cli]']
+                    # Use -i to simulate login shell - sets HOME correctly
+                    # Without -i, HOME stays as /root and pipx installs there
+                    pipx_cmd = ['sudo', '-i', '-u', run_as_user, 'pipx', 'install', 'meshtastic[cli]']
                 else:
                     console.print("[dim]Running: pipx install 'meshtastic[cli]'[/dim]")
                     pipx_cmd = ['pipx', 'install', 'meshtastic[cli]']
