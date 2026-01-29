@@ -775,16 +775,21 @@ class LoRaConfigurator:
         import subprocess
         import shutil
         import os
+        from utils.paths import get_real_user_home
 
         # First check if already available
         cli_path = self._find_meshtastic_cli()
         if cli_path:
             return True
 
-        # Get pipx bin path for installation
-        home = os.path.expanduser('~')
-        pipx_bin = os.path.join(home, '.local', 'bin')
+        # Get pipx bin path for installation - use real user's home, not /root
+        home = get_real_user_home()
+        pipx_bin = str(home / '.local' / 'bin')
         meshtastic_path = os.path.join(pipx_bin, 'meshtastic')
+
+        # Determine if we should install as a different user (when running via sudo)
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
 
         console.print("\n[yellow]Meshtastic CLI is required to save configuration to device.[/yellow]")
         console.print("[dim]The CLI communicates with meshtasticd to configure the LoRa radio.[/dim]\n")
@@ -808,11 +813,19 @@ class LoRaConfigurator:
                     console.print(f"[red]Error installing pipx: {e}[/red]")
                     return False
 
-            # Install meshtastic CLI
+            # Install meshtastic CLI - run as real user if we're under sudo
             try:
-                console.print("[dim]Running: pipx install 'meshtastic[cli]'[/dim]")
+                if run_as_user:
+                    console.print(f"[dim]Running: pipx install 'meshtastic[cli]' (as {run_as_user})[/dim]")
+                    # Use -i to simulate login shell - sets HOME correctly
+                    # Without -i, HOME stays as /root and pipx installs there
+                    pipx_cmd = ['sudo', '-i', '-u', run_as_user, 'pipx', 'install', 'meshtastic[cli]']
+                else:
+                    console.print("[dim]Running: pipx install 'meshtastic[cli]'[/dim]")
+                    pipx_cmd = ['pipx', 'install', 'meshtastic[cli]']
+
                 result = subprocess.run(
-                    ['pipx', 'install', 'meshtastic[cli]'],
+                    pipx_cmd,
                     capture_output=True, text=True, timeout=300
                 )
                 if result.returncode == 0:

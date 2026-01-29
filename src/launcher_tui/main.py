@@ -364,11 +364,27 @@ class MeshForgeLauncher(
     def _radio_menu(self):
         """Radio tools using meshtastic CLI directly."""
         while True:
-            # Check if CLI is available and show install option if not
-            has_cli = self._get_meshtastic_cli() != 'meshtastic'
+            # Check if CLI is available and actually working
+            cli_path = self._get_meshtastic_cli()
+            has_cli = cli_path != 'meshtastic'
+
+            # Even if found, verify it's actually executable
+            cli_works = False
+            cli_location = ""
+            if has_cli:
+                cli_location = cli_path
+                try:
+                    # Quick test - just check if we can run --version
+                    result = subprocess.run(
+                        [cli_path, '--version'],
+                        capture_output=True, timeout=5
+                    )
+                    cli_works = result.returncode == 0
+                except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+                    cli_works = False
 
             choices = []
-            if not has_cli:
+            if not cli_works:
                 choices.append(("install-cli", "** Install meshtastic CLI **"))
             choices.extend([
                 ("info", "Radio Info (meshtastic --info)"),
@@ -379,10 +395,17 @@ class MeshForgeLauncher(
                 ("set-region", "Set Region"),
                 ("set-name", "Set Node Name"),
                 ("reboot", "Reboot Radio"),
+                ("reinstall-cli", "Reinstall/Update CLI"),
                 ("back", "Back"),
             ])
 
-            status = "" if has_cli else "\n[CLI not installed]\n"
+            if cli_works:
+                status = f"\n[CLI: {cli_location}]"
+            elif has_cli:
+                status = f"\n[CLI found but not working: {cli_location}]"
+            else:
+                status = "\n[CLI not installed]"
+
             choice = self.dialog.menu(
                 "Radio Tools",
                 f"Meshtastic radio control (terminal-native):{status}",
@@ -392,17 +415,19 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "install-cli":
+            if choice == "install-cli" or choice == "reinstall-cli":
                 self._install_meshtastic_cli()
                 continue
 
             cli = self._get_meshtastic_cli()
+            # Use --host localhost to connect via meshtasticd (required for HAT radios)
+            conn_args = ['--host', 'localhost']
             if choice == "info":
-                self._radio_run([cli, '--info'], "Radio Info")
+                self._radio_run([cli] + conn_args + ['--info'], "Radio Info")
             elif choice == "nodes":
-                self._radio_run([cli, '--nodes'], "Node List")
+                self._radio_run([cli] + conn_args + ['--nodes'], "Node List")
             elif choice == "channels":
-                self._radio_run([cli, '--ch-index', '0', '--ch-getall'], "Channels")
+                self._radio_run([cli] + conn_args + ['--ch-index', '0', '--ch-getall'], "Channels")
             elif choice == "position":
                 self._radio_position_menu()
             elif choice == "send":
@@ -455,8 +480,12 @@ class MeshForgeLauncher(
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Installing Meshtastic CLI ===\n")
 
+        # Determine if we should install as a different user (when running via sudo)
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
         try:
-            # Ensure pipx is available
+            # Ensure pipx is available (this needs root for apt)
             if not shutil.which('pipx'):
                 print("Installing pipx...\n")
                 result = subprocess.run(
@@ -469,9 +498,20 @@ class MeshForgeLauncher(
                     self._wait_for_enter()
                     return
 
+            # Build pipx commands - run as real user if we're under sudo
+            def run_pipx_cmd(args, timeout_sec=300):
+                """Run pipx command, as real user if running via sudo."""
+                if run_as_user:
+                    # Run as the real user with login shell (-i) to set HOME correctly
+                    # Without -i, HOME stays as /root and pipx installs there
+                    cmd = ['sudo', '-i', '-u', run_as_user] + args
+                else:
+                    cmd = args
+                return subprocess.run(cmd, timeout=timeout_sec)
+
             # Ensure pipx bin dir is in PATH for this session
             print("Ensuring pipx paths...\n")
-            subprocess.run(['pipx', 'ensurepath'], timeout=15)
+            run_pipx_cmd(['pipx', 'ensurepath'], timeout_sec=15)
 
             # Add common pipx bin dirs to current process PATH
             for bindir in [
@@ -483,18 +523,15 @@ class MeshForgeLauncher(
                     os.environ['PATH'] = f"{bindir}:{os.environ.get('PATH', '')}"
 
             # Install meshtastic with CLI extras (live output)
-            print("\nInstalling meshtastic CLI via pipx...\n")
-            result = subprocess.run(
-                ['pipx', 'install', 'meshtastic[cli]', '--force'],
-                timeout=300
-            )
+            if run_as_user:
+                print(f"\nInstalling meshtastic CLI via pipx (as {run_as_user})...\n")
+            else:
+                print("\nInstalling meshtastic CLI via pipx...\n")
+            result = run_pipx_cmd(['pipx', 'install', 'meshtastic[cli]', '--force'])
 
             if result.returncode != 0:
                 print("\nRetrying without [cli] extras...\n")
-                result = subprocess.run(
-                    ['pipx', 'install', 'meshtastic', '--force'],
-                    timeout=300
-                )
+                result = run_pipx_cmd(['pipx', 'install', 'meshtastic', '--force'])
 
             if result.returncode == 0:
                 # Clear cached path so it gets re-resolved
@@ -543,7 +580,7 @@ class MeshForgeLauncher(
             ""
         )
 
-        cmd = [self._get_meshtastic_cli(), '--sendtext', msg]
+        cmd = [self._get_meshtastic_cli(), '--host', 'localhost', '--sendtext', msg]
         if dest and dest.strip():
             dest = dest.strip()
             if not dest.startswith('!'):
@@ -583,7 +620,7 @@ class MeshForgeLauncher(
 
         if self.dialog.yesno("Confirm", f"Set region to {choice}?\n\nRadio will restart."):
             self._radio_run(
-                [self._get_meshtastic_cli(), '--set', 'lora.region', choice],
+                [self._get_meshtastic_cli(), '--host', 'localhost', '--set', 'lora.region', choice],
                 f"Setting Region: {choice}"
             )
 
@@ -603,7 +640,7 @@ class MeshForgeLauncher(
             name[:4]
         )
 
-        cmd = [self._get_meshtastic_cli(), '--set-owner', name]
+        cmd = [self._get_meshtastic_cli(), '--host', 'localhost', '--set-owner', name]
         if short:
             cmd.extend(['--set-owner-short', short[:4]])
         self._radio_run(cmd, "Setting Node Name")
@@ -626,9 +663,10 @@ class MeshForgeLauncher(
             return
 
         cli = self._get_meshtastic_cli()
+        conn_args = ['--host', 'localhost']
 
         if choice == "view":
-            self._radio_run([cli, '--get', 'position'], "Position Settings")
+            self._radio_run([cli] + conn_args + ['--get', 'position'], "Position Settings")
         elif choice == "set":
             lat = self.dialog.inputbox(
                 "Latitude",
@@ -674,7 +712,7 @@ class MeshForgeLauncher(
                 return
 
             self._radio_run(
-                [cli, '--setlat', str(lat_f), '--setlon', str(lon_f)],
+                [cli] + conn_args + ['--setlat', str(lat_f), '--setlon', str(lon_f)],
                 "Setting Position"
             )
 
@@ -682,7 +720,7 @@ class MeshForgeLauncher(
         """Reboot the radio via meshtastic CLI."""
         if self.dialog.yesno("Reboot Radio", "Reboot the Meshtastic radio?\n\nThis restarts the firmware.", default_no=True):
             self._radio_run(
-                [self._get_meshtastic_cli(), '--reboot'],
+                [self._get_meshtastic_cli(), '--host', 'localhost', '--reboot'],
                 "Rebooting Radio"
             )
 

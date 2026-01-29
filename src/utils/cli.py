@@ -116,10 +116,14 @@ def run_meshtastic_command(args, connection_args=None, capture=True, timeout=60)
 def get_meshtastic_install_instructions():
     """Get installation instructions for meshtastic CLI
 
+    NOTE: pipx install should NOT be run with sudo, as it installs to
+    the user's ~/.local/bin which is inaccessible to other users.
+    Only apt install needs sudo.
+
     Returns:
         str: Installation instructions
     """
-    return "sudo apt install pipx && pipx install 'meshtastic[cli]' && pipx ensurepath"
+    return "sudo apt install pipx && pipx install 'meshtastic[cli]' && eval \"$(pipx ensurepath)\""
 
 
 def create_progress():
