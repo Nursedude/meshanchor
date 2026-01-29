@@ -23,20 +23,20 @@ class AIToolsMixin:
     """Mixin providing AI tools for the TUI launcher."""
 
     def _ai_tools_menu(self):
-        """AI-powered tools menu."""
+        """Maps and coverage tools menu."""
         choices = [
             ("livemap", "Live Network Map"),
+            ("coverage", "Generate Coverage Map (All Sources)"),
             ("diagnose", "Intelligent Diagnostics"),
             ("knowledge", "Knowledge Base Query"),
             ("assistant", "Claude Assistant"),
-            ("coverage", "Generate Coverage Map"),
             ("back", "Back"),
         ]
 
         while True:
             choice = self.dialog.menu(
-                "AI Tools",
-                "AI-powered mesh network assistance:",
+                "Maps & Coverage",
+                "Network mapping and analysis tools:",
                 choices
             )
 
