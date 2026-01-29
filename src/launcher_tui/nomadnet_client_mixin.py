@@ -501,8 +501,12 @@ class NomadNetClientMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Installing NomadNet ===\n")
 
+        # Determine if we should install as a different user (when running via sudo)
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
         try:
-            # Ensure pipx is available
+            # Ensure pipx is available (this needs root for apt)
             if not shutil.which('pipx'):
                 print("Installing pipx...\n")
                 result = subprocess.run(
@@ -515,9 +519,19 @@ class NomadNetClientMixin:
                     self._wait_for_enter()
                     return
 
+            # Build pipx commands - run as real user if we're under sudo
+            def run_pipx_cmd(args, timeout_sec=300):
+                """Run pipx command, as real user if running via sudo."""
+                if run_as_user:
+                    # Run as real user with login shell (-i) to set HOME correctly
+                    cmd = ['sudo', '-i', '-u', run_as_user] + args
+                else:
+                    cmd = args
+                return subprocess.run(cmd, timeout=timeout_sec)
+
             # Ensure pipx bin dir is in PATH for this session
             print("Ensuring pipx paths...\n")
-            subprocess.run(['pipx', 'ensurepath'], timeout=15)
+            run_pipx_cmd(['pipx', 'ensurepath'], timeout_sec=15)
 
             # Add common pipx bin dirs to current process PATH
             for bindir in [
@@ -529,17 +543,23 @@ class NomadNetClientMixin:
                     os.environ['PATH'] = f"{bindir}:{os.environ.get('PATH', '')}"
 
             # Install nomadnet via pipx (live output)
-            print("\nInstalling NomadNet via pipx...\n")
-            result = subprocess.run(
-                ['pipx', 'install', 'nomadnet'],
-                timeout=300
-            )
+            if run_as_user:
+                print(f"\nInstalling NomadNet via pipx (as {run_as_user})...\n")
+            else:
+                print("\nInstalling NomadNet via pipx...\n")
+            result = run_pipx_cmd(['pipx', 'install', 'nomadnet'])
 
             if result.returncode == 0:
                 print("\nInstallation complete.")
                 if self._is_nomadnet_installed():
                     nn_path = shutil.which('nomadnet')
-                    print(f"NomadNet installed at: {nn_path}")
+                    if nn_path:
+                        print(f"NomadNet installed at: {nn_path}")
+                    else:
+                        # Check user's local bin
+                        user_bin = get_real_user_home() / '.local' / 'bin' / 'nomadnet'
+                        if user_bin.exists():
+                            print(f"NomadNet installed at: {user_bin}")
                 else:
                     print("\nnomadnet not found in PATH.")
                     print("You may need to log out and back in,")
