@@ -890,6 +890,7 @@ class MeshForgeLauncher(
                 ("probe", "Probe Destination (rnprobe)"),
                 ("identity", "Identity Info (rnid)"),
                 ("nodes", "Known Destinations"),
+                ("positions", "Set Node Positions (for map)"),
                 ("diag", "RNS Diagnostics"),
                 ("bridge", "Gateway Bridge (start/stop)"),
                 ("nomadnet", "NomadNet Client"),
@@ -925,6 +926,8 @@ class MeshForgeLauncher(
                 self._rns_identity_info()
             elif choice == "nodes":
                 self._rns_known_destinations()
+            elif choice == "positions":
+                self._rns_set_node_positions()
             elif choice == "diag":
                 self._rns_diagnostics()
             elif choice == "bridge":
@@ -1092,6 +1095,166 @@ class MeshForgeLauncher(
             self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
 
         self._wait_for_enter()
+
+    def _rns_set_node_positions(self):
+        """Set GPS positions for RNS nodes so they appear on the map.
+
+        NomadNet nodes don't broadcast location, so positions must be set manually.
+        Sideband nodes with GPS sharing will be auto-populated.
+        """
+        while True:
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Set RNS Node Positions ===\n")
+            print("NomadNet nodes don't broadcast GPS. Set positions manually")
+            print("so your RNS nodes appear on the live network map.\n")
+
+            # Load node tracker and cache
+            try:
+                from gateway.node_tracker import UnifiedNodeTracker
+                tracker = UnifiedNodeTracker()
+                rns_nodes = tracker.get_rns_nodes()
+            except Exception as e:
+                print(f"Error loading node tracker: {e}")
+                self._wait_for_enter()
+                return
+
+            if not rns_nodes:
+                print("No RNS nodes discovered yet.")
+                print("\nMake sure rnsd is running and you've exchanged announces")
+                print("with other nodes (via NomadNet or Sideband).")
+                self._wait_for_enter()
+                return
+
+            # Build menu of nodes
+            choices = []
+            print(f"{'#':<3} {'Name':<20} {'Hash':<12} {'Position'}")
+            print("-" * 60)
+            for i, node in enumerate(rns_nodes):
+                if node.position.is_valid():
+                    pos_str = f"({node.position.latitude:.4f}, {node.position.longitude:.4f})"
+                else:
+                    pos_str = "NOT SET"
+                name = node.name[:18] if node.name else node.id[:18]
+                hash_short = node.id.replace('rns_', '')[:10]
+                print(f"{i+1:<3} {name:<20} {hash_short:<12} {pos_str}")
+                choices.append((str(i), f"{name} - {pos_str}"))
+
+            choices.append(("back", "Back to RNS Menu"))
+            print()
+
+            choice = self.dialog.menu(
+                "Select Node",
+                "Choose a node to set its position:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            try:
+                idx = int(choice)
+                if 0 <= idx < len(rns_nodes):
+                    self._set_single_node_position(rns_nodes[idx])
+            except ValueError:
+                pass
+
+    def _set_single_node_position(self, node):
+        """Set position for a single RNS node."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print(f"=== Set Position for {node.name} ===\n")
+        print(f"Node ID: {node.id}")
+        if node.position.is_valid():
+            print(f"Current: ({node.position.latitude:.6f}, {node.position.longitude:.6f})")
+        else:
+            print("Current: NOT SET")
+        print()
+        print("Enter coordinates in decimal degrees (e.g., 21.3069 for latitude)")
+        print("Tip: Get coords from Google Maps by right-clicking a location\n")
+
+        try:
+            lat_str = input("Latitude (e.g., 21.3069): ").strip()
+            if not lat_str:
+                print("Cancelled.")
+                self._wait_for_enter()
+                return
+
+            lon_str = input("Longitude (e.g., -157.8583): ").strip()
+            if not lon_str:
+                print("Cancelled.")
+                self._wait_for_enter()
+                return
+
+            lat = float(lat_str)
+            lon = float(lon_str)
+
+            # Validate
+            if not (-90 <= lat <= 90):
+                print(f"Invalid latitude: {lat} (must be -90 to 90)")
+                self._wait_for_enter()
+                return
+            if not (-180 <= lon <= 180):
+                print(f"Invalid longitude: {lon} (must be -180 to 180)")
+                self._wait_for_enter()
+                return
+
+            # Optional: name
+            name_input = input(f"Name [{node.name}]: ").strip()
+            new_name = name_input if name_input else node.name
+
+            # Save to cache
+            self._save_rns_node_position(node.id, new_name, lat, lon)
+            print(f"\nSaved: {new_name} at ({lat:.6f}, {lon:.6f})")
+            print("Refresh the map to see the updated position.")
+
+        except ValueError as e:
+            print(f"Invalid input: {e}")
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelled.")
+
+        self._wait_for_enter()
+
+    def _save_rns_node_position(self, node_id: str, name: str, lat: float, lon: float):
+        """Save an RNS node position to the node cache."""
+        import json
+
+        cache_path = get_real_user_home() / '.config' / 'meshforge' / 'node_cache.json'
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing cache
+        if cache_path.exists():
+            try:
+                with open(cache_path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                data = {'version': 1, 'nodes': []}
+        else:
+            data = {'version': 1, 'nodes': []}
+
+        if 'nodes' not in data:
+            data['nodes'] = []
+
+        # Find and update or add node
+        found = False
+        for node in data['nodes']:
+            if node.get('id') == node_id:
+                node['name'] = name
+                node['position'] = {'latitude': lat, 'longitude': lon, 'altitude': 0}
+                node['network'] = 'rns'
+                found = True
+                break
+
+        if not found:
+            data['nodes'].append({
+                'id': node_id,
+                'name': name,
+                'network': 'rns',
+                'position': {'latitude': lat, 'longitude': lon, 'altitude': 0},
+                'is_online': True,
+            })
+
+        # Save
+        with open(cache_path, 'w') as f:
+            json.dump(data, f, indent=2)
 
     def _rns_diagnostics(self):
         """Run comprehensive RNS diagnostics."""
