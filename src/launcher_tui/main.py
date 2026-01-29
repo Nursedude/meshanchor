@@ -2112,41 +2112,22 @@ class MeshForgeLauncher(
         """Run meshforge-status (terminal-native one-shot status)."""
         subprocess.run(['clear'], check=False, timeout=5)
         try:
-            # Capture output and pipe through less so user can scroll
+            # Run status script directly, showing output in real-time
             result = subprocess.run(
                 [sys.executable, str(self.src_dir / 'cli' / 'status.py')],
-                capture_output=True, text=True, timeout=30
+                timeout=20
             )
-            output = result.stdout or ""
-            if result.stderr:
-                output += result.stderr
-
-            if output.strip():
-                # Use less with -R for ANSI colors, -X to not clear on exit
-                proc = subprocess.Popen(
-                    ['less', '-R', '-X'],
-                    stdin=subprocess.PIPE
-                )
-                try:
-                    proc.communicate(input=output.encode(), timeout=300)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                except KeyboardInterrupt:
-                    proc.kill()
-            else:
-                print("No status output available.")
-                try:
-                    self._wait_for_enter()
-                except KeyboardInterrupt:
-                    print()
+            if result.returncode != 0:
+                print("\nStatus check encountered an error.")
         except subprocess.TimeoutExpired:
-            print("\n\nStatus check timed out (30s).")
-            try:
-                self._wait_for_enter("\nPress Enter to return to menu...")
-            except KeyboardInterrupt:
-                print()
+            print("\n\nStatus check timed out (20s).")
         except KeyboardInterrupt:
             print("\n\nAborted.")
+
+        try:
+            self._wait_for_enter("\nPress Enter to return to menu...")
+        except KeyboardInterrupt:
+            print()
 
     def _run_terminal_network(self):
         """Show network diagnostics directly in terminal."""
