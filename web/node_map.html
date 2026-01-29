@@ -441,6 +441,140 @@
             border-top: 1px solid #2a3a4a;
             font-size: 11px;
         }
+
+        /* Planning mode controls */
+        .planning-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #2a3a4a;
+        }
+        .planning-section .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #4fc3f7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .planning-mode-active {
+            background: rgba(79, 195, 247, 0.1) !important;
+            border-color: #4fc3f7 !important;
+        }
+
+        /* Simulated node marker */
+        .sim-node-marker {
+            animation: sim-pulse 2s ease-in-out infinite;
+        }
+        @keyframes sim-pulse {
+            0%, 100% { opacity: 0.9; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        .sim-coverage-circle {
+            animation: sim-coverage-expand 1s ease-out forwards;
+        }
+        @keyframes sim-coverage-expand {
+            0% { opacity: 0; transform: scale(0.5); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Antenna height slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0;
+        }
+        .slider-container label {
+            font-size: 11px;
+            color: #6a7a8a;
+            min-width: 50px;
+        }
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: #1a2a3a;
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #4fc3f7;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .slider-container .slider-value {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e0e0e0;
+            min-width: 36px;
+            text-align: right;
+        }
+
+        /* Simulation results panel */
+        .sim-results {
+            background: #0d1520;
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 11px;
+            display: none;
+        }
+        .sim-results.visible { display: block; }
+        .sim-results h5 {
+            color: #4fc3f7;
+            font-size: 11px;
+            margin: 0 0 6px 0;
+        }
+        .sim-result-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+        .sim-result-row .label { color: #6a7a8a; }
+        .sim-result-row .value { color: #e0e0e0; font-weight: 500; }
+        .sim-result-row .good { color: #66bb6a; }
+        .sim-result-row .warning { color: #ffa726; }
+        .sim-result-row .bad { color: #ef5350; }
+
+        .sim-links-list {
+            max-height: 120px;
+            overflow-y: auto;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #2a3a4a;
+        }
+        .sim-link-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 10px;
+        }
+        .sim-link-item .link-quality {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .sim-link-item .node-name { flex: 1; color: #aaa; }
+        .sim-link-item .link-info { color: #888; }
+
+        /* LOS line styling */
+        .los-line-clear { stroke: #66bb6a; }
+        .los-line-marginal { stroke: #ffa726; }
+        .los-line-blocked { stroke: #ef5350; stroke-dasharray: 4 4; }
+
+        /* Resilience visualization */
+        .orphan-marker {
+            animation: orphan-blink 1s ease-in-out infinite;
+        }
+        @keyframes orphan-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
     </style>
 </head>
 <body>
@@ -517,6 +651,104 @@
                     <span class="value" id="cache-count">--</span>
                 </div>
                 <button class="btn-action" onclick="downloadCurrentArea()">Cache View</button>
+            </div>
+
+            <!-- Phase 3: Planning Tools -->
+            <div class="planning-section">
+                <div class="section-title">Planning Tools</div>
+                <button class="btn-action" id="btn-sim-mode" onclick="toggleSimulatorMode()">
+                    🎯 Place Node
+                </button>
+                <div id="sim-controls" style="display: none;">
+                    <div class="slider-container">
+                        <label>Antenna:</label>
+                        <input type="range" id="sim-height" min="2" max="30" value="10" step="1">
+                        <span class="slider-value" id="sim-height-value">10m</span>
+                    </div>
+                    <div class="slider-container">
+                        <label>Radius:</label>
+                        <input type="range" id="sim-radius" min="1" max="20" value="5" step="1">
+                        <span class="slider-value" id="sim-radius-value">5km</span>
+                    </div>
+                    <button class="btn-action" onclick="clearSimulation()">Clear Simulation</button>
+                </div>
+                <div class="sim-results" id="sim-results">
+                    <h5>📍 Simulated Node</h5>
+                    <div class="sim-result-row">
+                        <span class="label">Position:</span>
+                        <span class="value" id="sim-pos">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Potential links:</span>
+                        <span class="value" id="sim-link-count">0</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Coverage:</span>
+                        <span class="value" id="sim-coverage-area">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Nearest node:</span>
+                        <span class="value" id="sim-nearest">--</span>
+                    </div>
+                    <div class="sim-links-list" id="sim-links-list"></div>
+                </div>
+
+                <button class="btn-action" id="btn-resilience" onclick="showResilienceAnalysis()" style="margin-top: 8px;">
+                    🔗 Network Resilience
+                </button>
+                <div id="resilience-results" class="sim-results">
+                    <h5>🔗 Network Resilience</h5>
+                    <div class="sim-result-row">
+                        <span class="label">Critical nodes:</span>
+                        <span class="value" id="resilience-critical">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Redundancy:</span>
+                        <span class="value" id="resilience-score">--</span>
+                    </div>
+                    <div id="resilience-details" style="margin-top: 6px; font-size: 10px; color: #888;"></div>
+                </div>
+
+                <button class="btn-action" id="btn-optimizer" onclick="showDeploymentOptimizer()" style="margin-top: 8px;">
+                    📍 Optimize Placement
+                </button>
+                <div id="optimizer-panel" class="sim-results">
+                    <h5>📍 Deployment Optimizer</h5>
+                    <div class="slider-container">
+                        <label>Nodes:</label>
+                        <input type="range" id="opt-node-count" min="1" max="5" value="2" step="1">
+                        <span class="slider-value" id="opt-node-count-value">2</span>
+                    </div>
+                    <button class="btn-action primary" onclick="runOptimizer()">Find Optimal Spots</button>
+                    <div id="optimizer-results" style="margin-top: 8px; font-size: 10px;"></div>
+                </div>
+
+                <button class="btn-action" id="btn-playback" onclick="togglePlaybackMode()" style="margin-top: 8px;">
+                    ⏮ Time Travel
+                </button>
+                <div id="playback-panel" class="sim-results">
+                    <h5>⏮ Network History</h5>
+                    <div class="slider-container">
+                        <label>Time:</label>
+                        <input type="range" id="playback-time" min="0" max="1440" value="1440" step="5">
+                        <span class="slider-value" id="playback-time-value">Now</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Viewing:</span>
+                        <span class="value" id="playback-timestamp">Current</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Nodes:</span>
+                        <span class="value" id="playback-node-count">--</span>
+                    </div>
+                    <div style="display: flex; gap: 4px; margin-top: 8px;">
+                        <button class="btn-action" onclick="playbackStep(-60)" style="flex: 1;">-1h</button>
+                        <button class="btn-action" onclick="playbackStep(-5)" style="flex: 1;">-5m</button>
+                        <button class="btn-action primary" onclick="exitPlayback()" style="flex: 1;">Live</button>
+                        <button class="btn-action" onclick="playbackStep(5)" style="flex: 1;">+5m</button>
+                        <button class="btn-action" onclick="playbackStep(60)" style="flex: 1;">+1h</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1537,6 +1769,816 @@
             updateDisplay();
         });
     });
+
+    // ============================================
+    // Phase 3: Click-to-Place Node Simulator
+    // ============================================
+
+    const simState = {
+        active: false,
+        marker: null,
+        coverageCircle: null,
+        losLines: [],
+        position: null
+    };
+
+    function toggleSimulatorMode() {
+        simState.active = !simState.active;
+        const btn = document.getElementById('btn-sim-mode');
+        const controls = document.getElementById('sim-controls');
+
+        if (simState.active) {
+            btn.textContent = '✕ Cancel Placement';
+            btn.classList.add('planning-mode-active');
+            controls.style.display = 'block';
+            map.getContainer().style.cursor = 'crosshair';
+
+            // Enable click handler
+            map.on('click', onSimulatorClick);
+        } else {
+            btn.textContent = '🎯 Place Node';
+            btn.classList.remove('planning-mode-active');
+            controls.style.display = 'none';
+            map.getContainer().style.cursor = '';
+
+            // Disable click handler
+            map.off('click', onSimulatorClick);
+            clearSimulation();
+        }
+    }
+
+    function onSimulatorClick(e) {
+        if (!simState.active) return;
+
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        simState.position = { lat, lon };
+
+        // Clear previous simulation
+        clearSimulationMarkers();
+
+        // Get parameters
+        const height = parseInt(document.getElementById('sim-height').value);
+        const radiusKm = parseInt(document.getElementById('sim-radius').value);
+
+        // Create simulated node marker
+        const simIcon = L.divIcon({
+            html: `<svg viewBox="0 0 24 24" width="28" height="28">
+                <circle cx="12" cy="12" r="10" fill="#4fc3f7" opacity="0.9"/>
+                <text x="12" y="16" text-anchor="middle" font-size="10" fill="#fff" font-weight="bold">?</text>
+            </svg>`,
+            className: 'node-marker sim-node-marker',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+
+        simState.marker = L.marker([lat, lon], { icon: simIcon, draggable: true })
+            .addTo(map)
+            .bindPopup(`<div class="node-popup">
+                <h3>Simulated Node</h3>
+                <div class="info-grid">
+                    <div class="info-label">Position</div>
+                    <div class="info-value">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+                    <div class="info-label">Antenna</div>
+                    <div class="info-value">${height}m</div>
+                    <div class="info-label">Range</div>
+                    <div class="info-value">${radiusKm}km</div>
+                </div>
+                <p style="font-size: 11px; color: #888; margin-top: 8px;">Drag to reposition</p>
+            </div>`)
+            .on('drag', () => updateSimulationFromMarker())
+            .on('dragend', () => runSimulationAnalysis());
+
+        // Create coverage circle
+        simState.coverageCircle = L.circle([lat, lon], {
+            radius: radiusKm * 1000,
+            color: '#4fc3f7',
+            fillColor: '#4fc3f7',
+            fillOpacity: 0.1,
+            weight: 2,
+            dashArray: '5 5',
+            className: 'sim-coverage-circle'
+        }).addTo(map);
+
+        // Run analysis
+        runSimulationAnalysis();
+    }
+
+    function updateSimulationFromMarker() {
+        if (!simState.marker) return;
+        const pos = simState.marker.getLatLng();
+        simState.position = { lat: pos.lat, lon: pos.lng };
+
+        // Update coverage circle position
+        if (simState.coverageCircle) {
+            simState.coverageCircle.setLatLng(pos);
+        }
+
+        // Update position display
+        document.getElementById('sim-pos').textContent =
+            `${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)}`;
+    }
+
+    async function runSimulationAnalysis() {
+        if (!simState.position) return;
+
+        const lat = simState.position.lat;
+        const lon = simState.position.lon;
+        const height = parseInt(document.getElementById('sim-height').value);
+        const radiusKm = parseInt(document.getElementById('sim-radius').value);
+
+        // Show results panel
+        document.getElementById('sim-results').classList.add('visible');
+        document.getElementById('sim-pos').textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+        // Clear previous LOS lines
+        simState.losLines.forEach(line => map.removeLayer(line));
+        simState.losLines = [];
+
+        // Find potential links to existing nodes
+        const potentialLinks = [];
+        let nearestNode = null;
+        let nearestDist = Infinity;
+
+        for (const [id, entry] of state.markers) {
+            const nodeLat = entry.feature.geometry.coordinates[1];
+            const nodeLon = entry.feature.geometry.coordinates[0];
+            const dist = getDistance(lat, lon, nodeLat, nodeLon);
+
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestNode = entry.feature;
+            }
+
+            if (dist <= radiusKm) {
+                potentialLinks.push({
+                    feature: entry.feature,
+                    distance: dist,
+                    lat: nodeLat,
+                    lon: nodeLon
+                });
+            }
+        }
+
+        // Update stats
+        document.getElementById('sim-link-count').textContent = potentialLinks.length;
+        document.getElementById('sim-coverage-area').textContent =
+            `~${(Math.PI * radiusKm * radiusKm).toFixed(1)} km²`;
+
+        if (nearestNode) {
+            const name = nearestNode.properties.name || nearestNode.properties.id;
+            document.getElementById('sim-nearest').textContent =
+                `${name} (${nearestDist.toFixed(1)}km)`;
+        } else {
+            document.getElementById('sim-nearest').textContent = 'None found';
+        }
+
+        // Analyze each potential link (check LOS if API available)
+        const linksHtml = [];
+        for (const link of potentialLinks.slice(0, 10)) { // Limit to 10
+            const props = link.feature.properties;
+            const name = props.name || props.id;
+            let quality = 'unknown';
+            let color = '#888';
+            let losInfo = '';
+
+            // Try to get LOS analysis from API
+            try {
+                const losRes = await fetch(
+                    `/api/los/${lat}/${lon}/${link.lat}/${link.lon}?alt1=${height}&alt2=10`
+                );
+                if (losRes.ok) {
+                    const losData = await losRes.json();
+                    if (!losData.error) {
+                        if (losData.is_clear && losData.fresnel_clearance_pct >= 60) {
+                            quality = 'good';
+                            color = '#66bb6a';
+                            losInfo = `${losData.fresnel_clearance_pct.toFixed(0)}% Fresnel`;
+                        } else if (losData.is_clear) {
+                            quality = 'marginal';
+                            color = '#ffa726';
+                            losInfo = `${losData.fresnel_clearance_pct.toFixed(0)}% Fresnel`;
+                        } else {
+                            quality = 'blocked';
+                            color = '#ef5350';
+                            losInfo = 'Obstructed';
+                        }
+                    }
+                }
+            } catch (e) {
+                // API not available, estimate based on distance
+                if (link.distance < 2) {
+                    quality = 'good';
+                    color = '#66bb6a';
+                    losInfo = 'Close range';
+                } else if (link.distance < 5) {
+                    quality = 'marginal';
+                    color = '#ffa726';
+                    losInfo = 'Medium range';
+                } else {
+                    quality = 'unknown';
+                    color = '#888';
+                    losInfo = 'Long range';
+                }
+            }
+
+            // Draw LOS line
+            const lineClass = quality === 'good' ? 'los-line-clear' :
+                             quality === 'marginal' ? 'los-line-marginal' : 'los-line-blocked';
+
+            const losLine = L.polyline([
+                [lat, lon],
+                [link.lat, link.lon]
+            ], {
+                color: color,
+                weight: quality === 'good' ? 2.5 : 2,
+                opacity: 0.7,
+                dashArray: quality === 'blocked' ? '4 4' : null,
+                className: lineClass
+            }).addTo(map);
+
+            simState.losLines.push(losLine);
+
+            // Add to links list
+            linksHtml.push(`
+                <div class="sim-link-item">
+                    <div class="link-quality" style="background: ${color}"></div>
+                    <span class="node-name">${name}</span>
+                    <span class="link-info">${link.distance.toFixed(1)}km · ${losInfo}</span>
+                </div>
+            `);
+        }
+
+        document.getElementById('sim-links-list').innerHTML =
+            linksHtml.length > 0 ? linksHtml.join('') :
+            '<div style="color: #666; font-size: 10px;">No nodes within range</div>';
+    }
+
+    function clearSimulationMarkers() {
+        if (simState.marker) {
+            map.removeLayer(simState.marker);
+            simState.marker = null;
+        }
+        if (simState.coverageCircle) {
+            map.removeLayer(simState.coverageCircle);
+            simState.coverageCircle = null;
+        }
+        simState.losLines.forEach(line => map.removeLayer(line));
+        simState.losLines = [];
+    }
+
+    function clearSimulation() {
+        clearSimulationMarkers();
+        simState.position = null;
+        document.getElementById('sim-results').classList.remove('visible');
+        document.getElementById('sim-links-list').innerHTML = '';
+    }
+
+    // Slider event listeners
+    document.getElementById('sim-height').addEventListener('input', function() {
+        document.getElementById('sim-height-value').textContent = this.value + 'm';
+        if (simState.position) runSimulationAnalysis();
+    });
+
+    document.getElementById('sim-radius').addEventListener('input', function() {
+        document.getElementById('sim-radius-value').textContent = this.value + 'km';
+        if (simState.coverageCircle) {
+            simState.coverageCircle.setRadius(this.value * 1000);
+        }
+        if (simState.position) runSimulationAnalysis();
+    });
+
+    // ============================================
+    // Phase 3: Network Resilience Analysis
+    // ============================================
+
+    const resilienceState = {
+        orphanMarkers: [],
+        criticalMarkers: []
+    };
+
+    async function showResilienceAnalysis() {
+        // Clear previous visualization
+        clearResilienceVisualization();
+
+        const resultsDiv = document.getElementById('resilience-results');
+        resultsDiv.classList.add('visible');
+        document.getElementById('resilience-details').innerHTML = 'Analyzing...';
+
+        if (!state.currentGeoJSON || state.currentGeoJSON.features.length < 2) {
+            document.getElementById('resilience-critical').textContent = 'N/A';
+            document.getElementById('resilience-score').textContent = 'N/A';
+            document.getElementById('resilience-details').innerHTML =
+                'Need at least 2 nodes for analysis';
+            return;
+        }
+
+        // Build network graph
+        const nodes = state.currentGeoJSON.features.filter(f => f.properties.is_online);
+        const graph = buildNetworkGraph(nodes);
+
+        // Find critical nodes (single points of failure)
+        const criticalNodes = findCriticalNodes(graph, nodes);
+
+        // Calculate redundancy score
+        const redundancyScore = calculateRedundancyScore(graph, nodes);
+
+        // Update UI
+        document.getElementById('resilience-critical').textContent = criticalNodes.length;
+        document.getElementById('resilience-critical').className =
+            'value ' + (criticalNodes.length === 0 ? 'good' :
+                       criticalNodes.length <= 2 ? 'warning' : 'bad');
+
+        const scoreClass = redundancyScore >= 70 ? 'good' :
+                          redundancyScore >= 40 ? 'warning' : 'bad';
+        document.getElementById('resilience-score').textContent = redundancyScore + '%';
+        document.getElementById('resilience-score').className = 'value ' + scoreClass;
+
+        // Show details
+        let detailsHtml = '';
+        if (criticalNodes.length > 0) {
+            detailsHtml = '<div style="margin-top: 6px;"><strong>Critical nodes:</strong></div>';
+            criticalNodes.forEach(cn => {
+                detailsHtml += `<div style="color: #ef5350;">⚠ ${cn.name} (${cn.dependents} dependent)</div>`;
+
+                // Highlight critical node on map
+                const marker = state.markers.get(cn.id);
+                if (marker) {
+                    const criticalIcon = L.divIcon({
+                        html: `<svg viewBox="0 0 32 32" width="32" height="32">
+                            <circle cx="16" cy="16" r="14" fill="none" stroke="#ef5350" stroke-width="3" stroke-dasharray="4 2">
+                                <animate attributeName="stroke-dashoffset" values="0;12" dur="1s" repeatCount="indefinite"/>
+                            </circle>
+                        </svg>`,
+                        className: 'node-marker',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16]
+                    });
+                    const critMarker = L.marker(marker.marker.getLatLng(), { icon: criticalIcon, interactive: false });
+                    critMarker.addTo(map);
+                    resilienceState.criticalMarkers.push(critMarker);
+                }
+            });
+        } else {
+            detailsHtml = '<div style="color: #66bb6a;">✓ No single points of failure</div>';
+        }
+
+        // Find isolated nodes (would become orphans)
+        const isolatedNodes = findIsolatedNodes(graph, nodes);
+        if (isolatedNodes.length > 0) {
+            detailsHtml += `<div style="margin-top: 6px;"><strong>Weakly connected:</strong></div>`;
+            isolatedNodes.slice(0, 5).forEach(n => {
+                detailsHtml += `<div style="color: #ffa726;">⚡ ${n.name} (1 link)</div>`;
+            });
+            if (isolatedNodes.length > 5) {
+                detailsHtml += `<div style="color: #888;">...and ${isolatedNodes.length - 5} more</div>`;
+            }
+        }
+
+        document.getElementById('resilience-details').innerHTML = detailsHtml;
+    }
+
+    function buildNetworkGraph(nodes) {
+        // Build adjacency list based on proximity (simplified model)
+        const graph = new Map();
+        const maxLinkDistance = 50; // km
+
+        // Initialize nodes
+        nodes.forEach(n => {
+            const id = n.properties.id || `${n.geometry.coordinates[0]}_${n.geometry.coordinates[1]}`;
+            graph.set(id, { node: n, neighbors: [] });
+        });
+
+        // Find links based on proximity (and SNR if available)
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const n1 = nodes[i];
+                const n2 = nodes[j];
+                const dist = getDistance(
+                    n1.geometry.coordinates[1], n1.geometry.coordinates[0],
+                    n2.geometry.coordinates[1], n2.geometry.coordinates[0]
+                );
+
+                // Determine if link exists
+                let canLink = false;
+
+                // Gateways/routers can link further
+                const isRouter1 = n1.properties.is_gateway || n1.properties.role === 'ROUTER';
+                const isRouter2 = n2.properties.is_gateway || n2.properties.role === 'ROUTER';
+                const linkRange = (isRouter1 || isRouter2) ? maxLinkDistance : 20;
+
+                if (dist <= linkRange) {
+                    canLink = true;
+                }
+
+                if (canLink) {
+                    const id1 = n1.properties.id || `${n1.geometry.coordinates[0]}_${n1.geometry.coordinates[1]}`;
+                    const id2 = n2.properties.id || `${n2.geometry.coordinates[0]}_${n2.geometry.coordinates[1]}`;
+
+                    graph.get(id1).neighbors.push(id2);
+                    graph.get(id2).neighbors.push(id1);
+                }
+            }
+        }
+
+        return graph;
+    }
+
+    function findCriticalNodes(graph, nodes) {
+        // A critical node is one whose removal disconnects part of the network
+        const criticalNodes = [];
+
+        for (const [id, data] of graph) {
+            if (data.neighbors.length < 2) continue; // Not critical if only 1 or 0 links
+
+            // Check if removing this node would orphan any other nodes
+            const orphanedCount = countOrphanedNodes(graph, id);
+
+            if (orphanedCount > 0) {
+                const name = data.node.properties.name || data.node.properties.id;
+                criticalNodes.push({
+                    id: id,
+                    name: name,
+                    dependents: orphanedCount,
+                    neighbors: data.neighbors.length
+                });
+            }
+        }
+
+        // Sort by number of dependents
+        criticalNodes.sort((a, b) => b.dependents - a.dependents);
+
+        return criticalNodes;
+    }
+
+    function countOrphanedNodes(graph, removedId) {
+        // BFS from any node (except removedId) to see what's reachable
+        const visited = new Set();
+        visited.add(removedId);
+
+        // Start from any node that's not the removed one
+        let startId = null;
+        for (const id of graph.keys()) {
+            if (id !== removedId) {
+                startId = id;
+                break;
+            }
+        }
+
+        if (!startId) return 0;
+
+        // BFS
+        const queue = [startId];
+        visited.add(startId);
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const data = graph.get(current);
+
+            for (const neighbor of data.neighbors) {
+                if (!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    queue.push(neighbor);
+                }
+            }
+        }
+
+        // Count nodes not visited (orphaned)
+        let orphaned = 0;
+        for (const id of graph.keys()) {
+            if (!visited.has(id) && id !== removedId) {
+                orphaned++;
+            }
+        }
+
+        return orphaned;
+    }
+
+    function findIsolatedNodes(graph, nodes) {
+        // Nodes with only 1 connection (vulnerable)
+        const isolated = [];
+
+        for (const [id, data] of graph) {
+            if (data.neighbors.length === 1) {
+                const name = data.node.properties.name || data.node.properties.id;
+                isolated.push({ id, name, neighbors: 1 });
+            }
+        }
+
+        return isolated;
+    }
+
+    function calculateRedundancyScore(graph, nodes) {
+        if (nodes.length < 2) return 0;
+
+        // Score based on average connectivity and absence of critical nodes
+        let totalNeighbors = 0;
+        let nodesWithMultipleLinks = 0;
+
+        for (const [id, data] of graph) {
+            totalNeighbors += data.neighbors.length;
+            if (data.neighbors.length >= 2) nodesWithMultipleLinks++;
+        }
+
+        const avgConnectivity = totalNeighbors / graph.size;
+        const multiLinkRatio = nodesWithMultipleLinks / graph.size;
+
+        // Score: combination of average connectivity and multi-link ratio
+        // Max score when avg connectivity >= 3 and all nodes have 2+ links
+        const connectivityScore = Math.min(avgConnectivity / 3, 1) * 50;
+        const redundancyRatio = multiLinkRatio * 50;
+
+        return Math.round(connectivityScore + redundancyRatio);
+    }
+
+    function clearResilienceVisualization() {
+        resilienceState.orphanMarkers.forEach(m => map.removeLayer(m));
+        resilienceState.criticalMarkers.forEach(m => map.removeLayer(m));
+        resilienceState.orphanMarkers = [];
+        resilienceState.criticalMarkers = [];
+    }
+
+    // ============================================
+    // Phase 3: Deployment Optimizer
+    // ============================================
+
+    const optimizerState = {
+        markers: [],
+        coverageCircles: []
+    };
+
+    function showDeploymentOptimizer() {
+        const panel = document.getElementById('optimizer-panel');
+        panel.classList.toggle('visible');
+    }
+
+    document.getElementById('opt-node-count').addEventListener('input', function() {
+        document.getElementById('opt-node-count-value').textContent = this.value;
+    });
+
+    async function runOptimizer() {
+        const nodeCount = parseInt(document.getElementById('opt-node-count').value);
+        const resultsDiv = document.getElementById('optimizer-results');
+        resultsDiv.innerHTML = '<div style="color: #4fc3f7;">Analyzing network gaps...</div>';
+
+        // Clear previous markers
+        clearOptimizerMarkers();
+
+        if (!state.currentGeoJSON || state.currentGeoJSON.features.length < 1) {
+            resultsDiv.innerHTML = '<div style="color: #ef5350;">No nodes to analyze</div>';
+            return;
+        }
+
+        // Get current coverage bounds
+        const nodes = state.currentGeoJSON.features.filter(f =>
+            f.properties.is_online && f.geometry.coordinates
+        );
+
+        if (nodes.length === 0) {
+            resultsDiv.innerHTML = '<div style="color: #ef5350;">No online nodes</div>';
+            return;
+        }
+
+        // Calculate bounding box with padding
+        const lats = nodes.map(n => n.geometry.coordinates[1]);
+        const lons = nodes.map(n => n.geometry.coordinates[0]);
+        const minLat = Math.min(...lats) - 0.1;
+        const maxLat = Math.max(...lats) + 0.1;
+        const minLon = Math.min(...lons) - 0.1;
+        const maxLon = Math.max(...lons) + 0.1;
+
+        // Find coverage gaps using grid analysis
+        const optimalPositions = findCoverageGaps(nodes, minLat, maxLat, minLon, maxLon, nodeCount);
+
+        // Display results
+        let html = `<div style="color: #66bb6a; margin-bottom: 6px;">Found ${optimalPositions.length} optimal positions:</div>`;
+
+        optimalPositions.forEach((pos, i) => {
+            html += `<div style="padding: 2px 0;">
+                ${i + 1}. ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}
+                <span style="color: #888;">(+${pos.improvement}% coverage)</span>
+            </div>`;
+
+            // Add marker
+            const icon = L.divIcon({
+                html: `<svg viewBox="0 0 32 32" width="32" height="32">
+                    <circle cx="16" cy="16" r="12" fill="#66bb6a" opacity="0.8"/>
+                    <text x="16" y="21" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">${i + 1}</text>
+                </svg>`,
+                className: 'node-marker sim-node-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+
+            const marker = L.marker([pos.lat, pos.lon], { icon })
+                .addTo(map)
+                .bindPopup(`<div class="node-popup">
+                    <h3>Suggested Location #${i + 1}</h3>
+                    <div class="info-grid">
+                        <div class="info-label">Position</div>
+                        <div class="info-value">${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}</div>
+                        <div class="info-label">Coverage improvement</div>
+                        <div class="info-value" style="color: #66bb6a;">+${pos.improvement}%</div>
+                        <div class="info-label">Nearest node</div>
+                        <div class="info-value">${pos.nearestDist.toFixed(1)}km</div>
+                        <div class="info-label">Potential links</div>
+                        <div class="info-value">${pos.potentialLinks}</div>
+                    </div>
+                </div>`);
+
+            optimizerState.markers.push(marker);
+
+            // Add coverage circle
+            const circle = L.circle([pos.lat, pos.lon], {
+                radius: 3000,
+                color: '#66bb6a',
+                fillColor: '#66bb6a',
+                fillOpacity: 0.15,
+                weight: 2,
+                dashArray: '5 5'
+            }).addTo(map);
+            optimizerState.coverageCircles.push(circle);
+        });
+
+        resultsDiv.innerHTML = html;
+    }
+
+    function findCoverageGaps(nodes, minLat, maxLat, minLon, maxLon, count) {
+        // Grid-based gap analysis
+        const gridSize = 20; // 20x20 grid
+        const latStep = (maxLat - minLat) / gridSize;
+        const lonStep = (maxLon - minLon) / gridSize;
+
+        // Score each grid cell by distance to nearest node (higher = worse coverage)
+        const cells = [];
+
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                const lat = minLat + (i + 0.5) * latStep;
+                const lon = minLon + (j + 0.5) * lonStep;
+
+                let minDist = Infinity;
+                let linksInRange = 0;
+
+                for (const node of nodes) {
+                    const dist = getDistance(lat, lon, node.geometry.coordinates[1], node.geometry.coordinates[0]);
+                    if (dist < minDist) minDist = dist;
+                    if (dist < 5) linksInRange++; // Within 5km
+                }
+
+                // Score: prefer locations far from existing nodes but can still connect
+                if (minDist > 0.5 && minDist < 30) { // At least 500m away, but within 30km
+                    cells.push({
+                        lat, lon,
+                        score: minDist * (linksInRange + 0.5), // Balance gap size vs connectivity
+                        nearestDist: minDist,
+                        potentialLinks: linksInRange
+                    });
+                }
+            }
+        }
+
+        // Sort by score (higher = better placement)
+        cells.sort((a, b) => b.score - a.score);
+
+        // Select top positions, ensuring they're not too close to each other
+        const selected = [];
+        const minSeparation = 3; // km
+
+        for (const cell of cells) {
+            if (selected.length >= count) break;
+
+            // Check if too close to already selected
+            let tooClose = false;
+            for (const sel of selected) {
+                if (getDistance(cell.lat, cell.lon, sel.lat, sel.lon) < minSeparation) {
+                    tooClose = true;
+                    break;
+                }
+            }
+
+            if (!tooClose) {
+                // Estimate coverage improvement (simplified)
+                const improvement = Math.round(cell.nearestDist * 2);
+                selected.push({
+                    lat: cell.lat,
+                    lon: cell.lon,
+                    improvement: Math.min(improvement, 25),
+                    nearestDist: cell.nearestDist,
+                    potentialLinks: cell.potentialLinks
+                });
+            }
+        }
+
+        return selected;
+    }
+
+    function clearOptimizerMarkers() {
+        optimizerState.markers.forEach(m => map.removeLayer(m));
+        optimizerState.coverageCircles.forEach(c => map.removeLayer(c));
+        optimizerState.markers = [];
+        optimizerState.coverageCircles = [];
+    }
+
+    // ============================================
+    // Phase 3: Time-Series Playback
+    // ============================================
+
+    const playbackState = {
+        active: false,
+        currentMinutesAgo: 0, // 0 = now, 1440 = 24 hours ago
+        savedGeoJSON: null
+    };
+
+    function togglePlaybackMode() {
+        const panel = document.getElementById('playback-panel');
+        panel.classList.toggle('visible');
+
+        if (panel.classList.contains('visible') && !playbackState.active) {
+            // Save current state
+            playbackState.savedGeoJSON = state.currentGeoJSON;
+            playbackState.active = true;
+        }
+    }
+
+    document.getElementById('playback-time').addEventListener('input', async function() {
+        const minutesAgo = 1440 - parseInt(this.value); // Inverted: right = now
+        playbackState.currentMinutesAgo = minutesAgo;
+
+        if (minutesAgo === 0) {
+            document.getElementById('playback-time-value').textContent = 'Now';
+            document.getElementById('playback-timestamp').textContent = 'Current';
+            exitPlayback();
+            return;
+        }
+
+        // Format time
+        const hours = Math.floor(minutesAgo / 60);
+        const mins = minutesAgo % 60;
+        if (hours > 0) {
+            document.getElementById('playback-time-value').textContent = `-${hours}h${mins > 0 ? mins + 'm' : ''}`;
+        } else {
+            document.getElementById('playback-time-value').textContent = `-${mins}m`;
+        }
+
+        await loadHistoricalSnapshot(minutesAgo);
+    });
+
+    async function playbackStep(minutes) {
+        const slider = document.getElementById('playback-time');
+        const newValue = Math.max(0, Math.min(1440, parseInt(slider.value) + minutes));
+        slider.value = newValue;
+        slider.dispatchEvent(new Event('input'));
+    }
+
+    async function loadHistoricalSnapshot(minutesAgo) {
+        const timestamp = (Date.now() / 1000) - (minutesAgo * 60);
+        const formattedTime = new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('playback-timestamp').textContent = formattedTime;
+
+        try {
+            const response = await fetch(`/api/nodes/snapshot?timestamp=${timestamp}&window=300`);
+            if (!response.ok) throw new Error('API unavailable');
+
+            const data = await response.json();
+            if (data.error) {
+                document.getElementById('playback-node-count').textContent = 'No data';
+                return;
+            }
+
+            // Update display with historical data
+            document.getElementById('playback-node-count').textContent = data.features.length;
+
+            // Replace current data with snapshot
+            state.currentGeoJSON = data;
+            state.firstLoad = true; // Reset to allow re-fitting
+            updateDisplay();
+            state.firstLoad = false;
+
+        } catch (e) {
+            // API not available - show message
+            document.getElementById('playback-node-count').textContent = 'API offline';
+        }
+    }
+
+    function exitPlayback() {
+        playbackState.active = false;
+        playbackState.currentMinutesAgo = 0;
+
+        // Restore live data
+        if (playbackState.savedGeoJSON) {
+            state.currentGeoJSON = playbackState.savedGeoJSON;
+            updateDisplay();
+        }
+
+        // Reset slider
+        document.getElementById('playback-time').value = 1440;
+        document.getElementById('playback-time-value').textContent = 'Now';
+        document.getElementById('playback-timestamp').textContent = 'Current';
+
+        // Refresh with live data
+        refreshNodes();
+    }
 
     // ============================================
     // Initialization
