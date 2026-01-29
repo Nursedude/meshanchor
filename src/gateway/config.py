@@ -113,7 +113,20 @@ def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[Confi
     return None
 
 # Import centralized path utility for sudo compatibility
-from utils.paths import get_real_user_home
+try:
+    from utils.paths import get_real_user_home
+except ImportError:
+    def get_real_user_home() -> Path:
+        """Fallback for when utils.paths is not in Python path."""
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            candidate = Path(f'/home/{sudo_user}')
+            return candidate
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            candidate = Path(f'/home/{logname}')
+            return candidate
+        return Path('/root')
 
 
 @dataclass
