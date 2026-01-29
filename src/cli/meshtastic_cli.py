@@ -69,6 +69,9 @@ class MeshtasticCLI:
                 if result.stderr:
                     console.print(f"[yellow]{result.stderr}[/yellow]")
             return result
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Aborted.[/yellow]")
+            return None
         except subprocess.TimeoutExpired:
             console.print("[red]Command timed out[/red]")
             return None
@@ -88,6 +91,8 @@ class MeshtasticCLI:
 
         try:
             subprocess.run(full_args, timeout=120)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Aborted.[/yellow]")
         except subprocess.TimeoutExpired:
             console.print("[red]Command timed out[/red]")
         except Exception as e:
@@ -264,6 +269,8 @@ class MeshtasticCLI:
             cli_path = self._cli_path or 'meshtastic'
             result = subprocess.run([cli_path, "-h"], capture_output=True, text=True, timeout=15)
             console.print(result.stdout)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Aborted.[/yellow]")
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
         Prompt.ask("\n[dim]Press Enter to continue[/dim]")

@@ -167,6 +167,16 @@ class MeshtasticCLI:
                     f"CLI attempt {attempt + 1} failed: {last_error[:100]}"
                 )
 
+            except KeyboardInterrupt:
+                # User aborted - exit immediately without retry
+                logger.info("CLI command aborted by user")
+                return CLIResult(
+                    success=False,
+                    error="Aborted by user",
+                    attempts=attempt + 1,
+                    command=full_command,
+                )
+
             except subprocess.TimeoutExpired:
                 last_error = f"Command timed out after {timeout}s"
                 logger.warning(f"CLI attempt {attempt + 1}: {last_error}")
@@ -179,7 +189,17 @@ class MeshtasticCLI:
             if attempt < retries - 1:
                 delay = self.RETRY_DELAYS[min(attempt, len(self.RETRY_DELAYS) - 1)]
                 logger.debug(f"Waiting {delay}s before retry...")
-                time.sleep(delay)
+                try:
+                    time.sleep(delay)
+                except KeyboardInterrupt:
+                    # User aborted during retry wait
+                    logger.info("CLI command aborted by user during retry wait")
+                    return CLIResult(
+                        success=False,
+                        error="Aborted by user",
+                        attempts=attempt + 1,
+                        command=full_command,
+                    )
 
         # All retries exhausted
         logger.error(f"CLI command failed after {retries} attempts: {args}")
