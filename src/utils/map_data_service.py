@@ -584,6 +584,14 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/nodes/trajectory/'):
             node_id = self.path.split('/api/nodes/trajectory/', 1)[1].rstrip('/')
             self._serve_trajectory(node_id)
+        elif self.path.startswith('/api/coverage/'):
+            # Coverage prediction for a node: /api/coverage/<lat>/<lon>/<alt>
+            parts = self.path.split('/api/coverage/', 1)[1].rstrip('/').split('/')
+            self._serve_coverage(parts)
+        elif self.path.startswith('/api/los/'):
+            # Line of sight check: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
+            parts = self.path.split('/api/los/', 1)[1].rstrip('/').split('/')
+            self._serve_los(parts)
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -693,6 +701,160 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
+
+    def _serve_coverage(self, parts: List[str]):
+        """Serve terrain-aware coverage prediction for a location.
+
+        URL: /api/coverage/<lat>/<lon>/<antenna_height_m>
+        Optional query params: radius_km (default 10), freq_mhz (default 906)
+        """
+        try:
+            if len(parts) < 3:
+                self._serve_json({"error": "Usage: /api/coverage/<lat>/<lon>/<height_m>"})
+                return
+
+            lat = float(parts[0])
+            lon = float(parts[1])
+            alt = float(parts[2])
+
+            # Parse query params
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            radius_km = float(params.get('radius_km', ['10'])[0])
+            freq_mhz = float(params.get('freq_mhz', ['906'])[0])
+            resolution = int(params.get('resolution', ['24'])[0])
+
+            # Limit resolution for performance
+            resolution = min(resolution, 48)
+            radius_km = min(radius_km, 50)
+
+            # Get coverage prediction from terrain analyzer
+            try:
+                from utils.terrain import SRTMProvider, LOSAnalyzer
+                provider = SRTMProvider()
+                analyzer = LOSAnalyzer(provider)
+                coverage = analyzer.coverage_grid(
+                    lat, lon, alt,
+                    radius_km=radius_km,
+                    freq_mhz=freq_mhz,
+                    resolution=resolution
+                )
+            except ImportError:
+                self._serve_json({"error": "terrain module not available"})
+                return
+            except Exception as e:
+                logger.error(f"Coverage calculation failed: {e}")
+                self._serve_json({"error": f"calculation failed: {str(e)}"})
+                return
+
+            # Convert to GeoJSON for map display
+            features = []
+            for point in coverage:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [point["lon"], point["lat"]]
+                    },
+                    "properties": {
+                        "is_clear": point["is_clear"],
+                        "total_loss_db": point["total_loss_db"],
+                        "terrain_loss_db": point["terrain_loss_db"],
+                        "fresnel_pct": point["fresnel_clearance_pct"],
+                        "distance_m": point["distance_m"],
+                        "bearing": point["bearing"],
+                    }
+                })
+
+            result = {
+                "type": "FeatureCollection",
+                "features": features,
+                "properties": {
+                    "center": [lon, lat],
+                    "antenna_height_m": alt,
+                    "radius_km": radius_km,
+                    "freq_mhz": freq_mhz,
+                }
+            }
+            self._serve_json(result)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"Coverage endpoint error: {e}")
+            self._serve_json({"error": str(e)})
+
+    def _serve_los(self, parts: List[str]):
+        """Serve line-of-sight analysis between two points.
+
+        URL: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
+        Optional query params: alt1, alt2 (antenna heights, default 10m), freq_mhz (default 906)
+        """
+        try:
+            if len(parts) < 4:
+                self._serve_json({"error": "Usage: /api/los/<lat1>/<lon1>/<lat2>/<lon2>"})
+                return
+
+            lat1 = float(parts[0])
+            lon1 = float(parts[1])
+            lat2 = float(parts[2])
+            lon2 = float(parts[3])
+
+            # Parse query params
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            alt1 = float(params.get('alt1', ['10'])[0])
+            alt2 = float(params.get('alt2', ['10'])[0])
+            freq_mhz = float(params.get('freq_mhz', ['906'])[0])
+
+            # Calculate LOS
+            try:
+                from utils.terrain import SRTMProvider, LOSAnalyzer
+                provider = SRTMProvider()
+                analyzer = LOSAnalyzer(provider)
+                result = analyzer.analyze(lat1, lon1, alt1, lat2, lon2, alt2, freq_mhz)
+            except ImportError:
+                self._serve_json({"error": "terrain module not available"})
+                return
+            except Exception as e:
+                logger.error(f"LOS calculation failed: {e}")
+                self._serve_json({"error": f"calculation failed: {str(e)}"})
+                return
+
+            # Build elevation profile for visualization
+            profile = []
+            if hasattr(result, 'profile') and result.profile:
+                for p in result.profile:
+                    profile.append({
+                        "distance_m": p.distance_m,
+                        "elevation_m": p.ground_elevation,
+                        "los_height_m": p.los_height,
+                        "fresnel_top": p.los_height + p.fresnel_radius,
+                        "fresnel_bottom": p.los_height - p.fresnel_radius,
+                    })
+
+            response = {
+                "is_clear": result.is_clear,
+                "distance_m": result.distance_m,
+                "total_loss_db": result.total_loss_db,
+                "terrain_loss_db": result.terrain_loss_db,
+                "fresnel_clearance_pct": result.fresnel_clearance_pct,
+                "obstruction_count": len(result.obstructions) if hasattr(result, 'obstructions') else 0,
+                "profile": profile,
+                "endpoints": {
+                    "from": {"lat": lat1, "lon": lon1, "alt": alt1},
+                    "to": {"lat": lat2, "lon": lon2, "alt": alt2},
+                }
+            }
+            self._serve_json(response)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"LOS endpoint error: {e}")
+            self._serve_json({"error": str(e)})
 
     def log_message(self, format, *args):
         """Suppress default request logging (too noisy)."""
