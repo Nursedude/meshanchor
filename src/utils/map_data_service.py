@@ -595,6 +595,10 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/nodes/snapshot'):
             # Historical snapshot: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
             self._serve_snapshot()
+        elif self.path == '/api/messages/queue' or self.path == '/api/messages/queue/':
+            self._serve_message_queue()
+        elif self.path == '/api/network/topology' or self.path == '/api/network/topology/':
+            self._serve_network_topology()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -919,6 +923,149 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             logger.error(f"LOS endpoint error: {e}")
             self._serve_json({"error": str(e)})
 
+    def _serve_message_queue(self):
+        """Serve pending messages from the gateway message queue."""
+        messages = []
+
+        # Try to load from SQLite message queue
+        try:
+            from gateway.message_queue import MessageQueue
+            queue = MessageQueue()
+            pending = queue.get_pending_messages(limit=50)
+            for msg in pending:
+                messages.append({
+                    "id": msg.get("id"),
+                    "source": msg.get("source_id"),
+                    "source_name": msg.get("source_name", ""),
+                    "target": msg.get("target_id"),
+                    "target_name": msg.get("target_name", ""),
+                    "network": msg.get("target_network", "meshtastic"),
+                    "status": msg.get("status", "pending"),
+                    "created_at": msg.get("created_at", ""),
+                    "message_type": msg.get("message_type", "text")
+                })
+        except ImportError:
+            logger.debug("MessageQueue not available")
+        except Exception as e:
+            logger.debug(f"Message queue error: {e}")
+
+        # Also check for cached queue file
+        if not messages:
+            try:
+                queue_cache = self.collector._cache_dir / "message_queue.json" if self.collector else None
+                if queue_cache and queue_cache.exists():
+                    with open(queue_cache) as f:
+                        data = json.load(f)
+                    messages = data.get("messages", [])
+            except Exception:
+                pass
+
+        self._serve_json({
+            "messages": messages,
+            "count": len(messages),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _serve_network_topology(self):
+        """Serve network topology data for D3.js visualization."""
+        if not self.collector:
+            self._serve_json({"error": "collector not available", "nodes": [], "links": []})
+            return
+
+        geojson = self.collector.collect()
+        nodes = []
+        links = []
+        node_map = {}
+
+        # Build nodes
+        for feature in geojson.get("features", []):
+            props = feature["properties"]
+            coords = feature["geometry"]["coordinates"]
+            node_id = props.get("id", f"{coords[0]}_{coords[1]}")
+
+            network = "gateway" if props.get("is_gateway") else props.get("network", "meshtastic")
+
+            node = {
+                "id": node_id,
+                "name": props.get("name", node_id),
+                "network": network,
+                "is_online": props.get("is_online", False),
+                "is_gateway": props.get("is_gateway", False),
+                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER"),
+                "lat": coords[1],
+                "lon": coords[0],
+                "snr": props.get("snr"),
+                "battery": props.get("battery")
+            }
+            nodes.append(node)
+            node_map[node_id] = node
+
+        # Build links based on proximity and network relationships
+        gateways = [n for n in nodes if n["is_gateway"] or n["is_router"]]
+        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"]]
+
+        # Connect regular nodes to nearest gateway/router
+        for node in regular_nodes:
+            if not node["is_online"]:
+                continue
+
+            nearest = None
+            min_dist = float("inf")
+
+            for gw in gateways:
+                if not gw["is_online"]:
+                    continue
+                dist = self._haversine(node["lat"], node["lon"], gw["lat"], gw["lon"])
+                if dist < min_dist and dist < 50:  # 50km max
+                    min_dist = dist
+                    nearest = gw
+
+            if nearest:
+                link_type = "gateway" if node["network"] != nearest["network"] else node["network"]
+                links.append({
+                    "source": node["id"],
+                    "target": nearest["id"],
+                    "type": link_type,
+                    "distance_km": round(min_dist, 2)
+                })
+
+        # Connect gateways to each other
+        for i, gw1 in enumerate(gateways):
+            for gw2 in gateways[i+1:]:
+                if not gw1["is_online"] or not gw2["is_online"]:
+                    continue
+                dist = self._haversine(gw1["lat"], gw1["lon"], gw2["lat"], gw2["lon"])
+                if dist < 100:  # 100km for gateway-gateway
+                    links.append({
+                        "source": gw1["id"],
+                        "target": gw2["id"],
+                        "type": "gateway",
+                        "distance_km": round(dist, 2)
+                    })
+
+        self._serve_json({
+            "nodes": nodes,
+            "links": links,
+            "network_counts": {
+                "meshtastic": len([n for n in nodes if n["network"] == "meshtastic"]),
+                "rns": len([n for n in nodes if n["network"] == "rns"]),
+                "aredn": len([n for n in nodes if n["network"] == "aredn"]),
+                "gateway": len([n for n in nodes if n["is_gateway"]])
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculate distance between two points in km."""
+        import math
+        R = 6371  # Earth radius in km
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat/2)**2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dlon/2)**2)
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
     def log_message(self, format, *args):
         """Suppress default request logging (too noisy)."""
         logger.debug(f"MapServer: {args[0]}")
@@ -932,6 +1079,9 @@ class MapServer:
     - GET /api/nodes/geojson  → live node GeoJSON from all sources
     - GET /api/nodes/history  → node history stats + unique nodes (24h)
     - GET /api/nodes/trajectory/<id> → trajectory GeoJSON for a node
+    - GET /api/nodes/snapshot → historical network snapshot for playback
+    - GET /api/messages/queue → pending messages from gateway queue
+    - GET /api/network/topology → network topology for D3.js visualization
     - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
 
