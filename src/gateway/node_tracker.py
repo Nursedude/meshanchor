@@ -16,7 +16,18 @@ import json
 logger = logging.getLogger(__name__)
 
 # Import centralized path utility
-from utils.paths import get_real_user_home
+try:
+    from utils.paths import get_real_user_home
+except ImportError:
+    def get_real_user_home() -> Path:
+        """Fallback for when utils.paths is not in Python path."""
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            return Path(f'/home/{sudo_user}')
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            return Path(f'/home/{logname}')
+        return Path('/root')
 
 
 @dataclass

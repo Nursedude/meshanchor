@@ -304,6 +304,7 @@ class MeshForgeLauncher(
                 ("aredn", "AREDN Mesh"),
                 # Tools & Config
                 ("rf", "RF Tools & Calculator"),
+                ("maps", "Maps & Coverage"),
                 ("config", "Configuration"),
                 ("hardware", "Hardware Detection"),
                 ("system", "System Tools (full Linux CLI)"),
@@ -346,6 +347,8 @@ class MeshForgeLauncher(
             self._aredn_menu()
         elif choice == "rf":
             self._rf_tools_menu()
+        elif choice == "maps":
+            self._ai_tools_menu()
         elif choice == "config":
             self._config_menu()
         elif choice == "hardware":
@@ -2054,6 +2057,7 @@ class MeshForgeLauncher(
         local_ip = "localhost"
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
             try:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
@@ -2073,8 +2077,8 @@ class MeshForgeLauncher(
                 port_ok = sock.connect_ex((local_ip, 9443)) == 0
             finally:
                 sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Socket check for web client failed: {e}")
 
         if port_ok:
             msg = (
@@ -2108,41 +2112,22 @@ class MeshForgeLauncher(
         """Run meshforge-status (terminal-native one-shot status)."""
         subprocess.run(['clear'], check=False, timeout=5)
         try:
-            # Capture output and pipe through less so user can scroll
+            # Run status script directly, showing output in real-time
             result = subprocess.run(
                 [sys.executable, str(self.src_dir / 'cli' / 'status.py')],
-                capture_output=True, text=True, timeout=30
+                timeout=20
             )
-            output = result.stdout or ""
-            if result.stderr:
-                output += result.stderr
-
-            if output.strip():
-                # Use less with -R for ANSI colors, -X to not clear on exit
-                proc = subprocess.Popen(
-                    ['less', '-R', '-X'],
-                    stdin=subprocess.PIPE
-                )
-                try:
-                    proc.communicate(input=output.encode(), timeout=300)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                except KeyboardInterrupt:
-                    proc.kill()
-            else:
-                print("No status output available.")
-                try:
-                    self._wait_for_enter()
-                except KeyboardInterrupt:
-                    print()
+            if result.returncode != 0:
+                print("\nStatus check encountered an error.")
         except subprocess.TimeoutExpired:
-            print("\n\nStatus check timed out (30s).")
-            try:
-                self._wait_for_enter("\nPress Enter to return to menu...")
-            except KeyboardInterrupt:
-                print()
+            print("\n\nStatus check timed out (20s).")
         except KeyboardInterrupt:
             print("\n\nAborted.")
+
+        try:
+            self._wait_for_enter("\nPress Enter to return to menu...")
+        except KeyboardInterrupt:
+            print()
 
     def _run_terminal_network(self):
         """Show network diagnostics directly in terminal."""
@@ -2181,6 +2166,7 @@ class MeshForgeLauncher(
         print()
         try:
             s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+            s.settimeout(2)
             try:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
@@ -2306,8 +2292,8 @@ class MeshForgeLauncher(
                     devices.append("TCP: localhost:4403 (meshtasticd)")
             finally:
                 sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Socket check for meshtasticd failed: {e}")
 
         # Check serial ports
         serial_ports = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
@@ -3082,8 +3068,8 @@ WantedBy=multi-user.target
                             ['pgrep', '-a', '-x', 'rnsd'],
                             timeout=5
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"pgrep for rnsd failed: {e}")
                 else:
                     print(f"\033[0;31m○\033[0m rnsd is \033[0;31mnot running\033[0m")
                     print("\nTo start: Select 'Start Service' from the menu")

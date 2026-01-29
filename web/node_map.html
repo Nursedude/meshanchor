@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Network Map - MeshForge</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://unpkg.com/d3@7.8.5/dist/d3.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -194,6 +199,31 @@
         /* Link lines */
         .link-line {
             stroke-linecap: round;
+        }
+
+        /* Link animation styles - SVG patterns for data flow */
+        @keyframes link-flow {
+            0% { stroke-dashoffset: 24; }
+            100% { stroke-dashoffset: 0; }
+        }
+        @keyframes link-pulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+        }
+        @keyframes link-glow {
+            0%, 100% { filter: drop-shadow(0 0 2px currentColor); }
+            50% { filter: drop-shadow(0 0 6px currentColor); }
+        }
+
+        /* Active link with flowing animation */
+        .leaflet-overlay-pane svg path.link-animated {
+            animation: link-flow 1.5s linear infinite;
+        }
+        .leaflet-overlay-pane svg path.link-pulse {
+            animation: link-pulse 2s ease-in-out infinite;
+        }
+        .leaflet-overlay-pane svg path.link-active {
+            animation: link-glow 1s ease-in-out infinite;
         }
 
         /* Control panel */
@@ -415,10 +445,658 @@
             border-top: 1px solid #2a3a4a;
             font-size: 11px;
         }
+
+        /* Planning mode controls */
+        .planning-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #2a3a4a;
+        }
+        .planning-section .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #4fc3f7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .planning-mode-active {
+            background: rgba(79, 195, 247, 0.1) !important;
+            border-color: #4fc3f7 !important;
+        }
+
+        /* Simulated node marker */
+        .sim-node-marker {
+            animation: sim-pulse 2s ease-in-out infinite;
+        }
+        @keyframes sim-pulse {
+            0%, 100% { opacity: 0.9; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        .sim-coverage-circle {
+            animation: sim-coverage-expand 1s ease-out forwards;
+        }
+        @keyframes sim-coverage-expand {
+            0% { opacity: 0; transform: scale(0.5); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Antenna height slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0;
+        }
+        .slider-container label {
+            font-size: 11px;
+            color: #6a7a8a;
+            min-width: 50px;
+        }
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: #1a2a3a;
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #4fc3f7;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .slider-container .slider-value {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e0e0e0;
+            min-width: 36px;
+            text-align: right;
+        }
+
+        /* Simulation results panel */
+        .sim-results {
+            background: #0d1520;
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 11px;
+            display: none;
+        }
+        .sim-results.visible { display: block; }
+        .sim-results h5 {
+            color: #4fc3f7;
+            font-size: 11px;
+            margin: 0 0 6px 0;
+        }
+        .sim-result-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+        .sim-result-row .label { color: #6a7a8a; }
+        .sim-result-row .value { color: #e0e0e0; font-weight: 500; }
+        .sim-result-row .good { color: #66bb6a; }
+        .sim-result-row .warning { color: #ffa726; }
+        .sim-result-row .bad { color: #ef5350; }
+
+        .sim-links-list {
+            max-height: 120px;
+            overflow-y: auto;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #2a3a4a;
+        }
+        .sim-link-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 10px;
+        }
+        .sim-link-item .link-quality {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .sim-link-item .node-name { flex: 1; color: #aaa; }
+        .sim-link-item .link-info { color: #888; }
+
+        /* LOS line styling */
+        .los-line-clear { stroke: #66bb6a; }
+        .los-line-marginal { stroke: #ffa726; }
+        .los-line-blocked { stroke: #ef5350; stroke-dasharray: 4 4; }
+
+        /* Resilience visualization */
+        .orphan-marker {
+            animation: orphan-blink 1s ease-in-out infinite;
+        }
+        @keyframes orphan-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Phase 4: Marker cluster styles - dark theme */
+        .marker-cluster {
+            background-clip: padding-box;
+            border-radius: 50%;
+        }
+        .marker-cluster div {
+            width: 30px;
+            height: 30px;
+            margin-left: 5px;
+            margin-top: 5px;
+            text-align: center;
+            border-radius: 50%;
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+            line-height: 30px;
+        }
+        .marker-cluster-small {
+            background-color: rgba(102, 187, 106, 0.4);
+        }
+        .marker-cluster-small div {
+            background-color: rgba(102, 187, 106, 0.8);
+        }
+        .marker-cluster-medium {
+            background-color: rgba(255, 167, 38, 0.4);
+        }
+        .marker-cluster-medium div {
+            background-color: rgba(255, 167, 38, 0.8);
+        }
+        .marker-cluster-large {
+            background-color: rgba(79, 195, 247, 0.4);
+        }
+        .marker-cluster-large div {
+            background-color: rgba(79, 195, 247, 0.8);
+        }
+
+        /* Phase 4: Topology view container */
+        #topology-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 500;
+            background: #0a0e1a;
+            display: none;
+        }
+        #topology-view.active {
+            display: block;
+        }
+        #topology-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Topology nodes */
+        .topo-node {
+            cursor: pointer;
+        }
+        .topo-node circle {
+            stroke: #1a2a3a;
+            stroke-width: 2;
+            transition: all 0.2s;
+        }
+        .topo-node:hover circle {
+            stroke: #4fc3f7;
+            stroke-width: 3;
+        }
+        .topo-node text {
+            fill: #e0e0e0;
+            font-size: 10px;
+            pointer-events: none;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+        .topo-label {
+            fill: #aaa;
+            font-size: 9px;
+            pointer-events: none;
+        }
+
+        /* Topology links */
+        .topo-link {
+            fill: none;
+            stroke-opacity: 0.6;
+            transition: stroke-opacity 0.2s;
+        }
+        .topo-link:hover {
+            stroke-opacity: 1;
+        }
+        .topo-link-gateway {
+            stroke: #4fc3f7;
+            stroke-dasharray: 5,3;
+        }
+        .topo-link-mesh {
+            stroke: #66bb6a;
+        }
+        .topo-link-rns {
+            stroke: #ab47bc;
+        }
+        .topo-link-aredn {
+            stroke: #ff7043;
+        }
+
+        /* Topology legend */
+        .topo-legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            z-index: 510;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .topo-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .topo-legend-line {
+            width: 20px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        /* Phase 4: Message flow animation */
+        @keyframes message-flow {
+            0% { offset-distance: 0%; opacity: 1; }
+            100% { offset-distance: 100%; opacity: 0.5; }
+        }
+        .message-particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4fc3f7;
+            box-shadow: 0 0 8px #4fc3f7;
+            pointer-events: none;
+            z-index: 600;
+        }
+
+        /* Message flow path overlay */
+        .flow-path {
+            fill: none;
+            stroke-width: 3;
+            stroke-linecap: round;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .flow-path.active {
+            opacity: 1;
+        }
+        .flow-path-meshtastic { stroke: #66bb6a; }
+        .flow-path-rns { stroke: #ab47bc; }
+        .flow-path-gateway { stroke: #ffa726; }
+
+        /* Message queue panel */
+        .message-queue-panel {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            z-index: 1000;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            max-width: 280px;
+            max-height: 200px;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            display: none;
+        }
+        .message-queue-panel.visible {
+            display: block;
+        }
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            border-bottom: 1px solid #1a2a3a;
+            font-size: 11px;
+        }
+        .queue-item:last-child {
+            border-bottom: none;
+        }
+        .queue-network {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .queue-network.meshtastic { background: #66bb6a; }
+        .queue-network.rns { background: #ab47bc; }
+        .queue-network.gateway { background: #ffa726; }
+        .queue-direction {
+            color: #6a7a8a;
+        }
+        .queue-target {
+            color: #e0e0e0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* View toggle buttons */
+        .view-toggle {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            gap: 2px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 3px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .view-toggle-btn {
+            padding: 6px 12px;
+            background: transparent;
+            color: #6a7a8a;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+        }
+        .view-toggle-btn:hover {
+            color: #e0e0e0;
+            background: #1a2a3a;
+        }
+        .view-toggle-btn.active {
+            background: #1565c0;
+            color: #e3f2fd;
+        }
+
+        /* Cluster summary tooltip */
+        .cluster-tooltip {
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 10px 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+        .cluster-tooltip h4 {
+            color: #4fc3f7;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .cluster-tooltip .stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #aaa;
+            padding: 2px 0;
+        }
+        .cluster-tooltip .stat-value {
+            color: #e0e0e0;
+            font-weight: 600;
+        }
+
+        /* ========================================
+           Phase 5: Field Operations UX
+           ======================================== */
+
+        /* GPS Operator Position */
+        .gps-marker {
+            background: transparent !important;
+            border: none !important;
+        }
+        .gps-marker-inner {
+            position: relative;
+            width: 24px;
+            height: 24px;
+        }
+        .gps-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: #2196f3;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.6);
+            z-index: 2;
+        }
+        .gps-accuracy {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(33, 150, 243, 0.5);
+            background: rgba(33, 150, 243, 0.15);
+            border-radius: 50%;
+            z-index: 1;
+        }
+        .gps-pulse {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: rgba(33, 150, 243, 0.4);
+            border-radius: 50%;
+            animation: gps-pulse-ring 2s ease-out infinite;
+            z-index: 1;
+        }
+        @keyframes gps-pulse-ring {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+            100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+        }
+        .gps-btn {
+            position: absolute;
+            bottom: 90px;
+            right: 10px;
+            z-index: 1000;
+            width: 40px;
+            height: 40px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            color: #6a7a8a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        .gps-btn:hover { background: #1a2a3a; color: #4fc3f7; border-color: #4fc3f7; }
+        .gps-btn.active { color: #2196f3; border-color: #2196f3; }
+        .gps-btn.tracking { color: #66bb6a; border-color: #66bb6a; }
+
+        /* Quick Status Card (Mobile) */
+        .status-card {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 2000;
+            background: #141e2e;
+            border-top: 1px solid #2a3a4a;
+            border-radius: 16px 16px 0 0;
+            padding: 16px 20px 24px;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-out;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .status-card.visible { transform: translateY(0); }
+        .status-card-handle {
+            width: 40px;
+            height: 4px;
+            background: #3a4a5a;
+            border-radius: 2px;
+            margin: 0 auto 12px;
+        }
+        .status-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .status-card-header h3 {
+            color: #4fc3f7;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+        .status-card-close {
+            background: none;
+            border: none;
+            color: #6a7a8a;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .status-card-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .status-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .status-card-item {
+            background: #1a2a3a;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .status-card-item .label {
+            color: #6a7a8a;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .status-card-item .value {
+            color: #e0e0e0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .status-card-item .value.online { color: #66bb6a; }
+        .status-card-item .value.offline { color: #ef5350; }
+        .status-card-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .status-card-actions button {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .status-card-actions .btn-distance {
+            background: #1a3a3a;
+            color: #26c6da;
+            border: 1px solid #2a4a4a;
+        }
+        .status-card-actions .btn-distance:hover { background: #2a4a4a; }
+        .status-card-actions .btn-distance:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Enhanced mobile touch targets */
+        @media (max-width: 768px) {
+            .gps-btn {
+                width: 48px;
+                height: 48px;
+                font-size: 22px;
+                bottom: 120px;
+            }
+            .btn-action {
+                padding: 12px;
+                font-size: 14px;
+            }
+            .filter-section label {
+                padding: 8px 0;
+                font-size: 14px;
+            }
+            .filter-section input[type="checkbox"] {
+                width: 20px;
+                height: 20px;
+            }
+            .leaflet-marker-icon {
+                touch-action: manipulation;
+            }
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+
+    <!-- Phase 4: D3.js Topology View -->
+    <div id="topology-view">
+        <svg id="topology-svg"></svg>
+        <div class="topo-legend">
+            <div class="legend-title">Network Links</div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#66bb6a"></div>
+                <span>Meshtastic</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ab47bc"></div>
+                <span>Reticulum</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ff7043"></div>
+                <span>AREDN</span>
+            </div>
+            <div class="topo-legend-item">
+                <div class="topo-legend-line" style="background:#ffa726;background:repeating-linear-gradient(90deg,#ffa726,#ffa726 5px,transparent 5px,transparent 8px)"></div>
+                <span>Gateway Bridge</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Phase 4: View Toggle (Map / Topology) -->
+    <div class="view-toggle">
+        <button class="view-toggle-btn active" id="view-map-btn" onclick="switchView('map')">
+            <span>&#x1F5FA;</span> Map
+        </button>
+        <button class="view-toggle-btn" id="view-topo-btn" onclick="switchView('topology')">
+            <span>&#x26A1;</span> Topology
+        </button>
+    </div>
+
+    <!-- Phase 4: Message Queue Panel -->
+    <div class="message-queue-panel" id="message-queue-panel">
+        <div class="legend-title">Message Queue</div>
+        <div id="queue-items"></div>
+    </div>
 
     <!-- Offline mode indicator -->
     <div class="offline-indicator" id="offline-indicator">
@@ -466,10 +1144,26 @@
                 <label><input type="checkbox" id="filter-online-only"> Online only</label>
                 <label><input type="checkbox" id="filter-coverage"> Coverage circles</label>
                 <label><input type="checkbox" id="filter-links" checked> Link lines</label>
+                <label><input type="checkbox" id="filter-link-anim" checked> Animate links</label>
+                <label><input type="checkbox" id="filter-heatmap"> Signal heatmap</label>
+                <label><input type="checkbox" id="filter-clustering"> Cluster view</label>
+                <label><input type="checkbox" id="filter-messages"> Message flow</label>
             </div>
 
             <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
             <button class="btn-action" onclick="fitAllNodes()">Fit All</button>
+
+            <div class="terrain-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
+                <div class="stat-row">
+                    <span class="label">Terrain Analysis</span>
+                </div>
+                <button class="btn-action" id="btn-terrain" onclick="showTerrainCoverage()" disabled>
+                    Show Coverage
+                </button>
+                <div id="terrain-status" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    Click a node first
+                </div>
+            </div>
 
             <div class="cache-section" id="cache-section">
                 <div class="stat-row">
@@ -477,6 +1171,104 @@
                     <span class="value" id="cache-count">--</span>
                 </div>
                 <button class="btn-action" onclick="downloadCurrentArea()">Cache View</button>
+            </div>
+
+            <!-- Phase 3: Planning Tools -->
+            <div class="planning-section">
+                <div class="section-title">Planning Tools</div>
+                <button class="btn-action" id="btn-sim-mode" onclick="toggleSimulatorMode()">
+                    🎯 Place Node
+                </button>
+                <div id="sim-controls" style="display: none;">
+                    <div class="slider-container">
+                        <label>Antenna:</label>
+                        <input type="range" id="sim-height" min="2" max="30" value="10" step="1">
+                        <span class="slider-value" id="sim-height-value">10m</span>
+                    </div>
+                    <div class="slider-container">
+                        <label>Radius:</label>
+                        <input type="range" id="sim-radius" min="1" max="20" value="5" step="1">
+                        <span class="slider-value" id="sim-radius-value">5km</span>
+                    </div>
+                    <button class="btn-action" onclick="clearSimulation()">Clear Simulation</button>
+                </div>
+                <div class="sim-results" id="sim-results">
+                    <h5>📍 Simulated Node</h5>
+                    <div class="sim-result-row">
+                        <span class="label">Position:</span>
+                        <span class="value" id="sim-pos">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Potential links:</span>
+                        <span class="value" id="sim-link-count">0</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Coverage:</span>
+                        <span class="value" id="sim-coverage-area">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Nearest node:</span>
+                        <span class="value" id="sim-nearest">--</span>
+                    </div>
+                    <div class="sim-links-list" id="sim-links-list"></div>
+                </div>
+
+                <button class="btn-action" id="btn-resilience" onclick="showResilienceAnalysis()" style="margin-top: 8px;">
+                    🔗 Network Resilience
+                </button>
+                <div id="resilience-results" class="sim-results">
+                    <h5>🔗 Network Resilience</h5>
+                    <div class="sim-result-row">
+                        <span class="label">Critical nodes:</span>
+                        <span class="value" id="resilience-critical">--</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Redundancy:</span>
+                        <span class="value" id="resilience-score">--</span>
+                    </div>
+                    <div id="resilience-details" style="margin-top: 6px; font-size: 10px; color: #888;"></div>
+                </div>
+
+                <button class="btn-action" id="btn-optimizer" onclick="showDeploymentOptimizer()" style="margin-top: 8px;">
+                    📍 Optimize Placement
+                </button>
+                <div id="optimizer-panel" class="sim-results">
+                    <h5>📍 Deployment Optimizer</h5>
+                    <div class="slider-container">
+                        <label>Nodes:</label>
+                        <input type="range" id="opt-node-count" min="1" max="5" value="2" step="1">
+                        <span class="slider-value" id="opt-node-count-value">2</span>
+                    </div>
+                    <button class="btn-action primary" onclick="runOptimizer()">Find Optimal Spots</button>
+                    <div id="optimizer-results" style="margin-top: 8px; font-size: 10px;"></div>
+                </div>
+
+                <button class="btn-action" id="btn-playback" onclick="togglePlaybackMode()" style="margin-top: 8px;">
+                    ⏮ Time Travel
+                </button>
+                <div id="playback-panel" class="sim-results">
+                    <h5>⏮ Network History</h5>
+                    <div class="slider-container">
+                        <label>Time:</label>
+                        <input type="range" id="playback-time" min="0" max="1440" value="1440" step="5">
+                        <span class="slider-value" id="playback-time-value">Now</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Viewing:</span>
+                        <span class="value" id="playback-timestamp">Current</span>
+                    </div>
+                    <div class="sim-result-row">
+                        <span class="label">Nodes:</span>
+                        <span class="value" id="playback-node-count">--</span>
+                    </div>
+                    <div style="display: flex; gap: 4px; margin-top: 8px;">
+                        <button class="btn-action" onclick="playbackStep(-60)" style="flex: 1;">-1h</button>
+                        <button class="btn-action" onclick="playbackStep(-5)" style="flex: 1;">-5m</button>
+                        <button class="btn-action primary" onclick="exitPlayback()" style="flex: 1;">Live</button>
+                        <button class="btn-action" onclick="playbackStep(5)" style="flex: 1;">+5m</button>
+                        <button class="btn-action" onclick="playbackStep(60)" style="flex: 1;">+1h</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -512,6 +1304,74 @@
             <div class="legend-shape"><svg viewBox="0 0 24 24"><polygon points="12,2 20,6 20,18 12,22 4,18 4,6" fill="#ff7043"/></svg></div>
             <span>AREDN</span>
         </div>
+        <div class="legend-title" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a3a4a;">Link Quality</div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 6"><line x1="0" y1="3" x2="24" y2="3" stroke="#66bb6a" stroke-width="3"/></svg></div>
+            <span>Excellent (>10 dB)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 6"><line x1="0" y1="3" x2="24" y2="3" stroke="#a5d6a7" stroke-width="2"/></svg></div>
+            <span>Good (5-10 dB)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 6"><line x1="0" y1="3" x2="24" y2="3" stroke="#ffa726" stroke-width="2"/></svg></div>
+            <span>Marginal (0-5 dB)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-shape"><svg viewBox="0 0 24 6"><line x1="0" y1="3" x2="24" y2="3" stroke="#ef5350" stroke-width="1.5" stroke-dasharray="4 2"/></svg></div>
+            <span>Poor (<0 dB)</span>
+        </div>
+        <div class="legend-title" id="heatmap-legend" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a3a4a; display: none;">Signal Heatmap</div>
+        <div class="legend-item heatmap-legend-item" style="display: none;">
+            <div class="legend-shape" style="width: 60px;"><svg viewBox="0 0 60 8"><defs><linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1a237e"/><stop offset="35%" stop-color="#5c6bc0"/><stop offset="50%" stop-color="#ffa726"/><stop offset="80%" stop-color="#66bb6a"/><stop offset="100%" stop-color="#00e676"/></linearGradient></defs><rect width="60" height="8" rx="2" fill="url(#hg)"/></svg></div>
+            <span style="font-size: 10px;">Weak → Strong</span>
+        </div>
+    </div>
+
+    <!-- Phase 5: GPS Location Button -->
+    <button class="gps-btn" id="gps-btn" title="Show my location" onclick="toggleGPS()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+        </svg>
+    </button>
+
+    <!-- Phase 5: Quick Status Card (Mobile) -->
+    <div class="status-card" id="status-card">
+        <div class="status-card-handle"></div>
+        <div class="status-card-header">
+            <h3 id="card-node-name">Node Name</h3>
+            <button class="status-card-close" onclick="closeStatusCard()">&times;</button>
+        </div>
+        <span class="status-card-badge badge-meshtastic" id="card-network">MESHTASTIC</span>
+        <div class="status-card-grid">
+            <div class="status-card-item">
+                <div class="label">Status</div>
+                <div class="value online" id="card-status">Online</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Last Seen</div>
+                <div class="value" id="card-last-seen">now</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">SNR</div>
+                <div class="value" id="card-snr">-- dB</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Battery</div>
+                <div class="value" id="card-battery">--%</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Hardware</div>
+                <div class="value" id="card-hardware">--</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Role</div>
+                <div class="value" id="card-role">--</div>
+            </div>
+        </div>
+        <div class="status-card-actions">
+            <button class="btn-distance" id="btn-distance" onclick="showDistanceToMe()">Distance to Me</button>
+        </div>
     </div>
 
     <script>
@@ -521,13 +1381,19 @@
 
     // State management
     const state = {
-        markers: new Map(),      // id -> { marker, feature, coverageCircle }
-        links: new Map(),        // "id1-id2" -> polyline
+        markers: new Map(),      // id -> { marker, feature, coverageCircle, network }
+        links: new Map(),        // "id1-id2" -> { line, overlay, snr, lastActivity }
         firstLoad: true,
         lastUpdate: null,
         updateCount: 0,
         currentGeoJSON: null,
-        userHasPanned: false
+        userHasPanned: false,
+        linkAnimationsEnabled: true,
+        // Phase 4 additions
+        currentView: 'map',      // 'map' or 'topology'
+        topology: null,          // D3 force simulation
+        messageQueue: [],        // pending messages
+        flowAnimations: []       // active message flow animations
     };
 
     // ============================================
@@ -576,10 +1442,44 @@
     // Track user interaction
     map.on('movestart', () => { state.userHasPanned = true; });
 
-    // Layer groups
-    const nodeLayer = L.layerGroup().addTo(map);
+    // Layer groups (featureGroup for getBounds() support)
+    const nodeLayer = L.featureGroup().addTo(map);
     const linkLayer = L.layerGroup().addTo(map);
     const coverageLayer = L.layerGroup().addTo(map);
+    const terrainLayer = L.layerGroup().addTo(map);
+    const messageFlowLayer = L.layerGroup().addTo(map);
+    let heatmapLayer = null; // Lazy initialized when needed
+
+    // Phase 4: Network-specific layers for filtering
+    const layers = {
+        meshtastic: L.layerGroup().addTo(map),
+        rns: L.layerGroup().addTo(map),
+        aredn: L.layerGroup().addTo(map),
+        gateway: L.layerGroup().addTo(map)
+    };
+
+    // Phase 4: Cluster groups for each network
+    const clusterGroups = {
+        meshtastic: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'meshtastic')
+        }),
+        rns: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'rns')
+        }),
+        aredn: L.markerClusterGroup({
+            maxClusterRadius: 50,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'aredn')
+        }),
+        gateway: L.markerClusterGroup({
+            maxClusterRadius: 30,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'gateway')
+        })
+    };
+
+    // Selected node for terrain analysis
+    let selectedNode = null;
 
     // ============================================
     // SVG Marker Icons
@@ -616,6 +1516,422 @@
                         fill="${color}" opacity="0.9"/>
             </svg>`
     };
+
+    // ============================================
+    // Phase 4: Cluster Icon Creation
+    // ============================================
+
+    function createClusterIcon(cluster, network) {
+        const count = cluster.getChildCount();
+        const markers = cluster.getAllChildMarkers();
+
+        // Calculate cluster health (% online)
+        let online = 0;
+        markers.forEach(m => {
+            const entry = Array.from(state.markers.values()).find(e => e.marker === m);
+            if (entry && entry.feature.properties.is_online) online++;
+        });
+        const healthPct = count > 0 ? Math.round((online / count) * 100) : 0;
+
+        // Color based on network
+        const colors = {
+            meshtastic: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+        const color = colors[network] || '#4fc3f7';
+
+        // Size based on count
+        const size = count < 10 ? 'small' : count < 50 ? 'medium' : 'large';
+
+        return L.divIcon({
+            html: `<div style="background:${color}">${count}</div>`,
+            className: `marker-cluster marker-cluster-${size}`,
+            iconSize: L.point(40, 40)
+        });
+    }
+
+    // ============================================
+    // Phase 4: View Switching (Map <-> Topology)
+    // ============================================
+
+    function switchView(view) {
+        state.currentView = view;
+
+        const mapEl = document.getElementById('map');
+        const topoEl = document.getElementById('topology-view');
+        const mapBtn = document.getElementById('view-map-btn');
+        const topoBtn = document.getElementById('view-topo-btn');
+
+        if (view === 'topology') {
+            mapEl.style.display = 'none';
+            topoEl.classList.add('active');
+            mapBtn.classList.remove('active');
+            topoBtn.classList.add('active');
+            renderTopology();
+        } else {
+            mapEl.style.display = 'block';
+            topoEl.classList.remove('active');
+            mapBtn.classList.add('active');
+            topoBtn.classList.remove('active');
+            if (state.topology) {
+                state.topology.stop();
+            }
+        }
+    }
+
+    // ============================================
+    // Phase 4: D3.js Force-Directed Topology View
+    // ============================================
+
+    function renderTopology() {
+        if (!state.currentGeoJSON || !state.currentGeoJSON.features.length) return;
+
+        const svg = d3.select('#topology-svg');
+        svg.selectAll('*').remove();
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Build nodes and links from GeoJSON
+        const nodes = [];
+        const links = [];
+        const nodeMap = new Map();
+
+        state.currentGeoJSON.features.forEach((f, i) => {
+            const props = f.properties;
+            const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
+            const node = {
+                id: props.id,
+                name: props.name || props.id,
+                network: network,
+                isOnline: props.is_online,
+                isGateway: props.is_gateway,
+                snr: props.snr,
+                battery: props.battery,
+                x: width / 2 + (Math.random() - 0.5) * 200,
+                y: height / 2 + (Math.random() - 0.5) * 200
+            };
+            nodes.push(node);
+            nodeMap.set(props.id, node);
+        });
+
+        // Create links - gateways connect to all nearby nodes of different networks
+        const gateways = nodes.filter(n => n.isGateway);
+        const regularNodes = nodes.filter(n => !n.isGateway);
+
+        // Connect regular nodes to nearest gateway or router
+        regularNodes.forEach(node => {
+            let nearest = null;
+            let minDist = Infinity;
+
+            gateways.forEach(gw => {
+                // In topology view, use index distance as proxy
+                const dist = Math.abs(nodes.indexOf(node) - nodes.indexOf(gw));
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = gw;
+                }
+            });
+
+            if (nearest) {
+                links.push({
+                    source: node,
+                    target: nearest,
+                    type: node.network === nearest.network ? 'mesh' : 'gateway',
+                    strength: node.isOnline && nearest.isOnline ? 0.3 : 0.1
+                });
+            }
+        });
+
+        // Connect gateways to each other (bridge links)
+        for (let i = 0; i < gateways.length; i++) {
+            for (let j = i + 1; j < gateways.length; j++) {
+                links.push({
+                    source: gateways[i],
+                    target: gateways[j],
+                    type: 'gateway',
+                    strength: 0.2
+                });
+            }
+        }
+
+        // Connect nodes within same network
+        const byNetwork = {};
+        regularNodes.forEach(n => {
+            if (!byNetwork[n.network]) byNetwork[n.network] = [];
+            byNetwork[n.network].push(n);
+        });
+
+        Object.values(byNetwork).forEach(networkNodes => {
+            for (let i = 0; i < networkNodes.length && i < 20; i++) {
+                const next = (i + 1) % networkNodes.length;
+                if (i !== next) {
+                    links.push({
+                        source: networkNodes[i],
+                        target: networkNodes[next],
+                        type: networkNodes[i].network,
+                        strength: 0.15
+                    });
+                }
+            }
+        });
+
+        // Create force simulation
+        state.topology = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(links).id(d => d.id).distance(80).strength(d => d.strength))
+            .force('charge', d3.forceManyBody().strength(-150))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(30));
+
+        // Create container groups
+        const g = svg.append('g');
+
+        // Zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([0.2, 4])
+            .on('zoom', (event) => g.attr('transform', event.transform));
+        svg.call(zoom);
+
+        // Draw links
+        const linkColors = {
+            meshtastic: '#66bb6a',
+            mesh: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+
+        const link = g.append('g')
+            .selectAll('line')
+            .data(links)
+            .join('line')
+            .attr('class', d => `topo-link topo-link-${d.type}`)
+            .attr('stroke', d => linkColors[d.type] || '#2a3a4a')
+            .attr('stroke-width', d => d.type === 'gateway' ? 2 : 1.5)
+            .attr('stroke-dasharray', d => d.type === 'gateway' ? '5,3' : null);
+
+        // Draw nodes
+        const nodeColors = {
+            meshtastic: '#66bb6a',
+            rns: '#ab47bc',
+            aredn: '#ff7043',
+            gateway: '#ffa726'
+        };
+
+        const node = g.append('g')
+            .selectAll('g')
+            .data(nodes)
+            .join('g')
+            .attr('class', 'topo-node')
+            .call(d3.drag()
+                .on('start', dragStarted)
+                .on('drag', dragged)
+                .on('end', dragEnded));
+
+        node.append('circle')
+            .attr('r', d => d.isGateway ? 16 : 12)
+            .attr('fill', d => d.isOnline ? nodeColors[d.network] || '#4fc3f7' : '#3a3a3a')
+            .attr('opacity', d => d.isOnline ? 0.9 : 0.5);
+
+        // Add gateway star indicator
+        node.filter(d => d.isGateway)
+            .append('text')
+            .attr('y', 1)
+            .attr('fill', '#fff')
+            .attr('font-size', '14px')
+            .text('★');
+
+        // Node labels
+        node.append('text')
+            .attr('class', 'topo-label')
+            .attr('dy', 25)
+            .text(d => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name);
+
+        // Tooltip on hover
+        node.append('title')
+            .text(d => `${d.name}\nNetwork: ${d.network}\nStatus: ${d.isOnline ? 'Online' : 'Offline'}${d.snr ? '\nSNR: ' + d.snr + ' dB' : ''}${d.battery ? '\nBattery: ' + d.battery + '%' : ''}`);
+
+        // Simulation tick
+        state.topology.on('tick', () => {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        function dragStarted(event, d) {
+            if (!event.active) state.topology.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragEnded(event, d) {
+            if (!event.active) state.topology.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    }
+
+    // ============================================
+    // Phase 4: Message Flow Visualization
+    // ============================================
+
+    function animateMessageFlow(sourceId, targetId, network = 'meshtastic') {
+        const sourceEntry = state.markers.get(sourceId);
+        const targetEntry = state.markers.get(targetId);
+
+        if (!sourceEntry || !targetEntry) return;
+
+        const sourceLatLng = sourceEntry.marker.getLatLng();
+        const targetLatLng = targetEntry.marker.getLatLng();
+
+        // Find gateway if cross-network
+        const sourceNetwork = sourceEntry.feature.properties.network;
+        const targetNetwork = targetEntry.feature.properties.network;
+        const isCrossNetwork = sourceNetwork !== targetNetwork;
+
+        // Create flow path
+        const path = isCrossNetwork
+            ? createCrossNetworkPath(sourceEntry, targetEntry)
+            : [[sourceLatLng.lat, sourceLatLng.lng], [targetLatLng.lat, targetLatLng.lng]];
+
+        const flowLine = L.polyline(path, {
+            color: isCrossNetwork ? '#ffa726' : (network === 'rns' ? '#ab47bc' : '#66bb6a'),
+            weight: 4,
+            opacity: 0,
+            dashArray: '8,8',
+            className: 'flow-path'
+        }).addTo(messageFlowLayer);
+
+        // Animate the line
+        setTimeout(() => flowLine.setStyle({ opacity: 0.8 }), 50);
+
+        // Create particle
+        const particle = L.circleMarker(sourceLatLng, {
+            radius: 6,
+            fillColor: isCrossNetwork ? '#ffa726' : '#4fc3f7',
+            fillOpacity: 1,
+            stroke: true,
+            color: '#fff',
+            weight: 2
+        }).addTo(messageFlowLayer);
+
+        // Animate particle along path
+        let progress = 0;
+        const duration = 2000;
+        const startTime = Date.now();
+
+        function animateParticle() {
+            const elapsed = Date.now() - startTime;
+            progress = Math.min(elapsed / duration, 1);
+
+            if (progress < 1) {
+                const idx = Math.floor(progress * (path.length - 1));
+                const nextIdx = Math.min(idx + 1, path.length - 1);
+                const segmentProgress = (progress * (path.length - 1)) - idx;
+
+                const lat = path[idx][0] + (path[nextIdx][0] - path[idx][0]) * segmentProgress;
+                const lng = path[idx][1] + (path[nextIdx][1] - path[idx][1]) * segmentProgress;
+
+                particle.setLatLng([lat, lng]);
+                requestAnimationFrame(animateParticle);
+            } else {
+                // Cleanup
+                setTimeout(() => {
+                    messageFlowLayer.removeLayer(flowLine);
+                    messageFlowLayer.removeLayer(particle);
+                }, 500);
+            }
+        }
+
+        requestAnimationFrame(animateParticle);
+
+        // Add to flow animations list
+        state.flowAnimations.push({ flowLine, particle });
+    }
+
+    function createCrossNetworkPath(source, target) {
+        // Find the nearest gateway to create a path through
+        const sourceLatLng = source.marker.getLatLng();
+        const targetLatLng = target.marker.getLatLng();
+
+        let gatewayLatLng = null;
+        let minDist = Infinity;
+
+        state.markers.forEach((entry) => {
+            if (entry.feature.properties.is_gateway) {
+                const gwLatLng = entry.marker.getLatLng();
+                const dist = getDistance(sourceLatLng.lat, sourceLatLng.lng, gwLatLng.lat, gwLatLng.lng);
+                if (dist < minDist) {
+                    minDist = dist;
+                    gatewayLatLng = gwLatLng;
+                }
+            }
+        });
+
+        if (gatewayLatLng) {
+            return [
+                [sourceLatLng.lat, sourceLatLng.lng],
+                [gatewayLatLng.lat, gatewayLatLng.lng],
+                [targetLatLng.lat, targetLatLng.lng]
+            ];
+        }
+
+        return [[sourceLatLng.lat, sourceLatLng.lng], [targetLatLng.lat, targetLatLng.lng]];
+    }
+
+    // Load and display message queue
+    async function loadMessageQueue() {
+        try {
+            const response = await fetch('/api/messages/queue');
+            if (response.ok) {
+                const data = await response.json();
+                state.messageQueue = data.messages || [];
+                renderMessageQueue();
+
+                // Animate recent messages
+                if (document.getElementById('filter-messages').checked) {
+                    state.messageQueue.slice(0, 3).forEach((msg, i) => {
+                        setTimeout(() => {
+                            if (msg.source && msg.target) {
+                                animateMessageFlow(msg.source, msg.target, msg.network);
+                            }
+                        }, i * 1000);
+                    });
+                }
+            }
+        } catch (e) {
+            // Message queue API not available
+        }
+    }
+
+    function renderMessageQueue() {
+        const container = document.getElementById('queue-items');
+        if (!container) return;
+
+        if (state.messageQueue.length === 0) {
+            container.innerHTML = '<div style="color:#6a7a8a;font-size:11px">No pending messages</div>';
+            return;
+        }
+
+        container.innerHTML = state.messageQueue.slice(0, 10).map(msg => `
+            <div class="queue-item">
+                <div class="queue-network ${msg.network || 'meshtastic'}"></div>
+                <span class="queue-direction">→</span>
+                <span class="queue-target">${msg.target_name || msg.target || 'Unknown'}</span>
+            </div>
+        `).join('');
+    }
 
     // ============================================
     // Node Rendering
@@ -838,7 +2154,18 @@
                     icon: createMarkerIcon(props, isNew)
                 });
                 marker.bindPopup(createPopupContent(props, coords));
-                nodeLayer.addLayer(marker);
+                marker.on('click', () => selectNodeForTerrain(feature));
+
+                // Determine network for clustering
+                const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
+                const useClustering = document.getElementById('filter-clustering').checked;
+
+                // Add to appropriate layer
+                if (useClustering && clusterGroups[network]) {
+                    clusterGroups[network].addLayer(marker);
+                } else {
+                    nodeLayer.addLayer(marker);
+                }
 
                 // Coverage circle
                 let coverageCircle = null;
@@ -856,14 +2183,19 @@
                     }).addTo(coverageLayer);
                 }
 
-                state.markers.set(id, { marker, feature, coverageCircle });
+                state.markers.set(id, { marker, feature, coverageCircle, network });
             }
         });
 
         // Remove markers no longer in data
+        const useClustering = document.getElementById('filter-clustering').checked;
         for (const [id, entry] of state.markers) {
             if (!activeIds.has(id)) {
                 nodeLayer.removeLayer(entry.marker);
+                // Also remove from cluster groups
+                if (entry.network && clusterGroups[entry.network]) {
+                    clusterGroups[entry.network].removeLayer(entry.marker);
+                }
                 if (entry.coverageCircle) {
                     coverageLayer.removeLayer(entry.coverageCircle);
                 }
@@ -871,11 +2203,26 @@
             }
         }
 
+        // Manage cluster layer visibility
+        if (useClustering) {
+            Object.keys(clusterGroups).forEach(net => {
+                if (!map.hasLayer(clusterGroups[net])) {
+                    map.addLayer(clusterGroups[net]);
+                }
+            });
+        } else {
+            // Hide cluster groups when not clustering
+            Object.keys(clusterGroups).forEach(net => map.removeLayer(clusterGroups[net]));
+        }
+
         // Draw link lines between nodes that have SNR data (implies they can hear each other)
         linkLayer.clearLayers();
         if (showLinks && state.currentGeoJSON.features.length > 1) {
             drawNodeLinks(state.currentGeoJSON.features, activeIds);
         }
+
+        // Update signal strength heatmap
+        updateSignalHeatmap(state.currentGeoJSON.features);
 
         // Update stats
         document.getElementById('stat-total').textContent = total;
@@ -896,7 +2243,9 @@
 
     function drawNodeLinks(features, activeIds) {
         // Draw lines between gateway/router nodes and their nearby online nodes
-        // This creates a network topology visualization
+        // This creates a network topology visualization with animated data flow
+        const animateLinks = document.getElementById('filter-link-anim').checked;
+
         const onlineNodes = features.filter(f =>
             f.properties.is_online && activeIds.has(f.properties.id || `${f.geometry.coordinates[0]}_${f.geometry.coordinates[1]}`)
         );
@@ -927,33 +2276,53 @@
 
             if (nearestGw) {
                 const snr = node.properties.snr;
-                let color = '#2a3a4a'; // Default dim
-                let weight = 1;
-                let opacity = 0.3;
+                const linkStyle = getLinkStyle(snr, animateLinks);
 
-                if (snr !== null && snr !== undefined) {
-                    if (snr >= 10) { color = '#66bb6a'; weight = 2; opacity = 0.6; }
-                    else if (snr >= 5) { color = '#a5d6a7'; weight = 1.5; opacity = 0.5; }
-                    else if (snr >= 0) { color = '#ffa726'; weight = 1.5; opacity = 0.5; }
-                    else if (snr >= -5) { color = '#ff7043'; weight = 1; opacity = 0.4; }
-                    else { color = '#ef5350'; weight = 1; opacity = 0.4; }
-                }
-
+                // Create base line (static or animated)
                 const line = L.polyline([
                     [node.geometry.coordinates[1], node.geometry.coordinates[0]],
                     [nearestGw.geometry.coordinates[1], nearestGw.geometry.coordinates[0]]
                 ], {
-                    color: color,
-                    weight: weight,
-                    opacity: opacity,
-                    dashArray: snr === null ? '4 4' : null,
+                    color: linkStyle.color,
+                    weight: linkStyle.weight,
+                    opacity: linkStyle.opacity,
+                    dashArray: linkStyle.dashArray,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    className: linkStyle.className,
                     interactive: false
                 });
                 linkLayer.addLayer(line);
+
+                // Add animated overlay for good links
+                if (animateLinks && snr !== null && snr >= 0) {
+                    const overlay = L.polyline([
+                        [node.geometry.coordinates[1], node.geometry.coordinates[0]],
+                        [nearestGw.geometry.coordinates[1], nearestGw.geometry.coordinates[0]]
+                    ], {
+                        color: linkStyle.color,
+                        weight: linkStyle.weight + 1,
+                        opacity: 0.2,
+                        dashArray: '4 12',
+                        lineCap: 'round',
+                        className: 'link-animated',
+                        interactive: false
+                    });
+                    linkLayer.addLayer(overlay);
+                }
+
+                // Store link info for activity tracking
+                const nodeId = node.properties.id || `${node.geometry.coordinates[0]}_${node.geometry.coordinates[1]}`;
+                const gwId = nearestGw.properties.id || `${nearestGw.geometry.coordinates[0]}_${nearestGw.geometry.coordinates[1]}`;
+                state.links.set(`${nodeId}-${gwId}`, {
+                    line: line,
+                    snr: snr,
+                    lastActivity: Date.now()
+                });
             }
         }
 
-        // Connect gateways to each other
+        // Connect gateways to each other (backbone links)
         for (let i = 0; i < gateways.length; i++) {
             for (let j = i + 1; j < gateways.length; j++) {
                 const dist = getDistance(
@@ -961,19 +2330,183 @@
                     gateways[j].geometry.coordinates[1], gateways[j].geometry.coordinates[0]
                 );
                 if (dist < 100) { // Within 100km
+                    // Backbone link with special styling
                     const line = L.polyline([
                         [gateways[i].geometry.coordinates[1], gateways[i].geometry.coordinates[0]],
                         [gateways[j].geometry.coordinates[1], gateways[j].geometry.coordinates[0]]
                     ], {
                         color: '#4fc3f7',
-                        weight: 2,
-                        opacity: 0.4,
-                        dashArray: '6 4',
+                        weight: 2.5,
+                        opacity: 0.5,
+                        dashArray: animateLinks ? '8 8' : '6 4',
+                        lineCap: 'round',
+                        className: animateLinks ? 'link-animated link-pulse' : '',
                         interactive: false
                     });
                     linkLayer.addLayer(line);
+
+                    // Glow effect for backbone
+                    if (animateLinks) {
+                        const glow = L.polyline([
+                            [gateways[i].geometry.coordinates[1], gateways[i].geometry.coordinates[0]],
+                            [gateways[j].geometry.coordinates[1], gateways[j].geometry.coordinates[0]]
+                        ], {
+                            color: '#4fc3f7',
+                            weight: 4,
+                            opacity: 0.15,
+                            lineCap: 'round',
+                            className: 'link-pulse',
+                            interactive: false
+                        });
+                        linkLayer.addLayer(glow);
+                    }
                 }
             }
+        }
+    }
+
+    // Get link styling based on SNR quality
+    function getLinkStyle(snr, animated) {
+        let color = '#2a3a4a';
+        let weight = 1;
+        let opacity = 0.3;
+        let dashArray = '4 4';
+        let className = '';
+
+        if (snr !== null && snr !== undefined) {
+            if (snr >= 10) {
+                // Excellent - solid bright green
+                color = '#66bb6a';
+                weight = 2.5;
+                opacity = 0.7;
+                dashArray = animated ? '6 6' : null;
+                className = animated ? 'link-animated' : '';
+            } else if (snr >= 5) {
+                // Good - light green
+                color = '#a5d6a7';
+                weight = 2;
+                opacity = 0.6;
+                dashArray = animated ? '5 7' : null;
+                className = animated ? 'link-animated' : '';
+            } else if (snr >= 0) {
+                // Marginal - orange
+                color = '#ffa726';
+                weight = 1.8;
+                opacity = 0.55;
+                dashArray = animated ? '4 8' : '3 3';
+                className = animated ? 'link-animated' : '';
+            } else if (snr >= -5) {
+                // Poor - dim orange
+                color = '#ff7043';
+                weight = 1.5;
+                opacity = 0.45;
+                dashArray = '4 4';
+                className = animated ? 'link-pulse' : '';
+            } else {
+                // Bad - red dashed
+                color = '#ef5350';
+                weight = 1.2;
+                opacity = 0.4;
+                dashArray = '3 5';
+                className = animated ? 'link-pulse' : '';
+            }
+        }
+
+        return { color, weight, opacity, dashArray, className };
+    }
+
+    // ============================================
+    // Signal Heatmap from Real SNR Data
+    // ============================================
+
+    function updateSignalHeatmap(features) {
+        const showHeatmap = document.getElementById('filter-heatmap').checked;
+
+        // Remove existing heatmap if disabled
+        if (!showHeatmap) {
+            if (heatmapLayer) {
+                map.removeLayer(heatmapLayer);
+                heatmapLayer = null;
+            }
+            return;
+        }
+
+        // Build heatmap data points from real SNR measurements
+        // Each point: [lat, lng, intensity] where intensity is normalized SNR
+        const heatData = [];
+
+        // Collect all nodes with valid SNR data
+        const nodesWithSNR = features.filter(f =>
+            f.properties.snr !== null &&
+            f.properties.snr !== undefined &&
+            f.properties.is_online
+        );
+
+        for (const node of nodesWithSNR) {
+            const coords = node.geometry.coordinates;
+            const snr = node.properties.snr;
+            const props = node.properties;
+
+            // Normalize SNR to 0-1 intensity (LoRa SNR range: -20 to +15 dB)
+            // Map SNR to intensity: -20dB=0.0, 0dB=0.5, +15dB=1.0
+            const intensity = Math.max(0, Math.min(1, (snr + 20) / 35));
+
+            // Add the node position as a heatmap point
+            heatData.push([coords[1], coords[0], intensity]);
+
+            // Generate interpolated points around the node based on estimated coverage
+            // This creates a more realistic signal propagation pattern
+            const coverageRadius = estimateCoverageRadius(props);
+            const numRings = 3;
+            const pointsPerRing = 8;
+
+            for (let ring = 1; ring <= numRings; ring++) {
+                // Signal attenuates with distance (inverse square approximation)
+                const ringRadius = (coverageRadius / 1000) * (ring / numRings); // km
+                const attenuation = 1 - (ring / (numRings + 1)); // Decay factor
+                const ringIntensity = intensity * attenuation;
+
+                for (let p = 0; p < pointsPerRing; p++) {
+                    const angle = (2 * Math.PI * p) / pointsPerRing;
+                    // Convert km to approximate lat/lng offset
+                    const latOffset = (ringRadius / 111) * Math.cos(angle);
+                    const lngOffset = (ringRadius / (111 * Math.cos(coords[1] * Math.PI / 180))) * Math.sin(angle);
+
+                    heatData.push([
+                        coords[1] + latOffset,
+                        coords[0] + lngOffset,
+                        ringIntensity
+                    ]);
+                }
+            }
+        }
+
+        // Create or update heatmap layer
+        if (heatData.length > 0) {
+            if (heatmapLayer) {
+                map.removeLayer(heatmapLayer);
+            }
+
+            heatmapLayer = L.heatLayer(heatData, {
+                radius: 35,
+                blur: 25,
+                maxZoom: 14,
+                max: 1.0,
+                minOpacity: 0.15,
+                gradient: {
+                    0.0: '#1a237e',  // Deep blue (no signal)
+                    0.2: '#283593',  // Blue
+                    0.35: '#5c6bc0', // Indigo
+                    0.5: '#ffa726',  // Orange (marginal)
+                    0.65: '#9ccc65', // Light green
+                    0.8: '#66bb6a',  // Green (good)
+                    1.0: '#00e676'   // Bright green (excellent)
+                }
+            });
+
+            // Add below nodes but above base map
+            heatmapLayer.addTo(map);
+            heatmapLayer.setZIndex(100);
         }
     }
 
@@ -1159,10 +2692,108 @@
     }
 
     // ============================================
+    // Terrain-Aware Coverage Prediction
+    // ============================================
+
+    function selectNodeForTerrain(feature) {
+        selectedNode = feature;
+        const btn = document.getElementById('btn-terrain');
+        const status = document.getElementById('terrain-status');
+        if (feature) {
+            btn.disabled = false;
+            const name = feature.properties.long_name || feature.properties.short_name || feature.properties.id;
+            status.textContent = `Selected: ${name}`;
+        } else {
+            btn.disabled = true;
+            status.textContent = 'Click a node first';
+        }
+    }
+
+    async function showTerrainCoverage() {
+        if (!selectedNode) return;
+
+        const btn = document.getElementById('btn-terrain');
+        const status = document.getElementById('terrain-status');
+        const coords = selectedNode.geometry.coordinates;
+        const lat = coords[1];
+        const lon = coords[0];
+        const alt = 10; // Default antenna height
+
+        btn.disabled = true;
+        status.textContent = 'Calculating terrain coverage...';
+        status.style.color = '#f39c12';
+
+        // Clear previous terrain overlay
+        terrainLayer.clearLayers();
+
+        try {
+            const response = await fetch(`/api/coverage/${lat}/${lon}/${alt}?radius_km=5&resolution=24`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+
+            // Display coverage points
+            data.features.forEach(feature => {
+                const fcoords = feature.geometry.coordinates;
+                const props = feature.properties;
+
+                // Color based on clearance
+                let color;
+                if (!props.is_clear) {
+                    color = '#ef5350'; // Red - obstructed
+                } else if (props.fresnel_pct >= 100) {
+                    color = '#66bb6a'; // Green - excellent
+                } else if (props.fresnel_pct >= 60) {
+                    color = '#ffca28'; // Yellow - marginal
+                } else {
+                    color = '#ff7043'; // Orange - poor
+                }
+
+                const circle = L.circleMarker([fcoords[1], fcoords[0]], {
+                    radius: 6,
+                    fillColor: color,
+                    color: color,
+                    weight: 1,
+                    opacity: 0.8,
+                    fillOpacity: 0.5,
+                }).bindPopup(`
+                    <div style="font-size: 12px;">
+                        <strong>Terrain Analysis</strong><br>
+                        Distance: ${(props.distance_m/1000).toFixed(2)} km<br>
+                        Bearing: ${props.bearing}&deg;<br>
+                        LOS Clear: ${props.is_clear ? 'Yes' : 'No'}<br>
+                        Fresnel: ${props.fresnel_pct.toFixed(0)}%<br>
+                        Path Loss: ${props.total_loss_db} dB<br>
+                        Terrain Loss: ${props.terrain_loss_db} dB
+                    </div>
+                `);
+
+                terrainLayer.addLayer(circle);
+            });
+
+            status.textContent = `Showing ${data.features.length} points`;
+            status.style.color = '#66bb6a';
+            btn.disabled = false;
+
+        } catch (e) {
+            console.error('Terrain coverage failed:', e);
+            status.textContent = `Error: ${e.message}`;
+            status.style.color = '#ef5350';
+            btn.disabled = false;
+        }
+    }
+
+    function clearTerrainCoverage() {
+        terrainLayer.clearLayers();
+        document.getElementById('terrain-status').textContent = 'Cleared';
+    }
+
+    // ============================================
     // Filter Event Listeners
     // ============================================
     ['filter-meshtastic', 'filter-rns', 'filter-aredn', 'filter-online-only',
-     'filter-coverage', 'filter-links'].forEach(id => {
+     'filter-coverage', 'filter-links', 'filter-link-anim', 'filter-heatmap'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {
             // Reset markers to force rebuild with new settings
             if (id === 'filter-coverage') {
@@ -1170,9 +2801,827 @@
                 coverageLayer.clearLayers();
                 state.markers.forEach(entry => { entry.coverageCircle = null; });
             }
+            // Toggle heatmap legend visibility
+            if (id === 'filter-heatmap') {
+                const show = document.getElementById('filter-heatmap').checked;
+                document.getElementById('heatmap-legend').style.display = show ? 'block' : 'none';
+                document.querySelectorAll('.heatmap-legend-item').forEach(el => {
+                    el.style.display = show ? 'flex' : 'none';
+                });
+            }
             updateDisplay();
         });
     });
+
+    // ============================================
+    // Phase 3: Click-to-Place Node Simulator
+    // ============================================
+
+    const simState = {
+        active: false,
+        marker: null,
+        coverageCircle: null,
+        losLines: [],
+        position: null
+    };
+
+    function toggleSimulatorMode() {
+        simState.active = !simState.active;
+        const btn = document.getElementById('btn-sim-mode');
+        const controls = document.getElementById('sim-controls');
+
+        if (simState.active) {
+            btn.textContent = '✕ Cancel Placement';
+            btn.classList.add('planning-mode-active');
+            controls.style.display = 'block';
+            map.getContainer().style.cursor = 'crosshair';
+
+            // Enable click handler
+            map.on('click', onSimulatorClick);
+        } else {
+            btn.textContent = '🎯 Place Node';
+            btn.classList.remove('planning-mode-active');
+            controls.style.display = 'none';
+            map.getContainer().style.cursor = '';
+
+            // Disable click handler
+            map.off('click', onSimulatorClick);
+            clearSimulation();
+        }
+    }
+
+    function onSimulatorClick(e) {
+        if (!simState.active) return;
+
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        simState.position = { lat, lon };
+
+        // Clear previous simulation
+        clearSimulationMarkers();
+
+        // Get parameters
+        const height = parseInt(document.getElementById('sim-height').value);
+        const radiusKm = parseInt(document.getElementById('sim-radius').value);
+
+        // Create simulated node marker
+        const simIcon = L.divIcon({
+            html: `<svg viewBox="0 0 24 24" width="28" height="28">
+                <circle cx="12" cy="12" r="10" fill="#4fc3f7" opacity="0.9"/>
+                <text x="12" y="16" text-anchor="middle" font-size="10" fill="#fff" font-weight="bold">?</text>
+            </svg>`,
+            className: 'node-marker sim-node-marker',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+
+        simState.marker = L.marker([lat, lon], { icon: simIcon, draggable: true })
+            .addTo(map)
+            .bindPopup(`<div class="node-popup">
+                <h3>Simulated Node</h3>
+                <div class="info-grid">
+                    <div class="info-label">Position</div>
+                    <div class="info-value">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+                    <div class="info-label">Antenna</div>
+                    <div class="info-value">${height}m</div>
+                    <div class="info-label">Range</div>
+                    <div class="info-value">${radiusKm}km</div>
+                </div>
+                <p style="font-size: 11px; color: #888; margin-top: 8px;">Drag to reposition</p>
+            </div>`)
+            .on('drag', () => updateSimulationFromMarker())
+            .on('dragend', () => runSimulationAnalysis());
+
+        // Create coverage circle
+        simState.coverageCircle = L.circle([lat, lon], {
+            radius: radiusKm * 1000,
+            color: '#4fc3f7',
+            fillColor: '#4fc3f7',
+            fillOpacity: 0.1,
+            weight: 2,
+            dashArray: '5 5',
+            className: 'sim-coverage-circle'
+        }).addTo(map);
+
+        // Run analysis
+        runSimulationAnalysis();
+    }
+
+    function updateSimulationFromMarker() {
+        if (!simState.marker) return;
+        const pos = simState.marker.getLatLng();
+        simState.position = { lat: pos.lat, lon: pos.lng };
+
+        // Update coverage circle position
+        if (simState.coverageCircle) {
+            simState.coverageCircle.setLatLng(pos);
+        }
+
+        // Update position display
+        document.getElementById('sim-pos').textContent =
+            `${pos.lat.toFixed(4)}, ${pos.lng.toFixed(4)}`;
+    }
+
+    async function runSimulationAnalysis() {
+        if (!simState.position) return;
+
+        const lat = simState.position.lat;
+        const lon = simState.position.lon;
+        const height = parseInt(document.getElementById('sim-height').value);
+        const radiusKm = parseInt(document.getElementById('sim-radius').value);
+
+        // Show results panel
+        document.getElementById('sim-results').classList.add('visible');
+        document.getElementById('sim-pos').textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+        // Clear previous LOS lines
+        simState.losLines.forEach(line => map.removeLayer(line));
+        simState.losLines = [];
+
+        // Find potential links to existing nodes
+        const potentialLinks = [];
+        let nearestNode = null;
+        let nearestDist = Infinity;
+
+        for (const [id, entry] of state.markers) {
+            const nodeLat = entry.feature.geometry.coordinates[1];
+            const nodeLon = entry.feature.geometry.coordinates[0];
+            const dist = getDistance(lat, lon, nodeLat, nodeLon);
+
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestNode = entry.feature;
+            }
+
+            if (dist <= radiusKm) {
+                potentialLinks.push({
+                    feature: entry.feature,
+                    distance: dist,
+                    lat: nodeLat,
+                    lon: nodeLon
+                });
+            }
+        }
+
+        // Update stats
+        document.getElementById('sim-link-count').textContent = potentialLinks.length;
+        document.getElementById('sim-coverage-area').textContent =
+            `~${(Math.PI * radiusKm * radiusKm).toFixed(1)} km²`;
+
+        if (nearestNode) {
+            const name = nearestNode.properties.name || nearestNode.properties.id;
+            document.getElementById('sim-nearest').textContent =
+                `${name} (${nearestDist.toFixed(1)}km)`;
+        } else {
+            document.getElementById('sim-nearest').textContent = 'None found';
+        }
+
+        // Analyze each potential link (check LOS if API available)
+        const linksHtml = [];
+        for (const link of potentialLinks.slice(0, 10)) { // Limit to 10
+            const props = link.feature.properties;
+            const name = props.name || props.id;
+            let quality = 'unknown';
+            let color = '#888';
+            let losInfo = '';
+
+            // Try to get LOS analysis from API
+            try {
+                const losRes = await fetch(
+                    `/api/los/${lat}/${lon}/${link.lat}/${link.lon}?alt1=${height}&alt2=10`
+                );
+                if (losRes.ok) {
+                    const losData = await losRes.json();
+                    if (!losData.error) {
+                        if (losData.is_clear && losData.fresnel_clearance_pct >= 60) {
+                            quality = 'good';
+                            color = '#66bb6a';
+                            losInfo = `${losData.fresnel_clearance_pct.toFixed(0)}% Fresnel`;
+                        } else if (losData.is_clear) {
+                            quality = 'marginal';
+                            color = '#ffa726';
+                            losInfo = `${losData.fresnel_clearance_pct.toFixed(0)}% Fresnel`;
+                        } else {
+                            quality = 'blocked';
+                            color = '#ef5350';
+                            losInfo = 'Obstructed';
+                        }
+                    }
+                }
+            } catch (e) {
+                // API not available, estimate based on distance
+                if (link.distance < 2) {
+                    quality = 'good';
+                    color = '#66bb6a';
+                    losInfo = 'Close range';
+                } else if (link.distance < 5) {
+                    quality = 'marginal';
+                    color = '#ffa726';
+                    losInfo = 'Medium range';
+                } else {
+                    quality = 'unknown';
+                    color = '#888';
+                    losInfo = 'Long range';
+                }
+            }
+
+            // Draw LOS line
+            const lineClass = quality === 'good' ? 'los-line-clear' :
+                             quality === 'marginal' ? 'los-line-marginal' : 'los-line-blocked';
+
+            const losLine = L.polyline([
+                [lat, lon],
+                [link.lat, link.lon]
+            ], {
+                color: color,
+                weight: quality === 'good' ? 2.5 : 2,
+                opacity: 0.7,
+                dashArray: quality === 'blocked' ? '4 4' : null,
+                className: lineClass
+            }).addTo(map);
+
+            simState.losLines.push(losLine);
+
+            // Add to links list
+            linksHtml.push(`
+                <div class="sim-link-item">
+                    <div class="link-quality" style="background: ${color}"></div>
+                    <span class="node-name">${name}</span>
+                    <span class="link-info">${link.distance.toFixed(1)}km · ${losInfo}</span>
+                </div>
+            `);
+        }
+
+        document.getElementById('sim-links-list').innerHTML =
+            linksHtml.length > 0 ? linksHtml.join('') :
+            '<div style="color: #666; font-size: 10px;">No nodes within range</div>';
+    }
+
+    function clearSimulationMarkers() {
+        if (simState.marker) {
+            map.removeLayer(simState.marker);
+            simState.marker = null;
+        }
+        if (simState.coverageCircle) {
+            map.removeLayer(simState.coverageCircle);
+            simState.coverageCircle = null;
+        }
+        simState.losLines.forEach(line => map.removeLayer(line));
+        simState.losLines = [];
+    }
+
+    function clearSimulation() {
+        clearSimulationMarkers();
+        simState.position = null;
+        document.getElementById('sim-results').classList.remove('visible');
+        document.getElementById('sim-links-list').innerHTML = '';
+    }
+
+    // Slider event listeners
+    document.getElementById('sim-height').addEventListener('input', function() {
+        document.getElementById('sim-height-value').textContent = this.value + 'm';
+        if (simState.position) runSimulationAnalysis();
+    });
+
+    document.getElementById('sim-radius').addEventListener('input', function() {
+        document.getElementById('sim-radius-value').textContent = this.value + 'km';
+        if (simState.coverageCircle) {
+            simState.coverageCircle.setRadius(this.value * 1000);
+        }
+        if (simState.position) runSimulationAnalysis();
+    });
+
+    // ============================================
+    // Phase 3: Network Resilience Analysis
+    // ============================================
+
+    const resilienceState = {
+        orphanMarkers: [],
+        criticalMarkers: []
+    };
+
+    async function showResilienceAnalysis() {
+        // Clear previous visualization
+        clearResilienceVisualization();
+
+        const resultsDiv = document.getElementById('resilience-results');
+        resultsDiv.classList.add('visible');
+        document.getElementById('resilience-details').innerHTML = 'Analyzing...';
+
+        if (!state.currentGeoJSON || state.currentGeoJSON.features.length < 2) {
+            document.getElementById('resilience-critical').textContent = 'N/A';
+            document.getElementById('resilience-score').textContent = 'N/A';
+            document.getElementById('resilience-details').innerHTML =
+                'Need at least 2 nodes for analysis';
+            return;
+        }
+
+        // Build network graph
+        const nodes = state.currentGeoJSON.features.filter(f => f.properties.is_online);
+        const graph = buildNetworkGraph(nodes);
+
+        // Find critical nodes (single points of failure)
+        const criticalNodes = findCriticalNodes(graph, nodes);
+
+        // Calculate redundancy score
+        const redundancyScore = calculateRedundancyScore(graph, nodes);
+
+        // Update UI
+        document.getElementById('resilience-critical').textContent = criticalNodes.length;
+        document.getElementById('resilience-critical').className =
+            'value ' + (criticalNodes.length === 0 ? 'good' :
+                       criticalNodes.length <= 2 ? 'warning' : 'bad');
+
+        const scoreClass = redundancyScore >= 70 ? 'good' :
+                          redundancyScore >= 40 ? 'warning' : 'bad';
+        document.getElementById('resilience-score').textContent = redundancyScore + '%';
+        document.getElementById('resilience-score').className = 'value ' + scoreClass;
+
+        // Show details
+        let detailsHtml = '';
+        if (criticalNodes.length > 0) {
+            detailsHtml = '<div style="margin-top: 6px;"><strong>Critical nodes:</strong></div>';
+            criticalNodes.forEach(cn => {
+                detailsHtml += `<div style="color: #ef5350;">⚠ ${cn.name} (${cn.dependents} dependent)</div>`;
+
+                // Highlight critical node on map
+                const marker = state.markers.get(cn.id);
+                if (marker) {
+                    const criticalIcon = L.divIcon({
+                        html: `<svg viewBox="0 0 32 32" width="32" height="32">
+                            <circle cx="16" cy="16" r="14" fill="none" stroke="#ef5350" stroke-width="3" stroke-dasharray="4 2">
+                                <animate attributeName="stroke-dashoffset" values="0;12" dur="1s" repeatCount="indefinite"/>
+                            </circle>
+                        </svg>`,
+                        className: 'node-marker',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16]
+                    });
+                    const critMarker = L.marker(marker.marker.getLatLng(), { icon: criticalIcon, interactive: false });
+                    critMarker.addTo(map);
+                    resilienceState.criticalMarkers.push(critMarker);
+                }
+            });
+        } else {
+            detailsHtml = '<div style="color: #66bb6a;">✓ No single points of failure</div>';
+        }
+
+        // Find isolated nodes (would become orphans)
+        const isolatedNodes = findIsolatedNodes(graph, nodes);
+        if (isolatedNodes.length > 0) {
+            detailsHtml += `<div style="margin-top: 6px;"><strong>Weakly connected:</strong></div>`;
+            isolatedNodes.slice(0, 5).forEach(n => {
+                detailsHtml += `<div style="color: #ffa726;">⚡ ${n.name} (1 link)</div>`;
+            });
+            if (isolatedNodes.length > 5) {
+                detailsHtml += `<div style="color: #888;">...and ${isolatedNodes.length - 5} more</div>`;
+            }
+        }
+
+        document.getElementById('resilience-details').innerHTML = detailsHtml;
+    }
+
+    function buildNetworkGraph(nodes) {
+        // Build adjacency list based on proximity (simplified model)
+        const graph = new Map();
+        const maxLinkDistance = 50; // km
+
+        // Initialize nodes
+        nodes.forEach(n => {
+            const id = n.properties.id || `${n.geometry.coordinates[0]}_${n.geometry.coordinates[1]}`;
+            graph.set(id, { node: n, neighbors: [] });
+        });
+
+        // Find links based on proximity (and SNR if available)
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const n1 = nodes[i];
+                const n2 = nodes[j];
+                const dist = getDistance(
+                    n1.geometry.coordinates[1], n1.geometry.coordinates[0],
+                    n2.geometry.coordinates[1], n2.geometry.coordinates[0]
+                );
+
+                // Determine if link exists
+                let canLink = false;
+
+                // Gateways/routers can link further
+                const isRouter1 = n1.properties.is_gateway || n1.properties.role === 'ROUTER';
+                const isRouter2 = n2.properties.is_gateway || n2.properties.role === 'ROUTER';
+                const linkRange = (isRouter1 || isRouter2) ? maxLinkDistance : 20;
+
+                if (dist <= linkRange) {
+                    canLink = true;
+                }
+
+                if (canLink) {
+                    const id1 = n1.properties.id || `${n1.geometry.coordinates[0]}_${n1.geometry.coordinates[1]}`;
+                    const id2 = n2.properties.id || `${n2.geometry.coordinates[0]}_${n2.geometry.coordinates[1]}`;
+
+                    graph.get(id1).neighbors.push(id2);
+                    graph.get(id2).neighbors.push(id1);
+                }
+            }
+        }
+
+        return graph;
+    }
+
+    function findCriticalNodes(graph, nodes) {
+        // A critical node is one whose removal disconnects part of the network
+        const criticalNodes = [];
+
+        for (const [id, data] of graph) {
+            if (data.neighbors.length < 2) continue; // Not critical if only 1 or 0 links
+
+            // Check if removing this node would orphan any other nodes
+            const orphanedCount = countOrphanedNodes(graph, id);
+
+            if (orphanedCount > 0) {
+                const name = data.node.properties.name || data.node.properties.id;
+                criticalNodes.push({
+                    id: id,
+                    name: name,
+                    dependents: orphanedCount,
+                    neighbors: data.neighbors.length
+                });
+            }
+        }
+
+        // Sort by number of dependents
+        criticalNodes.sort((a, b) => b.dependents - a.dependents);
+
+        return criticalNodes;
+    }
+
+    function countOrphanedNodes(graph, removedId) {
+        // BFS from any node (except removedId) to see what's reachable
+        const visited = new Set();
+        visited.add(removedId);
+
+        // Start from any node that's not the removed one
+        let startId = null;
+        for (const id of graph.keys()) {
+            if (id !== removedId) {
+                startId = id;
+                break;
+            }
+        }
+
+        if (!startId) return 0;
+
+        // BFS
+        const queue = [startId];
+        visited.add(startId);
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const data = graph.get(current);
+
+            for (const neighbor of data.neighbors) {
+                if (!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    queue.push(neighbor);
+                }
+            }
+        }
+
+        // Count nodes not visited (orphaned)
+        let orphaned = 0;
+        for (const id of graph.keys()) {
+            if (!visited.has(id) && id !== removedId) {
+                orphaned++;
+            }
+        }
+
+        return orphaned;
+    }
+
+    function findIsolatedNodes(graph, nodes) {
+        // Nodes with only 1 connection (vulnerable)
+        const isolated = [];
+
+        for (const [id, data] of graph) {
+            if (data.neighbors.length === 1) {
+                const name = data.node.properties.name || data.node.properties.id;
+                isolated.push({ id, name, neighbors: 1 });
+            }
+        }
+
+        return isolated;
+    }
+
+    function calculateRedundancyScore(graph, nodes) {
+        if (nodes.length < 2) return 0;
+
+        // Score based on average connectivity and absence of critical nodes
+        let totalNeighbors = 0;
+        let nodesWithMultipleLinks = 0;
+
+        for (const [id, data] of graph) {
+            totalNeighbors += data.neighbors.length;
+            if (data.neighbors.length >= 2) nodesWithMultipleLinks++;
+        }
+
+        const avgConnectivity = totalNeighbors / graph.size;
+        const multiLinkRatio = nodesWithMultipleLinks / graph.size;
+
+        // Score: combination of average connectivity and multi-link ratio
+        // Max score when avg connectivity >= 3 and all nodes have 2+ links
+        const connectivityScore = Math.min(avgConnectivity / 3, 1) * 50;
+        const redundancyRatio = multiLinkRatio * 50;
+
+        return Math.round(connectivityScore + redundancyRatio);
+    }
+
+    function clearResilienceVisualization() {
+        resilienceState.orphanMarkers.forEach(m => map.removeLayer(m));
+        resilienceState.criticalMarkers.forEach(m => map.removeLayer(m));
+        resilienceState.orphanMarkers = [];
+        resilienceState.criticalMarkers = [];
+    }
+
+    // ============================================
+    // Phase 3: Deployment Optimizer
+    // ============================================
+
+    const optimizerState = {
+        markers: [],
+        coverageCircles: []
+    };
+
+    function showDeploymentOptimizer() {
+        const panel = document.getElementById('optimizer-panel');
+        panel.classList.toggle('visible');
+    }
+
+    document.getElementById('opt-node-count').addEventListener('input', function() {
+        document.getElementById('opt-node-count-value').textContent = this.value;
+    });
+
+    async function runOptimizer() {
+        const nodeCount = parseInt(document.getElementById('opt-node-count').value);
+        const resultsDiv = document.getElementById('optimizer-results');
+        resultsDiv.innerHTML = '<div style="color: #4fc3f7;">Analyzing network gaps...</div>';
+
+        // Clear previous markers
+        clearOptimizerMarkers();
+
+        if (!state.currentGeoJSON || state.currentGeoJSON.features.length < 1) {
+            resultsDiv.innerHTML = '<div style="color: #ef5350;">No nodes to analyze</div>';
+            return;
+        }
+
+        // Get current coverage bounds
+        const nodes = state.currentGeoJSON.features.filter(f =>
+            f.properties.is_online && f.geometry.coordinates
+        );
+
+        if (nodes.length === 0) {
+            resultsDiv.innerHTML = '<div style="color: #ef5350;">No online nodes</div>';
+            return;
+        }
+
+        // Calculate bounding box with padding
+        const lats = nodes.map(n => n.geometry.coordinates[1]);
+        const lons = nodes.map(n => n.geometry.coordinates[0]);
+        const minLat = Math.min(...lats) - 0.1;
+        const maxLat = Math.max(...lats) + 0.1;
+        const minLon = Math.min(...lons) - 0.1;
+        const maxLon = Math.max(...lons) + 0.1;
+
+        // Find coverage gaps using grid analysis
+        const optimalPositions = findCoverageGaps(nodes, minLat, maxLat, minLon, maxLon, nodeCount);
+
+        // Display results
+        let html = `<div style="color: #66bb6a; margin-bottom: 6px;">Found ${optimalPositions.length} optimal positions:</div>`;
+
+        optimalPositions.forEach((pos, i) => {
+            html += `<div style="padding: 2px 0;">
+                ${i + 1}. ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}
+                <span style="color: #888;">(+${pos.improvement}% coverage)</span>
+            </div>`;
+
+            // Add marker
+            const icon = L.divIcon({
+                html: `<svg viewBox="0 0 32 32" width="32" height="32">
+                    <circle cx="16" cy="16" r="12" fill="#66bb6a" opacity="0.8"/>
+                    <text x="16" y="21" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">${i + 1}</text>
+                </svg>`,
+                className: 'node-marker sim-node-marker',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+
+            const marker = L.marker([pos.lat, pos.lon], { icon })
+                .addTo(map)
+                .bindPopup(`<div class="node-popup">
+                    <h3>Suggested Location #${i + 1}</h3>
+                    <div class="info-grid">
+                        <div class="info-label">Position</div>
+                        <div class="info-value">${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}</div>
+                        <div class="info-label">Coverage improvement</div>
+                        <div class="info-value" style="color: #66bb6a;">+${pos.improvement}%</div>
+                        <div class="info-label">Nearest node</div>
+                        <div class="info-value">${pos.nearestDist.toFixed(1)}km</div>
+                        <div class="info-label">Potential links</div>
+                        <div class="info-value">${pos.potentialLinks}</div>
+                    </div>
+                </div>`);
+
+            optimizerState.markers.push(marker);
+
+            // Add coverage circle
+            const circle = L.circle([pos.lat, pos.lon], {
+                radius: 3000,
+                color: '#66bb6a',
+                fillColor: '#66bb6a',
+                fillOpacity: 0.15,
+                weight: 2,
+                dashArray: '5 5'
+            }).addTo(map);
+            optimizerState.coverageCircles.push(circle);
+        });
+
+        resultsDiv.innerHTML = html;
+    }
+
+    function findCoverageGaps(nodes, minLat, maxLat, minLon, maxLon, count) {
+        // Grid-based gap analysis
+        const gridSize = 20; // 20x20 grid
+        const latStep = (maxLat - minLat) / gridSize;
+        const lonStep = (maxLon - minLon) / gridSize;
+
+        // Score each grid cell by distance to nearest node (higher = worse coverage)
+        const cells = [];
+
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                const lat = minLat + (i + 0.5) * latStep;
+                const lon = minLon + (j + 0.5) * lonStep;
+
+                let minDist = Infinity;
+                let linksInRange = 0;
+
+                for (const node of nodes) {
+                    const dist = getDistance(lat, lon, node.geometry.coordinates[1], node.geometry.coordinates[0]);
+                    if (dist < minDist) minDist = dist;
+                    if (dist < 5) linksInRange++; // Within 5km
+                }
+
+                // Score: prefer locations far from existing nodes but can still connect
+                if (minDist > 0.5 && minDist < 30) { // At least 500m away, but within 30km
+                    cells.push({
+                        lat, lon,
+                        score: minDist * (linksInRange + 0.5), // Balance gap size vs connectivity
+                        nearestDist: minDist,
+                        potentialLinks: linksInRange
+                    });
+                }
+            }
+        }
+
+        // Sort by score (higher = better placement)
+        cells.sort((a, b) => b.score - a.score);
+
+        // Select top positions, ensuring they're not too close to each other
+        const selected = [];
+        const minSeparation = 3; // km
+
+        for (const cell of cells) {
+            if (selected.length >= count) break;
+
+            // Check if too close to already selected
+            let tooClose = false;
+            for (const sel of selected) {
+                if (getDistance(cell.lat, cell.lon, sel.lat, sel.lon) < minSeparation) {
+                    tooClose = true;
+                    break;
+                }
+            }
+
+            if (!tooClose) {
+                // Estimate coverage improvement (simplified)
+                const improvement = Math.round(cell.nearestDist * 2);
+                selected.push({
+                    lat: cell.lat,
+                    lon: cell.lon,
+                    improvement: Math.min(improvement, 25),
+                    nearestDist: cell.nearestDist,
+                    potentialLinks: cell.potentialLinks
+                });
+            }
+        }
+
+        return selected;
+    }
+
+    function clearOptimizerMarkers() {
+        optimizerState.markers.forEach(m => map.removeLayer(m));
+        optimizerState.coverageCircles.forEach(c => map.removeLayer(c));
+        optimizerState.markers = [];
+        optimizerState.coverageCircles = [];
+    }
+
+    // ============================================
+    // Phase 3: Time-Series Playback
+    // ============================================
+
+    const playbackState = {
+        active: false,
+        currentMinutesAgo: 0, // 0 = now, 1440 = 24 hours ago
+        savedGeoJSON: null
+    };
+
+    function togglePlaybackMode() {
+        const panel = document.getElementById('playback-panel');
+        panel.classList.toggle('visible');
+
+        if (panel.classList.contains('visible') && !playbackState.active) {
+            // Save current state
+            playbackState.savedGeoJSON = state.currentGeoJSON;
+            playbackState.active = true;
+        }
+    }
+
+    document.getElementById('playback-time').addEventListener('input', async function() {
+        const minutesAgo = 1440 - parseInt(this.value); // Inverted: right = now
+        playbackState.currentMinutesAgo = minutesAgo;
+
+        if (minutesAgo === 0) {
+            document.getElementById('playback-time-value').textContent = 'Now';
+            document.getElementById('playback-timestamp').textContent = 'Current';
+            exitPlayback();
+            return;
+        }
+
+        // Format time
+        const hours = Math.floor(minutesAgo / 60);
+        const mins = minutesAgo % 60;
+        if (hours > 0) {
+            document.getElementById('playback-time-value').textContent = `-${hours}h${mins > 0 ? mins + 'm' : ''}`;
+        } else {
+            document.getElementById('playback-time-value').textContent = `-${mins}m`;
+        }
+
+        await loadHistoricalSnapshot(minutesAgo);
+    });
+
+    async function playbackStep(minutes) {
+        const slider = document.getElementById('playback-time');
+        const newValue = Math.max(0, Math.min(1440, parseInt(slider.value) + minutes));
+        slider.value = newValue;
+        slider.dispatchEvent(new Event('input'));
+    }
+
+    async function loadHistoricalSnapshot(minutesAgo) {
+        const timestamp = (Date.now() / 1000) - (minutesAgo * 60);
+        const formattedTime = new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('playback-timestamp').textContent = formattedTime;
+
+        try {
+            const response = await fetch(`/api/nodes/snapshot?timestamp=${timestamp}&window=300`);
+            if (!response.ok) throw new Error('API unavailable');
+
+            const data = await response.json();
+            if (data.error) {
+                document.getElementById('playback-node-count').textContent = 'No data';
+                return;
+            }
+
+            // Update display with historical data
+            document.getElementById('playback-node-count').textContent = data.features.length;
+
+            // Replace current data with snapshot
+            state.currentGeoJSON = data;
+            state.firstLoad = true; // Reset to allow re-fitting
+            updateDisplay();
+            state.firstLoad = false;
+
+        } catch (e) {
+            // API not available - show message
+            document.getElementById('playback-node-count').textContent = 'API offline';
+        }
+    }
+
+    function exitPlayback() {
+        playbackState.active = false;
+        playbackState.currentMinutesAgo = 0;
+
+        // Restore live data
+        if (playbackState.savedGeoJSON) {
+            state.currentGeoJSON = playbackState.savedGeoJSON;
+            updateDisplay();
+        }
+
+        // Reset slider
+        document.getElementById('playback-time').value = 1440;
+        document.getElementById('playback-time-value').textContent = 'Now';
+        document.getElementById('playback-timestamp').textContent = 'Current';
+
+        // Refresh with live data
+        refreshNodes();
+    }
 
     // ============================================
     // Initialization
@@ -1186,6 +3635,269 @@
 
     // Periodic cache status update
     setInterval(updateCacheStatus, 60000);
+
+    // Phase 4: Filter event listeners for clustering and messages
+    ['filter-clustering', 'filter-messages'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', () => {
+                if (id === 'filter-clustering') {
+                    // When toggling clustering, clear and rebuild markers
+                    nodeLayer.clearLayers();
+                    Object.values(clusterGroups).forEach(cg => cg.clearLayers());
+                    state.markers.forEach((entry, id) => {
+                        state.markers.delete(id);
+                    });
+                    state.markers.clear();
+                }
+                updateDisplay();
+
+                // Toggle message queue panel visibility
+                if (id === 'filter-messages') {
+                    const panel = document.getElementById('message-queue-panel');
+                    panel.classList.toggle('visible', el.checked);
+                    if (el.checked) {
+                        loadMessageQueue();
+                    }
+                }
+            });
+        }
+    });
+
+    // Phase 4: Handle window resize for topology view
+    window.addEventListener('resize', () => {
+        if (state.currentView === 'topology') {
+            renderTopology();
+        }
+    });
+
+    // Phase 4: Load message queue periodically
+    setInterval(() => {
+        if (document.getElementById('filter-messages').checked) {
+            loadMessageQueue();
+        }
+    }, 30000);
+
+    // Phase 4: Update topology when data refreshes (if in topology view)
+    const originalRefreshNodes = refreshNodes;
+    refreshNodes = async function() {
+        await originalRefreshNodes();
+        if (state.currentView === 'topology') {
+            renderTopology();
+        }
+    };
+
+    // Phase 4: Public API for external integration
+    window.meshforgeMap = {
+        getState: () => state,
+        switchView: switchView,
+        refreshNodes: refreshNodes,
+        animateMessageFlow: animateMessageFlow
+    };
+
+    // ============================================
+    // Phase 5: GPS Operator Position
+    // ============================================
+    const gpsState = {
+        watchId: null,
+        marker: null,
+        accuracyCircle: null,
+        position: null,
+        tracking: false
+    };
+
+    function toggleGPS() {
+        const btn = document.getElementById('gps-btn');
+
+        if (gpsState.tracking) {
+            // Stop tracking
+            if (gpsState.watchId !== null) {
+                navigator.geolocation.clearWatch(gpsState.watchId);
+                gpsState.watchId = null;
+            }
+            if (gpsState.marker) {
+                map.removeLayer(gpsState.marker);
+                gpsState.marker = null;
+            }
+            gpsState.tracking = false;
+            btn.classList.remove('tracking', 'active');
+            return;
+        }
+
+        if (!('geolocation' in navigator)) {
+            alert('Geolocation not available');
+            return;
+        }
+
+        btn.classList.add('active');
+
+        // Start watching position
+        gpsState.watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                updateGPSMarker(pos.coords);
+                btn.classList.remove('active');
+                btn.classList.add('tracking');
+                gpsState.tracking = true;
+            },
+            (err) => {
+                console.error('GPS error:', err);
+                btn.classList.remove('active');
+                alert('Could not get location: ' + err.message);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 5000
+            }
+        );
+    }
+
+    function updateGPSMarker(coords) {
+        gpsState.position = { lat: coords.latitude, lon: coords.longitude };
+        const latlng = [coords.latitude, coords.longitude];
+        const accuracy = coords.accuracy || 50;
+
+        if (!gpsState.marker) {
+            // Create GPS marker
+            const icon = L.divIcon({
+                className: 'gps-marker',
+                html: `
+                    <div class="gps-marker-inner">
+                        <div class="gps-pulse"></div>
+                        <div class="gps-dot"></div>
+                    </div>
+                `,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            gpsState.marker = L.marker(latlng, { icon: icon, zIndexOffset: 1000 })
+                .addTo(map)
+                .bindPopup(`
+                    <div class="node-popup">
+                        <h3>Your Location</h3>
+                        <div class="info-grid">
+                            <div class="info-label">Accuracy</div>
+                            <div class="info-value">${Math.round(accuracy)}m</div>
+                            <div class="info-label">Lat</div>
+                            <div class="info-value">${coords.latitude.toFixed(6)}</div>
+                            <div class="info-label">Lon</div>
+                            <div class="info-value">${coords.longitude.toFixed(6)}</div>
+                        </div>
+                    </div>
+                `);
+
+            // Zoom to position on first fix
+            map.setView(latlng, 13);
+        } else {
+            gpsState.marker.setLatLng(latlng);
+        }
+    }
+
+    // ============================================
+    // Phase 5: Quick Status Card (Mobile)
+    // ============================================
+    let selectedNodeForCard = null;
+
+    function showStatusCard(props, coords) {
+        selectedNodeForCard = { props, coords };
+
+        // Update card content
+        document.getElementById('card-node-name').textContent = props.name || props.id || 'Unknown';
+
+        const badge = document.getElementById('card-network');
+        badge.className = 'status-card-badge ' + (
+            props.network === 'rns' ? 'badge-rns' :
+            props.network === 'aredn' ? 'badge-aredn' : 'badge-meshtastic'
+        );
+        badge.textContent = (props.network || 'meshtastic').toUpperCase();
+
+        const status = document.getElementById('card-status');
+        status.textContent = props.is_online ? 'Online' : 'Offline';
+        status.className = 'value ' + (props.is_online ? 'online' : 'offline');
+
+        document.getElementById('card-last-seen').textContent = props.last_seen || '--';
+        document.getElementById('card-snr').textContent = props.snr !== null ? `${props.snr} dB` : '--';
+        document.getElementById('card-battery').textContent = props.battery !== null ? `${props.battery}%` : '--';
+        document.getElementById('card-hardware').textContent = props.hardware || '--';
+        document.getElementById('card-role').textContent = props.role || '--';
+
+        // Show card
+        document.getElementById('status-card').classList.add('visible');
+
+        // Update distance button availability
+        const distBtn = document.getElementById('btn-distance');
+        distBtn.disabled = !gpsState.position;
+        distBtn.style.opacity = gpsState.position ? '1' : '0.5';
+    }
+
+    function closeStatusCard() {
+        document.getElementById('status-card').classList.remove('visible');
+        selectedNodeForCard = null;
+    }
+
+    function showDistanceToMe() {
+        if (!selectedNodeForCard || !gpsState.position) return;
+
+        const dist = getDistance(
+            gpsState.position.lat, gpsState.position.lon,
+            selectedNodeForCard.coords[1], selectedNodeForCard.coords[0]
+        );
+
+        const distStr = dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(2)}km`;
+        alert(`Distance to ${selectedNodeForCard.props.name || 'node'}: ${distStr}`);
+    }
+
+    // Swipe to dismiss status card
+    (function() {
+        const card = document.getElementById('status-card');
+        let startY = 0;
+        let currentY = 0;
+
+        card.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.status-card-handle')) {
+                startY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        card.addEventListener('touchmove', (e) => {
+            if (startY) {
+                currentY = e.touches[0].clientY;
+                const diff = currentY - startY;
+                if (diff > 0) {
+                    card.style.transform = `translateY(${diff}px)`;
+                }
+            }
+        }, { passive: true });
+
+        card.addEventListener('touchend', () => {
+            if (startY && currentY - startY > 80) {
+                closeStatusCard();
+            }
+            card.style.transform = '';
+            startY = 0;
+            currentY = 0;
+        });
+    })();
+
+    // ============================================
+    // Phase 5: Hook marker clicks for mobile status card
+    // ============================================
+    // Extend the marker click behavior to show status card on mobile
+    const isMobile = () => 'ontouchstart' in window || window.innerWidth < 768;
+
+    // Override how markers handle clicks (applied to new markers)
+    const origUpdateDisplay = updateDisplay;
+    // Note: marker click handlers are added in updateDisplay when markers are created
+    // We add additional click behavior by listening on the nodeLayer
+    nodeLayer.on('click', function(e) {
+        if (isMobile() && e.layer && e.layer.feature) {
+            const props = e.layer.feature.properties;
+            const coords = e.layer.feature.geometry.coordinates;
+            e.layer.closePopup();
+            showStatusCard(props, coords);
+        }
+    });
     </script>
 </body>
 </html>

@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1302%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2624%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -30,17 +30,26 @@
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum networks
+- **Live NOC maps** with real-time node tracking
 - **Coverage maps** with SNR-based link quality
 - **RF engineering tools** for site planning
 - **AI diagnostics** that work offline
 
-It's the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport). SSH in from anywhere and manage everything from one terminal.
+### The Vision
+
+Modern mesh networks are fragmented. Meshtastic nodes can't talk to Reticulum nodes. AREDN operates on a different layer entirely. Each ecosystem has its own tools, its own interfaces, its own learning curve.
+
+**MeshForge unifies them.**
+
+One interface to monitor Meshtastic, Reticulum, and AREDN. One gateway to bridge messages between incompatible meshes. One toolkit for RF planning, diagnostics, and field operations. All running on a $35 Raspberry Pi that you can SSH into from anywhere.
+
+This is the first open-source tool to bridge Meshtastic (LoRa mesh) with Reticulum (encrypted transport layer). No cloud dependencies. No subscriptions. Just a box that makes mesh networks work together.
 
 ```bash
 sudo python3 src/launcher_tui/main.py
 ```
 
-**Built for:** HAM operators, emergency comms teams, off-grid builders, and mesh enthusiasts.
+**Built for:** HAM operators, emergency comms teams, off-grid builders, preppers, and mesh enthusiasts who want professional-grade network visibility without the complexity.
 
 ---
 
@@ -68,25 +77,27 @@ python3 src/standalone.py
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
-| **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Working |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Working |
-| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Working |
-| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Working |
-| **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Working |
-| **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Working |
-| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Working (requires API key) |
-| **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Working |
-| **AREDN** | Node discovery, link quality, service enumeration | Working |
+| **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Stable |
+| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
+| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
+| **Live NOC Map** | Real-time browser view, WebSocket updates, field ops tools | Alpha |
+| **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
+| **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
+| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
+| **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Stable |
+| **AREDN** | Node discovery, link quality, service enumeration | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 ### Roadmap
 
-| Feature | Status |
-|---------|--------|
-| Packet decode (protobuf + RNS frames) | Planned |
-| SDR spectrum analysis (RTL-SDR) | Planned |
-| GPS tracking + GPX export | Planned |
-| Multi-hop path visualization | Planned |
+| Feature | Target | Status |
+|---------|--------|--------|
+| Live Map Phase 6 — Historical playback | Q1 2026 | Planned |
+| Packet decode (protobuf + RNS frames) | Q2 2026 | Planned |
+| SDR spectrum analysis (RTL-SDR) | Q2 2026 | Planned |
+| GPS tracking + GPX export | Q2 2026 | Planned |
+| Multi-hop path visualization | Q2 2026 | In Progress (alpha) |
 
 *Goal: Wireshark-grade visibility into mesh traffic.*
 
@@ -250,7 +261,9 @@ Auto-detection, GPIO power control, and meshtasticd config generation are implem
 
 ## Coverage Maps
 
-Interactive network visualization powered by Folium:
+Interactive network visualization powered by Folium and Leaflet.js:
+
+### Static Coverage Maps (Stable)
 
 - **Node markers** with status, battery, RSSI, hardware info
 - **SNR-based link coloring** — green (excellent) → red (marginal)
@@ -266,6 +279,24 @@ from utils.coverage_map import CoverageMapGenerator
 gen = CoverageMapGenerator(offline=True)
 gen.add_nodes_from_geojson(node_data)
 gen.generate("field_coverage.html")  # Opens in any browser
+```
+
+### Live NOC Map (Alpha)
+
+Real-time browser-based network operations view:
+
+- **WebSocket updates** — sub-second node position refresh
+- **Animated transitions** — smooth node movement visualization
+- **Status dashboard** — online/offline counts, network health score
+- **Field operations panel** — range test, coverage estimation, deployment tools
+- **Node filtering** — by type, status, signal strength, last seen
+- **Cluster mode** — auto-group dense node areas for performance
+- **Alert system** — visual + audio notifications for node events
+
+```bash
+# Access from TUI (alpha branch)
+sudo python3 src/launcher_tui/main.py
+# Navigate: Maps → Live NOC View
 ```
 
 ---
@@ -285,7 +316,7 @@ src/
 ├── monitoring/            # Network monitoring
 │   └── mqtt_subscriber.py # Nodeless MQTT node tracking
 ├── utils/                 # Core utilities
-│   ├── rf.py              # RF calculations (1302 tests)
+│   ├── rf.py              # RF calculations (well-tested)
 │   ├── coverage_map.py    # Folium map generator + tile cache
 │   ├── diagnostic_engine.py # Rule-based AI diagnostics
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
@@ -345,16 +376,72 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ---
 
-## Branches
+## Development Branches
 
-| Branch | Purpose | Stability |
-|--------|---------|-----------|
-| `main` | Gateway bridge, production features | Stable |
-| `alpha` | Map development, experimental | Testing |
+MeshForge uses a two-branch development model for stability and rapid iteration:
+
+| Branch | Purpose | Stability | Use Case |
+|--------|---------|-----------|----------|
+| `main` | Production-ready features | **Stable** | Daily operations, reliable deployments |
+| `alpha` | Cutting-edge development | **Testing** | New features, experimental work |
+
+### Main Branch (Stable)
+
+The `main` branch contains battle-tested features:
+- Gateway bridge (Meshtastic ↔ RNS)
+- RF engineering tools
+- AI diagnostics (Standalone + PRO)
+- AREDN integration
+- Core TUI functionality
 
 ```bash
-git checkout alpha    # Switch to experimental
+# Install stable version
+git clone https://github.com/Nursedude/meshforge.git
+cd meshforge
+sudo bash scripts/install_noc.sh
 ```
+
+### Alpha Branch (Development)
+
+The `alpha` branch has the latest features under active development:
+- **Live Map NOC View** — Real-time node tracking in browser
+- **Field Operations Mode** — Node deployment tools, range testing
+- **Enhanced Animations** — Smooth node movements, visual transitions
+- **Advanced Filtering** — Node type, status, signal strength filters
+- **Offline Tile Caching** — Pre-fetch map tiles for field use
+
+```bash
+# Test alpha features
+git clone https://github.com/Nursedude/meshforge.git
+cd meshforge
+git checkout alpha
+sudo bash scripts/install_noc.sh
+```
+
+### Updating Your Installation
+
+```bash
+# For main (stable)
+cd /opt/meshforge && sudo git pull origin main
+
+# For alpha (development)
+cd /opt/meshforge && sudo git pull origin alpha
+```
+
+### Current Alpha Features (v0.4.7-beta)
+
+The Live Map system provides a browser-based NOC view:
+
+| Feature | Description |
+|---------|-------------|
+| **Real-time Updates** | WebSocket-driven node position updates |
+| **Link Visualization** | SNR-based link quality coloring |
+| **Node Clustering** | Auto-group dense node areas |
+| **Status Dashboard** | Node counts, network health, alerts |
+| **Field Tools** | Range test, coverage estimation, node deployment |
+| **Offline Mode** | Cached tiles work without internet |
+
+Access the live map from the TUI: **Maps → Live NOC View**
 
 ---
 
