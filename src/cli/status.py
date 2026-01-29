@@ -102,6 +102,7 @@ def get_local_ip():
     """Get the local IP address."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)  # 2 second timeout for network issues
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
@@ -129,7 +130,7 @@ def get_radio_info():
             return info
         result = subprocess.run(
             [cli_path, '--info'],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             for line in result.stdout.split('\n'):
@@ -158,7 +159,7 @@ def get_node_count():
             return None
         result = subprocess.run(
             [cli_path, '--nodes'],
-            capture_output=True, text=True, timeout=15
+            capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             # Count lines that look like node entries (contain !)

@@ -40,7 +40,15 @@ class MapDataCollector:
     2. MQTT subscriber — global/regional nodes
     3. Node tracker cache — previously discovered RNS + Meshtastic nodes
     4. Last-known cache — persisted state from previous runs
+
+    Settings (in ~/.config/meshforge/map_settings.json):
+    - node_cache_max_age_hours: Max age for node_cache.json (default: 48)
+    - rns_cache_max_age_hours: Max age for RNS temp cache (default: 1)
     """
+
+    # Default cache ages in hours
+    DEFAULT_NODE_CACHE_MAX_AGE_HOURS = 48
+    DEFAULT_RNS_CACHE_MAX_AGE_HOURS = 1
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
@@ -57,6 +65,19 @@ class MapDataCollector:
         self._last_collect: Optional[float] = None
         self._cached_geojson: Optional[Dict] = None
 
+        # User-configurable cache age settings
+        try:
+            from utils.common import SettingsManager
+            self._settings = SettingsManager(
+                "map_settings",
+                defaults={
+                    "node_cache_max_age_hours": self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS,
+                    "rns_cache_max_age_hours": self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS,
+                }
+            )
+        except ImportError:
+            self._settings = None
+
         # Node history database for position/state tracking over time
         self._history = None
         if enable_history:
@@ -66,6 +87,36 @@ class MapDataCollector:
                 self._history = NodeHistoryDB(db_path=db_path)
             except Exception as e:
                 logger.debug(f"Node history disabled: {e}")
+
+    def get_node_cache_max_age_seconds(self) -> int:
+        """Get max age for node_cache.json in seconds."""
+        if self._settings:
+            hours = self._settings.get("node_cache_max_age_hours", self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS)
+        else:
+            hours = self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS
+        return int(hours * 3600)
+
+    def get_rns_cache_max_age_seconds(self) -> int:
+        """Get max age for RNS temp cache in seconds."""
+        if self._settings:
+            hours = self._settings.get("rns_cache_max_age_hours", self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS)
+        else:
+            hours = self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS
+        return int(hours * 3600)
+
+    def set_node_cache_max_age_hours(self, hours: int) -> None:
+        """Set max age for node_cache.json in hours."""
+        if self._settings:
+            self._settings.set("node_cache_max_age_hours", hours)
+            self._settings.save()
+            logger.info(f"Node cache max age set to {hours} hours")
+
+    def set_rns_cache_max_age_hours(self, hours: int) -> None:
+        """Set max age for RNS temp cache in hours."""
+        if self._settings:
+            self._settings.set("rns_cache_max_age_hours", hours)
+            self._settings.save()
+            logger.info(f"RNS cache max age set to {hours} hours")
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -115,15 +166,24 @@ class MapDataCollector:
                 if fid:
                     features[fid] = f
 
+        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features)
         geojson = {
             "type": "FeatureCollection",
             "features": list(features.values()),
             "properties": {
                 "collected_at": datetime.now().isoformat(),
                 "source_count": len(features),
-                "sources": self._get_source_summary(tcp_features, mqtt_features, tracker_features)
+                "sources": sources
             }
         }
+
+        # Log collection summary for debugging
+        logger.debug(
+            f"MapDataCollector: {len(features)} nodes "
+            f"(meshtasticd:{sources.get('meshtasticd', 0)} "
+            f"mqtt:{sources.get('mqtt', 0)} "
+            f"tracker:{sources.get('node_tracker', 0)})"
+        )
 
         # Cache result
         self._cached_geojson = geojson
@@ -392,8 +452,9 @@ class MapDataCollector:
             cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
         except ImportError:
             import os as _os
-            sudo_user = _os.environ.get('SUDO_USER')
-            if sudo_user and sudo_user != 'root':
+            sudo_user = _os.environ.get('SUDO_USER', '')
+            # Path traversal protection (security)
+            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
                 cache_path = Path(f'/home/{sudo_user}/.config/meshforge/node_cache.json')
             else:
                 # Avoid Path.home() which returns /root under sudo (MF001)
@@ -402,35 +463,75 @@ class MapDataCollector:
         if cache_path.exists():
             try:
                 age = time.time() - cache_path.stat().st_mtime
-                if age < 3600:  # Less than 1 hour old
+                max_age = self.get_node_cache_max_age_seconds()
+                if age < max_age:  # Configurable, default 48 hours
                     with open(cache_path) as f:
                         data = json.load(f)
+
+                    # Count nodes for logging
+                    total_nodes = 0
                     if isinstance(data, list):
+                        total_nodes = len(data)
                         for node in data:
                             feature = self._node_cache_to_feature(node)
                             if feature:
                                 features.append(feature)
                     elif isinstance(data, dict) and "nodes" in data:
+                        total_nodes = len(data["nodes"])
                         for node in data["nodes"]:
                             feature = self._node_cache_to_feature(node)
                             if feature:
                                 features.append(feature)
+                    elif isinstance(data, dict):
+                        # Dict without "nodes" key - log for debugging
+                        logger.debug(f"node_cache.json has dict format without 'nodes' key: {list(data.keys())}")
+
+                    if features:
+                        logger.debug(f"node_cache: {len(features)}/{total_nodes} nodes with position")
+                else:
+                    # Cache too old
+                    age_hours = age / 3600
+                    max_hours = max_age / 3600
+                    logger.debug(f"node_cache.json too old: {age_hours:.1f}h > {max_hours:.1f}h max")
+            except json.JSONDecodeError as e:
+                logger.warning(f"node_cache.json JSON parse error: {e}")
+            except PermissionError as e:
+                logger.warning(f"node_cache.json permission denied: {e}")
             except Exception as e:
                 logger.debug(f"Node cache read error: {e}")
+        else:
+            logger.debug(f"node_cache.json not found at: {cache_path}")
 
         # Check RNS nodes temp file
         rns_cache = Path("/tmp/meshforge_rns_nodes.json")
         if rns_cache.exists():
+            rns_count = 0
             try:
                 age = time.time() - rns_cache.stat().st_mtime
-                if age < 600:  # Less than 10 minutes old
+                max_age = self.get_rns_cache_max_age_seconds()
+                if age < max_age:  # Configurable, default 1 hour
                     with open(rns_cache) as f:
                         data = json.load(f)
+
+                    # Handle both list and dict-with-nodes format
+                    nodes_list = []
                     if isinstance(data, list):
-                        for node in data:
-                            feature = self._rns_cache_to_feature(node)
-                            if feature:
-                                features.append(feature)
+                        nodes_list = data
+                    elif isinstance(data, dict) and "nodes" in data:
+                        nodes_list = data["nodes"]
+
+                    for node in nodes_list:
+                        feature = self._rns_cache_to_feature(node)
+                        if feature:
+                            features.append(feature)
+                            rns_count += 1
+
+                    if rns_count:
+                        logger.debug(f"rns_cache: {rns_count}/{len(nodes_list)} nodes with position")
+                else:
+                    age_mins = age / 60
+                    max_mins = max_age / 60
+                    logger.debug(f"RNS cache too old: {age_mins:.0f}m > {max_mins:.0f}m max")
             except Exception as e:
                 logger.debug(f"RNS cache read error: {e}")
 
@@ -584,6 +685,25 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/nodes/trajectory/'):
             node_id = self.path.split('/api/nodes/trajectory/', 1)[1].rstrip('/')
             self._serve_trajectory(node_id)
+        elif self.path.startswith('/api/coverage/'):
+            # Coverage prediction for a node: /api/coverage/<lat>/<lon>/<alt>
+            from urllib.parse import urlparse
+            path_only = urlparse(self.path).path
+            parts = path_only.split('/api/coverage/', 1)[1].rstrip('/').split('/')
+            self._serve_coverage(parts)
+        elif self.path.startswith('/api/los/'):
+            # Line of sight check: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
+            from urllib.parse import urlparse
+            path_only = urlparse(self.path).path
+            parts = path_only.split('/api/los/', 1)[1].rstrip('/').split('/')
+            self._serve_los(parts)
+        elif self.path.startswith('/api/nodes/snapshot'):
+            # Historical snapshot: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
+            self._serve_snapshot()
+        elif self.path == '/api/messages/queue' or self.path == '/api/messages/queue/':
+            self._serve_message_queue()
+        elif self.path == '/api/network/topology' or self.path == '/api/network/topology/':
+            self._serve_network_topology()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -694,6 +814,363 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _serve_coverage(self, parts: List[str]):
+        """Serve terrain-aware coverage prediction for a location.
+
+        URL: /api/coverage/<lat>/<lon>/<antenna_height_m>
+        Optional query params: radius_km (default 10), freq_mhz (default 906)
+        """
+        try:
+            if len(parts) < 3:
+                self._serve_json({"error": "Usage: /api/coverage/<lat>/<lon>/<height_m>"})
+                return
+
+            lat = float(parts[0])
+            lon = float(parts[1])
+            alt = float(parts[2])
+
+            # Parse query params
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            radius_km = float(params.get('radius_km', ['10'])[0])
+            freq_mhz = float(params.get('freq_mhz', ['906'])[0])
+            resolution = int(params.get('resolution', ['24'])[0])
+
+            # Limit resolution for performance
+            resolution = min(resolution, 48)
+            radius_km = min(radius_km, 50)
+
+            # Get coverage prediction from terrain analyzer
+            try:
+                from utils.terrain import SRTMProvider, LOSAnalyzer
+                provider = SRTMProvider()
+                analyzer = LOSAnalyzer(provider)
+                coverage = analyzer.coverage_grid(
+                    lat, lon, alt,
+                    radius_km=radius_km,
+                    freq_mhz=freq_mhz,
+                    resolution=resolution
+                )
+            except ImportError:
+                self._serve_json({"error": "terrain module not available"})
+                return
+            except Exception as e:
+                logger.error(f"Coverage calculation failed: {e}")
+                self._serve_json({"error": f"calculation failed: {str(e)}"})
+                return
+
+            # Convert to GeoJSON for map display
+            features = []
+            for point in coverage:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [point["lon"], point["lat"]]
+                    },
+                    "properties": {
+                        "is_clear": point["is_clear"],
+                        "total_loss_db": point["total_loss_db"],
+                        "terrain_loss_db": point["terrain_loss_db"],
+                        "fresnel_pct": point["fresnel_clearance_pct"],
+                        "distance_m": point["distance_m"],
+                        "bearing": point["bearing"],
+                    }
+                })
+
+            result = {
+                "type": "FeatureCollection",
+                "features": features,
+                "properties": {
+                    "center": [lon, lat],
+                    "antenna_height_m": alt,
+                    "radius_km": radius_km,
+                    "freq_mhz": freq_mhz,
+                }
+            }
+            self._serve_json(result)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"Coverage endpoint error: {e}")
+            self._serve_json({"error": str(e)})
+
+    def _serve_snapshot(self):
+        """Serve a historical network snapshot for playback.
+
+        URL: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        try:
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            timestamp = float(params.get('timestamp', [str(time.time())])[0])
+            window = int(params.get('window', ['300'])[0])
+
+            if not self.collector or not self.collector._history:
+                self._serve_json({"error": "history not available", "features": []})
+                return
+
+            history = self.collector._history
+            observations = history.get_snapshot(timestamp=timestamp, window_seconds=window)
+
+            # Convert observations to GeoJSON features
+            features = []
+            for obs in observations:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [obs.longitude, obs.latitude]
+                    },
+                    "properties": {
+                        "id": obs.node_id,
+                        "name": obs.name,
+                        "network": obs.network,
+                        "is_online": obs.is_online,
+                        "snr": obs.snr,
+                        "battery": obs.battery,
+                        "hardware": obs.hardware,
+                        "role": obs.role,
+                        "via_mqtt": obs.via_mqtt,
+                        "timestamp": obs.timestamp,
+                    }
+                })
+
+            result = {
+                "type": "FeatureCollection",
+                "features": features,
+                "properties": {
+                    "snapshot_time": timestamp,
+                    "window_seconds": window,
+                    "node_count": len(features),
+                }
+            }
+            self._serve_json(result)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"Snapshot endpoint error: {e}")
+            self._serve_json({"error": str(e)})
+
+    def _serve_los(self, parts: List[str]):
+        """Serve line-of-sight analysis between two points.
+
+        URL: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
+        Optional query params: alt1, alt2 (antenna heights, default 10m), freq_mhz (default 906)
+        """
+        try:
+            if len(parts) < 4:
+                self._serve_json({"error": "Usage: /api/los/<lat1>/<lon1>/<lat2>/<lon2>"})
+                return
+
+            lat1 = float(parts[0])
+            lon1 = float(parts[1])
+            lat2 = float(parts[2])
+            lon2 = float(parts[3])
+
+            # Parse query params
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            alt1 = float(params.get('alt1', ['10'])[0])
+            alt2 = float(params.get('alt2', ['10'])[0])
+            freq_mhz = float(params.get('freq_mhz', ['906'])[0])
+
+            # Calculate LOS
+            try:
+                from utils.terrain import SRTMProvider, LOSAnalyzer
+                provider = SRTMProvider()
+                analyzer = LOSAnalyzer(provider)
+                result = analyzer.analyze(lat1, lon1, alt1, lat2, lon2, alt2, freq_mhz)
+            except ImportError:
+                self._serve_json({"error": "terrain module not available"})
+                return
+            except Exception as e:
+                logger.error(f"LOS calculation failed: {e}")
+                self._serve_json({"error": f"calculation failed: {str(e)}"})
+                return
+
+            # Build elevation profile for visualization
+            profile = []
+            if hasattr(result, 'profile') and result.profile:
+                for p in result.profile:
+                    profile.append({
+                        "distance_m": p.distance_m,
+                        "elevation_m": p.ground_elevation,
+                        "los_height_m": p.los_height,
+                        "fresnel_top": p.los_height + p.fresnel_radius,
+                        "fresnel_bottom": p.los_height - p.fresnel_radius,
+                    })
+
+            response = {
+                "is_clear": result.is_clear,
+                "distance_m": result.distance_m,
+                "total_loss_db": result.total_loss_db,
+                "terrain_loss_db": result.terrain_loss_db,
+                "fresnel_clearance_pct": result.fresnel_clearance_pct,
+                "obstruction_count": len(result.obstructions) if hasattr(result, 'obstructions') else 0,
+                "profile": profile,
+                "endpoints": {
+                    "from": {"lat": lat1, "lon": lon1, "alt": alt1},
+                    "to": {"lat": lat2, "lon": lon2, "alt": alt2},
+                }
+            }
+            self._serve_json(response)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"LOS endpoint error: {e}")
+            self._serve_json({"error": str(e)})
+
+    def _serve_message_queue(self):
+        """Serve pending messages from the gateway message queue."""
+        messages = []
+
+        # Try to load from SQLite message queue
+        try:
+            from gateway.message_queue import MessageQueue
+            queue = MessageQueue()
+            pending = queue.get_pending_messages(limit=50)
+            for msg in pending:
+                messages.append({
+                    "id": msg.get("id"),
+                    "source": msg.get("source_id"),
+                    "source_name": msg.get("source_name", ""),
+                    "target": msg.get("target_id"),
+                    "target_name": msg.get("target_name", ""),
+                    "network": msg.get("target_network", "meshtastic"),
+                    "status": msg.get("status", "pending"),
+                    "created_at": msg.get("created_at", ""),
+                    "message_type": msg.get("message_type", "text")
+                })
+        except ImportError:
+            logger.debug("MessageQueue not available")
+        except Exception as e:
+            logger.debug(f"Message queue error: {e}")
+
+        # Also check for cached queue file
+        if not messages:
+            try:
+                queue_cache = self.collector._cache_dir / "message_queue.json" if self.collector else None
+                if queue_cache and queue_cache.exists():
+                    with open(queue_cache) as f:
+                        data = json.load(f)
+                    messages = data.get("messages", [])
+            except Exception:
+                pass
+
+        self._serve_json({
+            "messages": messages,
+            "count": len(messages),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _serve_network_topology(self):
+        """Serve network topology data for D3.js visualization."""
+        if not self.collector:
+            self._serve_json({"error": "collector not available", "nodes": [], "links": []})
+            return
+
+        geojson = self.collector.collect()
+        nodes = []
+        links = []
+        node_map = {}
+
+        # Build nodes
+        for feature in geojson.get("features", []):
+            props = feature["properties"]
+            coords = feature["geometry"]["coordinates"]
+            node_id = props.get("id", f"{coords[0]}_{coords[1]}")
+
+            network = "gateway" if props.get("is_gateway") else props.get("network", "meshtastic")
+
+            node = {
+                "id": node_id,
+                "name": props.get("name", node_id),
+                "network": network,
+                "is_online": props.get("is_online", False),
+                "is_gateway": props.get("is_gateway", False),
+                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER"),
+                "lat": coords[1],
+                "lon": coords[0],
+                "snr": props.get("snr"),
+                "battery": props.get("battery")
+            }
+            nodes.append(node)
+            node_map[node_id] = node
+
+        # Build links based on proximity and network relationships
+        gateways = [n for n in nodes if n["is_gateway"] or n["is_router"]]
+        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"]]
+
+        # Connect regular nodes to nearest gateway/router
+        for node in regular_nodes:
+            if not node["is_online"]:
+                continue
+
+            nearest = None
+            min_dist = float("inf")
+
+            for gw in gateways:
+                if not gw["is_online"]:
+                    continue
+                dist = self._haversine(node["lat"], node["lon"], gw["lat"], gw["lon"])
+                if dist < min_dist and dist < 50:  # 50km max
+                    min_dist = dist
+                    nearest = gw
+
+            if nearest:
+                link_type = "gateway" if node["network"] != nearest["network"] else node["network"]
+                links.append({
+                    "source": node["id"],
+                    "target": nearest["id"],
+                    "type": link_type,
+                    "distance_km": round(min_dist, 2)
+                })
+
+        # Connect gateways to each other
+        for i, gw1 in enumerate(gateways):
+            for gw2 in gateways[i+1:]:
+                if not gw1["is_online"] or not gw2["is_online"]:
+                    continue
+                dist = self._haversine(gw1["lat"], gw1["lon"], gw2["lat"], gw2["lon"])
+                if dist < 100:  # 100km for gateway-gateway
+                    links.append({
+                        "source": gw1["id"],
+                        "target": gw2["id"],
+                        "type": "gateway",
+                        "distance_km": round(dist, 2)
+                    })
+
+        self._serve_json({
+            "nodes": nodes,
+            "links": links,
+            "network_counts": {
+                "meshtastic": len([n for n in nodes if n["network"] == "meshtastic"]),
+                "rns": len([n for n in nodes if n["network"] == "rns"]),
+                "aredn": len([n for n in nodes if n["network"] == "aredn"]),
+                "gateway": len([n for n in nodes if n["is_gateway"]])
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def _haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculate distance between two points in km."""
+        import math
+        R = 6371  # Earth radius in km
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat/2)**2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dlon/2)**2)
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
     def log_message(self, format, *args):
         """Suppress default request logging (too noisy)."""
         logger.debug(f"MapServer: {args[0]}")
@@ -707,6 +1184,9 @@ class MapServer:
     - GET /api/nodes/geojson  → live node GeoJSON from all sources
     - GET /api/nodes/history  → node history stats + unique nodes (24h)
     - GET /api/nodes/trajectory/<id> → trajectory GeoJSON for a node
+    - GET /api/nodes/snapshot → historical network snapshot for playback
+    - GET /api/messages/queue → pending messages from gateway queue
+    - GET /api/network/topology → network topology for D3.js visualization
     - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
 
