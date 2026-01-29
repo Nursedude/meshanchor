@@ -131,6 +131,11 @@ def _run_command(args: List[str], timeout: int = 60, auto_detect: bool = True) -
                 raw=result.stdout
             )
 
+    except KeyboardInterrupt:
+        return CommandResult.fail(
+            "Command aborted by user",
+            error="interrupted"
+        )
     except subprocess.TimeoutExpired:
         return CommandResult.fail(
             f"Command timed out after {timeout}s",
@@ -870,6 +875,8 @@ def ble_scan() -> CommandResult:
             data={'devices': result.stdout},
             raw=result.stdout
         )
+    except KeyboardInterrupt:
+        return CommandResult.fail("BLE scan aborted by user", error="interrupted")
     except Exception as e:
         return CommandResult.fail(f"BLE scan failed: {e}")
 
