@@ -188,18 +188,16 @@ class AIToolsMixin:
             with open(output_file, 'w') as f:
                 f.write(html_content)
 
+            # Build detailed source breakdown
             source_info = []
-            if sources.get("meshtasticd", 0):
-                source_info.append(f"meshtasticd: {sources['meshtasticd']}")
-            if sources.get("mqtt", 0):
-                source_info.append(f"MQTT: {sources['mqtt']}")
-            if sources.get("node_tracker", 0):
-                source_info.append(f"tracker: {sources['node_tracker']}")
+            source_info.append(f"meshtasticd: {sources.get('meshtasticd', 0)}")
+            source_info.append(f"MQTT: {sources.get('mqtt', 0)}")
+            source_info.append(f"node_tracker: {sources.get('node_tracker', 0)}")
 
             msg = (
                 f"Map saved: {output_file}\n\n"
-                f"Nodes: {node_count}\n"
-                f"Sources: {', '.join(source_info) or 'cache/demo'}\n\n"
+                f"Total nodes: {node_count}\n"
+                f"Sources:\n  " + "\n  ".join(source_info) + "\n\n"
                 "Opening in browser..."
             )
             self.dialog.msgbox("Live Map", msg)

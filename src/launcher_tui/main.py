@@ -305,6 +305,7 @@ class MeshForgeLauncher(
                 ("aredn", "AREDN Mesh"),
                 # Tools & Config
                 ("rf", "RF Tools & Calculator"),
+                ("ai", "AI Tools & Maps"),
                 ("config", "Configuration"),
                 ("hardware", "Hardware Detection"),
                 ("system", "System Tools (full Linux CLI)"),
@@ -349,6 +350,8 @@ class MeshForgeLauncher(
             self._aredn_menu()
         elif choice == "rf":
             self._rf_tools_menu()
+        elif choice == "ai":
+            self._ai_tools_menu()
         elif choice == "config":
             self._config_menu()
         elif choice == "hardware":
