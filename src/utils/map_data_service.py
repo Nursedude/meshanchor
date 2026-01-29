@@ -166,15 +166,24 @@ class MapDataCollector:
                 if fid:
                     features[fid] = f
 
+        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features)
         geojson = {
             "type": "FeatureCollection",
             "features": list(features.values()),
             "properties": {
                 "collected_at": datetime.now().isoformat(),
                 "source_count": len(features),
-                "sources": self._get_source_summary(tcp_features, mqtt_features, tracker_features)
+                "sources": sources
             }
         }
+
+        # Log collection summary for debugging
+        logger.debug(
+            f"MapDataCollector: {len(features)} nodes "
+            f"(meshtasticd:{sources.get('meshtasticd', 0)} "
+            f"mqtt:{sources.get('mqtt', 0)} "
+            f"tracker:{sources.get('node_tracker', 0)})"
+        )
 
         # Cache result
         self._cached_geojson = geojson
@@ -443,8 +452,9 @@ class MapDataCollector:
             cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
         except ImportError:
             import os as _os
-            sudo_user = _os.environ.get('SUDO_USER')
-            if sudo_user and sudo_user != 'root':
+            sudo_user = _os.environ.get('SUDO_USER', '')
+            # Path traversal protection (security)
+            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
                 cache_path = Path(f'/home/{sudo_user}/.config/meshforge/node_cache.json')
             else:
                 # Avoid Path.home() which returns /root under sudo (MF001)
@@ -457,33 +467,71 @@ class MapDataCollector:
                 if age < max_age:  # Configurable, default 48 hours
                     with open(cache_path) as f:
                         data = json.load(f)
+
+                    # Count nodes for logging
+                    total_nodes = 0
                     if isinstance(data, list):
+                        total_nodes = len(data)
                         for node in data:
                             feature = self._node_cache_to_feature(node)
                             if feature:
                                 features.append(feature)
                     elif isinstance(data, dict) and "nodes" in data:
+                        total_nodes = len(data["nodes"])
                         for node in data["nodes"]:
                             feature = self._node_cache_to_feature(node)
                             if feature:
                                 features.append(feature)
+                    elif isinstance(data, dict):
+                        # Dict without "nodes" key - log for debugging
+                        logger.debug(f"node_cache.json has dict format without 'nodes' key: {list(data.keys())}")
+
+                    if features:
+                        logger.debug(f"node_cache: {len(features)}/{total_nodes} nodes with position")
+                else:
+                    # Cache too old
+                    age_hours = age / 3600
+                    max_hours = max_age / 3600
+                    logger.debug(f"node_cache.json too old: {age_hours:.1f}h > {max_hours:.1f}h max")
+            except json.JSONDecodeError as e:
+                logger.warning(f"node_cache.json JSON parse error: {e}")
+            except PermissionError as e:
+                logger.warning(f"node_cache.json permission denied: {e}")
             except Exception as e:
                 logger.debug(f"Node cache read error: {e}")
+        else:
+            logger.debug(f"node_cache.json not found at: {cache_path}")
 
         # Check RNS nodes temp file
         rns_cache = Path("/tmp/meshforge_rns_nodes.json")
         if rns_cache.exists():
+            rns_count = 0
             try:
                 age = time.time() - rns_cache.stat().st_mtime
                 max_age = self.get_rns_cache_max_age_seconds()
                 if age < max_age:  # Configurable, default 1 hour
                     with open(rns_cache) as f:
                         data = json.load(f)
+
+                    # Handle both list and dict-with-nodes format
+                    nodes_list = []
                     if isinstance(data, list):
-                        for node in data:
-                            feature = self._rns_cache_to_feature(node)
-                            if feature:
-                                features.append(feature)
+                        nodes_list = data
+                    elif isinstance(data, dict) and "nodes" in data:
+                        nodes_list = data["nodes"]
+
+                    for node in nodes_list:
+                        feature = self._rns_cache_to_feature(node)
+                        if feature:
+                            features.append(feature)
+                            rns_count += 1
+
+                    if rns_count:
+                        logger.debug(f"rns_cache: {rns_count}/{len(nodes_list)} nodes with position")
+                else:
+                    age_mins = age / 60
+                    max_mins = max_age / 60
+                    logger.debug(f"RNS cache too old: {age_mins:.0f}m > {max_mins:.0f}m max")
             except Exception as e:
                 logger.debug(f"RNS cache read error: {e}")
 
