@@ -40,7 +40,15 @@ class MapDataCollector:
     2. MQTT subscriber — global/regional nodes
     3. Node tracker cache — previously discovered RNS + Meshtastic nodes
     4. Last-known cache — persisted state from previous runs
+
+    Settings (in ~/.config/meshforge/map_settings.json):
+    - node_cache_max_age_hours: Max age for node_cache.json (default: 48)
+    - rns_cache_max_age_hours: Max age for RNS temp cache (default: 1)
     """
+
+    # Default cache ages in hours
+    DEFAULT_NODE_CACHE_MAX_AGE_HOURS = 48
+    DEFAULT_RNS_CACHE_MAX_AGE_HOURS = 1
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
@@ -57,6 +65,19 @@ class MapDataCollector:
         self._last_collect: Optional[float] = None
         self._cached_geojson: Optional[Dict] = None
 
+        # User-configurable cache age settings
+        try:
+            from utils.common import SettingsManager
+            self._settings = SettingsManager(
+                "map_settings",
+                defaults={
+                    "node_cache_max_age_hours": self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS,
+                    "rns_cache_max_age_hours": self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS,
+                }
+            )
+        except ImportError:
+            self._settings = None
+
         # Node history database for position/state tracking over time
         self._history = None
         if enable_history:
@@ -66,6 +87,36 @@ class MapDataCollector:
                 self._history = NodeHistoryDB(db_path=db_path)
             except Exception as e:
                 logger.debug(f"Node history disabled: {e}")
+
+    def get_node_cache_max_age_seconds(self) -> int:
+        """Get max age for node_cache.json in seconds."""
+        if self._settings:
+            hours = self._settings.get("node_cache_max_age_hours", self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS)
+        else:
+            hours = self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS
+        return int(hours * 3600)
+
+    def get_rns_cache_max_age_seconds(self) -> int:
+        """Get max age for RNS temp cache in seconds."""
+        if self._settings:
+            hours = self._settings.get("rns_cache_max_age_hours", self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS)
+        else:
+            hours = self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS
+        return int(hours * 3600)
+
+    def set_node_cache_max_age_hours(self, hours: int) -> None:
+        """Set max age for node_cache.json in hours."""
+        if self._settings:
+            self._settings.set("node_cache_max_age_hours", hours)
+            self._settings.save()
+            logger.info(f"Node cache max age set to {hours} hours")
+
+    def set_rns_cache_max_age_hours(self, hours: int) -> None:
+        """Set max age for RNS temp cache in hours."""
+        if self._settings:
+            self._settings.set("rns_cache_max_age_hours", hours)
+            self._settings.save()
+            logger.info(f"RNS cache max age set to {hours} hours")
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -402,7 +453,8 @@ class MapDataCollector:
         if cache_path.exists():
             try:
                 age = time.time() - cache_path.stat().st_mtime
-                if age < 3600:  # Less than 1 hour old
+                max_age = self.get_node_cache_max_age_seconds()
+                if age < max_age:  # Configurable, default 48 hours
                     with open(cache_path) as f:
                         data = json.load(f)
                     if isinstance(data, list):
@@ -423,7 +475,8 @@ class MapDataCollector:
         if rns_cache.exists():
             try:
                 age = time.time() - rns_cache.stat().st_mtime
-                if age < 600:  # Less than 10 minutes old
+                max_age = self.get_rns_cache_max_age_seconds()
+                if age < max_age:  # Configurable, default 1 hour
                     with open(rns_cache) as f:
                         data = json.load(f)
                     if isinstance(data, list):
