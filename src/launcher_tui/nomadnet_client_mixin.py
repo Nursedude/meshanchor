@@ -131,8 +131,8 @@ class NomadNetClientMixin:
                 version = result.stdout.strip() or result.stderr.strip()
                 if version:
                     print(f"  Version:   {version}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"NomadNet version check failed: {e}")
         else:
             print("  NOT INSTALLED")
             print("  Install:   pipx install nomadnet")
