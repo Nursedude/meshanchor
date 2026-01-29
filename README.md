@@ -30,7 +30,7 @@
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum networks
-- **Live NOC maps** with real-time node tracking
+- **Live NOC maps** showing Meshtastic AND RNS nodes on one map
 - **Coverage maps** with SNR-based link quality
 - **RF engineering tools** for site planning
 - **AI diagnostics** that work offline
@@ -81,11 +81,11 @@ python3 src/standalone.py
 | **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Stable |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
-| **Live NOC Map** | Real-time browser view, WebSocket updates, field ops tools | Alpha |
+| **Live NOC Map** | Real-time browser view, Meshtastic + RNS nodes, field ops tools | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
-| **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Stable |
+| **Reticulum** | Config editor, interface templates, node position mapping, rnstatus/rnpath | Stable |
 | **AREDN** | Node discovery, link quality, service enumeration | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
