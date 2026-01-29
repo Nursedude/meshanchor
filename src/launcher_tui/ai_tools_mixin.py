@@ -555,7 +555,8 @@ class AIToolsMixin:
         """Generate a coverage map and open in browser."""
         # Get node data source
         source_choices = [
-            ("live", "Live from meshtasticd"),
+            ("all", "All sources (recommended)"),
+            ("live", "Live from meshtasticd only"),
             ("mqtt", "From MQTT broker"),
             ("file", "From saved node file"),
             ("back", "Back"),
@@ -578,7 +579,32 @@ class AIToolsMixin:
 
             generator = CoverageMapGenerator()
 
-            if choice == "live":
+            if choice == "all":
+                # Use MapDataCollector to get nodes from ALL sources
+                # (meshtasticd, MQTT, node_cache.json, RNS cache)
+                try:
+                    from utils.map_data_service import MapDataCollector
+                    collector = MapDataCollector()
+                    geojson = collector.collect()
+                    features = geojson.get('features', [])
+                    if features:
+                        generator.add_nodes_from_geojson(geojson)
+                        self.dialog.infobox(
+                            "Generating",
+                            f"Found {len(features)} nodes from all sources..."
+                        )
+                    else:
+                        self.dialog.msgbox(
+                            "No Nodes",
+                            "No nodes found from any source.\n\n"
+                            "Check meshtasticd, MQTT, or node cache."
+                        )
+                        return
+                except ImportError as e:
+                    self.dialog.msgbox("Error", f"MapDataCollector not available: {e}")
+                    return
+
+            elif choice == "live":
                 # Try to get nodes from meshtasticd
                 nodes = self._get_nodes_from_meshtastic()
                 if nodes:
