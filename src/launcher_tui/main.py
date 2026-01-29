@@ -420,12 +420,14 @@ class MeshForgeLauncher(
                 continue
 
             cli = self._get_meshtastic_cli()
+            # Use --host localhost to connect via meshtasticd (required for HAT radios)
+            conn_args = ['--host', 'localhost']
             if choice == "info":
-                self._radio_run([cli, '--info'], "Radio Info")
+                self._radio_run([cli] + conn_args + ['--info'], "Radio Info")
             elif choice == "nodes":
-                self._radio_run([cli, '--nodes'], "Node List")
+                self._radio_run([cli] + conn_args + ['--nodes'], "Node List")
             elif choice == "channels":
-                self._radio_run([cli, '--ch-index', '0', '--ch-getall'], "Channels")
+                self._radio_run([cli] + conn_args + ['--ch-index', '0', '--ch-getall'], "Channels")
             elif choice == "position":
                 self._radio_position_menu()
             elif choice == "send":
@@ -578,7 +580,7 @@ class MeshForgeLauncher(
             ""
         )
 
-        cmd = [self._get_meshtastic_cli(), '--sendtext', msg]
+        cmd = [self._get_meshtastic_cli(), '--host', 'localhost', '--sendtext', msg]
         if dest and dest.strip():
             dest = dest.strip()
             if not dest.startswith('!'):
@@ -618,7 +620,7 @@ class MeshForgeLauncher(
 
         if self.dialog.yesno("Confirm", f"Set region to {choice}?\n\nRadio will restart."):
             self._radio_run(
-                [self._get_meshtastic_cli(), '--set', 'lora.region', choice],
+                [self._get_meshtastic_cli(), '--host', 'localhost', '--set', 'lora.region', choice],
                 f"Setting Region: {choice}"
             )
 
@@ -638,7 +640,7 @@ class MeshForgeLauncher(
             name[:4]
         )
 
-        cmd = [self._get_meshtastic_cli(), '--set-owner', name]
+        cmd = [self._get_meshtastic_cli(), '--host', 'localhost', '--set-owner', name]
         if short:
             cmd.extend(['--set-owner-short', short[:4]])
         self._radio_run(cmd, "Setting Node Name")
@@ -661,9 +663,10 @@ class MeshForgeLauncher(
             return
 
         cli = self._get_meshtastic_cli()
+        conn_args = ['--host', 'localhost']
 
         if choice == "view":
-            self._radio_run([cli, '--get', 'position'], "Position Settings")
+            self._radio_run([cli] + conn_args + ['--get', 'position'], "Position Settings")
         elif choice == "set":
             lat = self.dialog.inputbox(
                 "Latitude",
@@ -709,7 +712,7 @@ class MeshForgeLauncher(
                 return
 
             self._radio_run(
-                [cli, '--setlat', str(lat_f), '--setlon', str(lon_f)],
+                [cli] + conn_args + ['--setlat', str(lat_f), '--setlon', str(lon_f)],
                 "Setting Position"
             )
 
@@ -717,7 +720,7 @@ class MeshForgeLauncher(
         """Reboot the radio via meshtastic CLI."""
         if self.dialog.yesno("Reboot Radio", "Reboot the Meshtastic radio?\n\nThis restarts the firmware.", default_no=True):
             self._radio_run(
-                [self._get_meshtastic_cli(), '--reboot'],
+                [self._get_meshtastic_cli(), '--host', 'localhost', '--reboot'],
                 "Rebooting Radio"
             )
 
