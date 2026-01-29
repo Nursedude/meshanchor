@@ -592,6 +592,9 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             # Line of sight check: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
             parts = self.path.split('/api/los/', 1)[1].rstrip('/').split('/')
             self._serve_los(parts)
+        elif self.path.startswith('/api/nodes/snapshot'):
+            # Historical snapshot: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
+            self._serve_snapshot()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -783,6 +786,66 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_json({"error": f"Invalid parameters: {e}"})
         except Exception as e:
             logger.error(f"Coverage endpoint error: {e}")
+            self._serve_json({"error": str(e)})
+
+    def _serve_snapshot(self):
+        """Serve a historical network snapshot for playback.
+
+        URL: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        try:
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            timestamp = float(params.get('timestamp', [str(time.time())])[0])
+            window = int(params.get('window', ['300'])[0])
+
+            if not self.collector or not self.collector._history:
+                self._serve_json({"error": "history not available", "features": []})
+                return
+
+            history = self.collector._history
+            observations = history.get_snapshot(timestamp=timestamp, window_seconds=window)
+
+            # Convert observations to GeoJSON features
+            features = []
+            for obs in observations:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [obs.longitude, obs.latitude]
+                    },
+                    "properties": {
+                        "id": obs.node_id,
+                        "name": obs.name,
+                        "network": obs.network,
+                        "is_online": obs.is_online,
+                        "snr": obs.snr,
+                        "battery": obs.battery,
+                        "hardware": obs.hardware,
+                        "role": obs.role,
+                        "via_mqtt": obs.via_mqtt,
+                        "timestamp": obs.timestamp,
+                    }
+                })
+
+            result = {
+                "type": "FeatureCollection",
+                "features": features,
+                "properties": {
+                    "snapshot_time": timestamp,
+                    "window_seconds": window,
+                    "node_count": len(features),
+                }
+            }
+            self._serve_json(result)
+
+        except ValueError as e:
+            self._serve_json({"error": f"Invalid parameters: {e}"})
+        except Exception as e:
+            logger.error(f"Snapshot endpoint error: {e}")
             self._serve_json({"error": str(e)})
 
     def _serve_los(self, parts: List[str]):
