@@ -2073,8 +2073,8 @@ class MeshForgeLauncher(
                 port_ok = sock.connect_ex((local_ip, 9443)) == 0
             finally:
                 sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Socket check for web client failed: {e}")
 
         if port_ok:
             msg = (
@@ -2306,8 +2306,8 @@ class MeshForgeLauncher(
                     devices.append("TCP: localhost:4403 (meshtasticd)")
             finally:
                 sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Socket check for meshtasticd failed: {e}")
 
         # Check serial ports
         serial_ports = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
@@ -3082,8 +3082,8 @@ WantedBy=multi-user.target
                             ['pgrep', '-a', '-x', 'rnsd'],
                             timeout=5
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"pgrep for rnsd failed: {e}")
                 else:
                     print(f"\033[0;31m○\033[0m rnsd is \033[0;31mnot running\033[0m")
                     print("\nTo start: Select 'Start Service' from the menu")

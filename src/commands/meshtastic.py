@@ -221,8 +221,8 @@ def auto_detect_connection() -> CommandResult:
                 "Using TCP connection to meshtasticd (port 4403)",
                 data={'type': 'localhost', 'value': '127.0.0.1', 'method': 'tcp'}
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"TCP connection check to meshtasticd failed: {e}")
 
     # Check for USB serial devices
     usb_paths = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))

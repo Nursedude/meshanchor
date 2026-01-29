@@ -275,8 +275,12 @@ class SystemToolsMixin:
 
             # Header
             lines = result.stdout.strip().split('\n')
-            print(lines[0])  # Header
-            print("-" * 80)
+            if lines and lines[0]:
+                print(lines[0])  # Header
+                print("-" * 80)
+            else:
+                print("No process information available")
+                print("-" * 80)
 
             found = False
             for line in lines[1:]:
