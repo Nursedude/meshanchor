@@ -471,6 +471,18 @@
             <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
             <button class="btn-action" onclick="fitAllNodes()">Fit All</button>
 
+            <div class="terrain-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
+                <div class="stat-row">
+                    <span class="label">Terrain Analysis</span>
+                </div>
+                <button class="btn-action" id="btn-terrain" onclick="showTerrainCoverage()" disabled>
+                    Show Coverage
+                </button>
+                <div id="terrain-status" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    Click a node first
+                </div>
+            </div>
+
             <div class="cache-section" id="cache-section">
                 <div class="stat-row">
                     <span class="label">Cached:</span>
@@ -580,6 +592,10 @@
     const nodeLayer = L.layerGroup().addTo(map);
     const linkLayer = L.layerGroup().addTo(map);
     const coverageLayer = L.layerGroup().addTo(map);
+    const terrainLayer = L.layerGroup().addTo(map);
+
+    // Selected node for terrain analysis
+    let selectedNode = null;
 
     // ============================================
     // SVG Marker Icons
@@ -838,6 +854,7 @@
                     icon: createMarkerIcon(props, isNew)
                 });
                 marker.bindPopup(createPopupContent(props, coords));
+                marker.on('click', () => selectNodeForTerrain(feature));
                 nodeLayer.addLayer(marker);
 
                 // Coverage circle
@@ -1156,6 +1173,104 @@
                 maxZoom: Math.min(18, zoom + 2)
             }
         }, [channel.port2]);
+    }
+
+    // ============================================
+    // Terrain-Aware Coverage Prediction
+    // ============================================
+
+    function selectNodeForTerrain(feature) {
+        selectedNode = feature;
+        const btn = document.getElementById('btn-terrain');
+        const status = document.getElementById('terrain-status');
+        if (feature) {
+            btn.disabled = false;
+            const name = feature.properties.long_name || feature.properties.short_name || feature.properties.id;
+            status.textContent = `Selected: ${name}`;
+        } else {
+            btn.disabled = true;
+            status.textContent = 'Click a node first';
+        }
+    }
+
+    async function showTerrainCoverage() {
+        if (!selectedNode) return;
+
+        const btn = document.getElementById('btn-terrain');
+        const status = document.getElementById('terrain-status');
+        const coords = selectedNode.geometry.coordinates;
+        const lat = coords[1];
+        const lon = coords[0];
+        const alt = 10; // Default antenna height
+
+        btn.disabled = true;
+        status.textContent = 'Calculating terrain coverage...';
+        status.style.color = '#f39c12';
+
+        // Clear previous terrain overlay
+        terrainLayer.clearLayers();
+
+        try {
+            const response = await fetch(`/api/coverage/${lat}/${lon}/${alt}?radius_km=5&resolution=24`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+
+            // Display coverage points
+            data.features.forEach(feature => {
+                const fcoords = feature.geometry.coordinates;
+                const props = feature.properties;
+
+                // Color based on clearance
+                let color;
+                if (!props.is_clear) {
+                    color = '#ef5350'; // Red - obstructed
+                } else if (props.fresnel_pct >= 100) {
+                    color = '#66bb6a'; // Green - excellent
+                } else if (props.fresnel_pct >= 60) {
+                    color = '#ffca28'; // Yellow - marginal
+                } else {
+                    color = '#ff7043'; // Orange - poor
+                }
+
+                const circle = L.circleMarker([fcoords[1], fcoords[0]], {
+                    radius: 6,
+                    fillColor: color,
+                    color: color,
+                    weight: 1,
+                    opacity: 0.8,
+                    fillOpacity: 0.5,
+                }).bindPopup(`
+                    <div style="font-size: 12px;">
+                        <strong>Terrain Analysis</strong><br>
+                        Distance: ${(props.distance_m/1000).toFixed(2)} km<br>
+                        Bearing: ${props.bearing}&deg;<br>
+                        LOS Clear: ${props.is_clear ? 'Yes' : 'No'}<br>
+                        Fresnel: ${props.fresnel_pct.toFixed(0)}%<br>
+                        Path Loss: ${props.total_loss_db} dB<br>
+                        Terrain Loss: ${props.terrain_loss_db} dB
+                    </div>
+                `);
+
+                terrainLayer.addLayer(circle);
+            });
+
+            status.textContent = `Showing ${data.features.length} points`;
+            status.style.color = '#66bb6a';
+            btn.disabled = false;
+
+        } catch (e) {
+            console.error('Terrain coverage failed:', e);
+            status.textContent = `Error: ${e.message}`;
+            status.style.color = '#ef5350';
+            btn.disabled = false;
+        }
+    }
+
+    function clearTerrainCoverage() {
+        terrainLayer.clearLayers();
+        document.getElementById('terrain-status').textContent = 'Cleared';
     }
 
     // ============================================

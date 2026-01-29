@@ -37,15 +37,14 @@ Upon code review, Phase 1 of the live map engine is **already complete**:
 
 ## Current Phase: 2 — RF-Aware Visualization
 
-Phase 1 is done. Next work should focus on Phase 2:
-
 ### Task Status
 
 | Task | Status | Notes |
 |------|--------|-------|
-| 5. Terrain-aware coverage | 🔴 Not started | Needs SRTM data integration |
-| 6. Link quality animation | 🟡 Partial | Colors exist, no pulse animation |
-| 7. Coverage prediction overlay | 🔴 Not started | Uses rf.py path loss models |
+| 5. Terrain-aware coverage | ✅ Done | `terrain.py` already exists with SRTM + LOS |
+| 5b. API integration | ✅ Done | `/api/coverage/` and `/api/los/` endpoints added |
+| 7. Coverage prediction overlay | ✅ Done | Click node → "Show Coverage" button |
+| 6. Link quality animation | 🔴 Not started | Colors exist, no pulse animation |
 | 8. Signal heatmap from real data | 🔴 Not started | Needs data collection over time |
 
 ### Files to Create (Phase 2)
@@ -70,12 +69,17 @@ src/utils/node_history.py    # SQLite time-series (may already exist)
 - [x] Updated README (removed GTK references)
 - [x] Discovered Phase 1 already implemented
 - [x] Updated roadmap for TUI-only architecture
-- [ ] Phase 2 work not started
+- [x] Phase 2: Added `/api/coverage/` and `/api/los/` endpoints
+- [x] Phase 2: Added terrain coverage overlay to map
+- [x] Phase 2: Node click → terrain analysis button
 
-**Next Steps:**
-1. Test existing live map (TUI > AI Tools > Live Network Map)
-2. Identify gaps in Phase 1 implementation
-3. Begin Phase 2: terrain-aware coverage modeling
+**Completed:**
+- Task 5: Terrain-aware coverage (API + map integration)
+- Task 7: Coverage prediction overlay
+
+**Next Steps (new session):**
+1. Task 6: Link quality animation (pulse on active links)
+2. Task 8: Signal heatmap from real measurements
 
 ---
 
