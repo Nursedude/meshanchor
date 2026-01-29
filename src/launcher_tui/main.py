@@ -364,11 +364,27 @@ class MeshForgeLauncher(
     def _radio_menu(self):
         """Radio tools using meshtastic CLI directly."""
         while True:
-            # Check if CLI is available and show install option if not
-            has_cli = self._get_meshtastic_cli() != 'meshtastic'
+            # Check if CLI is available and actually working
+            cli_path = self._get_meshtastic_cli()
+            has_cli = cli_path != 'meshtastic'
+
+            # Even if found, verify it's actually executable
+            cli_works = False
+            cli_location = ""
+            if has_cli:
+                cli_location = cli_path
+                try:
+                    # Quick test - just check if we can run --version
+                    result = subprocess.run(
+                        [cli_path, '--version'],
+                        capture_output=True, timeout=5
+                    )
+                    cli_works = result.returncode == 0
+                except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+                    cli_works = False
 
             choices = []
-            if not has_cli:
+            if not cli_works:
                 choices.append(("install-cli", "** Install meshtastic CLI **"))
             choices.extend([
                 ("info", "Radio Info (meshtastic --info)"),
@@ -379,10 +395,17 @@ class MeshForgeLauncher(
                 ("set-region", "Set Region"),
                 ("set-name", "Set Node Name"),
                 ("reboot", "Reboot Radio"),
+                ("reinstall-cli", "Reinstall/Update CLI"),
                 ("back", "Back"),
             ])
 
-            status = "" if has_cli else "\n[CLI not installed]\n"
+            if cli_works:
+                status = f"\n[CLI: {cli_location}]"
+            elif has_cli:
+                status = f"\n[CLI found but not working: {cli_location}]"
+            else:
+                status = "\n[CLI not installed]"
+
             choice = self.dialog.menu(
                 "Radio Tools",
                 f"Meshtastic radio control (terminal-native):{status}",
@@ -392,7 +415,7 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "install-cli":
+            if choice == "install-cli" or choice == "reinstall-cli":
                 self._install_meshtastic_cli()
                 continue
 
