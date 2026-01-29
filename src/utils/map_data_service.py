@@ -586,11 +586,15 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_trajectory(node_id)
         elif self.path.startswith('/api/coverage/'):
             # Coverage prediction for a node: /api/coverage/<lat>/<lon>/<alt>
-            parts = self.path.split('/api/coverage/', 1)[1].rstrip('/').split('/')
+            from urllib.parse import urlparse
+            path_only = urlparse(self.path).path
+            parts = path_only.split('/api/coverage/', 1)[1].rstrip('/').split('/')
             self._serve_coverage(parts)
         elif self.path.startswith('/api/los/'):
             # Line of sight check: /api/los/<lat1>/<lon1>/<lat2>/<lon2>
-            parts = self.path.split('/api/los/', 1)[1].rstrip('/').split('/')
+            from urllib.parse import urlparse
+            path_only = urlparse(self.path).path
+            parts = path_only.split('/api/los/', 1)[1].rstrip('/').split('/')
             self._serve_los(parts)
         elif self.path.startswith('/api/nodes/snapshot'):
             # Historical snapshot: /api/nodes/snapshot?timestamp=<unix_ts>&window=300
