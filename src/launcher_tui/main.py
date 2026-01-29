@@ -455,8 +455,12 @@ class MeshForgeLauncher(
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Installing Meshtastic CLI ===\n")
 
+        # Determine if we should install as a different user (when running via sudo)
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
         try:
-            # Ensure pipx is available
+            # Ensure pipx is available (this needs root for apt)
             if not shutil.which('pipx'):
                 print("Installing pipx...\n")
                 result = subprocess.run(
@@ -469,9 +473,19 @@ class MeshForgeLauncher(
                     self._wait_for_enter()
                     return
 
+            # Build pipx commands - run as real user if we're under sudo
+            def run_pipx_cmd(args, timeout_sec=300):
+                """Run pipx command, as real user if running via sudo."""
+                if run_as_user:
+                    # Run as the real user, not root
+                    cmd = ['sudo', '-u', run_as_user] + args
+                else:
+                    cmd = args
+                return subprocess.run(cmd, timeout=timeout_sec)
+
             # Ensure pipx bin dir is in PATH for this session
             print("Ensuring pipx paths...\n")
-            subprocess.run(['pipx', 'ensurepath'], timeout=15)
+            run_pipx_cmd(['pipx', 'ensurepath'], timeout_sec=15)
 
             # Add common pipx bin dirs to current process PATH
             for bindir in [
@@ -483,18 +497,15 @@ class MeshForgeLauncher(
                     os.environ['PATH'] = f"{bindir}:{os.environ.get('PATH', '')}"
 
             # Install meshtastic with CLI extras (live output)
-            print("\nInstalling meshtastic CLI via pipx...\n")
-            result = subprocess.run(
-                ['pipx', 'install', 'meshtastic[cli]', '--force'],
-                timeout=300
-            )
+            if run_as_user:
+                print(f"\nInstalling meshtastic CLI via pipx (as {run_as_user})...\n")
+            else:
+                print("\nInstalling meshtastic CLI via pipx...\n")
+            result = run_pipx_cmd(['pipx', 'install', 'meshtastic[cli]', '--force'])
 
             if result.returncode != 0:
                 print("\nRetrying without [cli] extras...\n")
-                result = subprocess.run(
-                    ['pipx', 'install', 'meshtastic', '--force'],
-                    timeout=300
-                )
+                result = run_pipx_cmd(['pipx', 'install', 'meshtastic', '--force'])
 
             if result.returncode == 0:
                 # Clear cached path so it gets re-resolved
