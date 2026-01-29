@@ -2057,6 +2057,7 @@ class MeshForgeLauncher(
         local_ip = "localhost"
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
             try:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
@@ -2184,6 +2185,7 @@ class MeshForgeLauncher(
         print()
         try:
             s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+            s.settimeout(2)
             try:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
