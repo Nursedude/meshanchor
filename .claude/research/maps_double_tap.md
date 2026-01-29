@@ -16,7 +16,7 @@ This is the difference between Google Maps and an air traffic control display.
 
 ## Current State (v0.4.7-beta)
 
-What we have today in `src/utils/coverage_map.py` and `src/gtk_ui/panels/map.py`:
+What we have today in `src/utils/coverage_map.py`:
 
 - [x] Folium-based static HTML maps
 - [x] Node markers with popups (battery, RSSI, hardware)
@@ -26,17 +26,17 @@ What we have today in `src/utils/coverage_map.py` and `src/gtk_ui/panels/map.py`
 - [x] Multiple tile providers (OSM, Terrain, Satellite)
 - [x] Heatmap layer (node density)
 - [x] GeoJSON import/export
-- [x] GTK panel with WebKit embed (or browser fallback)
-- [x] 30-second auto-refresh in GTK panel
 - [x] AREDN node overlay (when available)
 - [x] RNS node discovery (UnifiedNodeTracker)
+
+**Architecture Note (2026-01):** GTK4 UI removed. MeshForge is now TUI-only.
+Live maps will open in system browser with local data server.
 
 **Limitations:**
 - Maps are regenerated from scratch each refresh (not incremental)
 - No animation or real-time streaming
 - Coverage radius is a guess (not RF-modeled)
 - No node path history or movement tracking
-- WebKit disabled when running as root (opens in browser instead)
 - No interactive "what-if" planning tools
 
 ---
@@ -45,30 +45,39 @@ What we have today in `src/utils/coverage_map.py` and `src/gtk_ui/panels/map.py`
 
 **Goal**: Replace static Folium regeneration with a live-updating map that doesn't lose state on refresh.
 
+**Architecture (TUI-only):** Live map runs in system browser, fed by local HTTP server.
+
 ### Tasks
 
-1. **Leaflet.js embedded map** (replace Folium for GTK panel)
-   - Self-contained HTML/JS that receives data updates via JavaScript bridge
+1. **Leaflet.js live map template**
+   - Self-contained HTML/JS/CSS that polls for data updates
    - Node positions update without full page reload
    - Smooth pan/zoom preserved across data refreshes
-   - File: Create `src/gtk_ui/assets/map_live.html`
+   - File: Create `src/maps/live_map.html`
 
-2. **WebSocket or polling data feed**
-   - GTK panel pushes GeoJSON diffs (not full regeneration)
-   - Only changed nodes trigger marker updates
-   - New nodes animate in (fade/scale), removed nodes fade out
-   - File: Modify `src/gtk_ui/panels/map.py`
+2. **Local map data server**
+   - Python HTTP server serves map HTML + JSON data endpoint
+   - `/api/nodes` returns current node GeoJSON
+   - Polling interval: 5 seconds (configurable)
+   - Auto-opens browser on launch
+   - File: Create `src/maps/server.py`
 
 3. **Node state machine visualization**
    - Online: solid marker with glow
    - Offline: grey, slightly transparent
    - New (< 5 min): pulsing ring animation
    - Alert (low battery, bad SNR): warning indicator
-   - File: CSS/JS in map_live.html
+   - File: CSS/JS in `src/maps/live_map.html`
 
-4. **Preserve Folium for export**
+4. **TUI integration**
+   - Add "Live Map" option to AI Tools menu
+   - Launches map server, opens browser
+   - Shows server URL for remote access
+   - File: Modify `src/launcher_tui/ai_tools_mixin.py`
+
+5. **Preserve Folium for export**
    - Keep CoverageMapGenerator for static HTML export
-   - Live map is GTK-only, export is Folium
+   - Live map is browser-based, export is Folium
    - Both use same data source (node_tracker)
 
 ---
@@ -210,11 +219,12 @@ What we have today in `src/utils/coverage_map.py` and `src/gtk_ui/panels/map.py`
 
 ## Implementation Priority
 
-### Now (Phase 1 — next sprint)
-- Task 1: Leaflet.js live map HTML
-- Task 2: Incremental data updates
-- Task 3: Node state visualization
-- Task 4: Keep Folium for export
+### ✅ COMPLETE (Phase 1)
+- Task 1: Leaflet.js live map — `web/node_map.html`
+- Task 2: Data server + API — `src/utils/map_data_service.py`
+- Task 3: Node state visualization — CSS animations in node_map.html
+- Task 4: TUI integration — `src/launcher_tui/ai_tools_mixin.py`
+- Task 5: Folium export preserved — `src/utils/coverage_map.py`
 
 ### Soon (Phase 2 — after stabilization)
 - Task 6: Link quality animation
@@ -265,14 +275,13 @@ What we have today in `src/utils/coverage_map.py` and `src/gtk_ui/panels/map.py`
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `src/gtk_ui/assets/map_live.html` | Create | Leaflet.js live map template |
-| `src/gtk_ui/assets/map_live.js` | Create | Map update logic, animations |
-| `src/gtk_ui/assets/map_live.css` | Create | Node styling, animations |
-| `src/gtk_ui/panels/map.py` | Modify | Switch to live map, incremental updates |
+| `src/maps/live_map.html` | Create | Leaflet.js live map (HTML/JS/CSS all-in-one) |
+| `src/maps/server.py` | Create | Local HTTP server + JSON API |
+| `src/maps/data_provider.py` | Create | Node data aggregation for API |
 | `src/utils/coverage_map.py` | Keep | Folium export (unchanged) |
-| `src/utils/map_data_store.py` | Create | SQLite time-series for playback |
-| `src/utils/terrain.py` | Create | SRTM elevation, LOS calculation |
-| `src/launcher_tui/ai_tools_mixin.py` | Modify | TUI access to new map features |
+| `src/utils/map_data_store.py` | Create | SQLite time-series for playback (Phase 3) |
+| `src/utils/terrain.py` | Create | SRTM elevation, LOS calculation (Phase 2) |
+| `src/launcher_tui/ai_tools_mixin.py` | Modify | Add "Live Map" menu option |
 
 ---
 
