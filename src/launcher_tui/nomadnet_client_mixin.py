@@ -217,26 +217,47 @@ class NomadNetClientMixin:
         if not self._check_rns_for_nomadnet():
             return
 
-        self.dialog.infobox(
-            "Launching NomadNet",
-            "Starting NomadNet text UI...\n\n"
-            "NomadNet includes a micron page browser for\n"
-            "browsing content on RNS nodes.\n\n"
-            "Exit NomadNet (Ctrl+Q) to return to MeshForge."
-        )
+        # Clear screen before launching
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Launching NomadNet ===")
+        print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
         try:
             # Run interactively -- NomadNet takes over the terminal
-            subprocess.run(
+            result = subprocess.run(
                 [nn_path, '--textui'],
                 timeout=None
             )
+            # After NomadNet exits, show status and wait for user
+            print()
+            if result.returncode != 0:
+                print(f"NomadNet exited with error code {result.returncode}")
+                print("\nCheck logs with:")
+                print("  cat ~/.nomadnetwork/logfile")
+                print("  journalctl --user -u nomadnet -n 50")
+            else:
+                print("NomadNet exited normally.")
+            print("\nPress Enter to return to MeshForge...")
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                pass
         except KeyboardInterrupt:
-            pass
+            print("\n\nAborted.")
         except FileNotFoundError:
-            self.dialog.msgbox("Error", f"NomadNet binary not found at: {nn_path}")
+            print(f"\nError: NomadNet binary not found at: {nn_path}")
+            print("\nPress Enter to continue...")
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                pass
         except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to launch NomadNet:\n{e}")
+            print(f"\nFailed to launch NomadNet: {e}")
+            print("\nPress Enter to continue...")
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                pass
 
     # ------------------------------------------------------------------
     # Launch daemon
