@@ -1442,8 +1442,8 @@
     // Track user interaction
     map.on('movestart', () => { state.userHasPanned = true; });
 
-    // Layer groups
-    const nodeLayer = L.layerGroup().addTo(map);
+    // Layer groups (featureGroup for getBounds() support)
+    const nodeLayer = L.featureGroup().addTo(map);
     const linkLayer = L.layerGroup().addTo(map);
     const coverageLayer = L.layerGroup().addTo(map);
     const terrainLayer = L.layerGroup().addTo(map);
