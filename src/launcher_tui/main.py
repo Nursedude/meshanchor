@@ -292,7 +292,6 @@ class MeshForgeLauncher(
             choices = [
                 # Monitor
                 ("status", "Status Overview"),
-                ("map", "Network Map (live nodes)"),
                 ("quick", "Quick Actions (shortcuts)"),
                 ("logs", "Logs (live follow, errors, analysis)"),
                 ("network", "Network & Ports"),
@@ -330,8 +329,6 @@ class MeshForgeLauncher(
         """Handle menu selection."""
         if choice == "status":
             self._run_terminal_status()
-        elif choice == "map":
-            self._open_live_map()
         elif choice == "quick":
             self._quick_actions_menu()
         elif choice == "radio":
