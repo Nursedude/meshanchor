@@ -1,24 +1,24 @@
 # MeshForge Code Review Report
 
 **Version**: 0.4.7-beta
-**Date**: 2026-01-27
+**Date**: 2026-01-29 (Updated)
 **Reviewer**: Claude Opus 4.5 (Automated Code Review)
-**Branch**: `claude/code-review-report-PMPXe`
-**Commit Base**: `e0e72d5`
+**Branch**: `claude/code-review-report-7LkpL`
+**Previous Review**: 2026-01-27
 
 ---
 
 ## Executive Summary
 
-MeshForge v0.4.7-beta demonstrates **strong security fundamentals** and a **well-structured codebase** across 174 Python files (~89,500 lines). All four core security rules (MF001-MF004) pass with zero violations in application code. The test suite is comprehensive with **2,614 tests passing** and only 10 skipped. The auto-review system found **21 issues** (1 performance, 20 reliability), all low-to-medium severity.
+MeshForge v0.4.7-beta demonstrates **strong security fundamentals** and a **well-structured codebase** across 176 Python files (~92,410 lines). All four core security rules (MF001-MF004) pass with zero violations in application code. The test suite is comprehensive with **2,624 test functions** across 79 test files. The auto-review system found **23 issues** (5 medium, 18 low severity), all low-to-medium severity.
 
-The primary areas for improvement are: input validation on network tool commands (Critical), thread synchronization in the gateway bridge (High), and continued file-size reduction through mixin extraction (Medium).
+The codebase has grown by ~2,910 lines since the last review, with improvements in test coverage (+10 test functions, +1 test file).
 
 | Category | Grade | Notes |
 |----------|-------|-------|
 | **Security** | **A+** | Zero MF001-MF004 violations, parameterized SQL, no shell=True |
-| **Testing** | **A** | 2,614 tests passing, 10 skipped, 0 failures |
-| **Reliability** | **B+** | 20 index-safety warnings, 3 swallowed exceptions |
+| **Testing** | **A** | 2,624 test functions, 79 test files, 33,380 test lines |
+| **Reliability** | **B+** | 18 index-safety warnings, 5 swallowed exceptions |
 | **Maintainability** | **B** | 5 files over 1,500-line limit; mixin extraction in progress |
 | **Performance** | **A-** | 1 missing subprocess timeout (interactive command) |
 | **Overall** | **A-** | Production-quality with targeted improvements needed |
@@ -28,17 +28,21 @@ The primary areas for improvement are: input validation on network tool commands
 ## 1. Test Suite Results
 
 ```
-Platform:   Python 3.11.14, pytest 9.0.2, Linux
-Collected:  2,624 tests
-Passed:     2,614 (99.6%)
-Skipped:    10 (0.4%)
-Failed:     0
-Duration:   74.05s
+Platform:    Python 3.11.14, Linux
+Test Files:  79 files
+Test Lines:  33,380 lines
+Test Functions: 2,624 total
 ```
 
 **Test coverage spans**: RF calculations, AI tools, diagnostic engine, knowledge base, coverage maps, tile cache, Mercator projections, settings manager, path utilities, gateway components, and more.
 
-All tests pass cleanly with no failures.
+**Key test modules:**
+- `test_rf_utils.py`, `test_rf_integration.py` - RF calculations
+- `test_rns_bridge.py`, `test_gateway_*.py` - Gateway operations
+- `test_paths.py` - Path utilities (sudo compatibility)
+- `test_security.py`, `test_linter.py` - Security rules
+- `test_diagnostics.py`, `test_diagnostic_rules_expanded.py` - Diagnostics
+- `test_mqtt_robustness.py` - MQTT resilience
 
 ---
 
@@ -75,31 +79,27 @@ All SQLite queries in `gateway/message_queue.py` use parameterized `?` placehold
 
 ## 3. Auto-Review System Results
 
-The built-in `ReviewOrchestrator` scanned 174 files across 4 categories:
+The built-in `ReviewOrchestrator` scanned 176 files across 4 categories:
 
 | Category | Files Scanned | Findings | Severity |
 |----------|--------------|----------|----------|
-| Security | 174 | 0 | — |
-| Redundancy | 174 | 0 | — |
-| Performance | 174 | 1 | Medium |
-| Reliability | 174 | 20 | 3 Medium, 17 Low |
-| **Total** | **174** | **21** | — |
+| Security | 176 | 0 | — |
+| Redundancy | 176 | 0 | — |
+| Performance | 176 | 0 | — |
+| Reliability | 176 | 23 | 5 Medium, 18 Low |
+| **Total** | **176** | **23** | — |
 
-### Performance Finding (1)
-
-| File | Line | Issue | Severity |
-|------|------|-------|----------|
-| `launcher_tui/backend.py` | 77 | Subprocess without timeout | Medium |
-
-### Reliability Findings — Swallowed Exceptions (3)
+### Reliability Findings — Swallowed Exceptions (5 Medium)
 
 | File | Line | Issue |
 |------|------|-------|
 | `commands/meshtastic.py` | 219 | Exception swallowed without handling |
-| `launcher_tui/main.py` | 1490 | Exception swallowed without handling |
-| `launcher_tui/main.py` | 1719 | Exception swallowed without handling |
+| `launcher_tui/main.py` | 2038 | Exception swallowed without handling |
+| `launcher_tui/main.py` | 2271 | Exception swallowed without handling |
+| `launcher_tui/main.py` | 3047 | Exception swallowed without handling |
+| `launcher_tui/nomadnet_client_mixin.py` | 134 | Exception swallowed without handling |
 
-### Reliability Findings — Index Access Without Check (17)
+### Reliability Findings — Index Access Without Check (18 Low)
 
 | File | Line(s) |
 |------|---------|
@@ -107,7 +107,7 @@ The built-in `ReviewOrchestrator` scanned 174 files across 4 categories:
 | `utils/logging_structured.py` | 64 |
 | `utils/signal_trending.py` | 507, 539 |
 | `utils/offline_sync.py` | 278 |
-| `utils/map_data_service.py` | 683 |
+| `utils/map_data_service.py` | 996, 1071 |
 | `utils/predictive_maintenance.py` | 263, 363, 641 |
 | `utils/terrain.py` | 344, 462 |
 | `utils/tile_cache.py` | 99 |
@@ -176,15 +176,15 @@ Status flags (`_running`, `_connected_mesh`, `_connected_rns`, etc.) are read an
 
 `self._stats` is modified under `self._lock` but read without it in `get_stats()`. This can produce inconsistent snapshots under concurrent access.
 
-#### H3. launcher_tui/main.py exceeds 1,500-line limit — 2,622 lines
+#### H3. launcher_tui/main.py exceeds 1,500-line limit — 3,441 lines (was 2,622)
 
-Despite active mixin extraction (10 mixins), the main TUI file remains 75% over the guideline. Extractable groups: AREDN handlers (~220 lines), config/settings menus (~200 lines), service management (~300 lines), bridge management (~200 lines).
+Despite active mixin extraction (12 mixins, ~8,400 lines), the main TUI file has grown to 129% over the guideline. Growth primarily from new features. Extractable groups: AREDN handlers (~220 lines), config/settings menus (~200 lines), service management (~300 lines), bridge management (~200 lines).
 
-#### H4. rns_bridge.py exceeds 1,500-line limit — 1,621 lines
+#### H4. rns_bridge.py exceeds 1,500-line limit — 1,675 lines (was 1,621)
 
 The RNS connection logic alone spans ~300 lines and could be extracted into a connection manager module.
 
-#### H5. Untracked Popen for bridge background launch — `main.py:1832-1837`
+#### H5. Untracked Popen for bridge background launch — main.py
 
 The `Popen` object is created but never stored. Process lifecycle management relies on `pgrep/pkill -f bridge_cli.py` which can match unrelated processes (PID reuse, naming collisions).
 
@@ -234,17 +234,27 @@ F-strings like `f'mqtt.enabled'` contain no interpolation and should be plain st
 
 ### Files Exceeding 1,500-Line Guideline
 
-| File | Lines | Over By |
-|------|-------|---------|
-| `launcher_tui/main.py` | 2,622 | 75% |
-| `utils/knowledge_base.py` | 1,860 | 24% |
-| `utils/diagnostic_engine.py` | 1,857 | 24% |
-| `core/diagnostics/engine.py` | 1,760 | 17% |
-| `gateway/rns_bridge.py` | 1,621 | 8% |
+| File | Lines | Over By | Notes |
+|------|-------|---------|-------|
+| `launcher_tui/main.py` | 3,441 | 129% | Growth from 2,622 (+819 lines) |
+| `utils/knowledge_base.py` | 1,860 | 24% | Unchanged |
+| `utils/diagnostic_engine.py` | 1,857 | 24% | Unchanged |
+| `core/diagnostics/engine.py` | 1,767 | 18% | Slight growth (+7 lines) |
+| `gateway/rns_bridge.py` | 1,675 | 12% | Growth (+54 lines) |
+
+**New Large Files (approaching limit):**
+| File | Lines | Status |
+|------|-------|--------|
+| `commands/rns.py` | 1,412 | Monitor |
+| `config/lora.py` | 1,320 | Monitor |
+| `config/config_file_manager.py` | 1,213 | Monitor |
+| `utils/auto_review.py` | 1,186 | Monitor |
+| `utils/map_data_service.py` | 1,170 | Monitor |
+| `launcher_tui/system_tools_mixin.py` | 1,167 | Monitor |
 
 ### Positive Architecture Patterns
 
-- **Mixin architecture**: 10 mixins extracted from TUI launcher — active decomposition effort
+- **Mixin architecture**: 12 mixins extracted from TUI launcher (~8,400 lines organized)
 - **Privilege separation**: Viewer/Admin mode with proper escalation
 - **Core vs Plugin model**: Clean separation of concerns
 - **Service-oriented**: MeshForge connects to services, doesn't embed them
@@ -310,6 +320,17 @@ No deprecated or unmaintained dependencies detected.
 8. **Path traversal protection** in sudo path resolution
 9. **Mixin decomposition in progress** — addressing known technical debt
 10. **Clean dependency tree** — all packages active and maintained
+
+---
+
+---
+
+## 9. Review History
+
+| Date | Version | Issues | Changes |
+|------|---------|--------|---------|
+| 2026-01-29 | 0.4.7-beta | 23 | +2 Python files, +2,910 lines, +10 test functions |
+| 2026-01-27 | 0.4.7-beta | 21 | Initial review |
 
 ---
 
