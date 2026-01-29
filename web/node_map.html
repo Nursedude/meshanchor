@@ -852,6 +852,207 @@
             color: #e0e0e0;
             font-weight: 600;
         }
+
+        /* ========================================
+           Phase 5: Field Operations UX
+           ======================================== */
+
+        /* GPS Operator Position */
+        .gps-marker {
+            background: transparent !important;
+            border: none !important;
+        }
+        .gps-marker-inner {
+            position: relative;
+            width: 24px;
+            height: 24px;
+        }
+        .gps-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: #2196f3;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.6);
+            z-index: 2;
+        }
+        .gps-accuracy {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(33, 150, 243, 0.5);
+            background: rgba(33, 150, 243, 0.15);
+            border-radius: 50%;
+            z-index: 1;
+        }
+        .gps-pulse {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: rgba(33, 150, 243, 0.4);
+            border-radius: 50%;
+            animation: gps-pulse-ring 2s ease-out infinite;
+            z-index: 1;
+        }
+        @keyframes gps-pulse-ring {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+            100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+        }
+        .gps-btn {
+            position: absolute;
+            bottom: 90px;
+            right: 10px;
+            z-index: 1000;
+            width: 40px;
+            height: 40px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            color: #6a7a8a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        .gps-btn:hover { background: #1a2a3a; color: #4fc3f7; border-color: #4fc3f7; }
+        .gps-btn.active { color: #2196f3; border-color: #2196f3; }
+        .gps-btn.tracking { color: #66bb6a; border-color: #66bb6a; }
+
+        /* Quick Status Card (Mobile) */
+        .status-card {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 2000;
+            background: #141e2e;
+            border-top: 1px solid #2a3a4a;
+            border-radius: 16px 16px 0 0;
+            padding: 16px 20px 24px;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-out;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .status-card.visible { transform: translateY(0); }
+        .status-card-handle {
+            width: 40px;
+            height: 4px;
+            background: #3a4a5a;
+            border-radius: 2px;
+            margin: 0 auto 12px;
+        }
+        .status-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .status-card-header h3 {
+            color: #4fc3f7;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+        .status-card-close {
+            background: none;
+            border: none;
+            color: #6a7a8a;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .status-card-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .status-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .status-card-item {
+            background: #1a2a3a;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .status-card-item .label {
+            color: #6a7a8a;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .status-card-item .value {
+            color: #e0e0e0;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .status-card-item .value.online { color: #66bb6a; }
+        .status-card-item .value.offline { color: #ef5350; }
+        .status-card-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .status-card-actions button {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .status-card-actions .btn-distance {
+            background: #1a3a3a;
+            color: #26c6da;
+            border: 1px solid #2a4a4a;
+        }
+        .status-card-actions .btn-distance:hover { background: #2a4a4a; }
+        .status-card-actions .btn-distance:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Enhanced mobile touch targets */
+        @media (max-width: 768px) {
+            .gps-btn {
+                width: 48px;
+                height: 48px;
+                font-size: 22px;
+                bottom: 120px;
+            }
+            .btn-action {
+                padding: 12px;
+                font-size: 14px;
+            }
+            .filter-section label {
+                padding: 8px 0;
+                font-size: 14px;
+            }
+            .filter-section input[type="checkbox"] {
+                width: 20px;
+                height: 20px;
+            }
+            .leaflet-marker-icon {
+                touch-action: manipulation;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1124,6 +1325,52 @@
         <div class="legend-item heatmap-legend-item" style="display: none;">
             <div class="legend-shape" style="width: 60px;"><svg viewBox="0 0 60 8"><defs><linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1a237e"/><stop offset="35%" stop-color="#5c6bc0"/><stop offset="50%" stop-color="#ffa726"/><stop offset="80%" stop-color="#66bb6a"/><stop offset="100%" stop-color="#00e676"/></linearGradient></defs><rect width="60" height="8" rx="2" fill="url(#hg)"/></svg></div>
             <span style="font-size: 10px;">Weak → Strong</span>
+        </div>
+    </div>
+
+    <!-- Phase 5: GPS Location Button -->
+    <button class="gps-btn" id="gps-btn" title="Show my location" onclick="toggleGPS()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+        </svg>
+    </button>
+
+    <!-- Phase 5: Quick Status Card (Mobile) -->
+    <div class="status-card" id="status-card">
+        <div class="status-card-handle"></div>
+        <div class="status-card-header">
+            <h3 id="card-node-name">Node Name</h3>
+            <button class="status-card-close" onclick="closeStatusCard()">&times;</button>
+        </div>
+        <span class="status-card-badge badge-meshtastic" id="card-network">MESHTASTIC</span>
+        <div class="status-card-grid">
+            <div class="status-card-item">
+                <div class="label">Status</div>
+                <div class="value online" id="card-status">Online</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Last Seen</div>
+                <div class="value" id="card-last-seen">now</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">SNR</div>
+                <div class="value" id="card-snr">-- dB</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Battery</div>
+                <div class="value" id="card-battery">--%</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Hardware</div>
+                <div class="value" id="card-hardware">--</div>
+            </div>
+            <div class="status-card-item">
+                <div class="label">Role</div>
+                <div class="value" id="card-role">--</div>
+            </div>
+        </div>
+        <div class="status-card-actions">
+            <button class="btn-distance" id="btn-distance" onclick="showDistanceToMe()">Distance to Me</button>
         </div>
     </div>
 
@@ -3447,6 +3694,210 @@
         refreshNodes: refreshNodes,
         animateMessageFlow: animateMessageFlow
     };
+
+    // ============================================
+    // Phase 5: GPS Operator Position
+    // ============================================
+    const gpsState = {
+        watchId: null,
+        marker: null,
+        accuracyCircle: null,
+        position: null,
+        tracking: false
+    };
+
+    function toggleGPS() {
+        const btn = document.getElementById('gps-btn');
+
+        if (gpsState.tracking) {
+            // Stop tracking
+            if (gpsState.watchId !== null) {
+                navigator.geolocation.clearWatch(gpsState.watchId);
+                gpsState.watchId = null;
+            }
+            if (gpsState.marker) {
+                map.removeLayer(gpsState.marker);
+                gpsState.marker = null;
+            }
+            gpsState.tracking = false;
+            btn.classList.remove('tracking', 'active');
+            return;
+        }
+
+        if (!('geolocation' in navigator)) {
+            alert('Geolocation not available');
+            return;
+        }
+
+        btn.classList.add('active');
+
+        // Start watching position
+        gpsState.watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                updateGPSMarker(pos.coords);
+                btn.classList.remove('active');
+                btn.classList.add('tracking');
+                gpsState.tracking = true;
+            },
+            (err) => {
+                console.error('GPS error:', err);
+                btn.classList.remove('active');
+                alert('Could not get location: ' + err.message);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 5000
+            }
+        );
+    }
+
+    function updateGPSMarker(coords) {
+        gpsState.position = { lat: coords.latitude, lon: coords.longitude };
+        const latlng = [coords.latitude, coords.longitude];
+        const accuracy = coords.accuracy || 50;
+
+        if (!gpsState.marker) {
+            // Create GPS marker
+            const icon = L.divIcon({
+                className: 'gps-marker',
+                html: `
+                    <div class="gps-marker-inner">
+                        <div class="gps-pulse"></div>
+                        <div class="gps-dot"></div>
+                    </div>
+                `,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            gpsState.marker = L.marker(latlng, { icon: icon, zIndexOffset: 1000 })
+                .addTo(map)
+                .bindPopup(`
+                    <div class="node-popup">
+                        <h3>Your Location</h3>
+                        <div class="info-grid">
+                            <div class="info-label">Accuracy</div>
+                            <div class="info-value">${Math.round(accuracy)}m</div>
+                            <div class="info-label">Lat</div>
+                            <div class="info-value">${coords.latitude.toFixed(6)}</div>
+                            <div class="info-label">Lon</div>
+                            <div class="info-value">${coords.longitude.toFixed(6)}</div>
+                        </div>
+                    </div>
+                `);
+
+            // Zoom to position on first fix
+            map.setView(latlng, 13);
+        } else {
+            gpsState.marker.setLatLng(latlng);
+        }
+    }
+
+    // ============================================
+    // Phase 5: Quick Status Card (Mobile)
+    // ============================================
+    let selectedNodeForCard = null;
+
+    function showStatusCard(props, coords) {
+        selectedNodeForCard = { props, coords };
+
+        // Update card content
+        document.getElementById('card-node-name').textContent = props.name || props.id || 'Unknown';
+
+        const badge = document.getElementById('card-network');
+        badge.className = 'status-card-badge ' + (
+            props.network === 'rns' ? 'badge-rns' :
+            props.network === 'aredn' ? 'badge-aredn' : 'badge-meshtastic'
+        );
+        badge.textContent = (props.network || 'meshtastic').toUpperCase();
+
+        const status = document.getElementById('card-status');
+        status.textContent = props.is_online ? 'Online' : 'Offline';
+        status.className = 'value ' + (props.is_online ? 'online' : 'offline');
+
+        document.getElementById('card-last-seen').textContent = props.last_seen || '--';
+        document.getElementById('card-snr').textContent = props.snr !== null ? `${props.snr} dB` : '--';
+        document.getElementById('card-battery').textContent = props.battery !== null ? `${props.battery}%` : '--';
+        document.getElementById('card-hardware').textContent = props.hardware || '--';
+        document.getElementById('card-role').textContent = props.role || '--';
+
+        // Show card
+        document.getElementById('status-card').classList.add('visible');
+
+        // Update distance button availability
+        const distBtn = document.getElementById('btn-distance');
+        distBtn.disabled = !gpsState.position;
+        distBtn.style.opacity = gpsState.position ? '1' : '0.5';
+    }
+
+    function closeStatusCard() {
+        document.getElementById('status-card').classList.remove('visible');
+        selectedNodeForCard = null;
+    }
+
+    function showDistanceToMe() {
+        if (!selectedNodeForCard || !gpsState.position) return;
+
+        const dist = getDistance(
+            gpsState.position.lat, gpsState.position.lon,
+            selectedNodeForCard.coords[1], selectedNodeForCard.coords[0]
+        );
+
+        const distStr = dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(2)}km`;
+        alert(`Distance to ${selectedNodeForCard.props.name || 'node'}: ${distStr}`);
+    }
+
+    // Swipe to dismiss status card
+    (function() {
+        const card = document.getElementById('status-card');
+        let startY = 0;
+        let currentY = 0;
+
+        card.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.status-card-handle')) {
+                startY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        card.addEventListener('touchmove', (e) => {
+            if (startY) {
+                currentY = e.touches[0].clientY;
+                const diff = currentY - startY;
+                if (diff > 0) {
+                    card.style.transform = `translateY(${diff}px)`;
+                }
+            }
+        }, { passive: true });
+
+        card.addEventListener('touchend', () => {
+            if (startY && currentY - startY > 80) {
+                closeStatusCard();
+            }
+            card.style.transform = '';
+            startY = 0;
+            currentY = 0;
+        });
+    })();
+
+    // ============================================
+    // Phase 5: Hook marker clicks for mobile status card
+    // ============================================
+    // Extend the marker click behavior to show status card on mobile
+    const isMobile = () => 'ontouchstart' in window || window.innerWidth < 768;
+
+    // Override how markers handle clicks (applied to new markers)
+    const origUpdateDisplay = updateDisplay;
+    // Note: marker click handlers are added in updateDisplay when markers are created
+    // We add additional click behavior by listening on the nodeLayer
+    nodeLayer.on('click', function(e) {
+        if (isMobile() && e.layer && e.layer.feature) {
+            const props = e.layer.feature.properties;
+            const coords = e.layer.feature.geometry.coordinates;
+            e.layer.closePopup();
+            showStatusCard(props, coords);
+        }
+    });
     </script>
 </body>
 </html>
