@@ -756,8 +756,18 @@ class ServiceOrchestrator:
                 logger.info(f"Installing {name}...")
                 if config.install_command:
                     try:
+                        # For pipx commands, run as real user if we're under sudo
+                        # This ensures packages install to user's ~/.local/bin not root's
+                        cmd = config.install_command
+                        if cmd and cmd[0] == 'pipx':
+                            sudo_user = os.environ.get('SUDO_USER')
+                            if sudo_user and sudo_user != 'root':
+                                # Use -i for login shell to set HOME correctly
+                                cmd = ['sudo', '-i', '-u', sudo_user] + cmd
+                                logger.info(f"Running as {sudo_user}: {' '.join(cmd)}")
+
                         result = subprocess.run(
-                            config.install_command,
+                            cmd,
                             capture_output=True,
                             text=True,
                             timeout=300  # 5 minute timeout for installs
