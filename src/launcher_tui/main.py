@@ -97,6 +97,7 @@ from nomadnet_client_mixin import NomadNetClientMixin
 from topology_mixin import TopologyMixin
 from rf_awareness_mixin import RFAwarenessMixin
 from metrics_mixin import MetricsMixin
+from link_quality_mixin import LinkQualityMixin
 
 
 class MeshForgeLauncher(
@@ -114,7 +115,8 @@ class MeshForgeLauncher(
     NomadNetClientMixin,
     TopologyMixin,
     RFAwarenessMixin,
-    MetricsMixin
+    MetricsMixin,
+    LinkQualityMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -900,6 +902,7 @@ class MeshForgeLauncher(
                 ("status", "RNS Status (rnstatus)"),
                 ("paths", "RNS Path Table (rnpath)"),
                 ("topology", "Network Topology (graph view)"),
+                ("quality", "Link Quality Analysis"),
                 ("probe", "Probe Destination (rnprobe)"),
                 ("identity", "Identity Info (rnid)"),
                 ("nodes", "Known Destinations"),
@@ -935,6 +938,8 @@ class MeshForgeLauncher(
                 self._wait_for_enter()
             elif choice == "topology":
                 self._topology_menu()
+            elif choice == "quality":
+                self._link_quality_menu()
             elif choice == "probe":
                 self._rns_probe_destination()
             elif choice == "identity":
