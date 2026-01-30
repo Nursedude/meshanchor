@@ -1117,8 +1117,16 @@
         </div>
         <div class="panel-body">
             <div class="stat-row">
-                <span class="label">Nodes:</span>
-                <span class="value" id="stat-total">0</span>
+                <span class="label">Total Seen:</span>
+                <span class="value" id="stat-total-seen" title="All nodes from meshtasticd (with + without GPS)">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="label">Mapped:</span>
+                <span class="value" id="stat-total" title="Nodes with GPS coordinates">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="label">No GPS:</span>
+                <span class="value" id="stat-no-gps" title="Nodes without GPS (can't be mapped)" style="color: #888;">0</span>
             </div>
             <div class="stat-row">
                 <span class="label">Online:</span>
@@ -1152,6 +1160,7 @@
 
             <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
             <button class="btn-action" onclick="fitAllNodes()">Fit All</button>
+            <button class="btn-action" onclick="window.open('/los_visualization.html', '_blank')" title="RF Line-of-Sight Calculator with Hawaii presets">RF Calculator</button>
 
             <div class="terrain-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
                 <div class="stat-row">
@@ -2056,11 +2065,20 @@
         state.lastUpdate = Date.now();
         state.updateCount++;
 
+        // Extract total node counts from GeoJSON properties
+        const props = geojson.properties || {};
+        const totalSeen = props.total_nodes || geojson.features.length;
+        const noGpsCount = props.nodes_without_position_count || 0;
+
+        // Update total seen and no-GPS stats
+        document.getElementById('stat-total-seen').textContent = totalSeen;
+        document.getElementById('stat-no-gps').textContent = noGpsCount;
+
         // Show update indicator
         const indicator = document.getElementById('update-indicator');
         indicator.classList.add('active');
         document.getElementById('update-text').textContent =
-            `Live · ${geojson.features.length} nodes`;
+            `Live · ${geojson.features.length} mapped / ${totalSeen} total`;
         setTimeout(() => indicator.classList.remove('active'), 3000);
 
         updateDisplay();

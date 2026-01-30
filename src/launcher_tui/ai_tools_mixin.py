@@ -55,7 +55,11 @@ class AIToolsMixin:
                 self._generate_coverage_map()
 
     def _maybe_auto_start_map(self):
-        """Start map server on TUI launch if user has enabled auto-open."""
+        """Start map server on TUI launch if user has enabled auto-open.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI during startup.
+        """
         import json
         import socket
 
@@ -84,10 +88,27 @@ class AIToolsMixin:
             pass
 
         # Start map server in background (no dialog, quiet)
+        # Suppress stdout/stderr AND logging to prevent TUI corruption
         try:
-            from utils.map_data_service import MapServer
-            server = MapServer(port=5000)
-            server.start_background()
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
+
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    from utils.map_data_service import MapServer
+                    server = MapServer(port=5000)
+                    server.start_background()
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
+
             # Store reference to prevent garbage collection
             self._map_server = server
         except Exception:
@@ -206,44 +227,91 @@ class AIToolsMixin:
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to generate live map: {e}")
 
+    def _is_headless(self) -> bool:
+        """Check if running without a display (headless/SSH)."""
+        import os
+        display = os.environ.get('DISPLAY')
+        wayland = os.environ.get('WAYLAND_DISPLAY')
+        ssh = os.environ.get('SSH_CONNECTION')
+        return (not display and not wayland) or bool(ssh)
+
     def _start_map_server(self):
-        """Start the map HTTP server for live-updating browser access."""
+        """Start the map HTTP server for live-updating browser access.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI.
+        """
         import socket
+        import time
 
         port = 5000
+
+        # Get all available IPs for display
+        from utils.map_data_service import get_all_ips
+        all_ips = get_all_ips()
 
         # Check if port is already in use
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex(('localhost', port))
+            result = sock.connect_ex(('127.0.0.1', port))
             sock.close()
             if result == 0:
+                urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
                 self.dialog.msgbox(
                     "Map Server",
                     f"Map server already running!\n\n"
-                    f"Open: http://localhost:{port}\n\n"
+                    f"Access via:\n{urls}\n\n"
+                    "Open any URL in your browser.\n"
                     "The map auto-refreshes every 30 seconds."
                 )
-                self._open_in_browser(f"http://localhost:{port}")
                 return
         except OSError:
             pass
 
         try:
-            from utils.map_data_service import MapServer
+            # Suppress stdout/stderr AND logging during server init to prevent
+            # TUI corruption. The meshtastic library, HTTP server, and various
+            # loggers can output during initialization.
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
 
-            server = MapServer(port=port)
-            server.start_background()
+            # Capture any output during initialization
+            captured_out = StringIO()
+            captured_err = StringIO()
 
-            self.dialog.msgbox(
-                "Map Server Started",
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                    from utils.map_data_service import MapServer
+
+                    server = MapServer(port=port)  # Binds to 0.0.0.0
+                    server.start_background()
+
+                    # Small delay to let server thread stabilize
+                    time.sleep(0.1)
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
+
+            # Store reference to prevent garbage collection
+            self._map_server = server
+
+            urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
+            msg = (
                 f"Live map server running!\n\n"
-                f"URL: http://localhost:{port}\n\n"
+                f"Access via:\n{urls}\n\n"
+                "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n"
                 "Server runs until MeshForge exits."
             )
-            self._open_in_browser(f"http://localhost:{port}")
+            self.dialog.msgbox("Map Server Started", msg)
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to start map server: {e}")
@@ -274,10 +342,15 @@ class AIToolsMixin:
                 f"Auto-open map: {state}\n\n"
             )
             if settings["auto_open_map"]:
+                from utils.map_data_service import get_all_ips
+                ips = get_all_ips()
+                urls = ", ".join(f"http://{ip}:5000" for ip in ips[:2])
+                if len(ips) > 2:
+                    urls += ", ..."
                 msg += (
                     "The map server will start automatically\n"
-                    "when MeshForge launches, and the map will\n"
-                    "be accessible at http://localhost:5000"
+                    "when MeshForge launches.\n\n"
+                    f"Access at: {urls}"
                 )
             else:
                 msg += "Map server will not start automatically."

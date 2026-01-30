@@ -348,7 +348,14 @@ class UnifiedNode:
 
     @classmethod
     def from_rns(cls, rns_hash: bytes, name: str = "", app_data: bytes = None) -> 'UnifiedNode':
-        """Create from RNS announce/discovery data"""
+        """Create from RNS announce/discovery data.
+
+        Parses LXMF announce app_data which may contain:
+        - Display name (first portion of app_data)
+        - Telemetry data including position (msgpack encoded, if present)
+
+        Sideband and other LXMF apps can include GPS coordinates in announces.
+        """
         hash_hex = rns_hash.hex()
 
         node = cls(
@@ -359,19 +366,122 @@ class UnifiedNode:
             rns_hash=rns_hash,
         )
 
-        # Parse app_data if available (may contain name, position, etc.)
-        if app_data:
-            try:
-                # LXMF announces include display name
-                if len(app_data) > 0:
-                    # First byte might be display name length
-                    # This varies by application
-                    pass
-            except Exception as e:
-                logger.debug(f"Could not parse RNS app_data: {e}")
+        # Parse app_data if available (may contain name, position, telemetry)
+        if app_data and len(app_data) > 0:
+            parsed = cls._parse_lxmf_app_data(app_data)
+            if parsed:
+                if parsed.get("display_name"):
+                    node.name = parsed["display_name"]
+                if parsed.get("latitude") is not None and parsed.get("longitude") is not None:
+                    lat = parsed["latitude"]
+                    lon = parsed["longitude"]
+                    # Validate coordinates
+                    if -90 <= lat <= 90 and -180 <= lon <= 180:
+                        node.position = Position(
+                            latitude=lat,
+                            longitude=lon,
+                            altitude=parsed.get("altitude", 0.0),
+                            timestamp=datetime.now()
+                        )
+                        logger.debug(f"RNS node {hash_hex[:8]} has position: {lat:.4f}, {lon:.4f}")
 
         node.last_seen = datetime.now()
         return node
+
+    @classmethod
+    def _parse_lxmf_app_data(cls, app_data: bytes) -> dict:
+        """Parse LXMF announce app_data to extract name and telemetry.
+
+        LXMF app_data format (Sideband/NomadNet):
+        - Display name as UTF-8 string (variable length)
+        - Optional msgpack-encoded telemetry dict after the name
+
+        Returns dict with: display_name, latitude, longitude, altitude, etc.
+        """
+        result = {}
+        msgpack_start = -1
+
+        try:
+            # First, find where msgpack telemetry starts (if present)
+            # Scan for msgpack dict marker (fixmap: 0x80-0x8f, map16: 0xde, map32: 0xdf)
+            for i in range(len(app_data)):
+                byte = app_data[i]
+                if byte >= 0x80 and byte <= 0x8f:  # fixmap (up to 15 entries)
+                    msgpack_start = i
+                    break
+                elif byte == 0xde or byte == 0xdf:  # map16 or map32
+                    msgpack_start = i
+                    break
+
+            # Extract display name from bytes BEFORE msgpack (or entire data if no msgpack)
+            name_bytes = app_data[:msgpack_start] if msgpack_start > 0 else app_data
+            if len(name_bytes) > 0 and len(name_bytes) < 128:
+                try:
+                    decoded = name_bytes.decode('utf-8', errors='ignore').strip('\x00').strip()
+                    if decoded and len(decoded) >= 2:
+                        # Filter to printable characters only
+                        clean_name = ''.join(c for c in decoded if c.isprintable())
+                        if clean_name:
+                            result["display_name"] = clean_name[:64]
+                except UnicodeDecodeError:
+                    pass
+
+            # Parse msgpack telemetry if found
+            if msgpack_start >= 0:
+                try:
+                    import msgpack
+                    telemetry = msgpack.unpackb(app_data[msgpack_start:], raw=False, strict_map_key=False)
+                    if isinstance(telemetry, dict):
+                        cls._extract_telemetry(telemetry, result)
+                except ImportError:
+                    # msgpack not installed - skip telemetry parsing
+                    pass
+                except Exception:
+                    # Invalid msgpack data - ignore
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Error parsing LXMF app_data: {e}")
+
+        return result
+
+    @classmethod
+    def _extract_telemetry(cls, telemetry: dict, result: dict):
+        """Extract position and other telemetry from parsed msgpack dict.
+
+        Sideband telemetry keys (from Sideband source):
+        - 'latitude' or 'lat': GPS latitude
+        - 'longitude' or 'lon' or 'lng': GPS longitude
+        - 'altitude' or 'alt': GPS altitude
+        - 'speed': Speed in km/h
+        - 'heading': Compass heading
+        - 'accuracy': GPS accuracy in meters
+        """
+        # Position extraction with multiple key formats
+        lat = telemetry.get('latitude') or telemetry.get('lat')
+        lon = telemetry.get('longitude') or telemetry.get('lon') or telemetry.get('lng')
+        alt = telemetry.get('altitude') or telemetry.get('alt') or 0.0
+
+        if lat is not None and lon is not None:
+            try:
+                result['latitude'] = float(lat)
+                result['longitude'] = float(lon)
+                result['altitude'] = float(alt) if alt else 0.0
+            except (TypeError, ValueError):
+                pass
+
+        # Other telemetry fields
+        if 'speed' in telemetry:
+            try:
+                result['speed'] = float(telemetry['speed'])
+            except (TypeError, ValueError):
+                pass
+
+        if 'battery' in telemetry:
+            try:
+                result['battery'] = int(telemetry['battery'])
+            except (TypeError, ValueError):
+                pass
 
 
 class UnifiedNodeTracker:
