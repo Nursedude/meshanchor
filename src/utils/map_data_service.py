@@ -32,6 +32,25 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def get_lan_ip() -> str:
+    """Get the LAN IP address for this machine.
+
+    Returns the IP that would be used to reach external hosts,
+    which is the appropriate IP for LAN access.
+    Falls back to 127.0.0.1 if detection fails.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
+        # Connect to external IP to determine which interface would be used
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 class MapDataCollector:
     """Collects node data from all available sources into unified GeoJSON.
 
@@ -1197,9 +1216,23 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
+    def __init__(self, port: int = 5000, host: str = "auto"):
+        """Initialize map server.
+
+        Args:
+            port: Port to listen on (default 5000)
+            host: Bind address. Options:
+                  - "auto": Bind to LAN IP (default, allows LAN access)
+                  - "localhost" or "127.0.0.1": Local only
+                  - "0.0.0.0": All interfaces (use with caution)
+                  - Specific IP: Bind to that IP only
+        """
         self.port = port
-        self.host = host
+        # Resolve "auto" to actual LAN IP
+        if host == "auto":
+            self.host = get_lan_ip()
+        else:
+            self.host = host
         self.collector = MapDataCollector()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1215,11 +1248,12 @@ class MapServer:
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
-        print(f"MeshForge Map Server running on port {self.port}")
-        print(f"  Local:  http://localhost:{self.port}/")
-        if self.host == "0.0.0.0":
-            print(f"  Remote: http://<your-ip>:{self.port}/")
-        print(f"  API:    http://localhost:{self.port}/api/nodes/geojson")
+        print(f"MeshForge Map Server running on {self.host}:{self.port}")
+        if self.host in ("127.0.0.1", "localhost"):
+            print(f"  URL: http://localhost:{self.port}/")
+        else:
+            print(f"  URL: http://{self.host}:{self.port}/")
+        print(f"  API: http://{self.host}:{self.port}/api/nodes/geojson")
         print("  Press Ctrl+C to stop")
 
         try:
@@ -1250,7 +1284,7 @@ class MapServer:
     @property
     def url(self) -> str:
         """Get the server URL."""
-        return f"http://localhost:{self.port}"
+        return f"http://{self.host}:{self.port}"
 
 
 def main():
@@ -1259,7 +1293,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
     parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0, use 127.0.0.1 for local only)")
+    parser.add_argument("--host", default="auto", help="Bind address: 'auto' (LAN IP), 'localhost', '0.0.0.0' (all), or specific IP")
     parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
     args = parser.parse_args()
 
