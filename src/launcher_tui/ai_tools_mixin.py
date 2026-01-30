@@ -55,7 +55,11 @@ class AIToolsMixin:
                 self._generate_coverage_map()
 
     def _maybe_auto_start_map(self):
-        """Start map server on TUI launch if user has enabled auto-open."""
+        """Start map server on TUI launch if user has enabled auto-open.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI during startup.
+        """
         import json
         import socket
 
@@ -84,10 +88,27 @@ class AIToolsMixin:
             pass
 
         # Start map server in background (no dialog, quiet)
+        # Suppress stdout/stderr AND logging to prevent TUI corruption
         try:
-            from utils.map_data_service import MapServer
-            server = MapServer(port=5000)
-            server.start_background()
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
+
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    from utils.map_data_service import MapServer
+                    server = MapServer(port=5000)
+                    server.start_background()
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
+
             # Store reference to prevent garbage collection
             self._map_server = server
         except Exception:
@@ -215,8 +236,13 @@ class AIToolsMixin:
         return (not display and not wayland) or bool(ssh)
 
     def _start_map_server(self):
-        """Start the map HTTP server for live-updating browser access."""
+        """Start the map HTTP server for live-updating browser access.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI.
+        """
         import socket
+        import time
 
         port = 5000
 
@@ -244,10 +270,35 @@ class AIToolsMixin:
             pass
 
         try:
-            from utils.map_data_service import MapServer
+            # Suppress stdout/stderr AND logging during server init to prevent
+            # TUI corruption. The meshtastic library, HTTP server, and various
+            # loggers can output during initialization.
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
 
-            server = MapServer(port=port)  # Binds to 0.0.0.0
-            server.start_background()
+            # Capture any output during initialization
+            captured_out = StringIO()
+            captured_err = StringIO()
+
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                    from utils.map_data_service import MapServer
+
+                    server = MapServer(port=port)  # Binds to 0.0.0.0
+                    server.start_background()
+
+                    # Small delay to let server thread stabilize
+                    time.sleep(0.1)
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
 
             # Store reference to prevent garbage collection
             self._map_server = server
