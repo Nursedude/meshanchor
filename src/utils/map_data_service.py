@@ -32,23 +32,48 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def get_lan_ip() -> str:
-    """Get the LAN IP address for this machine.
+def get_all_ips() -> list:
+    """Get all local IP addresses for this machine.
 
-    Returns the IP that would be used to reach external hosts,
-    which is the appropriate IP for LAN access.
-    Falls back to 127.0.0.1 if detection fails.
+    Returns list of IPs from all interfaces, useful when machine
+    has multiple networks (LAN, AREDN, VPN, etc.).
     """
+    ips = []
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(2)
-        # Connect to external IP to determine which interface would be used
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        import subprocess
+        result = subprocess.run(
+            ['hostname', '-I'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            ips = [ip.strip() for ip in result.stdout.split() if ip.strip()]
     except Exception:
-        return "127.0.0.1"
+        pass
+
+    # Fallback: try socket method
+    if not ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 80))
+            ips = [s.getsockname()[0]]
+            s.close()
+        except Exception:
+            pass
+
+    return ips if ips else ["127.0.0.1"]
+
+
+def get_lan_ip() -> str:
+    """Get a local IP address for this machine.
+
+    Returns first available IP. For machines with multiple interfaces
+    (AREDN, VPN, etc.), use get_all_ips() to see all options.
+    """
+    ips = get_all_ips()
+    return ips[0] if ips else "127.0.0.1"
 
 
 class MapDataCollector:
@@ -1216,23 +1241,18 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "auto"):
+    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
         """Initialize map server.
 
         Args:
             port: Port to listen on (default 5000)
             host: Bind address. Options:
-                  - "auto": Bind to LAN IP (default, allows LAN access)
+                  - "0.0.0.0": All interfaces (default, works with AREDN/VPN/LAN)
                   - "localhost" or "127.0.0.1": Local only
-                  - "0.0.0.0": All interfaces (use with caution)
                   - Specific IP: Bind to that IP only
         """
         self.port = port
-        # Resolve "auto" to actual LAN IP
-        if host == "auto":
-            self.host = get_lan_ip()
-        else:
-            self.host = host
+        self.host = host
         self.collector = MapDataCollector()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1248,12 +1268,17 @@ class MapServer:
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
-        print(f"MeshForge Map Server running on {self.host}:{self.port}")
-        if self.host in ("127.0.0.1", "localhost"):
+        print(f"MeshForge Map Server running on port {self.port}")
+        if self.host == "0.0.0.0":
+            # Show all available IPs when binding to all interfaces
+            ips = get_all_ips()
+            print("  Access via any of these URLs:")
+            for ip in ips:
+                print(f"    http://{ip}:{self.port}/")
+        elif self.host in ("127.0.0.1", "localhost"):
             print(f"  URL: http://localhost:{self.port}/")
         else:
             print(f"  URL: http://{self.host}:{self.port}/")
-        print(f"  API: http://{self.host}:{self.port}/api/nodes/geojson")
         print("  Press Ctrl+C to stop")
 
         try:
@@ -1293,7 +1318,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
     parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="auto", help="Bind address: 'auto' (LAN IP), 'localhost', '0.0.0.0' (all), or specific IP")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 for all interfaces)")
     parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
     args = parser.parse_args()
 
