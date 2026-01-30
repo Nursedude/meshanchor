@@ -17,6 +17,13 @@ Usage:
     server.start()  # Serves map + API at http://localhost:5000
 """
 
+# Ensure src/ is in path when running standalone
+import sys
+from pathlib import Path as _Path
+_src_dir = _Path(__file__).resolve().parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 import json
 import logging
 import os
@@ -127,6 +134,7 @@ class MapDataCollector:
 
         # Track nodes without GPS for reporting
         self._nodes_without_position: List[Dict] = []
+        self._total_nodes_seen: int = 0  # Total from meshtasticd (with + without GPS)
 
         # Node history database for position/state tracking over time
         self._history = None
@@ -256,6 +264,8 @@ class MapDataCollector:
                 "collected_at": datetime.now().isoformat(),
                 "source_count": len(features),
                 "sources": sources,
+                "total_nodes": self._total_nodes_seen,
+                "nodes_with_position": len(features),
                 "nodes_without_position": self._nodes_without_position,
                 "nodes_without_position_count": len(self._nodes_without_position),
                 "online_threshold_minutes": self.get_online_threshold_seconds() // 60,
@@ -360,14 +370,14 @@ class MapDataCollector:
                             if no_pos_info:
                                 no_position_nodes.append(no_pos_info)
 
-                    # Update the tracking list
+                    # Update the tracking lists
                     self._nodes_without_position = no_position_nodes
+                    self._total_nodes_seen = total_nodes
 
-                    if features:
-                        logger.debug(
-                            f"meshtasticd (TCP): {len(features)} nodes with position, "
-                            f"{len(no_position_nodes)} without (total: {total_nodes})"
-                        )
+                    logger.debug(
+                        f"meshtasticd (TCP): {len(features)} with GPS, "
+                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
+                    )
             finally:
                 from utils.meshtastic_connection import safe_close_interface
                 safe_close_interface(interface)
