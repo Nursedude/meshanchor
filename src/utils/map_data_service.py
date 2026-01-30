@@ -17,6 +17,13 @@ Usage:
     server.start()  # Serves map + API at http://localhost:5000
 """
 
+# Ensure src/ is in path when running standalone
+import sys
+from pathlib import Path as _Path
+_src_dir = _Path(__file__).resolve().parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 import json
 import logging
 import os
@@ -32,6 +39,50 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def get_all_ips() -> list:
+    """Get all local IP addresses for this machine.
+
+    Returns list of IPs from all interfaces, useful when machine
+    has multiple networks (LAN, AREDN, VPN, etc.).
+    """
+    ips = []
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['hostname', '-I'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            ips = [ip.strip() for ip in result.stdout.split() if ip.strip()]
+    except Exception:
+        pass
+
+    # Fallback: try socket method
+    if not ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 80))
+            ips = [s.getsockname()[0]]
+            s.close()
+        except Exception:
+            pass
+
+    return ips if ips else ["127.0.0.1"]
+
+
+def get_lan_ip() -> str:
+    """Get a local IP address for this machine.
+
+    Returns first available IP. For machines with multiple interfaces
+    (AREDN, VPN, etc.), use get_all_ips() to see all options.
+    """
+    ips = get_all_ips()
+    return ips[0] if ips else "127.0.0.1"
+
+
 class MapDataCollector:
     """Collects node data from all available sources into unified GeoJSON.
 
@@ -44,11 +95,13 @@ class MapDataCollector:
     Settings (in ~/.config/meshforge/map_settings.json):
     - node_cache_max_age_hours: Max age for node_cache.json (default: 48)
     - rns_cache_max_age_hours: Max age for RNS temp cache (default: 1)
+    - online_status_threshold_minutes: Minutes since lastHeard to consider online (default: 15)
     """
 
     # Default cache ages in hours
     DEFAULT_NODE_CACHE_MAX_AGE_HOURS = 48
     DEFAULT_RNS_CACHE_MAX_AGE_HOURS = 1
+    DEFAULT_ONLINE_THRESHOLD_MINUTES = 15
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
@@ -73,10 +126,15 @@ class MapDataCollector:
                 defaults={
                     "node_cache_max_age_hours": self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS,
                     "rns_cache_max_age_hours": self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS,
+                    "online_status_threshold_minutes": self.DEFAULT_ONLINE_THRESHOLD_MINUTES,
                 }
             )
         except ImportError:
             self._settings = None
+
+        # Track nodes without GPS for reporting
+        self._nodes_without_position: List[Dict] = []
+        self._total_nodes_seen: int = 0  # Total from meshtasticd (with + without GPS)
 
         # Node history database for position/state tracking over time
         self._history = None
@@ -117,6 +175,38 @@ class MapDataCollector:
             self._settings.set("rns_cache_max_age_hours", hours)
             self._settings.save()
             logger.info(f"RNS cache max age set to {hours} hours")
+
+    def get_online_threshold_seconds(self) -> int:
+        """Get online status threshold in seconds.
+
+        Nodes heard within this threshold are considered online.
+        Default: 15 minutes (900 seconds).
+        """
+        if self._settings:
+            minutes = self._settings.get("online_status_threshold_minutes", self.DEFAULT_ONLINE_THRESHOLD_MINUTES)
+        else:
+            minutes = self.DEFAULT_ONLINE_THRESHOLD_MINUTES
+        return int(minutes * 60)
+
+    def set_online_threshold_minutes(self, minutes: int) -> None:
+        """Set online status threshold in minutes.
+
+        Args:
+            minutes: Consider nodes online if heard within this many minutes.
+                    Use higher values for networks with longer update intervals.
+        """
+        if self._settings:
+            self._settings.set("online_status_threshold_minutes", minutes)
+            self._settings.save()
+            logger.info(f"Online status threshold set to {minutes} minutes")
+
+    def get_nodes_without_position(self) -> List[Dict]:
+        """Get list of nodes that have no GPS position.
+
+        Returns list of dicts with id, name, last_seen, network info.
+        Updated after each collect() call.
+        """
+        return self._nodes_without_position
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -173,7 +263,12 @@ class MapDataCollector:
             "properties": {
                 "collected_at": datetime.now().isoformat(),
                 "source_count": len(features),
-                "sources": sources
+                "sources": sources,
+                "total_nodes": self._total_nodes_seen,
+                "nodes_with_position": len(features),
+                "nodes_without_position": self._nodes_without_position,
+                "nodes_without_position_count": len(self._nodes_without_position),
+                "online_threshold_minutes": self.get_online_threshold_seconds() // 60,
             }
         }
 
@@ -236,6 +331,7 @@ class MapDataCollector:
 
         Uses MeshtasticConnectionManager for safe locking and cleanup.
         Returns list of GeoJSON features for nodes with valid positions.
+        Also populates self._nodes_without_position for nodes lacking GPS.
         """
         try:
             from utils.meshtastic_connection import get_connection_manager
@@ -244,6 +340,7 @@ class MapDataCollector:
             return []
 
         features = []
+        no_position_nodes = []
         manager = get_connection_manager()
 
         # Don't block if someone else holds the connection
@@ -258,13 +355,29 @@ class MapDataCollector:
             try:
                 if hasattr(interface, 'nodes') and interface.nodes:
                     now = time.time()
+                    online_threshold = self.get_online_threshold_seconds()
+                    total_nodes = len(interface.nodes)
+
                     for node_id, node_data in interface.nodes.items():
-                        feature = self._parse_tcp_node(node_id, node_data, now)
+                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
                         if feature:
                             features.append(feature)
+                        else:
+                            # Track nodes without valid position
+                            no_pos_info = self._extract_node_info_without_position(
+                                node_id, node_data, now, online_threshold
+                            )
+                            if no_pos_info:
+                                no_position_nodes.append(no_pos_info)
 
-                    if features:
-                        logger.debug(f"meshtasticd (TCP): {len(features)} nodes with position")
+                    # Update the tracking lists
+                    self._nodes_without_position = no_position_nodes
+                    self._total_nodes_seen = total_nodes
+
+                    logger.debug(
+                        f"meshtasticd (TCP): {len(features)} with GPS, "
+                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
+                    )
             finally:
                 from utils.meshtastic_connection import safe_close_interface
                 safe_close_interface(interface)
@@ -276,10 +389,17 @@ class MapDataCollector:
 
         return features
 
-    def _parse_tcp_node(self, node_id: str, data: dict, now: float) -> Optional[Dict]:
+    def _parse_tcp_node(self, node_id: str, data: dict, now: float,
+                        online_threshold_seconds: int = 900) -> Optional[Dict]:
         """Parse a single node from the TCP interface nodes dict.
 
         Handles both float (latitude) and integer (latitudeI) coordinate formats.
+
+        Args:
+            node_id: The node ID string
+            data: Raw node data from meshtastic interface
+            now: Current timestamp
+            online_threshold_seconds: Consider online if heard within this many seconds
         """
         position = data.get('position', {})
         if not position:
@@ -306,9 +426,10 @@ class MapDataCollector:
         user = data.get('user', {})
         device_metrics = data.get('deviceMetrics', {})
 
-        # Determine online status from lastHeard (15 min threshold)
+        # Determine online status from lastHeard (configurable threshold)
+        # Default to online if node exists in nodedb (matches other mesh maps)
         last_heard = data.get('lastHeard', 0)
-        is_online = (now - last_heard) < 900 if last_heard else False
+        is_online = True  # Node exists in nodedb = online
 
         # Format last_seen as human-readable
         if last_heard:
@@ -349,6 +470,57 @@ class MapDataCollector:
             is_local=(data.get('hopsAway', 99) == 0),
             last_seen=last_seen,
         )
+
+    def _extract_node_info_without_position(self, node_id: str, data: dict, now: float,
+                                            online_threshold_seconds: int = 900) -> Optional[Dict]:
+        """Extract basic info for a node that has no valid GPS position.
+
+        Returns a dict with id, name, last_seen, etc. for display in a table/list.
+        """
+        user = data.get('user', {})
+        device_metrics = data.get('deviceMetrics', {})
+
+        # Format node_id
+        node_num = data.get('num', 0)
+        if isinstance(node_id, str) and node_id.startswith('!'):
+            formatted_id = node_id
+        elif node_num:
+            formatted_id = f"!{node_num:08x}"
+        else:
+            formatted_id = str(node_id)
+
+        # All nodes in nodedb are considered online (matches other mesh maps)
+        last_heard = data.get('lastHeard', 0)
+        is_online = True
+
+        # Format last_seen
+        if last_heard:
+            age_seconds = int(now - last_heard)
+            if age_seconds < 60:
+                last_seen = f"{age_seconds}s ago"
+            elif age_seconds < 3600:
+                last_seen = f"{age_seconds // 60}m ago"
+            elif age_seconds < 86400:
+                last_seen = f"{age_seconds // 3600}h ago"
+            else:
+                last_seen = f"{age_seconds // 86400}d ago"
+        else:
+            last_seen = "unknown"
+
+        name = user.get('longName', '') or user.get('shortName', '')
+
+        return {
+            "id": formatted_id,
+            "name": name or formatted_id,
+            "is_online": is_online,
+            "last_seen": last_seen,
+            "hardware": user.get('hwModel', ''),
+            "role": user.get('role', ''),
+            "snr": data.get('snr'),
+            "battery": device_metrics.get('batteryLevel'),
+            "hops_away": data.get('hopsAway'),
+            "via_mqtt": data.get('viaMqtt', False),
+        }
 
     def _collect_via_cli(self) -> List[Dict]:
         """Fall back to CLI parsing when Python TCP interface unavailable."""
@@ -672,6 +844,26 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
     collector: Optional[MapDataCollector] = None
     web_dir: Optional[str] = None
+    # CORS: None = allow all, list = allow specific origins
+    allowed_origins: Optional[List[str]] = None
+
+    def _send_cors_header(self):
+        """Send appropriate CORS header based on configuration.
+
+        When allowed_origins is None: allow all origins (*)
+        When allowed_origins is a list: only allow those origins
+        """
+        origin = self.headers.get('Origin', '')
+
+        if self.allowed_origins is None:
+            # Allow all origins - useful for LAN/AREDN access
+            self.send_header('Access-Control-Allow-Origin', '*')
+        elif origin and any(origin.startswith(allowed) for allowed in self.allowed_origins):
+            # Origin matches allowed list
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            # Default fallback for localhost
+            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
 
     def do_GET(self):
         if self.path == '/api/nodes/geojson' or self.path == '/api/nodes/geojson/':
@@ -708,7 +900,47 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             # Serve static files from web/ directory
             if self.web_dir:
                 self.directory = self.web_dir
-            super().do_GET()
+            # For HTML files, serve with no-cache headers
+            if self.path.endswith('.html'):
+                self._serve_static_html()
+            else:
+                super().do_GET()
+
+    def _serve_static_html(self):
+        """Serve static HTML files with no-cache headers."""
+        from urllib.parse import urlparse, unquote
+        path_only = unquote(urlparse(self.path).path).lstrip('/')
+
+        if self.web_dir:
+            file_path = Path(self.web_dir) / path_only
+        else:
+            file_path = Path(__file__).parent.parent.parent / "web" / path_only
+
+        # Security: prevent path traversal
+        try:
+            base_dir = Path(self.web_dir) if self.web_dir else Path(__file__).parent.parent.parent / "web"
+            file_path = file_path.resolve()
+            base_dir = base_dir.resolve()
+            if not str(file_path).startswith(str(base_dir)):
+                self.send_error(403, "Forbidden")
+                return
+        except Exception:
+            self.send_error(400, "Invalid path")
+            return
+
+        if file_path.exists() and file_path.is_file():
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            self.end_headers()
+            self.wfile.write(data)
+        else:
+            self.send_error(404, f"File not found: {path_only}")
 
     def _serve_geojson(self):
         """Serve live node GeoJSON."""
@@ -721,12 +953,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -744,6 +971,9 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
             self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             self.wfile.write(data)
         else:
@@ -804,12 +1034,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -1172,8 +1397,12 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
     def log_message(self, format, *args):
-        """Suppress default request logging (too noisy)."""
-        logger.debug(f"MapServer: {args[0]}")
+        """Suppress ALL request logging to prevent TUI corruption.
+
+        The HTTP server runs in a background thread and logging to
+        stdout/stderr can corrupt the whiptail/dialog TUI display.
+        """
+        pass  # Complete silence - no logging at all
 
 
 class MapServer:
@@ -1197,9 +1426,24 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "127.0.0.1"):
+    def __init__(self, port: int = 5000, host: str = "0.0.0.0",
+                 cors_origins: Optional[List[str]] = None):
+        """Initialize map server.
+
+        Args:
+            port: Port to listen on (default 5000)
+            host: Bind address. Options:
+                  - "0.0.0.0": All interfaces (default, works with AREDN/VPN/LAN)
+                  - "localhost" or "127.0.0.1": Local only
+                  - Specific IP: Bind to that IP only
+            cors_origins: CORS allowed origins. Options:
+                  - None: Allow all origins (*) - best for LAN/AREDN access
+                  - List: Only allow specified origins, e.g.,
+                    ["http://localhost", "http://192.168.1."]
+        """
         self.port = port
         self.host = host
+        self.cors_origins = cors_origins
         self.collector = MapDataCollector()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1212,12 +1456,21 @@ class MapServer:
         """Start server (blocking)."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
-        print(f"MeshForge Map Server: http://localhost:{self.port}")
-        print(f"  Map:  http://localhost:{self.port}/")
-        print(f"  API:  http://localhost:{self.port}/api/nodes/geojson")
+        print(f"MeshForge Map Server running on port {self.port}")
+        if self.host == "0.0.0.0":
+            # Show all available IPs when binding to all interfaces
+            ips = get_all_ips()
+            print("  Access via any of these URLs:")
+            for ip in ips:
+                print(f"    http://{ip}:{self.port}/")
+        elif self.host in ("127.0.0.1", "localhost"):
+            print(f"  URL: http://localhost:{self.port}/")
+        else:
+            print(f"  URL: http://{self.host}:{self.port}/")
         print("  Press Ctrl+C to stop")
 
         try:
@@ -1230,6 +1483,7 @@ class MapServer:
         """Start server in background thread."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -1248,7 +1502,7 @@ class MapServer:
     @property
     def url(self) -> str:
         """Get the server URL."""
-        return f"http://localhost:{self.port}"
+        return f"http://{self.host}:{self.port}"
 
 
 def main():
@@ -1257,7 +1511,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
     parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 for all interfaces)")
     parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
     args = parser.parse_args()
 

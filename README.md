@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.8--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2624%20passing-brightgreen.svg" alt="Tests"></a>
@@ -30,7 +30,7 @@
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum networks
-- **Live NOC maps** with real-time node tracking
+- **Live NOC maps** showing Meshtastic AND RNS nodes on one map
 - **Coverage maps** with SNR-based link quality
 - **RF engineering tools** for site planning
 - **AI diagnostics** that work offline
@@ -73,7 +73,135 @@ python3 src/standalone.py
 
 ---
 
-## What Works (v0.4.7-beta)
+## Upgrading MeshForge
+
+### Before You Upgrade
+
+**1. Check your current version:**
+```bash
+python3 -c "from src.__version__ import __version__; print(__version__)"
+```
+
+**2. Backup your configuration (recommended):**
+```bash
+# Backup meshtasticd configs
+sudo cp -r /etc/meshtasticd/config.d ~/meshforge-backup-configs/
+
+# Backup Reticulum config
+cp -r ~/.reticulum ~/meshforge-backup-rns/
+
+# Backup MeshForge settings
+cp -r ~/.config/meshforge ~/meshforge-backup-settings/ 2>/dev/null || true
+```
+
+### Standard Upgrade (Git Pull)
+
+For installations cloned from GitHub:
+
+```bash
+cd /path/to/meshforge    # Usually /opt/meshforge or ~/meshforge
+
+# Check for local changes
+git status
+
+# Pull latest changes
+sudo git pull origin main
+
+# If you have local modifications, stash them first:
+# git stash
+# sudo git pull origin main
+# git stash pop
+```
+
+### Upgrade to Alpha Branch
+
+To test cutting-edge features:
+
+```bash
+cd /path/to/meshforge
+git fetch origin alpha
+git checkout alpha
+sudo git pull origin alpha
+```
+
+To return to stable:
+```bash
+git checkout main
+sudo git pull origin main
+```
+
+### Fresh Install Upgrade
+
+If upgrading from a very old version or encountering issues:
+
+```bash
+# Backup existing installation
+sudo mv /opt/meshforge /opt/meshforge.old
+
+# Fresh clone
+sudo git clone https://github.com/Nursedude/meshforge.git /opt/meshforge
+cd /opt/meshforge
+
+# Re-run installer if dependencies changed
+sudo bash scripts/install_noc.sh
+
+# Restore custom configs if needed
+sudo cp ~/meshforge-backup-configs/* /etc/meshtasticd/config.d/
+```
+
+### Post-Upgrade Verification
+
+After upgrading, verify the installation:
+
+```bash
+# Check new version
+python3 -c "from src.__version__ import __version__; print(__version__)"
+
+# Verify TUI launches
+sudo python3 src/launcher_tui/main.py
+
+# Check services are running
+systemctl status meshtasticd
+systemctl status rnsd
+```
+
+### Troubleshooting Upgrades
+
+| Issue | Solution |
+|-------|----------|
+| `Permission denied` | Use `sudo git pull` |
+| `Local changes would be overwritten` | `git stash` before pull, `git stash pop` after |
+| Python import errors | Re-run `sudo bash scripts/install_noc.sh` |
+| Service won't start | Check logs: `journalctl -u meshtasticd -n 50` |
+| Config file conflicts | Restore from backup or regenerate via TUI |
+| `meshtastic` module errors | See "Python Library Conflicts" below |
+
+#### Python Library Conflicts
+
+On some systems (especially Raspberry Pi OS with externally-managed Python), the `meshtastic` library may fail to install due to version conflicts. If you see errors like "externally-managed-environment" or module import failures:
+
+```bash
+# Force reinstall meshtastic (use with caution)
+pip install meshtastic --break-system-packages --ignore-installed
+
+# Alternative: use a virtual environment
+python3 -m venv ~/.meshforge-venv
+source ~/.meshforge-venv/bin/activate
+pip install meshtastic
+```
+
+Note: The `--break-system-packages` flag bypasses PEP 668 protections. Only use this if you understand the implications for your system Python environment.
+
+### Version History
+
+See the full changelog in `src/__version__.py` or run:
+```bash
+python3 -c "from src.__version__ import show_version_history; show_version_history()"
+```
+
+---
+
+## What Works (v0.4.8-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
@@ -81,11 +209,11 @@ python3 src/standalone.py
 | **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Stable |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
-| **Live NOC Map** | Real-time browser view, WebSocket updates, field ops tools | Alpha |
+| **Live NOC Map** | Real-time browser view, Meshtastic + RNS nodes, field ops tools | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
-| **Reticulum** | Config editor, interface templates, auto-deploy, rnstatus/rnpath | Stable |
+| **Reticulum** | Config editor, interface templates, node position mapping, rnstatus/rnpath | Stable |
 | **AREDN** | Node discovery, link quality, service enumeration | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
@@ -420,6 +548,9 @@ sudo bash scripts/install_noc.sh
 
 ### Updating Your Installation
 
+See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup, verification, and troubleshooting.
+
+Quick update:
 ```bash
 # For main (stable)
 cd /opt/meshforge && sudo git pull origin main
@@ -428,7 +559,7 @@ cd /opt/meshforge && sudo git pull origin main
 cd /opt/meshforge && sudo git pull origin alpha
 ```
 
-### Current Alpha Features (v0.4.7-beta)
+### Current Alpha Features (v0.4.8-beta)
 
 The Live Map system provides a browser-based NOC view:
 

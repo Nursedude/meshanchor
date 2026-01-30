@@ -55,7 +55,11 @@ class AIToolsMixin:
                 self._generate_coverage_map()
 
     def _maybe_auto_start_map(self):
-        """Start map server on TUI launch if user has enabled auto-open."""
+        """Start map server on TUI launch if user has enabled auto-open.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI during startup.
+        """
         import json
         import socket
 
@@ -84,10 +88,27 @@ class AIToolsMixin:
             pass
 
         # Start map server in background (no dialog, quiet)
+        # Suppress stdout/stderr AND logging to prevent TUI corruption
         try:
-            from utils.map_data_service import MapServer
-            server = MapServer(port=5000)
-            server.start_background()
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
+
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    from utils.map_data_service import MapServer
+                    server = MapServer(port=5000)
+                    server.start_background()
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
+
             # Store reference to prevent garbage collection
             self._map_server = server
         except Exception:
@@ -206,44 +227,91 @@ class AIToolsMixin:
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to generate live map: {e}")
 
+    def _is_headless(self) -> bool:
+        """Check if running without a display (headless/SSH)."""
+        import os
+        display = os.environ.get('DISPLAY')
+        wayland = os.environ.get('WAYLAND_DISPLAY')
+        ssh = os.environ.get('SSH_CONNECTION')
+        return (not display and not wayland) or bool(ssh)
+
     def _start_map_server(self):
-        """Start the map HTTP server for live-updating browser access."""
+        """Start the map HTTP server for live-updating browser access.
+
+        Note: Server initialization is wrapped to suppress stdout/stderr output
+        that could interfere with the whiptail/dialog TUI.
+        """
         import socket
+        import time
 
         port = 5000
+
+        # Get all available IPs for display
+        from utils.map_data_service import get_all_ips
+        all_ips = get_all_ips()
 
         # Check if port is already in use
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex(('localhost', port))
+            result = sock.connect_ex(('127.0.0.1', port))
             sock.close()
             if result == 0:
+                urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
                 self.dialog.msgbox(
                     "Map Server",
                     f"Map server already running!\n\n"
-                    f"Open: http://localhost:{port}\n\n"
+                    f"Access via:\n{urls}\n\n"
+                    "Open any URL in your browser.\n"
                     "The map auto-refreshes every 30 seconds."
                 )
-                self._open_in_browser(f"http://localhost:{port}")
                 return
         except OSError:
             pass
 
         try:
-            from utils.map_data_service import MapServer
+            # Suppress stdout/stderr AND logging during server init to prevent
+            # TUI corruption. The meshtastic library, HTTP server, and various
+            # loggers can output during initialization.
+            import logging
+            import sys
+            from contextlib import redirect_stdout, redirect_stderr
+            from io import StringIO
 
-            server = MapServer(port=port)
-            server.start_background()
+            # Capture any output during initialization
+            captured_out = StringIO()
+            captured_err = StringIO()
 
-            self.dialog.msgbox(
-                "Map Server Started",
+            # Temporarily raise logging level to suppress all log output
+            root_logger = logging.getLogger()
+            old_level = root_logger.level
+            root_logger.setLevel(logging.CRITICAL + 1)
+
+            try:
+                with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                    from utils.map_data_service import MapServer
+
+                    server = MapServer(port=port)  # Binds to 0.0.0.0
+                    server.start_background()
+
+                    # Small delay to let server thread stabilize
+                    time.sleep(0.1)
+            finally:
+                # Restore logging level
+                root_logger.setLevel(old_level)
+
+            # Store reference to prevent garbage collection
+            self._map_server = server
+
+            urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
+            msg = (
                 f"Live map server running!\n\n"
-                f"URL: http://localhost:{port}\n\n"
+                f"Access via:\n{urls}\n\n"
+                "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n"
                 "Server runs until MeshForge exits."
             )
-            self._open_in_browser(f"http://localhost:{port}")
+            self.dialog.msgbox("Map Server Started", msg)
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to start map server: {e}")
@@ -274,10 +342,15 @@ class AIToolsMixin:
                 f"Auto-open map: {state}\n\n"
             )
             if settings["auto_open_map"]:
+                from utils.map_data_service import get_all_ips
+                ips = get_all_ips()
+                urls = ", ".join(f"http://{ip}:5000" for ip in ips[:2])
+                if len(ips) > 2:
+                    urls += ", ..."
                 msg += (
                     "The map server will start automatically\n"
-                    "when MeshForge launches, and the map will\n"
-                    "be accessible at http://localhost:5000"
+                    "when MeshForge launches.\n\n"
+                    f"Access at: {urls}"
                 )
             else:
                 msg += "Map server will not start automatically."
@@ -603,30 +676,38 @@ class AIToolsMixin:
                     return
 
             elif choice == "live":
-                # Try to get nodes from meshtasticd
-                nodes = self._get_nodes_from_meshtastic()
-                if nodes:
-                    for node in nodes:
-                        generator.add_node(node)
+                # Get nodes from meshtasticd only
+                geojson = self._get_nodes_geojson_by_source("meshtasticd")
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                    self.dialog.infobox(
+                        "Generating",
+                        f"Found {len(features)} nodes from meshtasticd..."
+                    )
                 else:
                     self.dialog.msgbox(
                         "No Nodes",
-                        "Could not get nodes from meshtasticd.\n\n"
-                        "Ensure meshtasticd is running and has nodes."
+                        "No nodes found from meshtasticd.\n\n"
+                        "Ensure meshtasticd is running and has nodes with GPS."
                     )
                     return
 
             elif choice == "mqtt":
-                # Try MQTT source
-                nodes = self._get_nodes_from_mqtt()
-                if nodes:
-                    for node in nodes:
-                        generator.add_node(node)
+                # Get nodes from MQTT cache only
+                geojson = self._get_nodes_geojson_by_source("mqtt")
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                    self.dialog.infobox(
+                        "Generating",
+                        f"Found {len(features)} nodes from MQTT..."
+                    )
                 else:
                     self.dialog.msgbox(
                         "No Nodes",
-                        "Could not get nodes from MQTT.\n\n"
-                        "Check MQTT broker connection."
+                        "No nodes found from MQTT cache.\n\n"
+                        "MQTT nodes are cached when monitoring is running."
                     )
                     return
 
@@ -674,44 +755,39 @@ class AIToolsMixin:
         except Exception as e:
             self.dialog.msgbox("Error", f"Map generation failed: {e}")
 
-    def _get_nodes_from_meshtastic(self):
-        """Get nodes from meshtasticd."""
+    def _get_nodes_geojson_by_source(self, source: str) -> dict:
+        """Get nodes from a specific source using MapDataCollector.
+
+        Args:
+            source: Source filter - "meshtasticd", "mqtt", or "rns"
+
+        Returns:
+            GeoJSON FeatureCollection filtered to the specified source.
+        """
         try:
-            from utils.coverage_map import MapNode
-            import socket
+            from utils.map_data_service import MapDataCollector
 
-            # Check if meshtasticd is running
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('localhost', 4403))
-            sock.close()
+            collector = MapDataCollector()
+            geojson = collector.collect()
 
-            if result != 0:
-                return []
+            # Filter features by source
+            filtered_features = [
+                f for f in geojson.get('features', [])
+                if f.get('properties', {}).get('source') == source
+            ]
 
-            # Try to get node list via meshtastic CLI
-            cli_path = self._get_meshtastic_cli()
-            result = subprocess.run(
-                [cli_path, '--host', 'localhost', '--info'],
-                capture_output=True, text=True, timeout=30
-            )
-
-            if result.returncode != 0:
-                return []
-
-            # Parse nodes from output (simplified)
-            nodes = []
-            # This is a simplified parser - real implementation would
-            # parse the actual meshtastic output format
-            return nodes
-
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
-            return []
-
-    def _get_nodes_from_mqtt(self):
-        """Get nodes from MQTT broker."""
-        # Placeholder - would implement MQTT node retrieval
-        return []
+            return {
+                "type": "FeatureCollection",
+                "features": filtered_features,
+                "properties": {
+                    "source": source,
+                    "count": len(filtered_features)
+                }
+            }
+        except ImportError:
+            return {"type": "FeatureCollection", "features": []}
+        except Exception:
+            return {"type": "FeatureCollection", "features": []}
 
     def _open_in_browser(self, url: str):
         """Open URL in browser (in background thread).
