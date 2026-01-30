@@ -13,12 +13,17 @@
             padding: 0;
             box-sizing: border-box;
         }
+        html, body {
+            height: auto;
+            overflow-y: auto;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a2e;
             color: #eee;
             min-height: 100vh;
             padding: 20px;
+            padding-bottom: 50px;
         }
         .container {
             max-width: 1400px;
@@ -90,6 +95,10 @@
             border-radius: 6px;
             color: #eee;
             font-size: 14px;
+        }
+        .preset-group select {
+            max-height: 300px;
+            overflow-y: auto;
         }
         .preset-group select:focus, .preset-group input:focus {
             outline: none;
