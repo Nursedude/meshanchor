@@ -94,6 +94,7 @@ from quick_actions_mixin import QuickActionsMixin
 from emergency_mode_mixin import EmergencyModeMixin
 from rns_interfaces_mixin import RNSInterfacesMixin
 from nomadnet_client_mixin import NomadNetClientMixin
+from topology_mixin import TopologyMixin
 
 
 class MeshForgeLauncher(
@@ -108,7 +109,8 @@ class MeshForgeLauncher(
     QuickActionsMixin,
     EmergencyModeMixin,
     RNSInterfacesMixin,
-    NomadNetClientMixin
+    NomadNetClientMixin,
+    TopologyMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -887,6 +889,7 @@ class MeshForgeLauncher(
             choices = [
                 ("status", "RNS Status (rnstatus)"),
                 ("paths", "RNS Path Table (rnpath)"),
+                ("topology", "Network Topology (graph view)"),
                 ("probe", "Probe Destination (rnprobe)"),
                 ("identity", "Identity Info (rnid)"),
                 ("nodes", "Known Destinations"),
@@ -920,6 +923,8 @@ class MeshForgeLauncher(
                 print("=== RNS Path Table ===\n")
                 self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                 self._wait_for_enter()
+            elif choice == "topology":
+                self._topology_menu()
             elif choice == "probe":
                 self._rns_probe_destination()
             elif choice == "identity":
