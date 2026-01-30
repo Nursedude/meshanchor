@@ -1,0 +1,830 @@
+"""
+Service Menu Mixin - Service and bridge management handlers.
+
+Extracted from main.py to reduce file size per CLAUDE.md guidelines.
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+# Import centralized path utility
+try:
+    from utils.paths import get_real_user_home
+except ImportError:
+    def get_real_user_home() -> Path:
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            return Path(f'/home/{sudo_user}')
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            return Path(f'/home/{logname}')
+        return Path('/root')
+
+
+class ServiceMenuMixin:
+    """Mixin providing service and bridge management functionality."""
+
+    def _run_bridge(self):
+        """Gateway bridge start/stop/status menu."""
+        while True:
+            # Check if bridge is already running
+            bridge_running = self._is_bridge_running()
+
+            if bridge_running:
+                choices = [
+                    ("status", "Bridge Status"),
+                    ("logs", "View Bridge Logs"),
+                    ("stop", "Stop Bridge"),
+                    ("back", "Back"),
+                ]
+                subtitle = "Gateway bridge is RUNNING (background)"
+            else:
+                choices = [
+                    ("start", "Start Bridge (background)"),
+                    ("start-fg", "Start Bridge (foreground, live logs)"),
+                    ("back", "Back"),
+                ]
+                subtitle = "Gateway bridge is STOPPED"
+
+            choice = self.dialog.menu(
+                "Gateway Bridge",
+                f"RNS <-> Meshtastic bridge:\n\n{subtitle}",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "start":
+                self._start_bridge_background()
+            elif choice == "start-fg":
+                self._start_bridge_foreground()
+            elif choice == "status":
+                self._show_bridge_status()
+            elif choice == "stop":
+                self._stop_bridge()
+            elif choice == "logs":
+                self._show_bridge_logs()
+
+    def _is_bridge_running(self) -> bool:
+        """Check if the gateway bridge process is running."""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'bridge_cli.py'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _start_bridge_background(self):
+        """Start gateway bridge as a background process."""
+        if self._is_bridge_running():
+            self.dialog.msgbox("Already Running", "Gateway bridge is already running.")
+            return
+
+        self.dialog.infobox("Starting", "Starting gateway bridge in background...")
+
+        try:
+            import tempfile
+            log_fd, log_path_str = tempfile.mkstemp(
+                suffix='.log', prefix='meshforge-gateway-'
+            )
+            log_path = Path(log_path_str)
+            self._bridge_log_path = log_path
+            log_file = os.fdopen(log_fd, 'w')
+            subprocess.Popen(
+                [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True
+            )
+            log_file.close()
+
+            # Wait briefly and verify it started
+            import time
+            time.sleep(3)
+
+            if self._is_bridge_running():
+                self.dialog.msgbox("Started",
+                    "Gateway bridge started in background.\n\n"
+                    f"Logs: {log_path}\n\n"
+                    "Use 'Stop Bridge' to shut it down.")
+            else:
+                # Read log for error info
+                try:
+                    error_text = log_path.read_text()[-300:]
+                except Exception:
+                    error_text = "(no log output)"
+                self.dialog.msgbox("Failed",
+                    f"Bridge failed to start.\n\n{error_text}")
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to start bridge:\n{e}")
+
+    def _start_bridge_foreground(self):
+        """Start gateway bridge in foreground with live output."""
+        if self._is_bridge_running():
+            self.dialog.msgbox("Already Running",
+                "Gateway bridge is already running in background.\n\n"
+                "Stop it first to run in foreground.")
+            return
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("Starting Gateway Bridge (foreground)...")
+        print("Press Ctrl+C to stop\n")
+        try:
+            subprocess.run(
+                [sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')],
+                timeout=None
+            )
+        except KeyboardInterrupt:
+            print("\nBridge stopped.")
+        try:
+            self._wait_for_enter()
+        except KeyboardInterrupt:
+            print()
+
+    def _stop_bridge(self):
+        """Stop the background gateway bridge."""
+        if not self._is_bridge_running():
+            self.dialog.msgbox("Not Running", "Gateway bridge is not running.")
+            return
+
+        if not self.dialog.yesno("Stop Bridge", "Stop the gateway bridge?"):
+            return
+
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'bridge_cli.py'],
+                capture_output=True, timeout=10
+            )
+            import time
+            time.sleep(1)
+
+            if self._is_bridge_running():
+                # Force kill
+                subprocess.run(
+                    ['pkill', '-9', '-f', 'bridge_cli.py'],
+                    capture_output=True, timeout=10
+                )
+
+            self.dialog.msgbox("Stopped", "Gateway bridge stopped.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to stop bridge:\n{e}")
+
+    def _find_bridge_log(self) -> Optional[Path]:
+        """Find the gateway bridge log file.
+
+        Checks the stored path from the current session first, then searches
+        /tmp for the most recent meshforge-gateway-*.log file.
+        """
+        if self._bridge_log_path and self._bridge_log_path.exists():
+            return self._bridge_log_path
+
+        # Search for most recent gateway log in /tmp
+        try:
+            logs = sorted(
+                Path('/tmp').glob('meshforge-gateway-*.log'),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+        except OSError:
+            logs = []
+        if logs:
+            self._bridge_log_path = logs[0]
+            return logs[0]
+
+        return None
+
+    def _show_bridge_status(self):
+        """Show gateway bridge log tail."""
+        log_path = self._find_bridge_log()
+        if not log_path:
+            self.dialog.msgbox("No Logs", "No gateway log found.")
+            return
+
+        try:
+            lines = log_path.read_text().strip().split('\n')
+            # Show last 30 lines
+            tail = '\n'.join(lines[-30:])
+            self.dialog.msgbox(f"Bridge Status (last 30 lines)\n{log_path}", tail)
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to read log:\n{e}")
+
+    def _show_bridge_logs(self):
+        """Show full gateway bridge logs in less."""
+        log_path = self._find_bridge_log()
+        if not log_path:
+            self.dialog.msgbox("No Logs", "No gateway log found.")
+            return
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        try:
+            subprocess.run(['less', '-R', '-X', '+G', str(log_path)], timeout=300)
+        except KeyboardInterrupt:
+            pass
+
+    def _service_menu(self):
+        """Service management menu - terminal-native."""
+        while True:
+            choices = [
+                ("status", "Service Status (all)"),
+                ("meshtasticd", "Manage meshtasticd"),
+                ("rnsd", "Manage rnsd"),
+                ("restart-mesh", "Restart meshtasticd"),
+                ("start-rns", "Start rnsd"),
+                ("restart-rns", "Restart rnsd"),
+                ("install", "Install meshtasticd"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Service Management",
+                "Start/stop/restart services:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Service Status ===\n")
+                warnings = []
+                use_direct_rnsd = not self._has_systemd_unit('rnsd')
+
+                for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+                    # Special handling for rnsd without systemd unit
+                    if svc == 'rnsd' and use_direct_rnsd:
+                        if self._is_rnsd_running():
+                            print(f"  \033[0;32m●\033[0m {svc:<18} running (process)")
+                        else:
+                            print(f"  \033[2m○\033[0m {svc:<18} stopped")
+                        continue
+
+                    try:
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', svc],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        status = result.stdout.strip()
+
+                        # Check boot persistence
+                        boot_info = ""
+                        try:
+                            enabled_result = subprocess.run(
+                                ['systemctl', 'is-enabled', svc],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            is_enabled = enabled_result.returncode == 0
+                            if status == 'active' and not is_enabled:
+                                boot_info = "  (not enabled at boot)"
+                                warnings.append(svc)
+                        except Exception:
+                            pass
+
+                        if status == 'active':
+                            print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
+                        elif status == 'failed':
+                            print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
+                        else:
+                            print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                    except Exception:
+                        print(f"  ? {svc:<18} unknown")
+                print()
+
+                # Surface actionable warning
+                if warnings:
+                    print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
+                    print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
+
+                # Show failed service logs (only for systemd services)
+                for svc in ['meshtasticd']:
+                    try:
+                        r = subprocess.run(['systemctl', 'is-active', svc],
+                                           capture_output=True, text=True, timeout=5)
+                        if r.stdout.strip() == 'failed':
+                            print(f"\033[0;31m{svc} failure:\033[0m")
+                            subprocess.run(
+                                ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
+                                timeout=10
+                            )
+                            print()
+                    except Exception:
+                        pass
+
+                # Show rnsd failure logs if systemd-managed and failed
+                if not use_direct_rnsd:
+                    try:
+                        r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                           capture_output=True, text=True, timeout=5)
+                        if r.stdout.strip() == 'failed':
+                            print(f"\033[0;31mrnsd failure:\033[0m")
+                            subprocess.run(
+                                ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],
+                                timeout=10
+                            )
+                            print()
+                    except Exception:
+                        pass
+                self._wait_for_enter()
+            elif choice == "restart-mesh":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Restarting meshtasticd...\n")
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
+                subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
+                self._wait_for_enter()
+            elif choice == "start-rns":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Starting rnsd...\n")
+                # Use direct process control if no systemd unit
+                if not self._has_systemd_unit('rnsd'):
+                    self._start_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'start', 'rnsd'], timeout=30)
+                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                self._wait_for_enter()
+            elif choice == "restart-rns":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Restarting rnsd...\n")
+                # Use direct process control if no systemd unit
+                if not self._has_systemd_unit('rnsd'):
+                    self._stop_rnsd_direct()
+                    import time
+                    time.sleep(0.5)
+                    self._start_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
+                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                self._wait_for_enter()
+            elif choice == "install":
+                self._install_native_meshtasticd()
+            else:
+                self._manage_service(choice)
+
+    def _fix_spi_config(self, has_native: bool = False):
+        """Quick fix for SPI HAT with wrong USB config."""
+        self.dialog.infobox("Fixing", "Removing wrong USB configuration...")
+
+        try:
+            config_dir = Path('/etc/meshtasticd')
+
+            # Remove wrong USB config from config.d
+            usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
+            if usb_config.exists():
+                usb_config.unlink()
+                self.dialog.infobox("Fixing", "Removed usb-serial.yaml from config.d/")
+
+            # Check if config.yaml exists and is valid (has Webserver section)
+            config_yaml = config_dir / 'config.yaml'
+            needs_config = False
+            if not config_yaml.exists():
+                needs_config = True
+            elif not config_yaml.read_text().strip():
+                needs_config = True
+            elif 'Webserver:' not in config_yaml.read_text():
+                # Config exists but missing Webserver - probably corrupted
+                self.dialog.msgbox(
+                    "Config Warning",
+                    f"Your config.yaml may be corrupted:\n{config_yaml}\n\n"
+                    "It's missing the Webserver section.\n"
+                    "Check: cat /etc/meshtasticd/config.yaml"
+                )
+
+            # Only create config.yaml if it doesn't exist or is empty
+            if needs_config:
+                config_yaml.write_text("""---
+Lora:
+  Module: auto
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 200
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+""")
+                self.dialog.infobox("Fixing", "Created minimal config.yaml")
+
+            # NOTE: We do NOT create HAT templates - meshtasticd provides them
+            # User should select from /etc/meshtasticd/available.d/
+
+            if not has_native:
+                # Offer to install native meshtasticd
+                if self.dialog.yesno(
+                    "Install Native Daemon?",
+                    "SPI HATs require the native meshtasticd daemon.\n\n"
+                    "Would you like to install it now?\n\n"
+                    "(This requires internet connection)"
+                ):
+                    self._install_native_meshtasticd()
+                else:
+                    self.dialog.msgbox(
+                        "Config Fixed",
+                        "Wrong USB config removed.\n\n"
+                        "To complete setup, install native meshtasticd:\n"
+                        "  sudo apt install meshtasticd\n\n"
+                        "Or run: sudo bash scripts/install_noc.sh --force-native"
+                    )
+            else:
+                # Native daemon exists - restart service
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+                self.dialog.msgbox(
+                    "Config Fixed",
+                    "Configuration corrected!\n\n"
+                    "- Removed wrong USB config\n"
+                    "- Restarted meshtasticd service\n\n"
+                    "Check status: sudo systemctl status meshtasticd"
+                )
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Fix failed:\n{e}")
+
+    def _install_native_meshtasticd(self):
+        """Install native meshtasticd for SPI HAT."""
+        self.dialog.infobox("Installing", "Installing native meshtasticd...")
+
+        try:
+            # Check if already installed
+            result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                # Not installed - try to install
+                self.dialog.infobox("Installing", "Adding Meshtastic repository...")
+
+                # Detect OS for correct repo (matching install_noc.sh logic)
+                os_repo = "Raspbian_12"  # Default for Pi
+                if Path('/etc/os-release').exists():
+                    os_info = {}
+                    with open('/etc/os-release') as f:
+                        for line in f:
+                            if '=' in line:
+                                key, val = line.strip().split('=', 1)
+                                os_info[key] = val.strip('"')
+
+                    os_id = os_info.get('ID', '')
+                    version_id = os_info.get('VERSION_ID', '')
+
+                    if os_id == 'raspbian':
+                        os_repo = f"Raspbian_{version_id.split('.')[0]}" if version_id else "Raspbian_12"
+                    elif os_id == 'debian':
+                        os_repo = f"Debian_{version_id.split('.')[0]}" if version_id else "Debian_12"
+                    elif os_id == 'ubuntu':
+                        os_repo = f"xUbuntu_{version_id}" if version_id else "xUbuntu_24.04"
+
+                repo_url = f"https://download.opensuse.org/repositories/network:/Meshtastic:/beta/{os_repo}/"
+
+                # Add repo
+                subprocess.run(
+                    ['tee', '/etc/apt/sources.list.d/meshtastic.list'],
+                    input=f"deb {repo_url} /\n",
+                    text=True, timeout=30, check=False
+                )
+
+                # Download and install GPG key (no shell=True / bash -c)
+                key_result = subprocess.run(
+                    ['curl', '-fsSL', f'{repo_url}Release.key'],
+                    capture_output=True, timeout=30, check=False
+                )
+                if key_result.returncode == 0:
+                    subprocess.run(
+                        ['gpg', '--dearmor', '-o', '/etc/apt/trusted.gpg.d/meshtastic.gpg'],
+                        input=key_result.stdout, timeout=30, check=False
+                    )
+
+                self.dialog.infobox("Installing", "Updating package list...")
+                subprocess.run(['apt-get', 'update'], timeout=120, check=False)
+
+                self.dialog.infobox("Installing", "Installing meshtasticd...")
+                result = subprocess.run(['apt-get', 'install', '-y', 'meshtasticd'], timeout=300, capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    self.dialog.msgbox("Error", f"Failed to install meshtasticd:\n{result.stderr[:500]}")
+                    return
+
+            # Find actual meshtasticd binary path
+            result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
+            meshtasticd_bin = result.stdout.strip() if result.returncode == 0 else '/usr/bin/meshtasticd'
+
+            # Ensure config directories exist (meshtasticd package should create these)
+            config_dir = Path('/etc/meshtasticd')
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / 'available.d').mkdir(exist_ok=True)
+            (config_dir / 'config.d').mkdir(exist_ok=True)
+            (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
+
+            # Check if meshtasticd installed a valid config.yaml
+            # Only create one if missing or empty - NEVER overwrite
+            config_yaml = config_dir / 'config.yaml'
+            if config_yaml.exists() and 'Webserver:' in config_yaml.read_text():
+                self.dialog.infobox("Installing", "Using existing config.yaml from meshtasticd package")
+            elif not config_yaml.exists() or not config_yaml.read_text().strip():
+                # No config or empty - create minimal one
+                config_yaml.write_text("""---
+Lora:
+  Module: auto
+
+Logging:
+  LogLevel: info
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+General:
+  MaxNodes: 200
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/
+""")
+                self.dialog.infobox("Installing", "Created minimal config.yaml")
+
+            # NOTE: We do NOT create HAT templates - meshtasticd package provides them
+            # User selects their HAT from /etc/meshtasticd/available.d/ via Hardware Config menu
+
+            # Remove wrong USB config if present
+            usb_config = config_dir / 'config.d' / 'usb-serial.yaml'
+            if usb_config.exists():
+                usb_config.unlink()
+                self.dialog.infobox("Installing", "Removed incorrect USB config")
+
+            # Create service file
+            service_content = f"""[Unit]
+Description=Meshtastic Daemon (Native SPI)
+Documentation=https://meshtastic.org
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/meshtasticd
+ExecStart={meshtasticd_bin} -c /etc/meshtasticd/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+            Path('/etc/systemd/system/meshtasticd.service').write_text(service_content)
+
+            # Reload and enable
+            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'enable', 'meshtasticd'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+            self.dialog.msgbox(
+                "Success",
+                "Native meshtasticd installed!\n\n"
+                "NEXT STEP: Select your HAT config:\n"
+                "  meshtasticd → Hardware Config\n\n"
+                "Or manually:\n"
+                "  ls /etc/meshtasticd/available.d/\n"
+                "  sudo cp /etc/meshtasticd/available.d/<your-hat>.yaml \\\n"
+                "         /etc/meshtasticd/config.d/\n"
+                "  sudo systemctl restart meshtasticd"
+            )
+
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Installation failed:\n{e}")
+
+    def _manage_service(self, service_name: str):
+        """Manage a specific service."""
+        choices = [
+            ("status", "Check Status"),
+            ("start", "Start Service"),
+            ("stop", "Stop Service"),
+            ("restart", "Restart Service"),
+            ("logs", "View Logs"),
+            ("back", "Back"),
+        ]
+
+        while True:
+            choice = self.dialog.menu(
+                f"Manage {service_name}",
+                f"Select action for {service_name}:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            self._service_action(service_name, choice)
+
+    def _has_systemd_unit(self, service_name: str) -> bool:
+        """Check if a service has a systemd unit file."""
+        try:
+            result = subprocess.run(
+                ['systemctl', 'cat', service_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _is_rnsd_running(self) -> bool:
+        """Check if rnsd is running as a process."""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-x', 'rnsd'],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _start_rnsd_direct(self) -> bool:
+        """Start rnsd directly as a background process.
+
+        Returns True if started successfully.
+        """
+        # Check if already running
+        if self._is_rnsd_running():
+            print("rnsd is already running.")
+            return True
+
+        # Check if rnsd binary exists
+        rnsd_path = shutil.which('rnsd')
+        if not rnsd_path:
+            print("\033[0;31mError:\033[0m rnsd not found in PATH.")
+            print("Install Reticulum: pip install rns")
+            return False
+
+        try:
+            # Start rnsd as a background daemon
+            # rnsd itself daemonizes when run without -f flag
+            print("Starting rnsd daemon...")
+            result = subprocess.run(
+                ['rnsd'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            # rnsd daemonizes and returns quickly
+            # Check if it actually started
+            import time
+            time.sleep(0.5)
+            if self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd started successfully.")
+                return True
+            else:
+                print(f"\033[0;31mError:\033[0m rnsd failed to start.")
+                if result.stderr:
+                    print(result.stderr)
+                return False
+        except subprocess.TimeoutExpired:
+            # If it times out, check if running anyway (daemon fork)
+            if self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd started successfully.")
+                return True
+            print("\033[0;31mError:\033[0m rnsd start timed out.")
+            return False
+        except Exception as e:
+            print(f"\033[0;31mError:\033[0m Failed to start rnsd: {e}")
+            return False
+
+    def _stop_rnsd_direct(self) -> bool:
+        """Stop rnsd process directly.
+
+        Returns True if stopped successfully.
+        """
+        if not self._is_rnsd_running():
+            print("rnsd is not running.")
+            return True
+
+        try:
+            print("Stopping rnsd...")
+            # Use pkill to stop rnsd gracefully
+            result = subprocess.run(
+                ['pkill', '-TERM', '-x', 'rnsd'],
+                capture_output=True,
+                timeout=10
+            )
+            import time
+            time.sleep(0.5)
+            if not self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd stopped.")
+                return True
+            # If still running, try SIGKILL
+            subprocess.run(['pkill', '-KILL', '-x', 'rnsd'], timeout=5)
+            time.sleep(0.3)
+            if not self._is_rnsd_running():
+                print("\033[0;32m✓\033[0m rnsd stopped (forced).")
+                return True
+            print("\033[0;31mError:\033[0m Could not stop rnsd.")
+            return False
+        except Exception as e:
+            print(f"\033[0;31mError:\033[0m Failed to stop rnsd: {e}")
+            return False
+
+    def _service_action(self, service_name: str, action: str):
+        """Perform service action using systemctl or direct process control.
+
+        For rnsd: Uses direct process control if no systemd unit exists.
+        For other services: Uses systemctl.
+        """
+        subprocess.run(['clear'], check=False, timeout=5)
+
+        # Check if rnsd needs direct process handling
+        use_direct_rnsd = (service_name == 'rnsd' and
+                          not self._has_systemd_unit('rnsd'))
+
+        if action == "status":
+            print(f"=== {service_name} status ===\n")
+            if use_direct_rnsd:
+                # Show process status for rnsd
+                if self._is_rnsd_running():
+                    print(f"\033[0;32m●\033[0m rnsd is \033[0;32mrunning\033[0m")
+                    # Show process info
+                    try:
+                        subprocess.run(
+                            ['pgrep', '-a', '-x', 'rnsd'],
+                            timeout=5
+                        )
+                    except Exception:
+                        pass
+                else:
+                    print(f"\033[0;31m○\033[0m rnsd is \033[0;31mnot running\033[0m")
+                    print("\nTo start: Select 'Start Service' from the menu")
+            else:
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
+            self._wait_for_enter()
+
+        elif action == "start":
+            print(f"Starting {service_name}...\n")
+            if use_direct_rnsd:
+                self._start_rnsd_direct()
+            else:
+                subprocess.run(['systemctl', 'start', service_name], timeout=30)
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
+            self._wait_for_enter()
+
+        elif action == "stop":
+            if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
+                subprocess.run(['clear'], check=False, timeout=5)
+                print(f"Stopping {service_name}...\n")
+                if use_direct_rnsd:
+                    self._stop_rnsd_direct()
+                else:
+                    subprocess.run(['systemctl', 'stop', service_name], timeout=30)
+                    print(f"{service_name} stopped.")
+                self._wait_for_enter()
+
+        elif action == "restart":
+            print(f"Restarting {service_name}...\n")
+            if use_direct_rnsd:
+                self._stop_rnsd_direct()
+                import time
+                time.sleep(0.5)
+                self._start_rnsd_direct()
+            else:
+                subprocess.run(['systemctl', 'restart', service_name], timeout=30)
+                subprocess.run(
+                    ['systemctl', 'status', service_name, '--no-pager', '-l'],
+                    timeout=10
+                )
+            self._wait_for_enter()
+
+        elif action == "logs":
+            print(f"=== {service_name} logs (last 30) ===\n")
+            if use_direct_rnsd:
+                # rnsd logs go to ~/.reticulum/logfile by default
+                try:
+                    log_path = get_real_user_home() / '.reticulum' / 'logfile'
+                    if log_path.exists():
+                        print(f"Log file: {log_path}\n")
+                        subprocess.run(
+                            ['tail', '-n', '30', str(log_path)],
+                            timeout=10
+                        )
+                    else:
+                        print("No log file found at ~/.reticulum/logfile")
+                        print("rnsd may log to stdout or syslog depending on config.")
+                except Exception as e:
+                    print(f"Could not read logs: {e}")
+            else:
+                subprocess.run(
+                    ['journalctl', '-u', service_name, '-n', '30', '--no-pager'],
+                    timeout=15
+                )
+            self._wait_for_enter()
