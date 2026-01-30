@@ -44,6 +44,7 @@
 
 | Document | Description |
 |----------|-------------|
+| `tui_menu_redesign.md` | **TUI menu redesign - UI/UX research & implementation plan** |
 | `uconsole_portable_noc.md` | uConsole portable NOC design |
 | `event_driven_patterns.md` | Event-driven architecture patterns |
 | `meshforge_native_meshtastic.md` | Native Meshtastic protocol research |
