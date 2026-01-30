@@ -694,26 +694,46 @@ class MeshForgeLauncher(
         try:
             from utils.topology_visualizer import TopologyVisualizer
 
-            viz = TopologyVisualizer()
-            # TODO: Populate with actual data
-            output_dir = get_real_user_home() / ".config" / "meshforge" / "exports"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            # Get topology from TopologyMixin (properly populated)
+            topology = self._get_topology()
+            if topology is None:
+                self.dialog.msgbox(
+                    "Export Unavailable",
+                    "Network topology not loaded.\n\n"
+                    "The gateway service may need to be running."
+                )
+                return
+
+            # Create visualizer from actual topology data
+            viz = TopologyVisualizer.from_topology(topology)
 
             if format_type == "geojson":
-                path = output_dir / "topology.geojson"
-                viz.export_geojson(str(path))
+                path, count = viz.export_geojson()
+                self.dialog.msgbox(
+                    "GeoJSON Export",
+                    f"Exported {count} features.\n\nFile: {path}"
+                )
             elif format_type == "csv":
-                path = output_dir / "topology.csv"
-                viz.export_csv(str(path))
+                nodes_path, edges_path = viz.export_csv()
+                self.dialog.msgbox(
+                    "CSV Export",
+                    f"Exported CSV files:\n\nNodes: {nodes_path}\nEdges: {edges_path}"
+                )
             elif format_type == "graphml":
-                path = output_dir / "topology.graphml"
-                viz.export_graphml(str(path))
+                path, count = viz.export_graphml()
+                self.dialog.msgbox(
+                    "GraphML Export",
+                    f"Exported {count} edges.\n\nFile: {path}"
+                )
             elif format_type == "d3":
-                path = output_dir / "topology.json"
-                viz.export_d3_json(str(path))
+                path, count = viz.export_d3_json()
+                self.dialog.msgbox(
+                    "D3.js Export",
+                    f"Exported {count} nodes + links.\n\nFile: {path}"
+                )
 
-            self.dialog.msgbox("Export Complete", f"Exported to:\n{path}")
-
+        except ImportError:
+            self.dialog.msgbox("Export Failed", "Topology visualizer module not available.")
         except Exception as e:
             self.dialog.msgbox("Export Failed", f"Error: {e}")
 
