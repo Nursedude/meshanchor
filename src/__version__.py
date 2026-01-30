@@ -3,21 +3,21 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.4.8-beta"
-__version_info__ = (0, 4, 8, 'beta')
+__version__ = "0.4.8-alpha"
+__version_info__ = (0, 4, 8, 'alpha')
 __release_date__ = "2026-01-30"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
 __target_audience__ = "RF engineers, network operators, and amateur radio operators"
-__status__ = "beta"  # alpha=experimental, beta=testing, stable=production
+__status__ = "alpha"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
     {
-        "version": "0.4.8-beta",
+        "version": "0.4.8-alpha",
         "date": "2026-01-30",
-        "status": "beta",
+        "status": "alpha",
         "changes": [
             "FIX: TUI crash when launching map server (stdout/stderr suppression)",
             "FIX: SQLite 'readonly database' errors (permission fix documented)",
