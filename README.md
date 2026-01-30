@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.7--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.8--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2624%20passing-brightgreen.svg" alt="Tests"></a>
@@ -201,7 +201,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.4.7-beta)
+## What Works (v0.4.8-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
@@ -559,7 +559,7 @@ cd /opt/meshforge && sudo git pull origin main
 cd /opt/meshforge && sudo git pull origin alpha
 ```
 
-### Current Alpha Features (v0.4.7-beta)
+### Current Alpha Features (v0.4.8-beta)
 
 The Live Map system provides a browser-based NOC view:
 
