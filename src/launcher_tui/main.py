@@ -117,6 +117,7 @@ from service_menu_mixin import ServiceMenuMixin
 from hardware_menu_mixin import HardwareMenuMixin
 from settings_menu_mixin import SettingsMenuMixin
 from logs_menu_mixin import LogsMenuMixin
+from device_backup_mixin import DeviceBackupMixin
 
 
 class MeshForgeLauncher(
@@ -142,7 +143,8 @@ class MeshForgeLauncher(
     ServiceMenuMixin,
     HardwareMenuMixin,
     SettingsMenuMixin,
-    LogsMenuMixin
+    LogsMenuMixin,
+    DeviceBackupMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -749,6 +751,7 @@ class MeshForgeLauncher(
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
                 ("services", "Service Config      systemd services"),
+                ("backup", "Device Backup       Backup/restore configs"),
                 ("meshforge", "MeshForge Settings  App preferences"),
                 ("wizard", "Setup Wizard        First-run wizard"),
                 ("back", "Back"),
@@ -771,6 +774,8 @@ class MeshForgeLauncher(
                 self._edit_rns_config()
             elif choice == "services":
                 self._service_menu()
+            elif choice == "backup":
+                self._device_backup_menu()
             elif choice == "meshforge":
                 self._settings_menu()
             elif choice == "wizard":
