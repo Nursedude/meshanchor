@@ -32,6 +32,59 @@
             color: #888;
             margin-bottom: 20px;
         }
+        /* Preset selector */
+        .preset-section {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .preset-section h3 {
+            color: #4fc3f7;
+            margin-bottom: 15px;
+        }
+        .preset-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+        .preset-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        .preset-group label {
+            display: block;
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .preset-group select, .preset-group input {
+            width: 100%;
+            padding: 10px;
+            background: #0f1624;
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
+            color: #eee;
+            font-size: 14px;
+        }
+        .preset-group select:focus, .preset-group input:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+        .btn-calculate {
+            background: #4fc3f7;
+            color: #000;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-calculate:hover {
+            background: #81d4fa;
+        }
         .chart-container {
             background: #16213e;
             border-radius: 12px;
@@ -117,7 +170,95 @@
         <h1>RF Line of Sight Analysis</h1>
         <p class="subtitle">MeshForge RF Path Visualization</p>
 
-        <div id="loading" class="loading">Loading elevation data...</div>
+        <!-- Preset Selector -->
+        <div class="preset-section">
+            <h3>Location Presets</h3>
+            <div class="preset-row">
+                <div class="preset-group">
+                    <label>Point A (From)</label>
+                    <select id="presetA" onchange="loadPreset('A')">
+                        <option value="">-- Select Location --</option>
+                        <optgroup label="Hawaii - Big Island">
+                            <option value="hilo">Hilo</option>
+                            <option value="volcano">Volcano (Kilauea)</option>
+                            <option value="kona">Kona</option>
+                            <option value="mauna_kea">Mauna Kea Summit</option>
+                            <option value="mauna_loa">Mauna Loa Observatory</option>
+                            <option value="waimea">Waimea/Kamuela</option>
+                            <option value="pahoa">Pahoa</option>
+                            <option value="ocean_view">Ocean View</option>
+                        </optgroup>
+                        <optgroup label="Hawaii - Oahu">
+                            <option value="honolulu">Honolulu</option>
+                            <option value="pearl_harbor">Pearl Harbor</option>
+                            <option value="north_shore">North Shore</option>
+                            <option value="diamond_head">Diamond Head</option>
+                        </optgroup>
+                        <optgroup label="Hawaii - Other Islands">
+                            <option value="maui_haleakala">Maui - Haleakala</option>
+                            <option value="maui_lahaina">Maui - Lahaina</option>
+                            <option value="kauai_lihue">Kauai - Lihue</option>
+                        </optgroup>
+                        <optgroup label="US Mainland">
+                            <option value="sf_twin_peaks">San Francisco - Twin Peaks</option>
+                            <option value="la_griffith">Los Angeles - Griffith Observatory</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="preset-group">
+                    <label>Point B (To)</label>
+                    <select id="presetB" onchange="loadPreset('B')">
+                        <option value="">-- Select Location --</option>
+                        <optgroup label="Hawaii - Big Island">
+                            <option value="hilo">Hilo</option>
+                            <option value="volcano">Volcano (Kilauea)</option>
+                            <option value="kona">Kona</option>
+                            <option value="mauna_kea">Mauna Kea Summit</option>
+                            <option value="mauna_loa">Mauna Loa Observatory</option>
+                            <option value="waimea">Waimea/Kamuela</option>
+                            <option value="pahoa">Pahoa</option>
+                            <option value="ocean_view">Ocean View</option>
+                        </optgroup>
+                        <optgroup label="Hawaii - Oahu">
+                            <option value="honolulu">Honolulu</option>
+                            <option value="pearl_harbor">Pearl Harbor</option>
+                            <option value="north_shore">North Shore</option>
+                            <option value="diamond_head">Diamond Head</option>
+                        </optgroup>
+                        <optgroup label="Hawaii - Other Islands">
+                            <option value="maui_haleakala">Maui - Haleakala</option>
+                            <option value="maui_lahaina">Maui - Lahaina</option>
+                            <option value="kauai_lihue">Kauai - Lihue</option>
+                        </optgroup>
+                        <optgroup label="US Mainland">
+                            <option value="sf_twin_peaks">San Francisco - Twin Peaks</option>
+                            <option value="la_griffith">Los Angeles - Griffith Observatory</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="preset-group" style="flex: 0.5;">
+                    <label>Antenna A (m)</label>
+                    <input type="number" id="heightA" value="10" min="1" max="100">
+                </div>
+                <div class="preset-group" style="flex: 0.5;">
+                    <label>Antenna B (m)</label>
+                    <input type="number" id="heightB" value="10" min="1" max="100">
+                </div>
+                <div class="preset-group" style="flex: 0.5;">
+                    <label>Frequency (MHz)</label>
+                    <input type="number" id="freqInput" value="915" min="100" max="10000">
+                </div>
+                <div class="preset-group" style="flex: 0;">
+                    <label>&nbsp;</label>
+                    <button class="btn-calculate" onclick="calculateFromInputs()">Calculate</button>
+                </div>
+            </div>
+            <div style="margin-top: 10px; color: #666; font-size: 12px;">
+                Or use URL parameters: <code>?latA=19.72&lonA=-155.08&latB=19.82&lonB=-155.47&heightA=10&heightB=10&freq=915</code>
+            </div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">Loading elevation data...</div>
 
         <div id="content" style="display: none;">
             <div class="coordinates">
@@ -185,6 +326,79 @@
     </div>
 
     <script>
+        // Hawaii and other location presets
+        const LOCATION_PRESETS = {
+            // Big Island
+            hilo: { name: 'Hilo', lat: 19.7297, lon: -155.0900, elev: 12 },
+            volcano: { name: 'Volcano (Kilauea)', lat: 19.4194, lon: -155.2878, elev: 1222 },
+            kona: { name: 'Kona', lat: 19.6400, lon: -155.9969, elev: 15 },
+            mauna_kea: { name: 'Mauna Kea Summit', lat: 19.8207, lon: -155.4681, elev: 4207 },
+            mauna_loa: { name: 'Mauna Loa Observatory', lat: 19.5362, lon: -155.5763, elev: 3397 },
+            waimea: { name: 'Waimea/Kamuela', lat: 20.0231, lon: -155.6728, elev: 807 },
+            pahoa: { name: 'Pahoa', lat: 19.4961, lon: -154.9461, elev: 183 },
+            ocean_view: { name: 'Ocean View', lat: 19.1167, lon: -155.7650, elev: 549 },
+            // Oahu
+            honolulu: { name: 'Honolulu', lat: 21.3069, lon: -157.8583, elev: 5 },
+            pearl_harbor: { name: 'Pearl Harbor', lat: 21.3650, lon: -157.9500, elev: 3 },
+            north_shore: { name: 'North Shore (Haleiwa)', lat: 21.5936, lon: -158.1031, elev: 8 },
+            diamond_head: { name: 'Diamond Head', lat: 21.2614, lon: -157.8056, elev: 232 },
+            // Other islands
+            maui_haleakala: { name: 'Haleakala Summit', lat: 20.7097, lon: -156.2533, elev: 3055 },
+            maui_lahaina: { name: 'Lahaina', lat: 20.8783, lon: -156.6825, elev: 5 },
+            kauai_lihue: { name: 'Lihue', lat: 21.9811, lon: -159.3711, elev: 31 },
+            // US Mainland
+            sf_twin_peaks: { name: 'SF Twin Peaks', lat: 37.7544, lon: -122.4477, elev: 282 },
+            la_griffith: { name: 'Griffith Observatory', lat: 34.1184, lon: -118.3004, elev: 346 },
+        };
+
+        // Store selected coordinates
+        let selectedA = null;
+        let selectedB = null;
+
+        // Load preset into point A or B
+        function loadPreset(point) {
+            const select = document.getElementById('preset' + point);
+            const presetKey = select.value;
+            if (!presetKey) return;
+
+            const preset = LOCATION_PRESETS[presetKey];
+            if (!preset) return;
+
+            if (point === 'A') {
+                selectedA = preset;
+            } else {
+                selectedB = preset;
+            }
+        }
+
+        // Calculate from input selections
+        function calculateFromInputs() {
+            if (!selectedA || !selectedB) {
+                alert('Please select both Point A and Point B locations');
+                return;
+            }
+
+            const heightA = parseFloat(document.getElementById('heightA').value) || 10;
+            const heightB = parseFloat(document.getElementById('heightB').value) || 10;
+            const freq = parseFloat(document.getElementById('freqInput').value) || 915;
+
+            // Update URL and recalculate
+            const url = new URL(window.location);
+            url.searchParams.set('latA', selectedA.lat);
+            url.searchParams.set('lonA', selectedA.lon);
+            url.searchParams.set('latB', selectedB.lat);
+            url.searchParams.set('lonB', selectedB.lon);
+            url.searchParams.set('heightA', heightA);
+            url.searchParams.set('heightB', heightB);
+            url.searchParams.set('freq', freq);
+            window.history.pushState({}, '', url);
+
+            // Show loading and recalculate
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+            visualize();
+        }
+
         // Parse URL parameters
         function getParams() {
             const params = new URLSearchParams(window.location.search);
@@ -193,8 +407,8 @@
                 lonA: parseFloat(params.get('lonA')) || 0,
                 latB: parseFloat(params.get('latB')) || 0,
                 lonB: parseFloat(params.get('lonB')) || 0,
-                heightA: parseFloat(params.get('heightA')) || 2,
-                heightB: parseFloat(params.get('heightB')) || 2,
+                heightA: parseFloat(params.get('heightA')) || 10,
+                heightB: parseFloat(params.get('heightB')) || 10,
                 freq: parseFloat(params.get('freq')) || 915,
                 // Pre-calculated data can be passed as JSON
                 data: params.get('data') ? JSON.parse(decodeURIComponent(params.get('data'))) : null
@@ -261,11 +475,13 @@
             const params = getParams();
 
             if (!params.latA || !params.lonA || !params.latB || !params.lonB) {
-                document.getElementById('loading').innerHTML =
-                    '<h2>No coordinates provided</h2>' +
-                    '<p>Use URL parameters: ?latA=...&lonA=...&latB=...&lonB=...</p>';
+                // No URL params - show preset selector, hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'none';
                 return;
             }
+
+            document.getElementById('loading').style.display = 'block';
 
             const distance = haversineDistance(params.latA, params.lonA, params.latB, params.lonB);
             const distanceKm = distance / 1000;
