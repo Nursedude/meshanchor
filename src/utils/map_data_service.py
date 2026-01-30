@@ -1344,8 +1344,12 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
     def log_message(self, format, *args):
-        """Suppress default request logging (too noisy)."""
-        logger.debug(f"MapServer: {args[0]}")
+        """Suppress ALL request logging to prevent TUI corruption.
+
+        The HTTP server runs in a background thread and logging to
+        stdout/stderr can corrupt the whiptail/dialog TUI display.
+        """
+        pass  # Complete silence - no logging at all
 
 
 class MapServer:
