@@ -427,13 +427,9 @@ class MapDataCollector:
         device_metrics = data.get('deviceMetrics', {})
 
         # Determine online status from lastHeard (configurable threshold)
-        # Default to online if node exists in nodedb but has no lastHeard
+        # Default to online if node exists in nodedb (matches other mesh maps)
         last_heard = data.get('lastHeard', 0)
-        if last_heard:
-            is_online = (now - last_heard) < online_threshold_seconds
-        else:
-            # Node exists in nodedb - assume online (meshtasticd tracks it)
-            is_online = True
+        is_online = True  # Node exists in nodedb = online
 
         # Format last_seen as human-readable
         if last_heard:
@@ -493,12 +489,9 @@ class MapDataCollector:
         else:
             formatted_id = str(node_id)
 
-        # Determine online status - default to online if in nodedb
+        # All nodes in nodedb are considered online (matches other mesh maps)
         last_heard = data.get('lastHeard', 0)
-        if last_heard:
-            is_online = (now - last_heard) < online_threshold_seconds
-        else:
-            is_online = True  # Node exists in nodedb
+        is_online = True
 
         # Format last_seen
         if last_heard:
