@@ -73,6 +73,117 @@ python3 src/standalone.py
 
 ---
 
+## Upgrading MeshForge
+
+### Before You Upgrade
+
+**1. Check your current version:**
+```bash
+python3 -c "from src.__version__ import __version__; print(__version__)"
+```
+
+**2. Backup your configuration (recommended):**
+```bash
+# Backup meshtasticd configs
+sudo cp -r /etc/meshtasticd/config.d ~/meshforge-backup-configs/
+
+# Backup Reticulum config
+cp -r ~/.reticulum ~/meshforge-backup-rns/
+
+# Backup MeshForge settings
+cp -r ~/.config/meshforge ~/meshforge-backup-settings/ 2>/dev/null || true
+```
+
+### Standard Upgrade (Git Pull)
+
+For installations cloned from GitHub:
+
+```bash
+cd /path/to/meshforge    # Usually /opt/meshforge or ~/meshforge
+
+# Check for local changes
+git status
+
+# Pull latest changes
+sudo git pull origin main
+
+# If you have local modifications, stash them first:
+# git stash
+# sudo git pull origin main
+# git stash pop
+```
+
+### Upgrade to Alpha Branch
+
+To test cutting-edge features:
+
+```bash
+cd /path/to/meshforge
+git fetch origin alpha
+git checkout alpha
+sudo git pull origin alpha
+```
+
+To return to stable:
+```bash
+git checkout main
+sudo git pull origin main
+```
+
+### Fresh Install Upgrade
+
+If upgrading from a very old version or encountering issues:
+
+```bash
+# Backup existing installation
+sudo mv /opt/meshforge /opt/meshforge.old
+
+# Fresh clone
+sudo git clone https://github.com/Nursedude/meshforge.git /opt/meshforge
+cd /opt/meshforge
+
+# Re-run installer if dependencies changed
+sudo bash scripts/install_noc.sh
+
+# Restore custom configs if needed
+sudo cp ~/meshforge-backup-configs/* /etc/meshtasticd/config.d/
+```
+
+### Post-Upgrade Verification
+
+After upgrading, verify the installation:
+
+```bash
+# Check new version
+python3 -c "from src.__version__ import __version__; print(__version__)"
+
+# Verify TUI launches
+sudo python3 src/launcher_tui/main.py
+
+# Check services are running
+systemctl status meshtasticd
+systemctl status rnsd
+```
+
+### Troubleshooting Upgrades
+
+| Issue | Solution |
+|-------|----------|
+| `Permission denied` | Use `sudo git pull` |
+| `Local changes would be overwritten` | `git stash` before pull, `git stash pop` after |
+| Python import errors | Re-run `sudo bash scripts/install_noc.sh` |
+| Service won't start | Check logs: `journalctl -u meshtasticd -n 50` |
+| Config file conflicts | Restore from backup or regenerate via TUI |
+
+### Version History
+
+See the full changelog in `src/__version__.py` or run:
+```bash
+python3 -c "from src.__version__ import show_version_history; show_version_history()"
+```
+
+---
+
 ## What Works (v0.4.7-beta)
 
 | Category | Capabilities | Status |
@@ -420,6 +531,9 @@ sudo bash scripts/install_noc.sh
 
 ### Updating Your Installation
 
+See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup, verification, and troubleshooting.
+
+Quick update:
 ```bash
 # For main (stable)
 cd /opt/meshforge && sudo git pull origin main
