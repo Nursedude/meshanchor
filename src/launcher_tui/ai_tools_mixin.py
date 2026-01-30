@@ -220,27 +220,25 @@ class AIToolsMixin:
 
         port = 5000
 
-        # Get the LAN IP for display
-        from utils.map_data_service import get_lan_ip
-        lan_ip = get_lan_ip()
-        map_url = f"http://{lan_ip}:{port}"
+        # Get all available IPs for display
+        from utils.map_data_service import get_all_ips
+        all_ips = get_all_ips()
 
         # Check if port is already in use
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex((lan_ip, port))
+            result = sock.connect_ex(('127.0.0.1', port))
             sock.close()
             if result == 0:
+                urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
                 self.dialog.msgbox(
                     "Map Server",
                     f"Map server already running!\n\n"
-                    f"URL: {map_url}\n\n"
-                    "Open this URL in your browser.\n"
+                    f"Access via:\n{urls}\n\n"
+                    "Open any URL in your browser.\n"
                     "The map auto-refreshes every 30 seconds."
                 )
-                if not self._is_headless():
-                    self._open_in_browser(map_url)
                 return
         except OSError:
             pass
@@ -248,24 +246,21 @@ class AIToolsMixin:
         try:
             from utils.map_data_service import MapServer
 
-            server = MapServer(port=port)
+            server = MapServer(port=port)  # Binds to 0.0.0.0
             server.start_background()
 
             # Store reference to prevent garbage collection
             self._map_server = server
 
+            urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
             msg = (
                 f"Live map server running!\n\n"
-                f"URL: {map_url}\n\n"
-                "Open this URL in your browser.\n"
+                f"Access via:\n{urls}\n\n"
+                "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n"
                 "Server runs until MeshForge exits."
             )
             self.dialog.msgbox("Map Server Started", msg)
-
-            # Only try to open browser if we have a display
-            if not self._is_headless():
-                self._open_in_browser(map_url)
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to start map server: {e}")
@@ -296,12 +291,15 @@ class AIToolsMixin:
                 f"Auto-open map: {state}\n\n"
             )
             if settings["auto_open_map"]:
-                from utils.map_data_service import get_lan_ip
-                lan_ip = get_lan_ip()
+                from utils.map_data_service import get_all_ips
+                ips = get_all_ips()
+                urls = ", ".join(f"http://{ip}:5000" for ip in ips[:2])
+                if len(ips) > 2:
+                    urls += ", ..."
                 msg += (
                     "The map server will start automatically\n"
                     "when MeshForge launches.\n\n"
-                    f"Access at: http://{lan_ip}:5000"
+                    f"Access at: {urls}"
                 )
             else:
                 msg += "Map server will not start automatically."
