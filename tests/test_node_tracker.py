@@ -567,6 +567,129 @@ class TestNodeTrackerCache:
             assert len(tracker._nodes) == 0
 
 
+class TestRNSAnnounceHandling:
+    """Tests for RNS announce parsing and handling."""
+
+    def test_from_rns_with_name_in_app_data(self):
+        """Test from_rns extracts display name from app_data."""
+        rns_hash = bytes.fromhex('abcd1234567890abcdef1234567890ab')
+        app_data = b"Alice's Node"
+
+        node = UnifiedNode.from_rns(rns_hash, app_data=app_data)
+
+        assert node.name == "Alice's Node"
+        assert node.network == "rns"
+
+    def test_from_rns_with_msgpack_telemetry(self):
+        """Test from_rns parses msgpack telemetry with position."""
+        try:
+            import msgpack
+        except ImportError:
+            pytest.skip("msgpack not installed")
+
+        rns_hash = bytes.fromhex('abcd1234567890abcdef1234567890ab')
+
+        # Create app_data: display name + msgpack telemetry
+        name_bytes = b"GPS Node"
+        telemetry = {"latitude": 21.3069, "longitude": -157.8583, "altitude": 10.0}
+        telemetry_bytes = msgpack.packb(telemetry)
+        app_data = name_bytes + telemetry_bytes
+
+        node = UnifiedNode.from_rns(rns_hash, app_data=app_data)
+
+        assert node.name == "GPS Node"
+        assert node.position.is_valid()
+        assert abs(node.position.latitude - 21.3069) < 0.001
+        assert abs(node.position.longitude - (-157.8583)) < 0.001
+
+    def test_from_rns_with_sideband_style_telemetry(self):
+        """Test from_rns parses Sideband-style telemetry keys."""
+        try:
+            import msgpack
+        except ImportError:
+            pytest.skip("msgpack not installed")
+
+        rns_hash = bytes.fromhex('1234567890abcdef1234567890abcdef')
+
+        # Sideband uses 'lat', 'lon', 'alt' keys
+        telemetry = {"lat": 19.896, "lon": -155.582, "alt": 45.0, "speed": 5.2}
+        app_data = b"Sideband" + msgpack.packb(telemetry)
+
+        node = UnifiedNode.from_rns(rns_hash, app_data=app_data)
+
+        assert node.position.is_valid()
+        assert abs(node.position.latitude - 19.896) < 0.001
+        assert abs(node.position.longitude - (-155.582)) < 0.001
+
+    def test_from_rns_with_invalid_coordinates(self):
+        """Test from_rns rejects out-of-range coordinates."""
+        try:
+            import msgpack
+        except ImportError:
+            pytest.skip("msgpack not installed")
+
+        rns_hash = bytes.fromhex('deadbeef12345678deadbeef12345678')
+        telemetry = {"latitude": 999.0, "longitude": -157.8}  # Invalid lat
+        app_data = b"BadGPS" + msgpack.packb(telemetry)
+
+        node = UnifiedNode.from_rns(rns_hash, app_data=app_data)
+
+        # Position should NOT be set for invalid coordinates
+        assert not node.position.is_valid()
+
+    def test_from_rns_without_app_data(self):
+        """Test from_rns works without app_data."""
+        rns_hash = bytes.fromhex('cafebabe12345678cafebabe12345678')
+
+        node = UnifiedNode.from_rns(rns_hash)
+
+        assert node.network == "rns"
+        assert node.rns_hash == rns_hash
+        # Name should be derived from hash
+        assert node.name == rns_hash.hex()[:8]
+
+    def test_parse_lxmf_app_data_name_only(self):
+        """Test _parse_lxmf_app_data with name-only data."""
+        app_data = b"My Node Name"
+
+        result = UnifiedNode._parse_lxmf_app_data(app_data)
+
+        assert result.get("display_name") == "My Node Name"
+        assert result.get("latitude") is None
+
+    def test_parse_lxmf_app_data_empty(self):
+        """Test _parse_lxmf_app_data with empty data."""
+        result = UnifiedNode._parse_lxmf_app_data(b"")
+        assert result == {}
+
+    def test_on_rns_announce_adds_node(self):
+        """Test _on_rns_announce adds node to tracker."""
+        with patch.object(UnifiedNodeTracker, '_load_cache'):
+            tracker = UnifiedNodeTracker()
+
+            dest_hash = bytes.fromhex('1122334455667788aabbccddeeff0011')
+            announced_identity = MagicMock()
+            app_data = b"Announced Node"
+
+            tracker._on_rns_announce(dest_hash, announced_identity, app_data)
+
+            # Verify node was added
+            nodes = tracker.get_rns_nodes()
+            assert len(nodes) == 1
+            assert nodes[0].name == "Announced Node"
+
+    def test_on_rns_announce_error_handling(self):
+        """Test _on_rns_announce handles errors gracefully."""
+        with patch.object(UnifiedNodeTracker, '_load_cache'):
+            tracker = UnifiedNodeTracker()
+
+            # Should not raise even with bad data
+            tracker._on_rns_announce(None, None, None)
+
+            # Tracker should still be operational
+            assert len(tracker._nodes) == 0
+
+
 class TestGeoJSON:
     """Tests for GeoJSON export."""
 
