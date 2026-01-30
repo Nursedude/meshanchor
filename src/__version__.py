@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.4.7-beta"
-__version_info__ = (0, 4, 7, 'beta')
-__release_date__ = "2026-01-17"
+__version__ = "0.4.8-beta"
+__version_info__ = (0, 4, 8, 'beta')
+__release_date__ = "2026-01-30"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
@@ -14,6 +14,23 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.4.8-beta",
+        "date": "2026-01-30",
+        "status": "beta",
+        "changes": [
+            "FIX: TUI crash when launching map server (stdout/stderr suppression)",
+            "FIX: SQLite 'readonly database' errors (permission fix documented)",
+            "FIX: Browser caching old HTML files (no-cache headers added)",
+            "FIX: Page scroll on RF Calculator for smaller screens",
+            "NEW: RF Calculator with Hawaii location presets (Big Island, Oahu, Maui)",
+            "NEW: Leaflet map in RF LOS calculator with path visualization",
+            "NEW: Elevation profile chart with Fresnel zone clearance",
+            "NEW: Node count shows Total Seen / Mapped / No GPS breakdown",
+            "IMPROVED: HTTP request logging silenced to prevent TUI corruption",
+            "IMPROVED: Static HTML files served with cache-control headers",
+        ]
+    },
     {
         "version": "0.4.7-beta",
         "date": "2026-01-17",
