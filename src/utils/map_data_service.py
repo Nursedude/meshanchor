@@ -1197,7 +1197,7 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "127.0.0.1"):
+    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
         self.port = port
         self.host = host
         self.collector = MapDataCollector()
@@ -1215,9 +1215,11 @@ class MapServer:
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
-        print(f"MeshForge Map Server: http://localhost:{self.port}")
-        print(f"  Map:  http://localhost:{self.port}/")
-        print(f"  API:  http://localhost:{self.port}/api/nodes/geojson")
+        print(f"MeshForge Map Server running on port {self.port}")
+        print(f"  Local:  http://localhost:{self.port}/")
+        if self.host == "0.0.0.0":
+            print(f"  Remote: http://<your-ip>:{self.port}/")
+        print(f"  API:    http://localhost:{self.port}/api/nodes/geojson")
         print("  Press Ctrl+C to stop")
 
         try:
@@ -1257,7 +1259,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
     parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0, use 127.0.0.1 for local only)")
     parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
     args = parser.parse_args()
 
