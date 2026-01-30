@@ -174,6 +174,23 @@ systemctl status rnsd
 | Python import errors | Re-run `sudo bash scripts/install_noc.sh` |
 | Service won't start | Check logs: `journalctl -u meshtasticd -n 50` |
 | Config file conflicts | Restore from backup or regenerate via TUI |
+| `meshtastic` module errors | See "Python Library Conflicts" below |
+
+#### Python Library Conflicts
+
+On some systems (especially Raspberry Pi OS with externally-managed Python), the `meshtastic` library may fail to install due to version conflicts. If you see errors like "externally-managed-environment" or module import failures:
+
+```bash
+# Force reinstall meshtastic (use with caution)
+pip install meshtastic --break-system-packages --ignore-installed
+
+# Alternative: use a virtual environment
+python3 -m venv ~/.meshforge-venv
+source ~/.meshforge-venv/bin/activate
+pip install meshtastic
+```
+
+Note: The `--break-system-packages` flag bypasses PEP 668 protections. Only use this if you understand the implications for your system Python environment.
 
 ### Version History
 

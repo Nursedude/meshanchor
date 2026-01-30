@@ -88,11 +88,13 @@ class MapDataCollector:
     Settings (in ~/.config/meshforge/map_settings.json):
     - node_cache_max_age_hours: Max age for node_cache.json (default: 48)
     - rns_cache_max_age_hours: Max age for RNS temp cache (default: 1)
+    - online_status_threshold_minutes: Minutes since lastHeard to consider online (default: 15)
     """
 
     # Default cache ages in hours
     DEFAULT_NODE_CACHE_MAX_AGE_HOURS = 48
     DEFAULT_RNS_CACHE_MAX_AGE_HOURS = 1
+    DEFAULT_ONLINE_THRESHOLD_MINUTES = 15
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
@@ -117,10 +119,14 @@ class MapDataCollector:
                 defaults={
                     "node_cache_max_age_hours": self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS,
                     "rns_cache_max_age_hours": self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS,
+                    "online_status_threshold_minutes": self.DEFAULT_ONLINE_THRESHOLD_MINUTES,
                 }
             )
         except ImportError:
             self._settings = None
+
+        # Track nodes without GPS for reporting
+        self._nodes_without_position: List[Dict] = []
 
         # Node history database for position/state tracking over time
         self._history = None
@@ -161,6 +167,38 @@ class MapDataCollector:
             self._settings.set("rns_cache_max_age_hours", hours)
             self._settings.save()
             logger.info(f"RNS cache max age set to {hours} hours")
+
+    def get_online_threshold_seconds(self) -> int:
+        """Get online status threshold in seconds.
+
+        Nodes heard within this threshold are considered online.
+        Default: 15 minutes (900 seconds).
+        """
+        if self._settings:
+            minutes = self._settings.get("online_status_threshold_minutes", self.DEFAULT_ONLINE_THRESHOLD_MINUTES)
+        else:
+            minutes = self.DEFAULT_ONLINE_THRESHOLD_MINUTES
+        return int(minutes * 60)
+
+    def set_online_threshold_minutes(self, minutes: int) -> None:
+        """Set online status threshold in minutes.
+
+        Args:
+            minutes: Consider nodes online if heard within this many minutes.
+                    Use higher values for networks with longer update intervals.
+        """
+        if self._settings:
+            self._settings.set("online_status_threshold_minutes", minutes)
+            self._settings.save()
+            logger.info(f"Online status threshold set to {minutes} minutes")
+
+    def get_nodes_without_position(self) -> List[Dict]:
+        """Get list of nodes that have no GPS position.
+
+        Returns list of dicts with id, name, last_seen, network info.
+        Updated after each collect() call.
+        """
+        return self._nodes_without_position
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
@@ -217,7 +255,10 @@ class MapDataCollector:
             "properties": {
                 "collected_at": datetime.now().isoformat(),
                 "source_count": len(features),
-                "sources": sources
+                "sources": sources,
+                "nodes_without_position": self._nodes_without_position,
+                "nodes_without_position_count": len(self._nodes_without_position),
+                "online_threshold_minutes": self.get_online_threshold_seconds() // 60,
             }
         }
 
@@ -280,6 +321,7 @@ class MapDataCollector:
 
         Uses MeshtasticConnectionManager for safe locking and cleanup.
         Returns list of GeoJSON features for nodes with valid positions.
+        Also populates self._nodes_without_position for nodes lacking GPS.
         """
         try:
             from utils.meshtastic_connection import get_connection_manager
@@ -288,6 +330,7 @@ class MapDataCollector:
             return []
 
         features = []
+        no_position_nodes = []
         manager = get_connection_manager()
 
         # Don't block if someone else holds the connection
@@ -302,13 +345,29 @@ class MapDataCollector:
             try:
                 if hasattr(interface, 'nodes') and interface.nodes:
                     now = time.time()
+                    online_threshold = self.get_online_threshold_seconds()
+                    total_nodes = len(interface.nodes)
+
                     for node_id, node_data in interface.nodes.items():
-                        feature = self._parse_tcp_node(node_id, node_data, now)
+                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
                         if feature:
                             features.append(feature)
+                        else:
+                            # Track nodes without valid position
+                            no_pos_info = self._extract_node_info_without_position(
+                                node_id, node_data, now, online_threshold
+                            )
+                            if no_pos_info:
+                                no_position_nodes.append(no_pos_info)
+
+                    # Update the tracking list
+                    self._nodes_without_position = no_position_nodes
 
                     if features:
-                        logger.debug(f"meshtasticd (TCP): {len(features)} nodes with position")
+                        logger.debug(
+                            f"meshtasticd (TCP): {len(features)} nodes with position, "
+                            f"{len(no_position_nodes)} without (total: {total_nodes})"
+                        )
             finally:
                 from utils.meshtastic_connection import safe_close_interface
                 safe_close_interface(interface)
@@ -320,10 +379,17 @@ class MapDataCollector:
 
         return features
 
-    def _parse_tcp_node(self, node_id: str, data: dict, now: float) -> Optional[Dict]:
+    def _parse_tcp_node(self, node_id: str, data: dict, now: float,
+                        online_threshold_seconds: int = 900) -> Optional[Dict]:
         """Parse a single node from the TCP interface nodes dict.
 
         Handles both float (latitude) and integer (latitudeI) coordinate formats.
+
+        Args:
+            node_id: The node ID string
+            data: Raw node data from meshtastic interface
+            now: Current timestamp
+            online_threshold_seconds: Consider online if heard within this many seconds
         """
         position = data.get('position', {})
         if not position:
@@ -350,9 +416,9 @@ class MapDataCollector:
         user = data.get('user', {})
         device_metrics = data.get('deviceMetrics', {})
 
-        # Determine online status from lastHeard (15 min threshold)
+        # Determine online status from lastHeard (configurable threshold)
         last_heard = data.get('lastHeard', 0)
-        is_online = (now - last_heard) < 900 if last_heard else False
+        is_online = (now - last_heard) < online_threshold_seconds if last_heard else False
 
         # Format last_seen as human-readable
         if last_heard:
@@ -393,6 +459,57 @@ class MapDataCollector:
             is_local=(data.get('hopsAway', 99) == 0),
             last_seen=last_seen,
         )
+
+    def _extract_node_info_without_position(self, node_id: str, data: dict, now: float,
+                                            online_threshold_seconds: int = 900) -> Optional[Dict]:
+        """Extract basic info for a node that has no valid GPS position.
+
+        Returns a dict with id, name, last_seen, etc. for display in a table/list.
+        """
+        user = data.get('user', {})
+        device_metrics = data.get('deviceMetrics', {})
+
+        # Format node_id
+        node_num = data.get('num', 0)
+        if isinstance(node_id, str) and node_id.startswith('!'):
+            formatted_id = node_id
+        elif node_num:
+            formatted_id = f"!{node_num:08x}"
+        else:
+            formatted_id = str(node_id)
+
+        # Determine online status
+        last_heard = data.get('lastHeard', 0)
+        is_online = (now - last_heard) < online_threshold_seconds if last_heard else False
+
+        # Format last_seen
+        if last_heard:
+            age_seconds = int(now - last_heard)
+            if age_seconds < 60:
+                last_seen = f"{age_seconds}s ago"
+            elif age_seconds < 3600:
+                last_seen = f"{age_seconds // 60}m ago"
+            elif age_seconds < 86400:
+                last_seen = f"{age_seconds // 3600}h ago"
+            else:
+                last_seen = f"{age_seconds // 86400}d ago"
+        else:
+            last_seen = "unknown"
+
+        name = user.get('longName', '') or user.get('shortName', '')
+
+        return {
+            "id": formatted_id,
+            "name": name or formatted_id,
+            "is_online": is_online,
+            "last_seen": last_seen,
+            "hardware": user.get('hwModel', ''),
+            "role": user.get('role', ''),
+            "snr": data.get('snr'),
+            "battery": device_metrics.get('batteryLevel'),
+            "hops_away": data.get('hopsAway'),
+            "via_mqtt": data.get('viaMqtt', False),
+        }
 
     def _collect_via_cli(self) -> List[Dict]:
         """Fall back to CLI parsing when Python TCP interface unavailable."""
