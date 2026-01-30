@@ -44,6 +44,16 @@ Usage:
     result = messaging.send_message("Hello mesh!", destination="!abcd1234")
     result = messaging.get_messages(limit=20)
     result = messaging.get_conversations()
+
+    # RNode - LoRa device detection and management
+    result = rnode.detect_rnode_devices(probe=True)
+    result = rnode.get_device_info("/dev/ttyUSB0")
+    result = rnode.get_recommended_config("/dev/ttyUSB0", region="US")
+
+    # Device Backup - Meshtastic device backup/restore
+    result = device_backup.create_backup(name="pre-upgrade")
+    backups = device_backup.list_backups()
+    result = device_backup.restore_backup(backup_id)
 """
 
 from . import meshtastic
@@ -54,6 +64,8 @@ from . import diagnostics
 from . import hamclock
 from . import rns
 from . import messaging
+from . import rnode
+from . import device_backup
 from .base import CommandResult, CommandError
 
 __all__ = [
@@ -65,6 +77,8 @@ __all__ = [
     'hamclock',
     'rns',
     'messaging',
+    'rnode',
+    'device_backup',
     'CommandResult',
     'CommandError',
 ]
