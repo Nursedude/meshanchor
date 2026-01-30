@@ -222,7 +222,8 @@ class AIToolsMixin:
                 self.dialog.msgbox(
                     "Map Server",
                     f"Map server already running!\n\n"
-                    f"Open: http://localhost:{port}\n\n"
+                    f"Local:  http://localhost:{port}\n"
+                    f"Remote: http://<this-ip>:{port}\n\n"
                     "The map auto-refreshes every 30 seconds."
                 )
                 self._open_in_browser(f"http://localhost:{port}")
@@ -239,7 +240,8 @@ class AIToolsMixin:
             self.dialog.msgbox(
                 "Map Server Started",
                 f"Live map server running!\n\n"
-                f"URL: http://localhost:{port}\n\n"
+                f"Local:  http://localhost:{port}\n"
+                f"Remote: http://<this-ip>:{port}\n\n"
                 "The map pulls fresh data every 30 seconds.\n"
                 "Server runs until MeshForge exits."
             )
@@ -277,7 +279,7 @@ class AIToolsMixin:
                 msg += (
                     "The map server will start automatically\n"
                     "when MeshForge launches, and the map will\n"
-                    "be accessible at http://localhost:5000"
+                    "be accessible locally and remotely on port 5000."
                 )
             else:
                 msg += "Map server will not start automatically."
