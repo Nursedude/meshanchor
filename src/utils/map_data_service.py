@@ -880,7 +880,47 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             # Serve static files from web/ directory
             if self.web_dir:
                 self.directory = self.web_dir
-            super().do_GET()
+            # For HTML files, serve with no-cache headers
+            if self.path.endswith('.html'):
+                self._serve_static_html()
+            else:
+                super().do_GET()
+
+    def _serve_static_html(self):
+        """Serve static HTML files with no-cache headers."""
+        from urllib.parse import urlparse, unquote
+        path_only = unquote(urlparse(self.path).path).lstrip('/')
+
+        if self.web_dir:
+            file_path = Path(self.web_dir) / path_only
+        else:
+            file_path = Path(__file__).parent.parent.parent / "web" / path_only
+
+        # Security: prevent path traversal
+        try:
+            base_dir = Path(self.web_dir) if self.web_dir else Path(__file__).parent.parent.parent / "web"
+            file_path = file_path.resolve()
+            base_dir = base_dir.resolve()
+            if not str(file_path).startswith(str(base_dir)):
+                self.send_error(403, "Forbidden")
+                return
+        except Exception:
+            self.send_error(400, "Invalid path")
+            return
+
+        if file_path.exists() and file_path.is_file():
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            self.end_headers()
+            self.wfile.write(data)
+        else:
+            self.send_error(404, f"File not found: {path_only}")
 
     def _serve_geojson(self):
         """Serve live node GeoJSON."""
@@ -916,6 +956,9 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
             self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             self.wfile.write(data)
         else:
