@@ -96,6 +96,7 @@ from rns_interfaces_mixin import RNSInterfacesMixin
 from nomadnet_client_mixin import NomadNetClientMixin
 from topology_mixin import TopologyMixin
 from rf_awareness_mixin import RFAwarenessMixin
+from metrics_mixin import MetricsMixin
 
 
 class MeshForgeLauncher(
@@ -112,7 +113,8 @@ class MeshForgeLauncher(
     RNSInterfacesMixin,
     NomadNetClientMixin,
     TopologyMixin,
-    RFAwarenessMixin
+    RFAwarenessMixin,
+    MetricsMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -306,6 +308,7 @@ class MeshForgeLauncher(
                 # Mesh Networks
                 ("rns", "RNS / Reticulum"),
                 ("aredn", "AREDN Mesh"),
+                ("metrics", "Historical Metrics & Trends"),
                 # Tools & Config
                 ("rf", "RF Tools & Calculator"),
                 ("sdr", "RF Awareness (SDR Monitoring)"),
@@ -350,6 +353,8 @@ class MeshForgeLauncher(
             self._rns_menu()
         elif choice == "aredn":
             self._aredn_menu()
+        elif choice == "metrics":
+            self._metrics_menu()
         elif choice == "rf":
             self._rf_tools_menu()
         elif choice == "sdr":
