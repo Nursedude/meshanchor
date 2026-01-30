@@ -676,30 +676,38 @@ class AIToolsMixin:
                     return
 
             elif choice == "live":
-                # Try to get nodes from meshtasticd
-                nodes = self._get_nodes_from_meshtastic()
-                if nodes:
-                    for node in nodes:
-                        generator.add_node(node)
+                # Get nodes from meshtasticd only
+                geojson = self._get_nodes_geojson_by_source("meshtasticd")
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                    self.dialog.infobox(
+                        "Generating",
+                        f"Found {len(features)} nodes from meshtasticd..."
+                    )
                 else:
                     self.dialog.msgbox(
                         "No Nodes",
-                        "Could not get nodes from meshtasticd.\n\n"
-                        "Ensure meshtasticd is running and has nodes."
+                        "No nodes found from meshtasticd.\n\n"
+                        "Ensure meshtasticd is running and has nodes with GPS."
                     )
                     return
 
             elif choice == "mqtt":
-                # Try MQTT source
-                nodes = self._get_nodes_from_mqtt()
-                if nodes:
-                    for node in nodes:
-                        generator.add_node(node)
+                # Get nodes from MQTT cache only
+                geojson = self._get_nodes_geojson_by_source("mqtt")
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                    self.dialog.infobox(
+                        "Generating",
+                        f"Found {len(features)} nodes from MQTT..."
+                    )
                 else:
                     self.dialog.msgbox(
                         "No Nodes",
-                        "Could not get nodes from MQTT.\n\n"
-                        "Check MQTT broker connection."
+                        "No nodes found from MQTT cache.\n\n"
+                        "MQTT nodes are cached when monitoring is running."
                     )
                     return
 
@@ -747,44 +755,39 @@ class AIToolsMixin:
         except Exception as e:
             self.dialog.msgbox("Error", f"Map generation failed: {e}")
 
-    def _get_nodes_from_meshtastic(self):
-        """Get nodes from meshtasticd."""
+    def _get_nodes_geojson_by_source(self, source: str) -> dict:
+        """Get nodes from a specific source using MapDataCollector.
+
+        Args:
+            source: Source filter - "meshtasticd", "mqtt", or "rns"
+
+        Returns:
+            GeoJSON FeatureCollection filtered to the specified source.
+        """
         try:
-            from utils.coverage_map import MapNode
-            import socket
+            from utils.map_data_service import MapDataCollector
 
-            # Check if meshtasticd is running
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('localhost', 4403))
-            sock.close()
+            collector = MapDataCollector()
+            geojson = collector.collect()
 
-            if result != 0:
-                return []
+            # Filter features by source
+            filtered_features = [
+                f for f in geojson.get('features', [])
+                if f.get('properties', {}).get('source') == source
+            ]
 
-            # Try to get node list via meshtastic CLI
-            cli_path = self._get_meshtastic_cli()
-            result = subprocess.run(
-                [cli_path, '--host', 'localhost', '--info'],
-                capture_output=True, text=True, timeout=30
-            )
-
-            if result.returncode != 0:
-                return []
-
-            # Parse nodes from output (simplified)
-            nodes = []
-            # This is a simplified parser - real implementation would
-            # parse the actual meshtastic output format
-            return nodes
-
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
-            return []
-
-    def _get_nodes_from_mqtt(self):
-        """Get nodes from MQTT broker."""
-        # Placeholder - would implement MQTT node retrieval
-        return []
+            return {
+                "type": "FeatureCollection",
+                "features": filtered_features,
+                "properties": {
+                    "source": source,
+                    "count": len(filtered_features)
+                }
+            }
+        except ImportError:
+            return {"type": "FeatureCollection", "features": []}
+        except Exception:
+            return {"type": "FeatureCollection", "features": []}
 
     def _open_in_browser(self, url: str):
         """Open URL in browser (in background thread).
