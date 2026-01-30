@@ -95,6 +95,7 @@ from emergency_mode_mixin import EmergencyModeMixin
 from rns_interfaces_mixin import RNSInterfacesMixin
 from nomadnet_client_mixin import NomadNetClientMixin
 from topology_mixin import TopologyMixin
+from rf_awareness_mixin import RFAwarenessMixin
 
 
 class MeshForgeLauncher(
@@ -110,7 +111,8 @@ class MeshForgeLauncher(
     EmergencyModeMixin,
     RNSInterfacesMixin,
     NomadNetClientMixin,
-    TopologyMixin
+    TopologyMixin,
+    RFAwarenessMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -306,6 +308,7 @@ class MeshForgeLauncher(
                 ("aredn", "AREDN Mesh"),
                 # Tools & Config
                 ("rf", "RF Tools & Calculator"),
+                ("sdr", "RF Awareness (SDR Monitoring)"),
                 ("maps", "Maps & Coverage"),
                 ("config", "Configuration"),
                 ("hardware", "Hardware Detection"),
@@ -349,6 +352,8 @@ class MeshForgeLauncher(
             self._aredn_menu()
         elif choice == "rf":
             self._rf_tools_menu()
+        elif choice == "sdr":
+            self._rf_awareness_menu()
         elif choice == "maps":
             self._ai_tools_menu()
         elif choice == "config":
