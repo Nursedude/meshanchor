@@ -2,17 +2,23 @@
 First-Run Wizard Mixin - Initial Setup Experience
 
 Guides new users through MeshForge setup:
-1. Hardware detection (USB devices)
-2. Service status check
-3. Basic configuration
-4. Quick start guidance
+1. Connection type selection (SPI/USB/Network)
+2. Hardware-specific configuration
+3. Service status check
+4. Basic configuration
+
+Enhanced in v0.4.8:
+- SPI vs USB as first question
+- Hardware-specific config templates
+- MeshAdv-Mini and other HAT support
+- Region selection
 """
 
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Tuple
 
 # Import path utilities
 try:
@@ -41,6 +47,79 @@ try:
 except ImportError:
     DeviceScanner = None
 
+# Import startup checker for hardware detection
+try:
+    from startup_checks import StartupChecker
+except ImportError:
+    StartupChecker = None
+
+
+# =========================================================================
+# Hardware Configuration Templates
+# =========================================================================
+
+# SPI HAT configurations with their config file names
+SPI_HARDWARE_CONFIGS = {
+    'meshadv-mini': {
+        'name': 'MeshAdv-Mini',
+        'description': 'MeshAdv-Mini Pi HAT (recommended for Raspberry Pi)',
+        'config_file': 'lora-meshadv-mini.yaml',
+        'requires_spi': True,
+        'requires_overlay': 'spi0-0cs',
+    },
+    'waveshare-sx1262': {
+        'name': 'Waveshare SX1262 HAT',
+        'description': 'Waveshare SX1262 868/915M LoRa HAT',
+        'config_file': 'lora-waveshare-sx1262.yaml',
+        'requires_spi': True,
+        'requires_overlay': None,
+    },
+    'rak-hat': {
+        'name': 'RAK WisLink HAT',
+        'description': 'RAKwireless WisLink LoRa HAT',
+        'config_file': 'lora-rak-hat.yaml',
+        'requires_spi': True,
+        'requires_overlay': None,
+    },
+    'ebyte-e22': {
+        'name': 'Ebyte E22 Module',
+        'description': 'Ebyte E22-900M/E22-400M LoRa Module',
+        'config_file': 'lora-ebyte-e22.yaml',
+        'requires_spi': True,
+        'requires_overlay': None,
+    },
+    'custom-spi': {
+        'name': 'Custom SPI Device',
+        'description': 'Other SPI-connected LoRa module',
+        'config_file': None,  # Manual configuration required
+        'requires_spi': True,
+        'requires_overlay': None,
+    },
+}
+
+# Meshtastic regions for frequency configuration
+MESHTASTIC_REGIONS = [
+    ('US', 'United States (915 MHz)'),
+    ('EU_868', 'Europe 868 MHz'),
+    ('EU_433', 'Europe 433 MHz'),
+    ('CN', 'China (470-510 MHz)'),
+    ('JP', 'Japan (920 MHz)'),
+    ('ANZ', 'Australia/NZ (915/928 MHz)'),
+    ('KR', 'Korea (920 MHz)'),
+    ('TW', 'Taiwan (923 MHz)'),
+    ('RU', 'Russia (868 MHz)'),
+    ('IN', 'India (865-867 MHz)'),
+    ('NZ_865', 'New Zealand 865 MHz'),
+    ('TH', 'Thailand (920 MHz)'),
+    ('LORA_24', 'LoRa 2.4 GHz (worldwide)'),
+    ('UA_433', 'Ukraine 433 MHz'),
+    ('UA_868', 'Ukraine 868 MHz'),
+    ('MY_433', 'Malaysia 433 MHz'),
+    ('MY_919', 'Malaysia 919 MHz'),
+    ('SG_923', 'Singapore 923 MHz'),
+    ('UNSET', 'Unset (configure later)'),
+]
+
 
 class FirstRunMixin:
     """Mixin for first-run wizard in launcher TUI"""
@@ -64,6 +143,8 @@ class FirstRunMixin:
         """
         Run the first-run wizard.
         Returns True if completed, False if skipped.
+
+        Enhanced in v0.4.8 with SPI/USB selection first.
         """
         # Welcome
         result = self.dialog.yesno(
@@ -71,10 +152,10 @@ class FirstRunMixin:
             "It looks like this is your first time running MeshForge.\n\n"
             "Would you like to run the setup wizard?\n\n"
             "The wizard will:\n"
-            "• Detect connected hardware\n"
-            "• Check service status\n"
-            "• Help configure your mesh setup\n\n"
-            "You can run this wizard again from Settings > Setup Wizard."
+            "• Help you select your connection type (SPI/USB)\n"
+            "• Configure your hardware\n"
+            "• Set up mesh services\n\n"
+            "You can run this wizard again from Configuration > Setup Wizard."
         )
 
         if not result:
@@ -82,25 +163,368 @@ class FirstRunMixin:
             skip = self.dialog.yesno(
                 "Skip Setup",
                 "Skip the wizard and mark setup as complete?\n\n"
-                "You can always run it later from Settings."
+                "You can always run it later from Configuration."
             )
             if skip:
                 self._mark_setup_complete()
             return False
 
-        # Step 1: Hardware Detection
-        self._wizard_step_hardware()
+        # Step 1: Connection Type Selection (NEW in v0.4.8)
+        connection_type = self._wizard_step_connection_type()
 
-        # Step 2: Service Status
+        if connection_type == 'skip':
+            self._mark_setup_complete()
+            return False
+
+        # Step 2: Hardware-specific configuration
+        if connection_type == 'spi':
+            self._wizard_step_spi_config()
+        elif connection_type == 'usb':
+            self._wizard_step_usb_config()
+        elif connection_type == 'network':
+            self._wizard_step_network_config()
+
+        # Step 3: Region Selection
+        self._wizard_step_region()
+
+        # Step 4: Service Configuration
         self._wizard_step_services()
 
-        # Step 3: Quick Configuration
-        self._wizard_step_config()
-
-        # Step 4: Completion
+        # Step 5: Completion
         self._wizard_complete()
 
         return True
+
+    def _wizard_step_connection_type(self) -> str:
+        """
+        Step 1: Select connection type (SPI/USB/Network).
+
+        Returns: 'spi', 'usb', 'network', 'later', or 'skip'
+        """
+        # Auto-detect available options
+        spi_available = len(list(Path('/dev').glob('spidev*'))) > 0
+        usb_devices = self._find_usb_serial_devices()
+        is_pi = self._is_raspberry_pi()
+
+        # Build description based on detected hardware
+        desc = "How is your Meshtastic radio connected?\n\n"
+
+        if spi_available:
+            desc += "  SPI interface detected\n"
+        elif is_pi:
+            desc += "  Raspberry Pi detected (SPI can be enabled)\n"
+
+        if usb_devices:
+            desc += f"  {len(usb_devices)} USB serial device(s) found\n"
+
+        desc += "\nSelect your connection type:"
+
+        choices = [
+            ("spi", "SPI HAT         MeshAdv-Mini, Waveshare, etc."),
+            ("usb", "USB Serial      T-Beam, Heltec, RAK via USB"),
+            ("network", "Network         Remote meshtasticd (TCP)"),
+            ("later", "Configure Later Skip hardware setup"),
+        ]
+
+        choice = self.dialog.menu(
+            "Step 1: Connection Type",
+            desc,
+            choices
+        )
+
+        if choice is None:
+            return 'skip'
+
+        return choice
+
+    def _wizard_step_spi_config(self):
+        """Configure SPI HAT hardware."""
+        # Check if SPI is enabled
+        spi_available = len(list(Path('/dev').glob('spidev*'))) > 0
+
+        if not spi_available:
+            # Offer to enable SPI
+            if self._is_raspberry_pi():
+                if self._offer_enable_spi():
+                    self.dialog.msgbox(
+                        "SPI Enabled",
+                        "SPI has been enabled.\n\n"
+                        "A REBOOT is required for changes to take effect.\n\n"
+                        "After reboot, run the wizard again to complete setup."
+                    )
+                    return
+                else:
+                    self.dialog.msgbox(
+                        "SPI Required",
+                        "SPI HATs require SPI to be enabled.\n\n"
+                        "You can enable SPI later using:\n"
+                        "  sudo raspi-config\n\n"
+                        "Or from System > Hardware in MeshForge."
+                    )
+                    return
+            else:
+                self.dialog.msgbox(
+                    "SPI Not Available",
+                    "No SPI interface detected on this system.\n\n"
+                    "SPI HATs are typically used with Raspberry Pi."
+                )
+                return
+
+        # SPI is available - select hardware type
+        choices = []
+        for hw_id, hw_info in SPI_HARDWARE_CONFIGS.items():
+            choices.append((hw_id, f"{hw_info['name']:<20} {hw_info['description'][:30]}"))
+
+        choice = self.dialog.menu(
+            "Step 2: Select SPI Hardware",
+            "Which SPI HAT are you using?",
+            choices
+        )
+
+        if choice is None or choice == 'custom-spi':
+            self.dialog.msgbox(
+                "Manual Configuration",
+                "For custom SPI hardware, you'll need to:\n\n"
+                "1. Create a config file in /etc/meshtasticd/config.d/\n"
+                "2. Configure the SPI pins and radio chip type\n\n"
+                "See: Configuration > meshtasticd Config"
+            )
+            return
+
+        # Apply the selected configuration
+        hw_config = SPI_HARDWARE_CONFIGS.get(choice)
+        if hw_config and hw_config['config_file']:
+            self._apply_hardware_config(hw_config)
+
+    def _wizard_step_usb_config(self):
+        """Configure USB serial connection."""
+        devices = self._find_usb_serial_devices()
+
+        if not devices:
+            self.dialog.msgbox(
+                "No USB Devices",
+                "No USB serial devices detected.\n\n"
+                "Connect your Meshtastic device via USB and try again.\n\n"
+                "Supported devices:\n"
+                "  • T-Beam (CP2102 or CH340)\n"
+                "  • Heltec LoRa\n"
+                "  • RAK WisBlock\n"
+                "  • LilyGo T-Deck"
+            )
+            return
+
+        # Build device selection menu
+        choices = []
+        for dev in devices:
+            path = dev.get('path', '/dev/ttyUSB0')
+            name = dev.get('name', 'Unknown')
+            likely = " *" if dev.get('likely_meshtastic', False) else ""
+            choices.append((path, f"{name[:25]}{likely}"))
+
+        choices.append(("rescan", "Rescan        Detect devices again"))
+
+        choice = self.dialog.menu(
+            "Step 2: Select USB Device",
+            "Select your Meshtastic device:\n(* = likely Meshtastic)",
+            choices
+        )
+
+        if choice == "rescan":
+            self._wizard_step_usb_config()
+            return
+
+        if choice is None:
+            return
+
+        # Create USB serial config
+        self._create_usb_config(choice)
+
+    def _wizard_step_network_config(self):
+        """Configure network connection to remote meshtasticd."""
+        host = self.dialog.inputbox(
+            "Step 2: Network Host",
+            "Enter the hostname or IP of the meshtasticd server:",
+            "localhost"
+        )
+
+        if not host:
+            return
+
+        port = self.dialog.inputbox(
+            "Network Port",
+            "Enter the port number (default 4403):",
+            "4403"
+        )
+
+        if not port:
+            port = "4403"
+
+        # Save network configuration
+        try:
+            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+            settings_file = config_dir / "settings.json"
+            settings = {}
+            if settings_file.exists():
+                settings = json.loads(settings_file.read_text())
+
+            settings['meshtasticd_host'] = host
+            settings['meshtasticd_port'] = int(port)
+
+            settings_file.write_text(json.dumps(settings, indent=2))
+
+            self.dialog.msgbox(
+                "Network Configured",
+                f"Configured to connect to:\n\n"
+                f"  Host: {host}\n"
+                f"  Port: {port}\n\n"
+                f"Make sure meshtasticd is running on the remote host."
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to save settings: {e}")
+
+    def _wizard_step_region(self):
+        """Step 3: Select regulatory region."""
+        choices = [(code, desc) for code, desc in MESHTASTIC_REGIONS]
+
+        choice = self.dialog.menu(
+            "Step 3: Region Selection",
+            "Select your regulatory region:\n(This determines allowed frequencies)",
+            choices
+        )
+
+        if choice and choice != 'UNSET':
+            # Save region to settings
+            try:
+                config_dir = get_real_user_home() / ".config" / "meshforge"
+                config_dir.mkdir(parents=True, exist_ok=True)
+
+                import json
+                settings_file = config_dir / "settings.json"
+                settings = {}
+                if settings_file.exists():
+                    settings = json.loads(settings_file.read_text())
+
+                settings['region'] = choice
+
+                settings_file.write_text(json.dumps(settings, indent=2))
+            except Exception:
+                pass
+
+    def _find_usb_serial_devices(self) -> List[Dict[str, str]]:
+        """Find USB serial devices."""
+        devices = []
+
+        for pattern in ['ttyUSB*', 'ttyACM*']:
+            for path in Path('/dev').glob(pattern):
+                device = {'path': str(path), 'name': 'Unknown', 'likely_meshtastic': False}
+
+                try:
+                    result = subprocess.run(
+                        ['udevadm', 'info', '--query=property', str(path)],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    props = {}
+                    for line in result.stdout.splitlines():
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            props[key] = value
+
+                    vendor = props.get('ID_VENDOR', '')
+                    model = props.get('ID_MODEL', '')
+                    if vendor or model:
+                        device['name'] = f"{vendor} {model}".strip()
+
+                    device['likely_meshtastic'] = any(
+                        kw in (vendor + model).lower()
+                        for kw in ['meshtastic', 't-beam', 'heltec', 'rak', 'lilygo', 'cp210', 'ch340']
+                    )
+                except Exception:
+                    pass
+
+                devices.append(device)
+
+        return devices
+
+    def _apply_hardware_config(self, hw_config: dict):
+        """Apply a hardware configuration file."""
+        config_file = hw_config.get('config_file')
+        if not config_file:
+            return
+
+        # Source and destination paths
+        available_dir = Path('/etc/meshtasticd/available.d')
+        config_d = Path('/etc/meshtasticd/config.d')
+        source = available_dir / config_file
+
+        if not source.exists():
+            self.dialog.msgbox(
+                "Config Not Found",
+                f"Configuration file not found:\n{source}\n\n"
+                f"You may need to install or update meshtasticd."
+            )
+            return
+
+        try:
+            config_d.mkdir(parents=True, exist_ok=True)
+            dest = config_d / config_file
+
+            # Copy config file
+            shutil.copy2(source, dest)
+
+            # Restart meshtasticd
+            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+            self.dialog.msgbox(
+                "Configuration Applied",
+                f"Applied configuration for {hw_config['name']}.\n\n"
+                f"Config: {dest}\n\n"
+                f"meshtasticd has been restarted.\n"
+                f"Check: systemctl status meshtasticd"
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to apply config: {e}")
+
+    def _create_usb_config(self, device_path: str):
+        """Create USB serial configuration."""
+        config_d = Path('/etc/meshtasticd/config.d')
+
+        try:
+            config_d.mkdir(parents=True, exist_ok=True)
+            config_file = config_d / 'usb-serial.yaml'
+
+            config_content = f"""# USB Serial Configuration
+# Generated by MeshForge Setup Wizard
+
+Lora:
+  Module: sx1262  # Adjust if your device uses different chip
+  CS: 0
+  IRQ: 0
+  Busy: 0
+  Reset: 0
+
+Serial:
+  Enabled: true
+  Device: {device_path}
+"""
+            config_file.write_text(config_content)
+
+            # Restart meshtasticd
+            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+            self.dialog.msgbox(
+                "USB Configured",
+                f"USB serial configuration created.\n\n"
+                f"Device: {device_path}\n"
+                f"Config: {config_file}\n\n"
+                f"meshtasticd has been restarted."
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to create config: {e}")
 
     def _wizard_step_hardware(self):
         """Wizard Step 1: Hardware Detection"""

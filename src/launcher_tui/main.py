@@ -81,6 +81,18 @@ except ImportError:
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend
 
+# Import startup checks and conflict resolution (v0.4.8)
+try:
+    from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
+    from conflict_resolver import check_and_resolve_conflicts
+    HAS_STARTUP_CHECKS = True
+except ImportError:
+    HAS_STARTUP_CHECKS = False
+    StartupChecker = None
+    EnvironmentState = None
+    ServiceRunState = None
+    check_and_resolve_conflicts = None
+
 # Import mixins to reduce file size
 from rf_tools_mixin import RFToolsMixin
 from channel_config_mixin import ChannelConfigMixin
@@ -127,6 +139,9 @@ class MeshForgeLauncher(
         self._setup_status_bar()
         self._meshtastic_path = None  # Cached CLI path
         self._bridge_log_path = None  # Path to active bridge log file
+        # Enhanced startup checker (v0.4.8)
+        self._startup_checker = StartupChecker() if HAS_STARTUP_CHECKS else None
+        self._env_state: Optional[EnvironmentState] = None
 
     @staticmethod
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
@@ -214,6 +229,10 @@ class MeshForgeLauncher(
             self._run_basic_launcher()
             return
 
+        # Run startup environment checks (v0.4.8)
+        if not self._run_startup_checks():
+            return  # User aborted due to conflicts
+
         # Check for first run and offer setup wizard
         if self._check_first_run():
             self._run_first_run_wizard()
@@ -225,6 +244,45 @@ class MeshForgeLauncher(
         self._maybe_auto_start_map()
 
         self._run_main_menu()
+
+    def _run_startup_checks(self) -> bool:
+        """
+        Run startup environment checks and conflict resolution.
+
+        Returns:
+            True to continue, False if user aborted
+        """
+        if not HAS_STARTUP_CHECKS or not self._startup_checker:
+            return True
+
+        # Get environment state
+        self._env_state = self._startup_checker.check_all()
+
+        # Update status bar with environment info
+        if self._status_bar and hasattr(self._status_bar, '_env_state'):
+            self._status_bar._env_state = self._env_state
+
+        # Check for port conflicts
+        if self._env_state.conflicts:
+            if not check_and_resolve_conflicts(self.dialog, self._startup_checker):
+                return False  # User aborted
+
+            # Re-check after resolution
+            self._startup_checker.invalidate_cache()
+            self._env_state = self._startup_checker.check_all()
+
+        # Show alerts if any (non-blocking)
+        alerts = self._env_state.get_alerts()
+        if alerts and len(alerts) <= 3:
+            # Show a quick info message for minor issues
+            alert_text = "\n".join(f"  - {a}" for a in alerts)
+            self.dialog.msgbox(
+                "Startup Notes",
+                f"Environment check found:\n\n{alert_text}\n\n"
+                "These are informational - press Enter to continue."
+            )
+
+        return True
 
     def _check_service_misconfig(self):
         """Check for service misconfiguration and offer to fix."""
@@ -295,48 +353,530 @@ class MeshForgeLauncher(
             self._fix_spi_config(has_native)
 
     def _run_main_menu(self):
-        """Display the main NOC menu."""
+        """Display the main NOC menu.
+
+        Redesigned in v0.4.8 to follow UI/UX best practices:
+        - Max 10 items per menu (cognitive load)
+        - Grouped by user task, not technical domain
+        - 2-tap max for common operations
+        """
         while True:
+            # Build status hint for menu subtitle
+            status_hint = self._get_menu_status_hint()
+
             choices = [
-                # Monitor
-                ("status", "Status Overview"),
-                ("quick", "Quick Actions (shortcuts)"),
-                ("logs", "Logs (live follow, errors, analysis)"),
-                ("network", "Network & Ports"),
-                # Operate
-                ("radio", "Radio (meshtastic CLI)"),
-                ("services", "Services (start/stop/restart)"),
-                ("emcomm", "EMERGENCY MODE (field ops)"),
-                # Mesh Networks
-                ("rns", "RNS / Reticulum"),
-                ("aredn", "AREDN Mesh"),
-                ("metrics", "Historical Metrics & Trends"),
-                # Tools & Config
-                ("rf", "RF Tools & Calculator"),
-                ("sdr", "RF Awareness (SDR Monitoring)"),
-                ("maps", "Maps & Coverage"),
-                ("config", "Configuration"),
-                ("hardware", "Hardware Detection"),
-                ("system", "System Tools (full Linux CLI)"),
+                # Primary Operations (numbered for quick access)
+                ("1", "Dashboard           Status, health, alerts"),
+                ("2", "Mesh Networks       Meshtastic, RNS, AREDN"),
+                ("3", "RF & SDR            Calculators, SDR monitoring"),
+                ("4", "Maps & Viz          Coverage maps, topology"),
+                ("5", "Configuration       Radio, services, settings"),
+                ("6", "System              Hardware, logs, Linux tools"),
+                # Separator (visual only)
+                ("---", "─────────────────────────────────────"),
+                # Quick Access
+                ("q", "Quick Actions       Common shortcuts"),
+                ("e", "Emergency Mode      Field operations"),
                 # Meta
-                ("web", "Web Client URL"),
-                ("about", "About"),
-                ("quit", "Exit"),
+                ("a", "About               Version, help, web client"),
+                ("x", "Exit"),
             ]
 
             choice = self.dialog.menu(
                 f"MeshForge NOC v{__version__}",
-                "Network Operations Center:",
+                status_hint,
                 choices
             )
 
-            if choice is None or choice == "quit":
+            if choice is None or choice == "x":
                 break
 
-            self._handle_choice(choice)
+            # Handle separator (do nothing)
+            if choice == "---":
+                continue
+
+            self._handle_main_choice(choice)
+
+    def _get_menu_status_hint(self) -> str:
+        """Generate status hint for main menu subtitle."""
+        if self._env_state:
+            return self._env_state.get_status_line()
+        return "Network Operations Center"
+
+    def _handle_main_choice(self, choice: str):
+        """Handle main menu selection (v0.4.8 restructured)."""
+        if choice == "1":
+            self._dashboard_menu()
+        elif choice == "2":
+            self._mesh_networks_menu()
+        elif choice == "3":
+            self._rf_sdr_menu()
+        elif choice == "4":
+            self._maps_viz_menu()
+        elif choice == "5":
+            self._configuration_menu()
+        elif choice == "6":
+            self._system_menu()
+        elif choice == "q":
+            self._quick_actions_menu()
+        elif choice == "e":
+            self._emergency_mode()
+        elif choice == "a":
+            self._about_menu()
+
+    # =========================================================================
+    # NEW Submenu: Dashboard (1)
+    # =========================================================================
+
+    def _dashboard_menu(self):
+        """Dashboard - Status, health, alerts."""
+        while True:
+            choices = [
+                ("status", "Service Status      All services with health"),
+                ("network", "Network Status      Ports, interfaces, conflicts"),
+                ("nodes", "Node Count          Meshtastic + RNS nodes"),
+                ("metrics", "Historical Trends   Metrics over time"),
+                ("alerts", "View Alerts         Current warnings"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Dashboard",
+                "System status and monitoring:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                self._service_status_display()
+            elif choice == "network":
+                self._network_menu()
+            elif choice == "nodes":
+                self._show_node_counts()
+            elif choice == "metrics":
+                self._metrics_menu()
+            elif choice == "alerts":
+                self._show_alerts()
+
+    def _service_status_display(self):
+        """Show comprehensive service status."""
+        # Delegate to existing service menu status
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Service Status ===\n")
+
+        if self._env_state:
+            for name, info in self._env_state.services.items():
+                if info.state == ServiceRunState.RUNNING:
+                    print(f"  \033[0;32m●\033[0m {name:<18} running")
+                elif info.state == ServiceRunState.FAILED:
+                    print(f"  \033[0;31m●\033[0m {name:<18} FAILED")
+                else:
+                    print(f"  \033[2m○\033[0m {name:<18} stopped")
+        else:
+            # Fallback to systemctl
+            for svc in ['meshtasticd', 'rnsd', 'mosquitto']:
+                try:
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', svc],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    status = result.stdout.strip()
+                    if status == 'active':
+                        print(f"  \033[0;32m●\033[0m {svc:<18} running")
+                    else:
+                        print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                except Exception:
+                    print(f"  ? {svc:<18} unknown")
+
+        print()
+        self._wait_for_enter()
+
+    def _show_node_counts(self):
+        """Show node counts from all sources."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Node Counts ===\n")
+
+        # Meshtastic nodes
+        try:
+            cli = self._get_meshtastic_cli()
+            result = subprocess.run(
+                [cli, '--host', 'localhost', '--info'],
+                capture_output=True, text=True, timeout=30
+            )
+            # Count nodes in output
+            node_count = result.stdout.count('Node ')
+            print(f"  Meshtastic nodes: {node_count}")
+        except Exception as e:
+            print(f"  Meshtastic: unavailable ({e})")
+
+        # RNS destinations
+        try:
+            result = subprocess.run(
+                ['rnstatus', '-a'],
+                capture_output=True, text=True, timeout=10
+            )
+            # Count lines that look like destinations
+            dest_count = len([l for l in result.stdout.splitlines() if l.strip().startswith('<')])
+            print(f"  RNS destinations: {dest_count}")
+        except Exception:
+            print("  RNS: unavailable")
+
+        print()
+        self._wait_for_enter()
+
+    def _show_alerts(self):
+        """Show current alerts from environment state."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Current Alerts ===\n")
+
+        if self._env_state:
+            alerts = self._env_state.get_alerts()
+            if alerts:
+                for alert in alerts:
+                    print(f"  \033[0;33m!\033[0m {alert}")
+            else:
+                print("  No alerts - system healthy")
+        else:
+            print("  Environment state not available")
+
+        print()
+        self._wait_for_enter()
+
+    # =========================================================================
+    # NEW Submenu: Mesh Networks (2)
+    # =========================================================================
+
+    def _mesh_networks_menu(self):
+        """Mesh Networks - Meshtastic, RNS, AREDN."""
+        while True:
+            choices = [
+                ("meshtastic", "Meshtastic          Radio, channels, CLI"),
+                ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
+                ("aredn", "AREDN Mesh          AREDN integration"),
+                ("services", "Service Control     Start/stop/restart"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Mesh Networks",
+                "Manage mesh network connections:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "meshtastic":
+                self._radio_menu()
+            elif choice == "rns":
+                self._rns_menu()
+            elif choice == "aredn":
+                self._aredn_menu()
+            elif choice == "services":
+                self._service_menu()
+
+    # =========================================================================
+    # NEW Submenu: RF & SDR (3)
+    # =========================================================================
+
+    def _rf_sdr_menu(self):
+        """RF & SDR - Calculators, SDR monitoring."""
+        while True:
+            choices = [
+                ("link", "Link Budget         FSPL, Fresnel, range"),
+                ("site", "Site Planner        Coverage estimation"),
+                ("freq", "Frequency Slots     Channel calculator"),
+                ("sdr", "SDR Monitor         RF awareness (Airspy)"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "RF & SDR Tools",
+                "Radio frequency tools and monitoring:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "link":
+                self._rf_tools_menu()
+            elif choice == "site":
+                self._site_planner_menu()
+            elif choice == "freq":
+                self._frequency_calculator()
+            elif choice == "sdr":
+                self._rf_awareness_menu()
+
+    # =========================================================================
+    # NEW Submenu: Maps & Viz (4)
+    # =========================================================================
+
+    def _maps_viz_menu(self):
+        """Maps & Visualization - Coverage maps, topology."""
+        while True:
+            choices = [
+                ("coverage", "Coverage Map        Generate coverage map"),
+                ("topology", "Network Topology    D3.js graph view"),
+                ("nodes", "Node Map            All nodes on map"),
+                ("quality", "Link Quality        Quality analysis"),
+                ("export", "Export Data         GeoJSON, CSV, GraphML"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Maps & Visualization",
+                "Network visualization tools:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "coverage":
+                self._ai_tools_menu()
+            elif choice == "topology":
+                self._topology_menu()
+            elif choice == "nodes":
+                self._open_node_map()
+            elif choice == "quality":
+                self._link_quality_menu()
+            elif choice == "export":
+                self._export_data_menu()
+
+    def _open_node_map(self):
+        """Open the node map in browser."""
+        # Trigger map generation and open
+        self._ai_tools_menu()
+
+    def _export_data_menu(self):
+        """Export data in various formats."""
+        while True:
+            choices = [
+                ("geojson", "GeoJSON             For mapping tools"),
+                ("csv", "CSV                 Spreadsheet format"),
+                ("graphml", "GraphML             For graph analysis"),
+                ("d3", "D3.js JSON          For web visualization"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Export Data",
+                "Export network data:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            # Delegate to topology export functions
+            if choice in ["geojson", "csv", "graphml", "d3"]:
+                self._export_topology_data(choice)
+
+    def _export_topology_data(self, format_type: str):
+        """Export topology data in specified format."""
+        try:
+            from utils.topology_visualizer import TopologyVisualizer
+
+            viz = TopologyVisualizer()
+            # TODO: Populate with actual data
+            output_dir = get_real_user_home() / ".config" / "meshforge" / "exports"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            if format_type == "geojson":
+                path = output_dir / "topology.geojson"
+                viz.export_geojson(str(path))
+            elif format_type == "csv":
+                path = output_dir / "topology.csv"
+                viz.export_csv(str(path))
+            elif format_type == "graphml":
+                path = output_dir / "topology.graphml"
+                viz.export_graphml(str(path))
+            elif format_type == "d3":
+                path = output_dir / "topology.json"
+                viz.export_d3_json(str(path))
+
+            self.dialog.msgbox("Export Complete", f"Exported to:\n{path}")
+
+        except Exception as e:
+            self.dialog.msgbox("Export Failed", f"Error: {e}")
+
+    # =========================================================================
+    # NEW Submenu: Configuration (5)
+    # =========================================================================
+
+    def _configuration_menu(self):
+        """Configuration - Radio, services, settings."""
+        while True:
+            choices = [
+                ("radio", "Radio Config        meshtasticd settings"),
+                ("channels", "Channel Config      Meshtastic channels"),
+                ("rns-config", "RNS Config          Reticulum settings"),
+                ("services", "Service Config      systemd services"),
+                ("meshforge", "MeshForge Settings  App preferences"),
+                ("wizard", "Setup Wizard        First-run wizard"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Configuration",
+                "System and service configuration:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "radio":
+                self._config_menu()
+            elif choice == "channels":
+                self._channel_config_menu()
+            elif choice == "rns-config":
+                self._edit_rns_config()
+            elif choice == "services":
+                self._service_menu()
+            elif choice == "meshforge":
+                self._settings_menu()
+            elif choice == "wizard":
+                self._run_first_run_wizard()
+
+    # =========================================================================
+    # NEW Submenu: System (6)
+    # =========================================================================
+
+    def _system_menu(self):
+        """System - Hardware, logs, Linux tools."""
+        while True:
+            choices = [
+                ("hardware", "Hardware            Detect SPI/I2C/USB"),
+                ("logs", "Logs                View/follow logs"),
+                ("network", "Network Tools       Ping, ports, interfaces"),
+                ("shell", "Linux Shell         Drop to bash"),
+                ("reboot", "Reboot/Shutdown     Safe system control"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "System Tools",
+                "System administration:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "hardware":
+                self._hardware_menu()
+            elif choice == "logs":
+                self._logs_menu()
+            elif choice == "network":
+                self._network_tools_submenu()
+            elif choice == "shell":
+                self._drop_to_shell()
+            elif choice == "reboot":
+                self._reboot_menu()
+
+    def _network_tools_submenu(self):
+        """Network diagnostic tools."""
+        # Delegate to existing network menu
+        self._network_menu()
+
+    def _drop_to_shell(self):
+        """Drop to a bash shell."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("Dropping to shell. Type 'exit' to return to MeshForge.\n")
+        subprocess.run(['bash'], check=False)
+
+    def _reboot_menu(self):
+        """Safe reboot/shutdown options."""
+        while True:
+            choices = [
+                ("reboot", "Reboot              Restart system"),
+                ("shutdown", "Shutdown            Power off"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Reboot / Shutdown",
+                "System power options:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "reboot":
+                if self.dialog.yesno("Confirm Reboot", "Reboot the system now?"):
+                    subprocess.run(['systemctl', 'reboot'], timeout=30)
+            elif choice == "shutdown":
+                if self.dialog.yesno("Confirm Shutdown", "Shutdown the system now?"):
+                    subprocess.run(['systemctl', 'poweroff'], timeout=30)
+
+    # =========================================================================
+    # NEW Submenu: About (a)
+    # =========================================================================
+
+    def _about_menu(self):
+        """About - Version, help, web client."""
+        while True:
+            choices = [
+                ("version", "Version Info        MeshForge version"),
+                ("web", "Web Client          Open web interface"),
+                ("help", "Help                Documentation"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "About MeshForge",
+                "Information and help:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "version":
+                self._show_about()
+            elif choice == "web":
+                self._open_web_client()
+            elif choice == "help":
+                self._show_help()
+
+    def _show_help(self):
+        """Show help documentation."""
+        help_text = """
+MeshForge - Network Operations Center
+
+KEYBOARD SHORTCUTS:
+  1-6     Quick access to main sections
+  q       Quick Actions
+  e       Emergency Mode
+  a       About
+  x       Exit
+
+NAVIGATION:
+  Enter   Select item
+  Esc     Go back / Cancel
+  Tab     Move between buttons
+
+DOCUMENTATION:
+  https://github.com/Nursedude/meshforge
+
+SUPPORT:
+  Issues: github.com/Nursedude/meshforge/issues
+"""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print(help_text)
+        self._wait_for_enter()
+
+    # =========================================================================
+    # Legacy menu handler (for backward compatibility)
+    # =========================================================================
 
     def _handle_choice(self, choice: str):
-        """Handle menu selection."""
+        """Handle menu selection (legacy - kept for compatibility)."""
         if choice == "status":
             self._run_terminal_status()
         elif choice == "quick":
