@@ -844,6 +844,26 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
     collector: Optional[MapDataCollector] = None
     web_dir: Optional[str] = None
+    # CORS: None = allow all, list = allow specific origins
+    allowed_origins: Optional[List[str]] = None
+
+    def _send_cors_header(self):
+        """Send appropriate CORS header based on configuration.
+
+        When allowed_origins is None: allow all origins (*)
+        When allowed_origins is a list: only allow those origins
+        """
+        origin = self.headers.get('Origin', '')
+
+        if self.allowed_origins is None:
+            # Allow all origins - useful for LAN/AREDN access
+            self.send_header('Access-Control-Allow-Origin', '*')
+        elif origin and any(origin.startswith(allowed) for allowed in self.allowed_origins):
+            # Origin matches allowed list
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            # Default fallback for localhost
+            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
 
     def do_GET(self):
         if self.path == '/api/nodes/geojson' or self.path == '/api/nodes/geojson/':
@@ -933,12 +953,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -1019,12 +1034,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -1416,7 +1426,8 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
+    def __init__(self, port: int = 5000, host: str = "0.0.0.0",
+                 cors_origins: Optional[List[str]] = None):
         """Initialize map server.
 
         Args:
@@ -1425,9 +1436,14 @@ class MapServer:
                   - "0.0.0.0": All interfaces (default, works with AREDN/VPN/LAN)
                   - "localhost" or "127.0.0.1": Local only
                   - Specific IP: Bind to that IP only
+            cors_origins: CORS allowed origins. Options:
+                  - None: Allow all origins (*) - best for LAN/AREDN access
+                  - List: Only allow specified origins, e.g.,
+                    ["http://localhost", "http://192.168.1."]
         """
         self.port = port
         self.host = host
+        self.cors_origins = cors_origins
         self.collector = MapDataCollector()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1440,6 +1456,7 @@ class MapServer:
         """Start server (blocking)."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
@@ -1466,6 +1483,7 @@ class MapServer:
         """Start server in background thread."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
