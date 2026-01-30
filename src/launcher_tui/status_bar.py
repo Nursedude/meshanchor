@@ -11,14 +11,29 @@ Usage:
     bar = StatusBar()
     text = bar.get_status_line()
     # Returns: "MeshForge v0.4.7 | meshtasticd: ● | rnsd: ○ | mqtt: ○"
+
+Enhanced in v0.4.8:
+    - Integration with StartupChecker for conflict detection
+    - Shows hardware status (SPI/USB)
+    - Root/non-root indicator
 """
 
 import time
 import subprocess
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
+
+# Import startup checker for enhanced status
+try:
+    from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
+    HAS_STARTUP_CHECKER = True
+except ImportError:
+    HAS_STARTUP_CHECKER = False
+    StartupChecker = None
+    EnvironmentState = None
+    ServiceRunState = None
 
 # Cache TTL in seconds — how often to re-check service status
 STATUS_CACHE_TTL = 10.0
@@ -59,6 +74,11 @@ class StatusBar:
         # Space weather (separate cache with longer TTL)
         self._space_weather: Optional[str] = None
         self._space_weather_time: float = 0.0
+        # Enhanced startup checker (v0.4.8)
+        self._startup_checker: Optional[StartupChecker] = None
+        self._env_state: Optional[EnvironmentState] = None
+        if HAS_STARTUP_CHECKER:
+            self._startup_checker = StartupChecker()
 
     def get_status_line(self) -> str:
         """Get the formatted status line for --backtitle.
@@ -202,3 +222,105 @@ class StatusBar:
         """
         self._refresh_if_stale()
         return self._cache.get(service_name, SYM_UNKNOWN)
+
+    # =========================================================================
+    # Enhanced Status Methods (v0.4.8)
+    # =========================================================================
+
+    def get_environment(self, use_cache: bool = True) -> Optional[EnvironmentState]:
+        """Get full environment state from startup checker.
+
+        Args:
+            use_cache: Use cached result if available
+
+        Returns:
+            EnvironmentState or None if startup checker unavailable
+        """
+        if not self._startup_checker:
+            return None
+
+        if use_cache and self._env_state:
+            return self._env_state
+
+        self._env_state = self._startup_checker.check_all(use_cache=use_cache)
+        return self._env_state
+
+    def get_alerts(self) -> List[str]:
+        """Get list of current alerts (conflicts, failures, etc.).
+
+        Returns:
+            List of alert message strings
+        """
+        env = self.get_environment()
+        if env:
+            return env.get_alerts()
+        return []
+
+    def has_conflicts(self) -> bool:
+        """Check if there are any port conflicts.
+
+        Returns:
+            True if conflicts detected
+        """
+        env = self.get_environment()
+        if env:
+            return env.has_conflicts
+        return False
+
+    def get_enhanced_status_line(self) -> str:
+        """Get enhanced status line with hardware and conflict info.
+
+        Returns:
+            Status string with additional context
+        """
+        env = self.get_environment()
+        if not env:
+            return self.get_status_line()
+
+        parts = []
+
+        # Version
+        if self.version:
+            parts.append(f"MeshForge v{self.version}")
+        else:
+            parts.append("MeshForge")
+
+        # Root indicator
+        if not env.is_root:
+            parts.append("[user]")
+
+        # Service statuses from enhanced checker
+        for name, info in env.services.items():
+            if info.state == ServiceRunState.RUNNING:
+                parts.append(f"{name[:4]}:{SYM_RUNNING}")
+            elif info.state == ServiceRunState.FAILED:
+                parts.append(f"{name[:4]}:!")
+            else:
+                parts.append(f"{name[:4]}:{SYM_STOPPED}")
+
+        # Hardware indicator
+        hw = env.hardware
+        if hw.usb_serial_devices:
+            parts.append("USB:*")
+        elif hw.spi_available:
+            parts.append("SPI:*")
+
+        # Conflict warning
+        if env.conflicts:
+            parts.append(f"WARN:{len(env.conflicts)}")
+
+        # Node count if available
+        if self._node_count is not None:
+            parts.append(f"nodes:{self._node_count}")
+
+        # Space weather (compact)
+        if self._space_weather:
+            parts.append(self._space_weather)
+
+        return " | ".join(parts)
+
+    def refresh_environment(self) -> None:
+        """Force refresh of environment state."""
+        if self._startup_checker:
+            self._startup_checker.invalidate_cache()
+            self._env_state = None
