@@ -801,7 +801,7 @@ class MeshForgeLauncher(
         """Drop to a bash shell."""
         subprocess.run(['clear'], check=False, timeout=5)
         print("Dropping to shell. Type 'exit' to return to MeshForge.\n")
-        subprocess.run(['bash'], check=False)
+        subprocess.run(['bash'], check=False)  # noqa: MF004 - interactive shell
 
     def _reboot_menu(self):
         """Safe reboot/shutdown options."""
