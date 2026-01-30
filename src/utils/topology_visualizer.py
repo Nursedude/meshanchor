@@ -57,6 +57,10 @@ class TopoNode:
     hops: int = 0
     last_seen: Optional[datetime] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Geographic position for mapping
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    altitude: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -69,7 +73,14 @@ class TopoNode:
             "hops": self.hops,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "metadata": self.metadata,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "altitude": self.altitude,
         }
+
+    def has_position(self) -> bool:
+        """Check if node has a geographic position."""
+        return self.latitude is not None and self.longitude is not None
 
 
 @dataclass
@@ -175,7 +186,9 @@ class TopologyVisualizer:
     def add_node(self, node_id: str, name: str = None, node_type: str = "node",
                  network: str = "unknown", is_online: bool = True,
                  services: List[str] = None, hops: int = 0,
-                 metadata: Dict[str, Any] = None) -> TopoNode:
+                 metadata: Dict[str, Any] = None,
+                 latitude: float = None, longitude: float = None,
+                 altitude: float = None) -> TopoNode:
         """Add a node to the topology."""
         node = TopoNode(
             id=node_id,
@@ -187,6 +200,9 @@ class TopologyVisualizer:
             hops=hops,
             last_seen=datetime.now(),
             metadata=metadata or {},
+            latitude=latitude,
+            longitude=longitude,
+            altitude=altitude,
         )
         self._nodes[node_id] = node
         return node
@@ -926,3 +942,309 @@ class TopologyVisualizer:
         lines.append("=" * max_width)
 
         return "\n".join(lines)
+
+    def export_geojson(self, output_path: str = None,
+                       include_edges: bool = True) -> Tuple[str, int]:
+        """
+        Export topology as GeoJSON for mapping.
+
+        Creates a GeoJSON FeatureCollection with:
+        - Point features for nodes with positions
+        - LineString features for edges between positioned nodes
+
+        Args:
+            output_path: Output file path (default: topology.geojson in cache)
+            include_edges: Include edges as LineString features
+
+        Returns:
+            Tuple of (output_path, feature_count)
+        """
+        if output_path is None:
+            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(cache_dir / "topology.geojson")
+
+        features = []
+
+        # Add node features
+        for node_id, node in self._nodes.items():
+            if not node.has_position():
+                continue
+
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [node.longitude, node.latitude]
+                },
+                "properties": {
+                    "id": node.id,
+                    "name": node.name or node.id,
+                    "type": node.node_type,
+                    "network": node.network,
+                    "online": node.is_online,
+                    "hops": node.hops,
+                    "services": node.services,
+                    "marker-color": self.NODE_COLORS.get(node.node_type, "#6b7280"),
+                    "marker-size": "medium" if node.node_type in ("local", "gateway") else "small",
+                }
+            }
+
+            if node.altitude is not None:
+                feature["properties"]["altitude"] = node.altitude
+
+            if node.last_seen:
+                feature["properties"]["last_seen"] = node.last_seen.isoformat()
+
+            features.append(feature)
+
+        # Add edge features (only between positioned nodes)
+        if include_edges:
+            for edge in self._edges:
+                source = self._nodes.get(edge.source)
+                target = self._nodes.get(edge.target)
+
+                if not (source and target and source.has_position() and target.has_position()):
+                    continue
+
+                feature = {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                            [source.longitude, source.latitude],
+                            [target.longitude, target.latitude]
+                        ]
+                    },
+                    "properties": {
+                        "source": edge.source,
+                        "target": edge.target,
+                        "hops": edge.hops,
+                        "active": edge.is_active,
+                        "bidirectional": edge.bidirectional,
+                        "quality": edge.get_quality_label(),
+                        "stroke": edge.get_quality_color(),
+                        "stroke-width": 2 if edge.is_active else 1,
+                        "stroke-opacity": 0.8 if edge.is_active else 0.4,
+                    }
+                }
+
+                if edge.snr is not None:
+                    feature["properties"]["snr"] = edge.snr
+                if edge.rssi is not None:
+                    feature["properties"]["rssi"] = edge.rssi
+
+                features.append(feature)
+
+        # Build GeoJSON
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features,
+            "properties": {
+                "generator": "MeshForge TopologyVisualizer",
+                "generated_at": datetime.now().isoformat(),
+                "stats": self.get_stats(),
+            }
+        }
+
+        with open(output_path, 'w') as f:
+            json.dump(geojson, f, indent=2)
+
+        logger.info(f"Exported {len(features)} features to {output_path}")
+        return output_path, len(features)
+
+    def export_d3_json(self, output_path: str = None) -> Tuple[str, int]:
+        """
+        Export topology as D3.js compatible JSON format.
+
+        Creates a JSON file with nodes and links arrays suitable for
+        D3.js force-directed graph visualization.
+
+        Args:
+            output_path: Output file path (default: topology_d3.json in cache)
+
+        Returns:
+            Tuple of (output_path, total_count)
+        """
+        if output_path is None:
+            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(cache_dir / "topology_d3.json")
+
+        # Build nodes array
+        nodes = []
+        for node_id, node in self._nodes.items():
+            node_data = {
+                "id": node.id,
+                "name": node.name or node.id,
+                "group": node.node_type,
+                "network": node.network,
+                "online": node.is_online,
+                "hops": node.hops,
+                "services": node.services,
+                "color": self.NODE_COLORS.get(node.node_type, "#6b7280"),
+                "size": self.NODE_SIZES.get(node.node_type, 10),
+            }
+
+            if node.has_position():
+                node_data["lat"] = node.latitude
+                node_data["lon"] = node.longitude
+                if node.altitude:
+                    node_data["alt"] = node.altitude
+
+            nodes.append(node_data)
+
+        # Build links array
+        links = []
+        for edge in self._edges:
+            link_data = {
+                "source": edge.source,
+                "target": edge.target,
+                "value": edge.weight,
+                "hops": edge.hops,
+                "active": edge.is_active,
+                "bidirectional": edge.bidirectional,
+                "color": edge.get_quality_color(),
+                "quality": edge.get_quality_label(),
+            }
+
+            if edge.snr is not None:
+                link_data["snr"] = edge.snr
+            if edge.rssi is not None:
+                link_data["rssi"] = edge.rssi
+
+            links.append(link_data)
+
+        # Build D3 format
+        d3_data = {
+            "nodes": nodes,
+            "links": links,
+            "meta": {
+                "generator": "MeshForge TopologyVisualizer",
+                "generated_at": datetime.now().isoformat(),
+                "stats": self.get_stats(),
+            }
+        }
+
+        with open(output_path, 'w') as f:
+            json.dump(d3_data, f, indent=2)
+
+        total = len(nodes) + len(links)
+        logger.info(f"Exported D3 data ({len(nodes)} nodes, {len(links)} links) to {output_path}")
+        return output_path, total
+
+    def export_graphml(self, output_path: str = None) -> Tuple[str, int]:
+        """
+        Export topology as GraphML format for tools like Gephi.
+
+        Args:
+            output_path: Output file path (default: topology.graphml in cache)
+
+        Returns:
+            Tuple of (output_path, edge_count)
+        """
+        if output_path is None:
+            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(cache_dir / "topology.graphml")
+
+        def xml_escape(s: str) -> str:
+            """Escape XML special characters."""
+            return (s.replace("&", "&amp;")
+                     .replace("<", "&lt;")
+                     .replace(">", "&gt;")
+                     .replace('"', "&quot;")
+                     .replace("'", "&apos;"))
+
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
+            '  <!-- Node attributes -->',
+            '  <key id="name" for="node" attr.name="name" attr.type="string"/>',
+            '  <key id="type" for="node" attr.name="type" attr.type="string"/>',
+            '  <key id="network" for="node" attr.name="network" attr.type="string"/>',
+            '  <key id="online" for="node" attr.name="online" attr.type="boolean"/>',
+            '  <key id="lat" for="node" attr.name="latitude" attr.type="double"/>',
+            '  <key id="lon" for="node" attr.name="longitude" attr.type="double"/>',
+            '  <!-- Edge attributes -->',
+            '  <key id="hops" for="edge" attr.name="hops" attr.type="int"/>',
+            '  <key id="snr" for="edge" attr.name="snr" attr.type="double"/>',
+            '  <key id="rssi" for="edge" attr.name="rssi" attr.type="int"/>',
+            '  <key id="active" for="edge" attr.name="active" attr.type="boolean"/>',
+            '  <key id="weight" for="edge" attr.name="weight" attr.type="double"/>',
+            '  <graph id="topology" edgedefault="directed">',
+        ]
+
+        # Add nodes
+        for node_id, node in self._nodes.items():
+            safe_id = xml_escape(node_id)
+            lines.append(f'    <node id="{safe_id}">')
+            lines.append(f'      <data key="name">{xml_escape(node.name or node_id)}</data>')
+            lines.append(f'      <data key="type">{xml_escape(node.node_type)}</data>')
+            lines.append(f'      <data key="network">{xml_escape(node.network)}</data>')
+            lines.append(f'      <data key="online">{str(node.is_online).lower()}</data>')
+            if node.latitude is not None:
+                lines.append(f'      <data key="lat">{node.latitude}</data>')
+            if node.longitude is not None:
+                lines.append(f'      <data key="lon">{node.longitude}</data>')
+            lines.append('    </node>')
+
+        # Add edges
+        for i, edge in enumerate(self._edges):
+            src = xml_escape(edge.source)
+            dst = xml_escape(edge.target)
+            lines.append(f'    <edge id="e{i}" source="{src}" target="{dst}">')
+            lines.append(f'      <data key="hops">{edge.hops}</data>')
+            if edge.snr is not None:
+                lines.append(f'      <data key="snr">{edge.snr}</data>')
+            if edge.rssi is not None:
+                lines.append(f'      <data key="rssi">{edge.rssi}</data>')
+            lines.append(f'      <data key="active">{str(edge.is_active).lower()}</data>')
+            lines.append(f'      <data key="weight">{edge.weight}</data>')
+            lines.append('    </edge>')
+
+        lines.append('  </graph>')
+        lines.append('</graphml>')
+
+        with open(output_path, 'w') as f:
+            f.write('\n'.join(lines))
+
+        logger.info(f"Exported GraphML ({len(self._nodes)} nodes, {len(self._edges)} edges) to {output_path}")
+        return output_path, len(self._edges)
+
+    def export_csv(self, output_dir: str = None) -> Tuple[str, str]:
+        """
+        Export topology as CSV files (nodes.csv, edges.csv).
+
+        Args:
+            output_dir: Output directory (default: cache dir)
+
+        Returns:
+            Tuple of (nodes_path, edges_path)
+        """
+        if output_dir is None:
+            output_dir = str(get_real_user_home() / ".cache" / "meshforge")
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        # Export nodes
+        nodes_path = str(Path(output_dir) / "topology_nodes.csv")
+        with open(nodes_path, 'w') as f:
+            f.write("id,name,type,network,online,hops,latitude,longitude,altitude,services\n")
+            for node_id, node in self._nodes.items():
+                services_str = ";".join(node.services)
+                f.write(f'{node.id},"{node.name}",{node.node_type},{node.network},'
+                        f'{node.is_online},{node.hops},{node.latitude or ""},'
+                        f'{node.longitude or ""},{node.altitude or ""},"{services_str}"\n')
+
+        # Export edges
+        edges_path = str(Path(output_dir) / "topology_edges.csv")
+        with open(edges_path, 'w') as f:
+            f.write("source,target,hops,snr,rssi,active,bidirectional,weight,quality\n")
+            for edge in self._edges:
+                f.write(f'{edge.source},{edge.target},{edge.hops},'
+                        f'{edge.snr or ""},{edge.rssi or ""},{edge.is_active},'
+                        f'{edge.bidirectional},{edge.weight},{edge.get_quality_label()}\n')
+
+        logger.info(f"Exported CSV files to {output_dir}")
+        return nodes_path, edges_path

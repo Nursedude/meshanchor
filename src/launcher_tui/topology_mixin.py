@@ -531,9 +531,11 @@ class TopologyMixin:
 
         # Ask for export format
         format_choices = [
-            ("json", "JSON (full topology data)"),
-            ("csv", "CSV (edges only)"),
+            ("geojson", "GeoJSON (for mapping tools)"),
+            ("d3", "D3.js JSON (for web visualization)"),
             ("graphml", "GraphML (for Gephi, etc.)"),
+            ("csv", "CSV (nodes + edges)"),
+            ("json", "JSON (full topology data)"),
             ("back", "Back"),
         ]
 
@@ -547,72 +549,65 @@ class TopologyMixin:
             return
 
         try:
-            from utils.paths import get_real_user_home
-            export_dir = get_real_user_home() / ".cache" / "meshforge"
-            export_dir.mkdir(parents=True, exist_ok=True)
+            from utils.topology_visualizer import TopologyVisualizer
 
-            topo_dict = topology.to_dict()
+            # Create visualizer from topology
+            visualizer = TopologyVisualizer.from_topology(topology)
 
-            if export_format == "json":
+            if export_format == "geojson":
+                output_path, count = visualizer.export_geojson()
+                self.dialog.msgbox(
+                    "GeoJSON Export",
+                    f"Exported {count} features.\n\n"
+                    f"File: {output_path}\n\n"
+                    "Note: Only nodes with GPS positions are included."
+                )
+
+            elif export_format == "d3":
+                output_path, count = visualizer.export_d3_json()
+                self.dialog.msgbox(
+                    "D3.js Export",
+                    f"Exported {count} nodes + links.\n\n"
+                    f"File: {output_path}\n\n"
+                    "Use with D3.js force-directed graph."
+                )
+
+            elif export_format == "graphml":
+                output_path, count = visualizer.export_graphml()
+                self.dialog.msgbox(
+                    "GraphML Export",
+                    f"Exported {count} edges.\n\n"
+                    f"File: {output_path}\n\n"
+                    "Open in Gephi, yEd, or similar tools."
+                )
+
+            elif export_format == "csv":
+                nodes_path, edges_path = visualizer.export_csv()
+                self.dialog.msgbox(
+                    "CSV Export",
+                    f"Exported CSV files:\n\n"
+                    f"Nodes: {nodes_path}\n"
+                    f"Edges: {edges_path}"
+                )
+
+            elif export_format == "json":
                 import json
+                from utils.paths import get_real_user_home
+                export_dir = get_real_user_home() / ".cache" / "meshforge"
+                export_dir.mkdir(parents=True, exist_ok=True)
+
+                topo_dict = topology.to_dict()
                 output_path = export_dir / "topology_export.json"
                 with open(output_path, 'w') as f:
                     json.dump(topo_dict, f, indent=2, default=str)
 
-            elif export_format == "csv":
-                output_path = export_dir / "topology_edges.csv"
-                with open(output_path, 'w') as f:
-                    f.write("source,target,hops,snr,rssi,active,announce_count\n")
-                    for edge in topo_dict.get("edges", []):
-                        f.write(f"{edge.get('source_id', '')},"
-                                f"{edge.get('dest_id', '')},"
-                                f"{edge.get('hops', 0)},"
-                                f"{edge.get('snr', '')},"
-                                f"{edge.get('rssi', '')},"
-                                f"{edge.get('is_active', False)},"
-                                f"{edge.get('announce_count', 0)}\n")
+                self.dialog.msgbox(
+                    "JSON Export",
+                    f"Exported full topology data.\n\n"
+                    f"File: {output_path}"
+                )
 
-            elif export_format == "graphml":
-                output_path = export_dir / "topology.graphml"
-                self._export_graphml(topo_dict, output_path)
-
-            self.dialog.msgbox(
-                "Export Complete",
-                f"Topology exported to:\n\n{output_path}"
-            )
-
+        except ImportError:
+            self.dialog.msgbox("Error", "Topology visualizer module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Export failed:\n{e}")
-
-    def _export_graphml(self, topo_dict: dict, output_path: Path):
-        """Export topology as GraphML format."""
-        lines = [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
-            '  <key id="hops" for="edge" attr.name="hops" attr.type="int"/>',
-            '  <key id="snr" for="edge" attr.name="snr" attr.type="double"/>',
-            '  <key id="active" for="edge" attr.name="active" attr.type="boolean"/>',
-            '  <graph id="topology" edgedefault="directed">',
-        ]
-
-        # Add nodes
-        for node_id in topo_dict.get("nodes", []):
-            safe_id = node_id.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            lines.append(f'    <node id="{safe_id}"/>')
-
-        # Add edges
-        for i, edge in enumerate(topo_dict.get("edges", [])):
-            src = edge.get("source_id", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            dst = edge.get("dest_id", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            lines.append(f'    <edge id="e{i}" source="{src}" target="{dst}">')
-            lines.append(f'      <data key="hops">{edge.get("hops", 0)}</data>')
-            if edge.get("snr") is not None:
-                lines.append(f'      <data key="snr">{edge.get("snr")}</data>')
-            lines.append(f'      <data key="active">{str(edge.get("is_active", False)).lower()}</data>')
-            lines.append('    </edge>')
-
-        lines.append('  </graph>')
-        lines.append('</graphml>')
-
-        with open(output_path, 'w') as f:
-            f.write('\n'.join(lines))
