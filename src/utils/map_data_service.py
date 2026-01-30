@@ -17,6 +17,13 @@ Usage:
     server.start()  # Serves map + API at http://localhost:5000
 """
 
+# Ensure src/ is in path when running standalone
+import sys
+from pathlib import Path as _Path
+_src_dir = _Path(__file__).resolve().parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 import json
 import logging
 import os
