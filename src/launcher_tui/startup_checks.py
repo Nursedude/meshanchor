@@ -141,21 +141,38 @@ class EnvironmentState:
             for s in self.services.values()
         )
 
-    def get_status_line(self) -> str:
-        """Generate a one-line status summary for display."""
+    def get_status_line(self, plain: bool = False) -> str:
+        """Generate a one-line status summary for display.
+
+        Args:
+            plain: If True, use text indicators instead of ANSI color codes.
+                   Use plain=True for whiptail/dialog menus which don't render ANSI.
+        """
         parts = []
         for name, info in self.services.items():
             if info.state == ServiceRunState.RUNNING:
-                parts.append(f"{name} \033[32m●\033[0m")
+                if plain:
+                    parts.append(f"{name}: UP")
+                else:
+                    parts.append(f"{name} \033[32m●\033[0m")
             elif info.state == ServiceRunState.FAILED:
-                parts.append(f"{name} \033[31m●\033[0m")
+                if plain:
+                    parts.append(f"{name}: FAIL")
+                else:
+                    parts.append(f"{name} \033[31m●\033[0m")
             else:
-                parts.append(f"{name} \033[2m○\033[0m")
+                if plain:
+                    parts.append(f"{name}: --")
+                else:
+                    parts.append(f"{name} \033[2m○\033[0m")
 
         status = "  ".join(parts)
 
         if self.conflicts:
-            status += f"  \033[33m⚠ {len(self.conflicts)} conflict(s)\033[0m"
+            if plain:
+                status += f"  ! {len(self.conflicts)} conflict(s)"
+            else:
+                status += f"  \033[33m⚠ {len(self.conflicts)} conflict(s)\033[0m"
 
         return status
 
