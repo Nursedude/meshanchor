@@ -1957,24 +1957,173 @@ class MapServer:
 
 
 def main():
-    """Run the map server standalone."""
-    import argparse
+    """Run the map server standalone.
 
-    parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
-    parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 for all interfaces)")
-    parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
+    Designed for both interactive use and systemd service deployment.
+
+    Examples:
+        # Interactive
+        python -m utils.map_data_service
+
+        # As service
+        python -m utils.map_data_service --daemon
+
+        # Collect GeoJSON only
+        python -m utils.map_data_service --collect-only
+    """
+    import argparse
+    import signal
+
+    parser = argparse.ArgumentParser(
+        description="MeshForge Live Map Server - NOC Web Interface",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m utils.map_data_service           # Start on port 5000
+  python -m utils.map_data_service -p 8080   # Use custom port
+  python -m utils.map_data_service --daemon  # Run as background service
+  python -m utils.map_data_service --status  # Check if running
+  python -m utils.map_data_service --collect-only  # Just get GeoJSON
+        """
+    )
+    parser.add_argument("-p", "--port", type=int, default=5000,
+                        help="Port (default: 5000)")
+    parser.add_argument("--host", default="0.0.0.0",
+                        help="Bind address (default: 0.0.0.0 for all interfaces)")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Just collect and print GeoJSON, then exit")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run in daemon mode (for systemd)")
+    parser.add_argument("--status", action="store_true",
+                        help="Check if map server is running")
+    parser.add_argument("--pid-file", type=str,
+                        default="/run/meshforge/map-server.pid",
+                        help="PID file location (default: /run/meshforge/map-server.pid)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose logging")
     args = parser.parse_args()
 
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    # Status check
+    if args.status:
+        return _check_server_status(args.port)
+
+    # Collect-only mode
     if args.collect_only:
         collector = MapDataCollector()
         geojson = collector.collect()
         print(json.dumps(geojson, indent=2))
-        print(f"\n# {len(geojson['features'])} nodes collected", flush=True)
-    else:
-        server = MapServer(port=args.port, host=args.host)
+
+        # Summary to stderr so it doesn't pollute JSON output
+        import sys
+        props = geojson.get("properties", {})
+        print(f"\n# {len(geojson['features'])} nodes with position", file=sys.stderr)
+        print(f"# {props.get('nodes_without_position_count', 0)} nodes without position", file=sys.stderr)
+        print(f"# Sources: {props.get('sources', {})}", file=sys.stderr)
+        return 0
+
+    # Check if port is already in use
+    if _is_port_in_use(args.port):
+        print(f"ERROR: Port {args.port} is already in use")
+        print(f"  Check: lsof -i :{args.port}")
+        print(f"  Or use: --port <different_port>")
+        return 1
+
+    # Daemon mode - write PID file for service management
+    if args.daemon:
+        _write_pid_file(args.pid_file)
+
+    # Create and start server
+    server = MapServer(port=args.port, host=args.host)
+
+    # Signal handlers for graceful shutdown
+    def handle_signal(signum, frame):
+        sig_name = signal.Signals(signum).name
+        print(f"\nReceived {sig_name}, shutting down...")
+        server.stop()
+        _remove_pid_file(args.pid_file)
+        import sys
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    try:
         server.start()
+    finally:
+        _remove_pid_file(args.pid_file)
+
+    return 0
+
+
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is already in use."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+def _check_server_status(port: int) -> int:
+    """Check if map server is running and report status."""
+    if _is_port_in_use(port):
+        print(f"✓ MeshForge Map Server is running on port {port}")
+        # Try to get status from API
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"http://localhost:{port}/api/status", timeout=2) as resp:
+                data = json.loads(resp.read().decode())
+                print(f"  Collector: {'active' if data.get('collector') else 'inactive'}")
+                if data.get('radio'):
+                    radio = data['radio']
+                    print(f"  Radio: {radio.get('mode', 'unknown')} "
+                          f"({'connected' if radio.get('connected') else 'disconnected'})")
+        except Exception:
+            pass
+        return 0
+    else:
+        print(f"✗ MeshForge Map Server is not running on port {port}")
+        return 1
+
+
+def _write_pid_file(pid_file: str) -> None:
+    """Write PID file for service management."""
+    try:
+        pid_dir = Path(pid_file).parent
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        with open(pid_file, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.debug(f"PID file written: {pid_file}")
+    except PermissionError:
+        # Running as non-root, use alternative location
+        alt_pid = Path("/tmp/meshforge-map-server.pid")
+        with open(alt_pid, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.debug(f"PID file written: {alt_pid}")
+    except Exception as e:
+        logger.warning(f"Could not write PID file: {e}")
+
+
+def _remove_pid_file(pid_file: str) -> None:
+    """Remove PID file on shutdown."""
+    for path in [pid_file, "/tmp/meshforge-map-server.pid"]:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main() or 0)
