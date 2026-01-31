@@ -52,6 +52,17 @@ except ImportError:
             return Path('/root')
 
 
+# Import centralized service checking
+try:
+    from utils.service_check import check_process_running
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    try:
+        from src.utils.service_check import check_process_running
+        _HAS_SERVICE_CHECK = True
+    except ImportError:
+        _HAS_SERVICE_CHECK = False
+
 # Diagnostic data directory
 DIAG_DIR = get_real_user_home() / ".config" / "meshforge" / "diagnostics"
 
@@ -442,12 +453,16 @@ class NetworkDiagnostics:
     def _check_rns_health(self):
         """Check RNS/Reticulum health."""
         try:
-            # Check if rnsd is running
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, timeout=5
-            )
-            rnsd_running = result.returncode == 0
+            # Check if rnsd is running using centralized service checking
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
 
             # Check if RNS module is available
             try:
