@@ -1279,6 +1279,38 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Radio Control Panel -->
+            <div class="radio-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
+                <div class="section-title">📻 Radio Control</div>
+                <div class="stat-row">
+                    <span class="label">Status:</span>
+                    <span class="value" id="radio-status">Checking...</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Mode:</span>
+                    <span class="value" id="radio-mode">--</span>
+                </div>
+                <div id="radio-info-section" style="display: none;">
+                    <div class="stat-row">
+                        <span class="label">Node:</span>
+                        <span class="value" id="radio-node-name">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="label">Hardware:</span>
+                        <span class="value" id="radio-hardware">--</span>
+                    </div>
+                </div>
+                <div id="radio-message-form" style="display: none; margin-top: 8px;">
+                    <input type="text" id="radio-message-text" placeholder="Message..."
+                           style="width: 100%; padding: 6px; margin-bottom: 6px; background: #1a2a3a; border: 1px solid #2a3a4a; color: #fff; border-radius: 4px;">
+                    <input type="text" id="radio-message-dest" placeholder="Destination (^all or !nodeId)"
+                           style="width: 100%; padding: 6px; margin-bottom: 6px; background: #1a2a3a; border: 1px solid #2a3a4a; color: #fff; border-radius: 4px;">
+                    <button class="btn-action primary" onclick="sendRadioMessage()" style="width: 100%;">Send Message</button>
+                    <div id="radio-send-status" style="font-size: 10px; color: #888; margin-top: 4px;"></div>
+                </div>
+                <button class="btn-action" onclick="refreshRadioStatus()" style="margin-top: 6px;">Refresh Radio</button>
+            </div>
         </div>
     </div>
 
@@ -3642,8 +3674,106 @@
     }
 
     // ============================================
+    // Radio Control Functions
+    // ============================================
+
+    async function refreshRadioStatus() {
+        const statusEl = document.getElementById('radio-status');
+        const modeEl = document.getElementById('radio-mode');
+        const infoSection = document.getElementById('radio-info-section');
+        const messageForm = document.getElementById('radio-message-form');
+
+        try {
+            const response = await fetch('/api/radio/status');
+            if (!response.ok) throw new Error('Radio API not available');
+
+            const data = await response.json();
+
+            if (data.connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.style.color = '#66bb6a';
+                modeEl.textContent = data.mode.toUpperCase();
+
+                // Show message form when connected
+                messageForm.style.display = 'block';
+
+                // Try to get radio info
+                try {
+                    const infoRes = await fetch('/api/radio/info');
+                    if (infoRes.ok) {
+                        const info = await infoRes.json();
+                        if (info.name || info.hardware) {
+                            document.getElementById('radio-node-name').textContent = info.name || info.node_num || '--';
+                            document.getElementById('radio-hardware').textContent = info.hardware || '--';
+                            infoSection.style.display = 'block';
+                        }
+                    }
+                } catch (e) { /* info not available */ }
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.style.color = '#ef5350';
+                modeEl.textContent = data.mode || 'none';
+                infoSection.style.display = 'none';
+                messageForm.style.display = 'none';
+            }
+        } catch (e) {
+            statusEl.textContent = 'API unavailable';
+            statusEl.style.color = '#888';
+            modeEl.textContent = '--';
+            infoSection.style.display = 'none';
+            messageForm.style.display = 'none';
+        }
+    }
+
+    async function sendRadioMessage() {
+        const text = document.getElementById('radio-message-text').value.trim();
+        const dest = document.getElementById('radio-message-dest').value.trim() || '^all';
+        const statusEl = document.getElementById('radio-send-status');
+
+        if (!text) {
+            statusEl.textContent = 'Please enter a message';
+            statusEl.style.color = '#ef5350';
+            return;
+        }
+
+        statusEl.textContent = 'Sending...';
+        statusEl.style.color = '#888';
+
+        try {
+            const response = await fetch('/api/radio/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text, destination: dest })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                statusEl.textContent = 'Message sent!';
+                statusEl.style.color = '#66bb6a';
+                document.getElementById('radio-message-text').value = '';
+            } else {
+                statusEl.textContent = data.error || 'Send failed';
+                statusEl.style.color = '#ef5350';
+            }
+        } catch (e) {
+            statusEl.textContent = 'Network error';
+            statusEl.style.color = '#ef5350';
+        }
+
+        // Clear status after 3 seconds
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+
+    // ============================================
     // Initialization
     // ============================================
+
+    // Initialize radio status
+    refreshRadioStatus();
+    // Refresh radio status every 30 seconds
+    setInterval(refreshRadioStatus, 30000);
+
     refreshNodes();
 
     // Auto-refresh every 30 seconds (only if no embedded data pushing updates)
