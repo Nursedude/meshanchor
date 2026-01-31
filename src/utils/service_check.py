@@ -303,6 +303,51 @@ def check_process_running(process_name: str) -> bool:
         return False
 
 
+def check_process_with_pid(process_name: str) -> Tuple[bool, Optional[str]]:
+    """
+    Check if a process is running and return its PID.
+
+    Args:
+        process_name: Name of the process to check (e.g., 'rnsd', 'meshtasticd')
+
+    Returns:
+        Tuple of (is_running, pid) where pid is the first matching PID or None
+
+    Example:
+        >>> running, pid = check_process_with_pid('rnsd')
+        >>> if running:
+        ...     print(f"rnsd is running (PID: {pid})")
+    """
+    try:
+        # First try exact process name match (most reliable)
+        result = subprocess.run(
+            ['pgrep', '-x', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            pid = result.stdout.strip().split('\n')[0]
+            return True, pid
+
+        # Also check with -f for processes run via interpreters
+        result = subprocess.run(
+            ['pgrep', '-f', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Filter out pgrep itself and get first real PID
+            pids = [p for p in result.stdout.strip().split('\n') if p]
+            if pids:
+                return True, pids[0]
+
+        return False, None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False, None
+
+
 def check_systemd_service(service_name: str) -> Tuple[bool, bool]:
     """
     Check if a systemd service is running and enabled.

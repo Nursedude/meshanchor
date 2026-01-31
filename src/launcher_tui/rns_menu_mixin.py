@@ -1025,12 +1025,27 @@ class RNSMenuMixin:
     def _diagnose_rns_port_conflict(self):
         """Print diagnostic info for RNS Address-in-use port conflicts."""
         try:
-            rnsd_check = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if rnsd_check.returncode == 0:
-                pid = rnsd_check.stdout.strip().split('\n')[0]
+            # Use centralized service check when available
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
+
+            if rnsd_running:
+                # Get PID for diagnostic message
+                try:
+                    pid_result = subprocess.run(
+                        ['pgrep', '-f', 'rnsd'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    pid = pid_result.stdout.strip().split('\n')[0] if pid_result.stdout else 'unknown'
+                except Exception:
+                    pid = 'unknown'
                 print(f"rnsd is running (PID: {pid}) but may need a restart:")
                 print("  sudo systemctl restart rnsd")
             else:
