@@ -272,13 +272,61 @@ class FirstRunMixin:
                 )
                 return
 
-        # SPI is available - select hardware type
+        # Check for existing config in config.d
+        config_d = Path('/etc/meshtasticd/config.d')
+        available_d = Path('/etc/meshtasticd/available.d')
+        existing_configs = []
+        if config_d.exists():
+            existing_configs = [f for f in config_d.glob('lora-*.yaml')]
+
+        if existing_configs:
+            # Show existing config and ask if user wants to change
+            config_names = ", ".join(f.name for f in existing_configs)
+            change = self.dialog.yesno(
+                "Existing HAT Config Found",
+                f"You already have a HAT configured:\n\n"
+                f"  {config_names}\n\n"
+                f"Location: {config_d}\n\n"
+                "Do you want to change it?",
+                default_no=True
+            )
+            if not change:
+                self.dialog.msgbox(
+                    "Keeping Existing Config",
+                    f"Your current HAT config will be kept:\n\n"
+                    f"  {config_names}\n\n"
+                    "You can change this later from:\n"
+                    "  Configuration > meshtasticd Config > Hardware"
+                )
+                return
+
+        # Build choices from available.d (dynamic) + fallback to hardcoded
         choices = []
-        for hw_id, hw_info in SPI_HARDWARE_CONFIGS.items():
-            choices.append((hw_id, f"{hw_info['name']:<20} {hw_info['description'][:30]}"))
+
+        # First, use templates from available.d if it exists
+        if available_d.exists():
+            templates = sorted(available_d.glob('lora-*.yaml'))
+            if templates:
+                for tmpl in templates:
+                    # Mark if currently active
+                    is_active = config_d.exists() and (config_d / tmpl.name).exists()
+                    status = " [ACTIVE]" if is_active else ""
+                    # Create readable name from filename
+                    display_name = tmpl.stem.replace('lora-', '').replace('-', ' ').title()
+                    choices.append((tmpl.name, f"{display_name}{status}"))
+
+        # If no templates found in available.d, fall back to hardcoded list
+        if not choices:
+            for hw_id, hw_info in SPI_HARDWARE_CONFIGS.items():
+                choices.append((hw_id, f"{hw_info['name']:<20} {hw_info['description'][:30]}"))
+
+        # Always add manual option
+        choices.append(("custom-spi", "Custom/Other SPI Device"))
 
         choice = self.dialog.menu(
             "Step 2: Select SPI Hardware",
+            "Select your HAT from meshtasticd templates:\n\n"
+            f"Templates: {available_d}" if available_d.exists() else
             "Which SPI HAT are you using?",
             choices
         )
@@ -293,10 +341,44 @@ class FirstRunMixin:
             )
             return
 
-        # Apply the selected configuration
-        hw_config = SPI_HARDWARE_CONFIGS.get(choice)
-        if hw_config and hw_config['config_file']:
-            self._apply_hardware_config(hw_config)
+        # Check if choice is a filename from available.d or a hardcoded key
+        if choice.endswith('.yaml') and available_d.exists():
+            # It's a template from available.d
+            src = available_d / choice
+            if src.exists():
+                self._apply_hardware_config_from_file(src, config_d)
+        else:
+            # It's a hardcoded config key
+            hw_config = SPI_HARDWARE_CONFIGS.get(choice)
+            if hw_config and hw_config['config_file']:
+                self._apply_hardware_config(hw_config)
+
+    def _apply_hardware_config_from_file(self, src: Path, config_d: Path):
+        """Apply a hardware config directly from available.d template."""
+        try:
+            config_d.mkdir(parents=True, exist_ok=True)
+            dst = config_d / src.name
+
+            # Copy config file
+            shutil.copy2(src, dst)
+
+            # Restart meshtasticd
+            if _HAS_APPLY_RESTART:
+                success, msg = apply_config_and_restart('meshtasticd')
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+
+            self.dialog.msgbox(
+                "Configuration Applied",
+                f"Applied HAT configuration:\n\n"
+                f"Template: {src.name}\n"
+                f"Config: {dst}\n\n"
+                f"meshtasticd has been restarted.\n"
+                f"Check: systemctl status meshtasticd"
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to apply config: {e}")
 
     def _wizard_step_usb_config(self):
         """Configure USB serial connection."""
