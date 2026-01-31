@@ -1011,6 +1011,17 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_message_queue()
         elif self.path == '/api/network/topology' or self.path == '/api/network/topology/':
             self._serve_network_topology()
+        # ─────────────────────────────────────────────────────────────
+        # Radio Control API - MeshForge-owned radio access
+        # ─────────────────────────────────────────────────────────────
+        elif self.path == '/api/radio/info' or self.path == '/api/radio/info/':
+            self._serve_radio_info()
+        elif self.path == '/api/radio/nodes' or self.path == '/api/radio/nodes/':
+            self._serve_radio_nodes()
+        elif self.path == '/api/radio/channels' or self.path == '/api/radio/channels/':
+            self._serve_radio_channels()
+        elif self.path == '/api/radio/status' or self.path == '/api/radio/status/':
+            self._serve_radio_status()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -1020,6 +1031,60 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                 self._serve_static_html()
             else:
                 super().do_GET()
+
+    def do_POST(self):
+        """Handle POST requests for radio control actions."""
+        # ─────────────────────────────────────────────────────────────
+        # Radio Control API - POST endpoints
+        # ─────────────────────────────────────────────────────────────
+        if self.path == '/api/radio/message' or self.path == '/api/radio/message/':
+            self._handle_send_message()
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self._send_cors_header()
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
+    def _handle_send_message(self):
+        """Handle POST /api/radio/message - send a message via radio."""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(body)
+
+            text = data.get('text', '')
+            destination = data.get('destination', '^all')
+
+            if not text:
+                self._serve_json({"error": "text is required"}, status=400)
+                return
+
+            conn = self._get_radio_connection()
+            if not conn:
+                self._serve_json({"error": "meshtastic library not available"}, status=500)
+                return
+
+            success = conn.send_message(text, destination)
+            if success:
+                self._serve_json({
+                    "success": True,
+                    "message": "Message sent",
+                    "destination": destination,
+                    "connection_mode": conn.get_mode()
+                })
+            else:
+                self._serve_json({"error": "Failed to send message"}, status=500)
+
+        except json.JSONDecodeError:
+            self._serve_json({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
 
     def _serve_static_html(self):
         """Serve static HTML files with no-cache headers."""
@@ -1143,10 +1208,10 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         geojson = history.get_trajectory_geojson(node_id, hours=24)
         self._serve_json(geojson)
 
-    def _serve_json(self, obj: Any):
+    def _serve_json(self, obj: Any, status: int = 200):
         """Helper to serve a JSON response."""
         data = json.dumps(obj).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
         self._send_cors_header()
@@ -1530,6 +1595,99 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "timestamp": datetime.now().isoformat()
         })
 
+    # ─────────────────────────────────────────────────────────────────
+    # Radio Control API - MeshForge-owned Meshtastic access
+    # ─────────────────────────────────────────────────────────────────
+
+    def _get_radio_connection(self):
+        """Get or create radio connection manager."""
+        try:
+            from utils.meshtastic_connection import (
+                get_connection_manager, ConnectionMode
+            )
+            return get_connection_manager(mode=ConnectionMode.AUTO)
+        except ImportError:
+            return None
+
+    def _serve_radio_info(self):
+        """Serve radio device information."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            info = conn.get_radio_info()
+            info["connection_mode"] = conn.get_mode()
+            info["timestamp"] = datetime.now().isoformat()
+            self._serve_json(info)
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_nodes(self):
+        """Serve nodes from directly connected radio."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            nodes = conn.get_nodes()
+            self._serve_json({
+                "nodes": nodes,
+                "count": len(nodes),
+                "connection_mode": conn.get_mode(),
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_channels(self):
+        """Serve channels from directly connected radio."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            channels = conn.get_channels()
+            self._serve_json({
+                "channels": channels,
+                "count": len(channels),
+                "connection_mode": conn.get_mode(),
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_status(self):
+        """Serve radio connection status."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({
+                "connected": False,
+                "mode": "unavailable",
+                "error": "meshtastic library not available"
+            })
+            return
+
+        try:
+            # Check if connection is available
+            is_available = conn.is_available() if conn.mode.value == "tcp" else True
+            has_persistent = conn.has_persistent()
+
+            self._serve_json({
+                "connected": is_available or has_persistent,
+                "mode": conn.get_mode(),
+                "persistent_owner": conn.get_persistent_owner(),
+                "host": conn.host,
+                "port": conn.port,
+                "serial_port": conn.serial_port,
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
     def _haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance between two points in km."""
         import math
@@ -1551,7 +1709,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
 
 class MapServer:
-    """Simple HTTP server for the live network map.
+    """MeshForge HTTP server for network monitoring and radio control.
 
     Serves:
     - GET /              → node_map.html (the live map)
@@ -1563,6 +1721,13 @@ class MapServer:
     - GET /api/network/topology → network topology for D3.js visualization
     - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
+
+    Radio Control API (MeshForge-owned):
+    - GET /api/radio/info     → radio device information
+    - GET /api/radio/nodes    → nodes from connected radio
+    - GET /api/radio/channels → channels from connected radio
+    - GET /api/radio/status   → radio connection status
+    - POST /api/radio/message → send message via radio
 
     Usage:
         server = MapServer(port=5000)
