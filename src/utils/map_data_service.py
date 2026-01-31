@@ -231,6 +231,16 @@ class MapDataCollector:
             if fid:
                 features[fid] = f
 
+        # Source 1.5: Direct USB radio (when meshtasticd not running)
+        # Only try this if TCP returned nothing (avoids double-connection)
+        direct_radio_features = []
+        if not tcp_features:
+            direct_radio_features = self._collect_direct_radio()
+            for f in direct_radio_features:
+                fid = f["properties"].get("id", "")
+                if fid:
+                    features[fid] = f
+
         # Source 2: MQTT subscriber (if running)
         mqtt_features = self._collect_mqtt()
         for f in mqtt_features:
@@ -263,7 +273,9 @@ class MapDataCollector:
                 if fid:
                     features[fid] = f
 
-        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features, aredn_features)
+        sources = self._get_source_summary(
+            tcp_features, mqtt_features, tracker_features, aredn_features, direct_radio_features
+        )
         geojson = {
             "type": "FeatureCollection",
             "features": list(features.values()),
@@ -283,6 +295,7 @@ class MapDataCollector:
         logger.debug(
             f"MapDataCollector: {len(features)} nodes "
             f"(meshtasticd:{sources.get('meshtasticd', 0)} "
+            f"direct_radio:{sources.get('direct_radio', 0)} "
             f"mqtt:{sources.get('mqtt', 0)} "
             f"tracker:{sources.get('node_tracker', 0)})"
         )
@@ -391,6 +404,86 @@ class MapDataCollector:
 
         except Exception as e:
             logger.debug(f"TCP interface collection error: {e}")
+        finally:
+            manager.release_lock()
+
+        return features
+
+    def _collect_direct_radio(self) -> List[Dict]:
+        """Collect nodes directly from USB radio (serial connection).
+
+        Used when meshtasticd is not running (usb-direct mode).
+        MeshForge connects directly to the radio via USB serial.
+
+        Returns list of GeoJSON features for nodes with valid positions.
+        """
+        try:
+            from utils.meshtastic_connection import (
+                get_connection_manager, safe_close_interface, ConnectionMode,
+                reset_connection_manager
+            )
+        except ImportError:
+            logger.debug("meshtastic_connection module not available")
+            return []
+
+        # Check if USB device is available
+        import glob
+        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        if not usb_devices:
+            logger.debug("No USB radio devices found")
+            return []
+
+        features = []
+        no_position_nodes = []
+
+        # Reset manager to ensure we get SERIAL mode
+        # (in case a previous TCP connection left it in TCP mode)
+        reset_connection_manager()
+        manager = get_connection_manager(mode=ConnectionMode.SERIAL)
+
+        # Don't block if someone else holds the connection
+        if not manager.acquire_lock(timeout=5.0):
+            logger.debug("Could not acquire radio lock (in use)")
+            return []
+
+        try:
+            manager._wait_for_cooldown()
+            interface = manager._create_interface()
+
+            try:
+                if hasattr(interface, 'nodes') and interface.nodes:
+                    now = time.time()
+                    online_threshold = self.get_online_threshold_seconds()
+                    total_nodes = len(interface.nodes)
+
+                    for node_id, node_data in interface.nodes.items():
+                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
+                        if feature:
+                            # Mark as from direct radio
+                            feature["properties"]["source"] = "direct_radio"
+                            features.append(feature)
+                        else:
+                            # Track nodes without valid position
+                            no_pos_info = self._extract_node_info_without_position(
+                                node_id, node_data, now, online_threshold
+                            )
+                            if no_pos_info:
+                                no_position_nodes.append(no_pos_info)
+
+                    # Update the tracking lists (if meshtasticd didn't already)
+                    if not self._total_nodes_seen:
+                        self._nodes_without_position = no_position_nodes
+                        self._total_nodes_seen = total_nodes
+
+                    logger.debug(
+                        f"Direct radio (USB): {len(features)} with GPS, "
+                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
+                    )
+            finally:
+                safe_close_interface(interface)
+
+        except Exception as e:
+            logger.debug(f"Direct radio collection error: {e}")
         finally:
             manager.release_lock()
 
@@ -944,10 +1037,13 @@ class MapDataCollector:
         except Exception as e:
             logger.debug(f"Cache save error: {e}")
 
-    def _get_source_summary(self, tcp: List, mqtt: List, tracker: List, aredn: List = None) -> Dict:
+    def _get_source_summary(
+        self, tcp: List, mqtt: List, tracker: List, aredn: List = None, direct_radio: List = None
+    ) -> Dict:
         """Summarize which sources contributed data."""
         return {
             "meshtasticd": len(tcp),
+            "direct_radio": len(direct_radio) if direct_radio else 0,
             "mqtt": len(mqtt),
             "node_tracker": len(tracker),
             "aredn": len(aredn) if aredn else 0,
@@ -1160,7 +1256,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self.send_error(404, f"Map file not found: {map_path}")
 
     def _serve_status(self):
-        """Serve server status."""
+        """Serve server status including radio connection info."""
         status = {
             "status": "running",
             "time": datetime.now().isoformat(),
@@ -1174,12 +1270,57 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             except Exception:
                 status["history"] = None
 
+        # Include radio connection status
+        status["radio"] = self._get_radio_status_summary()
+
         data = json.dumps(status).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
+        self._send_cors_header()
         self.end_headers()
         self.wfile.write(data)
+
+    def _get_radio_status_summary(self) -> Dict[str, Any]:
+        """Get a summary of radio connection status for the status endpoint."""
+        try:
+            from utils.meshtastic_connection import get_connection_manager, ConnectionMode
+        except ImportError:
+            return {"available": False, "error": "meshtastic library not installed"}
+
+        # Check TCP port (meshtasticd)
+        tcp_available = False
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                tcp_available = sock.connect_ex(('localhost', 4403)) == 0
+        except Exception:
+            pass
+
+        # Check USB serial device
+        import glob
+        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        usb_available = len(usb_devices) > 0
+
+        # Determine connection mode
+        if tcp_available:
+            mode = "tcp"
+            connected = True
+        elif usb_available:
+            mode = "serial"
+            connected = True
+        else:
+            mode = "none"
+            connected = False
+
+        return {
+            "connected": connected,
+            "mode": mode,
+            "tcp_available": tcp_available,
+            "usb_available": usb_available,
+            "usb_devices": usb_devices if usb_available else [],
+        }
 
     def _serve_history_stats(self):
         """Serve node history summary and unique nodes list."""
