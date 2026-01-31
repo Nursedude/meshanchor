@@ -37,9 +37,11 @@ except ImportError:
 
 # Import service check
 try:
-    from utils.service_check import check_service
+    from utils.service_check import check_service, apply_config_and_restart
+    _HAS_APPLY_RESTART = True
 except ImportError:
     check_service = None
+    _HAS_APPLY_RESTART = False
 
 # Import device scanner
 try:
@@ -475,8 +477,11 @@ class FirstRunMixin:
             shutil.copy2(source, dest)
 
             # Restart meshtasticd
-            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+            if _HAS_APPLY_RESTART:
+                success, msg = apply_config_and_restart('meshtasticd')
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
 
             self.dialog.msgbox(
                 "Configuration Applied",
@@ -513,8 +518,11 @@ Serial:
             config_file.write_text(config_content)
 
             # Restart meshtasticd
-            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+            if _HAS_APPLY_RESTART:
+                success, msg = apply_config_and_restart('meshtasticd')
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
 
             self.dialog.msgbox(
                 "USB Configured",
