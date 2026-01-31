@@ -30,7 +30,7 @@ python3 src/standalone.py               # Zero-dependency RF tools
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
-# Version is in src/__version__.py (currently 0.4.7-beta)
+# Version is in src/__version__.py (currently 0.4.8-alpha)
 ```
 
 ## Architecture Overview
@@ -49,6 +49,7 @@ src/
 │   ├── rf.py          # RF calculations (tested)
 │   ├── rf_fast.pyx    # Cython optimization
 │   ├── common.py      # SettingsManager
+│   ├── service_check.py     # Service management (SINGLE SOURCE OF TRUTH)
 │   ├── auto_review.py # Self-audit system
 │   ├── diagnostic_engine.py # Intelligent diagnostics
 │   ├── knowledge_base.py    # Mesh networking knowledge
@@ -134,6 +135,80 @@ WebKit doesn't work when running as root. Always provide browser fallback.
 
 ### Service Verification
 Always check if services (rnsd, HamClock, meshtasticd) are running before using. Provide actionable error messages.
+
+## Service Management (utils/service_check.py)
+
+**SINGLE SOURCE OF TRUTH** for systemd service operations. Always use these helpers instead of raw subprocess calls.
+
+### Checking Service Status
+```python
+from utils.service_check import check_service, ServiceState
+
+# Check if service is available
+status = check_service('meshtasticd')
+if not status.available:
+    show_error(status.message)
+    show_fix(status.fix_hint)
+
+# Check specific states
+if status.state == ServiceState.FAILED:
+    print("Service crashed - check logs")
+elif status.state == ServiceState.NOT_RUNNING:
+    print("Service stopped")
+```
+
+### Restarting Services (after config changes)
+```python
+from utils.service_check import apply_config_and_restart
+
+# After modifying /etc/meshtasticd/config.yaml:
+success, msg = apply_config_and_restart('meshtasticd')
+if not success:
+    show_error(msg)
+```
+
+### Enabling Services at Boot
+```python
+from utils.service_check import enable_service
+
+# After creating a new service file:
+success, msg = enable_service('rnsd')
+
+# Enable AND start immediately:
+success, msg = enable_service('meshtasticd', start=True)
+```
+
+### Daemon Reload Only
+```python
+from utils.service_check import daemon_reload
+
+# After modifying service unit files:
+success, msg = daemon_reload()
+```
+
+### Available Helpers
+| Function | Use Case |
+|----------|----------|
+| `check_service(name)` | Pre-flight check before connecting |
+| `apply_config_and_restart(name)` | After config file changes |
+| `enable_service(name, start=False)` | After creating service files |
+| `daemon_reload()` | After modifying .service units |
+
+### Fallback Pattern (for compatibility)
+```python
+try:
+    from utils.service_check import apply_config_and_restart
+    _HAS_APPLY_RESTART = True
+except ImportError:
+    _HAS_APPLY_RESTART = False
+
+# Usage:
+if _HAS_APPLY_RESTART:
+    success, msg = apply_config_and_restart('meshtasticd')
+else:
+    subprocess.run(['systemctl', 'daemon-reload'], timeout=30)
+    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
+```
 
 ## File Size Guidelines
 

@@ -28,14 +28,18 @@ try:
     from utils.service_check import (
         check_service as _check_service_central,
         check_port,
+        enable_service,
         ServiceState as CentralServiceState
     )
     SERVICE_CHECK_AVAILABLE = True
+    _HAS_ENABLE_SERVICE = True
 except ImportError:
     _check_service_central = None
     check_port = None
+    enable_service = None
     CentralServiceState = None
     SERVICE_CHECK_AVAILABLE = False
+    _HAS_ENABLE_SERVICE = False
 
 
 class WizardServiceState(Enum):
@@ -618,8 +622,13 @@ WantedBy=multi-user.target
             with open(service_path, 'w') as f:
                 f.write(service_content)
 
-            subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
-            subprocess.run(['systemctl', 'enable', 'rnsd'], check=True, timeout=30)
+            if _HAS_ENABLE_SERVICE:
+                success, msg = enable_service('rnsd')
+                if not success:
+                    raise RuntimeError(msg)
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
+                subprocess.run(['systemctl', 'enable', 'rnsd'], check=True, timeout=30)
 
             self._print("  rnsd service created and enabled", "success")
             self._record_decision("rnsd", "Create systemd service", "created", "success")
