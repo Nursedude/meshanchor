@@ -226,6 +226,10 @@ class NomadNetClientMixin:
         if not nn_path:
             return
 
+        # Validate and repair config if needed (e.g., missing [textui] section)
+        if not self._validate_nomadnet_config():
+            return
+
         # Check if rnsd is running (NomadNet needs RNS)
         if not self._check_rns_for_nomadnet():
             return
@@ -644,6 +648,11 @@ node_name = NomadNet Node
 user_interface = text
 downloads_path = ~/Downloads
 
+[textui]
+# Text UI settings (required when user_interface = text)
+intro_time = 1
+editor = nano
+
 # No [interfaces] section = use shared RNS instance from rnsd
 # This prevents 'Address already in use' conflicts
 """
@@ -783,3 +792,69 @@ downloads_path = ~/Downloads
             "  sudo systemctl start rnsd\n\n"
             "Continue anyway?",
         )
+
+    def _validate_nomadnet_config(self) -> bool:
+        """Validate and repair NomadNet config if needed.
+
+        Checks for common issues like missing [textui] section when
+        user_interface = text is set.
+
+        Returns:
+            True if config is valid (or was repaired), False if user cancelled.
+        """
+        config_path = self._get_nomadnet_config_path()
+        if not config_path or not config_path.exists():
+            return True  # No config yet, will be created on first run
+
+        try:
+            content = config_path.read_text()
+        except PermissionError:
+            return True  # Can't read, let NomadNet handle it
+
+        # Check if text UI is selected but [textui] section is missing
+        has_text_ui = 'user_interface = text' in content.lower().replace(' ', '')
+        has_textui_section = '[textui]' in content.lower()
+
+        if has_text_ui and not has_textui_section:
+            # Offer to fix
+            if self.dialog.yesno(
+                "Config Repair Needed",
+                "NomadNet config has user_interface = text\n"
+                "but is missing the required [textui] section.\n\n"
+                "This will cause NomadNet to fail on launch.\n\n"
+                "Add the missing [textui] section now?",
+            ):
+                # Add the missing section
+                textui_section = """
+[textui]
+# Text UI settings (required when user_interface = text)
+intro_time = 1
+editor = nano
+"""
+                try:
+                    # Append to config
+                    with open(config_path, 'a') as f:
+                        f.write(textui_section)
+                    self.dialog.msgbox(
+                        "Config Fixed",
+                        f"Added [textui] section to:\n  {config_path}\n\n"
+                        "NomadNet should now launch correctly.",
+                    )
+                    return True
+                except PermissionError:
+                    self.dialog.msgbox(
+                        "Permission Denied",
+                        f"Cannot write to {config_path}\n\n"
+                        "Please add this section manually:\n\n"
+                        "[textui]\n"
+                        "intro_time = 1\n"
+                        "editor = nano",
+                    )
+                    return False
+                except Exception as e:
+                    self.dialog.msgbox("Error", f"Failed to update config:\n{e}")
+                    return False
+            else:
+                return False  # User declined repair
+
+        return True
