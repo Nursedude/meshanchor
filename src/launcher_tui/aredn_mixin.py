@@ -17,6 +17,7 @@ class AREDNMixin:
                 ("status", "Node Status"),
                 ("neighbors", "Neighbors & Links"),
                 ("services", "Advertised Services"),
+                ("map", "Show on Map"),
                 ("web", "Open AREDN Web UI"),
                 ("scan", "Scan Network"),
                 ("back", "Back"),
@@ -37,6 +38,8 @@ class AREDNMixin:
                 self._aredn_neighbors()
             elif choice == "services":
                 self._aredn_services()
+            elif choice == "map":
+                self._aredn_map()
             elif choice == "web":
                 self._aredn_web()
             elif choice == "scan":
@@ -222,6 +225,97 @@ class AREDNMixin:
 
         except ImportError:
             print("AREDN utilities not available.")
+        except Exception as e:
+            print(f"Error: {e}")
+
+        self._wait_for_enter()
+
+    def _aredn_map(self):
+        """Show AREDN nodes on the unified network map.
+
+        AREDN nodes are displayed alongside Meshtastic and RNS nodes
+        on the MeshForge map. Nodes must have location configured.
+        """
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== AREDN Network Map ===\n")
+
+        # Check for AREDN node
+        node_ip = self._aredn_get_node_ip()
+        if not node_ip:
+            print("No AREDN node found on local network.\n")
+            print("The map requires an AREDN node to be connected.")
+            print("Tried: localnode.local.mesh, 10.0.0.1")
+            self._wait_for_enter()
+            return
+
+        print(f"Connecting to AREDN node at {node_ip}...\n")
+
+        try:
+            from utils.aredn import get_aredn_node
+
+            node = get_aredn_node(node_ip)
+            if not node:
+                print("Could not retrieve node information.")
+                self._wait_for_enter()
+                return
+
+            # Show node info
+            print(f"  Local Node: {node.hostname}")
+            print(f"  Model:      {node.model}")
+
+            # Check if node has location
+            if node.has_location():
+                print(f"  Location:   {node.latitude:.6f}, {node.longitude:.6f}")
+                if node.grid_square:
+                    print(f"  Grid:       {node.grid_square}")
+            else:
+                print(f"  Location:   Not configured")
+                print("\n  Note: Configure location on your AREDN node")
+                print("  to see it on the map (Setup > Basic Setup > Location)")
+
+            # Show neighbor count
+            print(f"\n  Neighbors:  {len(node.links)}")
+
+            # Count neighbors with location
+            neighbors_with_loc = 0
+            print("\n  Checking neighbor locations...")
+            for link in node.links[:5]:  # Check first 5 to avoid long waits
+                if link.ip:
+                    try:
+                        from utils.aredn import get_aredn_node as get_neighbor
+                        neighbor = get_neighbor(link.ip)
+                        if neighbor and neighbor.has_location():
+                            neighbors_with_loc += 1
+                            print(f"    ✓ {neighbor.hostname} has location")
+                    except Exception:
+                        pass
+
+            if len(node.links) > 5:
+                print(f"    ... and {len(node.links) - 5} more neighbors")
+
+            print(f"\n  AREDN nodes on map: {1 if node.has_location() else 0} + {neighbors_with_loc} neighbors")
+
+            # Show map server info
+            print("\n" + "=" * 50)
+            print("\nAREDN nodes are included in the unified MeshForge map.")
+            print("The map shows Meshtastic, RNS, and AREDN nodes together.")
+            print("\nTo view the map:")
+            print("  1. Main Menu > Maps & Viz > Coverage Map")
+            print("  2. Or start the map server and open in browser")
+
+            # Check if map server is running
+            import socket
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                if sock.connect_ex(('localhost', 5000)) == 0:
+                    print("\n  Map server is running: http://localhost:5000")
+                sock.close()
+            except Exception:
+                pass
+
+        except ImportError as e:
+            print(f"AREDN utilities not available: {e}")
         except Exception as e:
             print(f"Error: {e}")
 

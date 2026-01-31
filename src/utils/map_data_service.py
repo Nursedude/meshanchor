@@ -248,7 +248,14 @@ class MapDataCollector:
             if fid and fid not in features:
                 features[fid] = f
 
-        # Source 4: Last-known cache (fill gaps)
+        # Source 4: AREDN mesh network
+        aredn_features = self._collect_aredn()
+        for f in aredn_features:
+            fid = f["properties"].get("id", "")
+            if fid and fid not in features:
+                features[fid] = f
+
+        # Source 5: Last-known cache (fill gaps)
         if not features:
             cache_features = self._load_cache()
             for f in cache_features:
@@ -256,7 +263,7 @@ class MapDataCollector:
                 if fid:
                     features[fid] = f
 
-        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features)
+        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features, aredn_features)
         geojson = {
             "type": "FeatureCollection",
             "features": list(features.values()),
@@ -709,6 +716,113 @@ class MapDataCollector:
 
         return features
 
+    def _collect_aredn(self) -> List[Dict]:
+        """Collect nodes from AREDN mesh network.
+
+        Scans the local AREDN network for nodes with GPS coordinates.
+        AREDN nodes may have location data configured by the operator.
+        """
+        features = []
+
+        try:
+            from utils.aredn import AREDNScanner, AREDNClient
+        except ImportError:
+            logger.debug("AREDN module not available")
+            return []
+
+        # First try to connect to the local AREDN node
+        local_node_ip = self._get_aredn_node_ip()
+        if not local_node_ip:
+            logger.debug("No AREDN node found on local network")
+            return []
+
+        try:
+            # Get the local node info (may have location)
+            client = AREDNClient(local_node_ip, timeout=5)
+            local_node = client.get_node_info()
+
+            if local_node:
+                feature = self._aredn_node_to_feature(local_node)
+                if feature:
+                    features.append(feature)
+
+                # Get neighbor nodes through links
+                for link in local_node.links:
+                    if link.ip:
+                        try:
+                            neighbor_client = AREDNClient(link.ip, timeout=3)
+                            neighbor_node = neighbor_client.get_node_info()
+                            if neighbor_node:
+                                neighbor_feature = self._aredn_node_to_feature(neighbor_node)
+                                if neighbor_feature:
+                                    # Add link quality info
+                                    neighbor_feature["properties"]["link_type"] = link.link_type.value
+                                    neighbor_feature["properties"]["link_quality"] = link.link_quality
+                                    neighbor_feature["properties"]["snr"] = link.snr if link.snr else None
+                                    features.append(neighbor_feature)
+                        except Exception as e:
+                            logger.debug(f"Error fetching AREDN neighbor {link.ip}: {e}")
+
+            if features:
+                logger.debug(f"AREDN: {len(features)} nodes with position")
+
+        except Exception as e:
+            logger.debug(f"AREDN collection error: {e}")
+
+        return features
+
+    def _get_aredn_node_ip(self) -> Optional[str]:
+        """Find AREDN node on local network."""
+        import socket
+
+        # Try common AREDN addresses
+        for host in ['localnode.local.mesh', '10.0.0.1', '10.1.0.1', 'localnode']:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                try:
+                    result = sock.connect_ex((host, 80))
+                    if result == 0:
+                        return host
+                finally:
+                    sock.close()
+            except Exception:
+                continue
+        return None
+
+    def _aredn_node_to_feature(self, node) -> Optional[Dict]:
+        """Convert AREDNNode to GeoJSON feature.
+
+        Args:
+            node: AREDNNode object from utils.aredn
+
+        Returns:
+            GeoJSON Feature dict or None if no valid location
+        """
+        # Check for valid location
+        if not node.has_location():
+            return None
+
+        # Determine online status (if we got data, it's online)
+        is_online = True
+
+        # Determine if this is a "gateway" type node
+        # AREDN nodes with tunnels act as gateways
+        is_gateway = node.tunnel_count > 0
+
+        return self._make_feature(
+            node_id=f"aredn_{node.hostname}",
+            name=node.hostname,
+            lat=node.latitude,
+            lon=node.longitude,
+            network="aredn",
+            is_online=is_online,
+            is_gateway=is_gateway,
+            hardware=node.model,
+            role=node.mesh_status or "AREDN",
+            last_seen="online",
+        )
+
     def _node_cache_to_feature(self, node: Dict) -> Optional[Dict]:
         """Convert a node cache entry to a GeoJSON feature."""
         lat = node.get("latitude") or node.get("lat")
@@ -830,12 +944,13 @@ class MapDataCollector:
         except Exception as e:
             logger.debug(f"Cache save error: {e}")
 
-    def _get_source_summary(self, tcp: List, mqtt: List, tracker: List) -> Dict:
+    def _get_source_summary(self, tcp: List, mqtt: List, tracker: List, aredn: List = None) -> Dict:
         """Summarize which sources contributed data."""
         return {
             "meshtasticd": len(tcp),
             "mqtt": len(mqtt),
             "node_tracker": len(tracker),
+            "aredn": len(aredn) if aredn else 0,
         }
 
 
@@ -1306,6 +1421,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         nodes = []
         links = []
         node_map = {}
+        aredn_links_added = set()  # Track AREDN links to avoid duplicates
 
         # Build nodes
         for feature in geojson.get("features", []):
@@ -1321,18 +1437,47 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                 "network": network,
                 "is_online": props.get("is_online", False),
                 "is_gateway": props.get("is_gateway", False),
-                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER"),
+                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER", "AREDN"),
                 "lat": coords[1],
                 "lon": coords[0],
                 "snr": props.get("snr"),
-                "battery": props.get("battery")
+                "battery": props.get("battery"),
+                # AREDN-specific properties
+                "link_type": props.get("link_type"),  # RF, DTD, TUN
+                "link_quality": props.get("link_quality"),
             }
             nodes.append(node)
             node_map[node_id] = node
 
-        # Build links based on proximity and network relationships
-        gateways = [n for n in nodes if n["is_gateway"] or n["is_router"]]
-        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"]]
+        # Build AREDN links from actual link data
+        # AREDN neighbors have link_type property indicating real RF/DTD/TUN links
+        aredn_nodes = [n for n in nodes if n["network"] == "aredn"]
+        if aredn_nodes:
+            # Find the local AREDN node (the one without link_type, it's the source)
+            local_aredn = [n for n in aredn_nodes if not n.get("link_type")]
+            neighbor_aredn = [n for n in aredn_nodes if n.get("link_type")]
+
+            for local in local_aredn:
+                for neighbor in neighbor_aredn:
+                    # Create link from local to neighbor
+                    link_key = tuple(sorted([local["id"], neighbor["id"]]))
+                    if link_key not in aredn_links_added:
+                        dist = self._haversine(local["lat"], local["lon"],
+                                               neighbor["lat"], neighbor["lon"])
+                        link_type_str = neighbor.get("link_type", "RF")
+                        links.append({
+                            "source": local["id"],
+                            "target": neighbor["id"],
+                            "type": f"aredn_{link_type_str.lower()}",  # aredn_rf, aredn_dtd, aredn_tun
+                            "link_quality": neighbor.get("link_quality", 0),
+                            "snr": neighbor.get("snr"),
+                            "distance_km": round(dist, 2)
+                        })
+                        aredn_links_added.add(link_key)
+
+        # Build links based on proximity and network relationships for non-AREDN nodes
+        gateways = [n for n in nodes if (n["is_gateway"] or n["is_router"]) and n["network"] != "aredn"]
+        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"] and n["network"] != "aredn"]
 
         # Connect regular nodes to nearest gateway/router
         for node in regular_nodes:
