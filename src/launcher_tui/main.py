@@ -399,8 +399,6 @@ class MeshForgeLauncher(
                 ("4", "Maps & Viz          Coverage maps, topology"),
                 ("5", "Configuration       Radio, services, settings"),
                 ("6", "System              Hardware, logs, Linux tools"),
-                # Separator (visual only)
-                ("---", "─────────────────────────────────────"),
                 # Quick Access
                 ("q", "Quick Actions       Common shortcuts"),
                 ("e", "Emergency Mode      Field operations"),
@@ -417,10 +415,6 @@ class MeshForgeLauncher(
 
             if choice is None or choice == "x":
                 break
-
-            # Handle separator (do nothing)
-            if choice == "---":
-                continue
 
             self._handle_main_choice(choice)
 
