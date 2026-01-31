@@ -1017,8 +1017,10 @@ RNSD_SERVICE
     REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 
     echo "  Installing NomadNet (RNS client)..."
+    # Clean install: uninstall first to avoid urwid version corruption (COLORMODE_16 bug)
     if [[ "$REAL_USER" != "root" ]]; then
         # Install as real user so config goes to their home directory
+        sudo -u "$REAL_USER" pipx uninstall nomadnet 2>/dev/null || true
         sudo -u "$REAL_USER" pipx install nomadnet 2>/dev/null || \
             sudo -i -u "$REAL_USER" pipx install nomadnet 2>/dev/null || \
             pipx install nomadnet 2>/dev/null
@@ -1027,6 +1029,7 @@ RNSD_SERVICE
         sudo -u "$REAL_USER" pipx ensurepath 2>/dev/null || true
     else
         # Running as root directly
+        pipx uninstall nomadnet 2>/dev/null || true
         pipx install nomadnet 2>/dev/null || true
         pipx ensurepath 2>/dev/null || true
     fi

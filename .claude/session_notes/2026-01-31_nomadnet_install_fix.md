@@ -41,6 +41,24 @@ nomadnet --version
 # Nomad Network Client 0.9.8
 ```
 
+## Additional Fix: COLORMODE_16 Bug
+
+NomadNet 0.9.8 has urwid version corruption issue causing:
+```
+module 'nomadnet.ui' has no attribute 'COLORMODE_16'
+```
+
+**Fix**: Clean reinstall - uninstall before install.
+
+| Commit | Description |
+|--------|-------------|
+| `04d0bcc` | fix: Clean reinstall NomadNet to avoid urwid COLORMODE_16 bug |
+
+Manual fix:
+```bash
+pipx uninstall nomadnet && pipx install nomadnet
+```
+
 ## Next Steps
 
 - Test on fresh Pi install
