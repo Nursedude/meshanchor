@@ -44,9 +44,11 @@ __all__ = [
     'check_udp_port',       # UDP port check (utility)
     'check_process_running', # Process check via pgrep (utility)
     'check_systemd_service', # Systemd status check
+    # Service management
+    'apply_config_and_restart',  # Reload daemon + restart service
     # Data classes
     'ServiceStatus',        # Return type from check_service
-    'ServiceState',         # Status enum (AVAILABLE, DEGRADED, etc.)
+    'ServiceState',         # Status enum (AVAILABLE, DEGRADED, FAILED, etc.)
     # Configuration
     'KNOWN_SERVICES',       # Service configuration dict
 ]
@@ -56,6 +58,7 @@ class ServiceState(Enum):
     """Service availability states."""
     AVAILABLE = "available"
     DEGRADED = "degraded"       # Running but with issues
+    FAILED = "failed"           # Service crashed or failed to start
     NOT_RUNNING = "not_running"
     NOT_INSTALLED = "not_installed"
     UNKNOWN = "unknown"         # Cannot determine state
@@ -484,7 +487,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 return ServiceStatus(
                     name=name,
                     available=False,
-                    state=ServiceState.DEGRADED,
+                    state=ServiceState.FAILED,
                     message=f"{description} has failed",
                     fix_hint=f"Check logs: journalctl -u {systemd_name}",
                     port=check_port_num,
@@ -618,3 +621,64 @@ def require_service(name: str, port: Optional[int] = None) -> ServiceStatus:
     if not status.available:
         logger.warning(f"{status.message}. {status.fix_hint}")
     return status
+
+
+def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Reload systemd daemon and restart a service.
+
+    This is the standard pattern after modifying service configuration files.
+    Always runs daemon-reload before restart to pick up changes.
+
+    Args:
+        service_name: Name of the systemd service to restart (default: meshtasticd)
+        timeout: Timeout in seconds for each command (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import apply_config_and_restart
+
+        # After modifying /etc/meshtasticd/config.yaml:
+        success, msg = apply_config_and_restart('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        # Step 1: Reload systemd daemon to pick up any service file changes
+        daemon_reload = subprocess.run(
+            ['systemctl', 'daemon-reload'],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if daemon_reload.returncode != 0:
+            error_msg = daemon_reload.stderr.strip() or "daemon-reload failed"
+            logger.error(f"daemon-reload failed: {error_msg}")
+            return False, f"daemon-reload failed: {error_msg}"
+
+        # Step 2: Restart the service
+        restart = subprocess.run(
+            ['systemctl', 'restart', service_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if restart.returncode != 0:
+            error_msg = restart.stderr.strip() or f"restart {service_name} failed"
+            logger.error(f"restart {service_name} failed: {error_msg}")
+            return False, f"restart {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully restarted {service_name}")
+        return True, f"{service_name} restarted successfully"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while restarting {service_name}")
+        return False, f"Timeout while restarting {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error restarting {service_name}: {e}")
+        return False, f"Error: {e}"
