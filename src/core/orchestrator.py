@@ -62,6 +62,7 @@ class ServiceState(Enum):
     RUNNING = "running"
     FAILED = "failed"
     NOT_INSTALLED = "not_installed"
+    NOT_NEEDED = "not_needed"  # For usb-direct mode where no daemon runs
 
 
 @dataclass
@@ -134,8 +135,9 @@ class ServiceOrchestrator:
 
     def __init__(self, config_path: Optional[Path] = None):
         """Initialize orchestrator."""
-        # Instance-level copy to avoid mutating shared class attribute
+        # Instance-level copies to avoid mutating shared class attributes
         self.SERVICES = dict(self.__class__.SERVICES)
+        self.STARTUP_ORDER = list(self.__class__.STARTUP_ORDER)
         self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
         self._stop_event = threading.Event()
@@ -225,17 +227,60 @@ class ServiceOrchestrator:
             self.SERVICES['meshtasticd'] = ServiceConfig(
                 name='meshtasticd',
                 systemd_name='meshtasticd',
+                check_binary='meshtasticd',
                 check_port=4403,
                 startup_delay=5,
                 required=True,
                 # No install command - requires .deb
             )
             logger.info("Configured for native meshtasticd (SPI radio)")
-        else:
-            # Python CLI (for USB serial radios)
+        elif daemon_type == 'native-usb':
+            # Native meshtasticd with USB serial radio
             self.SERVICES['meshtasticd'] = ServiceConfig(
                 name='meshtasticd',
                 systemd_name='meshtasticd',
+                check_binary='meshtasticd',
+                check_port=4403,
+                startup_delay=5,
+                required=True,
+            )
+            logger.info("Configured for native meshtasticd (USB serial)")
+        elif daemon_type == 'usb-direct':
+            # USB radios don't need a daemon - CLI talks directly to device
+            # Mark meshtasticd as not required since it doesn't need to run
+            self.SERVICES['meshtasticd'] = ServiceConfig(
+                name='meshtasticd',
+                systemd_name='meshtasticd',
+                check_binary=None,  # No binary check - it's a placeholder service
+                check_port=None,    # No port check - no daemon running
+                startup_delay=0,
+                required=False,     # NOT required for usb-direct mode
+            )
+            # Remove meshtasticd from startup order for usb-direct mode
+            if 'meshtasticd' in self.STARTUP_ORDER:
+                self.STARTUP_ORDER = [s for s in self.STARTUP_ORDER if s != 'meshtasticd']
+            # Also remove meshtasticd dependency from rnsd
+            if 'rnsd' in self.SERVICES:
+                rnsd_config = self.SERVICES['rnsd']
+                self.SERVICES['rnsd'] = ServiceConfig(
+                    name=rnsd_config.name,
+                    systemd_name=rnsd_config.systemd_name,
+                    check_binary=rnsd_config.check_binary,
+                    check_port=rnsd_config.check_port,
+                    check_command=rnsd_config.check_command,
+                    startup_delay=rnsd_config.startup_delay,
+                    required=rnsd_config.required,
+                    install_command=rnsd_config.install_command,
+                    dependencies=[],  # No dependencies in usb-direct mode
+                )
+            logger.info("Configured for USB-direct mode (no daemon required)")
+            logger.info("USB radios: use 'meshtastic --port /dev/ttyUSB0 --info' directly")
+        else:
+            # Python CLI (for USB serial radios with native daemon)
+            self.SERVICES['meshtasticd'] = ServiceConfig(
+                name='meshtasticd',
+                systemd_name='meshtasticd',
+                check_binary='meshtasticd',
                 check_port=4403,
                 startup_delay=5,
                 required=True,
@@ -365,6 +410,16 @@ class ServiceOrchestrator:
                 name=service_name,
                 state=ServiceState.UNKNOWN,
                 message=f"Unknown service: {service_name}"
+            )
+
+        # Check if service is not needed (e.g., usb-direct mode)
+        # Services with no check_binary and not required don't need to run
+        daemon_type = self.config['radio'].get('daemon', 'python')
+        if daemon_type == 'usb-direct' and service_name == 'meshtasticd':
+            return ServiceStatus(
+                name=service_name,
+                state=ServiceState.NOT_NEEDED,
+                message="USB-direct mode: no daemon needed (use meshtastic CLI directly)"
             )
 
         if not self.is_installed(service_name):
@@ -865,10 +920,11 @@ def main():
                 ServiceState.STOPPED: '○',
                 ServiceState.FAILED: '✗',
                 ServiceState.NOT_INSTALLED: '?',
+                ServiceState.NOT_NEEDED: '—',  # Dash indicates not applicable
             }.get(status.state, '?')
             pid_str = f" (PID: {status.pid})" if status.pid else ""
             print(f"  {state_icon} {name}: {status.state.value}{pid_str}")
-            if status.message and status.state != ServiceState.RUNNING:
+            if status.message and status.state not in (ServiceState.RUNNING,):
                 print(f"      {status.message}")
         print()
         sys.exit(0)
