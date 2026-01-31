@@ -1,0 +1,46 @@
+[Unit]
+Description=MeshForge Map Server - NOC Web Interface
+Documentation=https://github.com/Nursedude/meshforge
+After=network.target meshtasticd.service
+Wants=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshforge/src
+RuntimeDirectory=meshforge
+
+# Use venv if available, fall back to system Python
+ExecStart=/bin/bash -c '\
+    if [ -x /opt/meshforge/venv/bin/python ]; then \
+        exec /opt/meshforge/venv/bin/python -m utils.map_data_service --daemon --port 5000; \
+    else \
+        exec python3 -m utils.map_data_service --daemon --port 5000; \
+    fi'
+
+# Graceful shutdown
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=10
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshforge-map
+
+# Security hardening (relaxed for access to user dirs and radio)
+ProtectSystem=false
+PrivateTmp=false
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

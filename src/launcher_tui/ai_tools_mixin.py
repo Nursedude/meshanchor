@@ -57,8 +57,8 @@ class AIToolsMixin:
     def _maybe_auto_start_map(self):
         """Start map server on TUI launch if user has enabled auto-open.
 
-        Note: Server initialization is wrapped to suppress stdout/stderr output
-        that could interfere with the whiptail/dialog TUI during startup.
+        Prefers systemd service (meshforge-map) for reliability.
+        Falls back to in-process server if systemd unavailable.
         """
         import json
         import socket
@@ -76,7 +76,7 @@ class AIToolsMixin:
         if not settings.get("auto_open_map", False):
             return
 
-        # Check if server already running
+        # Check if server already running (port 5000)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
@@ -87,15 +87,17 @@ class AIToolsMixin:
         except OSError:
             pass
 
-        # Start map server in background (no dialog, quiet)
+        # Try to start via systemd service first (preferred for reliability)
+        if self._try_start_map_service_quiet():
+            return  # Successfully started via systemd
+
+        # Fall back to in-process server (non-systemd environments)
         # Suppress stdout/stderr AND logging to prevent TUI corruption
         try:
             import logging
-            import sys
             from contextlib import redirect_stdout, redirect_stderr
             from io import StringIO
 
-            # Temporarily raise logging level to suppress all log output
             root_logger = logging.getLogger()
             old_level = root_logger.level
             root_logger.setLevel(logging.CRITICAL + 1)
@@ -106,13 +108,52 @@ class AIToolsMixin:
                     server = MapServer(port=5000)
                     server.start_background()
             finally:
-                # Restore logging level
                 root_logger.setLevel(old_level)
 
-            # Store reference to prevent garbage collection
             self._map_server = server
         except Exception:
             pass  # Non-fatal, don't interrupt startup
+
+    def _try_start_map_service_quiet(self) -> bool:
+        """Try to start map server via systemd (quiet, no TUI output).
+
+        Returns True if service started successfully.
+        """
+        import subprocess
+        import socket
+        import time
+
+        try:
+            # Check if systemd is available
+            result = subprocess.run(
+                ['systemctl', 'is-enabled', 'meshforge-map'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode != 0:
+                return False  # Service not installed
+
+            # Start the service
+            subprocess.run(
+                ['systemctl', 'start', 'meshforge-map'],
+                capture_output=True, timeout=10
+            )
+
+            # Wait briefly for service to start
+            for _ in range(5):
+                time.sleep(0.5)
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    result = sock.connect_ex(('localhost', 5000))
+                    sock.close()
+                    if result == 0:
+                        return True
+                except OSError:
+                    pass
+
+            return False
+        except Exception:
+            return False
 
     def _get_map_settings_file(self) -> Path:
         """Get the map settings file path."""
@@ -238,8 +279,8 @@ class AIToolsMixin:
     def _start_map_server(self):
         """Start the map HTTP server for live-updating browser access.
 
-        Note: Server initialization is wrapped to suppress stdout/stderr output
-        that could interfere with the whiptail/dialog TUI.
+        Prefers systemd service (meshforge-map) for reliability.
+        Falls back to in-process server if systemd unavailable.
         """
         import socket
         import time
@@ -258,10 +299,12 @@ class AIToolsMixin:
             sock.close()
             if result == 0:
                 urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
+                service_status = self._get_map_service_status()
                 self.dialog.msgbox(
                     "Map Server",
                     f"Map server already running!\n\n"
                     f"Access via:\n{urls}\n\n"
+                    f"Service: {service_status}\n\n"
                     "Open any URL in your browser.\n"
                     "The map auto-refreshes every 30 seconds."
                 )
@@ -269,20 +312,31 @@ class AIToolsMixin:
         except OSError:
             pass
 
+        # Try systemd service first (preferred for reliability)
+        service_started = self._try_start_map_service()
+
+        if service_started:
+            urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
+            self.dialog.msgbox(
+                "Map Server Started",
+                f"Map server running as system service!\n\n"
+                f"Access via:\n{urls}\n\n"
+                "Open any URL in your browser.\n"
+                "The map pulls fresh data every 30 seconds.\n\n"
+                "Service persists after TUI exits.\n"
+                "Manage with: meshforge-map start|stop|status"
+            )
+            return
+
+        # Fall back to in-process server
         try:
-            # Suppress stdout/stderr AND logging during server init to prevent
-            # TUI corruption. The meshtastic library, HTTP server, and various
-            # loggers can output during initialization.
             import logging
-            import sys
             from contextlib import redirect_stdout, redirect_stderr
             from io import StringIO
 
-            # Capture any output during initialization
             captured_out = StringIO()
             captured_err = StringIO()
 
-            # Temporarily raise logging level to suppress all log output
             root_logger = logging.getLogger()
             old_level = root_logger.level
             root_logger.setLevel(logging.CRITICAL + 1)
@@ -294,27 +348,85 @@ class AIToolsMixin:
                     server = MapServer(port=port)  # Binds to 0.0.0.0
                     server.start_background()
 
-                    # Small delay to let server thread stabilize
                     time.sleep(0.1)
             finally:
-                # Restore logging level
                 root_logger.setLevel(old_level)
 
-            # Store reference to prevent garbage collection
             self._map_server = server
 
             urls = "\n".join(f"  http://{ip}:{port}" for ip in all_ips)
             msg = (
-                f"Live map server running!\n\n"
+                f"Live map server running (in-process)!\n\n"
                 f"Access via:\n{urls}\n\n"
                 "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n"
-                "Server runs until MeshForge exits."
+                "Server runs until MeshForge exits.\n\n"
+                "Tip: Install meshforge-map service for\n"
+                "persistent operation."
             )
             self.dialog.msgbox("Map Server Started", msg)
 
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to start map server: {e}")
+
+    def _try_start_map_service(self) -> bool:
+        """Try to start map server via systemd service.
+
+        Returns True if service started successfully.
+        """
+        import subprocess
+        import socket
+        import time
+
+        try:
+            # Check if systemd service is available
+            result = subprocess.run(
+                ['systemctl', 'is-enabled', 'meshforge-map'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode != 0:
+                return False  # Service not installed
+
+            # Start the service
+            subprocess.run(
+                ['systemctl', 'start', 'meshforge-map'],
+                capture_output=True, timeout=10
+            )
+
+            # Wait for service to start (up to 3 seconds)
+            for _ in range(6):
+                time.sleep(0.5)
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    result = sock.connect_ex(('localhost', 5000))
+                    sock.close()
+                    if result == 0:
+                        return True
+                except OSError:
+                    pass
+
+            return False
+        except Exception:
+            return False
+
+    def _get_map_service_status(self) -> str:
+        """Get map server service status for display."""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'meshforge-map'],
+                capture_output=True, text=True, timeout=5
+            )
+            status = result.stdout.strip()
+            if status == "active":
+                return "systemd service (active)"
+            elif result.returncode != 0:
+                return "in-process (TUI)"
+            return f"systemd ({status})"
+        except Exception:
+            return "in-process (TUI)"
 
     def _toggle_auto_map(self):
         """Toggle the auto-open map on launch setting."""
