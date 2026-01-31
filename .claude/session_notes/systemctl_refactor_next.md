@@ -77,6 +77,33 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
 - [x] Import test - service_check.py exports verified
 - [x] New functions have correct signatures
 
+## Session 3 Completed (Documentation & Tests)
+
+- [x] Fixed README version badge: `0.4.8-beta` → `0.4.8-alpha` (orange)
+- [x] Updated CLAUDE.md:
+  - Version reference to 0.4.8-alpha
+  - Added `service_check.py` to architecture overview
+  - New "Service Management" section with usage examples
+  - Documented all helpers with code examples
+- [x] Added comprehensive tests to `tests/test_service_check.py`:
+  - `TestDaemonReload` - 4 tests
+  - `TestEnableService` - 5 tests
+  - `TestApplyConfigAndRestart` - 4 tests
+  - `TestServiceHelpersIntegration` - 2 tests
+
+## Files Modified (Session 3)
+
+1. `README.md` - Version badge sync to alpha
+2. `CLAUDE.md` - Service management documentation
+3. `tests/test_service_check.py` - 15 new tests for helpers
+
+## Branch Strategy Note
+
+- Alpha is **89 commits ahead** of main
+- Main should stay frozen until release
+- All development on alpha (via feature branches)
+- This branch merges to alpha
+
 ## Next Steps
 
 1. Commit and push changes
