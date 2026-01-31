@@ -110,7 +110,7 @@ class SpaceWeatherAPI:
     ENDPOINTS = {
         'k_index_1m': '/json/planetary_k_index_1m.json',
         'k_index_3d': '/json/boulder_k_index_1m.json',
-        'a_index': '/json/daily_geomagnetic_indices.json',
+        'a_index_text': '/text/daily-geomagnetic-indices.txt',  # Text format (JSON not available)
         'solar_flux': '/json/f107_cm_flux.json',
         'sunspot': '/json/sunspot_report.json',
         'goes_xray': '/json/goes/primary/xrays-6-hour.json',
@@ -234,20 +234,64 @@ class SpaceWeatherAPI:
         The A-index is a daily average of geomagnetic activity,
         providing a more stable measure than the 3-hourly K-index.
 
+        Note: NOAA provides this as a text file, not JSON.
+        Format: daily-geomagnetic-indices.txt
+
         Returns:
             A-index value (0-400 scale) or None
         """
-        data = self._fetch_json(self.ENDPOINTS['a_index'])
+        return self._fetch_a_index_from_text()
 
-        if data and isinstance(data, list) and len(data) > 0:
-            try:
-                # Get most recent entry with Ap value
-                for entry in reversed(data):
-                    ap = entry.get('Ap')
-                    if ap is not None:
-                        return int(ap)
-            except (ValueError, KeyError, TypeError) as e:
-                logger.debug(f"[SWPC] Error parsing A-index: {e}")
+    def _fetch_a_index_from_text(self) -> Optional[int]:
+        """Fetch A-index from NOAA text endpoint.
+
+        Parses daily-geomagnetic-indices.txt which has format like:
+        #  Date        Ap
+        2026 01 30     8
+        2026 01 31     5
+        """
+        url = f"{self.BASE_URL}{self.ENDPOINTS['a_index_text']}"
+
+        # Check cache
+        cache_key = 'a_index_text'
+        if cache_key in self._cache:
+            cached_time, cached_data = self._cache[cache_key]
+            if datetime.now() - cached_time < timedelta(seconds=self._cache_ttl):
+                return cached_data
+
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'MeshForge/1.0 (Space Weather Monitor)')
+
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                text = response.read().decode('utf-8')
+
+            # Parse text file - look for lines with date and Ap value
+            # Skip comment lines starting with #
+            lines = [l.strip() for l in text.splitlines() if l.strip() and not l.startswith('#') and not l.startswith(':')]
+
+            if lines:
+                # Get the last data line (most recent)
+                for line in reversed(lines):
+                    parts = line.split()
+                    # Expected: YYYY MM DD Ap [other values...]
+                    # or similar format with Ap in position 3 or 4
+                    if len(parts) >= 4:
+                        try:
+                            # Try to find Ap value (typically column 4 or later)
+                            # Format varies, but Ap is usually after date fields
+                            ap_value = int(parts[3])  # After YYYY MM DD
+                            self._cache[cache_key] = (datetime.now(), ap_value)
+                            return ap_value
+                        except (ValueError, IndexError):
+                            continue
+
+        except urllib.error.HTTPError as e:
+            logger.warning(f"[SWPC] HTTP error fetching A-index text: {e.code}")
+        except urllib.error.URLError as e:
+            logger.warning(f"[SWPC] URL error fetching A-index text: {e.reason}")
+        except Exception as e:
+            logger.debug(f"[SWPC] Error parsing A-index text: {e}")
 
         return None
 
