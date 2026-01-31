@@ -94,6 +94,14 @@ New endpoints on MapServer (port 5000):
 - `src/utils/map_data_service.py` - Radio control API
 - `scripts/upgrade_to_native.sh` - New upgrade script
 
+## Merge Target
+**Branch: `alpha`** (not main)
+
+```bash
+git checkout alpha
+git merge claude/setup-meshforge-noc-Vh1Pu
+```
+
 ## User Environment
 - Fresh NOC install
 - USB radio (usb-direct mode)
