@@ -419,9 +419,13 @@ class MeshForgeLauncher(
             self._handle_main_choice(choice)
 
     def _get_menu_status_hint(self) -> str:
-        """Generate status hint for main menu subtitle."""
+        """Generate status hint for main menu subtitle.
+
+        Uses plain text indicators (UP/FAIL/--) since whiptail/dialog
+        don't render ANSI color escape codes.
+        """
         if self._env_state:
-            return self._env_state.get_status_line()
+            return self._env_state.get_status_line(plain=True)
         return "Network Operations Center"
 
     def _handle_main_choice(self, choice: str):
