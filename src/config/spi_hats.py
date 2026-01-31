@@ -11,6 +11,13 @@ from rich.panel import Panel
 from config.hardware import HardwareDetector
 from utils.logger import log
 
+# Try to import enable_service helper, fall back to direct subprocess
+try:
+    from utils.service_check import enable_service
+    _HAS_ENABLE_SERVICE = True
+except ImportError:
+    _HAS_ENABLE_SERVICE = False
+
 console = Console()
 
 # Path for auto-resume after reboot
@@ -513,8 +520,13 @@ WantedBy=multi-user.target
                 f.write(service_content)
 
             # Enable the service for next boot
-            subprocess.run(['systemctl', 'daemon-reload'], check=False, timeout=30)
-            subprocess.run(['systemctl', 'enable', 'meshtasticd-installer-resume.service'], check=False, timeout=15)
+            if _HAS_ENABLE_SERVICE:
+                success, msg = enable_service('meshtasticd-installer-resume.service')
+                if not success:
+                    log(f"Warning: {msg}", 'warning')
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], check=False, timeout=30)
+                subprocess.run(['systemctl', 'enable', 'meshtasticd-installer-resume.service'], check=False, timeout=15)
 
             log("Resume service created for post-reboot installer start")
         except PermissionError:

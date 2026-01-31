@@ -71,12 +71,20 @@ except ImportError:
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
 try:
-    from utils.service_check import check_service, check_port, ServiceState
+    from utils.service_check import (
+        check_service,
+        check_port,
+        apply_config_and_restart,
+        ServiceState
+    )
+    _HAS_APPLY_RESTART = True
 except ImportError:
     # Fallback if running standalone - will use direct systemctl
     check_service = None
     check_port = None
+    apply_config_and_restart = None
     ServiceState = None
+    _HAS_APPLY_RESTART = False
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend
@@ -330,8 +338,11 @@ class MeshForgeLauncher(
             if self.dialog.yesno("Config Conflict", msg):
                 try:
                     usb_config.unlink()
-                    subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                    if _HAS_APPLY_RESTART:
+                        success, msg = apply_config_and_restart('meshtasticd')
+                    else:
+                        subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                        subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
                     self.dialog.msgbox(
                         "Fixed",
                         "Removed usb-serial.yaml\n"

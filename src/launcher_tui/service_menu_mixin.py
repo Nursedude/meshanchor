@@ -17,11 +17,15 @@ try:
         check_systemd_service,
         check_process_running,
         check_service,
+        apply_config_and_restart,
+        enable_service,
         ServiceState,
     )
     _HAS_SERVICE_CHECK = True
+    _HAS_APPLY_RESTART = True
 except ImportError:
     _HAS_SERVICE_CHECK = False
+    _HAS_APPLY_RESTART = False
 
 # Import centralized path utility
 try:
@@ -471,8 +475,11 @@ General:
                     )
             else:
                 # Native daemon exists - restart service
-                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                if _HAS_APPLY_RESTART:
+                    success, msg = apply_config_and_restart('meshtasticd')
+                else:
+                    subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
 
                 self.dialog.msgbox(
                     "Config Fixed",
@@ -611,10 +618,15 @@ WantedBy=multi-user.target
 """
             Path('/etc/systemd/system/meshtasticd.service').write_text(service_content)
 
-            # Reload and enable
-            subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-            subprocess.run(['systemctl', 'enable', 'meshtasticd'], timeout=30, check=False)
-            subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+            # Reload, enable, and start
+            if _HAS_APPLY_RESTART:
+                success, msg = enable_service('meshtasticd', start=True)
+                if not success:
+                    self.dialog.msgbox("Warning", f"Service setup issue: {msg}")
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'enable', 'meshtasticd'], timeout=30, check=False)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
 
             self.dialog.msgbox(
                 "Success",
