@@ -16,6 +16,8 @@ try:
     from utils.service_check import (
         check_systemd_service,
         check_process_running,
+        check_service,
+        ServiceState,
     )
     _HAS_SERVICE_CHECK = True
 except ImportError:
@@ -326,9 +328,14 @@ class ServiceMenuMixin:
                 # Show failed service logs (only for systemd services)
                 for svc in ['meshtasticd']:
                     try:
-                        r = subprocess.run(['systemctl', 'is-active', svc],
-                                           capture_output=True, text=True, timeout=5)
-                        if r.stdout.strip() == 'failed':
+                        if _HAS_SERVICE_CHECK:
+                            status = check_service(svc)
+                            is_failed = status.state == ServiceState.FAILED
+                        else:
+                            r = subprocess.run(['systemctl', 'is-active', svc],
+                                               capture_output=True, text=True, timeout=5)
+                            is_failed = r.stdout.strip() == 'failed'
+                        if is_failed:
                             print(f"\033[0;31m{svc} failure:\033[0m")
                             subprocess.run(
                                 ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
@@ -341,9 +348,14 @@ class ServiceMenuMixin:
                 # Show rnsd failure logs if systemd-managed and failed
                 if not use_direct_rnsd:
                     try:
-                        r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
-                                           capture_output=True, text=True, timeout=5)
-                        if r.stdout.strip() == 'failed':
+                        if _HAS_SERVICE_CHECK:
+                            status = check_service('rnsd')
+                            is_failed = status.state == ServiceState.FAILED
+                        else:
+                            r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                               capture_output=True, text=True, timeout=5)
+                            is_failed = r.stdout.strip() == 'failed'
+                        if is_failed:
                             print(f"\033[0;31mrnsd failure:\033[0m")
                             subprocess.run(
                                 ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],

@@ -12,11 +12,18 @@ from pathlib import Path
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
 try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
+    from utils.service_check import (
+        check_service,
+        check_systemd_service,
+        ServiceState,
+        apply_config_and_restart,
+    )
+    _HAS_APPLY_RESTART = True
 except ImportError:
     check_service = None
     check_systemd_service = None
     ServiceState = None
+    _HAS_APPLY_RESTART = False
 
 
 class MeshtasticdConfigMixin:
@@ -467,10 +474,13 @@ Press Cancel to keep current values."""
             shutil.copy(src, dst)
 
             # Restart service
-            subprocess.run(['systemctl', 'daemon-reload'],
-                           capture_output=True, timeout=10)
-            subprocess.run(['systemctl', 'restart', 'meshtasticd'],
-                           capture_output=True, timeout=30)
+            if _HAS_APPLY_RESTART:
+                success, msg = apply_config_and_restart('meshtasticd')
+            else:
+                subprocess.run(['systemctl', 'daemon-reload'],
+                               capture_output=True, timeout=10)
+                subprocess.run(['systemctl', 'restart', 'meshtasticd'],
+                               capture_output=True, timeout=30)
 
             self.dialog.msgbox("Success",
                 f"Hardware config activated!\n\n"
@@ -610,21 +620,28 @@ Press Cancel to keep current values."""
         try:
             self.dialog.infobox("Restarting", "Restarting meshtasticd...")
 
-            subprocess.run(['systemctl', 'daemon-reload'],
-                           capture_output=True, timeout=10)
-
-            result = subprocess.run(
-                ['systemctl', 'restart', 'meshtasticd'],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 0:
-                self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
+            if _HAS_APPLY_RESTART:
+                success, msg = apply_config_and_restart('meshtasticd')
+                if success:
+                    self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
+                else:
+                    self.dialog.msgbox("Error", f"Restart failed:\n{msg}")
             else:
-                self.dialog.msgbox("Error",
-                    f"Restart failed:\n{result.stderr or result.stdout}")
+                subprocess.run(['systemctl', 'daemon-reload'],
+                               capture_output=True, timeout=10)
+
+                result = subprocess.run(
+                    ['systemctl', 'restart', 'meshtasticd'],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                if result.returncode == 0:
+                    self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
+                else:
+                    self.dialog.msgbox("Error",
+                        f"Restart failed:\n{result.stderr or result.stdout}")
 
         except subprocess.TimeoutExpired:
             self.dialog.msgbox("Error", "Restart timed out")
