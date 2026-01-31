@@ -25,6 +25,13 @@ from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checking
+try:
+    from utils.service_check import check_systemd_service, check_process_running
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 # Import startup checker for enhanced status
 try:
     from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
@@ -137,6 +144,8 @@ class StatusBar:
     def _check_systemd_active(self, service: str) -> str:
         """Check if a systemd service is active.
 
+        Uses centralized service_check module when available.
+
         Args:
             service: Service unit name.
 
@@ -144,6 +153,11 @@ class StatusBar:
             Status symbol character.
         """
         try:
+            if _HAS_SERVICE_CHECK:
+                is_running, _ = check_systemd_service(service)
+                return SYM_RUNNING if is_running else SYM_STOPPED
+
+            # Fallback to direct systemctl call
             result = subprocess.run(
                 ['systemctl', 'is-active', service],
                 capture_output=True, text=True, timeout=3
@@ -155,8 +169,16 @@ class StatusBar:
             return SYM_UNKNOWN
 
     def _check_bridge(self) -> None:
-        """Check if the RNS-Meshtastic bridge process is running."""
+        """Check if the RNS-Meshtastic bridge process is running.
+
+        Uses centralized service_check module when available.
+        """
         try:
+            if _HAS_SERVICE_CHECK:
+                self._bridge_running = check_process_running('rns_bridge')
+                return
+
+            # Fallback to direct pgrep call
             result = subprocess.run(
                 ['pgrep', '-f', 'rns_bridge'],
                 capture_output=True, timeout=3
