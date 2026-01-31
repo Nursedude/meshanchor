@@ -221,6 +221,9 @@ class NomadNetClientMixin:
 
         This takes over the terminal (like running nomadnet directly).
         The user returns to MeshForge when they exit NomadNet.
+
+        When running via sudo, launches as the real user so NomadNet
+        uses their config (~/.nomadnetwork) instead of root's.
         """
         nn_path = self._find_nomadnet_binary()
         if not nn_path:
@@ -239,12 +242,18 @@ class NomadNetClientMixin:
         print("=== Launching NomadNet ===")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
+        # Build command - run as real user if we're under sudo
+        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            # Run as real user with login shell to set HOME correctly
+            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--textui']
+        else:
+            cmd = [nn_path, '--textui']
+
         try:
             # Run interactively -- NomadNet takes over the terminal
-            result = subprocess.run(
-                [nn_path, '--textui'],
-                timeout=None
-            )
+            result = subprocess.run(cmd, timeout=None)
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
