@@ -11,6 +11,16 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+# Import centralized service checking
+try:
+    from utils.service_check import (
+        check_systemd_service,
+        check_process_running,
+    )
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 # Import centralized path utility
 try:
     from utils.paths import get_real_user_home
@@ -71,8 +81,15 @@ class ServiceMenuMixin:
                 self._show_bridge_logs()
 
     def _is_bridge_running(self) -> bool:
-        """Check if the gateway bridge process is running."""
+        """Check if the gateway bridge process is running.
+
+        Uses centralized service_check module when available.
+        """
         try:
+            if _HAS_SERVICE_CHECK:
+                return check_process_running('bridge_cli.py')
+
+            # Fallback to direct pgrep call
             result = subprocess.run(
                 ['pgrep', '-f', 'bridge_cli.py'],
                 capture_output=True, text=True, timeout=5
@@ -268,25 +285,28 @@ class ServiceMenuMixin:
                         continue
 
                     try:
-                        result = subprocess.run(
-                            ['systemctl', 'is-active', svc],
-                            capture_output=True, text=True, timeout=5
-                        )
-                        status = result.stdout.strip()
-
-                        # Check boot persistence
-                        boot_info = ""
-                        try:
+                        if _HAS_SERVICE_CHECK:
+                            is_running, is_enabled = check_systemd_service(svc)
+                            status = 'active' if is_running else 'inactive'
+                        else:
+                            # Fallback to direct systemctl call
+                            result = subprocess.run(
+                                ['systemctl', 'is-active', svc],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            status = result.stdout.strip()
+                            # Check boot persistence via fallback
                             enabled_result = subprocess.run(
                                 ['systemctl', 'is-enabled', svc],
                                 capture_output=True, text=True, timeout=5
                             )
                             is_enabled = enabled_result.returncode == 0
-                            if status == 'active' and not is_enabled:
-                                boot_info = "  (not enabled at boot)"
-                                warnings.append(svc)
-                        except Exception:
-                            pass
+
+                        # Check boot persistence
+                        boot_info = ""
+                        if status == 'active' and not is_enabled:
+                            boot_info = "  (not enabled at boot)"
+                            warnings.append(svc)
 
                         if status == 'active':
                             print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
@@ -636,8 +656,15 @@ WantedBy=multi-user.target
             return False
 
     def _is_rnsd_running(self) -> bool:
-        """Check if rnsd is running as a process."""
+        """Check if rnsd is running as a process.
+
+        Uses centralized service_check module when available.
+        """
         try:
+            if _HAS_SERVICE_CHECK:
+                return check_process_running('rnsd')
+
+            # Fallback to direct pgrep call
             result = subprocess.run(
                 ['pgrep', '-x', 'rnsd'],
                 capture_output=True,

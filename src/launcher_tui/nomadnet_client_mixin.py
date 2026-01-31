@@ -24,6 +24,13 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checking
+try:
+    from utils.service_check import check_process_running
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
 try:
     from utils.paths import get_real_user_home
@@ -185,11 +192,17 @@ class NomadNetClientMixin:
         print()
         print("--- RNS Connectivity ---")
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
+
+            if rnsd_running:
                 print("  rnsd:      RUNNING (shared instance available)")
             else:
                 print("  rnsd:      NOT running")
@@ -669,7 +682,17 @@ downloads_path = ~/Downloads
             print("  https://github.com/markqvist/NomadNet#configuration")
 
     def _is_nomadnet_running(self) -> bool:
-        """Check if NomadNet process is running."""
+        """Check if NomadNet process is running.
+
+        Uses centralized service_check module when available, with fallback
+        to direct pgrep for custom filtering.
+        """
+        # Try unified check first (faster and standardized)
+        if _HAS_SERVICE_CHECK:
+            if check_process_running('nomadnet'):
+                return True
+
+        # Fallback to direct pgrep with custom filtering
         try:
             result = subprocess.run(
                 ['pgrep', '-f', 'bin/nomadnet'],
@@ -729,14 +752,19 @@ downloads_path = ~/Downloads
     def _check_rns_for_nomadnet(self) -> bool:
         """Check that RNS/rnsd is available before launching NomadNet.
 
+        Uses centralized service_check module when available.
         Returns True if OK to proceed, False if user cancelled.
         """
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            rnsd_running = result.returncode == 0
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
         except Exception:
             rnsd_running = False
 

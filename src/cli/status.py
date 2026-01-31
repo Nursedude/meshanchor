@@ -18,6 +18,17 @@ import socket
 import subprocess
 from pathlib import Path
 
+# Use centralized service checking
+try:
+    from utils.service_check import (
+        check_port as _check_port,
+        check_systemd_service,
+        check_process_running,
+    )
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 # ANSI colors
 class C:
@@ -51,13 +62,21 @@ class C:
 
 
 def check_service(name):
-    """Check if a systemd service is running."""
+    """Check if a systemd service is running.
+
+    Uses centralized service_check module when available.
+    """
     try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', name],
-            capture_output=True, text=True, timeout=5
-        )
-        status = result.stdout.strip()
+        if _HAS_SERVICE_CHECK:
+            is_running, is_enabled = check_systemd_service(name)
+            status = 'active' if is_running else 'inactive'
+        else:
+            # Fallback to direct systemctl call
+            result = subprocess.run(
+                ['systemctl', 'is-active', name],
+                capture_output=True, text=True, timeout=5
+            )
+            status = result.stdout.strip()
 
         # If meshforge systemd service isn't active, check for interactive process
         if name == 'meshforge' and status != 'active':
@@ -70,7 +89,11 @@ def check_service(name):
 
 
 def _is_meshforge_process_running():
-    """Check if MeshForge is running as an interactive process (not systemd)."""
+    """Check if MeshForge is running as an interactive process (not systemd).
+
+    Note: This is a specialized check that filters out the status script itself,
+    so it doesn't use the generic check_process_running() from service_check.
+    """
     try:
         result = subprocess.run(
             ['pgrep', '-af', 'python.*meshforge|python.*launcher'],
@@ -87,7 +110,14 @@ def _is_meshforge_process_running():
 
 
 def check_port(port):
-    """Check if a TCP port is listening."""
+    """Check if a TCP port is listening.
+
+    Uses centralized service_check module when available.
+    """
+    if _HAS_SERVICE_CHECK:
+        return _check_port(port, host='127.0.0.1', timeout=1.0)
+
+    # Fallback to direct socket check
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
