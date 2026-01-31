@@ -11,6 +11,7 @@ import subprocess
 
 from src.utils.service_check import (
     check_port,
+    check_process_with_pid,
     check_service,
     check_systemd_service,
     require_service,
@@ -456,3 +457,66 @@ class TestServiceHelpersIntegration:
                 assert len(result) == 2
                 assert isinstance(result[0], bool)
                 assert isinstance(result[1], str)
+
+
+class TestCheckProcessWithPid:
+    """Tests for check_process_with_pid function."""
+
+    def test_process_running_returns_pid(self):
+        """Test that running process returns (True, pid)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="12345\n"
+            )
+
+            running, pid = check_process_with_pid('bash')
+
+            assert running is True
+            assert pid == "12345"
+
+    def test_process_not_running_returns_none(self):
+        """Test that non-running process returns (False, None)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout=""
+            )
+
+            running, pid = check_process_with_pid('nonexistent_process')
+
+            assert running is False
+            assert pid is None
+
+    def test_multiple_pids_returns_first(self):
+        """Test that multiple PIDs return the first one."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="12345\n67890\n"
+            )
+
+            running, pid = check_process_with_pid('multi_instance')
+
+            assert running is True
+            assert pid == "12345"
+
+    def test_timeout_returns_false(self):
+        """Test that timeout returns (False, None)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired('pgrep', 5)
+
+            running, pid = check_process_with_pid('slow_process')
+
+            assert running is False
+            assert pid is None
+
+    def test_pgrep_not_found_returns_false(self):
+        """Test graceful handling when pgrep is not available."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = FileNotFoundError()
+
+            running, pid = check_process_with_pid('any_process')
+
+            assert running is False
+            assert pid is None

@@ -19,7 +19,9 @@ from utils.paths import get_real_user_home
 
 # Try to use centralized service checker
 try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
+    from utils.service_check import (
+        check_service, check_systemd_service, check_process_with_pid, ServiceState
+    )
     _HAS_SERVICE_CHECK = True
 except ImportError:
     _HAS_SERVICE_CHECK = False
@@ -316,16 +318,23 @@ class GatewayDiagnostic:
     def check_rnsd_running(self) -> CheckResult:
         """Check if rnsd daemon is running."""
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split('\n')
+            # Use centralized service check when available
+            if _HAS_SERVICE_CHECK:
+                running, pid = check_process_with_pid('rnsd')
+            else:
+                # Fallback to direct pgrep
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                running = result.returncode == 0 and result.stdout.strip()
+                pid = result.stdout.strip().split('\n')[0] if running else None
+
+            if running:
                 return CheckResult(
                     name="RNS Daemon (rnsd)",
                     status=CheckStatus.PASS,
-                    message=f"Running (PID: {pids[0]})"
+                    message=f"Running (PID: {pid})"
                 )
             else:
                 return CheckResult(
@@ -473,13 +482,19 @@ class GatewayDiagnostic:
 
     def check_meshtasticd(self) -> CheckResult:
         """Check if meshtasticd service is running."""
-        # Check process
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'meshtasticd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
+            # Use centralized service check when available
+            if _HAS_SERVICE_CHECK:
+                running, _ = check_process_with_pid('meshtasticd')
+            else:
+                # Fallback to direct pgrep
+                result = subprocess.run(
+                    ['pgrep', '-f', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                running = result.returncode == 0 and result.stdout.strip()
+
+            if running:
                 # Also check TCP port
                 if self.check_tcp_port('localhost', 4403):
                     return CheckResult(
