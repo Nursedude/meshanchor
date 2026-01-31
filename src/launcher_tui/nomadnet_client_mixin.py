@@ -51,6 +51,97 @@ class NomadNetClientMixin:
     """Mixin providing NomadNet client management for the TUI launcher."""
 
     # ------------------------------------------------------------------
+    # Ownership fix for user directories
+    # ------------------------------------------------------------------
+
+    def _fix_user_directory_ownership(self) -> bool:
+        """Fix ownership of user directories if they were created by root.
+
+        When MeshForge runs with sudo, any user-space applications (NomadNet,
+        rnstatus, etc.) that were previously launched as root may have created
+        ~/.reticulum or ~/.nomadnetwork with root ownership.
+
+        This function detects and fixes that situation so the real user can
+        access their own directories.
+
+        Returns:
+            True if directories are accessible (or were fixed successfully).
+            False if fix failed and user declined to proceed.
+        """
+        sudo_user = os.environ.get('SUDO_USER')
+        if not sudo_user or sudo_user == 'root':
+            # Not running via sudo, nothing to fix
+            return True
+
+        user_home = get_real_user_home()
+        if not user_home.exists():
+            return True
+
+        # Directories that should belong to the user, not root
+        user_dirs = [
+            user_home / '.reticulum',
+            user_home / '.nomadnetwork',
+            user_home / '.config' / 'nomadnetwork',
+        ]
+
+        dirs_to_fix = []
+        for dir_path in user_dirs:
+            if dir_path.exists():
+                try:
+                    stat_info = dir_path.stat()
+                    # Check if owned by root (uid 0)
+                    if stat_info.st_uid == 0:
+                        dirs_to_fix.append(dir_path)
+                except (OSError, PermissionError):
+                    # Can't stat, might still be a problem
+                    dirs_to_fix.append(dir_path)
+
+        if not dirs_to_fix:
+            return True
+
+        # Found directories with wrong ownership - offer to fix
+        dir_list = '\n'.join(f'  {d}' for d in dirs_to_fix)
+        if not self.dialog.yesno(
+            "Fix Directory Ownership",
+            f"The following directories are owned by root,\n"
+            f"which prevents NomadNet from accessing them:\n\n"
+            f"{dir_list}\n\n"
+            f"This happened because NomadNet or rnsd was\n"
+            f"previously run as root.\n\n"
+            f"Fix ownership to user '{sudo_user}'?",
+        ):
+            # User declined - warn but allow proceeding
+            return self.dialog.yesno(
+                "Proceed Anyway?",
+                "Ownership was not fixed.\n\n"
+                "NomadNet may fail with 'Permission denied' errors.\n\n"
+                "Continue anyway?",
+            )
+
+        # Fix ownership recursively
+        self.dialog.infobox("Fixing Ownership", f"Changing ownership to {sudo_user}...")
+
+        for dir_path in dirs_to_fix:
+            try:
+                # chown -R user:user dir_path
+                subprocess.run(
+                    ['chown', '-R', f'{sudo_user}:{sudo_user}', str(dir_path)],
+                    capture_output=True, timeout=30
+                )
+                logger.info(f"Fixed ownership of {dir_path} to {sudo_user}")
+            except Exception as e:
+                logger.warning(f"Failed to fix ownership of {dir_path}: {e}")
+                self.dialog.msgbox(
+                    "Ownership Fix Failed",
+                    f"Could not fix ownership of:\n  {dir_path}\n\n"
+                    f"Error: {e}\n\n"
+                    f"Try manually:\n  sudo chown -R {sudo_user}:{sudo_user} {dir_path}",
+                )
+                return False
+
+        return True
+
+    # ------------------------------------------------------------------
     # Top-level submenu
     # ------------------------------------------------------------------
 
@@ -229,6 +320,11 @@ class NomadNetClientMixin:
         if not nn_path:
             return
 
+        # Fix ownership of user directories if they were created by root
+        # This is a common issue when MeshForge runs with sudo
+        if not self._fix_user_directory_ownership():
+            return
+
         # Validate and repair config if needed (e.g., missing [textui] section)
         if not self._validate_nomadnet_config():
             return
@@ -290,13 +386,21 @@ class NomadNetClientMixin:
     # ------------------------------------------------------------------
 
     def _launch_nomadnet_daemon(self):
-        """Start NomadNet in daemon mode (background, no UI)."""
+        """Start NomadNet in daemon mode (background, no UI).
+
+        When running via sudo, launches as the real user so NomadNet
+        uses their config (~/.nomadnetwork) instead of root's.
+        """
         nn_path = self._find_nomadnet_binary()
         if not nn_path:
             return
 
         if self._is_nomadnet_running():
             self.dialog.msgbox("Already Running", "NomadNet is already running.")
+            return
+
+        # Fix ownership of user directories if they were created by root
+        if not self._fix_user_directory_ownership():
             return
 
         if not self._check_rns_for_nomadnet():
@@ -315,9 +419,18 @@ class NomadNetClientMixin:
 
         self.dialog.infobox("Starting", "Starting NomadNet daemon...")
 
+        # Build command - run as real user if we're under sudo
+        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            # Run as real user with login shell to set HOME correctly
+            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--daemon']
+        else:
+            cmd = [nn_path, '--daemon']
+
         try:
             subprocess.Popen(
-                [nn_path, '--daemon'],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True
@@ -445,9 +558,17 @@ class NomadNetClientMixin:
                 if nn_path:
                     self.dialog.infobox("Generating Config", "Running NomadNet briefly to generate config...")
                     try:
+                        # Build command - run as real user if we're under sudo
+                        # This ensures config is created with correct ownership
+                        sudo_user = os.environ.get('SUDO_USER')
+                        if sudo_user and sudo_user != 'root':
+                            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--daemon']
+                        else:
+                            cmd = [nn_path, '--daemon']
+
                         # Run daemon briefly, then kill to generate config
                         proc = subprocess.Popen(
-                            [nn_path, '--daemon'],
+                            cmd,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             start_new_session=True,
