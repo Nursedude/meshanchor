@@ -994,6 +994,14 @@ RNSD_SERVICE
         systemctl daemon-reload
     fi
 
+    # Check if Meshtastic_Interface.py plugin exists - if so, install meshtastic module
+    # This is required for the RNS-over-Meshtastic bridge to work (Issue #24)
+    if [[ -f "/etc/reticulum/interfaces/Meshtastic_Interface.py" ]]; then
+        echo "  Meshtastic_Interface.py detected, installing meshtastic module..."
+        pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+        echo -e "  ${GREEN}✓ meshtastic module installed for rnsd${NC}"
+    fi
+
     echo -e "  ${GREEN}✓ Reticulum installed${NC}"
 else
     echo -e "${CYAN}[4/8] Skipping Reticulum...${NC}"
