@@ -115,4 +115,73 @@ Uses direct systemctl calls because it needs detailed info not provided by centr
 
 ---
 
-*Session ID: claude/service-unification-continued-LADhN*
+## Verification Run (Session c9oCZ)
+
+**Date**: 2026-01-31
+**Branch**: `claude/service-unification-verification-c9oCZ`
+
+### Verification Results
+
+| Check | Result |
+|-------|--------|
+| Linter (MF001-MF004) | PASS - 1 warning (intentional interactive shell) |
+| Syntax check | PASS - All .py files compile |
+| Version | 0.4.8-alpha (confirmed) |
+| Service imports | 50+ files correctly import from service_check.py |
+
+### Additional File Verified
+
+#### service_menu_mixin.py - PROPERLY IMPLEMENTED
+
+**Import block** (lines 15-28):
+```python
+try:
+    from utils.service_check import (
+        check_systemd_service,
+        check_process_running,
+        check_service,
+        apply_config_and_restart,
+        enable_service,
+        ServiceState,
+    )
+    _HAS_SERVICE_CHECK = True
+    _HAS_APPLY_RESTART = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+    _HAS_APPLY_RESTART = False
+```
+
+**Status checking** (lines 335-341, 355-361):
+- Uses `check_service()` when `_HAS_SERVICE_CHECK=True`
+- Proper fallback to direct `systemctl is-active`
+
+**Interactive UI operations** (lines 373-399, etc.):
+- Direct subprocess calls are intentional for interactive feedback
+- User needs to see immediate output from restart/status commands
+
+### Remaining Direct Calls Analysis
+
+Files with direct `systemctl`/`pgrep` calls that are **intentional**:
+
+| File | Reason |
+|------|--------|
+| `service_menu_mixin.py` | Interactive UI (shows status output) |
+| `system_tools_mixin.py` | Display commands (list-units, --failed) |
+| `first_run_mixin.py` | Initial setup with user feedback |
+| `meshtasticd_config_mixin.py` | Config changes with immediate restart |
+| `hardware_config.py` | Root-level hardware operations |
+| `startup_checks.py` | Needs detailed PID/enabled info |
+| `config_file_manager.py` | Config file operations |
+| `spi_hats.py` | Hardware installer operations |
+| `setup_wizard.py` | One-time setup operations |
+
+### Conclusion
+
+Service unification is **verified complete**. All status-checking operations use centralized helpers with proper fallbacks. Remaining direct subprocess calls are intentional for:
+- Interactive UI operations (user needs output)
+- Detailed systemd info (PID, enabled status)
+- Hardware/installer operations
+
+---
+
+*Session ID: claude/service-unification-verification-c9oCZ*
