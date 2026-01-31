@@ -1391,7 +1391,8 @@ This happens even when the user has previously installed `meshtastic` via CLI.
 ```bash
 # Install to system site-packages where rnsd can find it
 # --break-system-packages required on Debian 12+ / Pi OS Bookworm
-sudo pip3 install --break-system-packages meshtastic
+# --ignore-installed avoids "Cannot uninstall packaging" errors
+sudo pip3 install --break-system-packages --ignore-installed meshtastic
 ```
 
 **Option 2: Install to same Python that rnsd uses**
@@ -1400,10 +1401,10 @@ sudo pip3 install --break-system-packages meshtastic
 head -1 $(which rnsd 2>/dev/null || sudo find /usr -name rnsd 2>/dev/null | head -1)
 
 # If rnsd uses /usr/local/bin/python3:
-sudo /usr/local/bin/python3 -m pip install --break-system-packages meshtastic
+sudo /usr/local/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
 
 # If rnsd uses /usr/bin/python3:
-sudo /usr/bin/python3 -m pip install --break-system-packages meshtastic
+sudo /usr/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
 ```
 
 **Option 3: Disable the Meshtastic interface if not needed**
