@@ -661,6 +661,10 @@ downloads_path = ~/Downloads
 # Text UI settings (required when user_interface = text)
 intro_time = 1
 editor = nano
+theme = dark
+colormode = 256
+glyphs = unicode
+mouse_enabled = True
 
 # No [interfaces] section = use shared RNS instance from rnsd
 # This prevents 'Address already in use' conflicts
@@ -839,6 +843,10 @@ editor = nano
 # Text UI settings (required when user_interface = text)
 intro_time = 1
 editor = nano
+theme = dark
+colormode = 256
+glyphs = unicode
+mouse_enabled = True
 """
                 try:
                     # Append to config
@@ -857,7 +865,8 @@ editor = nano
                         "Please add this section manually:\n\n"
                         "[textui]\n"
                         "intro_time = 1\n"
-                        "editor = nano",
+                        "editor = nano\n"
+                        "colormode = 256",
                     )
                     return False
                 except Exception as e:
