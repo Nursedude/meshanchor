@@ -451,10 +451,10 @@ class GatewayDiagnostic:
                     name="Meshtastic Module (for rnsd)",
                     status=CheckStatus.FAIL,
                     message="meshtastic not importable by root's Python (rnsd will fail!)",
-                    fix_hint="sudo pip3 install --break-system-packages meshtastic",
+                    fix_hint="sudo pip3 install --break-system-packages --ignore-installed meshtastic",
                     details="The Meshtastic_Interface.py plugin requires meshtastic to be installed "
                             "in root's Python path. pipx or --user installs won't work. "
-                            "Use --break-system-packages on Debian 12+ / Pi OS Bookworm."
+                            "Use --break-system-packages --ignore-installed on Debian 12+ / Pi OS Bookworm."
                 )
         except subprocess.TimeoutExpired:
             return CheckResult(
