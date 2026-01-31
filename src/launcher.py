@@ -376,6 +376,58 @@ def main():
                        [a for a in sys.argv[1:] if a != '--status'], timeout=30)
         sys.exit(0)
 
+    # Handle --verify-install (comprehensive post-install verification)
+    if '--verify-install' in sys.argv or '--verify' in sys.argv:
+        script_path = Path(__file__).parent.parent / 'scripts' / 'verify_post_install.sh'
+        if script_path.exists():
+            # Pass through any flags like --quiet or --json
+            extra_args = [a for a in sys.argv[1:] if a not in ('--verify-install', '--verify')]
+            result = subprocess.run(
+                ['bash', str(script_path)] + extra_args,
+                timeout=120
+            )
+            sys.exit(result.returncode)
+        else:
+            # Fallback: run Python-based verification using StartupChecker
+            print(f"{Colors.CYAN}Running installation verification...{Colors.NC}\n")
+            try:
+                from launcher_tui.startup_checks import StartupChecker
+                checker = StartupChecker()
+                env = checker.check_all()
+
+                # Print results
+                print(f"{Colors.BOLD}Service Status:{Colors.NC}")
+                for name, info in env.services.items():
+                    if info.state.value == 'running':
+                        print(f"  {Colors.GREEN}[PASS]{Colors.NC} {name}")
+                    else:
+                        print(f"  {Colors.RED}[FAIL]{Colors.NC} {name}: {info.state.value}")
+
+                print(f"\n{Colors.BOLD}Hardware:{Colors.NC}")
+                if env.hardware.spi_devices:
+                    print(f"  {Colors.GREEN}[PASS]{Colors.NC} SPI: {', '.join(env.hardware.spi_devices)}")
+                if env.hardware.usb_serial_devices:
+                    for dev in env.hardware.usb_serial_devices:
+                        print(f"  {Colors.GREEN}[PASS]{Colors.NC} USB: {dev['path']} ({dev.get('name', 'Unknown')})")
+                if not env.hardware.spi_devices and not env.hardware.usb_serial_devices:
+                    print(f"  {Colors.YELLOW}[WARN]{Colors.NC} No radio hardware detected")
+
+                if env.conflicts:
+                    print(f"\n{Colors.BOLD}Conflicts:{Colors.NC}")
+                    for conflict in env.conflicts:
+                        print(f"  {Colors.RED}[FAIL]{Colors.NC} Port {conflict.port}: {conflict.actual_process} (PID {conflict.actual_pid})")
+
+                # Exit code based on state
+                if env.all_services_running and not env.conflicts:
+                    print(f"\n{Colors.GREEN}Verification passed.{Colors.NC}")
+                    sys.exit(0)
+                else:
+                    print(f"\n{Colors.YELLOW}Verification completed with issues.{Colors.NC}")
+                    sys.exit(2)
+            except ImportError as e:
+                print(f"{Colors.RED}Error: Could not load verification module: {e}{Colors.NC}")
+                sys.exit(1)
+
     # Check root
     if os.geteuid() != 0:
         print(f"\n{Colors.RED}Error: This application requires root/sudo privileges{Colors.NC}")
