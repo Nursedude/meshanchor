@@ -963,18 +963,17 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Install Reticulum (RNS) and NomadNet
+# Install Reticulum (RNS)
 # ─────────────────────────────────────────────────────────────────
 if $INSTALL_RNS; then
-    echo -e "${CYAN}[4/8] Installing Reticulum (RNS) and NomadNet...${NC}"
+    echo -e "${CYAN}[4/8] Installing Reticulum (RNS)...${NC}"
 
-    # Install pipx first (required for isolated NomadNet install)
+    # Install pipx (needed for NomadNet install via menu)
     if ! command -v pipx &>/dev/null; then
         echo "  Installing pipx..."
         apt-get install -y -qq pipx &>/dev/null
     fi
 
-    # Install RNS via pip (system-wide for rnsd)
     pip3 install $PIP_ARGS --ignore-installed -q rns
 
     # Create systemd service if not exists
@@ -1010,46 +1009,6 @@ RNSD_SERVICE
     fi
 
     echo -e "  ${GREEN}✓ Reticulum installed${NC}"
-
-    # Install NomadNet via pipx (the primary RNS client application)
-    # Determine real user for pipx install (when running via sudo)
-    REAL_USER="${SUDO_USER:-root}"
-    REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
-
-    echo "  Installing NomadNet (RNS client)..."
-    # Clean install: uninstall first to avoid urwid version corruption (COLORMODE_16 bug)
-    if [[ "$REAL_USER" != "root" ]]; then
-        # Install as real user so config goes to their home directory
-        sudo -u "$REAL_USER" pipx uninstall nomadnet 2>/dev/null || true
-        sudo -u "$REAL_USER" pipx install nomadnet 2>/dev/null || \
-            sudo -i -u "$REAL_USER" pipx install nomadnet 2>/dev/null || \
-            pipx install nomadnet 2>/dev/null
-
-        # Ensure pipx bin is in path
-        sudo -u "$REAL_USER" pipx ensurepath 2>/dev/null || true
-    else
-        # Running as root directly
-        pipx uninstall nomadnet 2>/dev/null || true
-        pipx install nomadnet 2>/dev/null || true
-        pipx ensurepath 2>/dev/null || true
-    fi
-
-    # Verify NomadNet installation
-    NOMADNET_PATH=""
-    if command -v nomadnet &>/dev/null; then
-        NOMADNET_PATH=$(command -v nomadnet)
-    elif [[ -f "$REAL_HOME/.local/bin/nomadnet" ]]; then
-        NOMADNET_PATH="$REAL_HOME/.local/bin/nomadnet"
-    elif [[ -f "/root/.local/bin/nomadnet" ]]; then
-        NOMADNET_PATH="/root/.local/bin/nomadnet"
-    fi
-
-    if [[ -n "$NOMADNET_PATH" ]]; then
-        echo -e "  ${GREEN}✓ NomadNet installed: $NOMADNET_PATH${NC}"
-    else
-        echo -e "  ${YELLOW}⚠ NomadNet install may need PATH update${NC}"
-        echo -e "  ${YELLOW}  Try: pipx ensurepath && source ~/.bashrc${NC}"
-    fi
 else
     echo -e "${CYAN}[4/8] Skipping Reticulum...${NC}"
     echo -e "  ${YELLOW}⊘ Skipped${NC}"
@@ -1295,7 +1254,7 @@ if $INSTALL_MESHTASTICD; then
     esac
 fi
 if $INSTALL_RNS; then
-    echo -e "  ${GREEN}✓${NC} Reticulum (RNS) + NomadNet"
+    echo -e "  ${GREEN}✓${NC} Reticulum (RNS)"
 fi
 echo -e "  ${GREEN}✓${NC} MeshForge NOC"
 echo ""
