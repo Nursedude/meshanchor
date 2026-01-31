@@ -11,6 +11,13 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+# Import centralized service checking
+try:
+    from utils.service_check import check_process_running
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 # Import centralized path utility
 try:
     from utils.paths import get_real_user_home, ReticulumPaths
