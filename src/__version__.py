@@ -3,17 +3,34 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.4.8-alpha"
-__version_info__ = (0, 4, 8, 'alpha')
-__release_date__ = "2026-01-30"
+__version__ = "0.5.0-beta"
+__version_info__ = (0, 5, 0, 'beta')
+__release_date__ = "2026-02-01"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
 __target_audience__ = "RF engineers, network operators, and amateur radio operators"
-__status__ = "alpha"  # alpha=experimental, beta=testing, stable=production
+__status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.5.0-beta",
+        "date": "2026-02-01",
+        "status": "beta",
+        "changes": [
+            "MILESTONE: Promoted to beta - TUI stable across 6+ fresh installs",
+            "FIX: NomadNet /etc/reticulum permission issues (auto-detect + bypass)",
+            "FIX: rnsd user/root identity mismatch detection and repair",
+            "FIX: AREDN/Folium startup error suppression",
+            "FIX: rnsd systemd user override for consistent RPC auth",
+            "NEW: RNS config path auto-detection with --rnsconfig fallback",
+            "NEW: Interactive /etc/reticulum permission fix menu",
+            "IMPROVED: NomadNet error diagnostics with specific fix suggestions",
+            "IMPROVED: User directory ownership auto-repair for sudo scenarios",
+            "NEXT: Gateway bridge Q&A testing (Short Turbo ↔ LongFast)",
+        ]
+    },
     {
         "version": "0.4.8-alpha",
         "date": "2026-01-30",
