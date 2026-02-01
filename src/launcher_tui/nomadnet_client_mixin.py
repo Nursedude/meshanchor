@@ -51,6 +51,58 @@ class NomadNetClientMixin:
     """Mixin providing NomadNet client management for the TUI launcher."""
 
     # ------------------------------------------------------------------
+    # RNS config path detection
+    # ------------------------------------------------------------------
+
+    def _get_rns_config_for_user(self) -> str:
+        """Get RNS config directory path appropriate for the current user.
+
+        Detects the problematic case where /etc/reticulum/ exists (from a
+        previous root/sudo run) but is not writable by the current user.
+        In that case, returns the user's ~/.reticulum path.
+
+        Returns:
+            Path string to pass to --rnsconfig, or None if default is fine.
+        """
+        etc_rns = Path('/etc/reticulum')
+        user_home = get_real_user_home()
+        user_rns = user_home / '.reticulum'
+
+        # If /etc/reticulum exists, check if it's usable
+        if etc_rns.exists():
+            # Check if storage subdir exists and is writable
+            storage_dir = etc_rns / 'storage'
+            try:
+                if storage_dir.exists():
+                    # Try to write a test file
+                    test_file = storage_dir / '.meshforge_write_test'
+                    try:
+                        test_file.touch()
+                        test_file.unlink()
+                        # Writable - system config is fine
+                        return None
+                    except (OSError, PermissionError):
+                        # Not writable - need to use user config
+                        logger.info(f"/etc/reticulum/storage not writable, using {user_rns}")
+                        return str(user_rns)
+                else:
+                    # storage dir doesn't exist - try to create it
+                    try:
+                        storage_dir.mkdir(parents=True, exist_ok=True)
+                        # Created successfully - system config is fine
+                        return None
+                    except (OSError, PermissionError):
+                        # Can't create - need to use user config
+                        logger.info(f"Cannot create /etc/reticulum/storage, using {user_rns}")
+                        return str(user_rns)
+            except Exception as e:
+                logger.warning(f"Error checking /etc/reticulum: {e}, falling back to user config")
+                return str(user_rns)
+
+        # /etc/reticulum doesn't exist - default resolution is fine
+        return None
+
+    # ------------------------------------------------------------------
     # Ownership fix for user directories
     # ------------------------------------------------------------------
 
@@ -333,9 +385,15 @@ class NomadNetClientMixin:
         if not self._check_rns_for_nomadnet():
             return
 
+        # Check if we need to use a specific RNS config path
+        # This handles the case where /etc/reticulum exists but isn't writable
+        rns_config_path = self._get_rns_config_for_user()
+
         # Clear screen before launching
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Launching NomadNet ===")
+        if rns_config_path:
+            print(f"Using RNS config: {rns_config_path}")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
         # When running via sudo, we must run NomadNet as the real user.
@@ -344,6 +402,11 @@ class NomadNetClientMixin:
         sudo_user = os.environ.get('SUDO_USER')
 
         try:
+            # Build base command with optional --rnsconfig
+            nn_args = ['--textui']
+            if rns_config_path:
+                nn_args = ['--rnsconfig', rns_config_path, '--textui']
+
             if sudo_user and sudo_user != 'root':
                 # Run as real user using 'sudo -u' with explicit PATH
                 # The -H sets HOME correctly, we pass PATH for pipx binaries
@@ -351,12 +414,12 @@ class NomadNetClientMixin:
                 user_path = f"{user_home}/.local/bin:/usr/local/bin:/usr/bin:/bin"
                 result = subprocess.run(
                     ['sudo', '-u', sudo_user, '-H',
-                     f'PATH={user_path}', nn_path, '--textui'],
+                     f'PATH={user_path}', nn_path] + nn_args,
                     timeout=None
                 )
             else:
                 # Not running via sudo, run directly
-                result = subprocess.run([nn_path, '--textui'], timeout=None)
+                result = subprocess.run([nn_path] + nn_args, timeout=None)
 
             # After NomadNet exits, show status and wait for user
             print()
@@ -427,8 +490,14 @@ class NomadNetClientMixin:
                         error_hints.append("Delete ~/.nomadnetwork/config and restart")
                         break
                     elif 'PermissionError' in line or 'Permission denied' in line:
-                        error_hints.append("Permission denied accessing files")
-                        error_hints.append(f"Check ownership: ls -la ~/.nomadnetwork/")
+                        if '/etc/reticulum' in line:
+                            error_hints.append("Cannot write to /etc/reticulum/ (system config)")
+                            error_hints.append("This happens when rnsd was run as root first")
+                            error_hints.append("Fix: sudo rm -rf /etc/reticulum")
+                            error_hints.append("     (or sudo chown -R $USER /etc/reticulum)")
+                        else:
+                            error_hints.append("Permission denied accessing files")
+                            error_hints.append(f"Check ownership: ls -la ~/.nomadnetwork/")
                         break
                     elif 'ModuleNotFoundError' in line or 'ImportError' in line:
                         error_hints.append("Missing Python dependencies")
@@ -484,15 +553,24 @@ class NomadNetClientMixin:
 
         self.dialog.infobox("Starting", "Starting NomadNet daemon...")
 
+        # Check if we need to use a specific RNS config path
+        rns_config_path = self._get_rns_config_for_user()
+
         # Build command - run as real user if we're under sudo
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
         sudo_user = os.environ.get('SUDO_USER')
+
+        # Build base args with optional --rnsconfig
+        nn_args = ['--daemon']
+        if rns_config_path:
+            nn_args = ['--rnsconfig', rns_config_path, '--daemon']
+
         if sudo_user and sudo_user != 'root':
             # Run as real user with -H to set HOME correctly
             # Using -H instead of -i avoids running shell profiles which can interfere
-            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+            cmd = ['sudo', '-H', '-u', sudo_user, nn_path] + nn_args
         else:
-            cmd = [nn_path, '--daemon']
+            cmd = [nn_path] + nn_args
 
         try:
             subprocess.Popen(
@@ -624,14 +702,23 @@ class NomadNetClientMixin:
                 if nn_path:
                     self.dialog.infobox("Generating Config", "Running NomadNet briefly to generate config...")
                     try:
+                        # Check if we need to use a specific RNS config path
+                        rns_config_path = self._get_rns_config_for_user()
+
                         # Build command - run as real user if we're under sudo
                         # This ensures config is created with correct ownership
                         sudo_user = os.environ.get('SUDO_USER')
+
+                        # Build base args with optional --rnsconfig
+                        nn_args = ['--daemon']
+                        if rns_config_path:
+                            nn_args = ['--rnsconfig', rns_config_path, '--daemon']
+
                         if sudo_user and sudo_user != 'root':
                             # Using -H instead of -i to set HOME without shell profiles
-                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path] + nn_args
                         else:
-                            cmd = [nn_path, '--daemon']
+                            cmd = [nn_path] + nn_args
 
                         # Run daemon briefly, then kill to generate config
                         proc = subprocess.Popen(
@@ -903,12 +990,97 @@ class NomadNetClientMixin:
         """Check that RNS/rnsd is available and properly configured.
 
         Checks:
-        1. Is rnsd running?
-        2. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
+        1. Is /etc/reticulum blocking user access?
+        2. Is rnsd running?
+        3. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
 
         Returns True if OK to proceed, False if user cancelled.
         """
         sudo_user = os.environ.get('SUDO_USER')
+
+        # Check for /etc/reticulum permission issues first
+        etc_rns = Path('/etc/reticulum')
+        if etc_rns.exists():
+            storage_dir = etc_rns / 'storage'
+            can_write = False
+            try:
+                if storage_dir.exists():
+                    test_file = storage_dir / '.write_test'
+                    try:
+                        test_file.touch()
+                        test_file.unlink()
+                        can_write = True
+                    except (OSError, PermissionError):
+                        pass
+                else:
+                    try:
+                        storage_dir.mkdir(parents=True, exist_ok=True)
+                        can_write = True
+                    except (OSError, PermissionError):
+                        pass
+            except Exception:
+                pass
+
+            if not can_write:
+                # /etc/reticulum exists but is not writable
+                # We'll use --rnsconfig to bypass it, but warn the user
+                target_user = sudo_user if sudo_user and sudo_user != 'root' else 'current user'
+                user_rns = get_real_user_home() / '.reticulum'
+
+                choice = self.dialog.menu(
+                    "/etc/reticulum Permission Issue",
+                    f"/etc/reticulum/ exists but is not writable by {target_user}.\n\n"
+                    f"This was likely created when RNS/rnsd ran as root.\n\n"
+                    f"NomadNet will use {user_rns} instead.",
+                    [
+                        ("continue", f"Continue (use {user_rns})"),
+                        ("fix", "Fix /etc/reticulum permissions (requires sudo)"),
+                        ("remove", "Remove /etc/reticulum (requires sudo)"),
+                        ("cancel", "Cancel"),
+                    ],
+                )
+
+                if choice == "fix":
+                    try:
+                        if sudo_user and sudo_user != 'root':
+                            subprocess.run(
+                                ['chown', '-R', f'{sudo_user}:{sudo_user}', str(etc_rns)],
+                                capture_output=True, timeout=30
+                            )
+                        else:
+                            # Running as root already, just fix permissions
+                            subprocess.run(
+                                ['chmod', '-R', '755', str(etc_rns)],
+                                capture_output=True, timeout=30
+                            )
+                        self.dialog.msgbox(
+                            "Permissions Fixed",
+                            f"Fixed permissions on /etc/reticulum/.\n\n"
+                            "NomadNet should now work with system config.",
+                        )
+                    except Exception as e:
+                        self.dialog.msgbox("Fix Failed", f"Could not fix permissions: {e}")
+                        return False
+                elif choice == "remove":
+                    if self.dialog.yesno(
+                        "Confirm Removal",
+                        f"Remove /etc/reticulum/ directory?\n\n"
+                        f"RNS will use {user_rns} instead.\n\n"
+                        "Proceed?",
+                    ):
+                        try:
+                            shutil.rmtree(str(etc_rns))
+                            self.dialog.msgbox(
+                                "Removed",
+                                f"/etc/reticulum/ has been removed.\n\n"
+                                f"RNS will now use {user_rns}.",
+                            )
+                        except Exception as e:
+                            self.dialog.msgbox("Removal Failed", f"Could not remove: {e}")
+                            return False
+                elif choice == "cancel":
+                    return False
+                # choice == "continue" falls through
 
         # Check if rnsd is running and get its user
         try:
