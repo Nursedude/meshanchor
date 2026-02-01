@@ -341,15 +341,17 @@ class NomadNetClientMixin:
         # When running via sudo, we must run NomadNet as the real user.
         # Just setting HOME is not enough - RPC authentication between
         # NomadNet and rnsd requires matching UIDs.
-        # Use 'su' which properly handles TTY for interactive apps.
         sudo_user = os.environ.get('SUDO_USER')
 
         try:
             if sudo_user and sudo_user != 'root':
-                # Run as real user using 'su' - preserves TTY for curses
-                # The '-' gives a login shell, '-c' runs the command
+                # Run as real user using 'sudo -u' with explicit PATH
+                # The -H sets HOME correctly, we pass PATH for pipx binaries
+                user_home = get_real_user_home()
+                user_path = f"{user_home}/.local/bin:/usr/local/bin:/usr/bin:/bin"
                 result = subprocess.run(
-                    ['su', '-', sudo_user, '-c', f'{nn_path} --textui'],
+                    ['sudo', '-u', sudo_user, '-H',
+                     f'PATH={user_path}', nn_path, '--textui'],
                     timeout=None
                 )
             else:
@@ -402,7 +404,23 @@ class NomadNetClientMixin:
                 for line in last_lines:
                     if 'AuthenticationError' in line or 'digest sent was rejected' in line:
                         error_hints.append("RPC authentication failed between NomadNet and rnsd")
-                        error_hints.append("This usually means rnsd is running as a different user")
+                        # Check if rnsd is running as root
+                        try:
+                            ps_result = subprocess.run(
+                                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            rnsd_user = ps_result.stdout.strip()
+                            if rnsd_user == 'root':
+                                error_hints.append("rnsd is running as root - identities don't match")
+                                error_hints.append("Fix: sudo systemctl stop rnsd")
+                                error_hints.append("     Then run rnsd as your user, or reconfigure")
+                            elif rnsd_user and rnsd_user != sudo_user:
+                                error_hints.append(f"rnsd runs as '{rnsd_user}', you are '{sudo_user}'")
+                            else:
+                                error_hints.append("Check that rnsd uses the same ~/.reticulum/ identity")
+                        except Exception:
+                            error_hints.append("Ensure rnsd and NomadNet use the same RNS identity")
                         break
                     elif 'KeyError' in line and 'textui' in line.lower():
                         error_hints.append("Config missing [textui] section")
