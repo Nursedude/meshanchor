@@ -900,39 +900,87 @@ class NomadNetClientMixin:
         return user_home / '.nomadnetwork' / 'config'
 
     def _check_rns_for_nomadnet(self) -> bool:
-        """Check that RNS/rnsd is available before launching NomadNet.
+        """Check that RNS/rnsd is available and properly configured.
 
-        Uses centralized service_check module when available.
+        Checks:
+        1. Is rnsd running?
+        2. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
+
         Returns True if OK to proceed, False if user cancelled.
         """
+        sudo_user = os.environ.get('SUDO_USER')
+
+        # Check if rnsd is running and get its user
         try:
-            if _HAS_SERVICE_CHECK:
-                rnsd_running = check_process_running('rnsd')
-            else:
-                # Fallback to direct pgrep call
-                result = subprocess.run(
-                    ['pgrep', '-f', 'rnsd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                rnsd_running = result.returncode == 0
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            rnsd_user = result.stdout.strip() if result.returncode == 0 else None
         except Exception:
-            rnsd_running = False
+            rnsd_user = None
 
-        if rnsd_running:
-            return True
+        if not rnsd_user:
+            # rnsd not running -- warn but allow proceeding
+            return self.dialog.yesno(
+                "rnsd Not Running",
+                "The RNS daemon (rnsd) is not running.\n\n"
+                "NomadNet can start its own RNS instance,\n"
+                "but for Meshtastic bridging you should run rnsd\n"
+                "with share_instance = Yes in the Reticulum config.\n\n"
+                "Continue anyway?",
+            )
 
-        # rnsd not running -- warn but allow proceeding
-        # (NomadNet can run its own RNS instance)
-        return self.dialog.yesno(
-            "rnsd Not Running",
-            "The RNS daemon (rnsd) is not running.\n\n"
-            "NomadNet can start its own RNS instance,\n"
-            "but for Meshtastic bridging you should run rnsd\n"
-            "with share_instance = Yes in the Reticulum config.\n\n"
-            "Start rnsd first:\n"
-            "  sudo systemctl start rnsd\n\n"
-            "Continue anyway?",
-        )
+        # rnsd is running - check if it's running as root (security issue)
+        if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
+            # This is the problem case - rnsd as root, NomadNet as user
+            if self.dialog.yesno(
+                "rnsd Running as Root",
+                "rnsd is running as root, but NomadNet needs to\n"
+                "run as your user for RPC authentication.\n\n"
+                "Different users = different RNS identities = auth failure.\n\n"
+                "Stop rnsd now? You can restart it as your user:\n"
+                f"  rnsd -v  (as {sudo_user})",
+            ):
+                # Stop rnsd
+                self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
+                try:
+                    subprocess.run(
+                        ['systemctl', 'stop', 'rnsd'],
+                        capture_output=True, timeout=10
+                    )
+                    # Also kill any stray processes
+                    subprocess.run(
+                        ['pkill', '-f', 'rnsd'],
+                        capture_output=True, timeout=5
+                    )
+                    time.sleep(1)
+
+                    self.dialog.msgbox(
+                        "rnsd Stopped",
+                        "rnsd has been stopped.\n\n"
+                        "NomadNet will start its own RNS instance,\n"
+                        "or you can run rnsd as your user first:\n"
+                        f"  rnsd -v\n\n"
+                        "For persistent fix, edit the systemd service:\n"
+                        "  sudo systemctl edit rnsd\n"
+                        f"  Add: User={sudo_user}",
+                    )
+                    return True
+                except Exception as e:
+                    self.dialog.msgbox(
+                        "Stop Failed",
+                        f"Could not stop rnsd: {e}\n\n"
+                        "Try manually:\n"
+                        "  sudo systemctl stop rnsd\n"
+                        "  sudo pkill rnsd",
+                    )
+                    return False
+            else:
+                return False  # User declined to fix
+
+        # rnsd running as correct user (or no sudo context)
+        return True
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
