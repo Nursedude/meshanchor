@@ -872,17 +872,87 @@ class NomadNetClientMixin:
         )
 
     def _validate_nomadnet_config(self) -> bool:
-        """Check NomadNet config exists.
+        """Validate and repair NomadNet config if needed.
 
-        We don't modify configs - NomadNet creates its own defaults.
-        Just verify config exists or will be created.
+        NomadNet requires a [textui] section when running in text UI mode.
+        If the config exists but lacks this section (e.g., old config from
+        before [textui] was required), NomadNet will crash with KeyError.
+
+        This function checks for and adds a minimal [textui] section if missing.
 
         Returns:
-            True to proceed with launch.
+            True to proceed with launch, False if user cancelled.
         """
         config_path = self._get_nomadnet_config_path()
         if not config_path or not config_path.exists():
             # No config yet - NomadNet will create default on first run
             return True
 
-        return True
+        try:
+            content = config_path.read_text()
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Cannot read NomadNet config: {e}")
+            return True  # Let NomadNet handle the error
+
+        # Check if [textui] section exists (case-insensitive)
+        if '[textui]' in content.lower():
+            return True
+
+        # Missing [textui] section - need to add it
+        logger.info(f"NomadNet config missing [textui] section: {config_path}")
+
+        if not self.dialog.yesno(
+            "Config Repair Needed",
+            f"Your NomadNet config is missing the [textui] section\n"
+            f"required for text UI mode.\n\n"
+            f"Config: {config_path}\n\n"
+            f"Add a default [textui] section now?",
+        ):
+            return self.dialog.yesno(
+                "Proceed Anyway?",
+                "Without [textui], NomadNet will crash.\n\n"
+                "Continue anyway?",
+            )
+
+        # Add minimal [textui] section
+        textui_section = """
+
+[textui]
+# Text UI configuration added by MeshForge
+intro_time = 1
+theme = dark
+colormode = 256
+glyphs = unicode
+mouse_enabled = yes
+hide_guide = no
+"""
+        try:
+            # Append [textui] section to config
+            with open(config_path, 'a') as f:
+                f.write(textui_section)
+            logger.info(f"Added [textui] section to {config_path}")
+
+            # Fix ownership if running via sudo
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                import subprocess
+                subprocess.run(
+                    ['chown', f'{sudo_user}:{sudo_user}', str(config_path)],
+                    capture_output=True, timeout=10
+                )
+
+            self.dialog.msgbox(
+                "Config Updated",
+                f"Added [textui] section to config.\n\n"
+                f"NomadNet text UI should now work.",
+            )
+            return True
+        except (OSError, PermissionError) as e:
+            self.dialog.msgbox(
+                "Config Update Failed",
+                f"Could not update config:\n  {config_path}\n\n"
+                f"Error: {e}\n\n"
+                f"Add [textui] section manually or delete config\n"
+                f"and let NomadNet recreate it.",
+            )
+            return False
