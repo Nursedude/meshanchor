@@ -10,6 +10,7 @@ Provides network topology visualization and analysis tools:
 """
 
 import logging
+import os
 import subprocess
 import threading
 import webbrowser
@@ -486,14 +487,24 @@ class TopologyMixin:
             output_path = visualizer.generate()
 
             # Try to open in browser (in background thread to not block)
+            # Drop privileges when running as root so browser runs as real user
             def open_browser():
                 try:
-                    # Try xdg-open first (Linux)
-                    result = subprocess.run(
-                        ["xdg-open", output_path],
-                        capture_output=True,
-                        timeout=10
-                    )
+                    real_user = os.environ.get('SUDO_USER')
+                    if os.geteuid() == 0 and real_user:
+                        # Running as root via sudo - run browser as real user
+                        result = subprocess.run(
+                            ['sudo', '-u', real_user, 'xdg-open', output_path],
+                            capture_output=True,
+                            timeout=10
+                        )
+                    else:
+                        # Not root - try xdg-open directly
+                        result = subprocess.run(
+                            ["xdg-open", output_path],
+                            capture_output=True,
+                            timeout=10
+                        )
                     if result.returncode != 0:
                         # Fallback to webbrowser module
                         webbrowser.open(f"file://{output_path}")
