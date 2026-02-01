@@ -1,0 +1,47 @@
+# MeshForge Gateway Node B - Short Turbo Configuration
+# Role: Bridge node for local high-speed network
+# Hardware: HAT radio (Waveshare, RAK, etc.)
+#
+# Copy to: /etc/meshtasticd/config.d/gateway-node-b.yaml
+
+Lora:
+  Module: sx1262        # Adjust for your hardware
+  Region: US            # Your region
+  ModemPreset: SHORT_TURBO
+  TxEnabled: true
+  TxPower: 30           # Max for your region/hardware
+
+Bluetooth:
+  Enabled: false        # Disable for gateway node
+
+WiFi:
+  Enabled: false        # Disable for headless operation
+
+# Channel 0: meshforge bridge channel (private)
+# PSK: Your 256-bit key (set via meshtastic CLI)
+# meshtastic --ch-set psk base64:YOUR_KEY_HERE --ch-index 0
+
+Channel0:
+  Role: PRIMARY
+  Name: meshforge
+  # PSK set separately for security
+  UplinkEnabled: false
+  DownlinkEnabled: false
+  PositionPrecision: 32
+
+# Gateway needs to see telemetry
+Telemetry:
+  DeviceMetricsEnabled: true
+  EnvironmentMetricsEnabled: true
+  AirQualityEnabled: false
+
+# Position for mapping
+Position:
+  PositionBroadcastSecs: 900
+  GpsEnabled: true      # If GPS connected
+  FixedPosition: false  # Set true + coords if no GPS
+
+# Device role for mesh participation
+Device:
+  Role: ROUTER          # Forward packets, don't sleep
+  NodeInfoBroadcastSecs: 3600
