@@ -68,10 +68,41 @@ The environment check still alerts for genuine issues:
 **Files changed**:
 - `src/launcher_tui/topology_mixin.py` - Added SSH/headless detection and lynx option
 
+---
+
+## Additional Fix: NomadNet Privilege Dropping
+
+**Issue**: NomadNet failing to launch with "Could not load config file, creating default configuration file..." then exit code 1.
+
+**Root Cause**: Commit 64aaa74 added `sudo -u user -i` to drop privileges. The `-i` flag runs a full login shell which executes shell profile scripts (~/.profile, ~/.bash_profile). These can interfere by changing PATH or environment in unexpected ways.
+
+**Fix**: Changed from `-i` (login shell) to `-H` (just set HOME):
+
+**Before**:
+```python
+cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--textui']
+```
+
+**After**:
+```python
+cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--textui']
+```
+
+The `-H` flag sets HOME to the target user's directory without running any shell profile scripts. This is simpler and less likely to cause issues.
+
+Updated in all three places:
+- Text UI launch
+- Daemon launch
+- Config generation
+
+**Files changed**:
+- `src/launcher_tui/nomadnet_client_mixin.py`
+
 ## Session Health
 
-Session remained focused. Two related issues fixed:
+Session remained focused. Three related issues fixed:
 1. Noisy boot-enable alert
 2. SSH topology browser handling
+3. NomadNet privilege dropping
 
 No entropy detected.
