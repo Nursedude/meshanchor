@@ -338,19 +338,20 @@ class NomadNetClientMixin:
         print("=== Launching NomadNet ===")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
-        # Build command - run as real user if we're under sudo
+        # Build environment - set HOME to real user's home when running via sudo
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
+        # IMPORTANT: We run directly (no sudo -u) because sudo breaks curses TTY
+        env = os.environ.copy()
         sudo_user = os.environ.get('SUDO_USER')
         if sudo_user and sudo_user != 'root':
-            # Run as real user with -H to set HOME correctly
-            # Using -H instead of -i avoids running shell profiles which can interfere
-            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--textui']
-        else:
-            cmd = [nn_path, '--textui']
+            user_home = get_real_user_home()
+            env['HOME'] = str(user_home)
+            env['USER'] = sudo_user
+            env['LOGNAME'] = sudo_user
 
         try:
             # Run interactively -- NomadNet takes over the terminal
-            result = subprocess.run(cmd, timeout=None)
+            result = subprocess.run([nn_path, '--textui'], env=env, timeout=None)
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
