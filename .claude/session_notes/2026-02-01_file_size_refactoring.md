@@ -1,99 +1,102 @@
 # Session Notes: File Size Refactoring
 
 **Date**: 2026-02-01
-**Branch**: `claude/session-management-setup-uBUFr`
-**Session ID**: 01UjAMVUWHAjUtCZX1eeGyfb
+**Current Branch**: `claude/analyze-diagnostics-traffic-aeP8d`
+**Previous Branch**: `claude/session-management-setup-uBUFr` (merged)
 
 ## Completed This Session
 
-### 1. Codebase Analysis
-- Reviewed recent commits (NGINX reliability, Config API RESTful patterns)
-- Identified 6 files over 1500 lines requiring refactoring
-- Confirmed NomadNet Text UI fix already in place (commit 180911c)
+### 1. knowledge_base.py Split ✅
+**Before**: 1860 lines
+**After**:
+- `knowledge_base.py` (205 lines): Core class, data classes, query methods
+- `knowledge_content.py` (1688 lines): All loader functions
 
-### 2. map_data_service.py Refactoring ✅
-**Before**: 2129 lines (single file)
-**After**: Split into 3 modules
+**Commit**: `refactor: Split knowledge_base.py into core and content modules`
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `src/utils/map_data_service.py` | 378 | MapServer + CLI + re-exports |
-| `src/utils/map_data_collector.py` | 993 | MapDataCollector class |
-| `src/utils/map_http_handler.py` | 833 | MapRequestHandler class |
+### 2. diagnostic_engine.py Split ✅
+**Before**: 1857 lines
+**After**:
+- `diagnostic_engine.py` (986 lines): Core engine, data classes, evidence checks
+- `diagnostic_rules.py` (901 lines): All 58 diagnostic rule definitions
 
-- All imports/exports preserved for backward compatibility
-- Syntax verified with py_compile
+**Commit**: `refactor: Split diagnostic_engine.py into core and rules modules`
+
+### 3. traffic_inspector.py Analysis ✅
+**Size**: 1716 lines (only 216 over guideline)
+**Decision**: NO SPLIT NEEDED
+- Well-organized with tightly coupled components
+- Dissectors, data classes, and capture are interdependent
+- Split would add complexity without major benefit
+
+## Previous Session Work (merged)
+
+### map_data_service.py Refactoring
+- Split into `map_data_collector.py` + `map_http_handler.py`
+- Merged in commit fc34435
 
 ## Remaining Tasks
 
-### File Size Reductions (Priority Order)
-1. **knowledge_base.py** (1860 lines) - IN PROGRESS
-   - Split plan: Core class + query methods → `knowledge_base.py` (~200 lines)
-   - Content loaders → `knowledge_content.py` (~1700 lines)
+### High Priority (over 1700 lines)
+- [ ] `core/diagnostics/engine.py` (1767 lines) - Check if duplicates utils/diagnostic_engine.py
+- [ ] `rns_bridge.py` (1702 lines) - Gateway bridge, consider collector/handler split
+- [ ] `launcher_tui/main.py` (2822 lines) - Extract menu handlers (large effort)
+- [ ] `hamclock.py` (2625 lines) - Extract API client
 
-2. **diagnostic_engine.py** (1857 lines) - PENDING
-3. **core/diagnostics/engine.py** (1767 lines) - PENDING
-4. **traffic_inspector.py** (1716 lines) - PENDING
-5. **rns_bridge.py** (1702 lines) - PENDING
+### Completed (no action needed)
+- [x] `knowledge_base.py` - Split complete
+- [x] `diagnostic_engine.py` - Split complete
+- [x] `traffic_inspector.py` - Analyzed, no split needed
+- [x] `map_data_service.py` - Split complete (previous session)
 
-### Feature Additions
-1. **RNS/RNSD tools menu** - Add to TUI (mirror GTK panel functionality)
-2. **Device config wizard** - Complete setup flow in TUI
-
-### Documentation
-1. **CLAUDE.md** - Update with service_check examples (partially done per systemctl_refactor_next.md)
+### Feature Additions (deferred)
+- [ ] RNS/RNSD tools menu
+- [ ] Device config wizard
+- [ ] CLAUDE.md updates for new file structure
 
 ## Files Created This Session
-- `/home/user/meshforge/src/utils/map_data_collector.py` (NEW)
-- `/home/user/meshforge/src/utils/map_http_handler.py` (NEW)
-- `/home/user/meshforge/src/utils/map_data_service.py` (MODIFIED - reduced to wrapper)
+- `src/utils/knowledge_content.py` (NEW - 1688 lines)
+- `src/utils/diagnostic_rules.py` (NEW - 901 lines)
 
-## Current Git Status
-- Working on `alpha` branch
-- Uncommitted changes:
-  - Modified: `src/utils/map_data_service.py`
-  - New: `src/utils/map_data_collector.py`
-  - New: `src/utils/map_http_handler.py`
+## Split Pattern Used
+
+Pattern: Extract content/rules into separate module, keep core class minimal.
+
+```python
+# In core module __init__:
+from . import content_module
+content_module.load_functions(self)
+
+# In content module:
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .core_module import CoreClass
+
+def load_functions(instance: "CoreClass") -> None:
+    instance._add_item(...)
+```
 
 ## Next Session Pickup
 
-1. **Commit current work** - map_data_service split
-2. **Continue knowledge_base.py** - Already analyzed structure:
-   ```
-   Lines 30-70: Data classes (keep in knowledge_base.py)
-   Lines 72-120: KnowledgeBase __init__ + core methods
-   Lines 121-350: _load_rf_knowledge
-   Lines 351-547: _load_meshtastic_knowledge
-   Lines 548-696: _load_reticulum_knowledge
-   Lines 697-775: _load_hardware_knowledge
-   Lines 776-881: _load_troubleshooting_guides
-   Lines 882-924: _load_best_practices
-   Lines 925-1176: _load_rns_troubleshooting
-   Lines 1177-1301: _load_aredn_knowledge
-   Lines 1302-1675: _load_rf_fundamentals_extended
-   Lines 1676-1777: _load_mqtt_knowledge
-   Lines 1778-1861: Query methods (keep in knowledge_base.py)
-   ```
-3. **Then remaining files** in priority order
-4. **Feature additions** after file cleanup
+1. **Push current commits** to branch
+2. **Investigate core/diagnostics/engine.py** - may duplicate utils/diagnostic_engine.py
+3. **Split rns_bridge.py** if needed
+4. **Large files** (launcher_tui/main.py, hamclock.py) - defer until adding features
 
 ## Commands for Next Session
 
 ```bash
 # Check current state
-git status
-wc -l src/utils/knowledge_base.py
+git log --oneline -5
+wc -l src/utils/knowledge_base.py src/utils/diagnostic_engine.py
 
-# Verify syntax after changes
-python3 -m py_compile src/utils/map_data_service.py src/utils/map_data_collector.py src/utils/map_http_handler.py
-
-# Commit when ready
-git add src/utils/map_data_service.py src/utils/map_data_collector.py src/utils/map_http_handler.py
-git commit -m "refactor: Split map_data_service.py into collector and handler modules"
+# Verify functionality
+python3 -c "from src.utils.knowledge_base import get_knowledge_base; kb = get_knowledge_base(); print(f'KB: {len(kb._entries)} entries')"
+python3 -c "from src.utils.diagnostic_engine import get_diagnostic_engine; e = get_diagnostic_engine(); print(f'Engine: {len(e._rules)} rules')"
 ```
 
 ## Notes
-- User requested deep thinking approach
-- Watch for session entropy (context overload)
-- Work systematically with task list
-- All files over 1500 lines should be split when adding new features (per CLAUDE.md)
+- Session entropy was moderate but manageable
+- Used TYPE_CHECKING for clean imports without circular dependency
+- Both splits verified with py_compile and functional tests
+- Pattern keeps public API unchanged
