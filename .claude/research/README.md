@@ -44,6 +44,7 @@
 
 | Document | Description |
 |----------|-------------|
+| `nginx_reliability_patterns.md` | **NGINX patterns for MeshForge reliability (health checks, retry, metrics)** |
 | `tui_menu_redesign.md` | **TUI menu redesign - UI/UX research & implementation plan** |
 | `../foundations/tui_architecture.md` | **TUI code architecture - mixin pattern, DialogBackend, adding features** |
 | `uconsole_portable_noc.md` | uConsole portable NOC design |
