@@ -934,53 +934,114 @@ class NomadNetClientMixin:
         # rnsd is running - check if it's running as root (security issue)
         if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
             # This is the problem case - rnsd as root, NomadNet as user
-            if self.dialog.yesno(
+            choice = self.dialog.menu(
                 "rnsd Running as Root",
                 "rnsd is running as root, but NomadNet needs to\n"
                 "run as your user for RPC authentication.\n\n"
                 "Different users = different RNS identities = auth failure.\n\n"
-                "Stop rnsd now? You can restart it as your user:\n"
-                f"  rnsd -v  (as {sudo_user})",
-            ):
-                # Stop rnsd
+                "How do you want to fix this?",
+                [
+                    ("fix", f"Fix rnsd to run as {sudo_user} (recommended)"),
+                    ("stop", "Stop rnsd (NomadNet will use its own RNS)"),
+                    ("cancel", "Cancel"),
+                ],
+            )
+
+            if choice == "fix":
+                return self._fix_rnsd_user(sudo_user)
+            elif choice == "stop":
+                # Just stop rnsd
                 self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
                 try:
-                    subprocess.run(
-                        ['systemctl', 'stop', 'rnsd'],
-                        capture_output=True, timeout=10
-                    )
-                    # Also kill any stray processes
-                    subprocess.run(
-                        ['pkill', '-f', 'rnsd'],
-                        capture_output=True, timeout=5
-                    )
+                    subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+                    subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
                     time.sleep(1)
-
                     self.dialog.msgbox(
                         "rnsd Stopped",
                         "rnsd has been stopped.\n\n"
-                        "NomadNet will start its own RNS instance,\n"
-                        "or you can run rnsd as your user first:\n"
-                        f"  rnsd -v\n\n"
-                        "For persistent fix, edit the systemd service:\n"
-                        "  sudo systemctl edit rnsd\n"
-                        f"  Add: User={sudo_user}",
+                        "NomadNet will start its own RNS instance.",
                     )
                     return True
                 except Exception as e:
-                    self.dialog.msgbox(
-                        "Stop Failed",
-                        f"Could not stop rnsd: {e}\n\n"
-                        "Try manually:\n"
-                        "  sudo systemctl stop rnsd\n"
-                        "  sudo pkill rnsd",
-                    )
+                    self.dialog.msgbox("Stop Failed", f"Could not stop rnsd: {e}")
                     return False
             else:
-                return False  # User declined to fix
+                return False  # User cancelled
 
         # rnsd running as correct user (or no sudo context)
         return True
+
+    def _fix_rnsd_user(self, target_user: str) -> bool:
+        """Configure rnsd systemd service to run as the specified user.
+
+        Creates a systemd override to set User= directive, then restarts rnsd.
+        This is the proper fix for the identity mismatch problem.
+        """
+        override_dir = Path('/etc/systemd/system/rnsd.service.d')
+        override_file = override_dir / 'user.conf'
+
+        self.dialog.infobox("Configuring rnsd", f"Setting rnsd to run as {target_user}...")
+
+        try:
+            # Create override directory
+            override_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write override config
+            override_content = f"""[Service]
+User={target_user}
+Group={target_user}
+"""
+            override_file.write_text(override_content)
+
+            # Reload systemd and restart rnsd
+            subprocess.run(['systemctl', 'daemon-reload'], capture_output=True, timeout=10)
+            subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+            subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
+            time.sleep(1)
+            subprocess.run(['systemctl', 'start', 'rnsd'], capture_output=True, timeout=10)
+            time.sleep(2)
+
+            # Verify it's running as the right user now
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            new_user = result.stdout.strip()
+
+            if new_user == target_user:
+                self.dialog.msgbox(
+                    "rnsd Fixed",
+                    f"rnsd is now running as {target_user}.\n\n"
+                    f"Override created: {override_file}\n\n"
+                    "NomadNet will now be able to connect via RPC.",
+                )
+                return True
+            else:
+                self.dialog.msgbox(
+                    "Fix May Have Failed",
+                    f"rnsd is running as '{new_user}' (expected '{target_user}').\n\n"
+                    f"Check: systemctl status rnsd\n"
+                    f"       cat {override_file}",
+                )
+                return True  # Let them try anyway
+
+        except PermissionError:
+            self.dialog.msgbox(
+                "Permission Denied",
+                f"Cannot write to {override_dir}\n\n"
+                "MeshForge needs to run with sudo to fix this.",
+            )
+            return False
+        except Exception as e:
+            self.dialog.msgbox(
+                "Configuration Failed",
+                f"Could not configure rnsd: {e}\n\n"
+                "Manual fix:\n"
+                f"  sudo systemctl edit rnsd\n"
+                f"  Add: [Service]\n"
+                f"       User={target_user}",
+            )
+            return False
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
