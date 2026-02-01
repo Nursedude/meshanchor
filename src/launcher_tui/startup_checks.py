@@ -189,8 +189,8 @@ class EnvironmentState:
         for name, info in self.services.items():
             if info.state == ServiceRunState.FAILED:
                 alerts.append(f"Service {name} has FAILED - check logs")
-            elif info.state == ServiceRunState.RUNNING and not info.enabled_at_boot:
-                alerts.append(f"Service {name} running but not enabled at boot")
+            # Note: We intentionally don't alert on "running but not enabled at boot"
+            # since service is working - boot-enable is a user preference, not an issue
 
         return alerts
 
