@@ -103,6 +103,31 @@ Updated in all three places:
 Session remained focused. Three related issues fixed:
 1. Noisy boot-enable alert
 2. SSH topology browser handling
-3. NomadNet privilege dropping
+3. NomadNet privilege dropping (partial - `-H` fix)
 
-No entropy detected.
+---
+
+## PICKUP POINT: NomadNet Text UI Still Broken
+
+**Status**: The `-H` fix helped but the text UI curses interface still doesn't work properly.
+
+**Root Cause Identified**: The `sudo -H -u user` approach breaks TTY/curses handling. The OLD working code (before commit 64aaa74) just ran:
+```python
+subprocess.run([nn_path, '--textui'], timeout=None)
+```
+
+No sudo, no user switching. It worked because it properly inherited the terminal.
+
+**Next Steps**:
+1. Instead of `sudo -H -u user`, set HOME environment variable:
+   ```python
+   env = os.environ.copy()
+   env['HOME'] = str(get_real_user_home())
+   subprocess.run([nn_path, '--textui'], timeout=None, env=env)
+   ```
+2. This lets NomadNet run as current user but find config in user's home
+3. May also need to fix directory permissions if they got created as root
+
+**Reference**: https://github.com/markqvist/nomadnet - NomadNet uses curses for text UI
+
+**Files to modify**: `src/launcher_tui/nomadnet_client_mixin.py`
