@@ -486,7 +486,36 @@ class TopologyMixin:
             visualizer = TopologyVisualizer.from_topology(topology)
             output_path = visualizer.generate()
 
-            # Try to open in browser (in background thread to not block)
+            # Detect SSH/headless environment
+            is_ssh = bool(os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'))
+            has_display = bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+
+            if is_ssh or not has_display:
+                # SSH/headless - offer text browser or show path
+                choices = [
+                    ("lynx", "Open with lynx (text browser)"),
+                    ("path", "Show file path only"),
+                    ("back", "Back"),
+                ]
+                choice = self.dialog.menu(
+                    "Topology Generated",
+                    f"File: {output_path}\n\nNo graphical display detected.\nHow would you like to view it?",
+                    choices
+                )
+                if choice == "lynx":
+                    # Open with lynx in foreground
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    subprocess.run(['lynx', output_path], timeout=300)
+                elif choice == "path":
+                    self.dialog.msgbox(
+                        "Topology File",
+                        f"Visualization saved to:\n\n{output_path}\n\n"
+                        f"You can open this file in any browser,\n"
+                        f"or copy to a machine with a GUI."
+                    )
+                return
+
+            # Has display - try to open in browser (in background thread)
             # Drop privileges when running as root so browser runs as real user
             def open_browser():
                 try:
