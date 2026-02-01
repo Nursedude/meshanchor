@@ -3,6 +3,9 @@ Exponential backoff reconnection strategy for gateway services.
 
 Provides reliable reconnection with exponential backoff and jitter
 for both Meshtastic and RNS connections.
+
+Also includes SlowStartRecovery for gradual throughput increase
+after service recovery (based on NGINX slow_start pattern).
 """
 
 import random
@@ -209,5 +212,175 @@ class ReconnectStrategy:
             multiplier=2.0,
             jitter=0.15,
             max_attempts=15
+        )
+        return cls(config=config)
+
+
+@dataclass
+class SlowStartConfig:
+    """Configuration for slow start recovery behavior."""
+
+    slow_start_seconds: float = 30.0
+    """Duration of the slow start period in seconds."""
+
+    min_multiplier: float = 0.1
+    """Starting throughput multiplier (0.0-1.0)."""
+
+    max_multiplier: float = 1.0
+    """Final throughput multiplier after recovery."""
+
+
+@dataclass
+class SlowStartRecovery:
+    """
+    Gradually increase message throughput after service recovery.
+
+    Based on NGINX slow_start pattern:
+    - After connection recovery, don't immediately blast full throughput
+    - Linearly ramp up over slow_start_seconds
+    - Prevents overwhelming recently-recovered Meshtastic radio
+
+    Usage:
+        slow_start = SlowStartRecovery()
+
+        # When connection is recovered:
+        slow_start.start_recovery()
+
+        # When sending messages:
+        multiplier = slow_start.get_throughput_multiplier()
+        delay = base_delay / multiplier  # Longer delays during recovery
+        time.sleep(delay)
+        send_message()
+
+    Reference:
+        NGINX slow_start: http://nginx.org/en/docs/http/ngx_http_upstream_module.html
+    """
+
+    config: SlowStartConfig = field(default_factory=SlowStartConfig)
+    _recovery_start: Optional[float] = field(default=None, init=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+
+    def start_recovery(self) -> None:
+        """Mark start of recovery period."""
+        with self._lock:
+            self._recovery_start = time.time()
+            logger.info(
+                f"Slow start recovery initiated "
+                f"(duration: {self.config.slow_start_seconds}s)"
+            )
+
+    def end_recovery(self) -> None:
+        """Manually end recovery period (return to full throughput)."""
+        with self._lock:
+            if self._recovery_start is not None:
+                elapsed = time.time() - self._recovery_start
+                logger.info(f"Slow start recovery ended after {elapsed:.1f}s")
+            self._recovery_start = None
+
+    def is_recovering(self) -> bool:
+        """Check if currently in recovery period."""
+        with self._lock:
+            if self._recovery_start is None:
+                return False
+
+            elapsed = time.time() - self._recovery_start
+            return elapsed < self.config.slow_start_seconds
+
+    def get_throughput_multiplier(self) -> float:
+        """
+        Get current throughput multiplier (0.1-1.0).
+
+        Returns:
+            Multiplier that linearly increases from min_multiplier to
+            max_multiplier over slow_start_seconds.
+
+            Returns max_multiplier (1.0) if not in recovery.
+
+        Usage:
+            # Apply to sending delay
+            delay = base_delay / multiplier
+
+            # Or apply to batch size
+            batch_size = int(max_batch * multiplier)
+        """
+        with self._lock:
+            if self._recovery_start is None:
+                return self.config.max_multiplier
+
+            elapsed = time.time() - self._recovery_start
+
+            # Recovery period complete
+            if elapsed >= self.config.slow_start_seconds:
+                self._recovery_start = None
+                logger.debug("Slow start recovery complete, full throughput restored")
+                return self.config.max_multiplier
+
+            # Linear interpolation from min to max
+            progress = elapsed / self.config.slow_start_seconds
+            multiplier = (
+                self.config.min_multiplier +
+                (self.config.max_multiplier - self.config.min_multiplier) * progress
+            )
+
+            return multiplier
+
+    def get_adjusted_delay(self, base_delay: float) -> float:
+        """
+        Get delay adjusted for current recovery state.
+
+        Args:
+            base_delay: Normal delay between operations
+
+        Returns:
+            Adjusted delay (longer during recovery, normal when recovered)
+        """
+        multiplier = self.get_throughput_multiplier()
+        if multiplier <= 0:
+            return base_delay * 10  # Safety cap
+        return base_delay / multiplier
+
+    def get_recovery_progress(self) -> Optional[float]:
+        """
+        Get recovery progress as percentage (0-100).
+
+        Returns:
+            Progress percentage, or None if not recovering
+        """
+        with self._lock:
+            if self._recovery_start is None:
+                return None
+
+            elapsed = time.time() - self._recovery_start
+            if elapsed >= self.config.slow_start_seconds:
+                return 100.0
+
+            return (elapsed / self.config.slow_start_seconds) * 100
+
+    @classmethod
+    def for_meshtastic(cls) -> 'SlowStartRecovery':
+        """
+        Create slow start recovery for Meshtastic connections.
+
+        Meshtastic radios can be overwhelmed after reconnection,
+        so we use a moderate 30-second ramp-up.
+        """
+        config = SlowStartConfig(
+            slow_start_seconds=30.0,
+            min_multiplier=0.1,
+            max_multiplier=1.0,
+        )
+        return cls(config=config)
+
+    @classmethod
+    def for_rns(cls) -> 'SlowStartRecovery':
+        """
+        Create slow start recovery for RNS connections.
+
+        RNS is more robust, so we use a shorter 15-second ramp-up.
+        """
+        config = SlowStartConfig(
+            slow_start_seconds=15.0,
+            min_multiplier=0.2,
+            max_multiplier=1.0,
         )
         return cls(config=config)
