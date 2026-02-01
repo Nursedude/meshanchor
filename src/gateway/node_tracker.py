@@ -1,6 +1,11 @@
 """
 Unified Node Tracker for RNS and Meshtastic Networks
-Tracks nodes from both networks with position and telemetry data
+Tracks nodes from both networks with position and telemetry data.
+
+Enhanced with:
+- Multi-service RNS announce parsing (LXMF, Nomad, generic)
+- Network topology graph with edge tracking
+- Path table change monitoring
 """
 
 import threading
@@ -9,11 +14,26 @@ import logging
 import os
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from pathlib import Path
 import json
 
 logger = logging.getLogger(__name__)
+
+# Import RNS service registry and topology (optional - graceful fallback)
+try:
+    from .rns_services import (
+        RNSServiceType, ServiceInfo, AnnounceEvent,
+        get_service_registry, RNSServiceRegistry
+    )
+    from .network_topology import (
+        NetworkTopology, get_network_topology, TopologyEvent
+    )
+    RNS_SERVICES_AVAILABLE = True
+except ImportError:
+    RNS_SERVICES_AVAILABLE = False
+    RNSServiceType = None  # type: ignore
+    ServiceInfo = None  # type: ignore
 
 # Import centralized path utility
 try:
@@ -250,6 +270,11 @@ class UnifiedNode:
     firmware_version: Optional[str] = None
     role: Optional[str] = None
 
+    # RNS service info (enhanced tracking)
+    service_type: Optional[str] = None  # RNS service type (LXMF_DELIVERY, NOMAD_PAGE, etc.)
+    service_aspect: Optional[str] = None  # Raw aspect filter (lxmf.delivery, nomadnetwork.node, etc.)
+    service_capabilities: List[str] = field(default_factory=list)  # Service capabilities
+
     def __post_init__(self):
         if self.first_seen is None:
             self.first_seen = datetime.now()
@@ -298,6 +323,10 @@ class UnifiedNode:
             "hardware_model": self.hardware_model,
             "firmware_version": self.firmware_version,
             "role": self.role,
+            # RNS service info
+            "service_type": self.service_type,
+            "service_aspect": self.service_aspect,
+            "service_capabilities": self.service_capabilities if self.service_capabilities else None,
         }
 
     @classmethod
@@ -347,14 +376,25 @@ class UnifiedNode:
         return node
 
     @classmethod
-    def from_rns(cls, rns_hash: bytes, name: str = "", app_data: bytes = None) -> 'UnifiedNode':
+    def from_rns(cls, rns_hash: bytes, name: str = "", app_data: bytes = None,
+                 service_info: Any = None, aspect: str = None) -> 'UnifiedNode':
         """Create from RNS announce/discovery data.
 
-        Parses LXMF announce app_data which may contain:
+        Parses announce app_data which may contain:
         - Display name (first portion of app_data)
         - Telemetry data including position (msgpack encoded, if present)
 
-        Sideband and other LXMF apps can include GPS coordinates in announces.
+        Supports multiple RNS service types:
+        - LXMF (Sideband, NomadNet messaging)
+        - Nomad Network pages
+        - Generic services
+
+        Args:
+            rns_hash: 16-byte destination hash
+            name: Optional display name override
+            app_data: Raw announce app_data bytes
+            service_info: Optional ServiceInfo from RNS service registry
+            aspect: Optional aspect filter string (e.g., "lxmf.delivery")
         """
         hash_hex = rns_hash.hex()
 
@@ -366,8 +406,31 @@ class UnifiedNode:
             rns_hash=rns_hash,
         )
 
-        # Parse app_data if available (may contain name, position, telemetry)
-        if app_data and len(app_data) > 0:
+        # Use service registry if available and service_info provided
+        if RNS_SERVICES_AVAILABLE and service_info is not None:
+            # Extract data from ServiceInfo
+            if service_info.display_name:
+                node.name = service_info.display_name
+            if service_info.latitude is not None and service_info.longitude is not None:
+                lat, lon = service_info.latitude, service_info.longitude
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    node.position = Position(
+                        latitude=lat,
+                        longitude=lon,
+                        altitude=service_info.altitude or 0.0,
+                        timestamp=datetime.now()
+                    )
+                    logger.debug(f"RNS node {hash_hex[:8]} has position: {lat:.4f}, {lon:.4f}")
+            if service_info.battery is not None:
+                node.telemetry.battery_level = service_info.battery
+
+            # Store service info
+            node.service_type = service_info.service_type.name if hasattr(service_info.service_type, 'name') else str(service_info.service_type)
+            node.service_aspect = service_info.aspect
+            node.service_capabilities = list(service_info.capabilities)
+
+        elif app_data and len(app_data) > 0:
+            # Fallback to legacy parsing if service registry not available
             parsed = cls._parse_lxmf_app_data(app_data)
             if parsed:
                 if parsed.get("display_name"):
@@ -375,7 +438,6 @@ class UnifiedNode:
                 if parsed.get("latitude") is not None and parsed.get("longitude") is not None:
                     lat = parsed["latitude"]
                     lon = parsed["longitude"]
-                    # Validate coordinates
                     if -90 <= lat <= 90 and -180 <= lon <= 180:
                         node.position = Position(
                             latitude=lat,
@@ -384,6 +446,10 @@ class UnifiedNode:
                             timestamp=datetime.now()
                         )
                         logger.debug(f"RNS node {hash_hex[:8]} has position: {lat:.4f}, {lon:.4f}")
+
+        # Store aspect even without full service info
+        if aspect and not node.service_aspect:
+            node.service_aspect = aspect
 
         node.last_seen = datetime.now()
         return node
@@ -488,6 +554,11 @@ class UnifiedNodeTracker:
     """
     Tracks nodes from both RNS and Meshtastic networks.
     Provides unified view for map display and monitoring.
+
+    Enhanced features:
+    - Multi-service RNS announce parsing via RNSServiceRegistry
+    - Network topology graph via NetworkTopology
+    - Path table change monitoring with event logging
     """
 
     OFFLINE_THRESHOLD = 3600  # 1 hour
@@ -509,6 +580,16 @@ class UnifiedNodeTracker:
         self._reticulum = None
         self._rns_connected = False
 
+        # Enhanced RNS service tracking
+        self._service_registry: Optional[RNSServiceRegistry] = None
+        self._network_topology: Optional[NetworkTopology] = None
+        if RNS_SERVICES_AVAILABLE:
+            self._service_registry = get_service_registry()
+            self._network_topology = get_network_topology()
+            # Register for topology events
+            self._network_topology.register_callback(self._on_topology_event)
+            logger.debug("Enhanced RNS service tracking enabled")
+
         # Load cached nodes
         self._load_cache()
 
@@ -518,6 +599,10 @@ class UnifiedNodeTracker:
         self._stop_event.clear()
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
+
+        # Start network topology tracking (includes path table monitor)
+        if self._network_topology:
+            self._network_topology.start()
 
         # Initialize RNS in the main thread to avoid signal handler issues
         # RNS.Reticulum() sets up signal handlers which only work in main thread
@@ -591,20 +676,39 @@ instance_control_port = 37429
                 self._rns_connected = True
                 logger.info("Connected to existing rnsd instance")
 
-                # Register announce handler to receive node announcements
-                class NodeAnnounceHandler:
-                    def __init__(self, tracker):
+                # Register announce handlers for node discovery
+                # We register handlers for specific aspects to get accurate service typing,
+                # plus a catch-all handler for unknown service types
+
+                class AspectAnnounceHandler:
+                    """Announce handler that passes aspect info to tracker"""
+                    def __init__(self, tracker, aspect: str = None):
                         self.tracker = tracker
-                        self.aspect_filter = None
+                        self.aspect_filter = aspect  # None = catch all
 
                     def received_announce(self, destination_hash, announced_identity, app_data):
                         try:
-                            self.tracker._on_rns_announce(destination_hash, announced_identity, app_data)
+                            self.tracker._on_rns_announce(
+                                destination_hash, announced_identity, app_data,
+                                aspect=self.aspect_filter
+                            )
                         except Exception as e:
                             logger.error(f"Error handling RNS announce: {e}")
 
-                RNS.Transport.register_announce_handler(NodeAnnounceHandler(self))
-                logger.info("Registered announce handler with rnsd")
+                # Register handlers for known service aspects
+                known_aspects = [
+                    "lxmf.delivery",       # LXMF messaging (Sideband, NomadNet)
+                    "lxmf.propagation",    # LXMF propagation nodes
+                    "nomadnetwork.node",   # Nomad Network pages
+                ]
+
+                for aspect in known_aspects:
+                    RNS.Transport.register_announce_handler(AspectAnnounceHandler(self, aspect))
+                    logger.debug(f"Registered announce handler for aspect: {aspect}")
+
+                # Also register a catch-all handler for unknown services
+                RNS.Transport.register_announce_handler(AspectAnnounceHandler(self, None))
+                logger.info(f"Registered {len(known_aspects) + 1} announce handlers with rnsd")
 
                 # Load known destinations from rnsd (may be empty initially)
                 self._load_known_rns_destinations(RNS)
@@ -695,6 +799,10 @@ instance_control_port = 37429
         logger.info("Stopping node tracker...")
         self._running = False
         self._stop_event.set()
+
+        # Stop network topology tracker
+        if self._network_topology:
+            self._network_topology.stop(timeout)
 
         # Wait for cleanup thread to finish
         if hasattr(self, '_cleanup_thread') and self._cleanup_thread and self._cleanup_thread.is_alive():
@@ -1097,27 +1205,145 @@ instance_control_port = 37429
         except Exception as e:
             logger.debug(f"Could not load known RNS destinations: {e}")
 
-    def _on_rns_announce(self, dest_hash, announced_identity, app_data):
-        """Handle RNS announce for node discovery"""
-        try:
-            # Parse display name from app_data if available
-            display_name = ""
-            if app_data:
-                try:
-                    # LXMF announces typically include display name
-                    # Try to decode as UTF-8 string
-                    display_name = app_data.decode('utf-8', errors='ignore').strip()
-                    # Clean up - remove non-printable characters
-                    display_name = ''.join(c for c in display_name if c.isprintable())
-                except Exception as e:
-                    logger.debug(f"Could not decode RNS display name: {e}")
+    def _on_rns_announce(self, dest_hash, announced_identity, app_data, aspect: str = None):
+        """Handle RNS announce for node discovery.
 
-            # Create node from announce
-            node = UnifiedNode.from_rns(dest_hash, name=display_name, app_data=app_data)
+        Uses the RNS service registry (if available) for multi-service parsing,
+        or falls back to legacy LXMF-only parsing.
+
+        Args:
+            dest_hash: 16-byte destination hash
+            announced_identity: RNS Identity object
+            app_data: Raw announce app_data bytes
+            aspect: Optional aspect filter from announce handler
+        """
+        try:
+            hash_short = dest_hash.hex()[:8]
+            service_info = None
+            display_name = ""
+
+            # Use service registry for enhanced parsing if available
+            if self._service_registry and RNS_SERVICES_AVAILABLE:
+                event = self._service_registry.parse_announce(
+                    dest_hash, announced_identity, app_data, aspect
+                )
+                service_info = event.service_info
+                display_name = event.raw_name
+
+                service_type_name = service_info.service_type.name if service_info else "UNKNOWN"
+                logger.debug(f"Parsed announce {hash_short}: type={service_type_name}, name={display_name or 'unnamed'}")
+            else:
+                # Legacy fallback: simple UTF-8 decode
+                if app_data:
+                    try:
+                        display_name = app_data.decode('utf-8', errors='ignore').strip()
+                        display_name = ''.join(c for c in display_name if c.isprintable())
+                    except Exception as e:
+                        logger.debug(f"Could not decode RNS display name: {e}")
+
+            # Create node from announce with service info
+            node = UnifiedNode.from_rns(
+                dest_hash,
+                name=display_name,
+                app_data=app_data,
+                service_info=service_info,
+                aspect=aspect
+            )
             self.add_node(node)
 
-            hash_short = dest_hash.hex()[:8]
-            logger.info(f"Discovered RNS node: {hash_short} ({display_name or 'unnamed'})")
+            # Update topology edge
+            if self._network_topology:
+                node_id = f"rns_{dest_hash.hex()[:16]}"
+                self._network_topology.add_edge(
+                    source_id="local",
+                    dest_id=node_id,
+                    dest_hash=dest_hash,
+                    hops=node.hops or 0,
+                )
+
+            service_desc = f"[{node.service_type}]" if node.service_type else ""
+            logger.info(f"Discovered RNS node: {hash_short} ({display_name or 'unnamed'}) {service_desc}")
 
         except Exception as e:
             logger.error(f"Error processing RNS announce: {e}")
+
+    def _on_topology_event(self, event: 'TopologyEvent'):
+        """Handle topology change events.
+
+        Updates node information when path table changes are detected.
+        """
+        if not RNS_SERVICES_AVAILABLE or event.dest_hash is None:
+            return
+
+        try:
+            node_id = f"rns_{event.dest_hash.hex()[:16]}"
+
+            with self._lock:
+                node = self._nodes.get(node_id)
+                if node:
+                    # Update hop count from topology event
+                    if event.new_value is not None and isinstance(event.new_value, int):
+                        node.hops = event.new_value
+                        node.update_seen()
+                        logger.debug(f"Updated node {node_id[:12]} hops: {event.new_value}")
+
+        except Exception as e:
+            logger.debug(f"Error handling topology event: {e}")
+
+    # --- Topology API methods ---
+
+    def get_topology_stats(self) -> Optional[Dict[str, Any]]:
+        """Get network topology statistics.
+
+        Returns:
+            Dict with node_count, edge_count, avg_hops, etc. or None if unavailable
+        """
+        if self._network_topology:
+            return self._network_topology.get_topology_stats()
+        return None
+
+    def get_topology(self) -> Optional[Dict[str, Any]]:
+        """Get full network topology as dictionary.
+
+        Returns:
+            Dict with nodes, edges, and stats or None if unavailable
+        """
+        if self._network_topology:
+            return self._network_topology.to_dict()
+        return None
+
+    def trace_path(self, dest_hash: bytes) -> Optional[Dict[str, Any]]:
+        """Trace path to a destination through the network.
+
+        Args:
+            dest_hash: 16-byte destination hash
+
+        Returns:
+            Dict with path info or None if unavailable
+        """
+        if self._network_topology:
+            return self._network_topology.trace_path(dest_hash)
+        return None
+
+    def get_recent_topology_events(self, count: int = 50) -> List[Dict[str, Any]]:
+        """Get recent topology change events.
+
+        Args:
+            count: Maximum number of events to return
+
+        Returns:
+            List of event dicts
+        """
+        if self._network_topology:
+            return self._network_topology.get_recent_events(count)
+        return []
+
+    def get_service_stats(self) -> Optional[Dict[str, int]]:
+        """Get counts of discovered services by type.
+
+        Returns:
+            Dict mapping service type names to counts or None if unavailable
+        """
+        if self._service_registry:
+            return self._service_registry.get_stats()
+        return None

@@ -1,13 +1,17 @@
 """
-Meshtastic TCP Connection Manager
+Meshtastic Connection Manager
 
-Provides resilient connection handling for meshtasticd which only supports
-one TCP client connection at a time. Features:
+Provides resilient connection handling for Meshtastic radios via:
+- TCP: Connect to meshtasticd (port 4403) - for SPI radios or when daemon is running
+- Serial: Connect directly to USB radio - MeshForge owns the connection
+
+Features:
 - Connection locking to prevent concurrent access
 - Retry logic for transient failures (Connection reset by peer)
 - Safe connection cleanup that handles already-closed connections
 - Cooldown period between connections to prevent rapid reconnect issues
 - Timeout handling
+- Auto-detection of USB devices
 """
 
 import socket
@@ -15,9 +19,17 @@ import threading
 import time
 import logging
 from contextlib import contextmanager
+from enum import Enum
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+class ConnectionMode(Enum):
+    """Connection mode for Meshtastic radios."""
+    TCP = "tcp"          # Connect to meshtasticd (port 4403)
+    SERIAL = "serial"    # Direct USB serial connection
+    AUTO = "auto"        # Auto-detect: try serial first, fall back to TCP
 
 # Singleton instance
 _connection_manager: Optional['MeshtasticConnectionManager'] = None
@@ -39,12 +51,34 @@ class ConnectionError(Exception):
     pass
 
 
-def get_connection_manager(host: str = 'localhost', port: int = 4403) -> 'MeshtasticConnectionManager':
-    """Get the singleton connection manager instance"""
+def get_connection_manager(
+    host: str = 'localhost',
+    port: int = 4403,
+    mode: ConnectionMode = ConnectionMode.AUTO,
+    serial_port: Optional[str] = None
+) -> 'MeshtasticConnectionManager':
+    """
+    Get the singleton connection manager instance.
+
+    Args:
+        host: meshtasticd host for TCP mode (default: localhost)
+        port: meshtasticd TCP port (default: 4403)
+        mode: Connection mode - TCP, SERIAL, or AUTO
+        serial_port: USB serial port for SERIAL mode (e.g., /dev/ttyUSB0)
+                     If None, will auto-detect
+
+    Returns:
+        MeshtasticConnectionManager singleton instance
+    """
     global _connection_manager
     with _manager_lock:
         if _connection_manager is None:
-            _connection_manager = MeshtasticConnectionManager(host, port)
+            _connection_manager = MeshtasticConnectionManager(
+                host=host,
+                port=port,
+                mode=mode,
+                serial_port=serial_port
+            )
         return _connection_manager
 
 
@@ -93,25 +127,40 @@ def safe_close_interface(interface) -> None:
 
 class MeshtasticConnectionManager:
     """
-    Manages TCP connections to meshtasticd.
+    Manages connections to Meshtastic radios.
 
-    meshtasticd only supports one TCP client at a time, so this manager:
+    Supports two modes:
+    - TCP: Connect to meshtasticd (for SPI radios or when daemon is preferred)
+    - Serial: Direct USB connection (MeshForge owns the radio)
+
+    Features:
     - Uses a lock to prevent concurrent connection attempts
     - Retries on transient failures like "Connection reset by peer"
-    - Adds cooldown between connections to let meshtasticd cleanup
+    - Adds cooldown between connections
     - Provides convenience methods for common operations
     """
 
-    def __init__(self, host: str = 'localhost', port: int = 4403):
+    def __init__(
+        self,
+        host: str = 'localhost',
+        port: int = 4403,
+        mode: ConnectionMode = ConnectionMode.AUTO,
+        serial_port: Optional[str] = None
+    ):
         """
         Initialize the connection manager.
 
         Args:
-            host: meshtasticd host (default: localhost)
+            host: meshtasticd host for TCP mode (default: localhost)
             port: meshtasticd TCP port (default: 4403)
+            mode: Connection mode - TCP, SERIAL, or AUTO
+            serial_port: USB serial port for SERIAL mode (auto-detected if None)
         """
         self.host = host
         self.port = port
+        self.mode = mode
+        self.serial_port = serial_port
+        self._resolved_mode: Optional[ConnectionMode] = None  # Actual mode after AUTO resolution
         self._lock = threading.Lock()
         self._interface = None
         self._last_close_time = 0.0
@@ -226,23 +275,102 @@ class MeshtasticConnectionManager:
         """Get the owner of the persistent connection, if any."""
         return self._persistent_owner
 
-    def _create_interface(self):
+    def _detect_usb_device(self) -> Optional[str]:
         """
-        Create a new meshtastic TCP interface.
+        Auto-detect USB serial device for Meshtastic radio.
 
         Returns:
-            TCPInterface instance
+            Device path (e.g., /dev/ttyUSB0) or None if not found
+        """
+        import glob
+        # Common Meshtastic USB device patterns
+        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*']
+        for pattern in patterns:
+            devices = glob.glob(pattern)
+            if devices:
+                # Return first available device
+                device = sorted(devices)[0]
+                logger.debug(f"Auto-detected USB device: {device}")
+                return device
+        return None
+
+    def _resolve_mode(self) -> ConnectionMode:
+        """
+        Resolve AUTO mode to actual connection mode.
+
+        AUTO tries serial first (MeshForge-owned), then falls back to TCP.
+
+        Returns:
+            Resolved ConnectionMode (TCP or SERIAL)
+        """
+        if self.mode != ConnectionMode.AUTO:
+            return self.mode
+
+        # AUTO mode: prefer serial if USB device available
+        if self.serial_port or self._detect_usb_device():
+            logger.info("AUTO mode: USB device detected, using SERIAL mode")
+            return ConnectionMode.SERIAL
+
+        # Fall back to TCP
+        if self.is_available():
+            logger.info("AUTO mode: meshtasticd available, using TCP mode")
+            return ConnectionMode.TCP
+
+        # Default to serial (will fail with clear message if no device)
+        logger.info("AUTO mode: no meshtasticd, defaulting to SERIAL mode")
+        return ConnectionMode.SERIAL
+
+    def _create_interface(self):
+        """
+        Create a new meshtastic interface (TCP or Serial).
+
+        Returns:
+            TCPInterface or SerialInterface instance
 
         Raises:
             ConnectionError: If connection fails
         """
+        # Resolve mode if AUTO
+        resolved = self._resolve_mode()
+        self._resolved_mode = resolved
+
+        if resolved == ConnectionMode.SERIAL:
+            return self._create_serial_interface()
+        else:
+            return self._create_tcp_interface()
+
+    def _create_tcp_interface(self):
+        """Create TCP interface to meshtasticd."""
         try:
             import meshtastic.tcp_interface
+            logger.debug(f"Creating TCP interface to {self.host}:{self.port}")
             return meshtastic.tcp_interface.TCPInterface(hostname=self.host)
         except ImportError:
             raise ConnectionError("meshtastic library not installed")
         except Exception as e:
-            raise ConnectionError(f"Failed to connect: {e}")
+            raise ConnectionError(f"TCP connection failed: {e}")
+
+    def _create_serial_interface(self):
+        """Create direct serial interface to USB radio."""
+        try:
+            import meshtastic.serial_interface
+            device = self.serial_port or self._detect_usb_device()
+            if not device:
+                raise ConnectionError(
+                    "No USB device found. Connect a Meshtastic radio or specify serial_port."
+                )
+            logger.debug(f"Creating Serial interface to {device}")
+            return meshtastic.serial_interface.SerialInterface(devPath=device)
+        except ImportError:
+            raise ConnectionError("meshtastic library not installed")
+        except Exception as e:
+            raise ConnectionError(f"Serial connection failed: {e}")
+
+    def get_mode(self) -> str:
+        """Get the current connection mode (after resolution)."""
+        if self._resolved_mode:
+            return self._resolved_mode.value
+        return self.mode.value
 
     def _wait_for_cooldown(self):
         """Wait for cooldown period since last connection close"""

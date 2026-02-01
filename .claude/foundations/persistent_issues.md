@@ -1355,3 +1355,97 @@ fi
 - Never mark install "complete" until verification passes
 
 ---
+
+## Issue #24: Meshtastic Module Not Found by rnsd (Python Environment Mismatch)
+
+### Symptom
+NomadNet or rnsd fails to start with:
+```
+[Critical] Using this interface requires a meshtastic module to be installed.
+[Critical] You can install one with the command: python3 -m pip install meshtastic
+```
+
+rnsd repeatedly crashes with exit code 255/EXCEPTION:
+```
+systemd[1]: rnsd.service: Main process exited, code=exited, status=255/EXCEPTION
+```
+
+This happens even when the user has previously installed `meshtastic` via CLI.
+
+### Root Cause
+**Python environment mismatch.** The `Meshtastic_Interface.py` plugin in `/etc/reticulum/interfaces/` requires the `meshtastic` Python module. However:
+
+1. **pipx isolation**: Installing meshtastic CLI with `pipx install meshtastic` puts it in an isolated virtual environment that rnsd cannot access
+2. **Different Python version**: rnsd may use `/usr/bin/python3` while user installed meshtastic to `/usr/local/bin/python3`
+3. **User vs system site-packages**: `pip3 install --user meshtastic` installs to `~/.local/lib/python3.x/` which root's rnsd cannot access
+
+### Impact
+- rnsd enters restart loop (every 5 seconds per systemd restart policy)
+- NomadNet refuses to launch
+- RNS-Meshtastic gateway completely broken
+- User thinks system is broken when it's just a module path issue
+
+### Proper Fix
+
+**Option 1: System-wide install (recommended for rnsd)**
+```bash
+# Install to system site-packages where rnsd can find it
+# --break-system-packages required on Debian 12+ / Pi OS Bookworm
+# --ignore-installed avoids "Cannot uninstall packaging" errors
+sudo pip3 install --break-system-packages --ignore-installed meshtastic
+```
+
+**Option 2: Install to same Python that rnsd uses**
+```bash
+# Check which Python rnsd uses
+head -1 $(which rnsd 2>/dev/null || sudo find /usr -name rnsd 2>/dev/null | head -1)
+
+# If rnsd uses /usr/local/bin/python3:
+sudo /usr/local/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
+
+# If rnsd uses /usr/bin/python3:
+sudo /usr/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
+```
+
+**Option 3: Disable the Meshtastic interface if not needed**
+```bash
+# Edit RNS config to disable the interface
+sudo nano /etc/reticulum/config
+# Change 'enabled = yes' to 'enabled = no' under [[Meshtastic Interface]]
+
+# Or remove the interface file entirely
+sudo rm /etc/reticulum/interfaces/Meshtastic_Interface.py
+sudo systemctl restart rnsd
+```
+
+### Diagnosing the Issue
+```bash
+# Check if meshtastic is importable by root's Python
+sudo python3 -c "import meshtastic; print(f'OK: {meshtastic.__version__}')" 2>&1
+
+# If "No module named 'meshtastic'":
+# The module is not installed in root's Python path
+
+# Check where meshtastic is installed (if at all)
+pip3 show meshtastic 2>/dev/null && echo "User install found"
+sudo pip3 show meshtastic 2>/dev/null && echo "System install found"
+pipx list 2>/dev/null | grep meshtastic && echo "pipx install found (isolated!)"
+```
+
+### Files Involved
+- `/etc/reticulum/interfaces/Meshtastic_Interface.py` - The RNS plugin that requires meshtastic
+- `/etc/reticulum/config` - RNS configuration referencing the interface
+- RNS interface plugin from: https://github.com/landandair/RNS_Over_Meshtastic
+
+### MeshForge Detection
+The gateway diagnostic (`src/utils/gateway_diagnostic.py`) should be updated to:
+1. Check if Meshtastic_Interface.py exists
+2. If it exists, verify meshtastic is importable as root
+3. Show specific fix instructions if not
+
+### Prevention
+- When installing Meshtastic_Interface plugin, always verify meshtastic module is available
+- Add pre-flight check in TUI before enabling RNS-Meshtastic bridge
+- Document in installation wizard that meshtastic must be installed system-wide
+
+---

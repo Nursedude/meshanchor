@@ -19,7 +19,9 @@ from utils.paths import get_real_user_home
 
 # Try to use centralized service checker
 try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
+    from utils.service_check import (
+        check_service, check_systemd_service, check_process_with_pid, ServiceState
+    )
     _HAS_SERVICE_CHECK = True
 except ImportError:
     _HAS_SERVICE_CHECK = False
@@ -81,6 +83,7 @@ class GatewayDiagnostic:
         # Meshtastic checks
         self.results.append(self.check_meshtastic_installed())
         self.results.append(self.check_meshtastic_interface())
+        self.results.append(self.check_meshtastic_module_for_rnsd())
         self.results.append(self.check_meshtasticd())
 
         # Optional integrations
@@ -315,16 +318,23 @@ class GatewayDiagnostic:
     def check_rnsd_running(self) -> CheckResult:
         """Check if rnsd daemon is running."""
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split('\n')
+            # Use centralized service check when available
+            if _HAS_SERVICE_CHECK:
+                running, pid = check_process_with_pid('rnsd')
+            else:
+                # Fallback to direct pgrep
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                running = result.returncode == 0 and result.stdout.strip()
+                pid = result.stdout.strip().split('\n')[0] if running else None
+
+            if running:
                 return CheckResult(
                     name="RNS Daemon (rnsd)",
                     status=CheckStatus.PASS,
-                    message=f"Running (PID: {pids[0]})"
+                    message=f"Running (PID: {pid})"
                 )
             else:
                 return CheckResult(
@@ -411,15 +421,80 @@ class GatewayDiagnostic:
                 fix_hint="Install from MeshForge RNS panel → 'Install Interface' button"
             )
 
-    def check_meshtasticd(self) -> CheckResult:
-        """Check if meshtasticd service is running."""
-        # Check process
+    def check_meshtastic_module_for_rnsd(self) -> CheckResult:
+        """
+        Check if meshtastic module is available in the Python environment that rnsd uses.
+
+        This is critical when Meshtastic_Interface.py is installed - rnsd will fail
+        to start if the meshtastic module isn't importable from root's Python.
+
+        See persistent_issues.md Issue #24 for details.
+        """
+        from utils.paths import ReticulumPaths
+        interface_path = ReticulumPaths.get_interfaces_dir() / "Meshtastic_Interface.py"
+
+        # Only check if the interface is installed - otherwise not relevant
+        if not interface_path.exists():
+            return CheckResult(
+                name="Meshtastic Module (for rnsd)",
+                status=CheckStatus.SKIP,
+                message="Meshtastic_Interface not installed, check not needed"
+            )
+
+        # Check if meshtastic is importable as root (how rnsd runs)
         try:
             result = subprocess.run(
-                ['pgrep', '-f', 'meshtasticd'],
-                capture_output=True, text=True, timeout=5
+                ['sudo', 'python3', '-c', 'import meshtastic; print(meshtastic.__version__)'],
+                capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0 and result.stdout.strip():
+                version = result.stdout.strip()
+                return CheckResult(
+                    name="Meshtastic Module (for rnsd)",
+                    status=CheckStatus.PASS,
+                    message=f"meshtastic {version} available to rnsd"
+                )
+            else:
+                # Module not found - this is the Issue #24 problem
+                return CheckResult(
+                    name="Meshtastic Module (for rnsd)",
+                    status=CheckStatus.FAIL,
+                    message="meshtastic not importable by root's Python (rnsd will fail!)",
+                    fix_hint="sudo pip3 install --break-system-packages --ignore-installed meshtastic",
+                    details="The Meshtastic_Interface.py plugin requires meshtastic to be installed "
+                            "in root's Python path. pipx or --user installs won't work. "
+                            "Use --break-system-packages --ignore-installed on Debian 12+ / Pi OS Bookworm."
+                )
+        except subprocess.TimeoutExpired:
+            return CheckResult(
+                name="Meshtastic Module (for rnsd)",
+                status=CheckStatus.WARN,
+                message="Check timed out",
+                fix_hint="Run: sudo python3 -c 'import meshtastic' to test manually"
+            )
+        except FileNotFoundError:
+            # sudo not available (testing environment)
+            return CheckResult(
+                name="Meshtastic Module (for rnsd)",
+                status=CheckStatus.SKIP,
+                message="Cannot check (sudo not available)"
+            )
+
+    def check_meshtasticd(self) -> CheckResult:
+        """Check if meshtasticd service is running."""
+        try:
+            # Use centralized service check when available
+            if _HAS_SERVICE_CHECK:
+                running, _ = check_process_with_pid('meshtasticd')
+            else:
+                # Fallback to direct pgrep
+                result = subprocess.run(
+                    ['pgrep', '-f', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                running = result.returncode == 0 and result.stdout.strip()
+
+            if running:
                 # Also check TCP port
                 if self.check_tcp_port('localhost', 4403):
                     return CheckResult(

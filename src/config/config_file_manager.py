@@ -17,7 +17,12 @@ from rich import box
 
 # Try to use centralized service checker
 try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
+    from utils.service_check import (
+        check_service,
+        check_systemd_service,
+        ServiceState,
+        apply_config_and_restart,
+    )
     _HAS_SERVICE_CHECK = True
 except ImportError:
     _HAS_SERVICE_CHECK = False
