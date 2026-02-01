@@ -342,8 +342,9 @@ class NomadNetClientMixin:
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
         sudo_user = os.environ.get('SUDO_USER')
         if sudo_user and sudo_user != 'root':
-            # Run as real user with login shell to set HOME correctly
-            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--textui']
+            # Run as real user with -H to set HOME correctly
+            # Using -H instead of -i avoids running shell profiles which can interfere
+            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--textui']
         else:
             cmd = [nn_path, '--textui']
 
@@ -423,8 +424,9 @@ class NomadNetClientMixin:
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
         sudo_user = os.environ.get('SUDO_USER')
         if sudo_user and sudo_user != 'root':
-            # Run as real user with login shell to set HOME correctly
-            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--daemon']
+            # Run as real user with -H to set HOME correctly
+            # Using -H instead of -i avoids running shell profiles which can interfere
+            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
         else:
             cmd = [nn_path, '--daemon']
 
@@ -562,7 +564,8 @@ class NomadNetClientMixin:
                         # This ensures config is created with correct ownership
                         sudo_user = os.environ.get('SUDO_USER')
                         if sudo_user and sudo_user != 'root':
-                            cmd = ['sudo', '-u', sudo_user, '-i', nn_path, '--daemon']
+                            # Using -H instead of -i to set HOME without shell profiles
+                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
                         else:
                             cmd = [nn_path, '--daemon']
 
