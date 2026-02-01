@@ -123,6 +123,225 @@ class MessageLifecycleEvent:
 
 
 @dataclass
+class RetryDecision:
+    """Result of a retry policy decision."""
+    retry: bool
+    delay: float = 0.0
+    reason: str = ""
+
+
+class RetryPolicy:
+    """
+    NGINX-style retry policy for message delivery.
+
+    Distinguishes between retriable (transient) and non-retriable (permanent)
+    errors to avoid wasting retries on failures that won't recover.
+
+    Based on NGINX proxy_next_upstream pattern:
+    - error, timeout → retry
+    - 502, 503 → retry
+    - 404, 403 → don't retry
+
+    Usage:
+        policy = RetryPolicy(max_tries=3, timeout=30.0)
+
+        # On failure:
+        decision = policy.should_retry(error_msg, attempt=1)
+        if decision.retry:
+            time.sleep(decision.delay)
+            retry_send()
+        else:
+            move_to_dead_letter(decision.reason)
+
+    Reference:
+        NGINX proxy_next_upstream:
+        http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_next_upstream
+    """
+
+    # Errors that should trigger retry (transient failures)
+    RETRIABLE_ERRORS = frozenset({
+        "connection_reset",
+        "connection reset",
+        "connection_refused",
+        "connection refused",
+        "broken_pipe",
+        "broken pipe",
+        "timeout",
+        "timed out",
+        "temporarily_unavailable",
+        "temporarily unavailable",
+        "network_unreachable",
+        "network unreachable",
+        "no route to host",
+        "resource temporarily unavailable",
+        "try again",
+        "eagain",
+        "econnreset",
+        "econnrefused",
+        "etimedout",
+    })
+
+    # Errors that should NOT retry (permanent failures)
+    NON_RETRIABLE_ERRORS = frozenset({
+        "permission_denied",
+        "permission denied",
+        "invalid_destination",
+        "invalid destination",
+        "message_too_large",
+        "message too large",
+        "authentication_failed",
+        "authentication failed",
+        "no such device",
+        "device not found",
+        "not found",
+        "invalid address",
+        "bad address",
+        "protocol error",
+        "eperm",
+        "eacces",
+        "einval",
+    })
+
+    def __init__(
+        self,
+        max_tries: int = 3,
+        timeout: float = 30.0,
+        base_delay: float = 2.0,
+        max_delay: float = 60.0,
+    ):
+        """
+        Initialize retry policy.
+
+        Args:
+            max_tries: Maximum retry attempts (default: 3)
+            timeout: Total timeout for all retries (default: 30s)
+            base_delay: Base delay for exponential backoff (default: 2s)
+            max_delay: Maximum delay between retries (default: 60s)
+        """
+        self.max_tries = max_tries
+        self.timeout = timeout
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+
+    def _classify_error(self, error: str) -> str:
+        """
+        Classify error as retriable or non-retriable.
+
+        Args:
+            error: Error message string
+
+        Returns:
+            "retriable", "non_retriable", or "unknown"
+        """
+        error_lower = error.lower()
+
+        # Check non-retriable first (more specific)
+        for pattern in self.NON_RETRIABLE_ERRORS:
+            if pattern in error_lower:
+                return "non_retriable"
+
+        # Check retriable patterns
+        for pattern in self.RETRIABLE_ERRORS:
+            if pattern in error_lower:
+                return "retriable"
+
+        return "unknown"
+
+    def should_retry(self, error: str, attempt: int) -> RetryDecision:
+        """
+        Determine if an error should trigger a retry.
+
+        Args:
+            error: Error message from failed send
+            attempt: Current attempt number (1-based)
+
+        Returns:
+            RetryDecision with retry=True/False, delay, and reason
+        """
+        error_class = self._classify_error(error)
+
+        # Non-retriable errors: fail immediately
+        if error_class == "non_retriable":
+            return RetryDecision(
+                retry=False,
+                reason=f"permanent_error: {error[:50]}",
+            )
+
+        # Check attempt limit
+        if attempt >= self.max_tries:
+            return RetryDecision(
+                retry=False,
+                reason=f"max_attempts_exceeded ({attempt}/{self.max_tries})",
+            )
+
+        # Retriable errors: calculate backoff delay
+        if error_class == "retriable":
+            delay = min(self.base_delay * (2 ** (attempt - 1)), self.max_delay)
+            return RetryDecision(
+                retry=True,
+                delay=delay,
+                reason=f"transient_error_retry_{attempt}",
+            )
+
+        # Unknown errors: retry once with short delay
+        if attempt < 2:
+            return RetryDecision(
+                retry=True,
+                delay=self.base_delay,
+                reason="unknown_error_retry",
+            )
+
+        # Unknown error, already retried once
+        return RetryDecision(
+            retry=False,
+            reason=f"unknown_error_exhausted: {error[:50]}",
+        )
+
+    def get_delay_for_attempt(self, attempt: int) -> float:
+        """
+        Calculate delay for a given retry attempt.
+
+        Args:
+            attempt: Attempt number (1-based)
+
+        Returns:
+            Delay in seconds (exponential backoff capped at max_delay)
+        """
+        delay = self.base_delay * (2 ** (attempt - 1))
+        return min(delay, self.max_delay)
+
+    @classmethod
+    def for_meshtastic(cls) -> 'RetryPolicy':
+        """
+        Create retry policy optimized for Meshtastic.
+
+        Meshtastic has slower transmission, so we use longer timeouts
+        and fewer retries.
+        """
+        return cls(
+            max_tries=3,
+            timeout=60.0,
+            base_delay=5.0,
+            max_delay=45.0,
+        )
+
+    @classmethod
+    def for_rns(cls) -> 'RetryPolicy':
+        """
+        Create retry policy optimized for RNS/LXMF.
+
+        RNS has its own delivery confirmation, so we use shorter
+        timeouts and more retries.
+        """
+        return cls(
+            max_tries=5,
+            timeout=30.0,
+            base_delay=2.0,
+            max_delay=30.0,
+        )
+
+
+@dataclass
 class QueuedMessage:
     """Message in the queue."""
     id: str
@@ -202,7 +421,8 @@ class PersistentMessageQueue:
     STALE_TIMEOUT = 300  # 5 minutes
 
     def __init__(self, db_path: Optional[str] = None,
-                 max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE):
+                 max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
+                 retry_policy: Optional[RetryPolicy] = None):
         """
         Initialize the message queue.
 
@@ -211,6 +431,8 @@ class PersistentMessageQueue:
             max_queue_size: Maximum active messages (pending + in_progress).
                           When exceeded, lowest-priority oldest messages are shed.
                           Set to 0 for unlimited (not recommended).
+            retry_policy: Optional RetryPolicy for intelligent retry decisions.
+                         If not provided, uses default RETRY_DELAYS behavior.
         """
         if db_path is None:
             config_dir = get_real_user_home() / ".config" / "meshforge"
@@ -219,6 +441,7 @@ class PersistentMessageQueue:
 
         self._db_path = db_path
         self._max_queue_size = max_queue_size
+        self._retry_policy = retry_policy
         self._lock = threading.Lock()
         self._processing = False
         self._process_thread = None
@@ -242,6 +465,7 @@ class PersistentMessageQueue:
             "deduplicated": 0,
             "shed": 0,
             "shed_rejected": 0,
+            "permanent_failures": 0,
         }
 
     @contextmanager
@@ -477,6 +701,9 @@ class PersistentMessageQueue:
     def mark_failed(self, msg_id: str, error: str = "") -> bool:
         """
         Mark message as failed and schedule retry or move to dead letter.
+
+        If a RetryPolicy is configured, uses intelligent retry decisions
+        based on error classification (transient vs permanent).
         """
         with self._get_connection() as conn:
             # Get current message
@@ -492,21 +719,50 @@ class PersistentMessageQueue:
             message.error_message = error
             message.updated_at = datetime.now()
 
-            if message.retry_count >= message.max_retries:
-                # Move to dead letter
-                message.status = MessageStatus.DEAD_LETTER
-                with self._lock:
-                    self._stats["failed"] += 1
-                logger.warning(f"Message {msg_id} moved to dead letter after {message.retry_count} retries")
+            # Use RetryPolicy if available for intelligent retry decisions
+            if self._retry_policy is not None:
+                decision = self._retry_policy.should_retry(error, message.retry_count)
+
+                if not decision.retry:
+                    # Policy says don't retry (permanent error or max attempts)
+                    message.status = MessageStatus.DEAD_LETTER
+                    with self._lock:
+                        self._stats["failed"] += 1
+                        if "permanent_error" in decision.reason:
+                            self._stats["permanent_failures"] += 1
+                    logger.warning(
+                        f"Message {msg_id} moved to dead letter: {decision.reason}"
+                    )
+                else:
+                    # Policy says retry with calculated delay
+                    message.retry_after = datetime.now() + timedelta(seconds=decision.delay)
+                    message.status = MessageStatus.PENDING
+                    with self._lock:
+                        self._stats["retried"] += 1
+                    logger.debug(
+                        f"Message {msg_id} scheduled for retry in {decision.delay:.1f}s "
+                        f"({decision.reason})"
+                    )
             else:
-                # Schedule retry with backoff
-                delay_idx = min(message.retry_count - 1, len(self.RETRY_DELAYS) - 1)
-                delay = self.RETRY_DELAYS[delay_idx]
-                message.retry_after = datetime.now() + timedelta(seconds=delay)
-                message.status = MessageStatus.PENDING
-                with self._lock:
-                    self._stats["retried"] += 1
-                logger.debug(f"Message {msg_id} scheduled for retry in {delay}s")
+                # Fallback to original RETRY_DELAYS behavior
+                if message.retry_count >= message.max_retries:
+                    # Move to dead letter
+                    message.status = MessageStatus.DEAD_LETTER
+                    with self._lock:
+                        self._stats["failed"] += 1
+                    logger.warning(
+                        f"Message {msg_id} moved to dead letter after "
+                        f"{message.retry_count} retries"
+                    )
+                else:
+                    # Schedule retry with backoff
+                    delay_idx = min(message.retry_count - 1, len(self.RETRY_DELAYS) - 1)
+                    delay = self.RETRY_DELAYS[delay_idx]
+                    message.retry_after = datetime.now() + timedelta(seconds=delay)
+                    message.status = MessageStatus.PENDING
+                    with self._lock:
+                        self._stats["retried"] += 1
+                    logger.debug(f"Message {msg_id} scheduled for retry in {delay}s")
 
             # Update in database
             data = message.to_dict()
@@ -521,6 +777,19 @@ class PersistentMessageQueue:
             ))
 
             return True
+
+    def set_retry_policy(self, policy: RetryPolicy) -> None:
+        """
+        Set or update the retry policy.
+
+        Args:
+            policy: RetryPolicy instance for intelligent retry decisions
+        """
+        self._retry_policy = policy
+        logger.info(
+            f"Retry policy configured: max_tries={policy.max_tries}, "
+            f"timeout={policy.timeout}s"
+        )
 
     def register_sender(self, destination: str,
                         send_fn: Callable[[Dict], bool]) -> None:
@@ -627,7 +896,7 @@ class PersistentMessageQueue:
         in_progress = status_counts.get("in_progress", 0)
         queue_depth = pending + in_progress
 
-        return {
+        stats = {
             **self._stats,
             "pending": pending,
             "in_progress": in_progress,
@@ -639,7 +908,10 @@ class PersistentMessageQueue:
             "queue_usage_pct": round(
                 (queue_depth / self._max_queue_size * 100) if self._max_queue_size > 0 else 0, 1
             ),
+            "retry_policy_enabled": self._retry_policy is not None,
         }
+
+        return stats
 
     def get_queue_depth(self) -> int:
         """Get count of active messages (pending + in_progress).
