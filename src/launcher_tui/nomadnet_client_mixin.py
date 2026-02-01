@@ -338,27 +338,28 @@ class NomadNetClientMixin:
         print("=== Launching NomadNet ===")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
-        # Build environment - set HOME to real user's home when running via sudo
-        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
-        # IMPORTANT: We run directly (no sudo -u) because sudo breaks curses TTY
-        env = os.environ.copy()
+        # When running via sudo, we must run NomadNet as the real user.
+        # Just setting HOME is not enough - RPC authentication between
+        # NomadNet and rnsd requires matching UIDs.
+        # Use 'su' which properly handles TTY for interactive apps.
         sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            user_home = get_real_user_home()
-            env['HOME'] = str(user_home)
-            env['USER'] = sudo_user
-            env['LOGNAME'] = sudo_user
 
         try:
-            # Run interactively -- NomadNet takes over the terminal
-            result = subprocess.run([nn_path, '--textui'], env=env, timeout=None)
+            if sudo_user and sudo_user != 'root':
+                # Run as real user using 'su' - preserves TTY for curses
+                # The '-' gives a login shell, '-c' runs the command
+                result = subprocess.run(
+                    ['su', '-', sudo_user, '-c', f'{nn_path} --textui'],
+                    timeout=None
+                )
+            else:
+                # Not running via sudo, run directly
+                result = subprocess.run([nn_path, '--textui'], timeout=None)
+
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                print(f"NomadNet exited with error code {result.returncode}")
-                print("\nCheck logs with:")
-                print("  cat ~/.nomadnetwork/logfile")
-                print("  journalctl --user -u nomadnet -n 50")
+                self._diagnose_nomadnet_error(result.returncode, sudo_user)
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -382,6 +383,50 @@ class NomadNetClientMixin:
                 input()
             except (EOFError, KeyboardInterrupt):
                 pass
+
+    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None):
+        """Analyze NomadNet failure and provide helpful diagnostics."""
+        print(f"NomadNet exited with error code {returncode}")
+
+        # Try to read the log file for clues
+        user_home = get_real_user_home()
+        logfile = user_home / '.nomadnetwork' / 'logfile'
+
+        error_hints = []
+        if logfile.exists():
+            try:
+                content = logfile.read_text()
+                last_lines = content.strip().split('\n')[-20:]
+
+                # Look for known error patterns
+                for line in last_lines:
+                    if 'AuthenticationError' in line or 'digest sent was rejected' in line:
+                        error_hints.append("RPC authentication failed between NomadNet and rnsd")
+                        error_hints.append("This usually means rnsd is running as a different user")
+                        break
+                    elif 'KeyError' in line and 'textui' in line.lower():
+                        error_hints.append("Config missing [textui] section")
+                        error_hints.append("Delete ~/.nomadnetwork/config and restart")
+                        break
+                    elif 'PermissionError' in line or 'Permission denied' in line:
+                        error_hints.append("Permission denied accessing files")
+                        error_hints.append(f"Check ownership: ls -la ~/.nomadnetwork/")
+                        break
+                    elif 'ModuleNotFoundError' in line or 'ImportError' in line:
+                        error_hints.append("Missing Python dependencies")
+                        error_hints.append("Try: pipx reinstall nomadnet")
+                        break
+            except (OSError, PermissionError):
+                pass
+
+        if error_hints:
+            print("\nDiagnosis:")
+            for hint in error_hints:
+                print(f"  - {hint}")
+        else:
+            print("\nCheck logs for details:")
+            print(f"  cat {logfile}")
+            print("  journalctl --user -u nomadnet -n 50")
 
     # ------------------------------------------------------------------
     # Launch daemon
