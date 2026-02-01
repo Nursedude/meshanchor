@@ -575,17 +575,30 @@ class SitePlanner:
         console.print("[dim]Check your country's amateur/ISM band rules before transmitting.[/dim]")
 
     def _open_url(self, url: str):
-        """Open URL in browser or display for manual access"""
+        """Open URL in browser or display for manual access.
+
+        When running as root via sudo, drops privileges so the browser
+        runs as the real user with their session/display.
+        """
         # Check if we're in a graphical environment
         display = os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')
 
         if display:
             try:
-                # Try xdg-open first (Linux with display)
-                result = subprocess.run(
-                    ['xdg-open', url],
-                    capture_output=True, timeout=5
-                )
+                # Drop privileges when running as root so browser runs as real user
+                real_user = os.environ.get('SUDO_USER')
+                if os.geteuid() == 0 and real_user:
+                    # Running as root via sudo - run browser as real user
+                    result = subprocess.run(
+                        ['sudo', '-u', real_user, 'xdg-open', url],
+                        capture_output=True, timeout=5
+                    )
+                else:
+                    # Not root - try xdg-open directly
+                    result = subprocess.run(
+                        ['xdg-open', url],
+                        capture_output=True, timeout=5
+                    )
                 if result.returncode == 0:
                     console.print(f"[green]Opened in browser[/green]")
                     return

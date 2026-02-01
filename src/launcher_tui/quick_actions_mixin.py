@@ -25,6 +25,17 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checking
+try:
+    from utils.service_check import (
+        check_systemd_service,
+        check_process_running,
+        check_port as _check_port,
+    )
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 
 # Quick action definitions: (tag, description, method_name)
 QUICK_ACTIONS = [
@@ -69,7 +80,10 @@ class QuickActionsMixin:
                     break
 
     def _qa_service_status(self):
-        """Quick: show all service statuses."""
+        """Quick: show all service statuses.
+
+        Uses centralized service_check module when available.
+        """
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Quick Service Status ===\n")
 
@@ -77,27 +91,28 @@ class QuickActionsMixin:
         warnings = []
         for svc in services:
             try:
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc],
-                    capture_output=True, text=True, timeout=5
-                )
-                status = result.stdout.strip()
-
-                # Check boot persistence
-                boot_info = ""
-                try:
+                if _HAS_SERVICE_CHECK:
+                    is_running, is_enabled = check_systemd_service(svc)
+                    status = 'active' if is_running else 'inactive'
+                else:
+                    # Fallback to direct systemctl call
+                    result = subprocess.run(
+                        ['systemctl', 'is-active', svc],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    status = result.stdout.strip()
+                    # Check boot persistence via fallback
                     enabled_result = subprocess.run(
                         ['systemctl', 'is-enabled', svc],
                         capture_output=True, text=True, timeout=5
                     )
                     is_enabled = enabled_result.returncode == 0
-                    if status == 'active' and not is_enabled:
-                        boot_info = "  (not enabled at boot)"
-                        warnings.append(svc)
-                    elif status == 'active' and is_enabled:
-                        boot_info = ""
-                except Exception:
-                    pass
+
+                # Check boot persistence
+                boot_info = ""
+                if status == 'active' and not is_enabled:
+                    boot_info = "  (not enabled at boot)"
+                    warnings.append(svc)
 
                 if status == 'active':
                     print(f"  * {svc:<18} running{boot_info}")
@@ -110,12 +125,18 @@ class QuickActionsMixin:
 
         # Bridge process (not a systemd service — no boot persistence check)
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rns_bridge'],
-                capture_output=True, timeout=3
-            )
-            bridge_status = "running" if result.returncode == 0 else "not running"
-            sym = "*" if result.returncode == 0 else "-"
+            if _HAS_SERVICE_CHECK:
+                bridge_running = check_process_running('rns_bridge')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rns_bridge'],
+                    capture_output=True, timeout=3
+                )
+                bridge_running = result.returncode == 0
+
+            bridge_status = "running" if bridge_running else "not running"
+            sym = "*" if bridge_running else "-"
             print(f"  {sym} {'rns_bridge':<18} {bridge_status}")
         except Exception:
             print(f"  ? {'rns_bridge':<18} unknown")
@@ -212,7 +233,10 @@ class QuickActionsMixin:
         self._wait_for_enter("Press Enter to continue...")
 
     def _qa_port_check(self):
-        """Quick: check network ports."""
+        """Quick: check network ports.
+
+        Uses centralized service_check module when available.
+        """
         import socket as sock
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Port Check ===\n")
@@ -226,13 +250,19 @@ class QuickActionsMixin:
 
         for port, desc in ports:
             try:
-                with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
-                    s.settimeout(1)
-                    result = s.connect_ex(('127.0.0.1', port))
-                    if result == 0:
-                        print(f"  * {port:<6} {desc}")
-                    else:
-                        print(f"  - {port:<6} {desc} (not listening)")
+                if _HAS_SERVICE_CHECK:
+                    port_open = _check_port(port, host='127.0.0.1', timeout=1.0)
+                else:
+                    # Fallback to direct socket check
+                    with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
+                        s.settimeout(1)
+                        result = s.connect_ex(('127.0.0.1', port))
+                        port_open = result == 0
+
+                if port_open:
+                    print(f"  * {port:<6} {desc}")
+                else:
+                    print(f"  - {port:<6} {desc} (not listening)")
             except Exception:
                 print(f"  ? {port:<6} {desc} (check failed)")
 

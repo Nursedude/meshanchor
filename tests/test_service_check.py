@@ -11,9 +11,13 @@ import subprocess
 
 from src.utils.service_check import (
     check_port,
+    check_process_with_pid,
     check_service,
     check_systemd_service,
     require_service,
+    daemon_reload,
+    enable_service,
+    apply_config_and_restart,
     ServiceState,
     ServiceStatus,
     KNOWN_SERVICES,
@@ -243,3 +247,276 @@ class TestKnownServices:
         for name, config in KNOWN_SERVICES.items():
             for field in required_fields:
                 assert field in config, f"Service '{name}' missing required field '{field}'"
+
+
+class TestDaemonReload:
+    """Tests for daemon_reload helper function."""
+
+    def test_daemon_reload_success(self):
+        """Test successful daemon-reload."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr='')
+
+            success, msg = daemon_reload()
+
+            assert success is True
+            assert 'succeeded' in msg
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0][0]
+            assert call_args == ['systemctl', 'daemon-reload']
+
+    def test_daemon_reload_failure(self):
+        """Test failed daemon-reload."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr='Failed to reload daemon'
+            )
+
+            success, msg = daemon_reload()
+
+            assert success is False
+            assert 'failed' in msg.lower()
+
+    def test_daemon_reload_timeout(self):
+        """Test daemon-reload timeout handling."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(
+                cmd='systemctl', timeout=30
+            )
+
+            success, msg = daemon_reload(timeout=30)
+
+            assert success is False
+            assert 'timeout' in msg.lower()
+
+    def test_daemon_reload_no_systemctl(self):
+        """Test daemon-reload when systemctl not available."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = FileNotFoundError("systemctl not found")
+
+            success, msg = daemon_reload()
+
+            assert success is False
+            assert 'systemctl not found' in msg
+
+
+class TestEnableService:
+    """Tests for enable_service helper function."""
+
+    def test_enable_service_success(self):
+        """Test successful service enable."""
+        with patch('subprocess.run') as mock_run:
+            # daemon-reload succeeds, enable succeeds
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),
+                MagicMock(returncode=0, stderr=''),
+            ]
+
+            success, msg = enable_service('rnsd')
+
+            assert success is True
+            assert 'enabled' in msg
+            assert mock_run.call_count == 2
+
+    def test_enable_service_with_start(self):
+        """Test enable service with start=True."""
+        with patch('subprocess.run') as mock_run:
+            # daemon-reload, enable, start all succeed
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),
+                MagicMock(returncode=0, stderr=''),
+                MagicMock(returncode=0, stderr=''),
+            ]
+
+            success, msg = enable_service('meshtasticd', start=True)
+
+            assert success is True
+            assert 'enabled and started' in msg
+            assert mock_run.call_count == 3
+
+    def test_enable_service_daemon_reload_fails(self):
+        """Test enable fails if daemon-reload fails."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr='daemon-reload failed'
+            )
+
+            success, msg = enable_service('rnsd')
+
+            assert success is False
+            assert 'daemon-reload' in msg
+
+    def test_enable_service_enable_fails(self):
+        """Test enable fails if systemctl enable fails."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),  # daemon-reload OK
+                MagicMock(returncode=1, stderr='Unit not found'),  # enable fails
+            ]
+
+            success, msg = enable_service('nonexistent')
+
+            assert success is False
+            assert 'enable' in msg.lower()
+
+    def test_enable_service_start_fails(self):
+        """Test returns error if start fails (but service was enabled)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),  # daemon-reload OK
+                MagicMock(returncode=0, stderr=''),  # enable OK
+                MagicMock(returncode=1, stderr='Failed to start'),  # start fails
+            ]
+
+            success, msg = enable_service('broken', start=True)
+
+            assert success is False
+            assert 'start failed' in msg.lower()
+
+
+class TestApplyConfigAndRestart:
+    """Tests for apply_config_and_restart helper function."""
+
+    def test_apply_config_and_restart_success(self):
+        """Test successful config apply and restart."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),  # daemon-reload
+                MagicMock(returncode=0, stderr=''),  # restart
+            ]
+
+            success, msg = apply_config_and_restart('meshtasticd')
+
+            assert success is True
+            assert 'restarted' in msg.lower()
+            assert mock_run.call_count == 2
+
+    def test_apply_config_and_restart_daemon_reload_fails(self):
+        """Test failure when daemon-reload fails."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr='daemon-reload error'
+            )
+
+            success, msg = apply_config_and_restart('meshtasticd')
+
+            assert success is False
+            assert 'daemon-reload' in msg
+
+    def test_apply_config_and_restart_restart_fails(self):
+        """Test failure when restart fails."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),  # daemon-reload OK
+                MagicMock(returncode=1, stderr='Failed to restart'),  # restart fails
+            ]
+
+            success, msg = apply_config_and_restart('meshtasticd')
+
+            assert success is False
+            assert 'restart' in msg.lower()
+
+    def test_apply_config_and_restart_custom_timeout(self):
+        """Test custom timeout is passed to subprocess."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stderr=''),
+                MagicMock(returncode=0, stderr=''),
+            ]
+
+            success, msg = apply_config_and_restart('meshtasticd', timeout=60)
+
+            # Verify timeout was passed
+            for call in mock_run.call_args_list:
+                assert call[1]['timeout'] == 60
+
+
+class TestServiceHelpersIntegration:
+    """Integration tests for service helper functions."""
+
+    def test_helpers_are_exported(self):
+        """Verify all helpers are in __all__ export list."""
+        from src.utils import service_check
+        assert 'daemon_reload' in service_check.__all__
+        assert 'enable_service' in service_check.__all__
+        assert 'apply_config_and_restart' in service_check.__all__
+
+    def test_helpers_return_tuple(self):
+        """Verify all helpers return (bool, str) tuple."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr='')
+
+            for helper in [daemon_reload,
+                           lambda: enable_service('test'),
+                           lambda: apply_config_and_restart('test')]:
+                result = helper()
+                assert isinstance(result, tuple)
+                assert len(result) == 2
+                assert isinstance(result[0], bool)
+                assert isinstance(result[1], str)
+
+
+class TestCheckProcessWithPid:
+    """Tests for check_process_with_pid function."""
+
+    def test_process_running_returns_pid(self):
+        """Test that running process returns (True, pid)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="12345\n"
+            )
+
+            running, pid = check_process_with_pid('bash')
+
+            assert running is True
+            assert pid == "12345"
+
+    def test_process_not_running_returns_none(self):
+        """Test that non-running process returns (False, None)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout=""
+            )
+
+            running, pid = check_process_with_pid('nonexistent_process')
+
+            assert running is False
+            assert pid is None
+
+    def test_multiple_pids_returns_first(self):
+        """Test that multiple PIDs return the first one."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="12345\n67890\n"
+            )
+
+            running, pid = check_process_with_pid('multi_instance')
+
+            assert running is True
+            assert pid == "12345"
+
+    def test_timeout_returns_false(self):
+        """Test that timeout returns (False, None)."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired('pgrep', 5)
+
+            running, pid = check_process_with_pid('slow_process')
+
+            assert running is False
+            assert pid is None
+
+    def test_pgrep_not_found_returns_false(self):
+        """Test graceful handling when pgrep is not available."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = FileNotFoundError()
+
+            running, pid = check_process_with_pid('any_process')
+
+            assert running is False
+            assert pid is None

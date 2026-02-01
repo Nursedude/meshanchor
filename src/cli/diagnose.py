@@ -463,10 +463,14 @@ def check_sdr():
     openwebrx = shutil.which('openwebrx')
     if openwebrx:
         try:
-            result = subprocess.run(['systemctl', 'is-active', 'openwebrx'],
-                                   capture_output=True, text=True, timeout=5)
-            status = result.stdout.strip()
-            print_status("OpenWebRX", status == 'active', status)
+            if SERVICE_CHECK_AVAILABLE:
+                svc_status = check_service('openwebrx')
+                print_status("OpenWebRX", svc_status.available, svc_status.state.value)
+            else:
+                result = subprocess.run(['systemctl', 'is-active', 'openwebrx'],
+                                       capture_output=True, text=True, timeout=5)
+                status = result.stdout.strip()
+                print_status("OpenWebRX", status == 'active', status)
         except Exception:
             print_status("OpenWebRX", True, "installed")
     else:

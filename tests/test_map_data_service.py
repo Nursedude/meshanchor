@@ -715,6 +715,54 @@ class TestMapServer:
         finally:
             server.stop()
 
+    def test_cors_default_allows_all(self):
+        """Default CORS configuration allows all origins (*)."""
+        from utils.map_data_service import MapServer
+
+        server = MapServer(port=5000, host="127.0.0.1")
+        assert server.cors_origins is None  # None means allow all
+
+    def test_cors_custom_origins(self):
+        """Custom CORS origins are stored correctly."""
+        from utils.map_data_service import MapServer
+
+        origins = ["http://localhost", "http://192.168.1."]
+        server = MapServer(port=5000, cors_origins=origins)
+        assert server.cors_origins == origins
+
+    def test_cors_handler_method(self):
+        """MapRequestHandler._send_cors_header works correctly."""
+        from utils.map_data_service import MapRequestHandler
+
+        # Test allow all (None)
+        handler = MagicMock(spec=MapRequestHandler)
+        handler.headers = {"Origin": "http://192.168.1.100:8080"}
+        handler.allowed_origins = None
+        handler.send_header = MagicMock()
+
+        # Call the actual method
+        MapRequestHandler._send_cors_header(handler)
+
+        handler.send_header.assert_called_once_with(
+            'Access-Control-Allow-Origin', '*'
+        )
+
+    def test_cors_handler_with_allowed_list(self):
+        """MapRequestHandler respects allowed origins list."""
+        from utils.map_data_service import MapRequestHandler
+
+        handler = MagicMock(spec=MapRequestHandler)
+        handler.headers = {"Origin": "http://192.168.1.100:8080"}
+        handler.allowed_origins = ["http://192.168.1."]
+        handler.send_header = MagicMock()
+
+        MapRequestHandler._send_cors_header(handler)
+
+        # Should allow the matching origin
+        handler.send_header.assert_called_once_with(
+            'Access-Control-Allow-Origin', 'http://192.168.1.100:8080'
+        )
+
 
 class TestMapDataCollectorIntegration:
     """Integration tests that verify the full collection pipeline."""

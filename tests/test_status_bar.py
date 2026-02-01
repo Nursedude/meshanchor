@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'launcher_tui'))
 
 from status_bar import (
-    StatusBar, STATUS_CACHE_TTL,
+    StatusBar, STATUS_CACHE_TTL, SPACE_WEATHER_CACHE_TTL,
     SYM_RUNNING, SYM_STOPPED, SYM_UNKNOWN,
     MONITORED_SERVICES,
 )
@@ -327,6 +327,104 @@ class TestStatusBarSymbols:
         bar.set_node_count(5)
         line = bar.get_status_line()
         assert line.isascii()
+
+
+class TestSpaceWeather:
+    """Test space weather display in status bar."""
+
+    def test_space_weather_displayed_when_available(self):
+        bar = StatusBar(version="1.0")
+        bar._cache_time = time.time()
+        bar._space_weather_time = time.time()
+        bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
+        bar._space_weather = "SFI:125 K:2"
+        line = bar.get_status_line()
+        assert "SFI:125 K:2" in line
+
+    def test_space_weather_not_displayed_when_none(self):
+        bar = StatusBar(version="1.0")
+        bar._cache_time = time.time()
+        bar._space_weather_time = time.time()
+        bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
+        bar._space_weather = None
+        line = bar.get_status_line()
+        assert "SFI" not in line
+        assert "K:" not in line
+
+    def test_space_weather_separate_ttl(self):
+        """Space weather has its own cache TTL."""
+        bar = StatusBar(version="1.0")
+
+        # Services cache is fresh, space weather is stale
+        bar._cache_time = time.time()
+        bar._space_weather_time = time.time() - SPACE_WEATHER_CACHE_TTL - 1
+        bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
+
+        with patch.object(bar, '_check_services') as mock_services:
+            with patch.object(bar, '_check_bridge'):
+                with patch.object(bar, '_check_space_weather') as mock_weather:
+                    bar._refresh_if_stale()
+                    # Services should NOT be called (fresh cache)
+                    mock_services.assert_not_called()
+                    # But space weather SHOULD be called (stale)
+                    mock_weather.assert_called_once()
+
+    def test_space_weather_fetch_success(self):
+        """Test successful space weather fetch."""
+        bar = StatusBar(version="1.0")
+
+        # Mock the SpaceWeatherAPI
+        mock_data = MagicMock()
+        mock_data.solar_flux = 145.5
+        mock_data.k_index = 3
+
+        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
+            mock_api = MockAPI.return_value
+            mock_api.get_current_conditions.return_value = mock_data
+
+            bar._check_space_weather()
+
+            assert bar._space_weather == "SFI:145 K:3"
+
+    def test_space_weather_graceful_failure(self):
+        """Space weather failure should not break status bar."""
+        bar = StatusBar(version="1.0")
+        bar._space_weather = "SFI:100 K:1"  # Previous value
+
+        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
+            mock_api = MockAPI.return_value
+            mock_api.get_current_conditions.side_effect = Exception("Network error")
+
+            bar._check_space_weather()
+
+            # Should be cleared on failure
+            assert bar._space_weather is None
+
+    def test_space_weather_import_error(self):
+        """Missing space_weather module should not crash."""
+        bar = StatusBar(version="1.0")
+
+        with patch.dict('sys.modules', {'utils.space_weather': None}):
+            # This will trigger ImportError in _check_space_weather
+            bar._check_space_weather()
+            assert bar._space_weather is None
+
+    def test_space_weather_partial_data(self):
+        """Handle partial data (e.g., only SFI available)."""
+        bar = StatusBar(version="1.0")
+
+        mock_data = MagicMock()
+        mock_data.solar_flux = 120.0
+        mock_data.k_index = None  # Not available
+
+        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
+            mock_api = MockAPI.return_value
+            mock_api.get_current_conditions.return_value = mock_data
+
+            bar._check_space_weather()
+
+            assert bar._space_weather == "SFI:120"
+            assert "K:" not in bar._space_weather
 
 
 class TestStatusBarEdgeCases:

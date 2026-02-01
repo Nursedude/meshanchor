@@ -231,6 +231,16 @@ class MapDataCollector:
             if fid:
                 features[fid] = f
 
+        # Source 1.5: Direct USB radio (when meshtasticd not running)
+        # Only try this if TCP returned nothing (avoids double-connection)
+        direct_radio_features = []
+        if not tcp_features:
+            direct_radio_features = self._collect_direct_radio()
+            for f in direct_radio_features:
+                fid = f["properties"].get("id", "")
+                if fid:
+                    features[fid] = f
+
         # Source 2: MQTT subscriber (if running)
         mqtt_features = self._collect_mqtt()
         for f in mqtt_features:
@@ -248,7 +258,14 @@ class MapDataCollector:
             if fid and fid not in features:
                 features[fid] = f
 
-        # Source 4: Last-known cache (fill gaps)
+        # Source 4: AREDN mesh network
+        aredn_features = self._collect_aredn()
+        for f in aredn_features:
+            fid = f["properties"].get("id", "")
+            if fid and fid not in features:
+                features[fid] = f
+
+        # Source 5: Last-known cache (fill gaps)
         if not features:
             cache_features = self._load_cache()
             for f in cache_features:
@@ -256,7 +273,9 @@ class MapDataCollector:
                 if fid:
                     features[fid] = f
 
-        sources = self._get_source_summary(tcp_features, mqtt_features, tracker_features)
+        sources = self._get_source_summary(
+            tcp_features, mqtt_features, tracker_features, aredn_features, direct_radio_features
+        )
         geojson = {
             "type": "FeatureCollection",
             "features": list(features.values()),
@@ -276,6 +295,7 @@ class MapDataCollector:
         logger.debug(
             f"MapDataCollector: {len(features)} nodes "
             f"(meshtasticd:{sources.get('meshtasticd', 0)} "
+            f"direct_radio:{sources.get('direct_radio', 0)} "
             f"mqtt:{sources.get('mqtt', 0)} "
             f"tracker:{sources.get('node_tracker', 0)})"
         )
@@ -384,6 +404,86 @@ class MapDataCollector:
 
         except Exception as e:
             logger.debug(f"TCP interface collection error: {e}")
+        finally:
+            manager.release_lock()
+
+        return features
+
+    def _collect_direct_radio(self) -> List[Dict]:
+        """Collect nodes directly from USB radio (serial connection).
+
+        Used when meshtasticd is not running (usb-direct mode).
+        MeshForge connects directly to the radio via USB serial.
+
+        Returns list of GeoJSON features for nodes with valid positions.
+        """
+        try:
+            from utils.meshtastic_connection import (
+                get_connection_manager, safe_close_interface, ConnectionMode,
+                reset_connection_manager
+            )
+        except ImportError:
+            logger.debug("meshtastic_connection module not available")
+            return []
+
+        # Check if USB device is available
+        import glob
+        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        if not usb_devices:
+            logger.debug("No USB radio devices found")
+            return []
+
+        features = []
+        no_position_nodes = []
+
+        # Reset manager to ensure we get SERIAL mode
+        # (in case a previous TCP connection left it in TCP mode)
+        reset_connection_manager()
+        manager = get_connection_manager(mode=ConnectionMode.SERIAL)
+
+        # Don't block if someone else holds the connection
+        if not manager.acquire_lock(timeout=5.0):
+            logger.debug("Could not acquire radio lock (in use)")
+            return []
+
+        try:
+            manager._wait_for_cooldown()
+            interface = manager._create_interface()
+
+            try:
+                if hasattr(interface, 'nodes') and interface.nodes:
+                    now = time.time()
+                    online_threshold = self.get_online_threshold_seconds()
+                    total_nodes = len(interface.nodes)
+
+                    for node_id, node_data in interface.nodes.items():
+                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
+                        if feature:
+                            # Mark as from direct radio
+                            feature["properties"]["source"] = "direct_radio"
+                            features.append(feature)
+                        else:
+                            # Track nodes without valid position
+                            no_pos_info = self._extract_node_info_without_position(
+                                node_id, node_data, now, online_threshold
+                            )
+                            if no_pos_info:
+                                no_position_nodes.append(no_pos_info)
+
+                    # Update the tracking lists (if meshtasticd didn't already)
+                    if not self._total_nodes_seen:
+                        self._nodes_without_position = no_position_nodes
+                        self._total_nodes_seen = total_nodes
+
+                    logger.debug(
+                        f"Direct radio (USB): {len(features)} with GPS, "
+                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
+                    )
+            finally:
+                safe_close_interface(interface)
+
+        except Exception as e:
+            logger.debug(f"Direct radio collection error: {e}")
         finally:
             manager.release_lock()
 
@@ -709,6 +809,113 @@ class MapDataCollector:
 
         return features
 
+    def _collect_aredn(self) -> List[Dict]:
+        """Collect nodes from AREDN mesh network.
+
+        Scans the local AREDN network for nodes with GPS coordinates.
+        AREDN nodes may have location data configured by the operator.
+        """
+        features = []
+
+        try:
+            from utils.aredn import AREDNScanner, AREDNClient
+        except ImportError:
+            logger.debug("AREDN module not available")
+            return []
+
+        # First try to connect to the local AREDN node
+        local_node_ip = self._get_aredn_node_ip()
+        if not local_node_ip:
+            logger.debug("No AREDN node found on local network")
+            return []
+
+        try:
+            # Get the local node info (may have location)
+            client = AREDNClient(local_node_ip, timeout=5)
+            local_node = client.get_node_info()
+
+            if local_node:
+                feature = self._aredn_node_to_feature(local_node)
+                if feature:
+                    features.append(feature)
+
+                # Get neighbor nodes through links
+                for link in local_node.links:
+                    if link.ip:
+                        try:
+                            neighbor_client = AREDNClient(link.ip, timeout=3)
+                            neighbor_node = neighbor_client.get_node_info()
+                            if neighbor_node:
+                                neighbor_feature = self._aredn_node_to_feature(neighbor_node)
+                                if neighbor_feature:
+                                    # Add link quality info
+                                    neighbor_feature["properties"]["link_type"] = link.link_type.value
+                                    neighbor_feature["properties"]["link_quality"] = link.link_quality
+                                    neighbor_feature["properties"]["snr"] = link.snr if link.snr else None
+                                    features.append(neighbor_feature)
+                        except Exception as e:
+                            logger.debug(f"Error fetching AREDN neighbor {link.ip}: {e}")
+
+            if features:
+                logger.debug(f"AREDN: {len(features)} nodes with position")
+
+        except Exception as e:
+            logger.debug(f"AREDN collection error: {e}")
+
+        return features
+
+    def _get_aredn_node_ip(self) -> Optional[str]:
+        """Find AREDN node on local network."""
+        import socket
+
+        # Try common AREDN addresses
+        for host in ['localnode.local.mesh', '10.0.0.1', '10.1.0.1', 'localnode']:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                try:
+                    result = sock.connect_ex((host, 80))
+                    if result == 0:
+                        return host
+                finally:
+                    sock.close()
+            except Exception:
+                continue
+        return None
+
+    def _aredn_node_to_feature(self, node) -> Optional[Dict]:
+        """Convert AREDNNode to GeoJSON feature.
+
+        Args:
+            node: AREDNNode object from utils.aredn
+
+        Returns:
+            GeoJSON Feature dict or None if no valid location
+        """
+        # Check for valid location
+        if not node.has_location():
+            return None
+
+        # Determine online status (if we got data, it's online)
+        is_online = True
+
+        # Determine if this is a "gateway" type node
+        # AREDN nodes with tunnels act as gateways
+        is_gateway = node.tunnel_count > 0
+
+        return self._make_feature(
+            node_id=f"aredn_{node.hostname}",
+            name=node.hostname,
+            lat=node.latitude,
+            lon=node.longitude,
+            network="aredn",
+            is_online=is_online,
+            is_gateway=is_gateway,
+            hardware=node.model,
+            role=node.mesh_status or "AREDN",
+            last_seen="online",
+        )
+
     def _node_cache_to_feature(self, node: Dict) -> Optional[Dict]:
         """Convert a node cache entry to a GeoJSON feature."""
         lat = node.get("latitude") or node.get("lat")
@@ -830,12 +1037,16 @@ class MapDataCollector:
         except Exception as e:
             logger.debug(f"Cache save error: {e}")
 
-    def _get_source_summary(self, tcp: List, mqtt: List, tracker: List) -> Dict:
+    def _get_source_summary(
+        self, tcp: List, mqtt: List, tracker: List, aredn: List = None, direct_radio: List = None
+    ) -> Dict:
         """Summarize which sources contributed data."""
         return {
             "meshtasticd": len(tcp),
+            "direct_radio": len(direct_radio) if direct_radio else 0,
             "mqtt": len(mqtt),
             "node_tracker": len(tracker),
+            "aredn": len(aredn) if aredn else 0,
         }
 
 
@@ -844,6 +1055,26 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
     collector: Optional[MapDataCollector] = None
     web_dir: Optional[str] = None
+    # CORS: None = allow all, list = allow specific origins
+    allowed_origins: Optional[List[str]] = None
+
+    def _send_cors_header(self):
+        """Send appropriate CORS header based on configuration.
+
+        When allowed_origins is None: allow all origins (*)
+        When allowed_origins is a list: only allow those origins
+        """
+        origin = self.headers.get('Origin', '')
+
+        if self.allowed_origins is None:
+            # Allow all origins - useful for LAN/AREDN access
+            self.send_header('Access-Control-Allow-Origin', '*')
+        elif origin and any(origin.startswith(allowed) for allowed in self.allowed_origins):
+            # Origin matches allowed list
+            self.send_header('Access-Control-Allow-Origin', origin)
+        else:
+            # Default fallback for localhost
+            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
 
     def do_GET(self):
         if self.path == '/api/nodes/geojson' or self.path == '/api/nodes/geojson/':
@@ -876,6 +1107,17 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._serve_message_queue()
         elif self.path == '/api/network/topology' or self.path == '/api/network/topology/':
             self._serve_network_topology()
+        # ─────────────────────────────────────────────────────────────
+        # Radio Control API - MeshForge-owned radio access
+        # ─────────────────────────────────────────────────────────────
+        elif self.path == '/api/radio/info' or self.path == '/api/radio/info/':
+            self._serve_radio_info()
+        elif self.path == '/api/radio/nodes' or self.path == '/api/radio/nodes/':
+            self._serve_radio_nodes()
+        elif self.path == '/api/radio/channels' or self.path == '/api/radio/channels/':
+            self._serve_radio_channels()
+        elif self.path == '/api/radio/status' or self.path == '/api/radio/status/':
+            self._serve_radio_status()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
@@ -885,6 +1127,60 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                 self._serve_static_html()
             else:
                 super().do_GET()
+
+    def do_POST(self):
+        """Handle POST requests for radio control actions."""
+        # ─────────────────────────────────────────────────────────────
+        # Radio Control API - POST endpoints
+        # ─────────────────────────────────────────────────────────────
+        if self.path == '/api/radio/message' or self.path == '/api/radio/message/':
+            self._handle_send_message()
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self._send_cors_header()
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
+    def _handle_send_message(self):
+        """Handle POST /api/radio/message - send a message via radio."""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(body)
+
+            text = data.get('text', '')
+            destination = data.get('destination', '^all')
+
+            if not text:
+                self._serve_json({"error": "text is required"}, status=400)
+                return
+
+            conn = self._get_radio_connection()
+            if not conn:
+                self._serve_json({"error": "meshtastic library not available"}, status=500)
+                return
+
+            success = conn.send_message(text, destination)
+            if success:
+                self._serve_json({
+                    "success": True,
+                    "message": "Message sent",
+                    "destination": destination,
+                    "connection_mode": conn.get_mode()
+                })
+            else:
+                self._serve_json({"error": "Failed to send message"}, status=500)
+
+        except json.JSONDecodeError:
+            self._serve_json({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
 
     def _serve_static_html(self):
         """Serve static HTML files with no-cache headers."""
@@ -933,12 +1229,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -965,7 +1256,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self.send_error(404, f"Map file not found: {map_path}")
 
     def _serve_status(self):
-        """Serve server status."""
+        """Serve server status including radio connection info."""
         status = {
             "status": "running",
             "time": datetime.now().isoformat(),
@@ -979,12 +1270,57 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             except Exception:
                 status["history"] = None
 
+        # Include radio connection status
+        status["radio"] = self._get_radio_status_summary()
+
         data = json.dumps(status).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
+        self._send_cors_header()
         self.end_headers()
         self.wfile.write(data)
+
+    def _get_radio_status_summary(self) -> Dict[str, Any]:
+        """Get a summary of radio connection status for the status endpoint."""
+        try:
+            from utils.meshtastic_connection import get_connection_manager, ConnectionMode
+        except ImportError:
+            return {"available": False, "error": "meshtastic library not installed"}
+
+        # Check TCP port (meshtasticd)
+        tcp_available = False
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                tcp_available = sock.connect_ex(('localhost', 4403)) == 0
+        except Exception:
+            pass
+
+        # Check USB serial device
+        import glob
+        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        usb_available = len(usb_devices) > 0
+
+        # Determine connection mode
+        if tcp_available:
+            mode = "tcp"
+            connected = True
+        elif usb_available:
+            mode = "serial"
+            connected = True
+        else:
+            mode = "none"
+            connected = False
+
+        return {
+            "connected": connected,
+            "mode": mode,
+            "tcp_available": tcp_available,
+            "usb_available": usb_available,
+            "usb_devices": usb_devices if usb_available else [],
+        }
 
     def _serve_history_stats(self):
         """Serve node history summary and unique nodes list."""
@@ -1013,18 +1349,13 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         geojson = history.get_trajectory_geojson(node_id, hours=24)
         self._serve_json(geojson)
 
-    def _serve_json(self, obj: Any):
+    def _serve_json(self, obj: Any, status: int = 200):
         """Helper to serve a JSON response."""
         data = json.dumps(obj).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
-        if origin.startswith(('http://localhost', 'http://127.0.0.1',
-                              'https://localhost', 'https://127.0.0.1')):
-            self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+        self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(data)
@@ -1296,6 +1627,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         nodes = []
         links = []
         node_map = {}
+        aredn_links_added = set()  # Track AREDN links to avoid duplicates
 
         # Build nodes
         for feature in geojson.get("features", []):
@@ -1311,18 +1643,47 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                 "network": network,
                 "is_online": props.get("is_online", False),
                 "is_gateway": props.get("is_gateway", False),
-                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER"),
+                "is_router": props.get("role") in ("ROUTER", "ROUTER_CLIENT", "REPEATER", "AREDN"),
                 "lat": coords[1],
                 "lon": coords[0],
                 "snr": props.get("snr"),
-                "battery": props.get("battery")
+                "battery": props.get("battery"),
+                # AREDN-specific properties
+                "link_type": props.get("link_type"),  # RF, DTD, TUN
+                "link_quality": props.get("link_quality"),
             }
             nodes.append(node)
             node_map[node_id] = node
 
-        # Build links based on proximity and network relationships
-        gateways = [n for n in nodes if n["is_gateway"] or n["is_router"]]
-        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"]]
+        # Build AREDN links from actual link data
+        # AREDN neighbors have link_type property indicating real RF/DTD/TUN links
+        aredn_nodes = [n for n in nodes if n["network"] == "aredn"]
+        if aredn_nodes:
+            # Find the local AREDN node (the one without link_type, it's the source)
+            local_aredn = [n for n in aredn_nodes if not n.get("link_type")]
+            neighbor_aredn = [n for n in aredn_nodes if n.get("link_type")]
+
+            for local in local_aredn:
+                for neighbor in neighbor_aredn:
+                    # Create link from local to neighbor
+                    link_key = tuple(sorted([local["id"], neighbor["id"]]))
+                    if link_key not in aredn_links_added:
+                        dist = self._haversine(local["lat"], local["lon"],
+                                               neighbor["lat"], neighbor["lon"])
+                        link_type_str = neighbor.get("link_type", "RF")
+                        links.append({
+                            "source": local["id"],
+                            "target": neighbor["id"],
+                            "type": f"aredn_{link_type_str.lower()}",  # aredn_rf, aredn_dtd, aredn_tun
+                            "link_quality": neighbor.get("link_quality", 0),
+                            "snr": neighbor.get("snr"),
+                            "distance_km": round(dist, 2)
+                        })
+                        aredn_links_added.add(link_key)
+
+        # Build links based on proximity and network relationships for non-AREDN nodes
+        gateways = [n for n in nodes if (n["is_gateway"] or n["is_router"]) and n["network"] != "aredn"]
+        regular_nodes = [n for n in nodes if not n["is_gateway"] and not n["is_router"] and n["network"] != "aredn"]
 
         # Connect regular nodes to nearest gateway/router
         for node in regular_nodes:
@@ -1375,6 +1736,99 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "timestamp": datetime.now().isoformat()
         })
 
+    # ─────────────────────────────────────────────────────────────────
+    # Radio Control API - MeshForge-owned Meshtastic access
+    # ─────────────────────────────────────────────────────────────────
+
+    def _get_radio_connection(self):
+        """Get or create radio connection manager."""
+        try:
+            from utils.meshtastic_connection import (
+                get_connection_manager, ConnectionMode
+            )
+            return get_connection_manager(mode=ConnectionMode.AUTO)
+        except ImportError:
+            return None
+
+    def _serve_radio_info(self):
+        """Serve radio device information."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            info = conn.get_radio_info()
+            info["connection_mode"] = conn.get_mode()
+            info["timestamp"] = datetime.now().isoformat()
+            self._serve_json(info)
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_nodes(self):
+        """Serve nodes from directly connected radio."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            nodes = conn.get_nodes()
+            self._serve_json({
+                "nodes": nodes,
+                "count": len(nodes),
+                "connection_mode": conn.get_mode(),
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_channels(self):
+        """Serve channels from directly connected radio."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({"error": "meshtastic library not available"}, status=500)
+            return
+
+        try:
+            channels = conn.get_channels()
+            self._serve_json({
+                "channels": channels,
+                "count": len(channels),
+                "connection_mode": conn.get_mode(),
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
+    def _serve_radio_status(self):
+        """Serve radio connection status."""
+        conn = self._get_radio_connection()
+        if not conn:
+            self._serve_json({
+                "connected": False,
+                "mode": "unavailable",
+                "error": "meshtastic library not available"
+            })
+            return
+
+        try:
+            # Check if connection is available
+            is_available = conn.is_available() if conn.mode.value == "tcp" else True
+            has_persistent = conn.has_persistent()
+
+            self._serve_json({
+                "connected": is_available or has_persistent,
+                "mode": conn.get_mode(),
+                "persistent_owner": conn.get_persistent_owner(),
+                "host": conn.host,
+                "port": conn.port,
+                "serial_port": conn.serial_port,
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            self._serve_json({"error": str(e)}, status=500)
+
     def _haversine(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance between two points in km."""
         import math
@@ -1396,7 +1850,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
 
 class MapServer:
-    """Simple HTTP server for the live network map.
+    """MeshForge HTTP server for network monitoring and radio control.
 
     Serves:
     - GET /              → node_map.html (the live map)
@@ -1409,6 +1863,13 @@ class MapServer:
     - GET /api/status    → server health check + history stats
     - GET /*             → static files from web/
 
+    Radio Control API (MeshForge-owned):
+    - GET /api/radio/info     → radio device information
+    - GET /api/radio/nodes    → nodes from connected radio
+    - GET /api/radio/channels → channels from connected radio
+    - GET /api/radio/status   → radio connection status
+    - POST /api/radio/message → send message via radio
+
     Usage:
         server = MapServer(port=5000)
         server.start()     # Blocks
@@ -1416,7 +1877,8 @@ class MapServer:
         server.start_background()  # Returns immediately
     """
 
-    def __init__(self, port: int = 5000, host: str = "0.0.0.0"):
+    def __init__(self, port: int = 5000, host: str = "0.0.0.0",
+                 cors_origins: Optional[List[str]] = None):
         """Initialize map server.
 
         Args:
@@ -1425,9 +1887,14 @@ class MapServer:
                   - "0.0.0.0": All interfaces (default, works with AREDN/VPN/LAN)
                   - "localhost" or "127.0.0.1": Local only
                   - Specific IP: Bind to that IP only
+            cors_origins: CORS allowed origins. Options:
+                  - None: Allow all origins (*) - best for LAN/AREDN access
+                  - List: Only allow specified origins, e.g.,
+                    ["http://localhost", "http://192.168.1."]
         """
         self.port = port
         self.host = host
+        self.cors_origins = cors_origins
         self.collector = MapDataCollector()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -1440,6 +1907,7 @@ class MapServer:
         """Start server (blocking)."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
@@ -1466,6 +1934,7 @@ class MapServer:
         """Start server in background thread."""
         MapRequestHandler.collector = self.collector
         MapRequestHandler.web_dir = self.web_dir
+        MapRequestHandler.allowed_origins = self.cors_origins
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -1488,24 +1957,173 @@ class MapServer:
 
 
 def main():
-    """Run the map server standalone."""
-    import argparse
+    """Run the map server standalone.
 
-    parser = argparse.ArgumentParser(description="MeshForge Live Map Server")
-    parser.add_argument("-p", "--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 for all interfaces)")
-    parser.add_argument("--collect-only", action="store_true", help="Just collect and print GeoJSON")
+    Designed for both interactive use and systemd service deployment.
+
+    Examples:
+        # Interactive
+        python -m utils.map_data_service
+
+        # As service
+        python -m utils.map_data_service --daemon
+
+        # Collect GeoJSON only
+        python -m utils.map_data_service --collect-only
+    """
+    import argparse
+    import signal
+
+    parser = argparse.ArgumentParser(
+        description="MeshForge Live Map Server - NOC Web Interface",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m utils.map_data_service           # Start on port 5000
+  python -m utils.map_data_service -p 8080   # Use custom port
+  python -m utils.map_data_service --daemon  # Run as background service
+  python -m utils.map_data_service --status  # Check if running
+  python -m utils.map_data_service --collect-only  # Just get GeoJSON
+        """
+    )
+    parser.add_argument("-p", "--port", type=int, default=5000,
+                        help="Port (default: 5000)")
+    parser.add_argument("--host", default="0.0.0.0",
+                        help="Bind address (default: 0.0.0.0 for all interfaces)")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Just collect and print GeoJSON, then exit")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run in daemon mode (for systemd)")
+    parser.add_argument("--status", action="store_true",
+                        help="Check if map server is running")
+    parser.add_argument("--pid-file", type=str,
+                        default="/run/meshforge/map-server.pid",
+                        help="PID file location (default: /run/meshforge/map-server.pid)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose logging")
     args = parser.parse_args()
 
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    # Status check
+    if args.status:
+        return _check_server_status(args.port)
+
+    # Collect-only mode
     if args.collect_only:
         collector = MapDataCollector()
         geojson = collector.collect()
         print(json.dumps(geojson, indent=2))
-        print(f"\n# {len(geojson['features'])} nodes collected", flush=True)
-    else:
-        server = MapServer(port=args.port, host=args.host)
+
+        # Summary to stderr so it doesn't pollute JSON output
+        import sys
+        props = geojson.get("properties", {})
+        print(f"\n# {len(geojson['features'])} nodes with position", file=sys.stderr)
+        print(f"# {props.get('nodes_without_position_count', 0)} nodes without position", file=sys.stderr)
+        print(f"# Sources: {props.get('sources', {})}", file=sys.stderr)
+        return 0
+
+    # Check if port is already in use
+    if _is_port_in_use(args.port):
+        print(f"ERROR: Port {args.port} is already in use")
+        print(f"  Check: lsof -i :{args.port}")
+        print(f"  Or use: --port <different_port>")
+        return 1
+
+    # Daemon mode - write PID file for service management
+    if args.daemon:
+        _write_pid_file(args.pid_file)
+
+    # Create and start server
+    server = MapServer(port=args.port, host=args.host)
+
+    # Signal handlers for graceful shutdown
+    def handle_signal(signum, frame):
+        sig_name = signal.Signals(signum).name
+        print(f"\nReceived {sig_name}, shutting down...")
+        server.stop()
+        _remove_pid_file(args.pid_file)
+        import sys
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    try:
         server.start()
+    finally:
+        _remove_pid_file(args.pid_file)
+
+    return 0
+
+
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is already in use."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+def _check_server_status(port: int) -> int:
+    """Check if map server is running and report status."""
+    if _is_port_in_use(port):
+        print(f"✓ MeshForge Map Server is running on port {port}")
+        # Try to get status from API
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"http://localhost:{port}/api/status", timeout=2) as resp:
+                data = json.loads(resp.read().decode())
+                print(f"  Collector: {'active' if data.get('collector') else 'inactive'}")
+                if data.get('radio'):
+                    radio = data['radio']
+                    print(f"  Radio: {radio.get('mode', 'unknown')} "
+                          f"({'connected' if radio.get('connected') else 'disconnected'})")
+        except Exception:
+            pass
+        return 0
+    else:
+        print(f"✗ MeshForge Map Server is not running on port {port}")
+        return 1
+
+
+def _write_pid_file(pid_file: str) -> None:
+    """Write PID file for service management."""
+    try:
+        pid_dir = Path(pid_file).parent
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        with open(pid_file, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.debug(f"PID file written: {pid_file}")
+    except PermissionError:
+        # Running as non-root, use alternative location
+        alt_pid = Path("/tmp/meshforge-map-server.pid")
+        with open(alt_pid, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.debug(f"PID file written: {alt_pid}")
+    except Exception as e:
+        logger.warning(f"Could not write PID file: {e}")
+
+
+def _remove_pid_file(pid_file: str) -> None:
+    """Remove PID file on shutdown."""
+    for path in [pid_file, "/tmp/meshforge-map-server.pid"]:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main() or 0)

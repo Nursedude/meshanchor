@@ -968,6 +968,12 @@ fi
 if $INSTALL_RNS; then
     echo -e "${CYAN}[4/8] Installing Reticulum (RNS)...${NC}"
 
+    # Install pipx (needed for NomadNet install via menu)
+    if ! command -v pipx &>/dev/null; then
+        echo "  Installing pipx..."
+        apt-get install -y -qq pipx &>/dev/null
+    fi
+
     pip3 install $PIP_ARGS --ignore-installed -q rns
 
     # Create systemd service if not exists
@@ -992,6 +998,14 @@ WantedBy=multi-user.target
 RNSD_SERVICE
 
         systemctl daemon-reload
+    fi
+
+    # Check if Meshtastic_Interface.py plugin exists - if so, install meshtastic module
+    # This is required for the RNS-over-Meshtastic bridge to work (Issue #24)
+    if [[ -f "/etc/reticulum/interfaces/Meshtastic_Interface.py" ]]; then
+        echo "  Meshtastic_Interface.py detected, installing meshtastic module..."
+        pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+        echo -e "  ${GREEN}✓ meshtastic module installed for rnsd${NC}"
     fi
 
     echo -e "  ${GREEN}✓ Reticulum installed${NC}"
@@ -1176,6 +1190,88 @@ fi
 WEB_CMD
 chmod +x /usr/local/bin/meshforge-web
 
+# MeshForge Map Server command (NOC web UI on port 5000)
+cat > /usr/local/bin/meshforge-map << 'MAP_CMD'
+#!/bin/bash
+# MeshForge Map Server - NOC Web Interface
+# Serves the live node map on port 5000
+
+PYTHON_CMD="/opt/meshforge/venv/bin/python"
+[ ! -x "$PYTHON_CMD" ] && PYTHON_CMD="python3"
+
+case "${1:-}" in
+    start)
+        echo "Starting MeshForge Map Server..."
+        sudo systemctl start meshforge-map
+        ;;
+    stop)
+        echo "Stopping MeshForge Map Server..."
+        sudo systemctl stop meshforge-map
+        ;;
+    restart)
+        echo "Restarting MeshForge Map Server..."
+        sudo systemctl restart meshforge-map
+        ;;
+    status)
+        systemctl status meshforge-map --no-pager
+        cd /opt/meshforge/src && $PYTHON_CMD -m utils.map_data_service --status
+        ;;
+    enable)
+        echo "Enabling MeshForge Map Server on boot..."
+        sudo systemctl enable meshforge-map
+        ;;
+    disable)
+        echo "Disabling MeshForge Map Server on boot..."
+        sudo systemctl disable meshforge-map
+        ;;
+    url)
+        LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+        [ -z "$LOCAL_IP" ] && LOCAL_IP="localhost"
+        echo "MeshForge Map: http://${LOCAL_IP}:5000/"
+        ;;
+    *)
+        # Default: run interactively (for debugging)
+        cd /opt/meshforge/src
+        exec $PYTHON_CMD -m utils.map_data_service "$@"
+        ;;
+esac
+MAP_CMD
+chmod +x /usr/local/bin/meshforge-map
+
+# Install MeshForge Map Server systemd service
+if [[ -f "$INSTALL_DIR/scripts/meshforge-map.service" ]]; then
+    cp "$INSTALL_DIR/scripts/meshforge-map.service" /etc/systemd/system/
+    echo -e "  ${GREEN}✓ meshforge-map.service installed${NC}"
+else
+    # Inline service definition (fallback)
+    cat > /etc/systemd/system/meshforge-map.service << 'MAP_SERVICE'
+[Unit]
+Description=MeshForge Map Server - NOC Web Interface
+Documentation=https://github.com/Nursedude/meshforge
+After=network.target meshtasticd.service
+Wants=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshforge/src
+RuntimeDirectory=meshforge
+ExecStart=/bin/bash -c 'if [ -x /opt/meshforge/venv/bin/python ]; then exec /opt/meshforge/venv/bin/python -m utils.map_data_service --daemon --port 5000; else exec python3 -m utils.map_data_service --daemon --port 5000; fi'
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshforge-map
+
+[Install]
+WantedBy=multi-user.target
+MAP_SERVICE
+    echo -e "  ${GREEN}✓ meshforge-map.service created${NC}"
+fi
+
 # Update systemd service to use orchestrator
 cat > /etc/systemd/system/meshforge.service << 'MESHFORGE_SERVICE'
 [Unit]
@@ -1243,6 +1339,7 @@ if $INSTALL_RNS; then
     echo -e "  ${GREEN}✓${NC} Reticulum (RNS)"
 fi
 echo -e "  ${GREEN}✓${NC} MeshForge NOC"
+echo -e "  ${GREEN}✓${NC} MeshForge Map Server (port 5000)"
 echo ""
 echo -e "${CYAN}Configuration:${NC}"
 echo -e "  NOC Mode:    ${BOLD}$NOC_MODE${NC}"
@@ -1259,17 +1356,20 @@ echo "  /etc/meshtasticd/available.d/     - Radio templates"
 echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo -e "  ${GREEN}meshforge-status${NC}            - Quick system status (no sudo needed)"
-echo -e "  ${GREEN}meshforge-web${NC}              - Open radio web client (config)"
-echo -e "  ${GREEN}sudo meshforge${NC}             - Launch interface wizard"
-echo -e "  ${GREEN}sudo meshforge-noc --start${NC}  - Start NOC services"
-echo -e "  ${GREEN}sudo meshforge-noc --status${NC} - Check service status"
-echo -e "  ${GREEN}sudo meshforge-noc --stop${NC}   - Stop NOC services"
+echo -e "  ${GREEN}meshforge-status${NC}             - Quick system status (no sudo needed)"
+echo -e "  ${GREEN}meshforge-web${NC}                - Open radio web client (config)"
+echo -e "  ${GREEN}meshforge-map url${NC}            - Show NOC map URL (port 5000)"
+echo -e "  ${GREEN}meshforge-map status${NC}         - Check map server status"
+echo -e "  ${GREEN}sudo meshforge${NC}               - Launch interface wizard"
+echo -e "  ${GREEN}sudo meshforge-noc --start${NC}   - Start NOC services"
+echo -e "  ${GREEN}sudo meshforge-noc --status${NC}  - Check service status"
+echo -e "  ${GREEN}sudo meshforge-noc --stop${NC}    - Stop NOC services"
 echo ""
 echo -e "${CYAN}Systemd Services:${NC}"
-echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}   - Enable on boot"
-echo -e "  ${GREEN}sudo systemctl start meshforge${NC}    - Start now"
-echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC} - Check meshtasticd"
+echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}       - Enable NOC on boot"
+echo -e "  ${GREEN}sudo systemctl enable meshforge-map${NC}   - Enable Map Server on boot"
+echo -e "  ${GREEN}sudo systemctl start meshforge-map${NC}    - Start Map Server now"
+echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC}     - Check meshtasticd"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────
@@ -1334,6 +1434,22 @@ if [[ -x "$VERIFY_SCRIPT" ]]; then
 else
     echo -e "${YELLOW}⚠ Verification script not found: $VERIFY_SCRIPT${NC}"
     echo -e "${YELLOW}  Skipping verification${NC}"
+fi
+
+# Enable and start MeshForge Map Server (NOC web UI)
+echo ""
+echo -e "${CYAN}Enabling MeshForge Map Server...${NC}"
+systemctl daemon-reload
+systemctl enable meshforge-map 2>/dev/null || true
+systemctl start meshforge-map 2>/dev/null || true
+
+# Check if map server started
+sleep 2
+if systemctl is-active --quiet meshforge-map; then
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    echo -e "  ${GREEN}✓ Map Server running: http://${LOCAL_IP}:5000/${NC}"
+else
+    echo -e "  ${YELLOW}⚠ Map Server not running (check: journalctl -u meshforge-map)${NC}"
 fi
 
 # Offer to start services (only if services can actually run)

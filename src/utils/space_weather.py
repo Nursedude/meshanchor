@@ -110,6 +110,7 @@ class SpaceWeatherAPI:
     ENDPOINTS = {
         'k_index_1m': '/json/planetary_k_index_1m.json',
         'k_index_3d': '/json/boulder_k_index_1m.json',
+        'a_index_text': '/text/daily-geomagnetic-indices.txt',  # Text format (JSON not available)
         'solar_flux': '/json/f107_cm_flux.json',
         'sunspot': '/json/sunspot_report.json',
         'goes_xray': '/json/goes/primary/xrays-6-hour.json',
@@ -227,6 +228,73 @@ class SpaceWeatherAPI:
 
         return None
 
+    def get_a_index(self) -> Optional[int]:
+        """Get current daily A-index (planetary).
+
+        The A-index is a daily average of geomagnetic activity,
+        providing a more stable measure than the 3-hourly K-index.
+
+        Note: NOAA provides this as a text file, not JSON.
+        Format: daily-geomagnetic-indices.txt
+
+        Returns:
+            A-index value (0-400 scale) or None
+        """
+        return self._fetch_a_index_from_text()
+
+    def _fetch_a_index_from_text(self) -> Optional[int]:
+        """Fetch A-index from NOAA text endpoint.
+
+        Parses daily-geomagnetic-indices.txt which has format like:
+        #  Date        Ap
+        2026 01 30     8
+        2026 01 31     5
+        """
+        url = f"{self.BASE_URL}{self.ENDPOINTS['a_index_text']}"
+
+        # Check cache
+        cache_key = 'a_index_text'
+        if cache_key in self._cache:
+            cached_time, cached_data = self._cache[cache_key]
+            if datetime.now() - cached_time < timedelta(seconds=self._cache_ttl):
+                return cached_data
+
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'MeshForge/1.0 (Space Weather Monitor)')
+
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                text = response.read().decode('utf-8')
+
+            # Parse text file - look for lines with date and Ap value
+            # Skip comment lines starting with #
+            lines = [l.strip() for l in text.splitlines() if l.strip() and not l.startswith('#') and not l.startswith(':')]
+
+            if lines:
+                # Get the last data line (most recent)
+                for line in reversed(lines):
+                    parts = line.split()
+                    # Expected: YYYY MM DD Ap [other values...]
+                    # or similar format with Ap in position 3 or 4
+                    if len(parts) >= 4:
+                        try:
+                            # Try to find Ap value (typically column 4 or later)
+                            # Format varies, but Ap is usually after date fields
+                            ap_value = int(parts[3])  # After YYYY MM DD
+                            self._cache[cache_key] = (datetime.now(), ap_value)
+                            return ap_value
+                        except (ValueError, IndexError):
+                            continue
+
+        except urllib.error.HTTPError as e:
+            logger.warning(f"[SWPC] HTTP error fetching A-index text: {e.code}")
+        except urllib.error.URLError as e:
+            logger.warning(f"[SWPC] URL error fetching A-index text: {e.reason}")
+        except Exception as e:
+            logger.debug(f"[SWPC] Error parsing A-index text: {e}")
+
+        return None
+
     def _flux_to_class(self, flux_wm2: float) -> str:
         """Convert X-ray flux (W/m²) to class notation."""
         if flux_wm2 < 1e-7:
@@ -250,12 +318,17 @@ class SpaceWeatherAPI:
     def assess_band_conditions(
         self,
         solar_flux: Optional[float],
-        k_index: Optional[int]
+        k_index: Optional[int],
+        a_index: Optional[int] = None
     ) -> Dict[str, BandCondition]:
         """Assess HF band conditions based on indices.
 
         Higher solar flux = better ionization = better HF
         Higher K-index = more disturbance = worse HF
+        Higher A-index = sustained disturbance = worse for low bands
+
+        The A-index is a daily average, so it indicates sustained conditions
+        that particularly affect lower HF bands (160m, 80m, 40m).
 
         Returns:
             Dict mapping band names to condition assessments
@@ -296,8 +369,23 @@ class SpaceWeatherAPI:
             else:
                 k_score = 0  # Geomagnetic storm
 
+        # Score based on A-index (lower = better, affects low bands)
+        # A-index scale: <7 Quiet, 7-15 Unsettled, 15-30 Active, 30-50 Minor storm
+        a_score = 4  # Default excellent if unknown
+        if a_index is not None:
+            if a_index < 7:
+                a_score = 4  # Quiet
+            elif a_index < 15:
+                a_score = 3  # Unsettled
+            elif a_index < 30:
+                a_score = 2  # Active
+            elif a_index < 50:
+                a_score = 1  # Minor storm
+            else:
+                a_score = 0  # Major storm
+
         # Combine scores
-        def score_to_condition(score: int) -> BandCondition:
+        def score_to_condition(score: float) -> BandCondition:
             if score >= 7:
                 return BandCondition.EXCELLENT
             elif score >= 5:
@@ -310,10 +398,11 @@ class SpaceWeatherAPI:
                 return BandCondition.VERY_POOR
 
         # Higher bands benefit more from high flux
-        # Lower bands are more affected by K-index
-        conditions['160m'] = score_to_condition(k_score * 2)  # Very K sensitive
-        conditions['80m'] = score_to_condition(k_score * 2)
-        conditions['40m'] = score_to_condition(flux_score + k_score)
+        # Lower bands are more affected by K-index and A-index
+        # A-index (daily average) particularly impacts sustained low-band propagation
+        conditions['160m'] = score_to_condition(k_score + a_score)  # Very sensitive to geomag
+        conditions['80m'] = score_to_condition(k_score + a_score)
+        conditions['40m'] = score_to_condition(flux_score * 0.5 + k_score * 0.5 + a_score)
         conditions['30m'] = score_to_condition(flux_score + k_score)
         conditions['20m'] = score_to_condition(flux_score + k_score)
         conditions['17m'] = score_to_condition(flux_score * 1.5 + k_score * 0.5)
@@ -354,6 +443,9 @@ class SpaceWeatherAPI:
             data.k_index, data.k_index_time = k_result
             data.geomag_storm = self.k_to_storm_level(data.k_index)
 
+        # Fetch A-index (daily geomagnetic average)
+        data.a_index = self.get_a_index()
+
         # Fetch Solar Flux
         data.solar_flux = self.get_solar_flux()
 
@@ -362,9 +454,9 @@ class SpaceWeatherAPI:
         if data.xray_flux:
             data.xray_class = data.xray_flux[0]  # First letter
 
-        # Assess band conditions
+        # Assess band conditions (now includes A-index for low-band accuracy)
         data.band_conditions = self.assess_band_conditions(
-            data.solar_flux, data.k_index
+            data.solar_flux, data.k_index, data.a_index
         )
 
         return data
@@ -423,6 +515,7 @@ if __name__ == "__main__":
     print(f"\nSpace Weather Conditions ({data.updated}):")
     print(f"  Solar Flux: {data.solar_flux} SFU")
     print(f"  K-index: {data.k_index}")
+    print(f"  A-index: {data.a_index}")
     print(f"  X-ray: {data.xray_flux}")
     print(f"  Geomagnetic: {data.geomag_storm.value}")
 

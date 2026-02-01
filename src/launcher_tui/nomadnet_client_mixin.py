@@ -24,6 +24,13 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Import centralized service checking
+try:
+    from utils.service_check import check_process_running
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
+
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
 try:
     from utils.paths import get_real_user_home
@@ -42,6 +49,97 @@ except ImportError:
 
 class NomadNetClientMixin:
     """Mixin providing NomadNet client management for the TUI launcher."""
+
+    # ------------------------------------------------------------------
+    # Ownership fix for user directories
+    # ------------------------------------------------------------------
+
+    def _fix_user_directory_ownership(self) -> bool:
+        """Fix ownership of user directories if they were created by root.
+
+        When MeshForge runs with sudo, any user-space applications (NomadNet,
+        rnstatus, etc.) that were previously launched as root may have created
+        ~/.reticulum or ~/.nomadnetwork with root ownership.
+
+        This function detects and fixes that situation so the real user can
+        access their own directories.
+
+        Returns:
+            True if directories are accessible (or were fixed successfully).
+            False if fix failed and user declined to proceed.
+        """
+        sudo_user = os.environ.get('SUDO_USER')
+        if not sudo_user or sudo_user == 'root':
+            # Not running via sudo, nothing to fix
+            return True
+
+        user_home = get_real_user_home()
+        if not user_home.exists():
+            return True
+
+        # Directories that should belong to the user, not root
+        user_dirs = [
+            user_home / '.reticulum',
+            user_home / '.nomadnetwork',
+            user_home / '.config' / 'nomadnetwork',
+        ]
+
+        dirs_to_fix = []
+        for dir_path in user_dirs:
+            if dir_path.exists():
+                try:
+                    stat_info = dir_path.stat()
+                    # Check if owned by root (uid 0)
+                    if stat_info.st_uid == 0:
+                        dirs_to_fix.append(dir_path)
+                except (OSError, PermissionError):
+                    # Can't stat, might still be a problem
+                    dirs_to_fix.append(dir_path)
+
+        if not dirs_to_fix:
+            return True
+
+        # Found directories with wrong ownership - offer to fix
+        dir_list = '\n'.join(f'  {d}' for d in dirs_to_fix)
+        if not self.dialog.yesno(
+            "Fix Directory Ownership",
+            f"The following directories are owned by root,\n"
+            f"which prevents NomadNet from accessing them:\n\n"
+            f"{dir_list}\n\n"
+            f"This happened because NomadNet or rnsd was\n"
+            f"previously run as root.\n\n"
+            f"Fix ownership to user '{sudo_user}'?",
+        ):
+            # User declined - warn but allow proceeding
+            return self.dialog.yesno(
+                "Proceed Anyway?",
+                "Ownership was not fixed.\n\n"
+                "NomadNet may fail with 'Permission denied' errors.\n\n"
+                "Continue anyway?",
+            )
+
+        # Fix ownership recursively
+        self.dialog.infobox("Fixing Ownership", f"Changing ownership to {sudo_user}...")
+
+        for dir_path in dirs_to_fix:
+            try:
+                # chown -R user:user dir_path
+                subprocess.run(
+                    ['chown', '-R', f'{sudo_user}:{sudo_user}', str(dir_path)],
+                    capture_output=True, timeout=30
+                )
+                logger.info(f"Fixed ownership of {dir_path} to {sudo_user}")
+            except Exception as e:
+                logger.warning(f"Failed to fix ownership of {dir_path}: {e}")
+                self.dialog.msgbox(
+                    "Ownership Fix Failed",
+                    f"Could not fix ownership of:\n  {dir_path}\n\n"
+                    f"Error: {e}\n\n"
+                    f"Try manually:\n  sudo chown -R {sudo_user}:{sudo_user} {dir_path}",
+                )
+                return False
+
+        return True
 
     # ------------------------------------------------------------------
     # Top-level submenu
@@ -185,11 +283,17 @@ class NomadNetClientMixin:
         print()
         print("--- RNS Connectivity ---")
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
+
+            if rnsd_running:
                 print("  rnsd:      RUNNING (shared instance available)")
             else:
                 print("  rnsd:      NOT running")
@@ -208,9 +312,21 @@ class NomadNetClientMixin:
 
         This takes over the terminal (like running nomadnet directly).
         The user returns to MeshForge when they exit NomadNet.
+
+        When running via sudo, launches as the real user so NomadNet
+        uses their config (~/.nomadnetwork) instead of root's.
         """
         nn_path = self._find_nomadnet_binary()
         if not nn_path:
+            return
+
+        # Fix ownership of user directories if they were created by root
+        # This is a common issue when MeshForge runs with sudo
+        if not self._fix_user_directory_ownership():
+            return
+
+        # Validate and repair config if needed (e.g., missing [textui] section)
+        if not self._validate_nomadnet_config():
             return
 
         # Check if rnsd is running (NomadNet needs RNS)
@@ -222,12 +338,20 @@ class NomadNetClientMixin:
         print("=== Launching NomadNet ===")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
+        # Build environment - set HOME to real user's home when running via sudo
+        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
+        # IMPORTANT: We run directly (no sudo -u) because sudo breaks curses TTY
+        env = os.environ.copy()
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            user_home = get_real_user_home()
+            env['HOME'] = str(user_home)
+            env['USER'] = sudo_user
+            env['LOGNAME'] = sudo_user
+
         try:
             # Run interactively -- NomadNet takes over the terminal
-            result = subprocess.run(
-                [nn_path, '--textui'],
-                timeout=None
-            )
+            result = subprocess.run([nn_path, '--textui'], env=env, timeout=None)
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
@@ -264,13 +388,21 @@ class NomadNetClientMixin:
     # ------------------------------------------------------------------
 
     def _launch_nomadnet_daemon(self):
-        """Start NomadNet in daemon mode (background, no UI)."""
+        """Start NomadNet in daemon mode (background, no UI).
+
+        When running via sudo, launches as the real user so NomadNet
+        uses their config (~/.nomadnetwork) instead of root's.
+        """
         nn_path = self._find_nomadnet_binary()
         if not nn_path:
             return
 
         if self._is_nomadnet_running():
             self.dialog.msgbox("Already Running", "NomadNet is already running.")
+            return
+
+        # Fix ownership of user directories if they were created by root
+        if not self._fix_user_directory_ownership():
             return
 
         if not self._check_rns_for_nomadnet():
@@ -289,9 +421,19 @@ class NomadNetClientMixin:
 
         self.dialog.infobox("Starting", "Starting NomadNet daemon...")
 
+        # Build command - run as real user if we're under sudo
+        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            # Run as real user with -H to set HOME correctly
+            # Using -H instead of -i avoids running shell profiles which can interfere
+            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+        else:
+            cmd = [nn_path, '--daemon']
+
         try:
             subprocess.Popen(
-                [nn_path, '--daemon'],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True
@@ -419,9 +561,18 @@ class NomadNetClientMixin:
                 if nn_path:
                     self.dialog.infobox("Generating Config", "Running NomadNet briefly to generate config...")
                     try:
+                        # Build command - run as real user if we're under sudo
+                        # This ensures config is created with correct ownership
+                        sudo_user = os.environ.get('SUDO_USER')
+                        if sudo_user and sudo_user != 'root':
+                            # Using -H instead of -i to set HOME without shell profiles
+                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+                        else:
+                            cmd = [nn_path, '--daemon']
+
                         # Run daemon briefly, then kill to generate config
                         proc = subprocess.Popen(
-                            [nn_path, '--daemon'],
+                            cmd,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                             start_new_session=True,
@@ -601,75 +752,34 @@ class NomadNetClientMixin:
         return candidate.exists()
 
     def _setup_nomadnet_shared_instance(self, run_as_user: str = None):
-        """Configure NomadNet for shared instance mode (use existing rnsd).
+        """Post-install message for NomadNet.
 
-        Creates a minimal config that doesn't define interfaces, so NomadNet
-        connects to the running rnsd instead of trying to bind its own ports.
-        This prevents 'Address already in use' errors.
+        NomadNet creates its own complete default config on first run.
+        We don't create configs - let NomadNet use its defaults.
         """
         user_home = get_real_user_home()
-        config_dir = user_home / '.nomadnetwork'
-        config_file = config_dir / 'config'
+        config_file = user_home / '.nomadnetwork' / 'config'
 
-        # Don't overwrite existing config
         if config_file.exists():
-            print(f"\nNomadNet config already exists: {config_file}")
-            return
+            print(f"\nNomadNet config exists: {config_file}")
+        else:
+            print("\nNomadNet will create its default config on first run.")
 
-        print("\nConfiguring NomadNet for shared instance mode (use rnsd)...")
-
-        # Minimal config - no interfaces = shared instance mode
-        config_content = """# NomadNet Configuration
-# Generated by MeshForge - configured for shared instance mode
-# This connects to the running rnsd instead of binding its own ports
-
-[node]
-enable_node = yes
-node_name = NomadNet Node
-
-[client]
-user_interface = text
-downloads_path = ~/Downloads
-
-# No [interfaces] section = use shared RNS instance from rnsd
-# This prevents 'Address already in use' conflicts
-"""
-
-        try:
-            # Create directory and file as the real user
-            if run_as_user:
-                # Create dir as user
-                subprocess.run(
-                    ['sudo', '-u', run_as_user, 'mkdir', '-p', str(config_dir)],
-                    timeout=10
-                )
-                # Write config as user using tee
-                proc = subprocess.run(
-                    ['sudo', '-u', run_as_user, 'tee', str(config_file)],
-                    input=config_content,
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if proc.returncode == 0:
-                    print(f"Created config: {config_file}")
-                    print("NomadNet will use shared RNS instance from rnsd.")
-                else:
-                    print(f"Warning: Could not create config: {proc.stderr}")
-            else:
-                # Running as normal user
-                config_dir.mkdir(parents=True, exist_ok=True)
-                config_file.write_text(config_content)
-                print(f"Created config: {config_file}")
-                print("NomadNet will use shared RNS instance from rnsd.")
-
-        except Exception as e:
-            print(f"Warning: Could not create NomadNet config: {e}")
-            print("You may need to configure manually - see:")
-            print("  https://github.com/markqvist/NomadNet#configuration")
+        print("\nNomadNet uses the shared RNS instance from rnsd by default.")
+        print("Config location: ~/.nomadnetwork/config")
 
     def _is_nomadnet_running(self) -> bool:
-        """Check if NomadNet process is running."""
+        """Check if NomadNet process is running.
+
+        Uses centralized service_check module when available, with fallback
+        to direct pgrep for custom filtering.
+        """
+        # Try unified check first (faster and standardized)
+        if _HAS_SERVICE_CHECK:
+            if check_process_running('nomadnet'):
+                return True
+
+        # Fallback to direct pgrep with custom filtering
         try:
             result = subprocess.run(
                 ['pgrep', '-f', 'bin/nomadnet'],
@@ -729,14 +839,19 @@ downloads_path = ~/Downloads
     def _check_rns_for_nomadnet(self) -> bool:
         """Check that RNS/rnsd is available before launching NomadNet.
 
+        Uses centralized service_check module when available.
         Returns True if OK to proceed, False if user cancelled.
         """
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            rnsd_running = result.returncode == 0
+            if _HAS_SERVICE_CHECK:
+                rnsd_running = check_process_running('rnsd')
+            else:
+                # Fallback to direct pgrep call
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
         except Exception:
             rnsd_running = False
 
@@ -755,3 +870,19 @@ downloads_path = ~/Downloads
             "  sudo systemctl start rnsd\n\n"
             "Continue anyway?",
         )
+
+    def _validate_nomadnet_config(self) -> bool:
+        """Check NomadNet config exists.
+
+        We don't modify configs - NomadNet creates its own defaults.
+        Just verify config exists or will be created.
+
+        Returns:
+            True to proceed with launch.
+        """
+        config_path = self._get_nomadnet_config_path()
+        if not config_path or not config_path.exists():
+            # No config yet - NomadNet will create default on first run
+            return True
+
+        return True

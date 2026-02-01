@@ -44,9 +44,13 @@ __all__ = [
     'check_udp_port',       # UDP port check (utility)
     'check_process_running', # Process check via pgrep (utility)
     'check_systemd_service', # Systemd status check
+    # Service management
+    'daemon_reload',             # Reload systemd daemon
+    'enable_service',            # Enable service at boot
+    'apply_config_and_restart',  # Reload daemon + restart service
     # Data classes
     'ServiceStatus',        # Return type from check_service
-    'ServiceState',         # Status enum (AVAILABLE, DEGRADED, etc.)
+    'ServiceState',         # Status enum (AVAILABLE, DEGRADED, FAILED, etc.)
     # Configuration
     'KNOWN_SERVICES',       # Service configuration dict
 ]
@@ -56,6 +60,7 @@ class ServiceState(Enum):
     """Service availability states."""
     AVAILABLE = "available"
     DEGRADED = "degraded"       # Running but with issues
+    FAILED = "failed"           # Service crashed or failed to start
     NOT_RUNNING = "not_running"
     NOT_INSTALLED = "not_installed"
     UNKNOWN = "unknown"         # Cannot determine state
@@ -298,6 +303,51 @@ def check_process_running(process_name: str) -> bool:
         return False
 
 
+def check_process_with_pid(process_name: str) -> Tuple[bool, Optional[str]]:
+    """
+    Check if a process is running and return its PID.
+
+    Args:
+        process_name: Name of the process to check (e.g., 'rnsd', 'meshtasticd')
+
+    Returns:
+        Tuple of (is_running, pid) where pid is the first matching PID or None
+
+    Example:
+        >>> running, pid = check_process_with_pid('rnsd')
+        >>> if running:
+        ...     print(f"rnsd is running (PID: {pid})")
+    """
+    try:
+        # First try exact process name match (most reliable)
+        result = subprocess.run(
+            ['pgrep', '-x', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            pid = result.stdout.strip().split('\n')[0]
+            return True, pid
+
+        # Also check with -f for processes run via interpreters
+        result = subprocess.run(
+            ['pgrep', '-f', process_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Filter out pgrep itself and get first real PID
+            pids = [p for p in result.stdout.strip().split('\n') if p]
+            if pids:
+                return True, pids[0]
+
+        return False, None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False, None
+
+
 def check_systemd_service(service_name: str) -> Tuple[bool, bool]:
     """
     Check if a systemd service is running and enabled.
@@ -484,7 +534,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 return ServiceStatus(
                     name=name,
                     available=False,
-                    state=ServiceState.DEGRADED,
+                    state=ServiceState.FAILED,
                     message=f"{description} has failed",
                     fix_hint=f"Check logs: journalctl -u {systemd_name}",
                     port=check_port_num,
@@ -618,3 +668,193 @@ def require_service(name: str, port: Optional[int] = None) -> ServiceStatus:
     if not status.available:
         logger.warning(f"{status.message}. {status.fix_hint}")
     return status
+
+
+def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Reload systemd daemon and restart a service.
+
+    This is the standard pattern after modifying service configuration files.
+    Always runs daemon-reload before restart to pick up changes.
+
+    Args:
+        service_name: Name of the systemd service to restart (default: meshtasticd)
+        timeout: Timeout in seconds for each command (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import apply_config_and_restart
+
+        # After modifying /etc/meshtasticd/config.yaml:
+        success, msg = apply_config_and_restart('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        # Step 1: Reload systemd daemon to pick up any service file changes
+        daemon_reload = subprocess.run(
+            ['systemctl', 'daemon-reload'],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if daemon_reload.returncode != 0:
+            error_msg = daemon_reload.stderr.strip() or "daemon-reload failed"
+            logger.error(f"daemon-reload failed: {error_msg}")
+            return False, f"daemon-reload failed: {error_msg}"
+
+        # Step 2: Restart the service
+        restart = subprocess.run(
+            ['systemctl', 'restart', service_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if restart.returncode != 0:
+            error_msg = restart.stderr.strip() or f"restart {service_name} failed"
+            logger.error(f"restart {service_name} failed: {error_msg}")
+            return False, f"restart {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully restarted {service_name}")
+        return True, f"{service_name} restarted successfully"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while restarting {service_name}")
+        return False, f"Timeout while restarting {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error restarting {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
+def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Reload the systemd daemon to pick up service file changes.
+
+    Use this after creating or modifying service unit files.
+    For most cases, prefer enable_service() or apply_config_and_restart()
+    which include daemon-reload automatically.
+
+    Args:
+        timeout: Timeout in seconds (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import daemon_reload
+
+        # After creating a new service file:
+        success, msg = daemon_reload()
+        if not success:
+            show_error(msg)
+    """
+    try:
+        result = subprocess.run(
+            ['systemctl', 'daemon-reload'],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or "daemon-reload failed"
+            logger.error(f"daemon-reload failed: {error_msg}")
+            return False, f"daemon-reload failed: {error_msg}"
+
+        logger.debug("systemctl daemon-reload succeeded")
+        return True, "daemon-reload succeeded"
+
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout during daemon-reload")
+        return False, "Timeout during daemon-reload"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error during daemon-reload: {e}")
+        return False, f"Error: {e}"
+
+
+def enable_service(service_name: str, start: bool = False, timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Enable a systemd service to start at boot.
+
+    Automatically runs daemon-reload before enabling to ensure service
+    file changes are picked up.
+
+    Args:
+        service_name: Name of the systemd service to enable
+        start: If True, also start the service immediately (default: False)
+        timeout: Timeout in seconds for each command (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import enable_service
+
+        # After creating a service file:
+        success, msg = enable_service('rnsd')
+        if not success:
+            show_error(msg)
+
+        # Enable and start immediately:
+        success, msg = enable_service('meshtasticd', start=True)
+    """
+    try:
+        # Step 1: Reload systemd daemon to pick up service file changes
+        reload_result = subprocess.run(
+            ['systemctl', 'daemon-reload'],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if reload_result.returncode != 0:
+            error_msg = reload_result.stderr.strip() or "daemon-reload failed"
+            logger.error(f"daemon-reload failed: {error_msg}")
+            return False, f"daemon-reload failed: {error_msg}"
+
+        # Step 2: Enable the service
+        enable_result = subprocess.run(
+            ['systemctl', 'enable', service_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if enable_result.returncode != 0:
+            error_msg = enable_result.stderr.strip() or f"enable {service_name} failed"
+            logger.error(f"enable {service_name} failed: {error_msg}")
+            return False, f"enable {service_name} failed: {error_msg}"
+
+        # Step 3: Optionally start the service
+        if start:
+            start_result = subprocess.run(
+                ['systemctl', 'start', service_name],
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            if start_result.returncode != 0:
+                error_msg = start_result.stderr.strip() or f"start {service_name} failed"
+                logger.error(f"start {service_name} failed: {error_msg}")
+                return False, f"Enabled but start failed: {error_msg}"
+
+            logger.info(f"Successfully enabled and started {service_name}")
+            return True, f"{service_name} enabled and started"
+
+        logger.info(f"Successfully enabled {service_name}")
+        return True, f"{service_name} enabled"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while enabling {service_name}")
+        return False, f"Timeout while enabling {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error enabling {service_name}: {e}")
+        return False, f"Error: {e}"
