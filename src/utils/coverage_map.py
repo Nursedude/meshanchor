@@ -677,7 +677,8 @@ class CoverageMapGenerator:
             import folium
             from folium.plugins import MarkerCluster, HeatMap
         except ImportError:
-            logger.error("Folium not installed. Run: pip install folium")
+            # Folium not installed - use Leaflet.js fallback instead
+            logger.debug("Folium not installed, using Leaflet fallback")
             return self._generate_fallback(output_path)
 
         # Determine output path
@@ -1053,7 +1054,8 @@ class CoverageMapGenerator:
             import folium
             from folium.plugins import HeatMap
         except ImportError:
-            logger.error("Folium not installed for heatmap")
+            # Heatmap requires Folium - no fallback available
+            logger.warning("Folium not installed, heatmap unavailable")
             return ""
 
         if output_path is None:
