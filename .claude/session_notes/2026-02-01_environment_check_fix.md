@@ -52,6 +52,26 @@ The environment check still alerts for genuine issues:
 
 - `src/launcher_tui/startup_checks.py` - Removed noisy boot-enable alert
 
+---
+
+## Additional Fix: Topology Browser SSH Support
+
+**Issue**: "Open in Browser (D3.js Graph)" failed in SSH/headless environments. The xdg-open/webbrowser calls would fail silently, leaving users with no working option.
+
+**Fix**: Modified `_open_topology_browser()` in `topology_mixin.py` to:
+1. Detect SSH/headless environment (SSH_CLIENT, SSH_TTY, no DISPLAY)
+2. If headless: offer menu with options:
+   - Open with lynx (text browser)
+   - Show file path only
+3. If has display: use existing xdg-open flow
+
+**Files changed**:
+- `src/launcher_tui/topology_mixin.py` - Added SSH/headless detection and lynx option
+
 ## Session Health
 
-Session remained focused on single issue. No entropy detected.
+Session remained focused. Two related issues fixed:
+1. Noisy boot-enable alert
+2. SSH topology browser handling
+
+No entropy detected.
