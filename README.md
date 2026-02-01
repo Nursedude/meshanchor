@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.4.8--alpha-orange.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.0--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2624%20passing-brightgreen.svg" alt="Tests"></a>
@@ -201,19 +201,19 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.4.8-beta)
+## What Works (v0.5.0-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Stable |
+| **TUI Interface** | Installer, service control, config management, diagnostics | **Stable** |
+| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
 | **Live NOC Map** | Real-time browser view, Meshtastic + RNS nodes, field ops tools | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
-| **Reticulum** | Config editor, interface templates, node position mapping, rnstatus/rnpath | Stable |
 | **AREDN** | Node discovery, link quality, service enumeration | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
@@ -221,11 +221,12 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 | Feature | Target | Status |
 |---------|--------|--------|
-| Live Map Phase 6 — Historical playback | Q1 2026 | Planned |
+| **Multi-Mesh Gateway** | Q1 2026 | **In Progress (alpha)** |
+| Short Turbo ↔ LongFast bridging | Q1 2026 | Testing |
+| Multi-radio template (HAT + USB) | Q1 2026 | Testing |
+| Multi-hop path visualization | Q2 2026 | Planned |
 | Packet decode (protobuf + RNS frames) | Q2 2026 | Planned |
 | SDR spectrum analysis (RTL-SDR) | Q2 2026 | Planned |
-| GPS tracking + GPX export | Q2 2026 | Planned |
-| Multi-hop path visualization | Q2 2026 | In Progress (alpha) |
 
 *Goal: Wireshark-grade visibility into mesh traffic.*
 
@@ -559,20 +560,18 @@ cd /opt/meshforge && sudo git pull origin main
 cd /opt/meshforge && sudo git pull origin alpha
 ```
 
-### Current Alpha Features (v0.4.8-beta)
+### Current Alpha Work: Multi-Mesh Gateway
 
-The Live Map system provides a browser-based NOC view:
+The gateway bridge is the cornerstone feature under active testing:
 
-| Feature | Description |
-|---------|-------------|
-| **Real-time Updates** | WebSocket-driven node position updates |
-| **Link Visualization** | SNR-based link quality coloring |
-| **Node Clustering** | Auto-group dense node areas |
-| **Status Dashboard** | Node counts, network health, alerts |
-| **Field Tools** | Range test, coverage estimation, node deployment |
-| **Offline Mode** | Cached tiles work without internet |
+| Configuration | Setup | Status |
+|---------------|-------|--------|
+| **moc1** | USB LongFast ↔ Short Turbo | Testing |
+| **moc2** | HAT Short Turbo ↔ LongFast (two-radio) | Testing |
+| **moc3** | HAT LongFast ↔ TBD | Planned |
+| **VolcanoAI** | USB LongFast ↔ RNS (desktop) | Testing |
 
-Access the live map from the TUI: **Maps → Live NOC View**
+The Live Map NOC view is stable and available: **Maps → Live NOC View**
 
 ---
 
