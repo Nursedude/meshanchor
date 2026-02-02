@@ -481,6 +481,48 @@
             100% { opacity: 1; transform: scale(1); }
         }
 
+        /* Node trajectory trails */
+        .trajectory-trail {
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+        }
+        @keyframes trail-dash {
+            0% { stroke-dashoffset: 12; }
+            100% { stroke-dashoffset: 0; }
+        }
+        .trajectory-trail-animated {
+            stroke-dasharray: 8 4;
+            animation: trail-dash 1s linear infinite;
+        }
+        .trajectory-point {
+            cursor: pointer;
+        }
+        .trajectory-point:hover {
+            transform: scale(1.5);
+        }
+        .btn-trail {
+            display: inline-block;
+            padding: 4px 10px;
+            margin-top: 8px;
+            background: #1a3a4a;
+            color: #4fc3f7;
+            border: 1px solid #2a4a5a;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-trail:hover {
+            background: #2a4a5a;
+            border-color: #4fc3f7;
+        }
+        .btn-trail.active {
+            background: #4fc3f7;
+            color: #0a0e1a;
+        }
+
         /* Antenna height slider */
         .slider-container {
             display: flex;
@@ -1489,7 +1531,9 @@
     const coverageLayer = L.layerGroup().addTo(map);
     const terrainLayer = L.layerGroup().addTo(map);
     const messageFlowLayer = L.layerGroup().addTo(map);
+    const trailsLayer = L.layerGroup().addTo(map);  // Node movement trails
     let heatmapLayer = null; // Lazy initialized when needed
+    let activeTrailNodeId = null; // Currently displayed trail
 
     // Phase 4: Network-specific layers for filtering
     const layers = {
@@ -2077,6 +2121,9 @@
                     <div class="info-label">Position</div>
                     <div class="info-value" style="font-size:11px">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</div>
                 </div>
+                <button class="btn-trail" onclick="toggleNodeTrail('${props.id}', event)" id="trail-btn-${props.id.replace(/[^a-zA-Z0-9]/g, '_')}">
+                    Show Trail (24h)
+                </button>
             </div>`;
     }
 
@@ -2558,6 +2605,170 @@
             heatmapLayer.addTo(map);
             heatmapLayer.setZIndex(100);
         }
+    }
+
+    // ============================================
+    // Node Movement Trails (Trajectory)
+    // ============================================
+
+    async function toggleNodeTrail(nodeId, event) {
+        if (event) event.stopPropagation();
+
+        // If clicking the same node, toggle off
+        if (activeTrailNodeId === nodeId) {
+            clearNodeTrail();
+            return;
+        }
+
+        // Clear any existing trail
+        clearNodeTrail();
+
+        // Fetch trajectory from API
+        try {
+            const response = await fetch(`/api/nodes/trajectory/${encodeURIComponent(nodeId)}`);
+            if (!response.ok) {
+                console.warn('Trajectory API not available');
+                return;
+            }
+
+            const geojson = await response.json();
+            if (!geojson.geometry || !geojson.geometry.coordinates || geojson.geometry.coordinates.length < 2) {
+                console.log('No trajectory data for node:', nodeId);
+                // Update button to show no data
+                const btnId = `trail-btn-${nodeId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                const btn = document.getElementById(btnId);
+                if (btn) btn.textContent = 'No trail data';
+                setTimeout(() => { if (btn) btn.textContent = 'Show Trail (24h)'; }, 2000);
+                return;
+            }
+
+            displayNodeTrail(nodeId, geojson);
+            activeTrailNodeId = nodeId;
+
+            // Update button state
+            const btnId = `trail-btn-${nodeId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.classList.add('active');
+                btn.textContent = 'Hide Trail';
+            }
+
+        } catch (e) {
+            console.error('Error fetching trajectory:', e);
+        }
+    }
+
+    function displayNodeTrail(nodeId, geojson) {
+        const coords = geojson.geometry.coordinates;
+        const props = geojson.properties;
+
+        // Get color based on network
+        const nodeEntry = Array.from(state.markers.values()).find(e => e.feature.properties.id === nodeId);
+        const color = nodeEntry ? getNodeColor(nodeEntry.feature.properties) : '#4fc3f7';
+
+        // Create trail polyline with gradient effect
+        const latLngs = coords.map(c => [c[1], c[0]]);
+
+        // Main trail line
+        const trailLine = L.polyline(latLngs, {
+            color: color,
+            weight: 3,
+            opacity: 0.8,
+            className: 'trajectory-trail trajectory-trail-animated'
+        });
+        trailsLayer.addLayer(trailLine);
+
+        // Trail shadow/glow effect
+        const trailShadow = L.polyline(latLngs, {
+            color: color,
+            weight: 8,
+            opacity: 0.2,
+            className: 'trajectory-trail'
+        });
+        trailsLayer.addLayer(trailShadow);
+
+        // Add time markers along the trail (every 5th point or so)
+        const step = Math.max(1, Math.floor(coords.length / 8));
+        for (let i = 0; i < coords.length; i += step) {
+            const coord = coords[i];
+            const isStart = i === 0;
+            const isEnd = i >= coords.length - step;
+
+            // Calculate marker size based on position
+            const radius = isStart ? 8 : isEnd ? 6 : 4;
+            const fillOpacity = isStart ? 1 : (0.4 + (i / coords.length) * 0.5);
+
+            const marker = L.circleMarker([coord[1], coord[0]], {
+                radius: radius,
+                fillColor: color,
+                color: '#fff',
+                weight: isStart || isEnd ? 2 : 1,
+                fillOpacity: fillOpacity,
+                className: 'trajectory-point'
+            });
+
+            // Add timestamp popup for each point
+            const timestamp = props.start_time + (i / coords.length) * (props.end_time - props.start_time);
+            const timeStr = new Date(timestamp * 1000).toLocaleTimeString();
+            marker.bindPopup(`<div style="font-size:11px">
+                <strong>${isStart ? 'Start' : isEnd ? 'Latest' : 'Position'}</strong><br>
+                Time: ${timeStr}<br>
+                Point ${i + 1} of ${coords.length}
+            </div>`);
+
+            trailsLayer.addLayer(marker);
+        }
+
+        // Add trail info to legend area
+        const trailInfo = document.createElement('div');
+        trailInfo.id = 'trail-info';
+        trailInfo.style.cssText = `
+            position: absolute;
+            bottom: 180px;
+            left: 10px;
+            z-index: 1000;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 11px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        `;
+        trailInfo.innerHTML = `
+            <div style="color: #4fc3f7; font-weight: 600; margin-bottom: 6px;">Node Trail</div>
+            <div style="color: #aaa;">Points: <span style="color: #e0e0e0; font-weight: 500;">${props.point_count}</span></div>
+            <div style="color: #aaa;">Duration: <span style="color: #e0e0e0; font-weight: 500;">${props.duration_hours.toFixed(1)}h</span></div>
+            <button onclick="clearNodeTrail()" style="margin-top: 8px; padding: 4px 10px; background: #1a3a4a; color: #4fc3f7; border: 1px solid #2a4a5a; border-radius: 4px; cursor: pointer; font-size: 10px;">
+                Clear Trail
+            </button>
+        `;
+        document.body.appendChild(trailInfo);
+
+        // Fit map to show the trail
+        const bounds = trailLine.getBounds();
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [80, 80], maxZoom: 15 });
+        }
+    }
+
+    function clearNodeTrail() {
+        trailsLayer.clearLayers();
+
+        // Remove trail info panel
+        const trailInfo = document.getElementById('trail-info');
+        if (trailInfo) trailInfo.remove();
+
+        // Reset button state
+        if (activeTrailNodeId) {
+            const btnId = `trail-btn-${activeTrailNodeId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.classList.remove('active');
+                btn.textContent = 'Show Trail (24h)';
+            }
+        }
+
+        activeTrailNodeId = null;
     }
 
     // Haversine distance in km
