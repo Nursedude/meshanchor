@@ -58,6 +58,7 @@ class RadioMenuMixin:
                 ("send", "Send Message"),
                 ("position", "Position (view/set)"),
                 ("set-region", "Set Region"),
+                ("set-txpower", "Set TX Power"),
                 ("set-name", "Set Node Name"),
                 ("reboot", "Reboot Radio"),
                 ("reinstall-cli", "Reinstall/Update CLI"),
@@ -99,6 +100,8 @@ class RadioMenuMixin:
                 self._radio_send_message()
             elif choice == "set-region":
                 self._radio_set_region()
+            elif choice == "set-txpower":
+                self._radio_set_tx_power()
             elif choice == "set-name":
                 self._radio_set_name()
             elif choice == "reboot":
@@ -287,6 +290,77 @@ class RadioMenuMixin:
             self._radio_run(
                 [self._get_meshtastic_cli(), '--host', 'localhost', '--set', 'lora.region', choice],
                 f"Setting Region: {choice}"
+            )
+
+    def _radio_set_tx_power(self):
+        """Set LoRa TX power via meshtastic CLI."""
+        # TX power limits by region (dBm)
+        # These are approximate regulatory maximums
+        region_limits = {
+            "US": 30, "EU_868": 14, "EU_433": 10, "CN": 20,
+            "JP": 13, "ANZ": 30, "KR": 10, "TW": 14,
+            "RU": 20, "IN": 30, "NZ_865": 27, "TH": 20,
+            "UA_868": 14, "LORA_24": 10,
+        }
+
+        choices = [
+            ("1", "1 dBm   (1 mW) - Minimum"),
+            ("5", "5 dBm   (3 mW) - Very low"),
+            ("10", "10 dBm  (10 mW) - Low"),
+            ("14", "14 dBm  (25 mW) - EU limit"),
+            ("17", "17 dBm  (50 mW) - Medium"),
+            ("20", "20 dBm  (100 mW) - Standard"),
+            ("22", "22 dBm  (158 mW) - High"),
+            ("27", "27 dBm  (500 mW) - Very high"),
+            ("30", "30 dBm  (1 W) - US max"),
+            ("custom", "Custom value..."),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "Set TX Power",
+            "Select transmit power level:\n\n"
+            "Note: Check your region's legal limit.\n"
+            "Higher power = more range but more battery use.",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        if choice == "custom":
+            power_str = self.dialog.inputbox(
+                "Custom TX Power",
+                "Enter TX power in dBm (1-30):\n\n"
+                "Common limits:\n"
+                "  US: 30 dBm (1W)\n"
+                "  EU: 14 dBm (25mW)\n"
+                "  JP: 13 dBm",
+                "20"
+            )
+            if not power_str:
+                return
+            try:
+                power = int(power_str.strip())
+            except ValueError:
+                self.dialog.msgbox("Error", "Invalid power value. Enter a number 1-30.")
+                return
+        else:
+            power = int(choice)
+
+        if not (1 <= power <= 30):
+            self.dialog.msgbox("Error", "TX power must be between 1 and 30 dBm.")
+            return
+
+        if self.dialog.yesno(
+            "Confirm TX Power",
+            f"Set TX power to {power} dBm?\n\n"
+            f"This is approximately {10 ** (power / 10):.0f} mW.\n\n"
+            "Ensure this complies with your region's regulations."
+        ):
+            self._radio_run(
+                [self._get_meshtastic_cli(), '--host', 'localhost', '--set', 'lora.tx_power', str(power)],
+                f"Setting TX Power: {power} dBm"
             )
 
     def _radio_set_name(self):
