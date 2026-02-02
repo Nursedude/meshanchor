@@ -51,6 +51,58 @@ class NomadNetClientMixin:
     """Mixin providing NomadNet client management for the TUI launcher."""
 
     # ------------------------------------------------------------------
+    # RNS config path detection
+    # ------------------------------------------------------------------
+
+    def _get_rns_config_for_user(self) -> str:
+        """Get RNS config directory path appropriate for the current user.
+
+        Detects the problematic case where /etc/reticulum/ exists (from a
+        previous root/sudo run) but is not writable by the current user.
+        In that case, returns the user's ~/.reticulum path.
+
+        Returns:
+            Path string to pass to --rnsconfig, or None if default is fine.
+        """
+        etc_rns = Path('/etc/reticulum')
+        user_home = get_real_user_home()
+        user_rns = user_home / '.reticulum'
+
+        # If /etc/reticulum exists, check if it's usable
+        if etc_rns.exists():
+            # Check if storage subdir exists and is writable
+            storage_dir = etc_rns / 'storage'
+            try:
+                if storage_dir.exists():
+                    # Try to write a test file
+                    test_file = storage_dir / '.meshforge_write_test'
+                    try:
+                        test_file.touch()
+                        test_file.unlink()
+                        # Writable - system config is fine
+                        return None
+                    except (OSError, PermissionError):
+                        # Not writable - need to use user config
+                        logger.info(f"/etc/reticulum/storage not writable, using {user_rns}")
+                        return str(user_rns)
+                else:
+                    # storage dir doesn't exist - try to create it
+                    try:
+                        storage_dir.mkdir(parents=True, exist_ok=True)
+                        # Created successfully - system config is fine
+                        return None
+                    except (OSError, PermissionError):
+                        # Can't create - need to use user config
+                        logger.info(f"Cannot create /etc/reticulum/storage, using {user_rns}")
+                        return str(user_rns)
+            except Exception as e:
+                logger.warning(f"Error checking /etc/reticulum: {e}, falling back to user config")
+                return str(user_rns)
+
+        # /etc/reticulum doesn't exist - default resolution is fine
+        return None
+
+    # ------------------------------------------------------------------
     # Ownership fix for user directories
     # ------------------------------------------------------------------
 
@@ -333,32 +385,46 @@ class NomadNetClientMixin:
         if not self._check_rns_for_nomadnet():
             return
 
+        # Check if we need to use a specific RNS config path
+        # This handles the case where /etc/reticulum exists but isn't writable
+        rns_config_path = self._get_rns_config_for_user()
+
         # Clear screen before launching
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Launching NomadNet ===")
+        if rns_config_path:
+            print(f"Using RNS config: {rns_config_path}")
         print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
 
-        # Build environment - set HOME to real user's home when running via sudo
-        # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
-        # IMPORTANT: We run directly (no sudo -u) because sudo breaks curses TTY
-        env = os.environ.copy()
+        # When running via sudo, we must run NomadNet as the real user.
+        # Just setting HOME is not enough - RPC authentication between
+        # NomadNet and rnsd requires matching UIDs.
         sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user and sudo_user != 'root':
-            user_home = get_real_user_home()
-            env['HOME'] = str(user_home)
-            env['USER'] = sudo_user
-            env['LOGNAME'] = sudo_user
 
         try:
-            # Run interactively -- NomadNet takes over the terminal
-            result = subprocess.run([nn_path, '--textui'], env=env, timeout=None)
+            # Build base command with optional --rnsconfig
+            nn_args = ['--textui']
+            if rns_config_path:
+                nn_args = ['--rnsconfig', rns_config_path, '--textui']
+
+            if sudo_user and sudo_user != 'root':
+                # Run as real user using 'sudo -u' with explicit PATH
+                # The -H sets HOME correctly, we pass PATH for pipx binaries
+                user_home = get_real_user_home()
+                user_path = f"{user_home}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+                result = subprocess.run(
+                    ['sudo', '-u', sudo_user, '-H',
+                     f'PATH={user_path}', nn_path] + nn_args,
+                    timeout=None
+                )
+            else:
+                # Not running via sudo, run directly
+                result = subprocess.run([nn_path] + nn_args, timeout=None)
+
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                print(f"NomadNet exited with error code {result.returncode}")
-                print("\nCheck logs with:")
-                print("  cat ~/.nomadnetwork/logfile")
-                print("  journalctl --user -u nomadnet -n 50")
+                self._diagnose_nomadnet_error(result.returncode, sudo_user)
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -382,6 +448,72 @@ class NomadNetClientMixin:
                 input()
             except (EOFError, KeyboardInterrupt):
                 pass
+
+    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None):
+        """Analyze NomadNet failure and provide helpful diagnostics."""
+        print(f"NomadNet exited with error code {returncode}")
+
+        # Try to read the log file for clues
+        user_home = get_real_user_home()
+        logfile = user_home / '.nomadnetwork' / 'logfile'
+
+        error_hints = []
+        if logfile.exists():
+            try:
+                content = logfile.read_text()
+                last_lines = content.strip().split('\n')[-20:]
+
+                # Look for known error patterns
+                for line in last_lines:
+                    if 'AuthenticationError' in line or 'digest sent was rejected' in line:
+                        error_hints.append("RPC authentication failed between NomadNet and rnsd")
+                        # Check if rnsd is running as root
+                        try:
+                            ps_result = subprocess.run(
+                                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            rnsd_user = ps_result.stdout.strip()
+                            if rnsd_user == 'root':
+                                error_hints.append("rnsd is running as root - identities don't match")
+                                error_hints.append("Fix: sudo systemctl stop rnsd")
+                                error_hints.append("     Then run rnsd as your user, or reconfigure")
+                            elif rnsd_user and rnsd_user != sudo_user:
+                                error_hints.append(f"rnsd runs as '{rnsd_user}', you are '{sudo_user}'")
+                            else:
+                                error_hints.append("Check that rnsd uses the same ~/.reticulum/ identity")
+                        except Exception:
+                            error_hints.append("Ensure rnsd and NomadNet use the same RNS identity")
+                        break
+                    elif 'KeyError' in line and 'textui' in line.lower():
+                        error_hints.append("Config missing [textui] section")
+                        error_hints.append("Delete ~/.nomadnetwork/config and restart")
+                        break
+                    elif 'PermissionError' in line or 'Permission denied' in line:
+                        if '/etc/reticulum' in line:
+                            error_hints.append("Cannot write to /etc/reticulum/ (system config)")
+                            error_hints.append("This happens when rnsd was run as root first")
+                            error_hints.append("Fix: sudo rm -rf /etc/reticulum")
+                            error_hints.append("     (or sudo chown -R $USER /etc/reticulum)")
+                        else:
+                            error_hints.append("Permission denied accessing files")
+                            error_hints.append(f"Check ownership: ls -la ~/.nomadnetwork/")
+                        break
+                    elif 'ModuleNotFoundError' in line or 'ImportError' in line:
+                        error_hints.append("Missing Python dependencies")
+                        error_hints.append("Try: pipx reinstall nomadnet")
+                        break
+            except (OSError, PermissionError):
+                pass
+
+        if error_hints:
+            print("\nDiagnosis:")
+            for hint in error_hints:
+                print(f"  - {hint}")
+        else:
+            print("\nCheck logs for details:")
+            print(f"  cat {logfile}")
+            print("  journalctl --user -u nomadnet -n 50")
 
     # ------------------------------------------------------------------
     # Launch daemon
@@ -421,15 +553,24 @@ class NomadNetClientMixin:
 
         self.dialog.infobox("Starting", "Starting NomadNet daemon...")
 
+        # Check if we need to use a specific RNS config path
+        rns_config_path = self._get_rns_config_for_user()
+
         # Build command - run as real user if we're under sudo
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config
         sudo_user = os.environ.get('SUDO_USER')
+
+        # Build base args with optional --rnsconfig
+        nn_args = ['--daemon']
+        if rns_config_path:
+            nn_args = ['--rnsconfig', rns_config_path, '--daemon']
+
         if sudo_user and sudo_user != 'root':
             # Run as real user with -H to set HOME correctly
             # Using -H instead of -i avoids running shell profiles which can interfere
-            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+            cmd = ['sudo', '-H', '-u', sudo_user, nn_path] + nn_args
         else:
-            cmd = [nn_path, '--daemon']
+            cmd = [nn_path] + nn_args
 
         try:
             subprocess.Popen(
@@ -561,14 +702,23 @@ class NomadNetClientMixin:
                 if nn_path:
                     self.dialog.infobox("Generating Config", "Running NomadNet briefly to generate config...")
                     try:
+                        # Check if we need to use a specific RNS config path
+                        rns_config_path = self._get_rns_config_for_user()
+
                         # Build command - run as real user if we're under sudo
                         # This ensures config is created with correct ownership
                         sudo_user = os.environ.get('SUDO_USER')
+
+                        # Build base args with optional --rnsconfig
+                        nn_args = ['--daemon']
+                        if rns_config_path:
+                            nn_args = ['--rnsconfig', rns_config_path, '--daemon']
+
                         if sudo_user and sudo_user != 'root':
                             # Using -H instead of -i to set HOME without shell profiles
-                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path, '--daemon']
+                            cmd = ['sudo', '-H', '-u', sudo_user, nn_path] + nn_args
                         else:
-                            cmd = [nn_path, '--daemon']
+                            cmd = [nn_path] + nn_args
 
                         # Run daemon briefly, then kill to generate config
                         proc = subprocess.Popen(
@@ -837,52 +987,316 @@ class NomadNetClientMixin:
         return user_home / '.nomadnetwork' / 'config'
 
     def _check_rns_for_nomadnet(self) -> bool:
-        """Check that RNS/rnsd is available before launching NomadNet.
+        """Check that RNS/rnsd is available and properly configured.
 
-        Uses centralized service_check module when available.
+        Checks:
+        1. Is /etc/reticulum blocking user access?
+        2. Is rnsd running?
+        3. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
+
         Returns True if OK to proceed, False if user cancelled.
         """
-        try:
-            if _HAS_SERVICE_CHECK:
-                rnsd_running = check_process_running('rnsd')
-            else:
-                # Fallback to direct pgrep call
-                result = subprocess.run(
-                    ['pgrep', '-f', 'rnsd'],
-                    capture_output=True, text=True, timeout=5
+        sudo_user = os.environ.get('SUDO_USER')
+
+        # Check for /etc/reticulum permission issues first
+        etc_rns = Path('/etc/reticulum')
+        if etc_rns.exists():
+            storage_dir = etc_rns / 'storage'
+            can_write = False
+            try:
+                if storage_dir.exists():
+                    test_file = storage_dir / '.write_test'
+                    try:
+                        test_file.touch()
+                        test_file.unlink()
+                        can_write = True
+                    except (OSError, PermissionError):
+                        pass
+                else:
+                    try:
+                        storage_dir.mkdir(parents=True, exist_ok=True)
+                        can_write = True
+                    except (OSError, PermissionError):
+                        pass
+            except Exception:
+                pass
+
+            if not can_write:
+                # /etc/reticulum exists but is not writable
+                # We'll use --rnsconfig to bypass it, but warn the user
+                target_user = sudo_user if sudo_user and sudo_user != 'root' else 'current user'
+                user_rns = get_real_user_home() / '.reticulum'
+
+                choice = self.dialog.menu(
+                    "/etc/reticulum Permission Issue",
+                    f"/etc/reticulum/ exists but is not writable by {target_user}.\n\n"
+                    f"This was likely created when RNS/rnsd ran as root.\n\n"
+                    f"NomadNet will use {user_rns} instead.",
+                    [
+                        ("continue", f"Continue (use {user_rns})"),
+                        ("fix", "Fix /etc/reticulum permissions (requires sudo)"),
+                        ("remove", "Remove /etc/reticulum (requires sudo)"),
+                        ("cancel", "Cancel"),
+                    ],
                 )
-                rnsd_running = result.returncode == 0
+
+                if choice == "fix":
+                    try:
+                        if sudo_user and sudo_user != 'root':
+                            subprocess.run(
+                                ['chown', '-R', f'{sudo_user}:{sudo_user}', str(etc_rns)],
+                                capture_output=True, timeout=30
+                            )
+                        else:
+                            # Running as root already, just fix permissions
+                            subprocess.run(
+                                ['chmod', '-R', '755', str(etc_rns)],
+                                capture_output=True, timeout=30
+                            )
+                        self.dialog.msgbox(
+                            "Permissions Fixed",
+                            f"Fixed permissions on /etc/reticulum/.\n\n"
+                            "NomadNet should now work with system config.",
+                        )
+                    except Exception as e:
+                        self.dialog.msgbox("Fix Failed", f"Could not fix permissions: {e}")
+                        return False
+                elif choice == "remove":
+                    if self.dialog.yesno(
+                        "Confirm Removal",
+                        f"Remove /etc/reticulum/ directory?\n\n"
+                        f"RNS will use {user_rns} instead.\n\n"
+                        "Proceed?",
+                    ):
+                        try:
+                            shutil.rmtree(str(etc_rns))
+                            self.dialog.msgbox(
+                                "Removed",
+                                f"/etc/reticulum/ has been removed.\n\n"
+                                f"RNS will now use {user_rns}.",
+                            )
+                        except Exception as e:
+                            self.dialog.msgbox("Removal Failed", f"Could not remove: {e}")
+                            return False
+                elif choice == "cancel":
+                    return False
+                # choice == "continue" falls through
+
+        # Check if rnsd is running and get its user
+        try:
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            rnsd_user = result.stdout.strip() if result.returncode == 0 else None
         except Exception:
-            rnsd_running = False
+            rnsd_user = None
 
-        if rnsd_running:
-            return True
+        if not rnsd_user:
+            # rnsd not running -- warn but allow proceeding
+            return self.dialog.yesno(
+                "rnsd Not Running",
+                "The RNS daemon (rnsd) is not running.\n\n"
+                "NomadNet can start its own RNS instance,\n"
+                "but for Meshtastic bridging you should run rnsd\n"
+                "with share_instance = Yes in the Reticulum config.\n\n"
+                "Continue anyway?",
+            )
 
-        # rnsd not running -- warn but allow proceeding
-        # (NomadNet can run its own RNS instance)
-        return self.dialog.yesno(
-            "rnsd Not Running",
-            "The RNS daemon (rnsd) is not running.\n\n"
-            "NomadNet can start its own RNS instance,\n"
-            "but for Meshtastic bridging you should run rnsd\n"
-            "with share_instance = Yes in the Reticulum config.\n\n"
-            "Start rnsd first:\n"
-            "  sudo systemctl start rnsd\n\n"
-            "Continue anyway?",
-        )
+        # rnsd is running - check if it's running as root (security issue)
+        if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
+            # This is the problem case - rnsd as root, NomadNet as user
+            choice = self.dialog.menu(
+                "rnsd Running as Root",
+                "rnsd is running as root, but NomadNet needs to\n"
+                "run as your user for RPC authentication.\n\n"
+                "Different users = different RNS identities = auth failure.\n\n"
+                "How do you want to fix this?",
+                [
+                    ("fix", f"Fix rnsd to run as {sudo_user} (recommended)"),
+                    ("stop", "Stop rnsd (NomadNet will use its own RNS)"),
+                    ("cancel", "Cancel"),
+                ],
+            )
+
+            if choice == "fix":
+                return self._fix_rnsd_user(sudo_user)
+            elif choice == "stop":
+                # Just stop rnsd
+                self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
+                try:
+                    subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+                    subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
+                    time.sleep(1)
+                    self.dialog.msgbox(
+                        "rnsd Stopped",
+                        "rnsd has been stopped.\n\n"
+                        "NomadNet will start its own RNS instance.",
+                    )
+                    return True
+                except Exception as e:
+                    self.dialog.msgbox("Stop Failed", f"Could not stop rnsd: {e}")
+                    return False
+            else:
+                return False  # User cancelled
+
+        # rnsd running as correct user (or no sudo context)
+        return True
+
+    def _fix_rnsd_user(self, target_user: str) -> bool:
+        """Configure rnsd systemd service to run as the specified user.
+
+        Creates a systemd override to set User= directive, then restarts rnsd.
+        This is the proper fix for the identity mismatch problem.
+        """
+        override_dir = Path('/etc/systemd/system/rnsd.service.d')
+        override_file = override_dir / 'user.conf'
+
+        self.dialog.infobox("Configuring rnsd", f"Setting rnsd to run as {target_user}...")
+
+        try:
+            # Create override directory
+            override_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write override config
+            override_content = f"""[Service]
+User={target_user}
+Group={target_user}
+"""
+            override_file.write_text(override_content)
+
+            # Reload systemd and restart rnsd
+            subprocess.run(['systemctl', 'daemon-reload'], capture_output=True, timeout=10)
+            subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+            subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
+            time.sleep(1)
+            subprocess.run(['systemctl', 'start', 'rnsd'], capture_output=True, timeout=10)
+            time.sleep(2)
+
+            # Verify it's running as the right user now
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            new_user = result.stdout.strip()
+
+            if new_user == target_user:
+                self.dialog.msgbox(
+                    "rnsd Fixed",
+                    f"rnsd is now running as {target_user}.\n\n"
+                    f"Override created: {override_file}\n\n"
+                    "NomadNet will now be able to connect via RPC.",
+                )
+                return True
+            else:
+                self.dialog.msgbox(
+                    "Fix May Have Failed",
+                    f"rnsd is running as '{new_user}' (expected '{target_user}').\n\n"
+                    f"Check: systemctl status rnsd\n"
+                    f"       cat {override_file}",
+                )
+                return True  # Let them try anyway
+
+        except PermissionError:
+            self.dialog.msgbox(
+                "Permission Denied",
+                f"Cannot write to {override_dir}\n\n"
+                "MeshForge needs to run with sudo to fix this.",
+            )
+            return False
+        except Exception as e:
+            self.dialog.msgbox(
+                "Configuration Failed",
+                f"Could not configure rnsd: {e}\n\n"
+                "Manual fix:\n"
+                f"  sudo systemctl edit rnsd\n"
+                f"  Add: [Service]\n"
+                f"       User={target_user}",
+            )
+            return False
 
     def _validate_nomadnet_config(self) -> bool:
-        """Check NomadNet config exists.
+        """Validate and repair NomadNet config if needed.
 
-        We don't modify configs - NomadNet creates its own defaults.
-        Just verify config exists or will be created.
+        NomadNet requires a [textui] section when running in text UI mode.
+        If the config exists but lacks this section (e.g., old config from
+        before [textui] was required), NomadNet will crash with KeyError.
+
+        This function checks for and adds a minimal [textui] section if missing.
 
         Returns:
-            True to proceed with launch.
+            True to proceed with launch, False if user cancelled.
         """
         config_path = self._get_nomadnet_config_path()
         if not config_path or not config_path.exists():
             # No config yet - NomadNet will create default on first run
             return True
 
-        return True
+        try:
+            content = config_path.read_text()
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Cannot read NomadNet config: {e}")
+            return True  # Let NomadNet handle the error
+
+        # Check if [textui] section exists (case-insensitive)
+        if '[textui]' in content.lower():
+            return True
+
+        # Missing [textui] section - need to add it
+        logger.info(f"NomadNet config missing [textui] section: {config_path}")
+
+        if not self.dialog.yesno(
+            "Config Repair Needed",
+            f"Your NomadNet config is missing the [textui] section\n"
+            f"required for text UI mode.\n\n"
+            f"Config: {config_path}\n\n"
+            f"Add a default [textui] section now?",
+        ):
+            return self.dialog.yesno(
+                "Proceed Anyway?",
+                "Without [textui], NomadNet will crash.\n\n"
+                "Continue anyway?",
+            )
+
+        # Add minimal [textui] section
+        textui_section = """
+
+[textui]
+# Text UI configuration added by MeshForge
+intro_time = 1
+theme = dark
+colormode = 256
+glyphs = unicode
+mouse_enabled = yes
+hide_guide = no
+"""
+        try:
+            # Append [textui] section to config
+            with open(config_path, 'a') as f:
+                f.write(textui_section)
+            logger.info(f"Added [textui] section to {config_path}")
+
+            # Fix ownership if running via sudo
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                import subprocess
+                subprocess.run(
+                    ['chown', f'{sudo_user}:{sudo_user}', str(config_path)],
+                    capture_output=True, timeout=10
+                )
+
+            self.dialog.msgbox(
+                "Config Updated",
+                f"Added [textui] section to config.\n\n"
+                f"NomadNet text UI should now work.",
+            )
+            return True
+        except (OSError, PermissionError) as e:
+            self.dialog.msgbox(
+                "Config Update Failed",
+                f"Could not update config:\n  {config_path}\n\n"
+                f"Error: {e}\n\n"
+                f"Add [textui] section manually or delete config\n"
+                f"and let NomadNet recreate it.",
+            )
+            return False
