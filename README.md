@@ -214,6 +214,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Stable |
 | **AREDN** | Node discovery, link quality, service enumeration | Stable |
+| **Prometheus Metrics** | HTTP endpoint, Grafana dashboards, alerting rules | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 ### Roadmap
@@ -464,6 +465,11 @@ src/
 ├── standalone.py          # Zero-dependency RF tools
 └── __version__.py         # Version tracking
 
+dashboards/                # Grafana monitoring dashboards
+├── meshforge-overview.json  # Health, services, queues
+├── meshforge-nodes.json     # Per-node RF metrics
+└── meshforge-gateway.json   # Gateway bridge status
+
 templates/
 └── gateway-pair/          # Multi-preset bridging templates
     ├── node-a.yaml        # First gateway node config
@@ -496,12 +502,26 @@ Auto-deploys a working config from `templates/reticulum.conf`:
 - Meshtastic Interface on `127.0.0.1:4403`
 - RNode LoRa (optional, for dedicated RNS radio)
 
+### Prometheus Metrics
+
+MeshForge exports metrics for monitoring with Prometheus and Grafana:
+
+```python
+from utils.metrics_export import start_metrics_server
+
+server = start_metrics_server(port=9090)
+# Metrics at http://localhost:9090/metrics
+```
+
+Pre-built Grafana dashboards in `dashboards/`. See `docs/METRICS.md` for full documentation.
+
 ### Ports
 
 | Port | Service |
 |------|---------|
 | 4403 | meshtasticd TCP API |
 | 9443 | meshtasticd Web UI |
+| 9090 | Prometheus metrics (optional) |
 
 ---
 
