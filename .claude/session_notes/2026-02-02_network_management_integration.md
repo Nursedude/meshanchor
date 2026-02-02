@@ -301,8 +301,63 @@ class TopologyVersioner:
 - [x] Compared with MeshForge capabilities
 - [x] Identified integration opportunities
 - [x] Documented implementation patterns
-- [ ] Begin implementation (next session)
+- [x] **COMPLETED: Priority 1 - Signal Quality Trending**
+
+---
+
+## Implementation Completed: Signal Quality Trending
+
+**Commit**: 5b7154e
+**Files Changed**:
+- `src/gateway/node_tracker.py` (+182 lines)
+- `tests/test_node_tracker.py` (+196 lines)
+
+### New Components
+
+1. **SignalSample dataclass** (line ~147)
+   - `timestamp: datetime`
+   - `value: float`
+   - `to_dict()` for serialization
+
+2. **UnifiedNode enhancements** (lines ~269-423)
+   - `snr_history: List[SignalSample]` - Signal history buffer
+   - `rssi_history: List[SignalSample]` - RSSI history buffer
+   - `MAX_SIGNAL_SAMPLES: int = 100` - Configurable limit
+   - `record_signal_quality(snr, rssi)` - Record with timestamp
+   - `snr_trend` property - Returns improving/degrading/stable/unknown
+   - `rssi_trend` property - Returns improving/degrading/stable/unknown
+   - `get_signal_stats()` - Returns min/max/avg/current/trend
+
+3. **Updated methods**
+   - `_merge_node()` - Now calls `record_signal_quality()`
+   - `to_dict(include_signal_history=False)` - Optional history export
+   - `_load_cache()` - Restores signal history from cache
+   - `_save_cache()` - Persists signal history
+
+### Algorithm Details
+
+Trend calculation compares average of recent 5 samples vs previous 5:
+- Delta > 2.0 dB → "improving"
+- Delta < -2.0 dB → "degrading"
+- Else → "stable"
+- Less than 5 samples → "unknown"
+
+### Test Coverage
+
+15 new tests in `TestSignalQualityTrending`:
+- Basic recording (snr, rssi, both)
+- History accumulation and max limit
+- All trend states (improving, degrading, stable, unknown)
+- Stats calculation
+- Serialization with/without history
+- Merge behavior
+
+**All 65 tests pass** (3 skipped are msgpack-related)
+
+---
 
 **Session entropy**: LOW - Good for continuation
 
-**Next session**: Start with Priority 1 (Signal Quality Trending)
+**Next priorities**:
+1. Priority 2: Auto-Connect Persistence (2-3 hours)
+2. Priority 3: Node State Machine (2-3 hours)
