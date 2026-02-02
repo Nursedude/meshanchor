@@ -126,6 +126,7 @@ from hardware_menu_mixin import HardwareMenuMixin
 from settings_menu_mixin import SettingsMenuMixin
 from logs_menu_mixin import LogsMenuMixin
 from device_backup_mixin import DeviceBackupMixin
+from traffic_inspector_mixin import TrafficInspectorMixin
 
 
 class MeshForgeLauncher(
@@ -152,7 +153,8 @@ class MeshForgeLauncher(
     HardwareMenuMixin,
     SettingsMenuMixin,
     LogsMenuMixin,
-    DeviceBackupMixin
+    DeviceBackupMixin,
+    TrafficInspectorMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -645,6 +647,7 @@ class MeshForgeLauncher(
             choices = [
                 ("coverage", "Coverage Map        Generate coverage map"),
                 ("topology", "Network Topology    D3.js graph view"),
+                ("traffic", "Traffic Inspector   Wireshark-grade visibility"),
                 ("nodes", "Node Map            All nodes on map"),
                 ("quality", "Link Quality        Quality analysis"),
                 ("export", "Export Data         GeoJSON, CSV, GraphML"),
@@ -664,6 +667,8 @@ class MeshForgeLauncher(
                 self._ai_tools_menu()
             elif choice == "topology":
                 self._topology_menu()
+            elif choice == "traffic":
+                self.menu_traffic_inspector()
             elif choice == "nodes":
                 self._open_node_map()
             elif choice == "quality":
