@@ -20,6 +20,18 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Import node state machine
+try:
+    from .node_state import (
+        NodeState, NodeStateMachine, NodeStateConfig,
+        StateTransition, get_default_state_config
+    )
+    NODE_STATE_AVAILABLE = True
+except ImportError:
+    NODE_STATE_AVAILABLE = False
+    NodeState = None  # type: ignore
+    NodeStateMachine = None  # type: ignore
+
 # Import RNS service registry and topology (optional - graceful fallback)
 try:
     from .rns_services import (
@@ -145,6 +157,19 @@ class DetectionSensor:
 
 
 @dataclass
+class SignalSample:
+    """A single signal quality measurement with timestamp."""
+    timestamp: datetime
+    value: float
+
+    def to_dict(self) -> dict:
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "value": self.value
+        }
+
+
+@dataclass
 class Telemetry:
     """
     Complete node telemetry data.
@@ -258,12 +283,23 @@ class UnifiedNode:
     rssi: Optional[int] = None
     hops: Optional[int] = None
 
+    # Signal quality history (for trending)
+    snr_history: List[SignalSample] = field(default_factory=list)
+    rssi_history: List[SignalSample] = field(default_factory=list)
+
+    # Configuration for signal history
+    MAX_SIGNAL_SAMPLES: int = field(default=100, repr=False)
+
     # Status
     is_online: bool = False
     is_gateway: bool = False
     is_local: bool = False  # Is this our own node
     last_seen: Optional[datetime] = None
     first_seen: Optional[datetime] = None
+
+    # State machine for granular status tracking
+    # Initialized in __post_init__ if available
+    _state_machine: Optional[Any] = field(default=None, repr=False)
 
     # Hardware info
     hardware_model: Optional[str] = None
@@ -278,11 +314,178 @@ class UnifiedNode:
     def __post_init__(self):
         if self.first_seen is None:
             self.first_seen = datetime.now()
+        # Initialize state machine if available
+        if NODE_STATE_AVAILABLE and self._state_machine is None:
+            from .node_state import NodeStateMachine, NodeState
+            initial = NodeState.DISCOVERED if self.is_online else NodeState.STALE_CACHE
+            self._state_machine = NodeStateMachine(initial_state=initial)
 
     def update_seen(self):
-        """Update last seen timestamp"""
+        """Update last seen timestamp and state machine"""
         self.last_seen = datetime.now()
         self.is_online = True
+        # Update state machine with current signal values
+        if self._state_machine is not None:
+            self._state_machine.record_response(snr=self.snr, rssi=self.rssi)
+
+    @property
+    def state(self) -> Optional['NodeState']:
+        """Get current node state (granular status)."""
+        if self._state_machine is not None:
+            return self._state_machine.state
+        # Fallback: derive from is_online
+        if NODE_STATE_AVAILABLE:
+            from .node_state import NodeState
+            return NodeState.ONLINE if self.is_online else NodeState.OFFLINE
+        return None
+
+    @property
+    def state_name(self) -> str:
+        """Get human-readable state name."""
+        if self._state_machine is not None:
+            return self._state_machine.state.display_name
+        return "Online" if self.is_online else "Offline"
+
+    @property
+    def state_icon(self) -> str:
+        """Get state icon for display."""
+        if self._state_machine is not None:
+            return self._state_machine.state.icon
+        return "+" if self.is_online else "-"
+
+    def check_timeout(self) -> bool:
+        """Check for timeout and update state. Returns True if state changed."""
+        if self._state_machine is not None:
+            old_state = self._state_machine.state
+            self._state_machine.check_timeout(self.last_seen)
+            # Sync is_online with state machine
+            self.is_online = self._state_machine.state.is_active()
+            return old_state != self._state_machine.state
+        return False
+
+    def get_state_history(self, count: int = 10) -> List[dict]:
+        """Get recent state transitions for debugging."""
+        if self._state_machine is not None:
+            return [t.to_dict() for t in self._state_machine.get_transitions(count)]
+        return []
+
+    def record_signal_quality(self, snr: Optional[float] = None, rssi: Optional[int] = None):
+        """Record signal quality measurements with timestamp for trending.
+
+        Args:
+            snr: Signal-to-Noise Ratio in dB (can be negative)
+            rssi: Received Signal Strength Indicator in dBm (typically negative)
+        """
+        now = datetime.now()
+
+        if snr is not None:
+            self.snr = snr
+            self.snr_history.append(SignalSample(timestamp=now, value=float(snr)))
+            # Trim to max size
+            if len(self.snr_history) > self.MAX_SIGNAL_SAMPLES:
+                self.snr_history = self.snr_history[-self.MAX_SIGNAL_SAMPLES:]
+
+        if rssi is not None:
+            self.rssi = rssi
+            self.rssi_history.append(SignalSample(timestamp=now, value=float(rssi)))
+            # Trim to max size
+            if len(self.rssi_history) > self.MAX_SIGNAL_SAMPLES:
+                self.rssi_history = self.rssi_history[-self.MAX_SIGNAL_SAMPLES:]
+
+    @property
+    def snr_trend(self) -> str:
+        """Calculate SNR trend from history.
+
+        Compares average of recent samples (last 5) to older samples (previous 5).
+        Requires at least 5 samples for meaningful trend.
+
+        Returns:
+            "improving": SNR increasing (better signal)
+            "degrading": SNR decreasing (worse signal)
+            "stable": SNR relatively constant
+            "unknown": Not enough data
+        """
+        return self._calculate_trend(self.snr_history)
+
+    @property
+    def rssi_trend(self) -> str:
+        """Calculate RSSI trend from history.
+
+        Compares average of recent samples to older samples.
+        Higher RSSI (closer to 0) = better signal.
+
+        Returns:
+            "improving": RSSI increasing (better signal)
+            "degrading": RSSI decreasing (worse signal)
+            "stable": RSSI relatively constant
+            "unknown": Not enough data
+        """
+        return self._calculate_trend(self.rssi_history)
+
+    def _calculate_trend(self, history: List[SignalSample], threshold: float = 2.0) -> str:
+        """Calculate trend from signal history.
+
+        Args:
+            history: List of SignalSample objects
+            threshold: Minimum delta to be considered improving/degrading (dB)
+
+        Returns:
+            Trend string: "improving", "degrading", "stable", or "unknown"
+        """
+        if len(history) < 5:
+            return "unknown"
+
+        # Get recent samples (last 5) and older samples (previous 5)
+        recent = [s.value for s in history[-5:]]
+        older_start = max(0, len(history) - 10)
+        older_end = len(history) - 5
+        older = [s.value for s in history[older_start:older_end]]
+
+        if not older:
+            return "unknown"
+
+        recent_avg = sum(recent) / len(recent)
+        older_avg = sum(older) / len(older)
+        delta = recent_avg - older_avg
+
+        # Higher SNR/RSSI = better signal
+        if delta > threshold:
+            return "improving"
+        elif delta < -threshold:
+            return "degrading"
+        return "stable"
+
+    def get_signal_stats(self) -> dict:
+        """Get signal quality statistics.
+
+        Returns:
+            Dict with min, max, avg, current, and trend for SNR and RSSI
+        """
+        stats = {}
+
+        if self.snr_history:
+            snr_values = [s.value for s in self.snr_history]
+            stats['snr'] = {
+                'current': self.snr,
+                'min': min(snr_values),
+                'max': max(snr_values),
+                'avg': sum(snr_values) / len(snr_values),
+                'samples': len(snr_values),
+                'trend': self.snr_trend
+            }
+
+        if self.rssi_history:
+            rssi_values = [s.value for s in self.rssi_history]
+            stats['rssi'] = {
+                'current': self.rssi,
+                'min': min(rssi_values),
+                'max': max(rssi_values),
+                'avg': sum(rssi_values) / len(rssi_values),
+                'samples': len(rssi_values),
+                'trend': self.rssi_trend
+            }
+
+        return stats
 
     def get_age_string(self) -> str:
         """Get human-readable time since last seen"""
@@ -301,9 +504,14 @@ class UnifiedNode:
         else:
             return f"{int(seconds / 86400)}d ago"
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization"""
-        return {
+    def to_dict(self, include_signal_history: bool = False) -> dict:
+        """Convert to dictionary for JSON serialization.
+
+        Args:
+            include_signal_history: If True, include full signal history arrays.
+                                   Default False to reduce payload size.
+        """
+        result = {
             "id": self.id,
             "network": self.network,
             "name": self.name,
@@ -314,6 +522,8 @@ class UnifiedNode:
             "rns_hash": self.rns_hash.hex() if self.rns_hash else None,
             "snr": self.snr,
             "rssi": self.rssi,
+            "snr_trend": self.snr_trend if self.snr_history else None,
+            "rssi_trend": self.rssi_trend if self.rssi_history else None,
             "hops": self.hops,
             "is_online": self.is_online,
             "is_gateway": self.is_gateway,
@@ -327,7 +537,23 @@ class UnifiedNode:
             "service_type": self.service_type,
             "service_aspect": self.service_aspect,
             "service_capabilities": self.service_capabilities if self.service_capabilities else None,
+            # Granular state
+            "state": self.state.name if self.state else None,
+            "state_display": self.state_name,
+            "state_icon": self.state_icon,
         }
+
+        # Optionally include full signal history (for detailed views/caching)
+        if include_signal_history:
+            if self.snr_history:
+                result["snr_history"] = [s.to_dict() for s in self.snr_history]
+            if self.rssi_history:
+                result["rssi_history"] = [s.to_dict() for s in self.rssi_history]
+            # Include state machine data for cache persistence
+            if self._state_machine is not None:
+                result["state_machine"] = self._state_machine.to_dict()
+
+        return result
 
     @classmethod
     def from_meshtastic(cls, mesh_node: dict, is_local: bool = False) -> 'UnifiedNode':
@@ -372,6 +598,11 @@ class UnifiedNode:
         node.snr = mesh_node.get('snr')
         node.hops = mesh_node.get('hopsAway')
         node.last_seen = datetime.now()
+        node.is_online = True
+
+        # Update state machine with live data
+        if node._state_machine is not None:
+            node._state_machine.record_response(snr=node.snr)
 
         return node
 
@@ -963,11 +1194,9 @@ instance_control_port = 37429
         if new.telemetry.timestamp:
             existing.telemetry = new.telemetry
 
-        # Update metrics
-        if new.snr is not None:
-            existing.snr = new.snr
-        if new.rssi is not None:
-            existing.rssi = new.rssi
+        # Update metrics with signal quality trending
+        if new.snr is not None or new.rssi is not None:
+            existing.record_signal_quality(snr=new.snr, rssi=new.rssi)
         if new.hops is not None:
             existing.hops = new.hops
 
@@ -992,7 +1221,7 @@ instance_control_port = 37429
                 logger.error(f"Callback error: {e}")
 
     def _cleanup_loop(self):
-        """Periodically mark offline nodes and save cache"""
+        """Periodically check node timeouts and save cache"""
         while self._running:
             if self._stop_event.wait(60):
                 break
@@ -1000,7 +1229,11 @@ instance_control_port = 37429
             with self._lock:
                 now = datetime.now()
                 for node in self._nodes.values():
-                    if node.last_seen:
+                    # Use state machine for timeout checking if available
+                    if node._state_machine is not None:
+                        node.check_timeout()
+                    elif node.last_seen:
+                        # Fallback to simple threshold check
                         age = (now - node.last_seen).total_seconds()
                         if age > self.OFFLINE_THRESHOLD:
                             node.is_online = False
@@ -1044,6 +1277,33 @@ instance_control_port = 37429
                         longitude=pos_data.get('longitude', 0.0),
                         altitude=pos_data.get('altitude', 0.0),
                     )
+                # Restore signal history from cache
+                snr_history = node_data.get('snr_history', [])
+                for sample in snr_history:
+                    try:
+                        ts = datetime.fromisoformat(sample['timestamp'])
+                        node.snr_history.append(SignalSample(timestamp=ts, value=sample['value']))
+                    except (KeyError, ValueError, TypeError):
+                        pass
+                rssi_history = node_data.get('rssi_history', [])
+                for sample in rssi_history:
+                    try:
+                        ts = datetime.fromisoformat(sample['timestamp'])
+                        node.rssi_history.append(SignalSample(timestamp=ts, value=sample['value']))
+                    except (KeyError, ValueError, TypeError):
+                        pass
+                # Restore current SNR/RSSI values
+                if node_data.get('snr') is not None:
+                    node.snr = node_data['snr']
+                if node_data.get('rssi') is not None:
+                    node.rssi = node_data['rssi']
+                # Restore state machine from cache if available
+                if NODE_STATE_AVAILABLE and node_data.get('state_machine'):
+                    try:
+                        from .node_state import NodeStateMachine
+                        node._state_machine = NodeStateMachine.from_dict(node_data['state_machine'])
+                    except Exception as e:
+                        logger.debug(f"Could not restore state machine: {e}")
                 self._nodes[node.id] = node
 
             logger.info(f"Loaded {len(self._nodes)} nodes from cache")
@@ -1058,7 +1318,8 @@ instance_control_port = 37429
             cache_file.parent.mkdir(parents=True, exist_ok=True)
 
             with self._lock:
-                nodes_data = [n.to_dict() for n in self._nodes.values()]
+                # Include signal history in cache for persistence
+                nodes_data = [n.to_dict(include_signal_history=True) for n in self._nodes.values()]
 
             cache_data = {
                 'version': 1,
