@@ -219,7 +219,9 @@ class AREDNClient:
             logger.error(f"AREDN HTTP error: {e.code} {e.reason}")
             return None
         except urllib.error.URLError as e:
-            logger.error(f"AREDN URL error: {e.reason}")
+            # URLError is expected when AREDN network is not available
+            # (DNS failure, connection refused, timeout, etc.)
+            logger.debug(f"AREDN URL error: {e.reason}")
             return None
         except json.JSONDecodeError as e:
             logger.error(f"AREDN JSON parse error: {e}")
