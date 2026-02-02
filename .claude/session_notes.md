@@ -3,9 +3,9 @@
 > **LoRa Mesh Network Development & Operations Suite**
 > *Build. Test. Deploy. Monitor.*
 
-## Current Version: 0.4.3-beta
-## Last Updated: 2026-01-15
-## Branch: `claude/review-and-report-rDUgX`
+## Current Version: 0.4.8-alpha
+## Last Updated: 2026-02-02
+## Branch: `claude/device-persistence-state-machine-oUfwu`
 
 ---
 
@@ -51,6 +51,85 @@ sudo ./scripts/install-desktop.sh
 ---
 
 ## Recent Work Summary
+
+### Session: 2026-02-02 - Device Persistence & Node State Machine
+
+**Features Implemented:**
+
+1. **Node State Machine** (`src/gateway/node_state.py`)
+   - Granular node states beyond simple online/offline
+   - States: DISCOVERED, ONLINE, WEAK_SIGNAL, INTERMITTENT, SUSPECTED_OFFLINE, OFFLINE, UNREACHABLE, STALE_CACHE
+   - State transition tracking with history
+   - Signal quality-based state transitions (weak signal detection)
+   - Timeout-based transitions (suspect -> offline)
+   - Integrated into UnifiedNode dataclass
+
+2. **Device Persistence** (`src/utils/device_persistence.py`)
+   - Remembers last successfully connected device
+   - Auto-reconnect to last known device on startup
+   - Connection history tracking (success/fail)
+   - Configurable auto-reconnect (enable/disable)
+   - Preferred connection type setting
+   - Reconnect config generation for DeviceController
+
+3. **DeviceController Integration** (`src/utils/device_controller.py`)
+   - Auto-connect now tries last known device first
+   - Records successful/failed connection attempts
+   - Integrated with DevicePersistence singleton
+
+4. **UnifiedNode Enhancements** (`src/gateway/node_tracker.py`)
+   - Added state machine to UnifiedNode
+   - New properties: state, state_name, state_icon
+   - check_timeout() method for state machine updates
+   - State history available via get_state_history()
+   - State data included in to_dict() serialization
+   - State machine persisted in node cache
+
+**Files Added:**
+| File | Description |
+|------|-------------|
+| `src/gateway/node_state.py` | NodeState enum and NodeStateMachine class |
+| `src/utils/device_persistence.py` | Device connection persistence |
+| `tests/test_node_state.py` | Tests for node state machine |
+| `tests/test_device_persistence.py` | Tests for device persistence |
+
+**Files Modified:**
+| File | Change |
+|------|--------|
+| `src/gateway/node_tracker.py` | State machine integration |
+| `src/utils/device_controller.py` | Persistence integration |
+
+**Node State Transitions:**
+```
+STALE_CACHE --> (response) --> DISCOVERED/ONLINE
+DISCOVERED --> (good signal) --> ONLINE
+ONLINE --> (weak signal) --> WEAK_SIGNAL
+WEAK_SIGNAL --> (strong signal) --> ONLINE
+ANY_ACTIVE --> (no response 5min) --> SUSPECTED_OFFLINE
+SUSPECTED_OFFLINE --> (no response 1hr) --> OFFLINE
+OFFLINE --> (response) --> ONLINE
+```
+
+**Usage Examples:**
+
+```python
+# Node state machine
+node = UnifiedNode(id="test", network="meshtastic")
+print(node.state_name)  # "Cached"
+node.update_seen()
+print(node.state_name)  # "Online"
+node.record_signal_quality(snr=-15.0)  # Weak signal
+print(node.state_name)  # May become "Weak Signal"
+
+# Device persistence
+from utils.device_persistence import get_device_persistence
+persistence = get_device_persistence()
+if persistence.has_last_device():
+    config = persistence.get_reconnect_config()
+    # Use config with DeviceController
+```
+
+---
 
 ### Session: 2026-01-15 - Auto-Review & Stability Milestone
 
