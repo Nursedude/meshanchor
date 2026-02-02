@@ -40,6 +40,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Import device persistence (optional - graceful fallback)
+try:
+    from utils.device_persistence import get_device_persistence, DevicePersistence
+    PERSISTENCE_AVAILABLE = True
+except ImportError:
+    PERSISTENCE_AVAILABLE = False
+    get_device_persistence = None  # type: ignore
+
 
 class ConnectionType(Enum):
     """Supported connection types."""
@@ -381,7 +389,24 @@ class DeviceController:
                 return self._connect_specific(self.config.connection_type)
 
     def _auto_connect(self) -> bool:
-        """Auto-detect and connect to best available device."""
+        """Auto-detect and connect to best available device.
+
+        Priority:
+        1. Last known successful device (if persistence enabled)
+        2. TCP to meshtasticd (most common)
+        3. Serial ports
+        4. BLE (slowest)
+        """
+        # Try last known device first (if available)
+        if PERSISTENCE_AVAILABLE:
+            persistence = get_device_persistence()
+            if persistence.has_last_device():
+                last = persistence.get_last_device()
+                logger.info(f"Trying last known device: {last.get('connection_type')}://{last.get('address')}")
+                if self._try_last_device(last):
+                    return True
+                logger.info("Last device unavailable, trying other options")
+
         # Try TCP first (meshtasticd is most common)
         if self._try_tcp():
             return True
@@ -396,6 +421,32 @@ class DeviceController:
 
         self._status.state = ConnectionState.ERROR
         self._status.error_message = "No Meshtastic device found"
+        return False
+
+    def _try_last_device(self, last: dict) -> bool:
+        """Try to connect to last known device."""
+        try:
+            conn_type = last.get("connection_type")
+            address = last.get("address")
+
+            if conn_type == "tcp":
+                parts = address.split(":")
+                host = parts[0] if parts else "localhost"
+                port = int(parts[1]) if len(parts) > 1 else 4403
+                self.config.host = host
+                self.config.port = port
+                return self._connect_specific(ConnectionType.TCP)
+
+            elif conn_type == "serial":
+                self.config.serial_port = address
+                return self._connect_specific(ConnectionType.SERIAL)
+
+            elif conn_type == "ble":
+                self.config.ble_address = address
+                return self._connect_specific(ConnectionType.BLE)
+
+        except Exception as e:
+            logger.debug(f"Failed to connect to last device: {e}")
         return False
 
     def _try_tcp(self) -> bool:
@@ -472,17 +523,57 @@ class DeviceController:
                 self._status.last_connected = time.time()
                 self._status.reconnect_attempts = 0
 
+                # Record successful connection for persistence
+                self._record_connection(conn_type, success=True)
+
                 self._fire_callback("on_connect", self._status)
                 return True
             else:
+                # Record failed connection attempt
+                self._record_connection(conn_type, success=False,
+                                       error_message="Connection refused")
                 return False
 
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             self._status.state = ConnectionState.ERROR
             self._status.error_message = str(e)
+            # Record failed connection attempt
+            self._record_connection(conn_type, success=False, error_message=str(e))
             self._fire_callback("on_error", e)
             return False
+
+    def _record_connection(self, conn_type: ConnectionType, success: bool,
+                          error_message: Optional[str] = None) -> None:
+        """Record connection attempt for persistence."""
+        if not PERSISTENCE_AVAILABLE:
+            return
+
+        try:
+            persistence = get_device_persistence()
+
+            # Build address string based on connection type
+            if conn_type == ConnectionType.TCP:
+                address = f"{self.config.host}:{self.config.port}"
+                type_str = "tcp"
+            elif conn_type == ConnectionType.SERIAL:
+                address = self.config.serial_port or ""
+                type_str = "serial"
+            elif conn_type == ConnectionType.BLE:
+                address = self.config.ble_address or ""
+                type_str = "ble"
+            else:
+                return  # Don't record AUTO type
+
+            persistence.record_connection(
+                connection_type=type_str,
+                address=address,
+                device_info=self._status.device_info if success else {},
+                success=success,
+                error_message=error_message,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record connection: {e}")
 
     def disconnect(self) -> None:
         """Disconnect from device."""
