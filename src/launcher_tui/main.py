@@ -127,6 +127,9 @@ from settings_menu_mixin import SettingsMenuMixin
 from logs_menu_mixin import LogsMenuMixin
 from device_backup_mixin import DeviceBackupMixin
 from traffic_inspector_mixin import TrafficInspectorMixin
+from updates_mixin import UpdatesMixin
+from mqtt_mixin import MQTTMixin
+from gateway_config_mixin import GatewayConfigMixin
 
 
 class MeshForgeLauncher(
@@ -154,7 +157,10 @@ class MeshForgeLauncher(
     SettingsMenuMixin,
     LogsMenuMixin,
     DeviceBackupMixin,
-    TrafficInspectorMixin
+    TrafficInspectorMixin,
+    UpdatesMixin,
+    MQTTMixin,
+    GatewayConfigMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -581,7 +587,9 @@ class MeshForgeLauncher(
             choices = [
                 ("meshtastic", "Meshtastic          Radio, channels, CLI"),
                 ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
+                ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
+                ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
                 ("services", "Service Control     Start/stop/restart"),
                 ("back", "Back"),
             ]
@@ -599,8 +607,12 @@ class MeshForgeLauncher(
                 self._radio_menu()
             elif choice == "rns":
                 self._rns_menu()
+            elif choice == "gateway":
+                self._gateway_config_menu()
             elif choice == "aredn":
                 self._aredn_menu()
+            elif choice == "mqtt":
+                self._mqtt_menu()
             elif choice == "services":
                 self._service_menu()
 
@@ -766,6 +778,7 @@ class MeshForgeLauncher(
                 ("rns-config", "RNS Config          Reticulum settings"),
                 ("services", "Service Config      systemd services"),
                 ("backup", "Device Backup       Backup/restore configs"),
+                ("updates", "Software Updates    One-click updates"),
                 ("meshforge", "MeshForge Settings  App preferences"),
                 ("wizard", "Setup Wizard        First-run wizard"),
                 ("back", "Back"),
@@ -790,6 +803,8 @@ class MeshForgeLauncher(
                 self._service_menu()
             elif choice == "backup":
                 self._device_backup_menu()
+            elif choice == "updates":
+                self._updates_menu()
             elif choice == "meshforge":
                 self._settings_menu()
             elif choice == "wizard":
