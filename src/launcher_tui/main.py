@@ -129,6 +129,7 @@ from device_backup_mixin import DeviceBackupMixin
 from traffic_inspector_mixin import TrafficInspectorMixin
 from updates_mixin import UpdatesMixin
 from mqtt_mixin import MQTTMixin
+from gateway_config_mixin import GatewayConfigMixin
 
 
 class MeshForgeLauncher(
@@ -158,7 +159,8 @@ class MeshForgeLauncher(
     DeviceBackupMixin,
     TrafficInspectorMixin,
     UpdatesMixin,
-    MQTTMixin
+    MQTTMixin,
+    GatewayConfigMixin
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -585,6 +587,7 @@ class MeshForgeLauncher(
             choices = [
                 ("meshtastic", "Meshtastic          Radio, channels, CLI"),
                 ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
+                ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
                 ("services", "Service Control     Start/stop/restart"),
@@ -604,6 +607,8 @@ class MeshForgeLauncher(
                 self._radio_menu()
             elif choice == "rns":
                 self._rns_menu()
+            elif choice == "gateway":
+                self._gateway_config_menu()
             elif choice == "aredn":
                 self._aredn_menu()
             elif choice == "mqtt":
@@ -850,7 +855,7 @@ class MeshForgeLauncher(
         """Drop to a bash shell."""
         subprocess.run(['clear'], check=False, timeout=5)
         print("Dropping to shell. Type 'exit' to return to MeshForge.\n")
-        subprocess.run(['bash'], check=False)  # noqa: MF004 - interactive shell
+        subprocess.run(['bash'], check=False)  # Interactive shell - no timeout
 
     def _reboot_menu(self):
         """Safe reboot/shutdown options."""

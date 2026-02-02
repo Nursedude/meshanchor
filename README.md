@@ -113,19 +113,15 @@ sudo git pull origin main
 # git stash pop
 ```
 
-### Upgrade to Alpha Branch
+### Switch Branches
 
-To test cutting-edge features:
+The `main` and `alpha` branches are now synchronized. Both contain all features.
 
 ```bash
-cd /path/to/meshforge
-git fetch origin alpha
-git checkout alpha
-sudo git pull origin alpha
-```
+# Check current branch
+git branch
 
-To return to stable:
-```bash
+# Switch if needed (both are equivalent)
 git checkout main
 sudo git pull origin main
 ```
@@ -206,7 +202,9 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | Category | Capabilities | Status |
 |----------|-------------|--------|
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
-| **TUI Interface** | Installer, service control, config management, diagnostics | **Stable** |
+| **TUI Interface** | Installer, service control, config management, diagnostics | Stable |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), routing | Stable |
+| **Traffic Inspector** | Wireshark-grade packet visibility, protocol dissection, multi-hop path tracing | Stable |
 | **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
@@ -214,21 +212,21 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
+| **Config API** | RESTful configuration management with NGINX reliability patterns | Stable |
 | **AREDN** | Node discovery, link quality, service enumeration | Stable |
+| **Prometheus Metrics** | HTTP endpoint, Grafana dashboards, alerting rules | Stable |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 ### Roadmap
 
 | Feature | Target | Status |
 |---------|--------|--------|
-| **Multi-Mesh Gateway** | Q1 2026 | **In Progress (alpha)** |
-| Short Turbo ↔ LongFast bridging | Q1 2026 | Testing |
-| Multi-radio template (HAT + USB) | Q1 2026 | Testing |
-| Multi-hop path visualization | Q2 2026 | Planned |
+| Historical playback (Live Map Phase 6) | Q2 2026 | Planned |
 | Packet decode (protobuf + RNS frames) | Q2 2026 | Planned |
 | SDR spectrum analysis (RTL-SDR) | Q2 2026 | Planned |
+| GPS tracking + GPX export | Q2 2026 | Planned |
 
-*Goal: Wireshark-grade visibility into mesh traffic.*
+*Goal: Complete network operations visibility with historical analysis.*
 
 ---
 
@@ -246,6 +244,7 @@ graph TB
         LAUNCHER[Launcher<br>Auto-detect display]
         GATEWAY[Gateway Bridge<br>Message routing + SQLite queue]
         MONITOR[MQTT Subscriber<br>Nodeless node tracking]
+        TRAFFIC[Traffic Inspector<br>Packet capture + path tracing]
         MAPS[Coverage Maps<br>Folium + offline tiles]
         RF[RF Engine<br>Link budget, Fresnel, path loss]
         DIAG[Diagnostics<br>Rule engine + knowledge base]
@@ -279,6 +278,8 @@ graph TB
     GATEWAY --> MESHTASTICD
     GATEWAY --> RNSD
     MONITOR --> MQTT
+    TRAFFIC --> GATEWAY
+    TRAFFIC --> MONITOR
     MAPS --> MONITOR
     RF --> NOAA
 
@@ -291,6 +292,7 @@ graph TB
     style BROWSER fill:#2d5016,color:#fff
     style CLI fill:#2d5016,color:#fff
     style GATEWAY fill:#1a3a5c,color:#fff
+    style TRAFFIC fill:#3a1a5c,color:#fff
     style AI fill:#5c1a3a,color:#fff
     style UCONSOLE fill:#5c4a1a,color:#fff
 ```
@@ -443,18 +445,35 @@ src/
 │   ├── message_queue.py   # Persistent SQLite queue
 │   └── node_tracker.py    # Unified node discovery
 ├── monitoring/            # Network monitoring
-│   └── mqtt_subscriber.py # Nodeless MQTT node tracking
+│   ├── mqtt_subscriber.py # Nodeless MQTT node tracking
+│   ├── traffic_inspector.py # Wireshark-grade packet capture
+│   └── path_visualizer.py # Multi-hop path tracing
 ├── utils/                 # Core utilities
 │   ├── rf.py              # RF calculations (well-tested)
 │   ├── coverage_map.py    # Folium map generator + tile cache
+│   ├── config_api.py      # RESTful configuration API
 │   ├── diagnostic_engine.py # Rule-based AI diagnostics
+│   ├── diagnostic_rules.py  # Diagnostic rule definitions
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
-│   ├── knowledge_base.py   # 20+ mesh networking topics
+│   ├── knowledge_base.py   # Core knowledge base class
+│   ├── knowledge_content.py # 20+ mesh networking topics
+│   ├── shared_health_state.py # Cross-component health tracking
+│   ├── metrics_export.py   # Prometheus/JSON metrics export
 │   ├── uconsole.py        # uConsole AIO V2 hardware profile
 │   ├── aredn.py           # AREDN mesh client
 │   └── paths.py           # Sudo-safe path resolution
 ├── standalone.py          # Zero-dependency RF tools
 └── __version__.py         # Version tracking
+
+dashboards/                # Grafana monitoring dashboards
+├── meshforge-overview.json  # Health, services, queues
+├── meshforge-nodes.json     # Per-node RF metrics
+└── meshforge-gateway.json   # Gateway bridge status
+
+templates/
+└── gateway-pair/          # Multi-preset bridging templates
+    ├── node-a.yaml        # First gateway node config
+    └── node-b.yaml        # Second gateway node config
 ```
 
 ---
@@ -483,12 +502,26 @@ Auto-deploys a working config from `templates/reticulum.conf`:
 - Meshtastic Interface on `127.0.0.1:4403`
 - RNode LoRa (optional, for dedicated RNS radio)
 
+### Prometheus Metrics
+
+MeshForge exports metrics for monitoring with Prometheus and Grafana:
+
+```python
+from utils.metrics_export import start_metrics_server
+
+server = start_metrics_server(port=9090)
+# Metrics at http://localhost:9090/metrics
+```
+
+Pre-built Grafana dashboards in `dashboards/`. See `docs/METRICS.md` for full documentation.
+
 ### Ports
 
 | Port | Service |
 |------|---------|
 | 4403 | meshtasticd TCP API |
 | 9443 | meshtasticd Web UI |
+| 9090 | Prometheus metrics (optional) |
 
 ---
 
@@ -507,71 +540,40 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ## Development Branches
 
-MeshForge uses a two-branch development model for stability and rapid iteration:
+MeshForge uses a unified development model:
 
-| Branch | Purpose | Stability | Use Case |
-|--------|---------|-----------|----------|
-| `main` | Production-ready features | **Stable** | Daily operations, reliable deployments |
-| `alpha` | Cutting-edge development | **Testing** | New features, experimental work |
+| Branch | Purpose | Status |
+|--------|---------|--------|
+| `main` | Production-ready, all features | **Stable** |
+| `alpha` | Synchronized with main | Unified |
 
-### Main Branch (Stable)
-
-The `main` branch contains battle-tested features:
-- Gateway bridge (Meshtastic ↔ RNS)
-- RF engineering tools
-- AI diagnostics (Standalone + PRO)
-- AREDN integration
-- Core TUI functionality
+All features are now in `main`. The `alpha` branch tracks `main` for users who prefer the alpha naming convention.
 
 ```bash
-# Install stable version
+# Install (main branch)
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
 sudo bash scripts/install_noc.sh
 ```
 
-### Alpha Branch (Development)
-
-The `alpha` branch has the latest features under active development:
-- **Live Map NOC View** — Real-time node tracking in browser
-- **Field Operations Mode** — Node deployment tools, range testing
-- **Enhanced Animations** — Smooth node movements, visual transitions
-- **Advanced Filtering** — Node type, status, signal strength filters
-- **Offline Tile Caching** — Pre-fetch map tiles for field use
+### Quick Update
 
 ```bash
-# Test alpha features
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge
-git checkout alpha
-sudo bash scripts/install_noc.sh
-```
-
-### Updating Your Installation
-
-See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup, verification, and troubleshooting.
-
-Quick update:
-```bash
-# For main (stable)
 cd /opt/meshforge && sudo git pull origin main
-
-# For alpha (development)
-cd /opt/meshforge && sudo git pull origin alpha
 ```
 
-### Current Alpha Work: Multi-Mesh Gateway
+See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup and troubleshooting.
 
-The gateway bridge is the cornerstone feature under active testing:
+### Gateway Configurations
 
 | Configuration | Setup | Status |
 |---------------|-------|--------|
-| **moc1** | USB LongFast ↔ Short Turbo | Testing |
-| **moc2** | HAT Short Turbo ↔ LongFast (two-radio) | Testing |
+| **moc1** | USB LongFast ↔ Short Turbo | Stable |
+| **moc2** | HAT Short Turbo ↔ LongFast (two-radio) | Stable |
 | **moc3** | HAT LongFast ↔ TBD | Planned |
-| **VolcanoAI** | USB LongFast ↔ RNS (desktop) | Testing |
+| **VolcanoAI** | USB LongFast ↔ RNS (desktop) | Stable |
 
-The Live Map NOC view is stable and available: **Maps → Live NOC View**
+Gateway templates available in `templates/gateway-pair/` for multi-preset bridging.
 
 ---
 
