@@ -20,6 +20,18 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Import node state machine
+try:
+    from .node_state import (
+        NodeState, NodeStateMachine, NodeStateConfig,
+        StateTransition, get_default_state_config
+    )
+    NODE_STATE_AVAILABLE = True
+except ImportError:
+    NODE_STATE_AVAILABLE = False
+    NodeState = None  # type: ignore
+    NodeStateMachine = None  # type: ignore
+
 # Import RNS service registry and topology (optional - graceful fallback)
 try:
     from .rns_services import (
@@ -285,6 +297,10 @@ class UnifiedNode:
     last_seen: Optional[datetime] = None
     first_seen: Optional[datetime] = None
 
+    # State machine for granular status tracking
+    # Initialized in __post_init__ if available
+    _state_machine: Optional[Any] = field(default=None, repr=False)
+
     # Hardware info
     hardware_model: Optional[str] = None
     firmware_version: Optional[str] = None
@@ -298,11 +314,60 @@ class UnifiedNode:
     def __post_init__(self):
         if self.first_seen is None:
             self.first_seen = datetime.now()
+        # Initialize state machine if available
+        if NODE_STATE_AVAILABLE and self._state_machine is None:
+            from .node_state import NodeStateMachine, NodeState
+            initial = NodeState.DISCOVERED if self.is_online else NodeState.STALE_CACHE
+            self._state_machine = NodeStateMachine(initial_state=initial)
 
     def update_seen(self):
-        """Update last seen timestamp"""
+        """Update last seen timestamp and state machine"""
         self.last_seen = datetime.now()
         self.is_online = True
+        # Update state machine with current signal values
+        if self._state_machine is not None:
+            self._state_machine.record_response(snr=self.snr, rssi=self.rssi)
+
+    @property
+    def state(self) -> Optional['NodeState']:
+        """Get current node state (granular status)."""
+        if self._state_machine is not None:
+            return self._state_machine.state
+        # Fallback: derive from is_online
+        if NODE_STATE_AVAILABLE:
+            from .node_state import NodeState
+            return NodeState.ONLINE if self.is_online else NodeState.OFFLINE
+        return None
+
+    @property
+    def state_name(self) -> str:
+        """Get human-readable state name."""
+        if self._state_machine is not None:
+            return self._state_machine.state.display_name
+        return "Online" if self.is_online else "Offline"
+
+    @property
+    def state_icon(self) -> str:
+        """Get state icon for display."""
+        if self._state_machine is not None:
+            return self._state_machine.state.icon
+        return "+" if self.is_online else "-"
+
+    def check_timeout(self) -> bool:
+        """Check for timeout and update state. Returns True if state changed."""
+        if self._state_machine is not None:
+            old_state = self._state_machine.state
+            self._state_machine.check_timeout(self.last_seen)
+            # Sync is_online with state machine
+            self.is_online = self._state_machine.state.is_active()
+            return old_state != self._state_machine.state
+        return False
+
+    def get_state_history(self, count: int = 10) -> List[dict]:
+        """Get recent state transitions for debugging."""
+        if self._state_machine is not None:
+            return [t.to_dict() for t in self._state_machine.get_transitions(count)]
+        return []
 
     def record_signal_quality(self, snr: Optional[float] = None, rssi: Optional[int] = None):
         """Record signal quality measurements with timestamp for trending.
@@ -472,6 +537,10 @@ class UnifiedNode:
             "service_type": self.service_type,
             "service_aspect": self.service_aspect,
             "service_capabilities": self.service_capabilities if self.service_capabilities else None,
+            # Granular state
+            "state": self.state.name if self.state else None,
+            "state_display": self.state_name,
+            "state_icon": self.state_icon,
         }
 
         # Optionally include full signal history (for detailed views/caching)
@@ -480,6 +549,9 @@ class UnifiedNode:
                 result["snr_history"] = [s.to_dict() for s in self.snr_history]
             if self.rssi_history:
                 result["rssi_history"] = [s.to_dict() for s in self.rssi_history]
+            # Include state machine data for cache persistence
+            if self._state_machine is not None:
+                result["state_machine"] = self._state_machine.to_dict()
 
         return result
 
@@ -526,6 +598,11 @@ class UnifiedNode:
         node.snr = mesh_node.get('snr')
         node.hops = mesh_node.get('hopsAway')
         node.last_seen = datetime.now()
+        node.is_online = True
+
+        # Update state machine with live data
+        if node._state_machine is not None:
+            node._state_machine.record_response(snr=node.snr)
 
         return node
 
@@ -1144,7 +1221,7 @@ instance_control_port = 37429
                 logger.error(f"Callback error: {e}")
 
     def _cleanup_loop(self):
-        """Periodically mark offline nodes and save cache"""
+        """Periodically check node timeouts and save cache"""
         while self._running:
             if self._stop_event.wait(60):
                 break
@@ -1152,7 +1229,11 @@ instance_control_port = 37429
             with self._lock:
                 now = datetime.now()
                 for node in self._nodes.values():
-                    if node.last_seen:
+                    # Use state machine for timeout checking if available
+                    if node._state_machine is not None:
+                        node.check_timeout()
+                    elif node.last_seen:
+                        # Fallback to simple threshold check
                         age = (now - node.last_seen).total_seconds()
                         if age > self.OFFLINE_THRESHOLD:
                             node.is_online = False
@@ -1216,6 +1297,13 @@ instance_control_port = 37429
                     node.snr = node_data['snr']
                 if node_data.get('rssi') is not None:
                     node.rssi = node_data['rssi']
+                # Restore state machine from cache if available
+                if NODE_STATE_AVAILABLE and node_data.get('state_machine'):
+                    try:
+                        from .node_state import NodeStateMachine
+                        node._state_machine = NodeStateMachine.from_dict(node_data['state_machine'])
+                    except Exception as e:
+                        logger.debug(f"Could not restore state machine: {e}")
                 self._nodes[node.id] = node
 
             logger.info(f"Loaded {len(self._nodes)} nodes from cache")
