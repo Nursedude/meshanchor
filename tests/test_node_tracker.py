@@ -728,3 +728,199 @@ class TestGeoJSON:
             geojson = tracker.to_geojson()
 
             assert len(geojson['features']) == 1
+
+
+class TestSignalQualityTrending:
+    """Tests for signal quality trending feature."""
+
+    def test_record_signal_quality_snr(self):
+        """Test recording SNR values."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        node.record_signal_quality(snr=10.5)
+
+        assert node.snr == 10.5
+        assert len(node.snr_history) == 1
+        assert node.snr_history[0].value == 10.5
+
+    def test_record_signal_quality_rssi(self):
+        """Test recording RSSI values."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        node.record_signal_quality(rssi=-75)
+
+        assert node.rssi == -75
+        assert len(node.rssi_history) == 1
+        assert node.rssi_history[0].value == -75.0
+
+    def test_record_signal_quality_both(self):
+        """Test recording both SNR and RSSI together."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        node.record_signal_quality(snr=8.0, rssi=-80)
+
+        assert node.snr == 8.0
+        assert node.rssi == -80
+        assert len(node.snr_history) == 1
+        assert len(node.rssi_history) == 1
+
+    def test_history_accumulates(self):
+        """Test that signal history accumulates over multiple recordings."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        for i in range(5):
+            node.record_signal_quality(snr=float(i))
+
+        assert len(node.snr_history) == 5
+        assert node.snr_history[0].value == 0.0
+        assert node.snr_history[4].value == 4.0
+
+    def test_history_max_samples(self):
+        """Test that history is trimmed to MAX_SIGNAL_SAMPLES."""
+        node = UnifiedNode(id="test", network="meshtastic")
+        node.MAX_SIGNAL_SAMPLES = 10  # Override for testing
+
+        for i in range(15):
+            node.record_signal_quality(snr=float(i))
+
+        assert len(node.snr_history) == 10
+        # Should keep the most recent 10
+        assert node.snr_history[0].value == 5.0
+        assert node.snr_history[9].value == 14.0
+
+    def test_snr_trend_unknown_insufficient_data(self):
+        """Test trend returns 'unknown' with insufficient data."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Less than 5 samples
+        for i in range(3):
+            node.record_signal_quality(snr=float(i))
+
+        assert node.snr_trend == "unknown"
+
+    def test_snr_trend_improving(self):
+        """Test SNR trend detection for improving signal."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Older samples: low SNR (0-4)
+        for i in range(5):
+            node.record_signal_quality(snr=float(i))
+        # Recent samples: high SNR (10-14) - clear improvement
+        for i in range(10, 15):
+            node.record_signal_quality(snr=float(i))
+
+        assert node.snr_trend == "improving"
+
+    def test_snr_trend_degrading(self):
+        """Test SNR trend detection for degrading signal."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Older samples: high SNR
+        for i in range(10, 15):
+            node.record_signal_quality(snr=float(i))
+        # Recent samples: low SNR - clear degradation
+        for i in range(5):
+            node.record_signal_quality(snr=float(i))
+
+        assert node.snr_trend == "degrading"
+
+    def test_snr_trend_stable(self):
+        """Test SNR trend detection for stable signal."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # All samples around the same value
+        for _ in range(10):
+            node.record_signal_quality(snr=5.0)
+
+        assert node.snr_trend == "stable"
+
+    def test_rssi_trend_improving(self):
+        """Test RSSI trend detection for improving signal."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Older samples: low RSSI (worse signal)
+        for i in range(5):
+            node.record_signal_quality(rssi=-90 + i)
+        # Recent samples: high RSSI (better signal)
+        for i in range(5):
+            node.record_signal_quality(rssi=-70 + i)
+
+        assert node.rssi_trend == "improving"
+
+    def test_get_signal_stats(self):
+        """Test signal statistics calculation."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Add some varied SNR values
+        for snr in [5.0, 10.0, 8.0, 12.0, 6.0, 9.0, 11.0, 7.0, 10.0, 8.0]:
+            node.record_signal_quality(snr=snr)
+
+        stats = node.get_signal_stats()
+
+        assert 'snr' in stats
+        assert stats['snr']['min'] == 5.0
+        assert stats['snr']['max'] == 12.0
+        assert stats['snr']['samples'] == 10
+        assert stats['snr']['current'] == 8.0
+        assert 'trend' in stats['snr']
+
+    def test_to_dict_includes_trends(self):
+        """Test that to_dict includes trend information."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        # Add enough samples for trend
+        for i in range(10):
+            node.record_signal_quality(snr=float(i), rssi=-80 + i)
+
+        d = node.to_dict()
+
+        assert 'snr_trend' in d
+        assert 'rssi_trend' in d
+        assert d['snr_trend'] is not None
+
+    def test_to_dict_with_signal_history(self):
+        """Test that to_dict includes history when requested."""
+        node = UnifiedNode(id="test", network="meshtastic")
+
+        node.record_signal_quality(snr=10.0, rssi=-75)
+
+        # Without history
+        d_minimal = node.to_dict(include_signal_history=False)
+        assert 'snr_history' not in d_minimal
+
+        # With history
+        d_full = node.to_dict(include_signal_history=True)
+        assert 'snr_history' in d_full
+        assert len(d_full['snr_history']) == 1
+        assert 'rssi_history' in d_full
+
+    def test_merge_node_records_signal(self):
+        """Test that merging nodes records signal quality."""
+        with patch.object(UnifiedNodeTracker, '_load_cache'):
+            tracker = UnifiedNodeTracker()
+
+            node1 = UnifiedNode(id="test", network="meshtastic", snr=5.0)
+            tracker.add_node(node1)
+
+            node2 = UnifiedNode(id="test", network="meshtastic", snr=8.0)
+            tracker.add_node(node2)
+
+            result = tracker.get_node("test")
+
+            # Should have recorded both signal values
+            assert result.snr == 8.0
+            assert len(result.snr_history) == 1  # Only from merge, not initial add
+
+    def test_signal_sample_to_dict(self):
+        """Test SignalSample serialization."""
+        from src.gateway.node_tracker import SignalSample
+
+        sample = SignalSample(
+            timestamp=datetime(2026, 1, 15, 12, 30, 0),
+            value=10.5
+        )
+
+        d = sample.to_dict()
+
+        assert d['value'] == 10.5
+        assert '2026-01-15' in d['timestamp']
