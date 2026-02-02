@@ -39,6 +39,7 @@ class MeshtasticdConfigMixin:
                 ("presets", "Radio Presets (LoRa)"),
                 ("hardware", "Hardware Config"),
                 ("channels", "Channel Config"),
+                ("mqtt", "MQTT Uplink/Downlink"),
                 ("gateway", "Gateway Template"),
                 ("edit", "Edit Config Files"),
                 ("restart", "Restart Service"),
@@ -66,6 +67,8 @@ class MeshtasticdConfigMixin:
                 self._hardware_config_menu()
             elif choice == "channels":
                 self._channel_config_menu()
+            elif choice == "mqtt":
+                self._mqtt_device_config()
             elif choice == "gateway":
                 self._gateway_template_menu()
             elif choice == "edit":
@@ -647,3 +650,327 @@ Press Cancel to keep current values."""
             self.dialog.msgbox("Error", "Restart timed out")
         except Exception as e:
             self.dialog.msgbox("Error", f"Restart failed:\n{e}")
+
+    def _mqtt_device_config(self):
+        """Configure MQTT uplink/downlink for the Meshtastic radio.
+
+        This configures the radio to send/receive messages via an MQTT broker,
+        enabling integration with the Meshtastic MQTT network.
+        """
+        while True:
+            choices = [
+                ("view", "View Current Settings"),
+                ("enable", "Enable MQTT Uplink"),
+                ("disable", "Disable MQTT"),
+                ("broker", "Set Broker Address"),
+                ("credentials", "Set Username/Password"),
+                ("topic", "Set Root Topic"),
+                ("encryption", "Encryption Key (PKC)"),
+                ("uplink", "Configure Uplink Channels"),
+                ("downlink", "Configure Downlink Channels"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "MQTT Device Config",
+                "Configure radio MQTT uplink/downlink:\n\n"
+                "This sends mesh traffic to an MQTT broker.",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            cli = self._get_meshtastic_cli()
+            conn_args = ['--host', 'localhost']
+
+            if choice == "view":
+                self._mqtt_view_settings()
+            elif choice == "enable":
+                self._mqtt_set_enabled(True)
+            elif choice == "disable":
+                self._mqtt_set_enabled(False)
+            elif choice == "broker":
+                self._mqtt_set_broker()
+            elif choice == "credentials":
+                self._mqtt_set_credentials()
+            elif choice == "topic":
+                self._mqtt_set_topic()
+            elif choice == "encryption":
+                self._mqtt_set_encryption()
+            elif choice == "uplink":
+                self._mqtt_configure_uplink()
+            elif choice == "downlink":
+                self._mqtt_configure_downlink()
+
+    def _mqtt_view_settings(self):
+        """View current MQTT settings."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== MQTT Settings ===\n")
+        cli = self._get_meshtastic_cli()
+        try:
+            result = subprocess.run(
+                [cli, '--host', 'localhost', '--get', 'mqtt'],
+                timeout=15
+            )
+            if result.returncode != 0:
+                print("\nFailed to get MQTT settings.")
+                print("Is meshtasticd running?")
+        except FileNotFoundError:
+            print("meshtastic CLI not found. Install via Radio Tools menu.")
+        except subprocess.TimeoutExpired:
+            print("\nCommand timed out.")
+        except KeyboardInterrupt:
+            print("\nAborted.")
+        self._wait_for_enter()
+
+    def _mqtt_set_enabled(self, enabled: bool):
+        """Enable or disable MQTT."""
+        action = "enable" if enabled else "disable"
+        if not self.dialog.yesno(
+            f"{'Enable' if enabled else 'Disable'} MQTT",
+            f"{'Enable' if enabled else 'Disable'} MQTT uplink/downlink?\n\n"
+            f"{'This will start sending mesh traffic to the MQTT broker.' if enabled else 'This will stop MQTT traffic.'}"
+        ):
+            return
+
+        cli = self._get_meshtastic_cli()
+        subprocess.run(['clear'], check=False, timeout=5)
+        print(f"=== {'Enabling' if enabled else 'Disabling'} MQTT ===\n")
+        try:
+            result = subprocess.run(
+                [cli, '--host', 'localhost', '--set', 'mqtt.enabled', str(enabled).lower()],
+                timeout=15
+            )
+            if result.returncode == 0:
+                print(f"\nMQTT {'enabled' if enabled else 'disabled'} successfully.")
+            else:
+                print("\nCommand failed.")
+        except Exception as e:
+            print(f"\nError: {e}")
+        self._wait_for_enter()
+
+    def _mqtt_set_broker(self):
+        """Set MQTT broker address."""
+        broker = self.dialog.inputbox(
+            "MQTT Broker",
+            "Enter MQTT broker address:\n\n"
+            "Examples:\n"
+            "  mqtt.meshtastic.org (public)\n"
+            "  192.168.1.100 (local)\n"
+            "  mybroker.example.com:1883",
+            init="mqtt.meshtastic.org"
+        )
+
+        if not broker:
+            return
+
+        cli = self._get_meshtastic_cli()
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Setting MQTT Broker ===\n")
+        try:
+            result = subprocess.run(
+                [cli, '--host', 'localhost', '--set', 'mqtt.address', broker.strip()],
+                timeout=15
+            )
+            if result.returncode == 0:
+                print(f"\nMQTT broker set to: {broker}")
+            else:
+                print("\nCommand failed.")
+        except Exception as e:
+            print(f"\nError: {e}")
+        self._wait_for_enter()
+
+    def _mqtt_set_credentials(self):
+        """Set MQTT username and password."""
+        username = self.dialog.inputbox(
+            "MQTT Username",
+            "Enter MQTT username (blank for anonymous):",
+            init=""
+        )
+
+        if username is None:
+            return
+
+        password = self.dialog.inputbox(
+            "MQTT Password",
+            "Enter MQTT password (blank for none):",
+            init=""
+        )
+
+        if password is None:
+            return
+
+        cli = self._get_meshtastic_cli()
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Setting MQTT Credentials ===\n")
+        try:
+            cmd = [cli, '--host', 'localhost']
+            if username:
+                cmd.extend(['--set', 'mqtt.username', username])
+            if password:
+                cmd.extend(['--set', 'mqtt.password', password])
+
+            if len(cmd) > 3:  # Has settings to apply
+                result = subprocess.run(cmd, timeout=15)
+                if result.returncode == 0:
+                    print("\nMQTT credentials updated.")
+                else:
+                    print("\nCommand failed.")
+            else:
+                print("No credentials to set.")
+        except Exception as e:
+            print(f"\nError: {e}")
+        self._wait_for_enter()
+
+    def _mqtt_set_topic(self):
+        """Set MQTT root topic."""
+        topic = self.dialog.inputbox(
+            "MQTT Root Topic",
+            "Enter MQTT root topic:\n\n"
+            "Default: msh\n"
+            "Full topic pattern: {root}/{region}/2/e/{channel}/...",
+            init="msh"
+        )
+
+        if not topic:
+            return
+
+        cli = self._get_meshtastic_cli()
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Setting MQTT Topic ===\n")
+        try:
+            result = subprocess.run(
+                [cli, '--host', 'localhost', '--set', 'mqtt.root', topic.strip()],
+                timeout=15
+            )
+            if result.returncode == 0:
+                print(f"\nMQTT root topic set to: {topic}")
+            else:
+                print("\nCommand failed.")
+        except Exception as e:
+            print(f"\nError: {e}")
+        self._wait_for_enter()
+
+    def _mqtt_set_encryption(self):
+        """Configure MQTT encryption key (Public Key Cryptography)."""
+        self.dialog.msgbox(
+            "MQTT Encryption",
+            "MQTT Encryption Options:\n\n"
+            "1. JSON mode (default): Messages sent as plaintext JSON\n"
+            "2. PKC mode: Messages encrypted with channel key\n\n"
+            "PKC mode requires:\n"
+            "  - encryption_enabled = true\n"
+            "  - A valid channel PSK\n\n"
+            "Configure encryption via:\n"
+            "  --set mqtt.encryption_enabled true\n"
+            "  --set mqtt.json_enabled false"
+        )
+
+        choices = [
+            ("json", "JSON Mode (plaintext, human-readable)"),
+            ("encrypted", "Encrypted Mode (PKC, secure)"),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "MQTT Encryption Mode",
+            "Select MQTT message format:",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        cli = self._get_meshtastic_cli()
+        subprocess.run(['clear'], check=False, timeout=5)
+
+        if choice == "json":
+            print("=== Setting JSON Mode ===\n")
+            try:
+                subprocess.run(
+                    [cli, '--host', 'localhost',
+                     '--set', 'mqtt.json_enabled', 'true',
+                     '--set', 'mqtt.encryption_enabled', 'false'],
+                    timeout=15
+                )
+                print("\nMQTT set to JSON mode (plaintext).")
+            except Exception as e:
+                print(f"\nError: {e}")
+        else:
+            print("=== Setting Encrypted Mode ===\n")
+            try:
+                subprocess.run(
+                    [cli, '--host', 'localhost',
+                     '--set', 'mqtt.json_enabled', 'false',
+                     '--set', 'mqtt.encryption_enabled', 'true'],
+                    timeout=15
+                )
+                print("\nMQTT set to encrypted mode (PKC).")
+                print("Messages will be encrypted with channel PSK.")
+            except Exception as e:
+                print(f"\nError: {e}")
+
+        self._wait_for_enter()
+
+    def _mqtt_configure_uplink(self):
+        """Configure which channels uplink to MQTT."""
+        self.dialog.msgbox(
+            "MQTT Uplink",
+            "MQTT Uplink sends local mesh messages to the broker.\n\n"
+            "Per-channel uplink is configured via:\n"
+            "  Channel Config → Edit Channel → Uplink Enabled\n\n"
+            "Or via CLI:\n"
+            "  meshtastic --ch-index 0 --ch-set uplink_enabled true"
+        )
+
+        # Offer to enable uplink on primary channel
+        if self.dialog.yesno(
+            "Enable Primary Uplink",
+            "Enable MQTT uplink on primary channel (index 0)?",
+            default_no=True
+        ):
+            cli = self._get_meshtastic_cli()
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Enabling Uplink ===\n")
+            try:
+                subprocess.run(
+                    [cli, '--host', 'localhost',
+                     '--ch-index', '0', '--ch-set', 'uplink_enabled', 'true'],
+                    timeout=15
+                )
+                print("\nUplink enabled on primary channel.")
+            except Exception as e:
+                print(f"\nError: {e}")
+            self._wait_for_enter()
+
+    def _mqtt_configure_downlink(self):
+        """Configure which channels downlink from MQTT."""
+        self.dialog.msgbox(
+            "MQTT Downlink",
+            "MQTT Downlink receives broker messages to local mesh.\n\n"
+            "Per-channel downlink is configured via:\n"
+            "  Channel Config → Edit Channel → Downlink Enabled\n\n"
+            "Or via CLI:\n"
+            "  meshtastic --ch-index 0 --ch-set downlink_enabled true"
+        )
+
+        # Offer to enable downlink on primary channel
+        if self.dialog.yesno(
+            "Enable Primary Downlink",
+            "Enable MQTT downlink on primary channel (index 0)?",
+            default_no=True
+        ):
+            cli = self._get_meshtastic_cli()
+            subprocess.run(['clear'], check=False, timeout=5)
+            print("=== Enabling Downlink ===\n")
+            try:
+                subprocess.run(
+                    [cli, '--host', 'localhost',
+                     '--ch-index', '0', '--ch-set', 'downlink_enabled', 'true'],
+                    timeout=15
+                )
+                print("\nDownlink enabled on primary channel.")
+            except Exception as e:
+                print(f"\nError: {e}")
+            self._wait_for_enter()
