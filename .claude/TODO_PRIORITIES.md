@@ -39,22 +39,22 @@
 - [x] **Gateway config template** - gateway-hawaiinet.yaml (2026-01-20)
 
 ### Rich CLI Enhancements (MOC2 Testing)
-- [ ] **RNS/RNSD tools menu** - Mirror GTK panel functionality:
-  - [ ] rnsd service status/control
-  - [ ] Config file editor
-  - [ ] Interface list
-  - [ ] Announce management
-  - [ ] NomadNet launcher
-- [ ] **Device config wizard** - Complete setup flow:
-  - [ ] Long name (40 char)
-  - [ ] Short name (4 char)
-  - [ ] Region selection
-  - [ ] Frequency slot
-  - [ ] Modem preset (Short Turbo, etc.)
-  - [ ] TX power
-  - [ ] Position (lat/lon)
-  - [ ] MQTT policy
-- [ ] **Gateway config menu** - For RNS bridge setup
+- [x] **RNS/RNSD tools menu** - Mirror GTK panel functionality (2026-02-02):
+  - [x] rnsd service status/control - service_menu_mixin.py
+  - [x] Config file editor - rns_menu_mixin.py
+  - [x] Interface list - rns_interfaces_mixin.py
+  - [x] Announce management - auto-handled by RNS
+  - [x] NomadNet launcher - nomadnet_client_mixin.py
+- [x] **Device config wizard** - Complete setup flow (2026-02-02):
+  - [x] Long name (40 char) - meshtasticd_config_mixin.py
+  - [x] Short name (4 char) - meshtasticd_config_mixin.py
+  - [x] Region selection - radio_menu_mixin.py
+  - [x] Frequency slot - meshtasticd_config_mixin.py
+  - [x] Modem preset (Short Turbo, etc.) - meshtasticd_config_mixin.py
+  - [x] TX power - radio_menu_mixin.py (NEW)
+  - [x] Position (lat/lon) - radio_menu_mixin.py
+  - [x] MQTT policy - meshtasticd_config_mixin.py (NEW)
+- [x] **Gateway config menu** - For RNS bridge setup (2026-02-02) - gateway_config_mixin.py (NEW)
 
 ### Code Quality
 - [x] **Consolidate `get_real_user_home()`** - Reviewed: try/except fallback pattern is intentional for robustness when utils.paths unavailable
