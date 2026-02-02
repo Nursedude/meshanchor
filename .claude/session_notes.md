@@ -5,7 +5,7 @@
 
 ## Current Version: 0.4.8-alpha
 ## Last Updated: 2026-02-02
-## Branch: `claude/device-persistence-state-machine-oUfwu`
+## Branch: `claude/session-management-setup-KMbuT`
 
 ---
 
@@ -52,7 +52,65 @@ sudo ./scripts/install-desktop.sh
 
 ## Recent Work Summary
 
-### Session: 2026-02-02 - Device Persistence & Node State Machine
+### Session: 2026-02-02 - Map Features & TUI Integration
+
+**Features Implemented:**
+
+1. **Node Movement Trails** (`web/node_map.html`)
+   - Added trajectory visualization for individual nodes
+   - "Show Trail (24h)" button in node popup
+   - Animated trail lines with time markers
+   - Trail info panel showing duration and point count
+   - Integration with existing `/api/nodes/trajectory/<id>` API
+
+2. **Signal Strength Heatmap** (Already existed, verified)
+   - Leaflet.heat layer using real SNR data
+   - Toggle via checkbox in control panel
+   - Color gradient: blue (weak) to green (excellent)
+
+3. **Network Topology** (Already existed, verified)
+   - D3.js force-directed graph
+   - View toggle between Map and Topology
+   - Network-colored nodes and links
+
+4. **One-Click Updates Mixin** (`src/launcher_tui/updates_mixin.py`)
+   - Check for available updates (meshtasticd, CLI, firmware)
+   - One-click update execution for meshtasticd and CLI
+   - Version comparison with installed vs latest
+   - Integrated into TUI Configuration menu
+
+5. **MQTT Monitoring Mixin** (`src/launcher_tui/mqtt_mixin.py`)
+   - Start/stop MQTT subscriber from TUI
+   - Configure MQTT broker settings
+   - View discovered nodes and statistics
+   - Export MQTT data to file
+   - Integrated into TUI Mesh Networks menu
+
+**Files Added:**
+| File | Description |
+|------|-------------|
+| `src/launcher_tui/updates_mixin.py` | One-click software update management |
+| `src/launcher_tui/mqtt_mixin.py` | MQTT monitoring control |
+
+**Files Modified:**
+| File | Change |
+|------|--------|
+| `web/node_map.html` | Node trails CSS, trails layer, trajectory functions |
+| `src/launcher_tui/main.py` | Added UpdatesMixin and MQTTMixin, menu entries |
+
+**TUI Menu Additions:**
+- Configuration > Software Updates (one-click updates)
+- Mesh Networks > MQTT Monitor (nodeless observation)
+
+**Map Features Summary:**
+- Node trails: Click "Show Trail (24h)" in node popup
+- Signal heatmap: Toggle "Signal heatmap" checkbox
+- Network topology: Click "Topology" view toggle
+- All features accessible from web map at `/` endpoint
+
+---
+
+### Session: 2026-02-02 (earlier) - Device Persistence & Node State Machine
 
 **Features Implemented:**
 
@@ -370,12 +428,12 @@ get_version_summary()
 - [x] v4.1.0 - Map, version checker, desktop integration
 
 ### Next Steps (v4.2+)
-- [ ] Node movement trails on map (position history)
-- [ ] Signal strength visualization/heatmap
-- [ ] One-click update execution (run apt/pipx from UI)
+- [x] Node movement trails on map (position history)
+- [x] Signal strength visualization/heatmap
+- [x] One-click update execution (run apt/pipx from UI)
 - [ ] Firmware flashing integration
-- [ ] MQTT integration for remote monitoring
-- [ ] Network topology visualization (node connections)
+- [x] MQTT integration for remote monitoring
+- [x] Network topology visualization (node connections)
 
 ---
 
