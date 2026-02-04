@@ -106,6 +106,33 @@ class ReticulumPaths:
       3. ~/.reticulum/config (traditional fallback)
     """
 
+    # System-wide paths
+    ETC_BASE = Path('/etc/reticulum')
+    ETC_STORAGE = ETC_BASE / 'storage'
+    ETC_INTERFACES = ETC_BASE / 'interfaces'
+
+    @classmethod
+    def ensure_system_dirs(cls) -> bool:
+        """Create system-wide Reticulum directories if they don't exist.
+
+        RNS requires a 'storage' subdirectory in its config directory.
+        When using /etc/reticulum/config, this means /etc/reticulum/storage
+        must exist with proper permissions before rnsd can start.
+
+        Returns:
+            True if directories exist or were created, False on permission error.
+
+        Note:
+            Requires root/sudo to create directories in /etc.
+        """
+        try:
+            cls.ETC_BASE.mkdir(mode=0o755, parents=True, exist_ok=True)
+            cls.ETC_STORAGE.mkdir(mode=0o755, parents=True, exist_ok=True)
+            cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
+            return True
+        except PermissionError:
+            return False
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get Reticulum config directory.

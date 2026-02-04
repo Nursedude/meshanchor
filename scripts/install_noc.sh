@@ -976,6 +976,17 @@ if $INSTALL_RNS; then
 
     pip3 install $PIP_ARGS --ignore-installed -q rns
 
+    # Create /etc/reticulum directory structure
+    # RNS stores data in a 'storage' subdirectory of its config directory.
+    # When using system-wide config (/etc/reticulum/config), rnsd needs
+    # the storage directory to exist with proper permissions.
+    echo "  Creating /etc/reticulum/ structure..."
+    mkdir -p /etc/reticulum/storage
+    mkdir -p /etc/reticulum/interfaces
+    chmod 755 /etc/reticulum
+    chmod 755 /etc/reticulum/storage
+    chmod 755 /etc/reticulum/interfaces
+
     # Create systemd service if not exists
     if ! systemctl list-unit-files | grep -q rnsd.service; then
         echo "  Creating rnsd systemd service..."
