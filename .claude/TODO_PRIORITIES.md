@@ -194,16 +194,25 @@
 
 ## Technical Debt
 
-| File | Lines | Action |
+**Threshold: 1,500 lines max per file**
+
+| File | Lines | Status |
 |------|-------|--------|
-| traffic_inspector.py | 1989 | Consider splitting UI/logic |
-| rns_bridge.py | 1849 | Monitor (gateway core) |
-| launcher_tui/main.py | 1794 | Extracted to mixins, monitor |
-| diagnostics/engine.py | 1767 | Consider splitting by category |
-| node_tracker.py | 1610 | Monitor (complex state machine) |
+| metrics_export.py | 1762 | Over - split Prometheus/InfluxDB |
+| knowledge_content.py | 1688 | Over - static data, acceptable |
+| rns_bridge.py | 1587 | Just over - was 1991 |
+| rns_menu_mixin.py | 1524 | Just over |
+
+**Recently Fixed (2026-02-04):**
+| File | Before | After | Change |
+|------|--------|-------|--------|
+| diagnostics/engine.py | 1767 | 709 | -60% (checks extracted) |
+| traffic_inspector.py | 2194 | 442 | -80% |
+| node_tracker.py | 1808 | 911 | -50% |
+| launcher_tui/main.py | 1532 | 1404 | -8% |
 
 *Note: Previous large files (mesh_tools.py, tools.py, tui/app.py) were refactored/consolidated.*
-*Last updated: 2026-02-03*
+*Last updated: 2026-02-04*
 
 ---
 
