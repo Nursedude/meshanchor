@@ -18,9 +18,6 @@ Usage:
 """
 
 import os
-import socket
-import subprocess
-import shutil
 import threading
 import time
 import json
@@ -28,7 +25,7 @@ import logging
 from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from .models import (
     CheckResult, CheckStatus, CheckCategory,
@@ -38,11 +35,49 @@ from .models import (
     CheckCallback, HealthCallback, EventCallback, ProgressCallback
 )
 
+# Import check implementations from checks module
+from .checks import (
+    # Services
+    check_service,
+    check_process,
+    check_service_logs,
+    # Network
+    check_tcp_port,
+    check_internet,
+    check_dns,
+    # RNS
+    check_rns_installed,
+    check_rns_config,
+    check_rns_port,
+    check_meshtastic_interface_file,
+    # Meshtastic
+    check_meshtastic_installed,
+    check_meshtastic_cli,
+    check_meshtastic_connection,
+    find_serial_devices,
+    # Serial
+    check_serial_ports,
+    check_dialout_group,
+    # Hardware
+    check_spi,
+    check_i2c,
+    check_temperature,
+    check_sdr,
+    # System
+    check_python_version,
+    check_pip_packages,
+    check_memory,
+    check_disk_space,
+    check_cpu_load,
+    # HAM Radio
+    check_callsign,
+)
+
 logger = logging.getLogger(__name__)
 
 
 # Import centralized path utility for sudo compatibility
-from utils.paths import get_real_user_home, ReticulumPaths
+from utils.paths import get_real_user_home
 
 # Backward compatibility alias
 _get_real_user_home = get_real_user_home
@@ -56,16 +91,6 @@ try:
     CLASSIFIER_AVAILABLE = True
 except ImportError:
     CLASSIFIER_AVAILABLE = False
-
-# Import centralized service checker - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import check_service as _check_service_status, check_port, ServiceState as SvcState
-    SERVICE_CHECK_AVAILABLE = True
-except ImportError:
-    _check_service_status = None
-    check_port = None
-    SvcState = None
-    SERVICE_CHECK_AVAILABLE = False
 
 
 class DiagnosticEngine:
@@ -250,1169 +275,86 @@ class DiagnosticEngine:
     def _run_services_checks(self) -> List[CheckResult]:
         """Check system services."""
         results = []
-
-        # meshtasticd
-        results.append(self._check_service('meshtasticd', 'Meshtastic daemon'))
-
-        # rnsd
-        results.append(self._check_process('rnsd', 'RNS daemon'))
-
-        # nomadnet
-        results.append(self._check_process('nomadnet', 'NomadNet'))
-
-        # bluetooth
-        results.append(self._check_service('bluetooth', 'Bluetooth'))
-
+        results.append(check_service('meshtasticd', 'Meshtastic daemon'))
+        results.append(check_process('rnsd', 'RNS daemon'))
+        results.append(check_process('nomadnet', 'NomadNet'))
+        results.append(check_service('bluetooth', 'Bluetooth'))
         self._update_subsystem_health('services', results)
         return results
 
     def _run_network_checks(self) -> List[CheckResult]:
         """Check network connectivity."""
         results = []
-
-        # Internet connectivity
-        results.append(self._check_internet())
-
-        # DNS resolution
-        results.append(self._check_dns())
-
-        # Meshtasticd API port
-        results.append(self._check_tcp_port(4403, 'meshtasticd API'))
-
-        # Meshtasticd Web UI port (HTTPS on 9443)
-        results.append(self._check_tcp_port(9443, 'meshtasticd Web UI', optional=True))
-
-        # MQTT (optional)
-        results.append(self._check_tcp_port(1883, 'MQTT broker', optional=True))
-
+        results.append(check_internet())
+        results.append(check_dns())
+        results.append(check_tcp_port(4403, 'meshtasticd API'))
+        results.append(check_tcp_port(9443, 'meshtasticd Web UI', optional=True))
+        results.append(check_tcp_port(1883, 'MQTT broker', optional=True))
         self._update_subsystem_health('network', results)
         return results
 
     def _run_rns_checks(self) -> List[CheckResult]:
         """Check Reticulum/RNS."""
         results = []
-
-        # RNS installation
-        results.append(self._check_rns_installed())
-
-        # RNS config file
-        results.append(self._check_rns_config())
-
-        # rnsd running
-        results.append(self._check_process('rnsd', 'RNS daemon'))
-
-        # Port 29716 availability (AutoInterface)
-        results.append(self._check_rns_port())
-
-        # Meshtastic interface file
-        results.append(self._check_meshtastic_interface_file())
-
+        results.append(check_rns_installed())
+        results.append(check_rns_config())
+        results.append(check_process('rnsd', 'RNS daemon'))
+        results.append(check_rns_port())
+        results.append(check_meshtastic_interface_file())
         self._update_subsystem_health('rns', results)
         return results
 
     def _run_meshtastic_checks(self) -> List[CheckResult]:
         """Check Meshtastic."""
         results = []
-
-        # Library installed
-        results.append(self._check_meshtastic_installed())
-
-        # CLI available
-        results.append(self._check_meshtastic_cli())
-
-        # Can connect via TCP
-        results.append(self._check_meshtastic_connection())
-
+        results.append(check_meshtastic_installed())
+        results.append(check_meshtastic_cli())
+        results.append(check_meshtastic_connection())
         self._update_subsystem_health('meshtastic', results)
         return results
 
     def _run_serial_checks(self) -> List[CheckResult]:
         """Check serial ports."""
         results = []
-
-        # Available ports
-        results.append(self._check_serial_ports())
-
-        # Dialout group membership
-        results.append(self._check_dialout_group())
-
+        results.append(check_serial_ports())
+        results.append(check_dialout_group())
         self._update_subsystem_health('serial', results)
         return results
 
     def _run_hardware_checks(self) -> List[CheckResult]:
         """Check hardware interfaces."""
         results = []
-
-        # SPI enabled
-        results.append(self._check_spi())
-
-        # I2C enabled
-        results.append(self._check_i2c())
-
-        # Temperature (Raspberry Pi)
-        results.append(self._check_temperature())
-
-        # SDR devices (optional)
-        results.append(self._check_sdr())
-
+        results.append(check_spi())
+        results.append(check_i2c())
+        results.append(check_temperature())
+        results.append(check_sdr())
         self._update_subsystem_health('hardware', results)
         return results
 
     def _run_system_checks(self) -> List[CheckResult]:
         """Check system resources."""
         results = []
-
-        # Python version
-        results.append(self._check_python_version())
-
-        # Required packages
-        results.append(self._check_pip_packages())
-
-        # Memory
-        results.append(self._check_memory())
-
-        # Disk space
-        results.append(self._check_disk_space())
-
-        # CPU load
-        results.append(self._check_cpu_load())
-
+        results.append(check_python_version())
+        results.append(check_pip_packages())
+        results.append(check_memory())
+        results.append(check_disk_space())
+        results.append(check_cpu_load())
         self._update_subsystem_health('system', results)
         return results
 
     def _run_ham_radio_checks(self) -> List[CheckResult]:
         """Check HAM radio configuration."""
         results = []
-
-        # Callsign configured
-        results.append(self._check_callsign())
-
+        results.append(check_callsign())
         self._update_subsystem_health('ham_radio', results)
         return results
 
     def _run_logs_checks(self) -> List[CheckResult]:
         """Analyze logs for errors."""
         results = []
-
-        # Recent errors in meshtasticd
-        results.append(self._check_service_logs('meshtasticd'))
-
+        results.append(check_service_logs('meshtasticd'))
         self._update_subsystem_health('logs', results)
         return results
-
-    # === Individual Check Implementations ===
-
-    def _check_service(self, service: str, display_name: str) -> CheckResult:
-        """Check if a systemd service is running."""
-        start = time.time()
-
-        # Use centralized service checker if available (SINGLE SOURCE OF TRUTH)
-        if SERVICE_CHECK_AVAILABLE and _check_service_status is not None:
-            try:
-                status = _check_service_status(service)
-                duration = (time.time() - start) * 1000
-
-                if status.available:
-                    return CheckResult(
-                        name=f"{display_name}",
-                        category=CheckCategory.SERVICES,
-                        status=CheckStatus.PASS,
-                        message="Service running",
-                        details={"detection_method": status.detection_method},
-                        duration_ms=duration
-                    )
-                elif status.state == SvcState.NOT_INSTALLED:
-                    return CheckResult(
-                        name=f"{display_name}",
-                        category=CheckCategory.SERVICES,
-                        status=CheckStatus.SKIP,
-                        message="Service not installed",
-                        fix_hint=status.fix_hint,
-                        duration_ms=duration
-                    )
-                else:
-                    return CheckResult(
-                        name=f"{display_name}",
-                        category=CheckCategory.SERVICES,
-                        status=CheckStatus.FAIL,
-                        message=status.message,
-                        fix_hint=status.fix_hint,
-                        details={"detection_method": status.detection_method},
-                        duration_ms=duration
-                    )
-            except Exception as e:
-                logger.warning(f"Centralized service check failed, falling back: {e}")
-                # Fall through to direct systemctl check
-
-        # Fallback: direct systemctl check (for standalone use or import failure)
-        try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', service],
-                capture_output=True, text=True, timeout=5
-            )
-            status_str = result.stdout.strip()
-            duration = (time.time() - start) * 1000
-
-            if status_str == 'active':
-                return CheckResult(
-                    name=f"{display_name}",
-                    category=CheckCategory.SERVICES,
-                    status=CheckStatus.PASS,
-                    message="Service running",
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name=f"{display_name}",
-                    category=CheckCategory.SERVICES,
-                    status=CheckStatus.FAIL,
-                    message=f"Service {status_str}",
-                    fix_hint=f"sudo systemctl start {service}",
-                    duration_ms=duration
-                )
-        except FileNotFoundError:
-            return CheckResult(
-                name=f"{display_name}",
-                category=CheckCategory.SERVICES,
-                status=CheckStatus.SKIP,
-                message="systemctl not found",
-                duration_ms=(time.time() - start) * 1000
-            )
-        except Exception as e:
-            return CheckResult(
-                name=f"{display_name}",
-                category=CheckCategory.SERVICES,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_process(self, process: str, display_name: str) -> CheckResult:
-        """Check if a process is running."""
-        start = time.time()
-        try:
-            result = subprocess.run(
-                ['pgrep', '-x', process],
-                capture_output=True, text=True, timeout=5
-            )
-            duration = (time.time() - start) * 1000
-
-            if result.returncode == 0:
-                pids = result.stdout.strip().split('\n')
-                return CheckResult(
-                    name=f"{display_name}",
-                    category=CheckCategory.SERVICES,
-                    status=CheckStatus.PASS,
-                    message=f"Running (PID: {pids[0]})",
-                    details={"pids": pids},
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name=f"{display_name}",
-                    category=CheckCategory.SERVICES,
-                    status=CheckStatus.WARN,
-                    message="Not running",
-                    fix_hint=f"Start {process} if needed",
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name=f"{display_name}",
-                category=CheckCategory.SERVICES,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_tcp_port(self, port: int, name: str, optional: bool = False) -> CheckResult:
-        """Check if a TCP port is listening."""
-        start = time.time()
-
-        # Use centralized port checker if available
-        if SERVICE_CHECK_AVAILABLE and check_port is not None:
-            try:
-                is_open = check_port(port, '127.0.0.1', timeout=2.0)
-                duration = (time.time() - start) * 1000
-
-                if is_open:
-                    return CheckResult(
-                        name=f"{name} (:{port})",
-                        category=CheckCategory.NETWORK,
-                        status=CheckStatus.PASS,
-                        message="Listening",
-                        duration_ms=duration
-                    )
-                else:
-                    return CheckResult(
-                        name=f"{name} (:{port})",
-                        category=CheckCategory.NETWORK,
-                        status=CheckStatus.SKIP if optional else CheckStatus.FAIL,
-                        message="Not reachable",
-                        fix_hint=f"Ensure {name} is running",
-                        duration_ms=duration
-                    )
-            except Exception as e:
-                logger.warning(f"Centralized port check failed, falling back: {e}")
-                # Fall through to direct socket check
-
-        # Fallback: direct socket check (for standalone use or import failure)
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('127.0.0.1', port))
-            sock.close()
-            duration = (time.time() - start) * 1000
-
-            if result == 0:
-                return CheckResult(
-                    name=f"{name} (:{port})",
-                    category=CheckCategory.NETWORK,
-                    status=CheckStatus.PASS,
-                    message="Listening",
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name=f"{name} (:{port})",
-                    category=CheckCategory.NETWORK,
-                    status=CheckStatus.SKIP if optional else CheckStatus.FAIL,
-                    message="Not reachable",
-                    fix_hint=f"Ensure {name} is running",
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name=f"{name} (:{port})",
-                category=CheckCategory.NETWORK,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_internet(self) -> CheckResult:
-        """Check internet connectivity."""
-        start = time.time()
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            result = sock.connect_ex(('8.8.8.8', 53))
-            sock.close()
-            duration = (time.time() - start) * 1000
-
-            if result == 0:
-                return CheckResult(
-                    name="Internet connectivity",
-                    category=CheckCategory.NETWORK,
-                    status=CheckStatus.PASS,
-                    message="Connected",
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name="Internet connectivity",
-                    category=CheckCategory.NETWORK,
-                    status=CheckStatus.WARN,
-                    message="No connection",
-                    fix_hint="Check network configuration",
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name="Internet connectivity",
-                category=CheckCategory.NETWORK,
-                status=CheckStatus.WARN,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_dns(self) -> CheckResult:
-        """Check DNS resolution."""
-        start = time.time()
-        try:
-            socket.gethostbyname('google.com')
-            duration = (time.time() - start) * 1000
-            return CheckResult(
-                name="DNS resolution",
-                category=CheckCategory.NETWORK,
-                status=CheckStatus.PASS,
-                message="Working",
-                duration_ms=duration
-            )
-        except socket.gaierror:
-            return CheckResult(
-                name="DNS resolution",
-                category=CheckCategory.NETWORK,
-                status=CheckStatus.WARN,
-                message="DNS failed",
-                fix_hint="Check /etc/resolv.conf",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_rns_installed(self) -> CheckResult:
-        """Check if RNS is installed."""
-        start = time.time()
-        try:
-            import importlib
-            importlib.import_module('RNS')
-            duration = (time.time() - start) * 1000
-            return CheckResult(
-                name="RNS library",
-                category=CheckCategory.RNS,
-                status=CheckStatus.PASS,
-                message="Installed",
-                duration_ms=duration
-            )
-        except ImportError:
-            return CheckResult(
-                name="RNS library",
-                category=CheckCategory.RNS,
-                status=CheckStatus.FAIL,
-                message="Not installed",
-                fix_hint="pipx install rns",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_rns_config(self) -> CheckResult:
-        """Check RNS configuration file."""
-        start = time.time()
-        config_path = ReticulumPaths.get_config_file()
-
-        if config_path.exists():
-            try:
-                content = config_path.read_text()
-                has_interface = '[interface' in content.lower() or '[[' in content
-                duration = (time.time() - start) * 1000
-
-                if has_interface:
-                    return CheckResult(
-                        name="RNS config",
-                        category=CheckCategory.RNS,
-                        status=CheckStatus.PASS,
-                        message=f"Found at {config_path}",
-                        details={"path": str(config_path)},
-                        duration_ms=duration
-                    )
-                else:
-                    return CheckResult(
-                        name="RNS config",
-                        category=CheckCategory.RNS,
-                        status=CheckStatus.WARN,
-                        message="No interfaces configured",
-                        fix_hint="Add interface to ~/.reticulum/config",
-                        duration_ms=duration
-                    )
-            except Exception as e:
-                return CheckResult(
-                    name="RNS config",
-                    category=CheckCategory.RNS,
-                    status=CheckStatus.FAIL,
-                    message=f"Read error: {e}",
-                    duration_ms=(time.time() - start) * 1000
-                )
-        else:
-            return CheckResult(
-                name="RNS config",
-                category=CheckCategory.RNS,
-                status=CheckStatus.WARN,
-                message="Not found (will be created on first run)",
-                fix_hint="Run rnsd once to generate config",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_rns_port(self) -> CheckResult:
-        """Check if RNS AutoInterface port (29716) is available."""
-        start = time.time()
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(('0.0.0.0', 29716))
-            sock.close()
-            duration = (time.time() - start) * 1000
-            return CheckResult(
-                name="RNS AutoInterface port",
-                category=CheckCategory.RNS,
-                status=CheckStatus.PASS,
-                message="Port 29716 available",
-                duration_ms=duration
-            )
-        except OSError as e:
-            if e.errno == 98:  # Address already in use
-                return CheckResult(
-                    name="RNS AutoInterface port",
-                    category=CheckCategory.RNS,
-                    status=CheckStatus.PASS,
-                    message="Port in use (rnsd running)",
-                    duration_ms=(time.time() - start) * 1000
-                )
-            return CheckResult(
-                name="RNS AutoInterface port",
-                category=CheckCategory.RNS,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_meshtastic_interface_file(self) -> CheckResult:
-        """Check for Meshtastic_Interface.py plugin in RNS interfaces directory.
-
-        The plugin must be in the 'interfaces/' subdirectory of the RNS config dir
-        (e.g., ~/.reticulum/interfaces/ or /etc/reticulum/interfaces/).
-        Source: https://github.com/landandair/RNS_Over_Meshtastic
-        """
-        start = time.time()
-        interface_file = ReticulumPaths.get_interfaces_dir() / 'Meshtastic_Interface.py'
-
-        if interface_file.exists():
-            return CheckResult(
-                name="Meshtastic Interface Plugin",
-                category=CheckCategory.RNS,
-                status=CheckStatus.PASS,
-                message=f"Installed at {interface_file}",
-                details={"path": str(interface_file)},
-                duration_ms=(time.time() - start) * 1000
-            )
-        else:
-            return CheckResult(
-                name="Meshtastic Interface Plugin",
-                category=CheckCategory.RNS,
-                status=CheckStatus.WARN,
-                message="Not installed - required for RNS over Meshtastic bridging",
-                fix_hint=(
-                    "Install from: https://github.com/landandair/RNS_Over_Meshtastic\n"
-                    f"Copy Meshtastic_Interface.py to: {ReticulumPaths.get_interfaces_dir()}/"
-                ),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_meshtastic_installed(self) -> CheckResult:
-        """Check if meshtastic library is installed."""
-        start = time.time()
-        try:
-            import importlib
-            importlib.import_module('meshtastic')
-            duration = (time.time() - start) * 1000
-            return CheckResult(
-                name="Meshtastic library",
-                category=CheckCategory.MESHTASTIC,
-                status=CheckStatus.PASS,
-                message="Installed",
-                duration_ms=duration
-            )
-        except ImportError:
-            return CheckResult(
-                name="Meshtastic library",
-                category=CheckCategory.MESHTASTIC,
-                status=CheckStatus.FAIL,
-                message="Not installed",
-                fix_hint="pip3 install meshtastic",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_meshtastic_cli(self) -> CheckResult:
-        """Check if meshtastic CLI is available."""
-        start = time.time()
-        cli_path = shutil.which('meshtastic')
-
-        if cli_path:
-            return CheckResult(
-                name="Meshtastic CLI",
-                category=CheckCategory.MESHTASTIC,
-                status=CheckStatus.PASS,
-                message=f"Found at {cli_path}",
-                details={"path": cli_path},
-                duration_ms=(time.time() - start) * 1000
-            )
-        else:
-            # Check user local bin
-            local_bin = _get_real_user_home() / '.local' / 'bin' / 'meshtastic'
-            if local_bin.exists():
-                return CheckResult(
-                    name="Meshtastic CLI",
-                    category=CheckCategory.MESHTASTIC,
-                    status=CheckStatus.PASS,
-                    message=f"Found at {local_bin}",
-                    details={"path": str(local_bin)},
-                    duration_ms=(time.time() - start) * 1000
-                )
-            return CheckResult(
-                name="Meshtastic CLI",
-                category=CheckCategory.MESHTASTIC,
-                status=CheckStatus.WARN,
-                message="Not in PATH",
-                fix_hint="pip3 install meshtastic (includes CLI)",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_meshtastic_connection(self) -> CheckResult:
-        """Check if we can connect to a Meshtastic device."""
-        start = time.time()
-
-        # Try TCP first (meshtasticd)
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex(('127.0.0.1', 4403))
-            sock.close()
-
-            if result == 0:
-                return CheckResult(
-                    name="Meshtastic connection",
-                    category=CheckCategory.MESHTASTIC,
-                    status=CheckStatus.PASS,
-                    message="TCP connection available (meshtasticd)",
-                    details={"method": "tcp", "port": 4403},
-                    duration_ms=(time.time() - start) * 1000
-                )
-        except Exception:
-            pass
-
-        # Check for serial devices
-        serial_devices = self._find_serial_devices()
-        if serial_devices:
-            return CheckResult(
-                name="Meshtastic connection",
-                category=CheckCategory.MESHTASTIC,
-                status=CheckStatus.PASS,
-                message=f"Serial device found: {serial_devices[0]}",
-                details={"method": "serial", "devices": serial_devices},
-                duration_ms=(time.time() - start) * 1000
-            )
-
-        return CheckResult(
-            name="Meshtastic connection",
-            category=CheckCategory.MESHTASTIC,
-            status=CheckStatus.FAIL,
-            message="No connection available",
-            fix_hint="Start meshtasticd or connect device via USB",
-            duration_ms=(time.time() - start) * 1000
-        )
-
-    def _check_serial_ports(self) -> CheckResult:
-        """Check for available serial ports."""
-        start = time.time()
-        devices = self._find_serial_devices()
-        duration = (time.time() - start) * 1000
-
-        if devices:
-            return CheckResult(
-                name="Serial ports",
-                category=CheckCategory.SERIAL,
-                status=CheckStatus.PASS,
-                message=f"Found: {', '.join(devices)}",
-                details={"devices": devices},
-                duration_ms=duration
-            )
-        else:
-            return CheckResult(
-                name="Serial ports",
-                category=CheckCategory.SERIAL,
-                status=CheckStatus.WARN,
-                message="No Meshtastic devices found",
-                fix_hint="Connect device via USB",
-                duration_ms=duration
-            )
-
-    def _find_serial_devices(self) -> List[str]:
-        """Find Meshtastic-compatible serial devices."""
-        devices = []
-        dev_path = Path('/dev')
-
-        # Common patterns
-        patterns = ['ttyACM*', 'ttyUSB*']
-
-        for pattern in patterns:
-            devices.extend([str(d) for d in dev_path.glob(pattern)])
-
-        return devices
-
-    def _check_dialout_group(self) -> CheckResult:
-        """Check if user is in dialout group."""
-        start = time.time()
-        try:
-            import grp
-            username = os.environ.get('SUDO_USER', os.environ.get('USER', 'root'))
-            groups = [g.gr_name for g in grp.getgrall() if username in g.gr_mem]
-
-            # Also check primary group
-            try:
-                import pwd
-                user_info = pwd.getpwnam(username)
-                primary_group = grp.getgrgid(user_info.pw_gid).gr_name
-                groups.append(primary_group)
-            except Exception:
-                pass
-
-            duration = (time.time() - start) * 1000
-
-            if 'dialout' in groups:
-                return CheckResult(
-                    name="Dialout group",
-                    category=CheckCategory.SERIAL,
-                    status=CheckStatus.PASS,
-                    message=f"User {username} in dialout group",
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name="Dialout group",
-                    category=CheckCategory.SERIAL,
-                    status=CheckStatus.WARN,
-                    message=f"User {username} not in dialout group",
-                    fix_hint=f"sudo usermod -a -G dialout {username} (then logout/login)",
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name="Dialout group",
-                category=CheckCategory.SERIAL,
-                status=CheckStatus.SKIP,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_spi(self) -> CheckResult:
-        """Check if SPI is enabled."""
-        start = time.time()
-        spi_devices = list(Path('/dev').glob('spidev*'))
-        duration = (time.time() - start) * 1000
-
-        if spi_devices:
-            return CheckResult(
-                name="SPI interface",
-                category=CheckCategory.HARDWARE,
-                status=CheckStatus.PASS,
-                message=f"Enabled ({len(spi_devices)} device(s))",
-                details={"devices": [str(d) for d in spi_devices]},
-                duration_ms=duration
-            )
-        else:
-            return CheckResult(
-                name="SPI interface",
-                category=CheckCategory.HARDWARE,
-                status=CheckStatus.SKIP,
-                message="Not enabled or not a Pi",
-                fix_hint="Enable SPI in raspi-config if needed",
-                duration_ms=duration
-            )
-
-    def _check_i2c(self) -> CheckResult:
-        """Check if I2C is enabled."""
-        start = time.time()
-        i2c_devices = list(Path('/dev').glob('i2c-*'))
-        duration = (time.time() - start) * 1000
-
-        if i2c_devices:
-            return CheckResult(
-                name="I2C interface",
-                category=CheckCategory.HARDWARE,
-                status=CheckStatus.PASS,
-                message=f"Enabled ({len(i2c_devices)} bus(es))",
-                details={"devices": [str(d) for d in i2c_devices]},
-                duration_ms=duration
-            )
-        else:
-            return CheckResult(
-                name="I2C interface",
-                category=CheckCategory.HARDWARE,
-                status=CheckStatus.SKIP,
-                message="Not enabled or not a Pi",
-                fix_hint="Enable I2C in raspi-config if needed",
-                duration_ms=duration
-            )
-
-    def _check_temperature(self) -> CheckResult:
-        """Check CPU temperature (Raspberry Pi)."""
-        start = time.time()
-        temp_file = Path('/sys/class/thermal/thermal_zone0/temp')
-
-        if temp_file.exists():
-            try:
-                temp_raw = temp_file.read_text().strip()
-                temp_c = int(temp_raw) / 1000
-                duration = (time.time() - start) * 1000
-
-                if temp_c >= 80:
-                    return CheckResult(
-                        name="CPU temperature",
-                        category=CheckCategory.HARDWARE,
-                        status=CheckStatus.FAIL,
-                        message=f"{temp_c:.1f}°C (CRITICAL)",
-                        fix_hint="Add cooling or reduce load",
-                        details={"temp_c": temp_c},
-                        duration_ms=duration
-                    )
-                elif temp_c >= 70:
-                    return CheckResult(
-                        name="CPU temperature",
-                        category=CheckCategory.HARDWARE,
-                        status=CheckStatus.WARN,
-                        message=f"{temp_c:.1f}°C (warm)",
-                        details={"temp_c": temp_c},
-                        duration_ms=duration
-                    )
-                else:
-                    return CheckResult(
-                        name="CPU temperature",
-                        category=CheckCategory.HARDWARE,
-                        status=CheckStatus.PASS,
-                        message=f"{temp_c:.1f}°C",
-                        details={"temp_c": temp_c},
-                        duration_ms=duration
-                    )
-            except Exception as e:
-                return CheckResult(
-                    name="CPU temperature",
-                    category=CheckCategory.HARDWARE,
-                    status=CheckStatus.FAIL,
-                    message=str(e),
-                    duration_ms=(time.time() - start) * 1000
-                )
-        else:
-            return CheckResult(
-                name="CPU temperature",
-                category=CheckCategory.HARDWARE,
-                status=CheckStatus.SKIP,
-                message="Not a Raspberry Pi",
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_sdr(self) -> CheckResult:
-        """Check for SDR devices."""
-        start = time.time()
-        rtl_path = shutil.which('rtl_test')
-
-        if rtl_path:
-            try:
-                result = subprocess.run(
-                    ['rtl_test', '-t'],
-                    capture_output=True, text=True, timeout=5
-                )
-                duration = (time.time() - start) * 1000
-
-                if 'Found' in result.stderr or 'Found' in result.stdout:
-                    return CheckResult(
-                        name="RTL-SDR",
-                        category=CheckCategory.HARDWARE,
-                        status=CheckStatus.PASS,
-                        message="Device found",
-                        duration_ms=duration
-                    )
-            except subprocess.TimeoutExpired:
-                pass
-            except Exception:
-                pass
-
-        return CheckResult(
-            name="RTL-SDR",
-            category=CheckCategory.HARDWARE,
-            status=CheckStatus.SKIP,
-            message="Not installed or no device",
-            duration_ms=(time.time() - start) * 1000
-        )
-
-    def _check_python_version(self) -> CheckResult:
-        """Check Python version."""
-        import sys
-        start = time.time()
-        version = sys.version_info
-        version_str = f"{version.major}.{version.minor}.{version.micro}"
-        duration = (time.time() - start) * 1000
-
-        if version >= (3, 9):
-            return CheckResult(
-                name="Python version",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.PASS,
-                message=version_str,
-                duration_ms=duration
-            )
-        elif version >= (3, 8):
-            return CheckResult(
-                name="Python version",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.WARN,
-                message=f"{version_str} (3.9+ recommended)",
-                duration_ms=duration
-            )
-        else:
-            return CheckResult(
-                name="Python version",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.FAIL,
-                message=f"{version_str} (requires 3.8+)",
-                fix_hint="Upgrade Python to 3.9+",
-                duration_ms=duration
-            )
-
-    def _check_pip_packages(self) -> CheckResult:
-        """Check required pip packages."""
-        start = time.time()
-        required = {
-            'meshtastic': 'meshtastic',
-            'rns': 'RNS',
-            'lxmf': 'LXMF',
-        }
-        installed = []
-        missing = []
-
-        import importlib
-        for display_name, module_name in required.items():
-            try:
-                importlib.import_module(module_name)
-                installed.append(display_name)
-            except ImportError:
-                missing.append(display_name)
-
-        duration = (time.time() - start) * 1000
-
-        if not missing:
-            return CheckResult(
-                name="Required packages",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.PASS,
-                message=f"All installed ({len(installed)})",
-                details={"installed": installed},
-                duration_ms=duration
-            )
-        else:
-            return CheckResult(
-                name="Required packages",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.WARN,
-                message=f"Missing: {', '.join(missing)}",
-                fix_hint=f"pip3 install {' '.join(missing)}",
-                details={"installed": installed, "missing": missing},
-                duration_ms=duration
-            )
-
-    def _check_memory(self) -> CheckResult:
-        """Check available memory."""
-        start = time.time()
-        try:
-            with open('/proc/meminfo') as f:
-                lines = f.readlines()
-
-            mem_info = {}
-            for line in lines:
-                parts = line.split()
-                if len(parts) >= 2:
-                    key = parts[0].rstrip(':')
-                    value = int(parts[1])
-                    mem_info[key] = value
-
-            total_mb = mem_info.get('MemTotal', 0) / 1024
-            available_mb = mem_info.get('MemAvailable', 0) / 1024
-            percent_free = (available_mb / total_mb * 100) if total_mb > 0 else 0
-            duration = (time.time() - start) * 1000
-
-            if percent_free < 10:
-                return CheckResult(
-                    name="Memory",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.FAIL,
-                    message=f"{available_mb:.0f}MB free ({percent_free:.0f}%)",
-                    fix_hint="Free up memory or add swap",
-                    details={"total_mb": total_mb, "available_mb": available_mb},
-                    duration_ms=duration
-                )
-            elif percent_free < 25:
-                return CheckResult(
-                    name="Memory",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.WARN,
-                    message=f"{available_mb:.0f}MB free ({percent_free:.0f}%)",
-                    details={"total_mb": total_mb, "available_mb": available_mb},
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name="Memory",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.PASS,
-                    message=f"{available_mb:.0f}MB free ({percent_free:.0f}%)",
-                    details={"total_mb": total_mb, "available_mb": available_mb},
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name="Memory",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_disk_space(self) -> CheckResult:
-        """Check available disk space."""
-        start = time.time()
-        try:
-            stat = os.statvfs('/')
-            total_gb = (stat.f_blocks * stat.f_frsize) / (1024**3)
-            free_gb = (stat.f_bavail * stat.f_frsize) / (1024**3)
-            duration = (time.time() - start) * 1000
-
-            if free_gb < 1:
-                return CheckResult(
-                    name="Disk space",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.FAIL,
-                    message=f"{free_gb:.1f}GB free (CRITICAL)",
-                    fix_hint="Free up disk space",
-                    details={"total_gb": total_gb, "free_gb": free_gb},
-                    duration_ms=duration
-                )
-            elif free_gb < 5:
-                return CheckResult(
-                    name="Disk space",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.WARN,
-                    message=f"{free_gb:.1f}GB free",
-                    details={"total_gb": total_gb, "free_gb": free_gb},
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name="Disk space",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.PASS,
-                    message=f"{free_gb:.1f}GB free",
-                    details={"total_gb": total_gb, "free_gb": free_gb},
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name="Disk space",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.FAIL,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_cpu_load(self) -> CheckResult:
-        """Check CPU load average."""
-        start = time.time()
-        try:
-            load_1, load_5, load_15 = os.getloadavg()
-            cpu_count = os.cpu_count() or 1
-            load_percent = (load_1 / cpu_count) * 100
-            duration = (time.time() - start) * 1000
-
-            if load_percent > 100:
-                return CheckResult(
-                    name="CPU load",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.WARN,
-                    message=f"{load_1:.2f} ({load_percent:.0f}% of {cpu_count} cores)",
-                    details={"load_1": load_1, "load_5": load_5, "load_15": load_15},
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name="CPU load",
-                    category=CheckCategory.SYSTEM,
-                    status=CheckStatus.PASS,
-                    message=f"{load_1:.2f} ({load_percent:.0f}%)",
-                    details={"load_1": load_1, "load_5": load_5, "load_15": load_15},
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name="CPU load",
-                category=CheckCategory.SYSTEM,
-                status=CheckStatus.SKIP,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
-
-    def _check_callsign(self) -> CheckResult:
-        """Check if HAM callsign is configured."""
-        start = time.time()
-        callsign = os.environ.get('CALLSIGN', os.environ.get('HAM_CALLSIGN', ''))
-        duration = (time.time() - start) * 1000
-
-        if callsign:
-            return CheckResult(
-                name="Callsign",
-                category=CheckCategory.HAM_RADIO,
-                status=CheckStatus.PASS,
-                message=callsign,
-                details={"callsign": callsign},
-                duration_ms=duration
-            )
-        else:
-            # Check NomadNet config
-            nomadnet_config = _get_real_user_home() / '.nomadnetwork' / 'config'
-            if nomadnet_config.exists():
-                try:
-                    content = nomadnet_config.read_text()
-                    if 'display_name' in content:
-                        return CheckResult(
-                            name="Callsign",
-                            category=CheckCategory.HAM_RADIO,
-                            status=CheckStatus.PASS,
-                            message="Set in NomadNet config",
-                            duration_ms=duration
-                        )
-                except Exception:
-                    pass
-
-            return CheckResult(
-                name="Callsign",
-                category=CheckCategory.HAM_RADIO,
-                status=CheckStatus.SKIP,
-                message="Not configured (optional)",
-                fix_hint="Set CALLSIGN environment variable",
-                duration_ms=duration
-            )
-
-    def _check_service_logs(self, service: str) -> CheckResult:
-        """Check recent service logs for errors."""
-        start = time.time()
-        try:
-            result = subprocess.run(
-                ['journalctl', '-u', service, '--since', '1 hour ago', '-p', 'err', '--no-pager', '-q'],
-                capture_output=True, text=True, timeout=10
-            )
-            duration = (time.time() - start) * 1000
-
-            lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
-            error_count = len(lines)
-
-            if error_count == 0:
-                return CheckResult(
-                    name=f"{service} logs",
-                    category=CheckCategory.LOGS,
-                    status=CheckStatus.PASS,
-                    message="No errors in last hour",
-                    duration_ms=duration
-                )
-            elif error_count < 5:
-                return CheckResult(
-                    name=f"{service} logs",
-                    category=CheckCategory.LOGS,
-                    status=CheckStatus.WARN,
-                    message=f"{error_count} error(s) in last hour",
-                    details={"recent_errors": lines[:3]},
-                    duration_ms=duration
-                )
-            else:
-                return CheckResult(
-                    name=f"{service} logs",
-                    category=CheckCategory.LOGS,
-                    status=CheckStatus.FAIL,
-                    message=f"{error_count} errors in last hour",
-                    fix_hint=f"Check: journalctl -u {service} -f",
-                    details={"recent_errors": lines[:5]},
-                    duration_ms=duration
-                )
-        except Exception as e:
-            return CheckResult(
-                name=f"{service} logs",
-                category=CheckCategory.LOGS,
-                status=CheckStatus.SKIP,
-                message=str(e),
-                duration_ms=(time.time() - start) * 1000
-            )
 
     # === Health Management ===
 
@@ -1748,7 +690,7 @@ class DiagnosticEngine:
         warnings = [r for r in all_results if r.status == CheckStatus.WARN]
 
         # Detect available connection types
-        serial_devices = self._find_serial_devices()
+        serial_devices = find_serial_devices()
         tcp_available = any(
             r.status == CheckStatus.PASS and '4403' in r.name
             for r in all_results
