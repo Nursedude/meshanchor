@@ -72,7 +72,7 @@ else
 fi
 
 # 4. Import check - RF tools
-if python3 -c "from src.utils.rf import haversine_distance, fspl_db" 2>/dev/null; then
+if python3 -c "from src.utils.rf import haversine_distance, free_space_path_loss" 2>/dev/null; then
     pass "RF tools import OK"
 else
     fail "RF tools import failed"
@@ -107,7 +107,7 @@ if python3 -m pytest --version 2>/dev/null; then
     # 8. Run RF tests (critical for HAM operations)
     echo ""
     echo "--- Running RF Tests ---"
-    if python3 -m pytest tests/test_rf.py -v --tb=short 2>&1; then
+    if python3 -m pytest tests/test_rf_utils.py -v --tb=short 2>&1; then
         pass "RF tests passed"
     else
         fail "RF tests failed"
