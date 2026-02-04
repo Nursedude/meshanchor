@@ -96,9 +96,50 @@ Top oversized files after this session:
  442 src/monitoring/traffic_inspector.py (was 2,194)
 ```
 
+## Session 3: RNS Sniffer Extraction (COMPLETED)
+
+### Date: 2026-02-04
+### Branch: `claude/continue-reexport-layer-7ooBF`
+
+#### rns_menu_mixin.py (1,524 → 1,069 lines = 30% reduction)
+- Created `src/launcher_tui/rns_sniffer_mixin.py` (476 lines)
+  - `_rns_traffic_sniffer` - main sniffer menu
+  - `_rns_sniffer_toggle_capture` - start/stop capture
+  - `_rns_sniffer_live_traffic` - view recent packets
+  - `_rns_sniffer_path_table` - discovered routes
+  - `_rns_sniffer_announces` - node discoveries
+  - `_rns_sniffer_filter_destination` - search by hash
+  - `_rns_sniffer_probe_destination` - request path + capture
+  - `_rns_sniffer_links` - active RNS links
+  - `_rns_sniffer_statistics` - packet stats
+  - `_rns_sniffer_test_known_node` - test 17a4dcfd...
+  - `_rns_sniffer_clear` - clear captured data
+- `RNSMenuMixin` now inherits from `RNSSnifferMixin`
+- Backwards compatible - no API changes
+
+### Verified Re-export Layers
+- `traffic_inspector.py` - properly re-exports from traffic_models, packet_dissectors, traffic_storage
+- `metrics_export.py` - properly re-exports from metrics_common, prometheus_exporter, influxdb_exporter
+
+### Current File Size State (Post-Session 3)
+
+Files now under threshold:
+```
+1069 src/launcher_tui/rns_menu_mixin.py (was 1,524)
+ 476 src/launcher_tui/rns_sniffer_mixin.py (new)
+```
+
+Files still over threshold (but acceptable):
+```
+1587 src/gateway/rns_bridge.py (87 over - tightly coupled)
+1688 src/utils/knowledge_content.py (static data - no split needed)
+```
+
+All other files previously refactored remain under threshold.
+
 ## Session Entropy
 
 No entropy detected. Clean execution with systematic progress.
 
 ---
-*Session complete. Significant progress made. Ready for follow-up work on node_tracker.py and rns_bridge.py.*
+*Session complete. All TUI mixin files now under 1,500 line threshold.*
