@@ -196,12 +196,12 @@
 
 **Threshold: 1,500 lines max per file**
 
+**All TUI files now under threshold.**
+
 | File | Lines | Status |
 |------|-------|--------|
-| metrics_export.py | 1762 | Over - split Prometheus/InfluxDB |
 | knowledge_content.py | 1688 | Over - static data, acceptable |
-| rns_bridge.py | 1587 | Just over - was 1991 |
-| rns_menu_mixin.py | 1524 | Just over |
+| rns_bridge.py | 1587 | Just over - tightly coupled, acceptable |
 
 **Recently Fixed (2026-02-04):**
 | File | Before | After | Change |
@@ -210,6 +210,8 @@
 | traffic_inspector.py | 2194 | 442 | -80% |
 | node_tracker.py | 1808 | 911 | -50% |
 | launcher_tui/main.py | 1532 | 1404 | -8% |
+| metrics_export.py | 1762 | 96 | -95% (split to 3 modules) |
+| rns_menu_mixin.py | 1524 | 1069 | -30% (sniffer extracted) |
 
 *Note: Previous large files (mesh_tools.py, tools.py, tui/app.py) were refactored/consolidated.*
 *Last updated: 2026-02-04*
