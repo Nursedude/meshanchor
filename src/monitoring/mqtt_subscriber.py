@@ -172,7 +172,7 @@ class MQTTNodelessSubscriber:
         # Data storage
         self._nodes: Dict[str, MQTTNode] = {}
         self._messages: deque = deque(maxlen=1000)  # Last 1000 messages
-        self._nodes_lock = threading.Lock()
+        self._nodes_lock = threading.RLock()  # RLock: methods that hold lock may call others that also acquire it
         self._messages_lock = threading.Lock()
 
         # Callbacks
@@ -274,11 +274,21 @@ class MQTTNodelessSubscriber:
             return False
 
         try:
-            # Create client
-            self._client = mqtt.Client(
-                client_id=f"meshforge_nodeless_{int(time.time())}",
-                protocol=mqtt.MQTTv311
-            )
+            # Create client - compatible with paho-mqtt v1.x and v2.x
+            client_id = f"meshforge_nodeless_{int(time.time())}"
+            if hasattr(mqtt, 'CallbackAPIVersion'):
+                # paho-mqtt v2.x requires callback_api_version
+                self._client = mqtt.Client(
+                    callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+                    client_id=client_id,
+                    protocol=mqtt.MQTTv311
+                )
+            else:
+                # paho-mqtt v1.x
+                self._client = mqtt.Client(
+                    client_id=client_id,
+                    protocol=mqtt.MQTTv311
+                )
 
             # Set callbacks
             self._client.on_connect = self._on_connect
@@ -302,17 +312,19 @@ class MQTTNodelessSubscriber:
 
             logger.info(f"Connecting to MQTT broker {broker}:{port}")
 
-            # Set socket timeout before connecting
-            import socket
-            self._client.socket().settimeout(connect_timeout) if self._client.socket() else None
-
             # Use connect_async for non-blocking connection
             self._client.connect_async(broker, port, keepalive=60)
             self._client.loop_start()
 
+            # Register atexit handler for clean shutdown
+            import atexit
+            atexit.register(self._atexit_cleanup)
+
             # Wait for connection with timeout
             start_time = time.time()
             while not self._connected and (time.time() - start_time) < connect_timeout:
+                if self._stop_event.is_set():
+                    break
                 time.sleep(0.1)
 
             if not self._connected:
@@ -352,28 +364,44 @@ class MQTTNodelessSubscriber:
 
     def _disconnect(self) -> None:
         """Disconnect from MQTT broker with timeout."""
-        if self._client:
+        client = self._client
+        if client:
             try:
-                # loop_stop with wait=True can hang, use timeout thread
-                import threading
+                # Disconnect first (tells broker we're leaving)
+                try:
+                    client.disconnect()
+                except Exception:
+                    pass
 
+                # loop_stop() can hang in some edge cases, use timeout thread
                 def stop_loop():
                     try:
-                        self._client.loop_stop(force=True)
-                        self._client.disconnect()
+                        # paho-mqtt v2.x removed the force parameter
+                        client.loop_stop()
                     except Exception:
                         pass
 
                 stop_thread = threading.Thread(target=stop_loop, daemon=True)
                 stop_thread.start()
-                stop_thread.join(timeout=5.0)  # 5 second max wait
+                stop_thread.join(timeout=3.0)
 
                 if stop_thread.is_alive():
-                    logger.warning("MQTT disconnect timed out, forcing cleanup")
+                    logger.warning("MQTT loop_stop timed out, abandoning thread")
             except Exception as e:
                 logger.debug(f"Disconnect cleanup: {e}")
             self._client = None
         self._connected = False
+
+    def _atexit_cleanup(self) -> None:
+        """Cleanup handler called on process exit."""
+        if self._client:
+            try:
+                self._stop_event.set()
+                self._client.disconnect()
+                self._client.loop_stop()
+            except Exception:
+                pass
+            self._client = None
 
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
