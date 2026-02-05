@@ -582,8 +582,9 @@ class RNSMenuMixin(RNSSnifferMixin):
 
         Called when 'no shared instance' error is detected. This method:
         1. Deploys proper config to /etc/reticulum/config (takes precedence)
-        2. Restarts rnsd service
-        3. Verifies shared instance is now available
+        2. Creates required subdirectories (storage, interfaces) with correct permissions
+        3. Restarts rnsd service
+        4. Verifies shared instance is now available
 
         Returns True if fix was successful.
         """
@@ -595,19 +596,36 @@ class RNSMenuMixin(RNSSnifferMixin):
 
         # Step 1: Deploy config to /etc/reticulum/config
         template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
-        target = Path('/etc/reticulum/config')
+        target_dir = Path('/etc/reticulum')
+        target = target_dir / 'config'
 
         if not template.exists():
             print("ERROR: MeshForge RNS template not found")
             print(f"  Expected: {template}")
             return False
 
-        print(f"\n[1/3] Deploying RNS config...")
+        print(f"\n[1/3] Deploying RNS config and directories...")
         print(f"  Template: {template}")
         print(f"  Target:   {target}")
 
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            # Create /etc/reticulum/ directory structure
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create required subdirectories that rnsd needs to write to
+            storage_dir = target_dir / 'storage'
+            interfaces_dir = target_dir / 'interfaces'
+
+            storage_dir.mkdir(exist_ok=True)
+            interfaces_dir.mkdir(exist_ok=True)
+
+            # Set permissions: directories need to be writable by rnsd
+            target_dir.chmod(0o755)
+            storage_dir.chmod(0o755)
+            interfaces_dir.chmod(0o755)
+
+            print(f"  Created: {storage_dir}")
+            print(f"  Created: {interfaces_dir}")
 
             # Backup existing config if present
             if target.exists():
