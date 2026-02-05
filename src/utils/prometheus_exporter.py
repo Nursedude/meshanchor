@@ -1128,11 +1128,11 @@ class MetricsServer:
                 {'exporter': self.exporter}
             )
 
-            self._server = socketserver.TCPServer(("", self.port), handler_class)
+            self._server = socketserver.TCPServer(("0.0.0.0", self.port), handler_class)
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
             self._thread.start()
 
-            logger.info(f"Prometheus metrics server started on port {self.port}")
+            logger.info(f"Prometheus metrics server started on 0.0.0.0:{self.port}")
             logger.info(f"Metrics available at http://localhost:{self.port}/metrics")
             return True
 
