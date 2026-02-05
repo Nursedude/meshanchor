@@ -295,13 +295,29 @@ class MQTTNodelessSubscriber:
             if self._config.get("use_tls", True):
                 self._setup_tls()
 
-            # Connect
+            # Connect with timeout to prevent hanging
             broker = self._config.get("broker", DEFAULT_BROKER)
             port = self._config.get("port", DEFAULT_PORT_TLS)
+            connect_timeout = self._config.get("connect_timeout", 10)  # 10 second default
 
             logger.info(f"Connecting to MQTT broker {broker}:{port}")
-            self._client.connect(broker, port, keepalive=60)
+
+            # Set socket timeout before connecting
+            import socket
+            self._client.socket().settimeout(connect_timeout) if self._client.socket() else None
+
+            # Use connect_async for non-blocking connection
+            self._client.connect_async(broker, port, keepalive=60)
             self._client.loop_start()
+
+            # Wait for connection with timeout
+            start_time = time.time()
+            while not self._connected and (time.time() - start_time) < connect_timeout:
+                time.sleep(0.1)
+
+            if not self._connected:
+                logger.warning(f"Connection to {broker}:{port} timed out after {connect_timeout}s")
+                # Connection will continue trying in background due to loop_start()
 
             return True
 
@@ -335,11 +351,25 @@ class MQTTNodelessSubscriber:
                 )
 
     def _disconnect(self) -> None:
-        """Disconnect from MQTT broker."""
+        """Disconnect from MQTT broker with timeout."""
         if self._client:
             try:
-                self._client.loop_stop()
-                self._client.disconnect()
+                # loop_stop with wait=True can hang, use timeout thread
+                import threading
+
+                def stop_loop():
+                    try:
+                        self._client.loop_stop(force=True)
+                        self._client.disconnect()
+                    except Exception:
+                        pass
+
+                stop_thread = threading.Thread(target=stop_loop, daemon=True)
+                stop_thread.start()
+                stop_thread.join(timeout=5.0)  # 5 second max wait
+
+                if stop_thread.is_alive():
+                    logger.warning("MQTT disconnect timed out, forcing cleanup")
             except Exception as e:
                 logger.debug(f"Disconnect cleanup: {e}")
             self._client = None
