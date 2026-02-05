@@ -641,31 +641,55 @@ class RNSMenuMixin(RNSSnifferMixin):
             print("  (Run MeshForge with sudo)")
             return False
 
-        # Step 2: Restart rnsd service
+        # Step 2: Stop rnsd, clear stale auth tokens, start rnsd
         print(f"\n[2/3] Restarting rnsd service...")
+
+        # Stop rnsd first (must stop before clearing auth files)
+        print("  Stopping rnsd...")
         try:
-            # Use service_check helper if available
-            try:
-                from utils.service_check import apply_config_and_restart
-                success, msg = apply_config_and_restart('rnsd')
-                if success:
-                    print("  rnsd restarted successfully")
-                else:
-                    print(f"  Warning: {msg}")
-            except ImportError:
-                # Fallback to direct systemctl
-                result = subprocess.run(
-                    ['systemctl', 'restart', 'rnsd'],
-                    capture_output=True, text=True, timeout=30
-                )
-                if result.returncode == 0:
-                    print("  rnsd restarted successfully")
-                else:
-                    print(f"  Warning: systemctl returned {result.returncode}")
-                    if result.stderr:
-                        print(f"  {result.stderr.strip()}")
+            subprocess.run(
+                ['systemctl', 'stop', 'rnsd'],
+                capture_output=True, text=True, timeout=10
+            )
+            time.sleep(1)  # Give it time to fully stop
+        except Exception as e:
+            print(f"  Warning stopping rnsd: {e}")
+
+        # Clear stale shared_instance_* files that cause AuthenticationError
+        # These files contain auth tokens that become invalid after config changes
+        print("  Clearing stale shared instance authentication files...")
+        storage_dirs = [
+            Path('/etc/reticulum/storage'),
+            Path('/root/.reticulum/storage'),
+        ]
+        files_cleared = 0
+        for storage_dir in storage_dirs:
+            if storage_dir.exists():
+                for auth_file in storage_dir.glob('shared_instance_*'):
+                    try:
+                        auth_file.unlink()
+                        files_cleared += 1
+                        print(f"    Removed: {auth_file}")
+                    except (OSError, PermissionError) as e:
+                        print(f"    Warning: Could not remove {auth_file}: {e}")
+        if files_cleared == 0:
+            print("    No stale auth files found")
+
+        # Start rnsd with fresh state
+        print("  Starting rnsd...")
+        try:
+            result = subprocess.run(
+                ['systemctl', 'start', 'rnsd'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                print("  rnsd started successfully")
+            else:
+                print(f"  Warning: systemctl returned {result.returncode}")
+                if result.stderr:
+                    print(f"  {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
-            print("  Warning: restart timed out")
+            print("  Warning: start timed out")
         except Exception as e:
             print(f"  Warning: {e}")
 
