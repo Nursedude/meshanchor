@@ -4,8 +4,49 @@
 > *Build. Test. Deploy. Monitor.*
 
 ## Current Version: 0.5.0-beta
-## Last Updated: 2026-02-03
-## Branch: `main` (PRs merged)
+## Last Updated: 2026-02-05
+## Branch: `claude/fix-mqtt-hang-uWguu` (ready for PR)
+
+---
+
+## Session: 2026-02-05 - MQTT Hang Fix (Phase 1)
+
+**Branch:** `claude/fix-mqtt-hang-uWguu`
+**Status:** Committed and pushed, ready for PR/merge
+
+**4 Root Causes Found and Fixed:**
+
+| # | Root Cause | File | Fix |
+|---|-----------|------|-----|
+| 1 | `loop_stop(force=True)` silently crashes in paho-mqtt v2.x | `mqtt_subscriber.py` | Removed `force=True`, disconnect before loop_stop |
+| 2 | No MQTT cleanup on TUI exit | `main.py` | Added subscriber/bridge cleanup in `finally` block |
+| 3 | Dead socket timeout code (no-op) | `mqtt_subscriber.py` | Removed dead code |
+| 4 | `_nodes_lock` deadlock (`Lock` -> `RLock`) | `mqtt_subscriber.py` | `get_mesh_size()` held Lock then called `get_online_nodes()` which re-acquired it |
+
+**Additional Fixes:**
+- paho-mqtt v2.x `Client()` compatibility (`CallbackAPIVersion`)
+- `atexit` cleanup handler as defense-in-depth
+- Same paho v2 fixes applied to `mqtt_bridge.py` plugin
+- `CommandResult.error` field renamed to `error_msg` (shadowed static method)
+
+**Files Modified:**
+| File | Change |
+|------|--------|
+| `src/monitoring/mqtt_subscriber.py` | paho v2 compat, RLock, atexit, disconnect fix |
+| `src/plugins/mqtt_bridge.py` | paho v2 compat, disconnect order fix |
+| `src/launcher_tui/main.py` | MQTT cleanup in exit path |
+| `src/agent/commands.py` | error -> error_msg rename |
+| `tests/test_agent.py` | Updated for error_msg rename |
+
+**Test Results:**
+- 66 MQTT robustness tests: ALL PASS
+- Full suite: 3017 passed, 52 failed (pre-existing), 18 skipped
+- Runtime: 3:52 (previously hung indefinitely at `test_get_stats_structure`)
+
+**Next Session:**
+- User has logs to share for analysis
+- User will be offline ~6hrs after sharing logs
+- Merge PR or continue with next priorities
 
 ---
 
