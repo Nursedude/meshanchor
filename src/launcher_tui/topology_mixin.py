@@ -188,42 +188,60 @@ class TopologyMixin:
     def _show_topology_nodes(self):
         """Show list of nodes in the topology."""
         topology = self._get_topology()
+        tracker = self._get_node_tracker()
 
-        if topology is None:
+        if topology is None and tracker is None:
             self.dialog.msgbox("Unavailable", "Topology module not loaded.")
             return
 
         try:
-            topo_dict = topology.to_dict()
-            nodes = topo_dict.get("nodes", [])
+            # Collect nodes from both topology and node tracker
+            all_nodes = {}  # node_id -> (display_name, node_type)
 
-            if not nodes:
-                self.dialog.msgbox("No Nodes", "No nodes discovered in the topology yet.")
+            # Get nodes from topology (RNS path table)
+            if topology:
+                topo_dict = topology.to_dict()
+                for node_id in topo_dict.get("nodes", []):
+                    if node_id == "local":
+                        all_nodes[node_id] = ("Local Node", "local")
+                    elif node_id.startswith("rns_"):
+                        all_nodes[node_id] = (node_id[:12], "RNS")
+                    else:
+                        all_nodes[node_id] = (node_id[:12], "Network")
+
+            # Get nodes from node tracker (has richer Meshtastic data)
+            if tracker and hasattr(tracker, 'get_all_nodes'):
+                for node in tracker.get_all_nodes():
+                    name = node.name or node.short_name or node.id
+                    if node.network == "meshtastic":
+                        node_type = "Mesh"
+                    elif node.network == "rns":
+                        node_type = "RNS"
+                    elif node.network == "both":
+                        node_type = "Bridge"
+                    else:
+                        node_type = "Node"
+                    # Add online indicator
+                    status = "+" if getattr(node, 'is_online', False) else "-"
+                    all_nodes[node.id] = (name, f"{node_type}{status}")
+
+            if not all_nodes:
+                self.dialog.msgbox("No Nodes", "No nodes discovered yet.\n\nNodes appear when:\n- RNS discovers paths\n- Meshtastic nodes are seen\n- Gateway bridge is running")
                 return
 
-            # Build node list for menu
+            # Build node list for menu (sort by name, limit to 50)
             node_choices = []
-            for node_id in sorted(nodes)[:50]:  # Limit to 50 for TUI
-                # Truncate long IDs
-                display_id = node_id[:30] if len(node_id) > 30 else node_id
-
-                # Determine node type
-                if node_id == "local":
-                    desc = "Local Node"
-                elif node_id.startswith("rns_"):
-                    desc = "RNS Destination"
-                elif node_id.startswith("mesh_") or node_id.startswith("!"):
-                    desc = "Meshtastic Node"
-                else:
-                    desc = "Network Node"
-
-                node_choices.append((node_id, f"{display_id} [{desc}]"))
+            sorted_nodes = sorted(all_nodes.items(), key=lambda x: x[1][0].lower())[:50]
+            for node_id, (name, node_type) in sorted_nodes:
+                # Truncate long names
+                display_name = name[:25] if len(name) > 25 else name
+                node_choices.append((node_id, f"{display_name} [{node_type}]"))
 
             node_choices.append(("back", "Back"))
 
             selected = self.dialog.menu(
                 "Network Nodes",
-                f"Found {len(nodes)} nodes:",
+                f"Found {len(all_nodes)} nodes:",
                 node_choices
             )
 
