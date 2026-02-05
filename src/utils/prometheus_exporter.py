@@ -625,6 +625,15 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
             self._serve_json_nodes()
         elif self.path == "/api/json/status":
             self._serve_json_status()
+        # Prometheus API endpoints (for Grafana Prometheus data source)
+        elif self.path.startswith("/api/v1/query_range"):
+            self._serve_prometheus_query_range()
+        elif self.path.startswith("/api/v1/query"):
+            self._serve_prometheus_query()
+        elif self.path.startswith("/api/v1/labels"):
+            self._serve_prometheus_labels()
+        elif self.path.startswith("/api/v1/label"):
+            self._serve_prometheus_label_values()
         elif self.path == "/":
             self._serve_index()
         else:
@@ -657,10 +666,14 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/json/status":
             self._serve_json_status()
         # Prometheus API compatibility endpoints
+        elif self.path.startswith("/api/v1/query_range"):
+            self._serve_prometheus_query_range()
         elif self.path.startswith("/api/v1/query"):
             self._serve_prometheus_query()
         elif self.path.startswith("/api/v1/labels"):
             self._serve_prometheus_labels()
+        elif self.path.startswith("/api/v1/label"):
+            self._serve_prometheus_label_values()
         else:
             self.send_response(404)
             self._add_cors_headers()
@@ -670,6 +683,7 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
     def _serve_prometheus_query(self):
         """Serve Prometheus query API for Grafana compatibility."""
         import json
+        import re
         import urllib.parse
 
         # Parse query from URL or body
@@ -694,21 +708,53 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
             }
         }
 
-        # If no specific query, return basic metrics
         try:
-            if "up" in query or not query:
+            # Parse all metrics from exporter
+            if self.exporter:
+                metrics_text = self.exporter.export()
+                now = time.time()
+
+                # Parse Prometheus format lines: metric_name{labels} value
+                # or metric_name value
+                metric_pattern = re.compile(
+                    r'^([a-zA-Z_][a-zA-Z0-9_]*)(\{[^}]*\})?\s+([0-9.eE+-]+|NaN|Inf|-Inf)$'
+                )
+
+                for line in metrics_text.split('\n'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+
+                    match = metric_pattern.match(line)
+                    if match:
+                        metric_name = match.group(1)
+                        labels_str = match.group(2) or ""
+                        value = match.group(3)
+
+                        # Filter by query if specified
+                        if query and query not in metric_name:
+                            continue
+
+                        # Parse labels
+                        labels = {"__name__": metric_name, "job": "meshforge"}
+                        if labels_str:
+                            # Parse {key="value",key2="value2"}
+                            label_pattern = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
+                            for label_match in label_pattern.finditer(labels_str):
+                                labels[label_match.group(1)] = label_match.group(2)
+
+                        result["data"]["result"].append({
+                            "metric": labels,
+                            "value": [now, value]
+                        })
+
+            # Always include 'up' metric
+            if not query or "up" in query:
                 result["data"]["result"].append({
                     "metric": {"__name__": "up", "job": "meshforge"},
                     "value": [time.time(), "1"]
                 })
-            if "meshforge" in query.lower() or not query:
-                # Add uptime metric
-                if self.exporter:
-                    uptime = time.time() - self.exporter.start_time
-                    result["data"]["result"].append({
-                        "metric": {"__name__": "meshforge_uptime_seconds"},
-                        "value": [time.time(), str(uptime)]
-                    })
+
         except Exception as e:
             logger.debug(f"Query error: {e}")
 
@@ -725,6 +771,124 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
         result = {
             "status": "success",
             "data": ["__name__", "job", "service", "node_id", "state", "network"]
+        }
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode('utf-8'))
+
+    def _serve_prometheus_query_range(self):
+        """Serve Prometheus query_range API for Grafana time-series panels."""
+        import json
+        import re
+        import urllib.parse
+
+        # Parse query from URL or body
+        query = ""
+        if "?" in self.path:
+            params = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+            query = params.get("query", [""])[0]
+        else:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length).decode('utf-8')
+                params = urllib.parse.parse_qs(body)
+                query = params.get("query", [""])[0]
+
+        # Return metrics in Prometheus API matrix format
+        result = {
+            "status": "success",
+            "data": {
+                "resultType": "matrix",
+                "result": []
+            }
+        }
+
+        try:
+            if self.exporter:
+                metrics_text = self.exporter.export()
+                now = time.time()
+
+                metric_pattern = re.compile(
+                    r'^([a-zA-Z_][a-zA-Z0-9_]*)(\{[^}]*\})?\s+([0-9.eE+-]+|NaN|Inf|-Inf)$'
+                )
+
+                for line in metrics_text.split('\n'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+
+                    match = metric_pattern.match(line)
+                    if match:
+                        metric_name = match.group(1)
+                        labels_str = match.group(2) or ""
+                        value = match.group(3)
+
+                        if query and query not in metric_name:
+                            continue
+
+                        labels = {"__name__": metric_name, "job": "meshforge"}
+                        if labels_str:
+                            label_pattern = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
+                            for label_match in label_pattern.finditer(labels_str):
+                                labels[label_match.group(1)] = label_match.group(2)
+
+                        # For query_range, return values array (time series)
+                        # We only have current value, so return single point
+                        result["data"]["result"].append({
+                            "metric": labels,
+                            "values": [[now, value]]
+                        })
+
+        except Exception as e:
+            logger.debug(f"Query range error: {e}")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode('utf-8'))
+
+    def _serve_prometheus_label_values(self):
+        """Serve Prometheus label values API for Grafana variable queries."""
+        import json
+        import re
+
+        # Extract label name from path: /api/v1/label/<label>/values
+        label_match = re.search(r'/api/v1/label/([^/]+)/values', self.path)
+        label_name = label_match.group(1) if label_match else ""
+
+        values = set()
+
+        try:
+            if self.exporter and label_name:
+                metrics_text = self.exporter.export()
+
+                if label_name == "__name__":
+                    # Return metric names
+                    metric_pattern = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)')
+                    for line in metrics_text.split('\n'):
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        match = metric_pattern.match(line)
+                        if match:
+                            values.add(match.group(1))
+                else:
+                    # Return label values
+                    label_pattern = re.compile(rf'{label_name}="([^"]*)"')
+                    for line in metrics_text.split('\n'):
+                        for match in label_pattern.finditer(line):
+                            values.add(match.group(1))
+
+        except Exception as e:
+            logger.debug(f"Label values error: {e}")
+
+        result = {
+            "status": "success",
+            "data": sorted(list(values))
         }
 
         self.send_response(200)
