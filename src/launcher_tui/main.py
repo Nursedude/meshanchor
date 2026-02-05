@@ -1443,13 +1443,28 @@ def main():
     except Exception:
         pass  # Keep original stderr if can't redirect
 
+    launcher = None
     try:
         launcher = MeshForgeLauncher()
         launcher.run()
     except KeyboardInterrupt:
         print("\n\nExiting MeshForge...")
-        sys.exit(0)
     finally:
+        # Stop MQTT subscriber if running (prevents hang on exit)
+        if launcher is not None:
+            try:
+                if hasattr(launcher, '_mqtt_subscriber') and launcher._mqtt_subscriber:
+                    launcher._mqtt_subscriber.stop()
+                    launcher._mqtt_subscriber = None
+            except Exception:
+                pass
+            try:
+                if hasattr(launcher, '_mqtt_ws_bridge') and launcher._mqtt_ws_bridge:
+                    launcher._mqtt_ws_bridge.stop()
+                    launcher._mqtt_ws_bridge = None
+            except Exception:
+                pass
+
         # Restore stderr
         try:
             if sys.stderr != _original_stderr:
