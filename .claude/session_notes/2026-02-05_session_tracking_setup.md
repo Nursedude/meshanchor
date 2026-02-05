@@ -272,3 +272,53 @@ Added to `prometheus_exporter.py`:
 - `src/utils/prometheus_exporter.py:635-725` - Added POST/OPTIONS handlers
 
 **Status:** RESOLVED
+
+---
+
+## Session Handoff - 2026-02-05 (End of Day)
+
+### Current Blockers (Resume Here)
+
+#### 1. Gateway Won't Start - Wrong Bridge Mode
+**Error:**
+```
+Checking secondary meshtasticd (localhost:4404)... ✗ NOT AVAILABLE
+Pre-flight checks FAILED
+```
+
+**Root Cause:**
+Gateway is configured for `mesh_bridge` mode which requires TWO meshtasticd instances (ports 4403 + 4404). User only has one radio.
+
+**Fix Needed:**
+Change bridge mode from `mesh_bridge` to `message_bridge` in TUI:
+- Gateway Bridge → Configure Gateway → Bridge Mode → **message_bridge**
+
+No config file exists yet - settings are in-memory until saved.
+
+#### 2. Grafana Not Loading Data
+**Status:** Prometheus API implemented but gateway must be running for metrics server to start.
+
+**What's Working:**
+- Prometheus endpoints: `/api/v1/query`, `/api/v1/query_range`, `/api/v1/labels`
+- Server binds to `0.0.0.0:9090` for LAN access
+- Use `http://127.0.0.1:9090` in Grafana (not localhost - IPv6 issue)
+
+**What's Blocking:**
+- Gateway won't start (see #1 above)
+- Metrics server auto-starts with gateway
+- When gateway is stopped, no metrics
+
+#### 3. MQTT Down
+Not investigated yet. Check `mosquitto` service status.
+
+### Commits This Session
+- `e707235` - fix: Bind metrics server to 0.0.0.0 for LAN access
+- `87437de` - fix: Full Prometheus API support for Grafana (query, query_range, labels)
+- `f9f4b84` - fix: Metrics server supports POST/OPTIONS for Grafana Prometheus data source
+
+### Resume Checklist
+1. [ ] Fix gateway bridge mode: `mesh_bridge` → `message_bridge`
+2. [ ] Start gateway - verify metrics server starts on 9090
+3. [ ] Test Grafana with `http://127.0.0.1:9090`
+4. [ ] Check MQTT/mosquitto status
+5. [ ] Verify node data flows to Grafana dashboards
