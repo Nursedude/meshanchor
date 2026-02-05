@@ -714,10 +714,16 @@ class RNSMeshtasticBridge:
         Uses ReconnectStrategy for exponential backoff with jitter.
         Respects permanent failure flag for non-retriable errors.
         """
+        _logged_permanent_failure = False
         while self._running:
             try:
-                # Don't retry if RNS init failed permanently (e.g., signal handler issue)
+                # Don't retry if RNS init failed permanently (e.g., library not installed)
                 if self._rns_init_failed_permanently:
+                    if not _logged_permanent_failure:
+                        logger.warning("RNS initialization failed permanently - "
+                                      "bridge will not attempt reconnection. "
+                                      "Check RNS/LXMF installation and logs above.")
+                        _logged_permanent_failure = True
                     self._stop_event.wait(30)
                     continue
 
@@ -863,8 +869,8 @@ class RNSMeshtasticBridge:
 
         If RNS was pre-initialized from the main thread (via _init_rns_main_thread),
         skips Reticulum initialization and proceeds directly to LXMF setup.
-        Otherwise falls back to initialization here (may fail in background thread
-        due to signal handler requirements).
+        Otherwise falls back to initialization here. When rnsd is running,
+        connects as a shared instance client (no signal handlers needed).
         """
         try:
             import RNS
@@ -875,105 +881,125 @@ class RNSMeshtasticBridge:
                 logger.info("RNS pre-initialized, proceeding to LXMF setup")
             else:
                 # RNS was NOT pre-initialized - try here (fallback path)
-                # This may fail with 'signal only works in main thread'
+                # When rnsd is running with share_instance=Yes, RNS.Reticulum()
+                # connects as a client via socket - no signal handlers needed.
                 from utils.gateway_diagnostic import find_rns_processes
                 rns_pids = find_rns_processes()
+                config_dir = self.config.rns.config_dir or None
 
                 if rns_pids:
-                    logger.info(f"rnsd detected (PID: {rns_pids[0]}), deferring RNS to rnsd")
-                    logger.info("Bridge RNS features deferred - rnsd handles transport")
-                    self._reticulum = None
-                    self._connected_rns = False
+                    logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
+                               "connecting as shared instance client")
                     self._rns_via_rnsd = True
-                    self._rns_init_failed_permanently = True
-                    return
-                else:
-                    config_dir = self.config.rns.config_dir or None
-                    try:
-                        self._reticulum = RNS.Reticulum(configdir=config_dir)
-                    except OSError as e:
-                        if hasattr(e, 'errno') and e.errno == 98:
-                            from utils.gateway_diagnostic import handle_address_in_use_error
-                            diag = handle_address_in_use_error(e, logger)
 
-                            self._reticulum = None
+                try:
+                    self._reticulum = RNS.Reticulum(configdir=config_dir)
+                except OSError as e:
+                    if hasattr(e, 'errno') and e.errno == 98:
+                        from utils.gateway_diagnostic import handle_address_in_use_error
+                        diag = handle_address_in_use_error(e, logger)
+
+                        self._reticulum = None
+                        self._connected_rns = False
+
+                        if diag['rns_pids']:
+                            logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), "
+                                       "will retry connection as client")
+                            self._rns_via_rnsd = True
+                        else:
+                            logger.warning("RNS port in use by unknown process (stale socket?)")
+                            logger.info("Will retry after backoff - port may become available")
+                        return
+                    else:
+                        raise
+                except ValueError as e:
+                    if "signal only works in main thread" in str(e).lower():
+                        logger.warning("RNS signal handler failed (background thread) - "
+                                      "this is non-fatal when rnsd is running")
+                        if not rns_pids:
+                            # No rnsd and can't init RNS from here - permanent failure
+                            self._rns_init_failed_permanently = True
                             self._connected_rns = False
-
-                            if diag['rns_pids']:
-                                logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), deferring to rnsd")
-                                self._rns_via_rnsd = True
-                                self._rns_init_failed_permanently = True
-                            else:
-                                logger.warning("RNS port in use by unknown process (stale socket?)")
-                                logger.info("Will retry after backoff - port may become available")
                             return
-                        else:
-                            raise
-                    except Exception as e:
-                        if "reinitialise" in str(e).lower() or "already running" in str(e).lower():
-                            logger.info("RNS already running in this process, using shared instance")
-                            # RNS singleton is active - proceed to LXMF setup
-                        else:
-                            raise
+                        # rnsd is running but RNS.Reticulum() failed with signal error.
+                        # This shouldn't happen in client mode, but if it does,
+                        # we can't proceed without a Reticulum instance.
+                        self._connected_rns = False
+                        return
+                    else:
+                        raise
+                except Exception as e:
+                    if "reinitialise" in str(e).lower() or "already running" in str(e).lower():
+                        logger.info("RNS already running in this process, "
+                                   "proceeding to LXMF setup")
+                        # RNS singleton is active - proceed to LXMF setup
+                    else:
+                        raise
 
-            # Create or load identity
-            identity_path = get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
-            if identity_path.exists():
-                self._identity = RNS.Identity.from_file(str(identity_path))
-            else:
-                self._identity = RNS.Identity()
-                identity_path.parent.mkdir(parents=True, exist_ok=True)
-                self._identity.to_file(str(identity_path))
-
-            # Create LXMF router
-            storage_path = get_real_user_home() / ".config" / "meshforge" / "lxmf_storage"
-            storage_path.mkdir(parents=True, exist_ok=True)
-            self._lxmf_router = LXMF.LXMRouter(storagepath=str(storage_path))
-
-            # Register delivery callback
-            self._lxmf_router.register_delivery_callback(self._on_lxmf_receive)
-
-            # Create source identity
-            self._lxmf_source = self._lxmf_router.register_delivery_identity(
-                self._identity,
-                display_name="MeshForge Gateway"
-            )
-
-            # Announce presence
-            self._lxmf_router.announce(self._lxmf_source.hash)
-
-            # Register announce handler for node discovery
-            class AnnounceHandler:
-                def __init__(self, bridge):
-                    self.aspect_filter = "lxmf.delivery"
-                    self.bridge = bridge
-
-                def received_announce(self, dest_hash, announced_identity, app_data):
-                    self.bridge._on_rns_announce(dest_hash, announced_identity, app_data)
-
-            RNS.Transport.register_announce_handler(AnnounceHandler(self))
-
-            self._connected_rns = True
-            logger.info("Connected to RNS")
-            self._notify_status("rns_connected")
+            # Set up LXMF messaging on top of the RNS instance
+            self._setup_lxmf(RNS, LXMF)
 
         except ImportError:
-            logger.warning("RNS library not installed")
+            logger.warning("RNS/LXMF library not installed - bridge cannot connect")
             self._connected_rns = False
             self._rns_init_failed_permanently = True  # Don't retry
         except Exception as e:
             error_msg = str(e).lower()
             if "signal only works in main thread" in error_msg:
-                # RNS must be initialized from main thread - don't retry from background thread
-                logger.warning("RNS must be initialized from main thread (run rnsd separately)")
-                self._rns_init_failed_permanently = True  # Don't retry
-            elif "reinitialise" in error_msg or "already running" in error_msg:
-                # RNS singleton already exists - don't retry
-                logger.info("RNS already initialized elsewhere, skipping gateway RNS init")
-                self._rns_init_failed_permanently = True  # Don't retry
+                logger.warning("RNS requires main thread for signal handlers")
+                if not self._rns_via_rnsd:
+                    self._rns_init_failed_permanently = True
             else:
-                logger.error(f"Failed to initialize RNS: {e}")
+                logger.error(f"Failed to connect to RNS: {e}")
             self._connected_rns = False
+
+    def _setup_lxmf(self, RNS, LXMF):
+        """Set up LXMF identity, router, and announce handler.
+
+        Called after RNS is initialized (either pre-init or fallback).
+        Separated from _connect_rns to keep the method focused and
+        allow LXMF setup to be retried independently.
+        """
+        # Create or load identity
+        identity_path = get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
+        if identity_path.exists():
+            self._identity = RNS.Identity.from_file(str(identity_path))
+        else:
+            self._identity = RNS.Identity()
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            self._identity.to_file(str(identity_path))
+
+        # Create LXMF router
+        storage_path = get_real_user_home() / ".config" / "meshforge" / "lxmf_storage"
+        storage_path.mkdir(parents=True, exist_ok=True)
+        self._lxmf_router = LXMF.LXMRouter(storagepath=str(storage_path))
+
+        # Register delivery callback
+        self._lxmf_router.register_delivery_callback(self._on_lxmf_receive)
+
+        # Create source identity
+        self._lxmf_source = self._lxmf_router.register_delivery_identity(
+            self._identity,
+            display_name="MeshForge Gateway"
+        )
+
+        # Announce presence
+        self._lxmf_router.announce(self._lxmf_source.hash)
+
+        # Register announce handler for node discovery
+        class AnnounceHandler:
+            def __init__(self, bridge):
+                self.aspect_filter = "lxmf.delivery"
+                self.bridge = bridge
+
+            def received_announce(self, dest_hash, announced_identity, app_data):
+                self.bridge._on_rns_announce(dest_hash, announced_identity, app_data)
+
+        RNS.Transport.register_announce_handler(AnnounceHandler(self))
+
+        self._connected_rns = True
+        logger.info("Connected to RNS (LXMF ready)")
+        self._notify_status("rns_connected")
 
     def _disconnect_rns(self):
         """Disconnect from RNS and release ports"""
@@ -1491,7 +1517,8 @@ def start_gateway_headless() -> bool:
 
         if success:
             print("Gateway bridge started successfully")
-            print(f"  Meshtastic: {'Connected' if _active_bridge._connected_mesh else 'Disconnected'}")
+            mesh_ok = _active_bridge._mesh_handler.is_connected if _active_bridge._mesh_handler else False
+            print(f"  Meshtastic: {'Connected' if mesh_ok else 'Disconnected'}")
             print(f"  RNS: {'Connected' if _active_bridge._connected_rns else 'Disconnected'}")
         else:
             print("Gateway bridge failed to start - check logs")
@@ -1552,7 +1579,7 @@ def get_gateway_stats() -> dict:
         result = {
             'running': _active_bridge._running,
             'status': 'Running' if _active_bridge._running else 'Stopped',
-            'meshtastic_connected': _active_bridge._connected_mesh,
+            'meshtastic_connected': _active_bridge._mesh_handler.is_connected if _active_bridge._mesh_handler else False,
             'rns_connected': _active_bridge._connected_rns,
             'messages_mesh_to_rns': stats.get('messages_mesh_to_rns', 0),
             'messages_rns_to_mesh': stats.get('messages_rns_to_mesh', 0),
