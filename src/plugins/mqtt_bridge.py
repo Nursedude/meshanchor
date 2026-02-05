@@ -261,7 +261,13 @@ class MQTTBridgePlugin(IntegrationPlugin):
         try:
             import paho.mqtt.client as mqtt
 
-            self._client = mqtt.Client()
+            # Create client - compatible with paho-mqtt v1.x and v2.x
+            if hasattr(mqtt, 'CallbackAPIVersion'):
+                self._client = mqtt.Client(
+                    callback_api_version=mqtt.CallbackAPIVersion.VERSION1
+                )
+            else:
+                self._client = mqtt.Client()
 
             # Set callbacks
             self._client.on_connect = self._on_connect
@@ -307,10 +313,15 @@ class MQTTBridgePlugin(IntegrationPlugin):
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
         self._stop_reconnect.set()
-        if self._client:
+        client = self._client
+        if client:
             try:
-                self._client.loop_stop()
-                self._client.disconnect()
+                client.disconnect()
+            except Exception:
+                pass
+            try:
+                # paho-mqtt v2.x removed the force parameter from loop_stop
+                client.loop_stop()
             except Exception as e:
                 logger.debug(f"Disconnect cleanup: {e}")
             self._client = None
