@@ -94,6 +94,49 @@ Modified `_open_topology_browser()` to:
 
 ---
 
+## Bug Fix: RNS "No Shared Instance" Better Diagnostics
+
+**Problem:**
+When rnsd is running but RNS tools report "no shared instance available", the TUI
+only checked the user's config and suggested starting rnsd (which was already running).
+
+**Root Cause:**
+rnsd runs as root with config at `/root/.reticulum/config`. If that config doesn't
+have `share_instance = Yes`, rnsd won't create the shared instance. The user's config
+at `~/.reticulum/config` was valid, but rnsd's wasn't being checked.
+
+**Fix Applied:**
+Enhanced error handler in `rns_menu_mixin.py:990-1065` to:
+1. Check if rnsd IS running (pgrep)
+2. If running, check BOTH user config AND rnsd config (`/root/` or `/etc/`)
+3. Detect missing `share_instance = Yes` in rnsd config
+4. Detect port mismatches between configs
+5. Show specific fix instructions
+
+**File Modified:**
+- `src/launcher_tui/rns_menu_mixin.py:990-1065` - Enhanced RNS shared instance diagnostics
+
+---
+
+## Enhancement: Automatic RNS Setup Fix
+
+**Problem:**
+User had to manually fix RNS config and restart rnsd - not the MeshForge experience.
+
+**Solution:**
+Added `_auto_fix_rns_shared_instance()` method that automatically:
+1. Deploys MeshForge's RNS template to `/etc/reticulum/config`
+2. Backs up any existing config
+3. Restarts rnsd service
+4. Verifies shared instance is now listening on port 37428
+5. Retries the original command if fix succeeded
+
+**File Modified:**
+- `src/launcher_tui/rns_menu_mixin.py:579-660` - New `_auto_fix_rns_shared_instance()` method
+- `src/launcher_tui/rns_menu_mixin.py:1091-1113` - Auto-fix on "no shared instance" error
+
+---
+
 ## Session Log
 
 ### Entry 1 - Session Start
@@ -106,12 +149,13 @@ Modified `_open_topology_browser()` to:
 
 ## Handoff Notes (for next session)
 
-- **Current task status:** COMPLETED - topology browser fix
+- **Current task status:** COMPLETED - topology browser + RNS auto-fix
 - **Blockers encountered:** None
 - **Files modified:**
   - `src/launcher_tui/topology_mixin.py` - Fixed browser visualization to use node tracker data
+  - `src/launcher_tui/rns_menu_mixin.py` - Auto-fix RNS shared instance issues
   - `.claude/session_notes/2026-02-05_session_tracking_setup.md` - This file
-- **Commits made:** 2 (session notes + topology fix)
+- **Commits made:** 4 (session notes + topology fix + RNS diagnostics + RNS auto-fix)
 - **Next steps:**
-  - Test topology browser with live meshtasticd/rnsd services
+  - User should test: run rnstatus from TUI, it should auto-fix if needed
   - Alpha branch work: NanoVNA plugin, firmware flashing
