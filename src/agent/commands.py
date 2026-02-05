@@ -48,7 +48,7 @@ class CommandResult:
     """Result of command execution."""
     status: CommandStatus
     data: Any = None
-    error: Optional[str] = None
+    error_msg: Optional[str] = None
     execution_time_ms: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -59,8 +59,8 @@ class CommandResult:
         }
         if self.data is not None:
             result["data"] = self.data
-        if self.error:
-            result["error"] = self.error
+        if self.error_msg:
+            result["error"] = self.error_msg
         return result
 
     @staticmethod
@@ -71,7 +71,7 @@ class CommandResult:
     @staticmethod
     def error(message: str, status: CommandStatus = CommandStatus.ERROR) -> CommandResult:
         """Create an error result."""
-        return CommandResult(status=status, error=message)
+        return CommandResult(status=status, error_msg=message)
 
 
 @dataclass
