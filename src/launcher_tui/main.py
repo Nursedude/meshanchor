@@ -271,6 +271,9 @@ class MeshForgeLauncher(
         if not self._run_startup_checks():
             return  # User aborted due to conflicts
 
+        # Check for root without SUDO_USER (causes RNS auth issues)
+        self._check_root_without_sudo_user()
+
         # Check for first run and offer setup wizard
         if self._check_first_run():
             self._run_first_run_wizard()
@@ -324,6 +327,63 @@ class MeshForgeLauncher(
             )
 
         return True
+
+    def _check_root_without_sudo_user(self):
+        """
+        Warn if running as root without SUDO_USER set.
+
+        This is a common issue on fresh installs where the user follows
+        'sudo meshforge' guidance but the environment doesn't preserve
+        SUDO_USER (e.g., after 'su -' or direct root login).
+
+        Without SUDO_USER, RNS applications (NomadNet, rnstatus) will run
+        as root while rnsd runs as the regular user, causing RPC auth failures.
+        """
+        # Only check if we're actually root
+        if os.getuid() != 0:
+            return
+
+        sudo_user = os.environ.get('SUDO_USER', '')
+
+        # SUDO_USER is set and not root - we're fine
+        if sudo_user and sudo_user != 'root':
+            return
+
+        # We're root without SUDO_USER - this can cause issues
+        # Check if rnsd is running as a non-root user (the problematic case)
+        rnsd_user = None
+        try:
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                rnsd_user = result.stdout.strip()
+        except Exception:
+            pass
+
+        # If rnsd is running as a regular user, warn about the mismatch
+        if rnsd_user and rnsd_user != 'root':
+            self.dialog.msgbox(
+                "Root Context Warning",
+                f"MeshForge is running as root, but rnsd runs as '{rnsd_user}'.\n\n"
+                f"This mismatch will cause RNS apps (NomadNet) to fail\n"
+                f"with RPC authentication errors.\n\n"
+                f"Recommended: Exit and run as your regular user:\n"
+                f"  exit\n"
+                f"  meshforge   (without sudo)\n\n"
+                f"Or preserve SUDO_USER:\n"
+                f"  sudo -E meshforge\n\n"
+                f"MeshForge will try to work around this, but some\n"
+                f"features may not work correctly.",
+            )
+        elif not rnsd_user:
+            # rnsd not running yet - just a general warning
+            # Only show this once per session using a flag
+            if not hasattr(self, '_root_warning_shown'):
+                self._root_warning_shown = True
+                # Less alarming message since rnsd isn't running yet
+                # The NomadNet menu will handle specific issues when they arise
 
     def _check_service_misconfig(self):
         """Check for service misconfiguration and offer to fix."""
