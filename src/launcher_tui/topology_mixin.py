@@ -681,6 +681,11 @@ class TopologyMixin:
                             node_type = "gateway"
 
                         # Add/update node with rich data
+                        # Position is stored in node.position, not directly on node
+                        lat = node.position.latitude if node.position and node.position.is_valid() else None
+                        lon = node.position.longitude if node.position and node.position.is_valid() else None
+                        alt = node.position.altitude if node.position else None
+
                         visualizer.add_node(
                             node_id=node.id,
                             name=node.name or node.short_name or node.id,
@@ -688,9 +693,9 @@ class TopologyMixin:
                             network=node.network or "unknown",
                             is_online=getattr(node, 'is_online', False),
                             hops=node.hops or 0,
-                            latitude=node.latitude,
-                            longitude=node.longitude,
-                            altitude=node.altitude,
+                            latitude=lat,
+                            longitude=lon,
+                            altitude=alt,
                             metadata={
                                 "hardware": node.hardware_model,
                                 "firmware": node.firmware_version,
