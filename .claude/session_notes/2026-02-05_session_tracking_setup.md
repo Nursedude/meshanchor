@@ -246,3 +246,29 @@ Modified `_auto_fix_rns_shared_instance()` to:
   - [ ] Video tutorials (P4)
   - [ ] Deployment guides for Pi/SBC (P4)
   - [ ] Network planning guide (P4)
+
+---
+
+## RESOLVED: Grafana 501 POST Error
+
+**Symptom:**
+```
+501 Unsupported method ('POST') - There was an error returned querying the Prometheus API.
+```
+
+**Root Cause:**
+Grafana's Prometheus data source uses POST requests for queries, but `MetricsHTTPHandler`
+only implemented `do_GET`. CORS preflight (OPTIONS) was also missing.
+
+**Fix Applied:**
+Added to `prometheus_exporter.py`:
+1. `do_POST()` - Routes POST requests to same handlers as GET
+2. `do_OPTIONS()` - CORS preflight response
+3. `_serve_prometheus_query()` - Prometheus API `/api/v1/query` compatibility
+4. `_serve_prometheus_labels()` - Prometheus API `/api/v1/labels` compatibility
+5. Updated CORS headers to allow POST method
+
+**File Modified:**
+- `src/utils/prometheus_exporter.py:635-725` - Added POST/OPTIONS handlers
+
+**Status:** RESOLVED
