@@ -577,6 +577,107 @@ class RNSMenuMixin(RNSSnifferMixin):
             self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
             return None
 
+    def _auto_fix_rns_shared_instance(self) -> bool:
+        """Automatically fix RNS shared instance issues.
+
+        Called when 'no shared instance' error is detected. This method:
+        1. Deploys proper config to /etc/reticulum/config (takes precedence)
+        2. Restarts rnsd service
+        3. Verifies shared instance is now available
+
+        Returns True if fix was successful.
+        """
+        import time
+
+        print("\n" + "=" * 50)
+        print("AUTO-FIX: RNS Shared Instance")
+        print("=" * 50)
+
+        # Step 1: Deploy config to /etc/reticulum/config
+        template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+        target = Path('/etc/reticulum/config')
+
+        if not template.exists():
+            print("ERROR: MeshForge RNS template not found")
+            print(f"  Expected: {template}")
+            return False
+
+        print(f"\n[1/3] Deploying RNS config...")
+        print(f"  Template: {template}")
+        print(f"  Target:   {target}")
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            # Backup existing config if present
+            if target.exists():
+                backup = target.with_suffix('.backup')
+                shutil.copy2(str(target), str(backup))
+                print(f"  Backed up existing config to: {backup}")
+
+            shutil.copy2(str(template), str(target))
+            target.chmod(0o644)
+            print("  Config deployed successfully")
+        except (OSError, PermissionError) as e:
+            print(f"  ERROR: {e}")
+            print("  (Run MeshForge with sudo)")
+            return False
+
+        # Step 2: Restart rnsd service
+        print(f"\n[2/3] Restarting rnsd service...")
+        try:
+            # Use service_check helper if available
+            try:
+                from utils.service_check import apply_config_and_restart
+                success, msg = apply_config_and_restart('rnsd')
+                if success:
+                    print("  rnsd restarted successfully")
+                else:
+                    print(f"  Warning: {msg}")
+            except ImportError:
+                # Fallback to direct systemctl
+                result = subprocess.run(
+                    ['systemctl', 'restart', 'rnsd'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    print("  rnsd restarted successfully")
+                else:
+                    print(f"  Warning: systemctl returned {result.returncode}")
+                    if result.stderr:
+                        print(f"  {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            print("  Warning: restart timed out")
+        except Exception as e:
+            print(f"  Warning: {e}")
+
+        # Give rnsd time to start and bind the port
+        print("  Waiting for rnsd to initialize...")
+        time.sleep(2)
+
+        # Step 3: Verify shared instance is now available
+        print(f"\n[3/3] Verifying shared instance...")
+        try:
+            # Check if rnsd is listening on port 37428
+            result = subprocess.run(
+                ['ss', '-tlnp'],
+                capture_output=True, text=True, timeout=5
+            )
+            if '37428' in result.stdout:
+                print("  SUCCESS: rnsd is now listening on port 37428")
+                print("\n" + "=" * 50)
+                print("RNS shared instance is now available!")
+                print("=" * 50 + "\n")
+                return True
+            else:
+                print("  WARNING: rnsd not yet listening on port 37428")
+                print("  Service may need more time to start.")
+                print("  Check logs: sudo journalctl -u rnsd -n 20")
+                return False
+        except Exception as e:
+            print(f"  Cannot verify: {e}")
+            return False
+
     def _check_meshtastic_plugin(self) -> bool:
         """Check if Meshtastic_Interface.py plugin is installed.
 
@@ -988,100 +1089,28 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
             elif "no shared" in combined.lower():
-                # rnsd not running or share_instance not enabled
+                # rnsd not running or share_instance not enabled - AUTO-FIX
                 print("\nNo shared RNS instance available.")
+                print("MeshForge will attempt to fix this automatically...\n")
 
-                # Check if rnsd is actually running
-                rnsd_running = False
-                try:
-                    result_rnsd = subprocess.run(
-                        ['pgrep', '-f', 'rnsd'],
-                        capture_output=True, text=True, timeout=5
+                # Attempt automatic fix
+                if self._auto_fix_rns_shared_instance():
+                    # Success - retry the original command
+                    print(f"\nRetrying {tool_name}...\n")
+                    retry_result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=15
                     )
-                    rnsd_running = result_rnsd.returncode == 0
-                except Exception:
-                    pass
-
-                # Check user's config
-                cfg_path = ReticulumPaths.get_config_file()
-                user_cfg_ok = False
-                user_share_port = None
-                if cfg_path.exists():
-                    try:
-                        cfg_content = cfg_path.read_text()
-                        issues = self._validate_rns_config_content(cfg_content)
-                        if issues:
-                            print(f"\nUser config issues ({cfg_path}):")
-                            for issue in issues:
-                                print(f"  - {issue}")
-                            print("\nFix config: use 'Edit Reticulum Config' menu")
-                        else:
-                            user_cfg_ok = True
-                            # Extract shared_instance_port
-                            for line in cfg_content.split('\n'):
-                                if 'shared_instance_port' in line.lower() and '=' in line:
-                                    try:
-                                        user_share_port = int(line.split('=')[1].strip())
-                                    except ValueError:
-                                        pass
-                    except PermissionError:
-                        print(f"\nCannot read config: {cfg_path}")
-                        print("  Run MeshForge with sudo")
-
-                # If rnsd is running but we can't connect, check root's config
-                if rnsd_running and user_cfg_ok:
-                    print(f"\nrnsd IS running but shared instance not available.")
-                    print(f"User config: {cfg_path} (OK)")
-
-                    # Check root's RNS config (where rnsd likely has its config)
-                    root_cfg = Path('/root/.reticulum/config')
-                    etc_cfg = Path('/etc/reticulum/config')
-
-                    for rnsd_cfg in [root_cfg, etc_cfg]:
-                        if rnsd_cfg.exists():
-                            try:
-                                rnsd_content = rnsd_cfg.read_text()
-                                has_share = any(
-                                    'share_instance' in line.lower() and
-                                    ('yes' in line.lower() or 'true' in line.lower())
-                                    for line in rnsd_content.split('\n')
-                                    if not line.strip().startswith('#')
-                                )
-                                rnsd_port = None
-                                for line in rnsd_content.split('\n'):
-                                    if 'shared_instance_port' in line.lower() and '=' in line:
-                                        try:
-                                            rnsd_port = int(line.split('=')[1].strip())
-                                        except ValueError:
-                                            pass
-
-                                print(f"rnsd config: {rnsd_cfg}")
-                                if not has_share:
-                                    print(f"  ! Missing 'share_instance = Yes' in rnsd config")
-                                    print(f"  Add this to {rnsd_cfg} and restart rnsd")
-                                elif user_share_port and rnsd_port and user_share_port != rnsd_port:
-                                    print(f"  ! Port mismatch: user={user_share_port}, rnsd={rnsd_port}")
-                                    print(f"  Both configs must use same shared_instance_port")
-                                else:
-                                    print(f"  Config appears OK (share_instance=Yes)")
-                                    print("\nTry restarting rnsd:")
-                                    print("  sudo systemctl restart rnsd")
-                                break
-                            except PermissionError:
-                                print(f"\nCannot read rnsd config: {rnsd_cfg}")
-                                print("  Run MeshForge with sudo to diagnose")
-                                break
-                    else:
-                        print("\nrnsd config not found at /root/ or /etc/")
-                        print("rnsd may be using a different config location")
-
-                elif not rnsd_running:
-                    print(f"\nConfig looks OK ({cfg_path})")
-                    print("rnsd is not running. Start it:")
-                    print("  sudo systemctl start rnsd")
-                elif not cfg_path.exists():
-                    print(f"\nNo config found at: {cfg_path}")
-                    print("Use 'Edit Reticulum Config' to deploy template")
+                    if retry_result.returncode == 0 and retry_result.stdout:
+                        print(retry_result.stdout, end='')
+                    elif retry_result.stdout:
+                        print(retry_result.stdout, end='')
+                else:
+                    # Auto-fix failed - show manual instructions
+                    print("\nAuto-fix was unable to resolve the issue.")
+                    print("Manual steps:")
+                    print("  1. Check if running with sudo: sudo python3 src/launcher_tui/main.py")
+                    print("  2. Check rnsd logs: sudo journalctl -u rnsd -n 30")
+                    print("  3. Restart rnsd: sudo systemctl restart rnsd")
             else:
                 # Generic failure - show output and suggestions
                 if result.stdout:
