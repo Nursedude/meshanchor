@@ -909,3 +909,22 @@ instance_control_port = 37429
         if self._service_registry:
             return self._service_registry.get_stats()
         return None
+
+
+# Global node tracker instance (singleton)
+_node_tracker: Optional[UnifiedNodeTracker] = None
+
+
+def get_node_tracker() -> UnifiedNodeTracker:
+    """Get the global node tracker instance.
+
+    Returns a singleton UnifiedNodeTracker that is shared across the application.
+    The tracker is created on first call and reused thereafter.
+
+    Returns:
+        UnifiedNodeTracker: The global node tracker instance
+    """
+    global _node_tracker
+    if _node_tracker is None:
+        _node_tracker = UnifiedNodeTracker()
+    return _node_tracker
