@@ -26,6 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger('gateway.cli')
 
+# Metrics server instance (auto-started with gateway)
+_metrics_server = None
+
 
 def preflight_checks(config: GatewayConfig) -> bool:
     """
@@ -119,6 +122,8 @@ def on_message(msg):
 
 def main():
     """Main entry point."""
+    global _metrics_server
+
     print("\n" + "="*50)
     print("  MeshForge Gateway Bridge")
     print("  RNS <-> Meshtastic Message Bridge")
@@ -167,6 +172,16 @@ def main():
 
         bridge_started = True
         print("Gateway started successfully!")
+
+        # Auto-start metrics server for Grafana integration
+        try:
+            from utils.metrics_export import start_metrics_server
+            _metrics_server = start_metrics_server(port=9090)
+            print("Metrics server started on http://localhost:9090/metrics")
+            print("  Grafana JSON API: http://localhost:9090/api/json/metrics")
+        except Exception as e:
+            logger.debug(f"Metrics server not started: {e}")
+
         print("Press Ctrl+C to stop\n")
 
         # Wait for connections before showing initial status
@@ -202,6 +217,15 @@ def main():
         traceback.print_exc()
 
     finally:
+        # Stop metrics server if running
+        if _metrics_server:
+            try:
+                _metrics_server.stop()
+                logger.debug("Metrics server stopped")
+            except Exception:
+                pass
+            _metrics_server = None
+
         # Only stop if we successfully started
         if bridge_started:
             print("Stopping gateway...")
