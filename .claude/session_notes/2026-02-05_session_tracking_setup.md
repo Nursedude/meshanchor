@@ -68,7 +68,29 @@
 3. No radio connected
 4. Actual bug in node counting
 
-**Investigation Status:** In progress
+**Investigation Status:** RESOLVED
+
+---
+
+## Bug Fix: Topology Browser Not Showing Node Tracker Data
+
+**Problem:**
+The D3.js browser visualization showed "1 Node, 0 Links" even when nodes were available
+in the UnifiedNodeTracker.
+
+**Root Cause:**
+`_open_topology_browser()` in `topology_mixin.py` only read from `NetworkTopology`
+which is populated by RNS path table. It did NOT incorporate data from
+`UnifiedNodeTracker` which has richer Meshtastic node data.
+
+**Fix Applied:**
+Modified `_open_topology_browser()` to:
+1. Get both topology AND node tracker singletons
+2. Enrich the visualizer with nodes from tracker (name, GPS, SNR, RSSI, role)
+3. Add edges from local to each tracked node
+
+**File Modified:**
+- `src/launcher_tui/topology_mixin.py:639-704` - Enhanced browser visualization
 
 ---
 
@@ -84,11 +106,12 @@
 
 ## Handoff Notes (for next session)
 
-- **Current task status:** Investigating 0 node count issue
-- **Blockers encountered:** None yet
-- **Files modified:** This session notes file
-- **Commits made:** None yet
+- **Current task status:** COMPLETED - topology browser fix
+- **Blockers encountered:** None
+- **Files modified:**
+  - `src/launcher_tui/topology_mixin.py` - Fixed browser visualization to use node tracker data
+  - `.claude/session_notes/2026-02-05_session_tracking_setup.md` - This file
+- **Commits made:** 2 (session notes + topology fix)
 - **Next steps:**
-  - Determine if 0 nodes is expected (services not running)
-  - If bug, fix it
-  - Alpha branch work if user requests
+  - Test topology browser with live meshtasticd/rnsd services
+  - Alpha branch work: NanoVNA plugin, firmware flashing

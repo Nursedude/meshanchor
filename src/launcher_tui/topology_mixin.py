@@ -644,12 +644,71 @@ class TopologyMixin:
             from utils.topology_visualizer import TopologyVisualizer
 
             topology = self._get_topology()
-            if topology is None:
+            tracker = self._get_node_tracker()
+
+            if topology is None and tracker is None:
                 self.dialog.msgbox("Unavailable", "Topology module not loaded.")
                 return
 
-            # Generate visualization
-            visualizer = TopologyVisualizer.from_topology(topology)
+            # Generate visualization - start with topology data
+            if topology:
+                visualizer = TopologyVisualizer.from_topology(topology)
+            else:
+                visualizer = TopologyVisualizer()
+                visualizer.add_node("local", name="Local Node", node_type="local", network="rns")
+
+            # Enrich with node tracker data (has richer Meshtastic node info)
+            if tracker and hasattr(tracker, 'get_all_nodes'):
+                try:
+                    for node in tracker.get_all_nodes():
+                        # Determine node type
+                        if node.network == "rns":
+                            node_type = "rns"
+                        elif node.network == "meshtastic":
+                            node_type = "meshtastic"
+                        elif node.network == "both":
+                            node_type = "both"
+                        else:
+                            node_type = "node"
+
+                        # Check if it's a router/gateway
+                        if node.role and "router" in node.role.lower():
+                            node_type = "router"
+                        elif node.role and "gateway" in node.role.lower():
+                            node_type = "gateway"
+
+                        # Add/update node with rich data
+                        visualizer.add_node(
+                            node_id=node.id,
+                            name=node.name or node.short_name or node.id,
+                            node_type=node_type,
+                            network=node.network,
+                            is_online=getattr(node, 'is_online', False),
+                            hops=node.hops or 0,
+                            latitude=node.latitude,
+                            longitude=node.longitude,
+                            altitude=node.altitude,
+                            metadata={
+                                "hardware": node.hardware_model,
+                                "firmware": node.firmware_version,
+                                "role": node.role,
+                                "snr": node.snr,
+                                "rssi": node.rssi,
+                            }
+                        )
+
+                        # Add edge from local to this node if not already present
+                        if node.id != "local":
+                            visualizer.add_edge(
+                                source="local",
+                                target=node.id,
+                                hops=node.hops or 1,
+                                snr=node.snr,
+                                rssi=node.rssi,
+                                is_active=getattr(node, 'is_online', False),
+                            )
+                except Exception as e:
+                    logger.debug(f"Error adding tracker nodes to visualizer: {e}")
             output_path = visualizer.generate()
 
             # Detect SSH/headless environment
