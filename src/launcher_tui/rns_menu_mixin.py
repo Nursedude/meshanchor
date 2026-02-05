@@ -1130,8 +1130,8 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("\nError: RNS port conflict (Address already in use)")
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
-            elif "no shared" in combined.lower() or "could not" in combined.lower():
-                # RNS connectivity issue - AUTO-FIX
+            elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
+                # RNS shared instance issue - AUTO-FIX
                 print(f"\nRNS connectivity issue detected.")
                 print("MeshForge will attempt to fix this automatically...\n")
 
@@ -1154,30 +1154,16 @@ class RNSMenuMixin(RNSSnifferMixin):
                     print("  2. Check rnsd logs: sudo journalctl -u rnsd -n 30")
                     print("  3. Restart rnsd: sudo systemctl restart rnsd")
             else:
-                # Other failure - still try auto-fix as RNS issues are usually config/service related
+                # Other error - DON'T auto-fix, just show output
+                # RNS tools may return non-zero for benign reasons (empty table, no paths)
                 if result.stdout:
                     print(result.stdout, end='')
-                print(f"\n{tool_name} returned an error. Attempting auto-fix...\n")
-
-                if self._auto_fix_rns_shared_instance():
-                    # Success - retry the original command
-                    print(f"\nRetrying {tool_name}...\n")
-                    retry_result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=15
-                    )
-                    if retry_result.returncode == 0 and retry_result.stdout:
-                        print(retry_result.stdout, end='')
-                    elif retry_result.stdout:
-                        print(retry_result.stdout, end='')
-                else:
-                    print("\nAuto-fix did not resolve the issue.")
-                    print("Possible causes:")
-                    print("  - rnsd not running: sudo systemctl start rnsd")
-                    print("  - RNS not installed: pipx install rns")
-                    if result.stderr and result.stderr.strip():
-                        err_lines = result.stderr.strip().split('\n')[-3:]
-                        print("\nDetails:")
-                        for line in err_lines:
+                if result.stderr and result.stderr.strip():
+                    # Only show stderr if it contains actual error info
+                    stderr_lower = result.stderr.lower()
+                    if "error" in stderr_lower or "failed" in stderr_lower or "exception" in stderr_lower:
+                        print(f"\nNote: {tool_name} reported an issue:")
+                        for line in result.stderr.strip().split('\n')[-3:]:
                             print(f"  {line}")
         except FileNotFoundError:
             print(f"\n{tool_name} not found. Is RNS installed?")
