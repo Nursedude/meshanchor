@@ -145,17 +145,83 @@ Added `_auto_fix_rns_shared_instance()` method that automatically:
 - Reviewed TODO_PRIORITIES.md
 - Started investigating node count issue
 
+### Entry 2 - Topology Browser Fix (Partial)
+- Fixed: Exception handler was outside for loop (one bad node stopped all)
+- Fixed: Safely handle non-string role values
+- Stats show 372 nodes but browser still shows 1 - needs more investigation
+
+### Entry 3 - RNS Auto-Fix
+- Created auto-fix that deploys config, creates directories, restarts rnsd
+- Still failing with `AuthenticationError: digest sent was rejected`
+- Need to clear stale shared instance state
+
+---
+
+## PERSISTENT ISSUE: Topology Browser Shows 1 Node
+
+**Symptom:**
+- `_show_topology_stats()` correctly shows 372 nodes (10 RNS, 362 Meshtastic)
+- But topology browser (D3.js) only shows 1 node
+
+**What We Tried:**
+1. Added node tracker data to `_open_topology_browser()` ✓
+2. Fixed exception handling (try/except inside loop) ✓
+3. Fixed role.lower() crash for non-string roles ✓
+
+**Possible Remaining Causes:**
+1. `TopologyVisualizer.from_topology()` might be overwriting nodes added later
+2. The HTML generation might be truncating data
+3. JavaScript in the template might not be handling large node counts
+4. The `visualizer.generate()` might have issues
+
+**Next Steps to Debug:**
+```python
+# Add debug output before generate():
+print(f"Visualizer has {len(visualizer._nodes)} nodes, {len(visualizer._edges)} edges")
+```
+
+Check these files:
+- `src/utils/topology_visualizer.py` - `generate()` and `from_topology()` methods
+- `web/node_map.html` or wherever the D3.js template is
+
+---
+
+## PERSISTENT ISSUE: RNS AuthenticationError
+
+**Symptom:**
+```
+multiprocessing.context.AuthenticationError: digest sent was rejected
+```
+
+**Root Cause:**
+Stale shared instance authentication tokens. rnsd creates auth tokens in storage/
+and clients must match. When we deploy new config but old storage remains, auth fails.
+
+**Fix Needed:**
+Add to `_auto_fix_rns_shared_instance()`:
+```python
+# Before restarting rnsd, clear stale shared instance state
+subprocess.run(['systemctl', 'stop', 'rnsd'], timeout=10)
+for storage_dir in ['/etc/reticulum/storage', '/root/.reticulum/storage']:
+    for f in Path(storage_dir).glob('shared_instance_*'):
+        f.unlink()
+subprocess.run(['systemctl', 'start', 'rnsd'], timeout=10)
+```
+
 ---
 
 ## Handoff Notes (for next session)
 
-- **Current task status:** COMPLETED - topology browser + RNS auto-fix
-- **Blockers encountered:** None
+- **Current task status:** IN PROGRESS - topology browser and RNS still have issues
+- **Blockers encountered:**
+  1. Topology browser shows 1 node despite 372 in tracker
+  2. RNS auth error from stale shared instance state
 - **Files modified:**
-  - `src/launcher_tui/topology_mixin.py` - Fixed browser visualization to use node tracker data
-  - `src/launcher_tui/rns_menu_mixin.py` - Auto-fix RNS shared instance issues
-  - `.claude/session_notes/2026-02-05_session_tracking_setup.md` - This file
-- **Commits made:** 4 (session notes + topology fix + RNS diagnostics + RNS auto-fix)
+  - `src/launcher_tui/topology_mixin.py` - Improved node iteration, needs more work
+  - `src/launcher_tui/rns_menu_mixin.py` - Auto-fix needs stale state cleanup
+- **Commits made:** 6 total on branch `claude/session-tracking-setup-vzff1`
+- **Branch:** `claude/session-tracking-setup-vzff1`
 - **Next steps:**
-  - User should test: run rnstatus from TUI, it should auto-fix if needed
-  - Alpha branch work: NanoVNA plugin, firmware flashing
+  1. Debug why visualizer isn't showing 372 nodes
+  2. Add stale state cleanup to RNS auto-fix
+  3. Test both fixes end-to-end
