@@ -1103,9 +1103,12 @@ class NomadNetClientMixin:
                 "Continue anyway?",
             )
 
-        # rnsd is running - check if it's running as root (security issue)
+        # rnsd is running - check for user mismatches
+        current_uid = os.getuid()
+        we_are_root = current_uid == 0
+
         if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
-            # This is the problem case - rnsd as root, NomadNet as user
+            # Case 1: rnsd as root, NomadNet wants to run as user
             choice = self.dialog.menu(
                 "rnsd Running as Root",
                 "rnsd is running as root, but NomadNet needs to\n"
@@ -1123,6 +1126,50 @@ class NomadNetClientMixin:
                 return self._fix_rnsd_user(sudo_user)
             elif choice == "stop":
                 # Just stop rnsd
+                self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
+                try:
+                    subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+                    subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
+                    time.sleep(1)
+                    self.dialog.msgbox(
+                        "rnsd Stopped",
+                        "rnsd has been stopped.\n\n"
+                        "NomadNet will start its own RNS instance.",
+                    )
+                    return True
+                except Exception as e:
+                    self.dialog.msgbox("Stop Failed", f"Could not stop rnsd: {e}")
+                    return False
+            else:
+                return False  # User cancelled
+
+        elif we_are_root and rnsd_user and rnsd_user != 'root' and not sudo_user:
+            # Case 2: We're root but SUDO_USER not set, rnsd runs as user
+            # This is a fresh install issue - NomadNet would run as root
+            # Store the rnsd user so we can run NomadNet as that user
+            choice = self.dialog.menu(
+                "User Mismatch Detected",
+                f"rnsd is running as '{rnsd_user}', but SUDO_USER is not set.\n\n"
+                f"NomadNet would run as root, causing RPC auth failure.\n\n"
+                f"Different users = different RNS identities = auth failure.\n\n"
+                f"How do you want to proceed?",
+                [
+                    ("run_as_user", f"Run NomadNet as '{rnsd_user}' (recommended)"),
+                    ("stop", "Stop rnsd (NomadNet will use its own RNS)"),
+                    ("cancel", "Cancel"),
+                ],
+            )
+
+            if choice == "run_as_user":
+                # Set SUDO_USER temporarily so _launch_nomadnet_textui uses it
+                os.environ['SUDO_USER'] = rnsd_user
+                self.dialog.msgbox(
+                    "User Set",
+                    f"NomadNet will run as '{rnsd_user}'.\n\n"
+                    f"This matches the user running rnsd.",
+                )
+                return True
+            elif choice == "stop":
                 self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
                 try:
                     subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
