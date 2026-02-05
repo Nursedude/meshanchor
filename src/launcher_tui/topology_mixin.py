@@ -82,9 +82,11 @@ class TopologyMixin:
 
     def _show_topology_stats(self):
         """Display topology statistics."""
+        # Prefer getting stats from node tracker (has richer data)
+        tracker = self._get_node_tracker()
         topology = self._get_topology()
 
-        if topology is None:
+        if topology is None and tracker is None:
             self.dialog.msgbox(
                 "Topology Unavailable",
                 "Network topology module not loaded.\n\n"
@@ -93,24 +95,69 @@ class TopologyMixin:
             return
 
         try:
-            stats = topology.get_topology_stats()
+            # Get topology stats from tracker if available, else direct
+            if tracker and hasattr(tracker, 'get_topology_stats'):
+                stats = tracker.get_topology_stats() or {}
+            elif topology:
+                stats = topology.get_topology_stats()
+            else:
+                stats = {}
+
+            # Get node counts from tracker for richer data
+            tracker_node_count = 0
+            online_count = 0
+            rns_count = 0
+            mesh_count = 0
+            if tracker and hasattr(tracker, 'get_all_nodes'):
+                try:
+                    all_nodes = tracker.get_all_nodes()
+                    tracker_node_count = len(all_nodes)
+                    for node in all_nodes:
+                        if getattr(node, 'is_online', False):
+                            online_count += 1
+                        network = getattr(node, 'network', '')
+                        if network == 'rns':
+                            rns_count += 1
+                        elif network == 'meshtastic':
+                            mesh_count += 1
+                        elif network == 'both':
+                            rns_count += 1
+                            mesh_count += 1
+                except Exception:
+                    pass
+
+            # Use the higher of topology nodes or tracker nodes
+            topo_node_count = stats.get('node_count', 0)
+            node_count = max(topo_node_count, tracker_node_count)
 
             # Format stats display
             lines = [
                 "NETWORK TOPOLOGY STATISTICS",
                 "=" * 40,
                 "",
-                f"Total Nodes:    {stats.get('node_count', 0)}",
+                f"Total Nodes:    {node_count}",
+            ]
+
+            # Show network breakdown if we have tracker data
+            if tracker_node_count > 0:
+                if online_count > 0:
+                    lines.append(f"  Online:       {online_count}")
+                if rns_count > 0:
+                    lines.append(f"  RNS:          {rns_count}")
+                if mesh_count > 0:
+                    lines.append(f"  Meshtastic:   {mesh_count}")
+
+            lines.extend([
+                "",
                 f"Total Edges:    {stats.get('edge_count', 0)}",
                 f"Active Edges:   {stats.get('active_edges', 0)}",
                 "",
                 f"Average Hops:   {stats.get('avg_hops', 0):.2f}",
                 f"Maximum Hops:   {stats.get('max_hops', 0)}",
                 "",
-            ]
+            ])
 
             # Add service stats if available from node tracker
-            tracker = self._get_node_tracker()
             if tracker and hasattr(tracker, 'get_service_stats'):
                 try:
                     svc_stats = tracker.get_service_stats()
@@ -122,6 +169,16 @@ class TopologyMixin:
                         lines.append("")
                 except Exception:
                     pass
+
+            # Show help if no data
+            if node_count == 0 and stats.get('edge_count', 0) == 0:
+                lines.append("No topology data available.")
+                lines.append("")
+                lines.append("Topology is populated when:")
+                lines.append("  - RNS discovers paths to destinations")
+                lines.append("  - Meshtastic nodes are seen")
+                lines.append("  - Gateway bridge is running")
+                lines.append("")
 
             self.dialog.msgbox("Topology Statistics", "\n".join(lines))
 
