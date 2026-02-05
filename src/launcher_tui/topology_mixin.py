@@ -658,9 +658,11 @@ class TopologyMixin:
                 visualizer.add_node("local", name="Local Node", node_type="local", network="rns")
 
             # Enrich with node tracker data (has richer Meshtastic node info)
+            nodes_added = 0
             if tracker and hasattr(tracker, 'get_all_nodes'):
-                try:
-                    for node in tracker.get_all_nodes():
+                all_nodes = tracker.get_all_nodes()
+                for node in all_nodes:
+                    try:
                         # Determine node type
                         if node.network == "rns":
                             node_type = "rns"
@@ -671,10 +673,11 @@ class TopologyMixin:
                         else:
                             node_type = "node"
 
-                        # Check if it's a router/gateway
-                        if node.role and "router" in node.role.lower():
+                        # Check if it's a router/gateway (safely handle non-string role)
+                        role_str = str(node.role or "").lower()
+                        if "router" in role_str:
                             node_type = "router"
-                        elif node.role and "gateway" in node.role.lower():
+                        elif "gateway" in role_str:
                             node_type = "gateway"
 
                         # Add/update node with rich data
@@ -682,7 +685,7 @@ class TopologyMixin:
                             node_id=node.id,
                             name=node.name or node.short_name or node.id,
                             node_type=node_type,
-                            network=node.network,
+                            network=node.network or "unknown",
                             is_online=getattr(node, 'is_online', False),
                             hops=node.hops or 0,
                             latitude=node.latitude,
@@ -707,8 +710,13 @@ class TopologyMixin:
                                 rssi=node.rssi,
                                 is_active=getattr(node, 'is_online', False),
                             )
-                except Exception as e:
-                    logger.debug(f"Error adding tracker nodes to visualizer: {e}")
+                        nodes_added += 1
+                    except Exception as e:
+                        # Log but continue processing other nodes
+                        logger.debug(f"Error adding node {getattr(node, 'id', 'unknown')}: {e}")
+                        continue
+
+                logger.info(f"Added {nodes_added}/{len(all_nodes)} nodes to topology visualizer")
             output_path = visualizer.generate()
 
             # Detect SSH/headless environment
