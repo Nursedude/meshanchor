@@ -219,13 +219,13 @@ class TestCommandHandler:
         result = CommandResult.success({"key": "value"})
         assert result.status == CommandStatus.SUCCESS
         assert result.data == {"key": "value"}
-        assert result.error is None
+        assert result.error_msg is None
 
     def test_command_result_error(self):
         """Test error command result."""
         result = CommandResult.error("Something went wrong")
         assert result.status == CommandStatus.ERROR
-        assert result.error == "Something went wrong"
+        assert result.error_msg == "Something went wrong"
 
     def test_command_result_to_dict(self):
         """Test command result serialization."""
