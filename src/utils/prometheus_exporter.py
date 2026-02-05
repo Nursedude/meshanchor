@@ -635,8 +635,103 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
     def _add_cors_headers(self):
         """Add CORS headers for Grafana."""
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
+
+    def do_OPTIONS(self):
+        """Handle OPTIONS request (CORS preflight)."""
+        self.send_response(200)
+        self._add_cors_headers()
+        self.end_headers()
+
+    def do_POST(self):
+        """Handle POST request (for Grafana Prometheus data source)."""
+        # Grafana Prometheus data source sends POST requests
+        # Route to same handlers as GET for our endpoints
+        if self.path == "/metrics":
+            self._serve_metrics()
+        elif self.path == "/api/json/metrics":
+            self._serve_json_metrics()
+        elif self.path == "/api/json/nodes":
+            self._serve_json_nodes()
+        elif self.path == "/api/json/status":
+            self._serve_json_status()
+        # Prometheus API compatibility endpoints
+        elif self.path.startswith("/api/v1/query"):
+            self._serve_prometheus_query()
+        elif self.path.startswith("/api/v1/labels"):
+            self._serve_prometheus_labels()
+        else:
+            self.send_response(404)
+            self._add_cors_headers()
+            self.end_headers()
+            self.wfile.write(b"Not Found")
+
+    def _serve_prometheus_query(self):
+        """Serve Prometheus query API for Grafana compatibility."""
+        import json
+        import urllib.parse
+
+        # Parse query from URL or body
+        query = ""
+        if "?" in self.path:
+            params = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+            query = params.get("query", [""])[0]
+        else:
+            # Read POST body
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length).decode('utf-8')
+                params = urllib.parse.parse_qs(body)
+                query = params.get("query", [""])[0]
+
+        # Return metrics in Prometheus API format
+        result = {
+            "status": "success",
+            "data": {
+                "resultType": "vector",
+                "result": []
+            }
+        }
+
+        # If no specific query, return basic metrics
+        try:
+            if "up" in query or not query:
+                result["data"]["result"].append({
+                    "metric": {"__name__": "up", "job": "meshforge"},
+                    "value": [time.time(), "1"]
+                })
+            if "meshforge" in query.lower() or not query:
+                # Add uptime metric
+                if self.exporter:
+                    uptime = time.time() - self.exporter.start_time
+                    result["data"]["result"].append({
+                        "metric": {"__name__": "meshforge_uptime_seconds"},
+                        "value": [time.time(), str(uptime)]
+                    })
+        except Exception as e:
+            logger.debug(f"Query error: {e}")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode('utf-8'))
+
+    def _serve_prometheus_labels(self):
+        """Serve Prometheus labels API for Grafana compatibility."""
+        import json
+
+        result = {
+            "status": "success",
+            "data": ["__name__", "job", "service", "node_id", "state", "network"]
+        }
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._add_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode('utf-8'))
 
     def _serve_index(self):
         """Serve index page with available endpoints."""
@@ -648,8 +743,15 @@ Endpoints:
   /api/json/metrics - JSON metrics (for Grafana Infinity plugin)
   /api/json/nodes   - Node data JSON
   /api/json/status  - System status JSON
+  /api/v1/query     - Prometheus API (for Grafana Prometheus data source)
+  /api/v1/labels    - Prometheus labels API
 
-Grafana Setup:
+Grafana Setup (Option 1 - Prometheus data source):
+  1. Add data source: Type = Prometheus
+  2. URL = http://localhost:9090
+  3. Query: meshforge_uptime_seconds, etc.
+
+Grafana Setup (Option 2 - Infinity plugin):
   1. Install 'Infinity' data source plugin
   2. Add data source: URL = http://localhost:9090
   3. Query: /api/json/metrics or /api/json/nodes
