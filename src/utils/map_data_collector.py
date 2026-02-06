@@ -198,6 +198,15 @@ class MapDataCollector:
 
         features: Dict[str, Dict] = {}  # id -> feature (dedup by id)
 
+        # Source 0: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
+        # This is the same data source the topology view uses (378 nodes).
+        # It includes nodes from RNS path table, meshtasticd, and gateway bridge.
+        tracker_unified_features = self._collect_unified_tracker()
+        for f in tracker_unified_features:
+            fid = f["properties"].get("id", "")
+            if fid:
+                features[fid] = f
+
         # Source 1: meshtasticd TCP
         tcp_features = self._collect_meshtasticd()
         for f in tcp_features:
@@ -256,7 +265,7 @@ class MapDataCollector:
 
         sources = self._get_source_summary(
             tcp_features, mqtt_features, tracker_features, aredn_features,
-            direct_radio_features, rns_direct_features
+            direct_radio_features, rns_direct_features, tracker_unified_features
         )
         geojson = {
             "type": "FeatureCollection",
@@ -276,7 +285,8 @@ class MapDataCollector:
         # Log collection summary for debugging
         logger.debug(
             f"MapDataCollector: {len(features)} nodes "
-            f"(meshtasticd:{sources.get('meshtasticd', 0)} "
+            f"(unified:{sources.get('unified_tracker', 0)} "
+            f"meshtasticd:{sources.get('meshtasticd', 0)} "
             f"direct_radio:{sources.get('direct_radio', 0)} "
             f"mqtt:{sources.get('mqtt', 0)} "
             f"tracker:{sources.get('node_tracker', 0)} "
@@ -296,6 +306,51 @@ class MapDataCollector:
                 logger.debug(f"History recording error: {e}")
 
         return geojson
+
+    def _collect_unified_tracker(self) -> List[Dict]:
+        """Collect nodes from the UnifiedNodeTracker singleton.
+
+        The UnifiedNodeTracker is the richest data source — it merges nodes from
+        RNS path table, meshtasticd, and the gateway bridge into a unified view.
+        This is the same data the Topology view displays.
+
+        Returns:
+            List of GeoJSON features for nodes with valid positions.
+        """
+        try:
+            from gateway.node_tracker import get_node_tracker
+        except ImportError:
+            logger.debug("UnifiedNodeTracker not available")
+            return []
+
+        try:
+            tracker = get_node_tracker()
+            geojson = tracker.to_geojson()
+            features = geojson.get("features", [])
+
+            if features:
+                # Enrich with additional properties the map expects
+                for f in features:
+                    props = f.get("properties", {})
+                    # Ensure standard fields exist
+                    if "via_mqtt" not in props:
+                        props["via_mqtt"] = False
+                    if "hardware" not in props:
+                        props["hardware"] = ""
+                    if "role" not in props:
+                        props["role"] = ""
+                    if "source" not in props:
+                        props["source"] = "unified_tracker"
+
+                logger.debug(
+                    f"UnifiedNodeTracker: {len(features)} nodes with position "
+                    f"(total tracked: {len(tracker.get_all_nodes())})"
+                )
+            return features
+
+        except Exception as e:
+            logger.debug(f"UnifiedNodeTracker collection error: {e}")
+            return []
 
     def _collect_meshtasticd(self) -> List[Dict]:
         """Collect nodes from meshtasticd via TCP.
@@ -1290,10 +1345,12 @@ class MapDataCollector:
 
     def _get_source_summary(
         self, tcp: List, mqtt: List, tracker: List, aredn: List = None,
-        direct_radio: List = None, rns_direct: List = None
+        direct_radio: List = None, rns_direct: List = None,
+        unified_tracker: List = None
     ) -> Dict:
         """Summarize which sources contributed data."""
         return {
+            "unified_tracker": len(unified_tracker) if unified_tracker else 0,
             "meshtasticd": len(tcp),
             "direct_radio": len(direct_radio) if direct_radio else 0,
             "mqtt": len(mqtt),
