@@ -212,19 +212,19 @@ else:
 
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
 
-**All files now under threshold (2026-02-04):**
+**All files under threshold (2026-02-06):**
 - ✅ `traffic_inspector.py` (442 lines)
-- ✅ `rns_bridge.py` (1,587 lines) - Meshtastic handler extracted
-- ✅ `node_tracker.py` (911 lines) - Data classes extracted
-- ✅ `launcher_tui/main.py` (1,404 lines) - Network tools in mixin
-- ✅ `rns_menu_mixin.py` (1,069 lines) - Sniffer methods extracted
+- ✅ `rns_bridge.py` (1,614 lines) - Meshtastic handler extracted
+- ✅ `node_tracker.py` (930 lines) - Data classes extracted
+- ✅ `launcher_tui/main.py` (1,433 lines) - 30 mixins, dead code removed
+- ✅ `rns_menu_mixin.py` (1,210 lines) - Sniffer methods extracted
 - ✅ `metrics_export.py` (96 lines) - Split to 3 modules
 
 **Refactoring history:**
-- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,404)
-- `rns_bridge.py` (was 1,991 → 1,587, MeshtasticHandler extracted)
-- `node_tracker.py` (was 1,808 → 911, node_models.py extracted)
-- `rns_menu_mixin.py` (was 1,524 → 1,069, rns_sniffer_mixin.py extracted)
+- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433)
+- `rns_bridge.py` (was 1,991 → 1,614, MeshtasticHandler extracted)
+- `node_tracker.py` (was 1,808 → 930, node_models.py extracted)
+- `rns_menu_mixin.py` (was 1,524 → 1,210, rns_sniffer_mixin.py extracted)
 - `metrics_export.py` (was 1,762 → 96, split to common/prometheus/influxdb)
 - `hamclock.py` (2,625 → 1,525)
 - GTK4 panels removed (TUI is now only interface)

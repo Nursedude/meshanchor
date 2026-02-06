@@ -436,13 +436,16 @@ class UpdatesMixin:
             Tuple of (success, message)
         """
         try:
-            # Split command properly for subprocess
-            # Note: We use shell=True here because update commands often have
-            # pipes and special characters. This is safe because the commands
-            # are hardcoded in version_checker.py, not user input.
+            import shlex
+            # Split command string into safe argument list (MF002: no shell=True)
+            # Commands are hardcoded in version_checker.py, not user input.
+            # If command contains pipes/redirects, fall back to bash -c wrapper.
+            if '|' in command or '>' in command or '&&' in command:
+                cmd_args = ['bash', '-c', command]
+            else:
+                cmd_args = shlex.split(command)
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_args,
                 capture_output=True,
                 text=True,
                 timeout=300  # 5 minute timeout

@@ -50,7 +50,7 @@ except ImportError:
 
     def get_real_user_home() -> _Path:
         sudo_user = _os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root':
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
             return _Path(f'/home/{sudo_user}')
         return _Path.home()
 
