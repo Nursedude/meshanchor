@@ -27,6 +27,21 @@ from .mesh_bridge import (
     BridgedMeshMessage,
     create_mesh_bridge,
 )
+from .meshtastic_protobuf_client import (
+    MeshtasticProtobufClient,
+    get_protobuf_client,
+    reset_protobuf_client,
+)
+from .meshtastic_protobuf_ops import (
+    ProtobufEventType,
+    ProtobufTransportConfig,
+    DeviceConfigSnapshot,
+    ModuleConfigSnapshot,
+    NeighborEntry,
+    NeighborReport,
+    DeviceMetadataResult,
+    TracerouteResult,
+)
 
 __all__ = [
     # RNS-Meshtastic bridge
@@ -46,4 +61,16 @@ __all__ = [
     'MeshtasticPresetBridge',
     'BridgedMeshMessage',
     'create_mesh_bridge',
+    # Protobuf-over-HTTP client
+    'MeshtasticProtobufClient',
+    'get_protobuf_client',
+    'reset_protobuf_client',
+    'ProtobufEventType',
+    'ProtobufTransportConfig',
+    'DeviceConfigSnapshot',
+    'ModuleConfigSnapshot',
+    'NeighborEntry',
+    'NeighborReport',
+    'DeviceMetadataResult',
+    'TracerouteResult',
 ]
