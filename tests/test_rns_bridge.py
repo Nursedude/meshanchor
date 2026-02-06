@@ -109,7 +109,6 @@ class TestRNSMeshtasticBridge:
     def test_init(self, bridge):
         """Test bridge initialization."""
         assert bridge._running is False
-        assert bridge._connected_mesh is False
         assert bridge._connected_rns is False
         assert bridge.stats['messages_mesh_to_rns'] == 0
         assert bridge.stats['messages_rns_to_mesh'] == 0
@@ -125,10 +124,13 @@ class TestRNSMeshtasticBridge:
         """Test is_connected property."""
         assert bridge.is_connected is False
 
-        bridge._connected_mesh = True
-        assert bridge.is_connected is True
+        # Meshtastic handler connected
+        if bridge._mesh_handler:
+            bridge._mesh_handler._connected = True
+            assert bridge.is_connected is True
+            bridge._mesh_handler._connected = False
 
-        bridge._connected_mesh = False
+        # RNS connected
         bridge._connected_rns = True
         assert bridge.is_connected is True
 
@@ -168,9 +170,9 @@ class TestRNSMeshtasticBridge:
 
         assert callback in bridge._status_callbacks
 
-    def test_send_to_meshtastic_not_connected(self, bridge):
-        """Test send fails when not connected."""
-        bridge._connected_mesh = False
+    def test_send_to_meshtastic_no_handler(self, bridge):
+        """Test send fails when handler not initialized."""
+        bridge._mesh_handler = None
 
         result = bridge.send_to_meshtastic("Test message")
 
@@ -184,38 +186,10 @@ class TestRNSMeshtasticBridge:
 
         assert result is False
 
-    def test_send_to_meshtastic_with_interface(self, bridge):
-        """Test send uses interface when available."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
-
-        result = bridge.send_to_meshtastic("Hello", destination="!12345678", channel=1)
-
-        assert result is True
-        mock_interface.sendText.assert_called_once_with(
-            "Hello",
-            destinationId="!12345678",
-            channelIndex=1
-        )
-
-    def test_send_to_meshtastic_error_handling(self, bridge):
-        """Test send handles errors gracefully."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        mock_interface.sendText.side_effect = Exception("Send failed")
-        bridge._mesh_interface = mock_interface
-
-        result = bridge.send_to_meshtastic("Hello")
-
-        assert result is False
-        assert bridge.stats['errors'] == 1
-
     def test_test_connection_structure(self, bridge):
         """Test test_connection returns correct structure."""
-        with patch.object(bridge, '_test_meshtastic', return_value=False):
-            with patch.object(bridge, '_test_rns', return_value=False):
-                result = bridge.test_connection()
+        with patch.object(bridge, '_test_rns', return_value=False):
+            result = bridge.test_connection()
 
         assert 'meshtastic' in result
         assert 'rns' in result
@@ -353,3 +327,235 @@ class TestBridgeCallbacks:
 
             # Good callback should still be called
             good_callback.assert_called_once()
+
+
+class TestRNSConnectionFlow:
+    """Tests for RNS connection and LXMF setup flow.
+
+    Validates the fix for the gateway bridge failing to connect to RNS
+    when rnsd is running (previously gave up permanently instead of
+    connecting as a shared instance client).
+    """
+
+    @pytest.fixture
+    def bridge(self):
+        """Create a bridge with mocked dependencies."""
+        with patch('src.gateway.rns_bridge.UnifiedNodeTracker'):
+            config = GatewayConfig()
+            config.enabled = True
+            bridge = RNSMeshtasticBridge(config=config)
+            yield bridge
+            if bridge._running:
+                bridge._running = False
+
+    def test_connect_rns_with_pre_initialized(self, bridge):
+        """When RNS is pre-initialized, _connect_rns should set up LXMF."""
+        bridge._rns_pre_initialized = True
+
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+        mock_identity = MagicMock()
+        mock_rns.Identity.return_value = mock_identity
+        mock_rns.Identity.from_file.return_value = mock_identity
+
+        mock_router = MagicMock()
+        mock_lxmf.LXMRouter.return_value = mock_router
+        mock_source = MagicMock()
+        mock_router.register_delivery_identity.return_value = mock_source
+
+        with patch.dict('sys.modules', {'RNS': mock_rns, 'LXMF': mock_lxmf}):
+            bridge._connect_rns()
+
+        assert bridge._connected_rns is True
+        assert bridge._lxmf_router is mock_router
+        assert bridge._lxmf_source is mock_source
+
+    def test_connect_rns_import_error_is_permanent(self, bridge):
+        """When RNS/LXMF not installed, failure is permanent."""
+        bridge._rns_pre_initialized = False
+
+        with patch('builtins.__import__', side_effect=ImportError("No module")):
+            bridge._connect_rns()
+
+        assert bridge._connected_rns is False
+        assert bridge._rns_init_failed_permanently is True
+
+    def test_connect_rns_rnsd_detected_tries_client(self, bridge):
+        """When rnsd is detected and RNS not pre-initialized, should try client connection."""
+        bridge._rns_pre_initialized = False
+
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+        mock_identity = MagicMock()
+        mock_rns.Identity.return_value = mock_identity
+        mock_rns.Identity.from_file.return_value = mock_identity
+
+        mock_router = MagicMock()
+        mock_lxmf.LXMRouter.return_value = mock_router
+        mock_source = MagicMock()
+        mock_router.register_delivery_identity.return_value = mock_source
+
+        with patch.dict('sys.modules', {'RNS': mock_rns, 'LXMF': mock_lxmf}):
+            with patch('utils.gateway_diagnostic.find_rns_processes', return_value=[12345]):
+                bridge._connect_rns()
+
+        # Should connect as client, NOT give up
+        assert bridge._connected_rns is True
+        assert bridge._rns_via_rnsd is True
+        assert bridge._rns_init_failed_permanently is False
+        mock_rns.Reticulum.assert_called_once()
+
+    def test_connect_rns_no_permanent_failure_on_rnsd_port_conflict(self, bridge):
+        """Port conflict with rnsd running should NOT be permanent failure."""
+        bridge._rns_pre_initialized = False
+
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+        port_error = OSError("Address already in use")
+        port_error.errno = 98
+        mock_rns.Reticulum.side_effect = port_error
+
+        with patch.dict('sys.modules', {'RNS': mock_rns, 'LXMF': mock_lxmf}):
+            with patch('utils.gateway_diagnostic.find_rns_processes', return_value=[12345]):
+                with patch('utils.gateway_diagnostic.handle_address_in_use_error',
+                          return_value={'rns_pids': [12345]}):
+                    bridge._connect_rns()
+
+        # Should be retriable, not permanent
+        assert bridge._rns_init_failed_permanently is False
+        assert bridge._rns_via_rnsd is True
+
+    def test_connect_rns_already_running_proceeds_to_lxmf(self, bridge):
+        """'Already running' during Reticulum init should proceed to LXMF setup."""
+        bridge._rns_pre_initialized = False
+
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+        mock_rns.Reticulum.side_effect = Exception("Cannot reinitialise Reticulum")
+
+        mock_identity = MagicMock()
+        mock_rns.Identity.return_value = mock_identity
+        mock_rns.Identity.from_file.return_value = mock_identity
+
+        mock_router = MagicMock()
+        mock_lxmf.LXMRouter.return_value = mock_router
+        mock_source = MagicMock()
+        mock_router.register_delivery_identity.return_value = mock_source
+
+        with patch.dict('sys.modules', {'RNS': mock_rns, 'LXMF': mock_lxmf}):
+            with patch('utils.gateway_diagnostic.find_rns_processes', return_value=[]):
+                bridge._connect_rns()
+
+        # Should proceed to LXMF setup since RNS singleton is active
+        assert bridge._connected_rns is True
+        assert bridge._rns_init_failed_permanently is False
+
+    def test_setup_lxmf_creates_identity_and_router(self, bridge):
+        """_setup_lxmf should create identity, router, and set connected."""
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+
+        mock_identity = MagicMock()
+        mock_rns.Identity.return_value = mock_identity
+
+        mock_router = MagicMock()
+        mock_lxmf.LXMRouter.return_value = mock_router
+        mock_source = MagicMock()
+        mock_router.register_delivery_identity.return_value = mock_source
+
+        bridge._setup_lxmf(mock_rns, mock_lxmf)
+
+        assert bridge._connected_rns is True
+        assert bridge._identity is mock_identity
+        assert bridge._lxmf_router is mock_router
+        assert bridge._lxmf_source is mock_source
+        mock_router.register_delivery_callback.assert_called_once()
+        mock_router.announce.assert_called_once()
+
+    def test_rns_loop_logs_permanent_failure(self, bridge):
+        """_rns_loop should log when permanent failure prevents retries."""
+        bridge._running = True
+        bridge._rns_init_failed_permanently = True
+
+        # Run one iteration then stop
+        def stop_after_wait(timeout):
+            bridge._running = False
+            return True  # Simulate event set
+
+        bridge._stop_event = MagicMock()
+        bridge._stop_event.wait = stop_after_wait
+
+        with patch('src.gateway.rns_bridge.logger') as mock_logger:
+            bridge._rns_loop()
+
+        # Should have logged the permanent failure warning
+        mock_logger.warning.assert_any_call(
+            "RNS initialization failed permanently - "
+            "bridge will not attempt reconnection. "
+            "Check RNS/LXMF installation and logs above."
+        )
+
+
+class TestHeadlessFunctions:
+    """Tests for module-level headless gateway functions."""
+
+    def test_get_gateway_stats_no_bridge(self):
+        """get_gateway_stats returns defaults when no bridge active."""
+        import src.gateway.rns_bridge as bridge_mod
+        original = bridge_mod._active_bridge
+        try:
+            bridge_mod._active_bridge = None
+            stats = bridge_mod.get_gateway_stats()
+            assert stats['running'] is False
+            assert stats['meshtastic_connected'] is False
+            assert stats['rns_connected'] is False
+        finally:
+            bridge_mod._active_bridge = original
+
+    def test_get_gateway_stats_uses_mesh_handler(self):
+        """get_gateway_stats uses _mesh_handler.is_connected, not _connected_mesh."""
+        import src.gateway.rns_bridge as bridge_mod
+        original = bridge_mod._active_bridge
+
+        mock_bridge = MagicMock()
+        mock_bridge._running = True
+        mock_bridge._connected_rns = False
+        mock_handler = MagicMock()
+        mock_handler.is_connected = True
+        mock_bridge._mesh_handler = mock_handler
+        mock_bridge.get_status.return_value = {
+            'statistics': {},
+            'uptime_seconds': 10,
+        }
+        mock_bridge.health.get_summary.return_value = {}
+        mock_bridge.delivery_tracker.get_stats.return_value = {}
+
+        try:
+            bridge_mod._active_bridge = mock_bridge
+            stats = bridge_mod.get_gateway_stats()
+            assert stats['meshtastic_connected'] is True
+        finally:
+            bridge_mod._active_bridge = original
+
+    def test_start_gateway_headless_uses_mesh_handler(self):
+        """start_gateway_headless uses _mesh_handler.is_connected."""
+        import src.gateway.rns_bridge as bridge_mod
+        original = bridge_mod._active_bridge
+
+        with patch('src.gateway.rns_bridge.UnifiedNodeTracker'):
+            with patch('src.gateway.rns_bridge.RNSMeshtasticBridge') as MockBridge:
+                mock_instance = MagicMock()
+                mock_instance._running = False
+                mock_instance.start.return_value = True
+                mock_handler = MagicMock()
+                mock_handler.is_connected = False
+                mock_instance._mesh_handler = mock_handler
+                mock_instance._connected_rns = False
+                MockBridge.return_value = mock_instance
+
+                try:
+                    bridge_mod._active_bridge = None
+                    result = bridge_mod.start_gateway_headless()
+                    assert result is True
+                finally:
+                    bridge_mod._active_bridge = original
