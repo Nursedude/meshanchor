@@ -894,7 +894,7 @@ class MeshForgeLauncher(
                 ("livemap", "Live NOC Map        Real-time browser view"),
                 ("coverage", "Coverage Map        Generate coverage map"),
                 ("topology", "Network Topology    D3.js graph view"),
-                ("traffic", "Traffic Inspector   Wireshark-grade visibility"),
+                ("traffic", "Traffic Inspector   Packet capture & analysis"),
                 ("quality", "Link Quality        Quality analysis"),
                 ("export", "Export Data         GeoJSON, CSV, GraphML"),
                 ("ai", "AI Diagnostics      Knowledge base, assistant"),
