@@ -141,10 +141,11 @@ sudo git pull origin main
 
 ### Switch Branches
 
-All development is on `main`. The `alpha` branch is deprecated (135 commits behind).
+All active development is on `main`. The `alpha` branch contains firmware
+and NanoVNA research work and is not synchronized with main.
 
 ```bash
-# If you're on alpha, switch to main:
+# If you're on alpha, switch to main for current features:
 git checkout main
 sudo git pull origin main
 ```
@@ -220,27 +221,29 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.5.0-beta)
+## What Works (v0.5.1-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
+| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics | Stable |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
-| **TUI Interface** | Installer, service control, device config wizard (name, region, TX power, MQTT), gateway config, diagnostics | Stable |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge, persistent message queue (SQLite), WebSocket broadcast | Stable |
-| **MQTT Architecture** | Local mosquitto broker, multi-consumer support, setup wizard | Stable |
-| **Traffic Inspector** | Wireshark-grade packet visibility, protocol dissection, multi-hop path tracing | Stable |
-| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
-| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Stable |
-| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Stable |
-| **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
-| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Stable (requires API key) |
-| **Config API** | RESTful configuration management with NGINX reliability patterns | Stable |
-| **AREDN** | Node discovery, link quality, service enumeration | Stable |
-| **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Stable |
+| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
+| **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Beta |
+| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Beta |
+| **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
+| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Beta |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge (LXMF), persistent queue (SQLite), WebSocket broadcast | Alpha |
+| **Traffic Inspector** | Packet capture from meshtastic callbacks, protocol tree, display filters, path tracing | Beta |
+| **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Beta |
 | **Grafana Dashboards** | Pre-built JSON dashboards, manual import required | Dashboards Ready |
+| **AREDN** | Node discovery, link quality, service enumeration (correct API, needs hardware) | Code Ready |
+| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
+| **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
+
+**Status key:** Stable = tested in the field | Beta = works but needs soak time | Alpha = architecture solid, needs testing | Code Ready = implemented, no hardware to validate
 
 ### Roadmap
 
@@ -517,7 +520,7 @@ src/
 │   └── node_tracker.py    # Unified node discovery
 ├── monitoring/            # Network monitoring
 │   ├── mqtt_subscriber.py # Nodeless MQTT node tracking
-│   ├── traffic_inspector.py # Wireshark-grade packet capture
+│   ├── traffic_inspector.py # Packet capture + protocol analysis
 │   └── path_visualizer.py # Multi-hop path tracing
 ├── utils/                 # Core utilities
 │   ├── rf.py              # RF calculations (well-tested)
@@ -662,7 +665,8 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ## Development
 
-Single-branch model on `main`. Feature branches via `claude/` prefix, merged by PR.
+Active development on `main`. Feature branches via `claude/` prefix, merged by PR.
+`alpha` branch preserved for firmware/NanoVNA research.
 
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
