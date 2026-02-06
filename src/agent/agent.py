@@ -112,7 +112,12 @@ class AgentConfig:
                 from utils.paths import get_real_user_home
                 home = get_real_user_home()
             except ImportError:
-                home = Path.home()
+                import os as _os
+                _sudo_user = _os.environ.get('SUDO_USER', '')
+                if _sudo_user and _sudo_user != 'root' and '/' not in _sudo_user and '..' not in _sudo_user:
+                    home = Path(f'/home/{_sudo_user}')
+                else:
+                    home = Path.home()
             self.data_dir = str(home / ".config" / "meshforge" / "agent")
 
         # Set default PID file

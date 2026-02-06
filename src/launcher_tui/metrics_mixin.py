@@ -431,7 +431,12 @@ class MetricsMixin:
             export_dir = get_real_user_home() / ".cache" / "meshforge"
         except ImportError:
             from pathlib import Path
-            export_dir = Path.home() / ".cache" / "meshforge"
+            import os
+            sudo_user = os.environ.get('SUDO_USER', '')
+            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+                export_dir = Path(f'/home/{sudo_user}') / ".cache" / "meshforge"
+            else:
+                export_dir = Path.home() / ".cache" / "meshforge"
 
         export_dir.mkdir(parents=True, exist_ok=True)
 
