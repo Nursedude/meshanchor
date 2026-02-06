@@ -466,6 +466,7 @@ class MQTTMixin:
             choices = [
                 ("local", f"Use Local Broker    Quick: localhost:1883"),
                 ("public", f"Use Public Broker   Quick: mqtt.meshtastic.org"),
+                ("private", "Use Private Broker  Custom: your own broker"),
                 ("broker", f"Broker              {broker}"),
                 ("port", f"Port                {port}"),
                 ("topic", f"Topic               {topic[:30]}..."),
@@ -530,6 +531,11 @@ class MQTTMixin:
                     "  TLS: enabled\n\n"
                     "This is nodeless monitoring - no local radio needed."
                 )
+                break
+
+            elif choice == "private":
+                # Guided setup for a private/custom MQTT broker
+                self._configure_private_broker(config)
                 break
 
             elif choice == "broker":
@@ -949,6 +955,109 @@ class MQTTMixin:
             'username': None,
             'password': None
         }
+
+    def _configure_private_broker(self, config: Dict[str, Any]):
+        """Guided setup for a private MQTT broker.
+
+        Walks through all required fields with sensible defaults for
+        a private/regional mesh broker (e.g. HawaiiNet, local Mosquitto).
+
+        Important: root_topic controls how many nodes you see.
+        Using 'msh' gets everything; 'msh/US/2/e' filters to US region.
+        """
+        broker = self.dialog.inputbox(
+            "Broker Address",
+            "Enter your private MQTT broker hostname or IP:\n\n"
+            "Examples:\n"
+            "  gt.wildc.net\n"
+            "  192.168.1.100\n"
+            "  mqtt.local",
+            init=config.get('broker', '')
+        )
+        if not broker:
+            return
+
+        port = self.dialog.inputbox(
+            "Broker Port",
+            "Enter MQTT port:\n\n"
+            "  1883 = Plain TCP\n"
+            "  1884 = Alternative plain TCP\n"
+            "  8883 = TLS encrypted",
+            init=str(config.get('port', 1883))
+        )
+        if not port or not port.isdigit():
+            return
+
+        username = self.dialog.inputbox(
+            "Username",
+            "MQTT username (blank for anonymous):",
+            init=config.get('username', '')
+        )
+
+        password = self.dialog.inputbox(
+            "Password",
+            "MQTT password (blank for none):",
+            init=''
+        )
+
+        # Root topic — this is the key to controlling node count
+        root_topic = self.dialog.inputbox(
+            "Root Topic",
+            "MQTT root topic — controls which nodes you see:\n\n"
+            "  msh           = ALL nodes (can be 5000+)\n"
+            "  msh/US        = US region only\n"
+            "  msh/US/2/e    = US encrypted channel\n"
+            "  msh/HI        = Hawaii only (if broker supports)\n\n"
+            "Your meshtasticd MQTT module must use the same root topic.",
+            init=config.get('root_topic', 'msh/US/2/e')
+        )
+        if not root_topic:
+            root_topic = "msh/US/2/e"
+
+        channel = self.dialog.inputbox(
+            "Channel Name",
+            "Meshtastic channel to subscribe to:\n\n"
+            "  LongFast   = Default Meshtastic channel\n"
+            "  HawaiiNet  = Regional channel\n"
+            "  meshforge  = Private MeshForge channel\n\n"
+            "Must match your radio's channel configuration.",
+            init=config.get('channel', 'LongFast')
+        )
+        if not channel:
+            channel = "LongFast"
+
+        # Build topic from root + channel
+        topic = f"{root_topic}/{channel}/#"
+
+        use_tls = int(port) == 8883
+
+        new_config = {
+            'broker': broker,
+            'port': int(port),
+            'topic': topic,
+            'root_topic': root_topic,
+            'channel': channel,
+            'username': username if username else None,
+            'password': password if password else None,
+            'use_tls': use_tls,
+        }
+
+        # Preserve auto-start settings
+        new_config['auto_start'] = config.get('auto_start', False)
+        new_config['auto_start_telemetry'] = config.get('auto_start_telemetry', True)
+
+        self._save_mqtt_config(new_config)
+        self.dialog.msgbox(
+            "Private Broker Configured",
+            f"Saved configuration:\n\n"
+            f"  Broker:   {broker}:{port}\n"
+            f"  Topic:    {topic}\n"
+            f"  Channel:  {channel}\n"
+            f"  Username: {username or '(anonymous)'}\n"
+            f"  TLS:      {'Yes' if use_tls else 'No'}\n\n"
+            f"Root topic '{root_topic}' determines node scope.\n"
+            f"Restart MQTT subscriber to apply."
+        )
 
     def _save_mqtt_config(self, config: Dict[str, Any]):
         """Save MQTT configuration to file."""
