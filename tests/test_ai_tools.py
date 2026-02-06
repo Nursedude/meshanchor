@@ -78,7 +78,7 @@ class TestAIToolsMixin:
         mixin_instance._ai_tools_menu()
 
         # Verify menu was shown with correct options
-        assert mixin_instance.dialog.last_menu_title == "AI Tools"
+        assert mixin_instance.dialog.last_menu_title == "Maps & Coverage"
         choice_keys = [c[0] for c in mixin_instance.dialog.last_menu_choices]
         assert "diagnose" in choice_keys
         assert "knowledge" in choice_keys
