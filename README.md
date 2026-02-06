@@ -101,43 +101,49 @@ Main Menu (MeshForge NOC)
 
 ## Upgrading MeshForge
 
-### Before You Upgrade
+### Clean Reinstall (Recommended)
 
-**1. Check your current version:**
-```bash
-python3 -c "from src.__version__ import __version__; print(__version__)"
-```
-
-**2. Backup your configuration (recommended):**
-```bash
-# Backup meshtasticd configs
-sudo cp -r /etc/meshtasticd/config.d ~/meshforge-backup-configs/
-
-# Backup Reticulum config
-cp -r ~/.reticulum ~/meshforge-backup-rns/
-
-# Backup MeshForge settings
-cp -r ~/.config/meshforge ~/meshforge-backup-settings/ 2>/dev/null || true
-```
-
-### Standard Upgrade (Git Pull)
-
-For installations cloned from GitHub:
+The cleanest way to upgrade MeshForge — guarantees you get the latest code,
+dependencies, and system integration without stale files or merge conflicts:
 
 ```bash
-cd /path/to/meshforge    # Usually /opt/meshforge or ~/meshforge
-
-# Check for local changes
-git status
-
-# Pull latest changes
-sudo git pull origin main
-
-# If you have local modifications, stash them first:
-# git stash
-# sudo git pull origin main
-# git stash pop
+sudo bash /opt/meshforge/scripts/reinstall.sh
 ```
+
+**What it does:**
+1. Backs up your configs (`/etc/meshforge/`, `/etc/meshtasticd/config.d/`, `~/.config/meshforge/`)
+2. Stops MeshForge services (meshforge, meshforge-map)
+3. Removes `/opt/meshforge` completely (source + venv)
+4. Fresh `git clone` from GitHub
+5. Runs `install_noc.sh` to rebuild everything
+6. Restores your backed-up configs
+
+**What it does NOT touch:**
+- meshtasticd (apt package, service, `/etc/meshtasticd/config.yaml`)
+- Reticulum/rnsd installation
+- Your radio configs in `/etc/meshtasticd/config.d/`
+- MQTT broker (mosquitto)
+- System packages
+
+No need to re-image your Pi. Your radio stays configured.
+
+### Quick Update (Git Pull)
+
+For developers or when you know the update is minor:
+
+```bash
+cd /opt/meshforge && sudo bash scripts/update.sh
+```
+
+Or manually:
+```bash
+cd /opt/meshforge && sudo git pull origin main
+```
+
+**When to use git pull:** Small code changes, you track the repo, no dependency changes.
+
+**When to use clean reinstall:** New dependencies, major version bumps, import errors,
+stale `.pyc` files, or anything that "doesn't look right" after a pull.
 
 ### Switch Branches
 
@@ -146,32 +152,12 @@ and NanoVNA research work and is not synchronized with main.
 
 ```bash
 # If you're on alpha, switch to main for current features:
-git checkout main
-sudo git pull origin main
-```
-
-### Fresh Install Upgrade
-
-If upgrading from a very old version or encountering issues:
-
-```bash
-# Backup existing installation
-sudo mv /opt/meshforge /opt/meshforge.old
-
-# Fresh clone
-sudo git clone https://github.com/Nursedude/meshforge.git /opt/meshforge
 cd /opt/meshforge
-
-# Re-run installer if dependencies changed
-sudo bash scripts/install_noc.sh
-
-# Restore custom configs if needed
-sudo cp ~/meshforge-backup-configs/* /etc/meshtasticd/config.d/
+git checkout main
+sudo bash scripts/update.sh
 ```
 
 ### Post-Upgrade Verification
-
-After upgrading, verify the installation:
 
 ```bash
 # Check new version
@@ -189,12 +175,12 @@ systemctl status rnsd
 
 | Issue | Solution |
 |-------|----------|
-| `Permission denied` | Use `sudo git pull` |
-| `Local changes would be overwritten` | `git stash` before pull, `git stash pop` after |
-| Python import errors | Re-run `sudo bash scripts/install_noc.sh` |
+| Python import errors | `sudo bash scripts/reinstall.sh` (clean reinstall) |
+| `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
 | Service won't start | Check logs: `journalctl -u meshtasticd -n 50` |
-| Config file conflicts | Restore from backup or regenerate via TUI |
+| Config file conflicts | Restore from `~/meshforge-backup-*` or regenerate via TUI |
 | `meshtastic` module errors | See "Python Library Conflicts" below |
+| Stale `.pyc` files | Clean reinstall handles this automatically |
 
 #### Python Library Conflicts
 
@@ -240,6 +226,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **Grafana Dashboards** | Pre-built JSON dashboards, manual import required | Dashboards Ready |
 | **AREDN** | Node discovery, link quality, service enumeration (correct API, needs hardware) | Code Ready |
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
+| **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs, channels, traceroute, neighbor info) | Beta |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
@@ -475,7 +462,7 @@ gen.generate("field_coverage.html")  # Opens in any browser
 
 ### Live NOC Map (Beta)
 
-Real-time browser-based network operations view at `http://localhost:8080`:
+Real-time browser-based network operations view at `http://localhost:5000`:
 
 **Working Features**:
 - **WebSocket updates** — real-time node position refresh (requires bridge running)
@@ -494,7 +481,7 @@ Real-time browser-based network operations view at `http://localhost:8080`:
 # Via TUI: Maps → Start Map Server
 # Or directly:
 sudo python3 src/utils/map_data_service.py
-# Open http://localhost:8080 in browser
+# Open http://localhost:5000 in browser
 ```
 
 **Data Sources**:
@@ -517,7 +504,9 @@ src/
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
-│   └── node_tracker.py    # Unified node discovery
+│   ├── node_tracker.py    # Unified node discovery
+│   ├── meshtastic_protobuf_client.py  # Protobuf-over-HTTP transport
+│   └── meshtastic_protobuf_ops.py     # Protobuf data classes + parsers
 ├── monitoring/            # Network monitoring
 │   ├── mqtt_subscriber.py # Nodeless MQTT node tracking
 │   ├── traffic_inspector.py # Packet capture + protocol analysis
@@ -609,14 +598,76 @@ See `dashboards/README.md` and `docs/METRICS.md` for full setup instructions.
 
 ### Ports
 
-| Port | Service | Notes |
-|------|---------|-------|
-| 4403 | meshtasticd TCP API | Single client limit |
-| 1883 | mosquitto MQTT | Multi-consumer (optional) |
-| 5001 | MeshForge WebSocket | Real-time messages |
-| 8080 | MeshForge Web UI | Maps, node browser |
-| 9090 | Prometheus metrics | Optional |
-| 9443 | meshtasticd Web UI | Official Meshtastic UI |
+| Port | Service | Owner | Notes |
+|------|---------|-------|-------|
+| 4403 | meshtasticd TCP API | meshtasticd | Single client limit |
+| 1883 | mosquitto MQTT | mosquitto | Multi-consumer (optional) |
+| 5000 | MeshForge Map Server | **MeshForge** | Live NOC map + REST API (20 endpoints) |
+| 5001 | MeshForge WebSocket | **MeshForge** | Real-time message broadcast |
+| 8081 | MeshForge Config API | **MeshForge** | RESTful config management |
+| 9090 | Prometheus metrics | **MeshForge** | Prometheus + Grafana JSON API |
+| 9443 | meshtasticd Web UI | meshtasticd | Protobuf + JSON endpoints |
+
+### API Reference
+
+MeshForge serves **42+ REST endpoints** across 4 HTTP servers. All APIs are
+local-only (LAN/localhost) with CORS enabled for browser access.
+
+#### Map Server (port 5000)
+
+| Method | Endpoint | Returns |
+|--------|----------|---------|
+| GET | `/api/nodes/geojson` | Unified GeoJSON from all sources (Meshtastic, MQTT, RNS) |
+| GET | `/api/nodes/history` | 24-hour node statistics |
+| GET | `/api/nodes/trajectory/<id>` | Node movement trail (GeoJSON LineString) |
+| GET | `/api/network/topology` | D3.js force-directed graph data |
+| GET | `/api/coverage/<lat>/<lon>/<h>` | Terrain-aware RF coverage prediction |
+| GET | `/api/los/<lat1>/<lon1>/<lat2>/<lon2>` | Line-of-sight + Fresnel zone analysis |
+| GET | `/api/radio/info` | Radio device info (wraps meshtasticd) |
+| GET | `/api/radio/nodes` | Nodes from connected radio |
+| GET | `/api/radio/channels` | Channel list from radio |
+| GET | `/api/radio/status` | Radio connection state |
+| POST | `/api/radio/message` | Send message via radio |
+| GET | `/api/messages/queue` | Outbound message queue |
+| GET | `/api/messages/received` | Received messages |
+| GET | `/api/status` | Server health + radio status |
+
+#### Prometheus Metrics (port 9090)
+
+| Method | Endpoint | Returns |
+|--------|----------|---------|
+| GET | `/metrics` | Prometheus exposition format (50+ metric families) |
+| GET | `/api/v1/query` | PromQL query (Grafana compatible) |
+| GET | `/api/v1/query_range` | Time-series range query |
+| GET | `/api/json/nodes` | Node metrics as JSON |
+| GET | `/api/json/status` | System status JSON |
+
+#### Config API (port 8081)
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/config[/<path>]` | Read config value(s) |
+| PUT | `/config/<path>` | Set config value (validated) |
+| DELETE | `/config/<path>` | Reset to default |
+| POST | `/config/_reset` | Factory reset all config |
+| GET | `/config/_audit` | Change audit log |
+
+#### Protobuf Transport (via meshtasticd port 9443)
+
+MeshForge's `MeshtasticProtobufClient` communicates with meshtasticd's
+protobuf endpoints for full device control without consuming the TCP
+connection (port 4403):
+
+| Operation | Protocol | Description |
+|-----------|----------|-------------|
+| Config read/write | AdminMessage | All 8 device + 13 module config sections |
+| Channel management | AdminMessage | Get/set channels 0-7 |
+| Owner management | AdminMessage | Get/set device name |
+| Neighbor info | NEIGHBORINFO_APP | Parse neighbor tables from mesh broadcasts |
+| Device metadata | AdminMessage | Firmware version, capabilities, hardware model |
+| Traceroute | TRACEROUTE_APP | Multi-hop route discovery with SNR |
+| Position request | POSITION_APP | Request GPS position from remote nodes |
+| Event polling | FromRadio stream | Background thread dispatches events via callbacks |
 
 ---
 
@@ -677,7 +728,11 @@ sudo bash scripts/install_noc.sh
 ### Quick Update
 
 ```bash
-cd /opt/meshforge && sudo git pull origin main
+# Quick pull (minor updates)
+cd /opt/meshforge && sudo bash scripts/update.sh
+
+# Clean reinstall (recommended for major updates)
+sudo bash /opt/meshforge/scripts/reinstall.sh
 ```
 
 See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup and troubleshooting.
