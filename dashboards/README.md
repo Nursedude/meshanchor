@@ -147,6 +147,21 @@ Gateway bridge monitoring:
 | `meshforge_message_queue_depth` | gauge | Current queue sizes |
 | `meshforge_gateway_connections` | gauge | Active gateway connections |
 | `meshforge_gateway_errors_total` | counter | Gateway errors by type |
+| `meshforge_env_temperature_celsius` | gauge | Node temperature (Celsius) |
+| `meshforge_env_humidity_percent` | gauge | Node humidity (%) |
+| `meshforge_env_pressure_hpa` | gauge | Barometric pressure (hPa) |
+| `meshforge_env_gas_resistance_ohms` | gauge | VOC gas resistance (BME680) |
+| `meshforge_air_quality_pm25` | gauge | PM2.5 particulate (ug/m3) |
+| `meshforge_air_quality_co2_ppm` | gauge | CO2 concentration (ppm) |
+| `meshforge_air_quality_iaq` | gauge | Indoor Air Quality index |
+| `meshforge_health_heart_bpm` | gauge | Heart rate (BPM) |
+| `meshforge_health_spo2_percent` | gauge | Blood oxygen saturation (%) |
+| `meshforge_mqtt_connected` | gauge | MQTT subscriber connected |
+| `meshforge_mqtt_nodes_total` | gauge | Total MQTT-discovered nodes |
+| `meshforge_mqtt_nodes_online` | gauge | Online MQTT nodes |
+| `meshforge_mqtt_mesh_size` | gauge | 24h unique nodes via MQTT |
+| `meshforge_topology_nodes` | gauge | Topology graph node count |
+| `meshforge_topology_edges` | gauge | Topology graph edge count |
 
 ## Alerting Examples
 
