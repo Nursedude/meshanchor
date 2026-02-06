@@ -353,19 +353,26 @@ class MapDataCollector:
             return []
 
     def _collect_meshtasticd(self) -> List[Dict]:
-        """Collect nodes from meshtasticd via TCP.
+        """Collect nodes from meshtasticd.
 
-        Uses configurable host/port (default: localhost:4403).
+        Uses configurable host/port (default: localhost:4403 TCP, 9443 HTTP).
 
-        Strategy:
-        1. Try the Python TCP interface (structured data, most reliable)
-        2. Fall back to CLI parsing if Python module unavailable
+        Strategy (ordered by preference):
+        1. HTTP API (/json/nodes) — no TCP lock needed, non-blocking
+        2. TCP interface via connection manager — needs exclusive lock
+        3. CLI parsing — fallback when Python module unavailable
         """
-        features = []
         host = self.get_meshtasticd_host()
+
+        # Strategy 1: HTTP API (preferred — doesn't conflict with gateway bridge)
+        features = self._collect_via_http(host)
+        if features:
+            return features
+
+        # Strategy 2: TCP interface (needs lock)
         port = self.get_meshtasticd_port()
 
-        # Quick check if port is open before attempting connection
+        # Quick check if TCP port is open before attempting connection
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
@@ -377,17 +384,91 @@ class MapDataCollector:
         except OSError:
             return []
 
-        # Strategy 1: Use Python TCP interface via connection manager
         features = self._collect_via_tcp_interface()
         if features:
             return features
 
-        # Strategy 2: Fall back to CLI parsing
+        # Strategy 3: Fall back to CLI parsing
         features = self._collect_via_cli()
         if features:
             logger.debug(f"meshtasticd (CLI): {len(features)} nodes with position")
 
         return features
+
+    def _collect_via_http(self, host: str) -> List[Dict]:
+        """Collect nodes via meshtasticd's HTTP JSON API.
+
+        Uses GET /json/nodes which returns all known mesh nodes without
+        needing the TCP connection lock. This is the preferred collection
+        method because it doesn't conflict with the gateway bridge.
+        """
+        try:
+            from utils.meshtastic_http import get_http_client
+        except ImportError:
+            return []
+
+        try:
+            client = get_http_client(host=host)
+            if not client.is_available:
+                logger.debug("meshtasticd HTTP API not available")
+                return []
+
+            nodes = client.get_nodes()
+            if not nodes:
+                return []
+
+            features = []
+            no_position_nodes = []
+            now = time.time()
+            online_threshold = self.get_online_threshold_seconds()
+
+            for node in nodes:
+                if node.has_position:
+                    last_heard = node.last_heard or 0
+                    is_online = (now - last_heard) < online_threshold if last_heard else False
+
+                    feature = {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [node.longitude, node.latitude],
+                        },
+                        "properties": {
+                            "id": node.node_id,
+                            "name": node.long_name or node.short_name or node.node_id,
+                            "short_name": node.short_name,
+                            "hardware": node.hw_model,
+                            "snr": node.snr,
+                            "last_heard": last_heard,
+                            "via_mqtt": node.via_mqtt,
+                            "role": "node",
+                            "online": is_online,
+                            "altitude": node.altitude,
+                            "source": "meshtasticd_http",
+                        },
+                    }
+                    features.append(feature)
+                else:
+                    no_position_nodes.append({
+                        "id": node.node_id,
+                        "name": node.long_name or node.short_name or node.node_id,
+                        "hw_model": node.hw_model,
+                        "snr": node.snr,
+                        "last_heard": node.last_heard,
+                    })
+
+            self._nodes_without_position = no_position_nodes
+            self._total_nodes_seen = len(nodes)
+
+            logger.debug(
+                f"meshtasticd (HTTP): {len(features)} with GPS, "
+                f"{len(no_position_nodes)} without GPS (total: {len(nodes)})"
+            )
+            return features
+
+        except Exception as e:
+            logger.debug(f"HTTP collection error: {e}")
+            return []
 
     def _collect_via_tcp_interface(self) -> List[Dict]:
         """Collect nodes using the meshtastic Python TCP interface.
@@ -1350,7 +1431,7 @@ class MapDataCollector:
         unified_tracker: List = None
     ) -> Dict:
         """Summarize which sources contributed data."""
-        return {
+        summary = {
             "unified_tracker": len(unified_tracker) if unified_tracker else 0,
             "meshtasticd": len(tcp),
             "direct_radio": len(direct_radio) if direct_radio else 0,
@@ -1359,3 +1440,9 @@ class MapDataCollector:
             "aredn": len(aredn) if aredn else 0,
             "rns_direct": len(rns_direct) if rns_direct else 0,
         }
+        # Flag if HTTP was used (source tag on features)
+        if tcp and any(f.get("properties", {}).get("source") == "meshtasticd_http" for f in tcp):
+            summary["meshtasticd_via"] = "http"
+        elif tcp:
+            summary["meshtasticd_via"] = "tcp"
+        return summary
