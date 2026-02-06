@@ -127,8 +127,8 @@ class AREDNNode:
     @property
     def base_url(self) -> str:
         if self.ip:
-            return f"http://{self.ip}"
-        return f"http://{self.hostname}.local.mesh"
+            return f"http://{self.ip}:8080"
+        return f"http://{self.hostname}.local.mesh:8080"
 
     def to_dict(self) -> Dict:
         return {
@@ -166,24 +166,28 @@ class AREDNClient:
     """
 
     DEFAULT_TIMEOUT = 5
+    DEFAULT_PORT = 8080  # AREDN nodes serve HTTP on port 8080, not 80
 
-    def __init__(self, hostname_or_ip: str, timeout: int = DEFAULT_TIMEOUT):
+    def __init__(self, hostname_or_ip: str, timeout: int = DEFAULT_TIMEOUT,
+                 port: int = DEFAULT_PORT):
         """
         Initialize AREDN client.
 
         Args:
             hostname_or_ip: Node hostname (without .local.mesh) or IP address
             timeout: Request timeout in seconds
+            port: HTTP port (default 8080 — standard AREDN port)
         """
         self.hostname = hostname_or_ip
         self.timeout = timeout
+        self.port = port
 
-        # Determine base URL
+        # Determine base URL — AREDN uses port 8080
         if self._is_ip(hostname_or_ip):
-            self.base_url = f"http://{hostname_or_ip}"
+            self.base_url = f"http://{hostname_or_ip}:{port}"
             self.ip = hostname_or_ip
         else:
-            self.base_url = f"http://{hostname_or_ip}.local.mesh"
+            self.base_url = f"http://{hostname_or_ip}.local.mesh:{port}"
             self.ip = None
 
     def _is_ip(self, value: str) -> bool:
