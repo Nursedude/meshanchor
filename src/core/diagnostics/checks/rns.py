@@ -19,15 +19,26 @@ try:
     PATHS_AVAILABLE = True
 except ImportError:
     PATHS_AVAILABLE = False
-    # Fallback paths
+    import os as _os
+    # Fallback paths with sudo-safe home resolution
+    def _fallback_home() -> Path:
+        sudo_user = _os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            return Path(f'/home/{sudo_user}')
+        return Path.home()
+
+    _fb_home = _fallback_home()
+
     class ReticulumPaths:
+        _home = _fb_home
+
         @staticmethod
         def get_config_file():
-            return Path.home() / '.reticulum' / 'config'
+            return ReticulumPaths._home / '.reticulum' / 'config'
 
         @staticmethod
         def get_interfaces_dir():
-            return Path.home() / '.reticulum' / 'interfaces'
+            return ReticulumPaths._home / '.reticulum' / 'interfaces'
 
 
 def check_rns_installed() -> CheckResult:
