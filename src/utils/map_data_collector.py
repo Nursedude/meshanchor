@@ -75,6 +75,7 @@ class MapDataCollector:
                     "online_status_threshold_minutes": self.DEFAULT_ONLINE_THRESHOLD_MINUTES,
                     "meshtasticd_host": self.DEFAULT_MESHTASTICD_HOST,
                     "meshtasticd_port": self.DEFAULT_MESHTASTICD_PORT,
+                    "aredn_node_ips": [],  # e.g. ["10.54.25.1", "10.1.0.1"]
                 }
             )
         except ImportError:
@@ -880,11 +881,24 @@ class MapDataCollector:
         return features
 
     def _get_aredn_node_ip(self) -> Optional[str]:
-        """Find AREDN node on local network."""
+        """Find AREDN node on local network.
+
+        Checks user-configured IPs first, then common AREDN defaults.
+        Configure via map_settings.json: "aredn_node_ips": ["10.54.25.1"]
+        """
         import socket
 
-        # Try common AREDN addresses
-        for host in ['localnode.local.mesh', '10.0.0.1', '10.1.0.1', 'localnode']:
+        # User-configured AREDN node IPs (checked first)
+        custom_ips = []
+        if self._settings:
+            custom_ips = self._settings.get("aredn_node_ips", [])
+            if isinstance(custom_ips, str):
+                custom_ips = [custom_ips]
+
+        # Common AREDN addresses as fallback
+        default_hosts = ['localnode.local.mesh', '10.0.0.1', '10.1.0.1', 'localnode']
+
+        for host in custom_ips + default_hosts:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
@@ -960,9 +974,11 @@ class MapDataCollector:
             logger.debug("RNS module not available for direct query")
             return []
 
+        # Load RNS position cache for coordinate lookup
+        rns_positions = self._load_rns_position_cache()
+
         try:
             # Connect to the shared RNS instance
-            # This connects as a client to the running rnsd
             reticulum = RNS.Reticulum()
 
             # Check for known destinations in path table
@@ -970,27 +986,29 @@ class MapDataCollector:
                 for dest_hash, path_data in RNS.Transport.path_table.items():
                     try:
                         if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
-                            node_id = f"rns_{dest_hash.hex()[:16]}"
+                            hash_hex = dest_hash.hex()
+                            node_id = f"rns_{hash_hex[:16]}"
 
                             # Extract hop count from path tuple if available
                             hops = 0
                             if isinstance(path_data, tuple) and len(path_data) > 1:
                                 hops = path_data[1]
 
-                            # For now, we can't get positions from path table alone
-                            # But we can check the node tracker cache for matching entries
-                            # This creates a placeholder that may be merged with cached data
-                            feature = self._make_feature(
-                                node_id=node_id,
-                                name=f"RNS:{dest_hash.hex()[:8]}",
-                                lat=None, lon=None,  # No position from path table
-                                network="rns",
-                                is_online=True,  # In path table = reachable
-                                hops=hops,
-                            )
-                            # Only add if we got a valid feature (has position from merge)
-                            # For now, skip nodes without position
-                            # features.append(feature)
+                            # Look up position from cache
+                            pos = rns_positions.get(hash_hex[:16])
+                            lat = pos.get("lat") if pos else None
+                            lon = pos.get("lon") if pos else None
+                            name = (pos.get("name") if pos else None) or f"RNS:{hash_hex[:8]}"
+
+                            if lat and lon:
+                                feature = self._make_feature(
+                                    node_id=node_id,
+                                    name=name,
+                                    lat=lat, lon=lon,
+                                    network="rns",
+                                    is_online=True,
+                                )
+                                features.append(feature)
 
                     except Exception as e:
                         logger.debug(f"Error processing RNS destination: {e}")
@@ -1004,11 +1022,77 @@ class MapDataCollector:
 
             if features:
                 logger.debug(f"RNS direct: {len(features)} nodes with position")
+            else:
+                # Log how many RNS destinations we found (even without position)
+                path_count = len(RNS.Transport.path_table) if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table else 0
+                if path_count:
+                    logger.debug(
+                        f"RNS: {path_count} destinations in path table, "
+                        f"{len(rns_positions)} have cached positions"
+                    )
 
         except Exception as e:
             logger.debug(f"RNS direct query error: {e}")
 
         return features
+
+    def _load_rns_position_cache(self) -> Dict[str, Dict]:
+        """Load RNS node position cache for coordinate lookup.
+
+        Reads from /tmp/meshforge_rns_nodes.json and node_cache.json
+        to build a hash -> {lat, lon, name} mapping.
+        """
+        positions: Dict[str, Dict] = {}
+
+        # Source 1: RNS temp cache
+        rns_cache = Path("/tmp/meshforge_rns_nodes.json")
+        if rns_cache.exists():
+            try:
+                with open(rns_cache) as f:
+                    data = json.load(f)
+                nodes_list = data if isinstance(data, list) else data.get("nodes", [])
+                for node in nodes_list:
+                    rns_hash = node.get("id", node.get("rns_hash", ""))
+                    if isinstance(rns_hash, str):
+                        rns_hash = rns_hash.replace("rns_", "")[:16]
+                    lat = node.get("latitude") or node.get("lat")
+                    lon = node.get("longitude") or node.get("lon")
+                    if lat and lon and rns_hash:
+                        positions[rns_hash] = {
+                            "lat": lat, "lon": lon,
+                            "name": node.get("name", node.get("display_name", "")),
+                        }
+            except Exception as e:
+                logger.debug(f"RNS position cache load error: {e}")
+
+        # Source 2: Node tracker cache (RNS entries)
+        try:
+            from utils.paths import get_real_user_home
+            cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
+        except ImportError:
+            cache_path = Path("/tmp/meshforge/node_cache.json")
+
+        if cache_path.exists():
+            try:
+                with open(cache_path) as f:
+                    data = json.load(f)
+                nodes_list = data if isinstance(data, list) else data.get("nodes", [])
+                for node in nodes_list:
+                    if node.get("network") == "rns":
+                        rns_hash = node.get("id", node.get("rns_hash", ""))
+                        if isinstance(rns_hash, str):
+                            rns_hash = rns_hash.replace("rns_", "")[:16]
+                        lat = node.get("latitude") or node.get("lat")
+                        lon = node.get("longitude") or node.get("lon")
+                        if lat and lon and rns_hash:
+                            positions[rns_hash] = {
+                                "lat": lat, "lon": lon,
+                                "name": node.get("name", ""),
+                            }
+            except Exception:
+                pass
+
+        return positions
 
     def _load_nomadnet_peers(self) -> List[Dict]:
         """Load known peers from NomadNet cache if available."""
