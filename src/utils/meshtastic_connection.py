@@ -15,6 +15,7 @@ Features:
 """
 
 import socket
+import sys
 import threading
 import time
 import logging
@@ -23,6 +24,48 @@ from enum import Enum
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _install_meshtastic_thread_guard():
+    """Install a threading excepthook to suppress known meshtastic library crashes.
+
+    The meshtastic library runs a heartbeat timer in a background thread that calls
+    sendHeartbeat() -> _sendToRadio() -> socket.send(). If the TCP connection to
+    meshtasticd drops (e.g. service restart, network issue), the socket.send() raises
+    BrokenPipeError in that timer thread. Since MeshForge doesn't own that thread,
+    we can't wrap it in try/except. Instead, we install a threading.excepthook to
+    catch and log these crashes instead of printing the traceback.
+    """
+    _original_excepthook = getattr(threading, 'excepthook', None)
+
+    def _meshtastic_excepthook(args):
+        # args: ExceptHookArgs(exc_type, exc_value, exc_traceback, thread)
+        exc_type = args.exc_type
+        exc_value = args.exc_value
+        thread = args.thread
+
+        # Suppress known meshtastic library BrokenPipeError from heartbeat timer
+        if exc_type in (BrokenPipeError, ConnectionResetError, OSError):
+            thread_name = getattr(thread, 'name', '') if thread else ''
+            logger.warning(
+                f"meshtasticd TCP connection lost (heartbeat failed): {exc_value}"
+            )
+            return
+
+        # For other exceptions, call the original hook or log
+        if _original_excepthook:
+            _original_excepthook(args)
+        else:
+            logger.error(
+                f"Unhandled exception in thread {getattr(thread, 'name', '?')}: "
+                f"{exc_type.__name__}: {exc_value}"
+            )
+
+    threading.excepthook = _meshtastic_excepthook
+
+
+# Install the guard on module import
+_install_meshtastic_thread_guard()
 
 
 class ConnectionMode(Enum):
