@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import pytest
 
+from utils.rf import DeployEnvironment, BuildingType
 from utils.preset_impact import (
     PresetAnalyzer, PresetComparison, compare_presets, format_comparison_table,
     PRESET_PARAMS,
@@ -505,3 +506,139 @@ class TestFormatOutputConsistency:
         parser = LogParser()
         entry = parser.parse_line("ERROR: test", LogSource.MESHTASTICD)
         json.dumps(entry.to_dict())
+
+
+# =============================================================================
+# Environment-Aware Propagation Integration
+# =============================================================================
+
+class TestEnvironmentAwareIntegration:
+    """Test environment-aware path loss wiring through multihop and preset_impact."""
+
+    def test_multihop_suburban_worse_than_free_space(self):
+        """Suburban environment gives lower success than free space on same path."""
+        nodes = [
+            RelayNode(lat=21.30, lon=-157.86, name="A"),
+            RelayNode(lat=21.40, lon=-157.75, name="B"),
+        ]
+        free = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.FREE_SPACE)
+        suburban = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.SUBURBAN)
+
+        path_free = free.analyze_path(nodes)
+        path_sub = suburban.analyze_path(nodes)
+
+        assert path_free.success_probability >= path_sub.success_probability
+        # Suburban path loss should be higher
+        assert path_sub.hops[0].fspl_db > path_free.hops[0].fspl_db
+
+    def test_multihop_forest_severely_limited(self):
+        """Forest environment makes even moderate hops difficult."""
+        nodes = [
+            RelayNode(lat=21.30, lon=-157.86, name="A"),
+            RelayNode(lat=21.35, lon=-157.82, name="B"),
+        ]
+        forest = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.FOREST)
+        path = forest.analyze_path(nodes)
+        # Forest PLE=5.0 should dramatically reduce margin vs free space
+        free = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.FREE_SPACE)
+        path_free = free.analyze_path(nodes)
+        margin_drop = path_free.hops[0].link_margin_db - path.hops[0].link_margin_db
+        assert margin_drop > 20  # Forest adds >20 dB loss at multi-km
+
+    def test_multihop_over_water_near_free_space(self):
+        """Over-water propagation is close to free space (PLE ~1.9)."""
+        nodes = [
+            RelayNode(lat=21.30, lon=-157.86, name="A"),
+            RelayNode(lat=21.35, lon=-157.82, name="B"),
+        ]
+        water = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.OVER_WATER)
+        free = HopAnalyzer(preset='LONG_FAST', environment=DeployEnvironment.FREE_SPACE)
+
+        path_water = water.analyze_path(nodes)
+        path_free = free.analyze_path(nodes)
+
+        # Over water should be within ~5 dB of free space for moderate distances
+        margin_diff = abs(path_free.hops[0].link_margin_db -
+                         path_water.hops[0].link_margin_db)
+        assert margin_diff < 10
+
+    def test_multihop_environment_propagates_to_compare(self):
+        """compare_presets_for_path uses the analyzer's environment."""
+        nodes = [
+            RelayNode(lat=21.30, lon=-157.86, name="A"),
+            RelayNode(lat=21.35, lon=-157.82, name="B"),
+        ]
+        analyzer = HopAnalyzer(
+            preset='LONG_FAST',
+            environment=DeployEnvironment.DENSE_URBAN,
+        )
+        results = analyzer.compare_presets_for_path(nodes)
+        # All presets should be significantly degraded in dense urban
+        for r in results:
+            assert r.success_probability < 1.0
+
+    def test_preset_impact_suburban_range_realistic(self):
+        """Suburban LONG_FAST should predict ~2-10 km, not 300 km."""
+        analyzer = PresetAnalyzer(
+            environment=DeployEnvironment.SUBURBAN,
+            antenna_height_m=2.0,
+        )
+        impact = analyzer.analyze_preset('LONG_FAST')
+        # Suburban with fade margin should be much less than free space
+        assert impact.max_range_km < 50
+        assert impact.max_range_km > 0.5
+
+    def test_preset_impact_free_space_backward_compat(self):
+        """Default FREE_SPACE environment matches old FSPL behavior."""
+        old = PresetAnalyzer()  # defaults to FREE_SPACE
+        impact = old.analyze_preset('LONG_FAST')
+        # Old behavior: max_range_los_km was the uncapped FSPL range
+        # New: still uses FSPL for FREE_SPACE
+        assert impact.max_range_los_km > 100  # Still shows theoretical LOS range
+
+    def test_preset_impact_building_reduces_range(self):
+        """Building penetration loss reduces range."""
+        outdoor = PresetAnalyzer(
+            environment=DeployEnvironment.SUBURBAN,
+            building=BuildingType.NONE,
+        )
+        indoor = PresetAnalyzer(
+            environment=DeployEnvironment.SUBURBAN,
+            building=BuildingType.CONCRETE,
+        )
+        range_out = outdoor.analyze_preset('LONG_FAST').max_range_km
+        range_in = indoor.analyze_preset('LONG_FAST').max_range_km
+        assert range_out > range_in
+
+    def test_preset_impact_radio_horizon_caps_range(self):
+        """Range is capped by radio horizon based on antenna height."""
+        low = PresetAnalyzer(
+            environment=DeployEnvironment.FREE_SPACE,
+            antenna_height_m=2.0,
+        )
+        high = PresetAnalyzer(
+            environment=DeployEnvironment.FREE_SPACE,
+            antenna_height_m=50.0,
+        )
+        range_low = low.analyze_preset('VERY_LONG_SLOW').max_range_km
+        range_high = high.analyze_preset('VERY_LONG_SLOW').max_range_km
+        # High antenna should allow longer range
+        assert range_high > range_low
+
+    def test_environment_ordering_consistency(self):
+        """More obstructed environments should give shorter range."""
+        envs = [
+            DeployEnvironment.FREE_SPACE,
+            DeployEnvironment.RURAL_OPEN,
+            DeployEnvironment.SUBURBAN,
+            DeployEnvironment.DENSE_URBAN,
+        ]
+        ranges = []
+        for env in envs:
+            a = PresetAnalyzer(environment=env, antenna_height_m=10.0)
+            impact = a.analyze_preset('LONG_FAST')
+            ranges.append(impact.max_range_km)
+        # Each should be less than or equal to the previous
+        for i in range(len(ranges) - 1):
+            assert ranges[i] >= ranges[i + 1], \
+                f"{envs[i].value} range {ranges[i]} should >= {envs[i+1].value} range {ranges[i+1]}"

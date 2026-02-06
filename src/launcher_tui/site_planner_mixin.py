@@ -6,6 +6,24 @@ antenna guidelines, and external tool references.
 Extracted from main.py to reduce file size.
 """
 
+from utils.rf import DeployEnvironment, BuildingType
+
+
+# Menu labels for environment selection
+_ENV_CHOICES = [
+    ("free_space", "Free Space / Clear LOS"),
+    ("rural_open", "Rural Open Terrain"),
+    ("suburban", "Suburban / Residential"),
+    ("urban_elevated", "Urban w/ Elevated Gateway"),
+    ("urban_ground", "Urban Ground Level"),
+    ("dense_urban", "Dense Urban / Downtown"),
+    ("forest", "Forest / Heavy Vegetation"),
+    ("over_water", "Over Water / Coastal"),
+    ("indoor", "Indoor (same building)"),
+]
+
+_ENV_MAP = {v.value: v for v in DeployEnvironment}
+
 
 class SitePlannerMixin:
     """Mixin providing site planner methods for the launcher."""
@@ -48,112 +66,127 @@ class SitePlannerMixin:
             elif choice == "tools":
                 self._external_tools()
 
+    def _select_environment(self):
+        """Let the user pick a deployment environment.
+
+        Returns:
+            DeployEnvironment or None if cancelled.
+        """
+        choice = self.dialog.menu(
+            "Environment",
+            "Select deployment environment:",
+            _ENV_CHOICES,
+        )
+        if choice is None:
+            return None
+        return _ENV_MAP.get(choice, DeployEnvironment.SUBURBAN)
+
     def _estimate_range(self):
-        """Estimate communication range based on parameters."""
-        # Get TX power
-        tx_pwr = self.dialog.inputbox("Range Estimator", "TX Power (dBm):", "20")
+        """Estimate communication range using environment-aware model."""
+        from utils.preset_impact import PresetAnalyzer, PRESET_PARAMS
+
+        # TX power
+        tx_pwr = self.dialog.inputbox("Range Estimator", "TX Power (dBm):", "22")
         if not tx_pwr:
             return
 
-        # Get antenna gains
-        ant_gain = self.dialog.inputbox("Range Estimator", "Total Antenna Gain (dBi):", "4")
+        # Antenna gain
+        ant_gain = self.dialog.inputbox("Range Estimator", "Total Antenna Gain (dBi):", "4.3")
         if not ant_gain:
             return
 
-        # Get preset
-        presets = [
-            ("SHORT_TURBO", "-105 dBm sensitivity"),
-            ("SHORT_FAST", "-110 dBm sensitivity"),
-            ("MEDIUM_FAST", "-120 dBm sensitivity"),
-            ("LONG_FAST", "-125 dBm sensitivity"),
-            ("LONG_SLOW", "-132 dBm sensitivity"),
-        ]
+        # Antenna height
+        ant_height = self.dialog.inputbox("Range Estimator", "Antenna Height (m):", "2")
+        if not ant_height:
+            return
 
+        # Preset selection
+        preset_choices = [
+            (name, params['desc'])
+            for name, params in PRESET_PARAMS.items()
+        ]
         preset = self.dialog.menu(
             "Select Preset",
             "Choose LoRa modem preset:",
-            presets
+            preset_choices,
         )
-
         if not preset:
             return
 
-        # Sensitivity values
-        sens_map = {
-            "SHORT_TURBO": -105,
-            "SHORT_FAST": -110,
-            "MEDIUM_FAST": -120,
-            "LONG_FAST": -125,
-            "LONG_SLOW": -132,
-        }
+        # Environment selection
+        env = self._select_environment()
+        if env is None:
+            return
 
         try:
-            import math
             tx_p = float(tx_pwr)
             ant_g = float(ant_gain)
-            sens = sens_map.get(preset, -125)
+            ant_h = float(ant_height)
 
-            # Link budget
-            link_budget = tx_p + ant_g - sens
+            analyzer = PresetAnalyzer(
+                tx_power_dbm=int(tx_p),
+                tx_gain_dbi=ant_g / 2,
+                rx_gain_dbi=ant_g / 2,
+                environment=env,
+                antenna_height_m=ant_h,
+            )
+            impact = analyzer.analyze_preset(preset)
 
-            # Estimate range using FSPL formula (915 MHz)
-            # FSPL = 20*log10(d) + 20*log10(f) + 32.45
-            # d = 10^((FSPL - 20*log10(f) - 32.45) / 20)
-            freq_mhz = 915
-            max_fspl = link_budget
-            range_km = 10 ** ((max_fspl - 20 * math.log10(freq_mhz) - 32.45) / 20)
+            # Also show LOS reference
+            los_analyzer = PresetAnalyzer(
+                tx_power_dbm=int(tx_p),
+                tx_gain_dbi=ant_g / 2,
+                rx_gain_dbi=ant_g / 2,
+                environment=DeployEnvironment.FREE_SPACE,
+                antenna_height_m=ant_h,
+            )
+            los_impact = los_analyzer.analyze_preset(preset)
 
-            # Apply terrain factor (0.3-0.7 of theoretical)
-            los_range = range_km
-            urban_range = range_km * 0.3
-            rural_range = range_km * 0.5
+            env_label = dict(_ENV_CHOICES).get(env.value, env.value)
 
-            text = f"""Range Estimation:
+            text = f"""Range Estimation ({env_label}):
 
 Preset: {preset}
-TX Power: {tx_p} dBm
+TX Power: {tx_p:.0f} dBm
 Antenna Gain: {ant_g} dBi
-RX Sensitivity: {sens} dBm
+Antenna Height: {ant_h} m
+Sensitivity: {impact.sensitivity_dbm:.1f} dBm
+Link Budget: {impact.link_budget_db:.1f} dB
 
-Link Budget: {link_budget:.1f} dB
+Estimated Max Range (915 MHz):
+  {env_label}: {impact.max_range_km:.1f} km
+  Free Space (LOS ref): {los_impact.max_range_km:.1f} km
 
-Estimated Range (915 MHz):
-  Line of Sight: {los_range:.1f} km
-  Rural/Suburban: {rural_range:.1f} km
-  Urban/Dense: {urban_range:.1f} km
+Coverage Area: {impact.coverage_area_km2:.1f} km2
+Airtime: {impact.airtime_ms:.0f} ms
+Throughput: {impact.throughput_bps / 1000:.2f} kbps
 
-Note: Actual range depends on terrain,
-vegetation, and antenna height."""
+Note: Uses log-distance propagation model
+with environment-specific path loss exponent
+and fade margin."""
 
             self.dialog.msgbox("Range Estimation", text)
 
-        except ValueError:
+        except (ValueError, TypeError):
             self.dialog.msgbox("Error", "Invalid number entered")
 
     def _compare_presets(self):
-        """Compare LoRa modem presets."""
-        text = """LoRa Modem Preset Comparison:
+        """Compare LoRa modem presets with environment-aware range."""
+        from utils.preset_impact import PresetAnalyzer, format_comparison_table
 
-Preset          BW    SF  Range     Speed
-──────────────────────────────────────────
-SHORT_TURBO    500   7   <1 km     Fastest
-SHORT_FAST     250   7   1-5 km    Fast
-SHORT_SLOW     125   7   1-5 km    Medium
-MEDIUM_FAST    250   10  5-20 km   Medium
-MEDIUM_SLOW    125   10  5-20 km   Slower
-LONG_FAST      250   11  10-30 km  Default
-LONG_MODERATE  125   11  15-40 km  Slower
-LONG_SLOW      125   12  20-50 km  Slowest
+        # Let user pick environment
+        env = self._select_environment()
+        if env is None:
+            env = DeployEnvironment.FREE_SPACE
 
-Higher SF = Longer range, slower speed
-Lower BW = Better sensitivity, slower speed
+        analyzer = PresetAnalyzer(environment=env)
+        comp = analyzer.compare()
+        table = format_comparison_table(comp)
 
-Recommended:
-  Gateway: SHORT_TURBO or MEDIUM_FAST
-  Rural: LONG_FAST or LONG_MODERATE
-  Urban: SHORT_FAST or MEDIUM_FAST"""
+        env_label = dict(_ENV_CHOICES).get(env.value, env.value)
+        header = f"Preset Comparison ({env_label})"
 
-        self.dialog.msgbox("Preset Comparison", text)
+        self.dialog.msgbox(header, table)
 
     def _antenna_guidelines(self):
         """Show antenna guidelines."""

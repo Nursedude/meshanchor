@@ -31,6 +31,13 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from utils.rf import (
+    DeployEnvironment,
+    BuildingType,
+    realistic_max_range,
+    radio_horizon_km,
+)
+
 
 # LoRa PHY constants
 NOISE_FIGURE_DB = 6.0  # Typical for SX1262/SX1276
@@ -153,8 +160,8 @@ PRESET_PARAMS = {
 class PresetAnalyzer:
     """Analyzes LoRa preset impact on coverage and performance.
 
-    Combines LoRa PHY calculations (sensitivity, airtime) with RF
-    propagation models (FSPL, link budget) to produce actionable
+    Combines LoRa PHY calculations (sensitivity, airtime) with
+    environment-aware propagation models to produce actionable
     coverage comparisons.
     """
 
@@ -163,7 +170,10 @@ class PresetAnalyzer:
                  tx_gain_dbi: float = DEFAULT_TX_GAIN_DBI,
                  rx_gain_dbi: float = DEFAULT_RX_GAIN_DBI,
                  freq_mhz: float = DEFAULT_FREQ_MHZ,
-                 payload_bytes: int = DEFAULT_PAYLOAD_BYTES):
+                 payload_bytes: int = DEFAULT_PAYLOAD_BYTES,
+                 environment: DeployEnvironment = DeployEnvironment.FREE_SPACE,
+                 building: BuildingType = BuildingType.NONE,
+                 antenna_height_m: float = 2.0):
         """Initialize analyzer with radio parameters.
 
         Args:
@@ -172,12 +182,18 @@ class PresetAnalyzer:
             rx_gain_dbi: Receive antenna gain in dBi.
             freq_mhz: Operating frequency in MHz.
             payload_bytes: Payload size for airtime calculation.
+            environment: Deployment environment for path loss modeling.
+            building: Building type at RX end (adds penetration loss).
+            antenna_height_m: Antenna height above ground in meters.
         """
         self.tx_power_dbm = tx_power_dbm
         self.tx_gain_dbi = tx_gain_dbi
         self.rx_gain_dbi = rx_gain_dbi
         self.freq_mhz = freq_mhz
         self.payload_bytes = payload_bytes
+        self.environment = environment
+        self.building = building
+        self.antenna_height_m = antenna_height_m
 
     def sensitivity(self, spreading_factor: int, bandwidth_hz: int) -> float:
         """Calculate receiver sensitivity for given LoRa parameters.
@@ -305,16 +321,22 @@ class PresetAnalyzer:
         # Link budget = TX power + gains - sensitivity
         lb = self.tx_power_dbm + self.tx_gain_dbi + self.rx_gain_dbi - sens
 
-        # Max range from FSPL
-        max_range_m = self.max_range_fspl(lb, self.freq_mhz)
+        # Max range using environment-aware log-distance model
+        if self.environment == DeployEnvironment.FREE_SPACE:
+            # Pure FSPL for backwards compatibility and LOS reference
+            max_range_m = self.max_range_fspl(lb, self.freq_mhz)
+        else:
+            max_range_m = realistic_max_range(
+                lb, self.freq_mhz,
+                environment=self.environment,
+                building=self.building,
+            )
         max_range_km = max_range_m / 1000.0
 
-        # Earth curvature limit (radio horizon for ground-level antennas)
-        # d_horizon = sqrt(2 * R * h) for 4/3 earth model
-        # At 10m antenna height: ~13 km radio horizon
-        # For elevated terrain, much further — so we just report FSPL range
-        # but cap at a practical limit
-        practical_limit_km = min(max_range_km, 200.0)  # Cap at 200 km
+        # Cap at radio horizon based on antenna heights
+        horizon_km = radio_horizon_km(self.antenna_height_m,
+                                      self.antenna_height_m)
+        practical_limit_km = min(max_range_km, horizon_km)
 
         # Coverage area (circular)
         coverage_km2 = math.pi * practical_limit_km ** 2
