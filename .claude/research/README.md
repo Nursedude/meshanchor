@@ -31,12 +31,19 @@
 | `meshtasticd_port_conflicts.md` | Port conflict troubleshooting |
 | `meshtastic_broken_pipe_bug.md` | Known CLI bug documentation |
 
+### RF & Physical Layer Research
+
+| Document | Description |
+|----------|-------------|
+| `lora_physical_layer.md` | **LoRa PHY deep-dive: CSS modulation, demodulation, SNR limits, synchronization, capture effect, link budget** |
+| `rf_lora_phy_deep_dive.md` | **RF engine gap analysis: propagation models, environment modeling, concrete improvements with code** |
+| `site_planner.md` | RF site planning resources |
+
 ### Tools & Planning
 
 | Document | Description |
 |----------|-------------|
 | `maps_double_tap.md` | **Maps "Double Tap" — eye candy vision & task breakdown** |
-| `site_planner.md` | RF site planning resources |
 | `gateway_setup_guide.md` | Gateway configuration guide |
 | `firmware_viability.md` | Firmware compatibility analysis |
 
