@@ -82,6 +82,9 @@ class PrometheusExporter:
         self._collectors.append(self._collect_gateway_metrics)
         self._collectors.append(self._collect_tcp_metrics)
         self._collectors.append(self._collect_rns_metrics)
+        self._collectors.append(self._collect_environment_metrics)
+        self._collectors.append(self._collect_mqtt_metrics)
+        self._collectors.append(self._collect_topology_metrics)
 
     def register_collector(self, collector: Callable[[], List[str]]) -> None:
         """
@@ -326,10 +329,21 @@ class PrometheusExporter:
                         rssi_added = True
                     lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
 
+            # Battery metrics
+            battery_added = False
+            for point in history.get_recent(metric_type=MetricType.BATTERY, hours=1, limit=100):
+                if point.node_id:
+                    if not battery_added:
+                        defn = METRICS["meshforge_node_battery_percent"]
+                        lines.append(f"# HELP {defn.name} {defn.help_text}")
+                        lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                        battery_added = True
+                    lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
+
         except ImportError:
             pass
         except Exception as e:
-            logger.debug(f"Error collecting SNR/RSSI metrics: {e}")
+            logger.debug(f"Error collecting SNR/RSSI/battery metrics: {e}")
 
         return lines
 
@@ -531,6 +545,240 @@ class PrometheusExporter:
 
         except Exception as e:
             logger.debug(f"Error collecting RNS metrics: {e}")
+
+        return lines
+
+    def _collect_environment_metrics(self) -> List[str]:
+        """Collect environment sensor metrics from MQTT subscriber nodes.
+
+        Exports temperature, humidity, pressure, gas resistance, air quality,
+        and health metrics (heart rate, SpO2) from nodes with attached sensors.
+        """
+        lines = []
+
+        try:
+            from monitoring.mqtt_subscriber import get_local_subscriber
+        except ImportError:
+            logger.debug("MQTT subscriber not available for environment metrics")
+            return lines
+
+        try:
+            subscriber = get_local_subscriber()
+            if not subscriber.is_connected():
+                return lines
+
+            # Environment sensors (BME280/BME680/BMP280)
+            env_nodes = subscriber.get_nodes_with_environment_metrics()
+            if env_nodes:
+                # Temperature
+                temp_nodes = [n for n in env_nodes if n.temperature is not None]
+                if temp_nodes:
+                    defn = METRICS["meshforge_env_temperature_celsius"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in temp_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.temperature, {"node_id": node.node_id}
+                        ))
+
+                # Humidity
+                humid_nodes = [n for n in env_nodes if n.humidity is not None]
+                if humid_nodes:
+                    defn = METRICS["meshforge_env_humidity_percent"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in humid_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.humidity, {"node_id": node.node_id}
+                        ))
+
+                # Pressure
+                press_nodes = [n for n in env_nodes if n.pressure is not None]
+                if press_nodes:
+                    defn = METRICS["meshforge_env_pressure_hpa"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in press_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.pressure, {"node_id": node.node_id}
+                        ))
+
+                # Gas resistance (BME680)
+                gas_nodes = [n for n in env_nodes if n.gas_resistance is not None]
+                if gas_nodes:
+                    defn = METRICS["meshforge_env_gas_resistance_ohms"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in gas_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.gas_resistance, {"node_id": node.node_id}
+                        ))
+
+            # Air quality sensors (PMSA003I, SCD4X)
+            aq_nodes = subscriber.get_nodes_with_air_quality()
+            if aq_nodes:
+                pm25_nodes = [n for n in aq_nodes if n.pm25_standard is not None]
+                if pm25_nodes:
+                    defn = METRICS["meshforge_air_quality_pm25"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in pm25_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.pm25_standard, {"node_id": node.node_id}
+                        ))
+
+                pm10_nodes = [n for n in aq_nodes if n.pm10_standard is not None]
+                if pm10_nodes:
+                    defn = METRICS["meshforge_air_quality_pm10"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in pm10_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.pm10_standard, {"node_id": node.node_id}
+                        ))
+
+                co2_nodes = [n for n in aq_nodes if n.co2 is not None]
+                if co2_nodes:
+                    defn = METRICS["meshforge_air_quality_co2_ppm"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in co2_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.co2, {"node_id": node.node_id}
+                        ))
+
+                iaq_nodes = [n for n in aq_nodes if n.iaq is not None]
+                if iaq_nodes:
+                    defn = METRICS["meshforge_air_quality_iaq"]
+                    lines.append(f"# HELP {defn.name} {defn.help_text}")
+                    lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                    for node in iaq_nodes:
+                        lines.append(_format_metric_line(
+                            defn.name, node.iaq, {"node_id": node.node_id}
+                        ))
+
+            # Health metrics (MAX30102, pulse oximeters) - Meshtastic 2.7+
+            all_nodes = subscriber.get_nodes()
+            hr_nodes = [n for n in all_nodes if n.heart_bpm is not None]
+            if hr_nodes:
+                defn = METRICS["meshforge_health_heart_bpm"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for node in hr_nodes:
+                    lines.append(_format_metric_line(
+                        defn.name, node.heart_bpm, {"node_id": node.node_id}
+                    ))
+
+            spo2_nodes = [n for n in all_nodes if n.spo2 is not None]
+            if spo2_nodes:
+                defn = METRICS["meshforge_health_spo2_percent"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for node in spo2_nodes:
+                    lines.append(_format_metric_line(
+                        defn.name, node.spo2, {"node_id": node.node_id}
+                    ))
+
+        except Exception as e:
+            logger.debug(f"Error collecting environment metrics: {e}")
+
+        return lines
+
+    def _collect_mqtt_metrics(self) -> List[str]:
+        """Collect MQTT subscriber statistics.
+
+        Exports connection state, node counts, mesh size, and message
+        counts from the MQTT subscriber singleton.
+        """
+        lines = []
+
+        try:
+            from monitoring.mqtt_subscriber import get_local_subscriber
+        except ImportError:
+            logger.debug("MQTT subscriber not available for metrics")
+            return lines
+
+        try:
+            subscriber = get_local_subscriber()
+            stats = subscriber.get_stats()
+            connected = 1 if subscriber.is_connected() else 0
+
+            # MQTT connected status
+            defn = METRICS["meshforge_mqtt_connected"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, connected))
+
+            # MQTT total nodes
+            defn = METRICS["meshforge_mqtt_nodes_total"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, stats.get("node_count", 0)))
+
+            # MQTT online nodes
+            defn = METRICS["meshforge_mqtt_nodes_online"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, stats.get("online_count", 0)))
+
+            # MQTT messages received
+            defn = METRICS["meshforge_mqtt_messages_received"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, stats.get("message_count", 0)))
+
+            # Mesh size (24h unique nodes)
+            defn = METRICS["meshforge_mqtt_mesh_size"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, stats.get("mesh_size_24h", 0)))
+
+        except Exception as e:
+            logger.debug(f"Error collecting MQTT metrics: {e}")
+
+        return lines
+
+    def _collect_topology_metrics(self) -> List[str]:
+        """Collect network topology graph statistics.
+
+        Exports node count, edge count, and snapshot count from
+        the topology snapshot store.
+        """
+        lines = []
+
+        try:
+            from utils.topology_snapshot import get_topology_snapshot_store
+        except ImportError:
+            logger.debug("Topology snapshot store not available")
+            return lines
+
+        try:
+            store = get_topology_snapshot_store()
+            snapshots = store.get_snapshots(hours=24)
+
+            # Snapshot count
+            defn = METRICS["meshforge_topology_snapshots"]
+            lines.append(f"# HELP {defn.name} {defn.help_text}")
+            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+            lines.append(_format_metric_line(defn.name, len(snapshots)))
+
+            # Latest snapshot stats (if any)
+            if snapshots:
+                latest = snapshots[-1]
+                stats = latest.stats if hasattr(latest, 'stats') else {}
+
+                defn = METRICS["meshforge_topology_nodes"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, stats.get("node_count", len(latest.nodes))))
+
+                defn = METRICS["meshforge_topology_edges"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, stats.get("edge_count", len(latest.edges))))
+
+        except Exception as e:
+            logger.debug(f"Error collecting topology metrics: {e}")
 
         return lines
 
@@ -978,6 +1226,21 @@ Grafana Setup (Option 2 - Infinity plugin):
                 metrics['meshtasticd_running'] = 0
                 metrics['rnsd_running'] = 0
 
+            # MQTT stats
+            try:
+                from monitoring.mqtt_subscriber import get_local_subscriber
+                subscriber = get_local_subscriber()
+                mqtt_stats = subscriber.get_stats()
+                metrics['mqtt_connected'] = 1 if subscriber.is_connected() else 0
+                metrics['mqtt_nodes'] = mqtt_stats.get('node_count', 0)
+                metrics['mqtt_online'] = mqtt_stats.get('online_count', 0)
+                metrics['mqtt_mesh_size_24h'] = mqtt_stats.get('mesh_size_24h', 0)
+                metrics['mqtt_nodes_with_env'] = mqtt_stats.get('nodes_with_env_metrics', 0)
+                metrics['mqtt_nodes_with_aq'] = mqtt_stats.get('nodes_with_aq_metrics', 0)
+                metrics['mesh_health_status'] = mqtt_stats.get('mesh_health_status', 'unknown')
+            except Exception:
+                metrics['mqtt_connected'] = 0
+
             # Uptime
             if self.exporter:
                 metrics['uptime_seconds'] = time.time() - self.exporter.start_time
@@ -1012,16 +1275,28 @@ Grafana Setup (Option 2 - Infinity plugin):
                 for feature in geojson.get('features', []):
                     props = feature.get('properties', {})
                     coords = feature.get('geometry', {}).get('coordinates', [0, 0])
-                    nodes.append({
+                    node_data = {
                         'id': props.get('id', ''),
                         'name': props.get('name', ''),
                         'lat': coords[1] if len(coords) > 1 else 0,
                         'lon': coords[0] if len(coords) > 0 else 0,
                         'snr': props.get('snr'),
+                        'rssi': props.get('rssi'),
                         'battery': props.get('battery'),
                         'last_heard': props.get('last_heard'),
                         'online': props.get('online', False),
-                    })
+                        'hardware': props.get('hardware', ''),
+                        'role': props.get('role', ''),
+                        # Environment sensors
+                        'temperature': props.get('temperature'),
+                        'humidity': props.get('humidity'),
+                        'pressure': props.get('pressure'),
+                        # Air quality
+                        'pm25': props.get('pm25'),
+                        'co2': props.get('co2'),
+                        'iaq': props.get('iaq'),
+                    }
+                    nodes.append(node_data)
             except Exception as e:
                 logger.debug(f"Node collection error: {e}")
 

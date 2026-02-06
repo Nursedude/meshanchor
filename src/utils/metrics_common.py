@@ -263,6 +263,124 @@ METRICS: Dict[str, MetricDefinition] = {
         help_text="Hop count for known RNS path",
         labels=["destination"],
     ),
+
+    # Environment sensor metrics (BME280, BME680, BMP280)
+    "meshforge_env_temperature_celsius": MetricDefinition(
+        name="meshforge_env_temperature_celsius",
+        metric_type=GAUGE,
+        help_text="Environment temperature in Celsius from node sensor",
+        labels=["node_id"],
+    ),
+    "meshforge_env_humidity_percent": MetricDefinition(
+        name="meshforge_env_humidity_percent",
+        metric_type=GAUGE,
+        help_text="Relative humidity percentage from node sensor",
+        labels=["node_id"],
+    ),
+    "meshforge_env_pressure_hpa": MetricDefinition(
+        name="meshforge_env_pressure_hpa",
+        metric_type=GAUGE,
+        help_text="Barometric pressure in hPa from node sensor",
+        labels=["node_id"],
+    ),
+    "meshforge_env_gas_resistance_ohms": MetricDefinition(
+        name="meshforge_env_gas_resistance_ohms",
+        metric_type=GAUGE,
+        help_text="Gas resistance in Ohms from BME680 VOC sensor",
+        labels=["node_id"],
+    ),
+
+    # Air quality metrics (PMSA003I, SCD4X)
+    "meshforge_air_quality_pm25": MetricDefinition(
+        name="meshforge_air_quality_pm25",
+        metric_type=GAUGE,
+        help_text="PM2.5 particulate matter in ug/m3",
+        labels=["node_id"],
+    ),
+    "meshforge_air_quality_pm10": MetricDefinition(
+        name="meshforge_air_quality_pm10",
+        metric_type=GAUGE,
+        help_text="PM10 particulate matter in ug/m3",
+        labels=["node_id"],
+    ),
+    "meshforge_air_quality_co2_ppm": MetricDefinition(
+        name="meshforge_air_quality_co2_ppm",
+        metric_type=GAUGE,
+        help_text="CO2 concentration in ppm from SCD4X sensor",
+        labels=["node_id"],
+    ),
+    "meshforge_air_quality_iaq": MetricDefinition(
+        name="meshforge_air_quality_iaq",
+        metric_type=GAUGE,
+        help_text="Indoor Air Quality index (0-500)",
+        labels=["node_id"],
+    ),
+
+    # Health metrics (MAX30102, pulse oximeters) - Meshtastic 2.7+
+    "meshforge_health_heart_bpm": MetricDefinition(
+        name="meshforge_health_heart_bpm",
+        metric_type=GAUGE,
+        help_text="Heart rate in beats per minute from wearable sensor",
+        labels=["node_id"],
+    ),
+    "meshforge_health_spo2_percent": MetricDefinition(
+        name="meshforge_health_spo2_percent",
+        metric_type=GAUGE,
+        help_text="Blood oxygen saturation percentage from pulse oximeter",
+        labels=["node_id"],
+    ),
+
+    # MQTT subscriber metrics
+    "meshforge_mqtt_nodes_total": MetricDefinition(
+        name="meshforge_mqtt_nodes_total",
+        metric_type=GAUGE,
+        help_text="Total nodes discovered via MQTT",
+        labels=[],
+    ),
+    "meshforge_mqtt_nodes_online": MetricDefinition(
+        name="meshforge_mqtt_nodes_online",
+        metric_type=GAUGE,
+        help_text="Nodes currently online via MQTT",
+        labels=[],
+    ),
+    "meshforge_mqtt_connected": MetricDefinition(
+        name="meshforge_mqtt_connected",
+        metric_type=GAUGE,
+        help_text="Whether MQTT subscriber is connected (1) or not (0)",
+        labels=[],
+    ),
+    "meshforge_mqtt_messages_received": MetricDefinition(
+        name="meshforge_mqtt_messages_received",
+        metric_type=COUNTER,
+        help_text="Total MQTT messages received",
+        labels=[],
+    ),
+    "meshforge_mqtt_mesh_size": MetricDefinition(
+        name="meshforge_mqtt_mesh_size",
+        metric_type=GAUGE,
+        help_text="Unique nodes seen in last 24 hours via MQTT",
+        labels=[],
+    ),
+
+    # Topology metrics
+    "meshforge_topology_nodes": MetricDefinition(
+        name="meshforge_topology_nodes",
+        metric_type=GAUGE,
+        help_text="Number of nodes in network topology graph",
+        labels=[],
+    ),
+    "meshforge_topology_edges": MetricDefinition(
+        name="meshforge_topology_edges",
+        metric_type=GAUGE,
+        help_text="Number of edges (links) in network topology graph",
+        labels=[],
+    ),
+    "meshforge_topology_snapshots": MetricDefinition(
+        name="meshforge_topology_snapshots",
+        metric_type=GAUGE,
+        help_text="Number of stored topology snapshots",
+        labels=[],
+    ),
 }
 
 
