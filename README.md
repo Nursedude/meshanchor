@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.0--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.1--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2963%20functions-brightgreen.svg" alt="Tests"></a>
@@ -141,13 +141,10 @@ sudo git pull origin main
 
 ### Switch Branches
 
-The `main` and `alpha` branches are now synchronized. Both contain all features.
+All development is on `main`. The `alpha` branch is deprecated (135 commits behind).
 
 ```bash
-# Check current branch
-git branch
-
-# Switch if needed (both are equivalent)
+# If you're on alpha, switch to main:
 git checkout main
 sudo git pull origin main
 ```
@@ -663,19 +660,11 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ---
 
-## Development Branches
+## Development
 
-MeshForge uses a unified development model:
-
-| Branch | Purpose | Status |
-|--------|---------|--------|
-| `main` | Production-ready, all features | **Stable** |
-| `alpha` | Synchronized with main | Unified |
-
-All features are now in `main`. The `alpha` branch tracks `main` for users who prefer the alpha naming convention.
+Single-branch model on `main`. Feature branches via `claude/` prefix, merged by PR.
 
 ```bash
-# Install (main branch)
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
 sudo bash scripts/install_noc.sh

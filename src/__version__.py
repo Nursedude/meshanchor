@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.5.0-beta"
-__version_info__ = (0, 5, 0, 'beta')
-__release_date__ = "2026-02-01"
+__version__ = "0.5.1-beta"
+__version_info__ = (0, 5, 1, 'beta')
+__release_date__ = "2026-02-06"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
@@ -14,6 +14,33 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.5.1-beta",
+        "date": "2026-02-06",
+        "status": "beta",
+        "changes": [
+            "NEW: Full telemetry pipeline — sensor data through Prometheus, InfluxDB, Grafana",
+            "NEW: Gateway auto-starts metrics server, MQTT connect with timeout",
+            "NEW: Auto-fix RNS shared instance on 'no shared' error",
+            "NEW: Meshtastic 2.7+ favorites management, PKI status, health metrics",
+            "NEW: Wireshark-grade RNS packet sniffer",
+            "NEW: MQTT auto-start and local broker multi-consumer architecture",
+            "NEW: MQTT → WebSocket bridge for web UI access",
+            "NEW: Startup warning for root without SUDO_USER",
+            "FIX: Gateway bridge connects to RNS as shared instance client",
+            "FIX: MQTT subscriber hang on exit (4 root causes)",
+            "FIX: Bind metrics server to localhost only (security)",
+            "FIX: Path.home() violations in 6 files (MF001 audit)",
+            "FIX: shell=True in updates_mixin.py (MF002)",
+            "FIX: License mismatch in TUI about screen (MIT → GPL-3.0)",
+            "FIX: _frequency_calculator() undefined method → _calc_frequency_slot()",
+            "REFACTOR: TUI Maps & Viz menu routes directly to map functions",
+            "REFACTOR: Removed dead _handle_choice() and _network_tools_submenu()",
+            "REFACTOR: Extracted rns_sniffer_mixin, metrics modules, diagnostic checks",
+            "DOCS: README updated with TUI menu structure, code health, raspi-config patterns",
+            "DOCS: Single-branch model — alpha branch deprecated",
+        ]
+    },
     {
         "version": "0.5.0-beta",
         "date": "2026-02-01",
