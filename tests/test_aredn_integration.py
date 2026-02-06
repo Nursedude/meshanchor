@@ -340,16 +340,16 @@ class TestAREDNClientIPDetection:
     """Test IP vs hostname detection."""
 
     def test_ip_detection(self):
-        """Test that IP addresses are correctly detected."""
+        """Test that IP addresses are correctly detected with port 8080."""
         client = AREDNClient("10.54.25.2")
         assert client.ip == "10.54.25.2"
-        assert client.base_url == "http://10.54.25.2"
+        assert client.base_url == "http://10.54.25.2:8080"
 
     def test_hostname_detection(self):
-        """Test that hostnames use .local.mesh suffix."""
+        """Test that hostnames use .local.mesh suffix with port 8080."""
         client = AREDNClient("WH6GXZ-meshforge")
         assert client.ip is None
-        assert client.base_url == "http://WH6GXZ-meshforge.local.mesh"
+        assert client.base_url == "http://WH6GXZ-meshforge.local.mesh:8080"
 
 
 class TestAREDNNodeDataclass:
@@ -371,14 +371,14 @@ class TestAREDNNodeDataclass:
         assert node.has_location() is False
 
     def test_base_url_with_ip(self):
-        """Test base_url uses IP when available."""
+        """Test base_url uses IP with port 8080."""
         node = AREDNNode(hostname="test", ip="10.54.25.2")
-        assert node.base_url == "http://10.54.25.2"
+        assert node.base_url == "http://10.54.25.2:8080"
 
     def test_base_url_without_ip(self):
-        """Test base_url uses .local.mesh when no IP."""
+        """Test base_url uses .local.mesh with port 8080."""
         node = AREDNNode(hostname="WH6GXZ-node")
-        assert node.base_url == "http://WH6GXZ-node.local.mesh"
+        assert node.base_url == "http://WH6GXZ-node.local.mesh:8080"
 
     def test_to_dict(self):
         """Test serialization to dict."""
