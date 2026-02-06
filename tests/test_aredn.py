@@ -167,13 +167,13 @@ class TestAREDNNode:
         """Test base_url uses IP when available."""
         node = AREDNNode(hostname="test", ip="10.0.0.5")
 
-        assert node.base_url == "http://10.0.0.5"
+        assert node.base_url == "http://10.0.0.5:8080"
 
     def test_base_url_without_ip(self):
         """Test base_url uses hostname when no IP."""
         node = AREDNNode(hostname="mynode")
 
-        assert node.base_url == "http://mynode.local.mesh"
+        assert node.base_url == "http://mynode.local.mesh:8080"
 
     def test_to_dict(self):
         """Test serialization to dict."""
