@@ -959,6 +959,81 @@ class RNSMenuMixin(RNSSnifferMixin):
 
         subprocess.run([editor, str(config_path)], timeout=None)
 
+        # After editing, check for config divergence between user and root
+        self._check_rns_config_divergence(config_path)
+
+    def _check_rns_config_divergence(self, edited_path: Path):
+        """Check if edited config differs from root/system config that rnsd actually uses.
+
+        When running with sudo, user edits /home/user/.reticulum/config but
+        rnsd (running as root) reads /root/.reticulum/config. The configs
+        silently diverge, causing the user's changes to have no effect.
+
+        This check warns the user and offers to sync.
+        """
+        import os
+
+        # Only relevant when running as root/sudo
+        if os.geteuid() != 0:
+            return
+
+        # Find where rnsd actually reads its config
+        # rnsd systemd service runs as root, so it reads from one of:
+        root_configs = [
+            Path('/etc/reticulum/config'),
+            Path('/root/.config/reticulum/config'),
+            Path('/root/.reticulum/config'),
+        ]
+
+        # Skip if edited path is already a root/system path
+        edited_str = str(edited_path)
+        if edited_str.startswith('/root/') or edited_str.startswith('/etc/'):
+            return
+
+        for root_config in root_configs:
+            if root_config.exists() and root_config != edited_path:
+                # Compare contents
+                try:
+                    user_content = edited_path.read_text()
+                    root_content = root_config.read_text()
+
+                    if user_content != root_content:
+                        if self.dialog.yesno(
+                            "Config Divergence Detected",
+                            f"WARNING: Your edited config:\n"
+                            f"  {edited_path}\n\n"
+                            f"differs from the config rnsd uses:\n"
+                            f"  {root_config}\n\n"
+                            f"rnsd runs as root and reads {root_config}.\n"
+                            f"Your changes won't take effect until synced.\n\n"
+                            f"Copy your config to {root_config}?"
+                        ):
+                            try:
+                                import shutil
+                                # Backup root config first
+                                backup = root_config.with_suffix('.config.bak')
+                                if root_config.exists():
+                                    shutil.copy2(str(root_config), str(backup))
+                                shutil.copy2(str(edited_path), str(root_config))
+                                self.dialog.msgbox(
+                                    "Config Synced",
+                                    f"Copied to: {root_config}\n"
+                                    f"Backup at: {backup}\n\n"
+                                    f"Restart rnsd to apply:\n"
+                                    f"  sudo systemctl restart rnsd"
+                                )
+                            except Exception as e:
+                                self.dialog.msgbox(
+                                    "Sync Failed",
+                                    f"Could not copy config: {e}\n\n"
+                                    f"Manual fix:\n"
+                                    f"  sudo cp {edited_path} {root_config}\n"
+                                    f"  sudo systemctl restart rnsd"
+                                )
+                except Exception:
+                    pass
+                return  # Only check the first existing root config
+
     def _validate_rns_config_content(self, content: str) -> list:
         """Validate RNS config content and return list of issues found.
 
