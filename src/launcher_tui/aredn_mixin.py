@@ -54,7 +54,7 @@ class AREDNMixin:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 try:
-                    result = sock.connect_ex((host, 80))
+                    result = sock.connect_ex((host, 8080))  # AREDN serves on 8080
                     if result == 0:
                         return host
                 finally:
