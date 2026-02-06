@@ -730,3 +730,193 @@ class TestStartInfluxDBExporter:
         exporter.stop()
         time.sleep(0.2)  # Give thread time to stop
         assert exporter.is_running() is False
+
+
+class TestEnvironmentMetricDefinitions:
+    """Test environment sensor metric definitions."""
+
+    def test_environment_metrics_defined(self):
+        """Test that all environment sensor metrics are defined."""
+        env_metrics = [
+            "meshforge_env_temperature_celsius",
+            "meshforge_env_humidity_percent",
+            "meshforge_env_pressure_hpa",
+            "meshforge_env_gas_resistance_ohms",
+        ]
+        for metric in env_metrics:
+            assert metric in METRICS, f"Missing env metric: {metric}"
+            assert METRICS[metric].metric_type == GAUGE
+            assert "node_id" in METRICS[metric].labels
+
+    def test_air_quality_metrics_defined(self):
+        """Test that air quality metrics are defined."""
+        aq_metrics = [
+            "meshforge_air_quality_pm25",
+            "meshforge_air_quality_pm10",
+            "meshforge_air_quality_co2_ppm",
+            "meshforge_air_quality_iaq",
+        ]
+        for metric in aq_metrics:
+            assert metric in METRICS, f"Missing AQ metric: {metric}"
+            assert METRICS[metric].metric_type == GAUGE
+
+    def test_health_metrics_defined(self):
+        """Test that health/wearable metrics are defined."""
+        health_metrics = [
+            "meshforge_health_heart_bpm",
+            "meshforge_health_spo2_percent",
+        ]
+        for metric in health_metrics:
+            assert metric in METRICS, f"Missing health metric: {metric}"
+            assert METRICS[metric].metric_type == GAUGE
+
+    def test_mqtt_metrics_defined(self):
+        """Test that MQTT subscriber metrics are defined."""
+        mqtt_metrics = [
+            "meshforge_mqtt_nodes_total",
+            "meshforge_mqtt_nodes_online",
+            "meshforge_mqtt_connected",
+            "meshforge_mqtt_messages_received",
+            "meshforge_mqtt_mesh_size",
+        ]
+        for metric in mqtt_metrics:
+            assert metric in METRICS, f"Missing MQTT metric: {metric}"
+            assert METRICS[metric].metric_type in [GAUGE, COUNTER]
+
+    def test_topology_metrics_defined(self):
+        """Test that topology metrics are defined."""
+        topo_metrics = [
+            "meshforge_topology_nodes",
+            "meshforge_topology_edges",
+            "meshforge_topology_snapshots",
+        ]
+        for metric in topo_metrics:
+            assert metric in METRICS, f"Missing topology metric: {metric}"
+            assert METRICS[metric].metric_type == GAUGE
+
+
+class TestEnvironmentCollector:
+    """Test environment metrics collector with mocked MQTT subscriber."""
+
+    def test_env_collector_with_mocked_subscriber(self):
+        """Test environment collector exports sensor data from MQTT nodes."""
+        # Create mock MQTT node with sensor data
+        mock_node = MagicMock()
+        mock_node.node_id = "!abc123"
+        mock_node.long_name = "Sensor Node"
+        mock_node.short_name = "SN"
+        mock_node.temperature = 25.5
+        mock_node.humidity = 65.2
+        mock_node.pressure = 1013.25
+        mock_node.gas_resistance = 50000.0
+        mock_node.pm25_standard = 12
+        mock_node.pm10_standard = None
+        mock_node.co2 = 450
+        mock_node.iaq = 42
+        mock_node.heart_bpm = 72
+        mock_node.spo2 = 98
+
+        mock_subscriber = MagicMock()
+        mock_subscriber.is_connected.return_value = True
+        mock_subscriber.get_nodes_with_environment_metrics.return_value = [mock_node]
+        mock_subscriber.get_nodes_with_air_quality.return_value = [mock_node]
+        mock_subscriber.get_nodes.return_value = [mock_node]
+
+        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+            exporter = PrometheusExporter()
+            lines = exporter._collect_environment_metrics()
+
+            output = "\n".join(lines)
+            assert "meshforge_env_temperature_celsius" in output
+            assert "25.5" in output
+            assert "meshforge_env_humidity_percent" in output
+            assert "65.2" in output
+            assert "meshforge_env_pressure_hpa" in output
+            assert "1013.25" in output
+            assert "meshforge_air_quality_pm25" in output
+            assert "meshforge_air_quality_co2_ppm" in output
+            assert "meshforge_health_heart_bpm" in output
+            assert "72" in output
+            assert "meshforge_health_spo2_percent" in output
+
+    def test_env_collector_handles_no_connection(self):
+        """Test environment collector handles disconnected MQTT gracefully."""
+        mock_subscriber = MagicMock()
+        mock_subscriber.is_connected.return_value = False
+
+        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+            exporter = PrometheusExporter()
+            lines = exporter._collect_environment_metrics()
+            assert lines == []
+
+    def test_env_collector_handles_import_error(self):
+        """Test environment collector handles missing MQTT module."""
+        exporter = PrometheusExporter()
+        # The collector should handle ImportError gracefully
+        lines = exporter._collect_environment_metrics()
+        assert isinstance(lines, list)
+
+
+class TestMQTTCollector:
+    """Test MQTT metrics collector."""
+
+    def test_mqtt_collector_with_mocked_subscriber(self):
+        """Test MQTT collector exports subscriber statistics."""
+        mock_subscriber = MagicMock()
+        mock_subscriber.is_connected.return_value = True
+        mock_subscriber.get_stats.return_value = {
+            "node_count": 50,
+            "online_count": 30,
+            "message_count": 1000,
+            "mesh_size_24h": 45,
+        }
+
+        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+            exporter = PrometheusExporter()
+            lines = exporter._collect_mqtt_metrics()
+
+            output = "\n".join(lines)
+            assert "meshforge_mqtt_connected" in output
+            assert "meshforge_mqtt_nodes_total" in output
+            assert "50" in output
+            assert "meshforge_mqtt_nodes_online" in output
+            assert "30" in output
+            assert "meshforge_mqtt_mesh_size" in output
+            assert "45" in output
+
+
+class TestTopologyCollector:
+    """Test topology metrics collector."""
+
+    def test_topology_collector_with_mocked_store(self):
+        """Test topology collector exports snapshot statistics."""
+        mock_snapshot = MagicMock()
+        mock_snapshot.nodes = [{"id": "n1"}, {"id": "n2"}, {"id": "n3"}]
+        mock_snapshot.edges = [{"src": "n1", "dst": "n2"}]
+        mock_snapshot.stats = {"node_count": 3, "edge_count": 1}
+
+        mock_store = MagicMock()
+        mock_store.get_snapshots.return_value = [mock_snapshot]
+
+        with patch('utils.topology_snapshot.get_topology_snapshot_store', return_value=mock_store):
+            exporter = PrometheusExporter()
+            lines = exporter._collect_topology_metrics()
+
+            output = "\n".join(lines)
+            assert "meshforge_topology_snapshots" in output
+            assert "meshforge_topology_nodes" in output
+            assert "meshforge_topology_edges" in output
+
+    def test_topology_collector_no_snapshots(self):
+        """Test topology collector handles empty snapshot store."""
+        mock_store = MagicMock()
+        mock_store.get_snapshots.return_value = []
+
+        with patch('utils.topology_snapshot.get_topology_snapshot_store', return_value=mock_store):
+            exporter = PrometheusExporter()
+            lines = exporter._collect_topology_metrics()
+
+            output = "\n".join(lines)
+            assert "meshforge_topology_snapshots" in output
+            # Should show 0 snapshots
+            assert "0" in output
