@@ -11,7 +11,13 @@ import math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from utils.rf import haversine_distance, fresnel_radius, free_space_path_loss, earth_bulge
+from utils.rf import (
+    haversine_distance, fresnel_radius, free_space_path_loss, earth_bulge,
+    DeployEnvironment, BuildingType, ENVIRONMENT_PARAMS,
+    BUILDING_PENETRATION_DB, SNR_THRESHOLD_DB,
+    rx_sensitivity, log_distance_path_loss, realistic_max_range,
+    radio_horizon_km, processing_gain_db, capture_effect,
+)
 
 
 class TestHaversineDistance:
@@ -213,6 +219,250 @@ class TestDetailedLinkBudget:
         assert sf12.link_margin_db > sf7.link_margin_db
 
 
+class TestRxSensitivity:
+    """Test bandwidth-aware receiver sensitivity calculation."""
+
+    def test_sf12_bw125_standard(self):
+        """SF12/125kHz should be ~-137 dBm (matches datasheet)."""
+        sens = rx_sensitivity(12, 125000)
+        assert -138.0 < sens < -136.0
+
+    def test_sf7_bw125(self):
+        """SF7/125kHz should be ~-124.5 dBm."""
+        sens = rx_sensitivity(7, 125000)
+        assert -125.5 < sens < -123.5
+
+    def test_sf11_bw250_longfast(self):
+        """LongFast (SF11/250kHz) should be ~-131.5 dBm."""
+        sens = rx_sensitivity(11, 250000)
+        assert -132.5 < sens < -130.5
+
+    def test_sf12_bw62500_verylongslow(self):
+        """VeryLongSlow (SF12/62.5kHz) should be ~-140 dBm."""
+        sens = rx_sensitivity(12, 62500)
+        assert -141.0 < sens < -139.0
+
+    def test_wider_bw_less_sensitive(self):
+        """Wider bandwidth = worse sensitivity (more noise)."""
+        sens_125 = rx_sensitivity(11, 125000)
+        sens_250 = rx_sensitivity(11, 250000)
+        assert sens_250 > sens_125  # Less negative = worse
+
+    def test_higher_sf_more_sensitive(self):
+        """Higher SF = better sensitivity (lower SNR threshold)."""
+        sens_7 = rx_sensitivity(7, 125000)
+        sens_12 = rx_sensitivity(12, 125000)
+        assert sens_12 < sens_7  # More negative = better
+
+    def test_halving_bw_gains_3db(self):
+        """Halving BW should improve sensitivity by ~3 dB."""
+        sens_250 = rx_sensitivity(11, 250000)
+        sens_125 = rx_sensitivity(11, 125000)
+        diff = sens_250 - sens_125
+        assert 2.5 < diff < 3.5
+
+
+class TestLogDistancePathLoss:
+    """Test environment-aware log-distance path loss model."""
+
+    def test_free_space_matches_fspl(self):
+        """Free space environment should closely match FSPL."""
+        ld_pl = log_distance_path_loss(1000, 915, DeployEnvironment.FREE_SPACE)
+        fspl = free_space_path_loss(1000, 915)
+        assert abs(ld_pl - fspl) < 1.0  # Within 1 dB
+
+    def test_suburban_worse_than_free_space(self):
+        """Suburban PLE 2.7 should give more loss than free space PLE 2.0."""
+        fs_pl = log_distance_path_loss(5000, 915, DeployEnvironment.FREE_SPACE)
+        sub_pl = log_distance_path_loss(5000, 915, DeployEnvironment.SUBURBAN)
+        assert sub_pl > fs_pl + 5  # At least 5 dB worse at 5 km
+
+    def test_forest_much_worse(self):
+        """Forest PLE 5.0 should give dramatically more loss."""
+        sub_pl = log_distance_path_loss(1000, 915, DeployEnvironment.SUBURBAN)
+        forest_pl = log_distance_path_loss(1000, 915, DeployEnvironment.FOREST)
+        assert forest_pl > sub_pl + 15
+
+    def test_urban_elevated_below_free_space(self):
+        """Urban elevated GW (PLE 1.8) can be better than free space at distance."""
+        ue_pl = log_distance_path_loss(5000, 915, DeployEnvironment.URBAN_ELEVATED)
+        fs_pl = log_distance_path_loss(5000, 915, DeployEnvironment.FREE_SPACE)
+        assert ue_pl < fs_pl  # Waveguide effect
+
+    def test_short_distance_uses_fspl(self):
+        """Very short distance should fall back to FSPL."""
+        ld_pl = log_distance_path_loss(0.5, 915, DeployEnvironment.SUBURBAN, d0_m=1.0)
+        fspl = free_space_path_loss(0.5, 915)
+        assert abs(ld_pl - fspl) < 0.1
+
+    def test_zero_distance_returns_zero(self):
+        """Zero distance should return 0."""
+        assert log_distance_path_loss(0, 915) == 0.0
+
+    def test_negative_distance_returns_zero(self):
+        """Negative distance should return 0."""
+        assert log_distance_path_loss(-100, 915) == 0.0
+
+
+class TestRealisticMaxRange:
+    """Test max range with environment model and fade margins."""
+
+    def test_free_space_much_further_than_suburban(self):
+        """Free space should yield much longer range than suburban."""
+        fs_range = realistic_max_range(155, 915, DeployEnvironment.FREE_SPACE)
+        sub_range = realistic_max_range(155, 915, DeployEnvironment.SUBURBAN)
+        assert fs_range > sub_range * 10  # Order of magnitude difference
+
+    def test_building_reduces_range(self):
+        """Indoor reception should reduce range."""
+        outdoor = realistic_max_range(155, 915, DeployEnvironment.SUBURBAN,
+                                      BuildingType.NONE)
+        indoor = realistic_max_range(155, 915, DeployEnvironment.SUBURBAN,
+                                     BuildingType.CONCRETE)
+        assert outdoor > indoor * 2
+
+    def test_suburban_longfast_reasonable(self):
+        """LongFast suburban range should be roughly 2-10 km."""
+        # Typical LongFast link budget ~156 dB
+        range_m = realistic_max_range(156, 915, DeployEnvironment.SUBURBAN)
+        range_km = range_m / 1000
+        assert 1.0 < range_km < 15.0  # Realistic suburban range
+
+    def test_zero_budget_returns_zero(self):
+        """Zero link budget should return 0 range."""
+        assert realistic_max_range(0, 915) == 0.0
+
+    def test_forest_severely_limited(self):
+        """Forest range should be very short."""
+        range_m = realistic_max_range(156, 915, DeployEnvironment.FOREST)
+        range_km = range_m / 1000
+        assert range_km < 2.0  # Dense forest severely limits range
+
+
+class TestRadioHorizon:
+    """Test radio horizon calculation."""
+
+    def test_10m_antennas(self):
+        """Two 10m antennas should have ~26 km horizon."""
+        horizon = radio_horizon_km(10, 10)
+        assert 24 < horizon < 28
+
+    def test_ground_level_short(self):
+        """1.5m handheld should have ~5 km horizon."""
+        horizon = radio_horizon_km(1.5, 1.5)
+        assert 4 < horizon < 12
+
+    def test_mountain_to_mast(self):
+        """1000m mountain to 10m mast should have ~140 km horizon."""
+        horizon = radio_horizon_km(10, 1000)
+        assert 130 < horizon < 150
+
+    def test_higher_goes_further(self):
+        """Taller antennas = further horizon."""
+        low = radio_horizon_km(5, 5)
+        high = radio_horizon_km(30, 30)
+        assert high > low * 2
+
+    def test_zero_height(self):
+        """Zero height should still work (earth's surface)."""
+        horizon = radio_horizon_km(0, 10)
+        assert horizon > 0
+
+
+class TestProcessingGain:
+    """Test LoRa processing gain calculation."""
+
+    def test_sf7(self):
+        """SF7 should give ~21.1 dB processing gain."""
+        pg = processing_gain_db(7)
+        assert 20.5 < pg < 21.5
+
+    def test_sf12(self):
+        """SF12 should give ~36.1 dB processing gain."""
+        pg = processing_gain_db(12)
+        assert 35.5 < pg < 36.5
+
+    def test_each_sf_adds_3db(self):
+        """Each SF increment should add ~3 dB."""
+        for sf in range(7, 12):
+            low = processing_gain_db(sf)
+            high = processing_gain_db(sf + 1)
+            diff = high - low
+            assert 2.5 < diff < 3.5
+
+
+class TestCaptureEffect:
+    """Test LoRa capture effect analysis."""
+
+    def test_strong_signal_captures(self):
+        """10 dB stronger signal should capture with same SF."""
+        captured, margin, desc = capture_effect(-90, -100, same_sf=True)
+        assert captured is True
+        assert margin > 0
+        assert "Captured" in desc
+
+    def test_equal_power_blocked(self):
+        """Equal power signals should fail capture (need 6 dB)."""
+        captured, margin, desc = capture_effect(-90, -90, same_sf=True)
+        assert captured is False
+        assert "Blocked" in desc
+
+    def test_weaker_signal_blocked(self):
+        """Weaker signal should be blocked."""
+        captured, margin, desc = capture_effect(-100, -90, same_sf=True)
+        assert captured is False
+
+    def test_cross_sf_more_tolerant(self):
+        """Cross-SF should tolerate weaker wanted signal (16 dB rejection)."""
+        # Same scenario that fails same-SF should pass cross-SF
+        captured_same, _, _ = capture_effect(-95, -90, same_sf=True)
+        captured_cross, _, _ = capture_effect(-95, -90, same_sf=False)
+        assert captured_same is False  # 5 dB < 6 dB threshold
+        assert captured_cross is True  # 5 dB > -16 dB threshold
+
+    def test_exactly_at_threshold(self):
+        """At exactly 6 dB delta, should capture."""
+        captured, margin, _ = capture_effect(-90, -96, same_sf=True)
+        assert captured is True
+        assert abs(margin) < 0.1  # Right at threshold
+
+
+class TestEnvironmentParams:
+    """Test environment and building type constants."""
+
+    def test_all_environments_have_params(self):
+        """Every DeployEnvironment should have parameters."""
+        for env in DeployEnvironment:
+            assert env in ENVIRONMENT_PARAMS
+            n, sigma, margin = ENVIRONMENT_PARAMS[env]
+            assert n > 0
+            assert sigma >= 0
+            assert margin >= 0
+
+    def test_all_buildings_have_loss(self):
+        """Every BuildingType should have penetration loss."""
+        for bldg in BuildingType:
+            assert bldg in BUILDING_PENETRATION_DB
+            loss = BUILDING_PENETRATION_DB[bldg]
+            assert loss >= 0
+
+    def test_no_building_zero_loss(self):
+        """No building should have 0 dB loss."""
+        assert BUILDING_PENETRATION_DB[BuildingType.NONE] == 0.0
+
+    def test_building_loss_ordering(self):
+        """Heavier materials should have more loss."""
+        assert BUILDING_PENETRATION_DB[BuildingType.WOOD_FRAME] < \
+               BUILDING_PENETRATION_DB[BuildingType.CONCRETE] < \
+               BUILDING_PENETRATION_DB[BuildingType.METAL_CLAD]
+
+    def test_snr_thresholds_complete(self):
+        """SNR thresholds should cover SF 7-12."""
+        for sf in range(7, 13):
+            assert sf in SNR_THRESHOLD_DB
+            assert SNR_THRESHOLD_DB[sf] < 0  # All negative (below noise)
+
+
 def run_tests():
     """Run all tests without pytest."""
     import traceback
@@ -224,6 +474,13 @@ def run_tests():
         TestEarthBulge,
         TestKnifeEdgeDiffraction,
         TestDetailedLinkBudget,
+        TestRxSensitivity,
+        TestLogDistancePathLoss,
+        TestRealisticMaxRange,
+        TestRadioHorizon,
+        TestProcessingGain,
+        TestCaptureEffect,
+        TestEnvironmentParams,
     ]
 
     total = 0
