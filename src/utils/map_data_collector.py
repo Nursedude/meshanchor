@@ -543,6 +543,9 @@ class MapDataCollector:
         else:
             formatted_id = str(node_id)
 
+        # Extract environment sensor data from meshtasticd telemetry
+        env_metrics = data.get('environmentMetrics', {})
+
         return self._make_feature(
             node_id=formatted_id,
             name=user.get('longName', '') or user.get('shortName', ''),
@@ -558,6 +561,11 @@ class MapDataCollector:
             via_mqtt=data.get('viaMqtt', False),
             is_local=(data.get('hopsAway', 99) == 0),
             last_seen=last_seen,
+            temperature=env_metrics.get('temperature'),
+            humidity=env_metrics.get('relativeHumidity'),
+            pressure=env_metrics.get('barometricPressure'),
+            channel_utilization=device_metrics.get('channelUtilization'),
+            air_util_tx=device_metrics.get('airUtilTx'),
         )
 
     def _extract_node_info_without_position(self, node_id: str, data: dict, now: float,
@@ -686,12 +694,28 @@ class MapDataCollector:
         return features
 
     def _collect_mqtt(self) -> List[Dict]:
-        """Collect nodes from MQTT subscriber if available."""
+        """Collect nodes from MQTT subscriber if available.
+
+        Tries the live subscriber singleton first (best data, includes sensors),
+        then falls back to cached GeoJSON file.
+        """
+        # Try live subscriber first (has real-time sensor data)
         try:
-            from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
-            # Check if there's a running instance with cached data
-            # The subscriber stores nodes in memory, so we need a running instance
-            # For now, check if there's a cached MQTT node file
+            from monitoring.mqtt_subscriber import get_local_subscriber
+            subscriber = get_local_subscriber()
+            if subscriber.is_connected():
+                geojson = subscriber.get_geojson()
+                features = geojson.get("features", [])
+                if features:
+                    logger.debug(f"MQTT live: {len(features)} nodes with position")
+                    return features
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"MQTT live collection error: {e}")
+
+        # Fallback: cached MQTT node file
+        try:
             mqtt_cache = self._cache_dir / "mqtt_nodes.json"
             if mqtt_cache.exists():
                 age = time.time() - mqtt_cache.stat().st_mtime
@@ -700,10 +724,8 @@ class MapDataCollector:
                         data = json.load(f)
                     if data.get("type") == "FeatureCollection":
                         return data.get("features", [])
-        except ImportError:
-            pass
         except Exception as e:
-            logger.debug(f"MQTT collection error: {e}")
+            logger.debug(f"MQTT cache collection error: {e}")
 
         return []
 
@@ -1095,28 +1117,56 @@ class MapDataCollector:
                       snr: Optional[float] = None, battery: Optional[int] = None,
                       hardware: str = "", role: str = "",
                       is_gateway: bool = False, via_mqtt: bool = False,
-                      is_local: bool = False, last_seen: str = "") -> Dict:
+                      is_local: bool = False, last_seen: str = "",
+                      rssi: Optional[int] = None,
+                      temperature: Optional[float] = None,
+                      humidity: Optional[float] = None,
+                      pressure: Optional[float] = None,
+                      pm25: Optional[int] = None,
+                      co2: Optional[int] = None,
+                      iaq: Optional[int] = None,
+                      channel_utilization: Optional[float] = None,
+                      air_util_tx: Optional[float] = None) -> Dict:
         """Create a GeoJSON Feature for a node."""
+        props = {
+            "id": str(node_id),
+            "name": name or str(node_id),
+            "network": network,
+            "is_online": is_online,
+            "is_local": is_local,
+            "is_gateway": is_gateway,
+            "via_mqtt": via_mqtt,
+            "snr": snr,
+            "rssi": rssi,
+            "battery": battery,
+            "last_seen": last_seen or ("online" if is_online else "unknown"),
+            "hardware": hardware,
+            "role": role,
+        }
+        # Add sensor data only when present (avoid cluttering output)
+        if temperature is not None:
+            props["temperature"] = temperature
+        if humidity is not None:
+            props["humidity"] = humidity
+        if pressure is not None:
+            props["pressure"] = pressure
+        if pm25 is not None:
+            props["pm25"] = pm25
+        if co2 is not None:
+            props["co2"] = co2
+        if iaq is not None:
+            props["iaq"] = iaq
+        if channel_utilization is not None:
+            props["channel_utilization"] = channel_utilization
+        if air_util_tx is not None:
+            props["air_util_tx"] = air_util_tx
         return {
             "type": "Feature",
             "geometry": {
                 "type": "Point",
                 "coordinates": [lon, lat]
             },
-            "properties": {
-                "id": str(node_id),
-                "name": name or str(node_id),
-                "network": network,
-                "is_online": is_online,
-                "is_local": is_local,
-                "is_gateway": is_gateway,
-                "via_mqtt": via_mqtt,
-                "snr": snr,
-                "battery": battery,
-                "last_seen": last_seen or ("online" if is_online else "unknown"),
-                "hardware": hardware,
-                "role": role,
-            }
+            "properties": props,
         }
 
     def _merge_feature(self, existing: Dict, new: Dict) -> None:

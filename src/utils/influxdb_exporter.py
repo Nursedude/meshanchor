@@ -405,6 +405,84 @@ class InfluxDBExporter:
         except Exception as e:
             logger.debug(f"Error collecting message metrics: {e}")
 
+        # Environment sensor metrics from MQTT subscriber
+        try:
+            from monitoring.mqtt_subscriber import get_local_subscriber
+            subscriber = get_local_subscriber()
+            if subscriber.is_connected():
+                # MQTT stats
+                mqtt_stats = subscriber.get_stats()
+                self.write_point(
+                    "meshforge_mqtt",
+                    {
+                        "nodes_total": mqtt_stats.get("node_count", 0),
+                        "nodes_online": mqtt_stats.get("online_count", 0),
+                        "mesh_size_24h": mqtt_stats.get("mesh_size_24h", 0),
+                        "messages": mqtt_stats.get("message_count", 0),
+                    },
+                    {},
+                    timestamp
+                )
+
+                # Environment sensors per node
+                for node in subscriber.get_nodes_with_environment_metrics():
+                    fields = {}
+                    if node.temperature is not None:
+                        fields["temperature"] = float(node.temperature)
+                    if node.humidity is not None:
+                        fields["humidity"] = float(node.humidity)
+                    if node.pressure is not None:
+                        fields["pressure"] = float(node.pressure)
+                    if node.gas_resistance is not None:
+                        fields["gas_resistance"] = float(node.gas_resistance)
+                    if fields:
+                        self.write_point(
+                            "meshforge_environment",
+                            fields,
+                            {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
+                            timestamp
+                        )
+
+                # Air quality sensors per node
+                for node in subscriber.get_nodes_with_air_quality():
+                    fields = {}
+                    if node.pm25_standard is not None:
+                        fields["pm25"] = int(node.pm25_standard)
+                    if node.pm10_standard is not None:
+                        fields["pm10"] = int(node.pm10_standard)
+                    if node.co2 is not None:
+                        fields["co2"] = int(node.co2)
+                    if node.iaq is not None:
+                        fields["iaq"] = int(node.iaq)
+                    if fields:
+                        self.write_point(
+                            "meshforge_air_quality",
+                            fields,
+                            {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
+                            timestamp
+                        )
+
+                # Health metrics per node
+                for node in subscriber.get_nodes():
+                    fields = {}
+                    if node.heart_bpm is not None:
+                        fields["heart_bpm"] = int(node.heart_bpm)
+                    if node.spo2 is not None:
+                        fields["spo2"] = int(node.spo2)
+                    if node.body_temperature is not None:
+                        fields["body_temperature"] = float(node.body_temperature)
+                    if fields:
+                        self.write_point(
+                            "meshforge_health",
+                            fields,
+                            {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
+                            timestamp
+                        )
+        except ImportError:
+            logger.debug("MQTT subscriber not available for InfluxDB export")
+        except Exception as e:
+            logger.debug(f"Error collecting MQTT/environment metrics: {e}")
+
         # Flush remaining batch
         if not self._flush_batch():
             success = False
