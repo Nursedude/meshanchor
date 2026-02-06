@@ -879,7 +879,7 @@ class MeshForgeLauncher(
             elif choice == "site":
                 self._site_planner_menu()
             elif choice == "freq":
-                self._frequency_calculator()
+                self._calc_frequency_slot()
             elif choice == "sdr":
                 self._rf_awareness_menu()
 
@@ -891,12 +891,13 @@ class MeshForgeLauncher(
         """Maps & Visualization - Coverage maps, topology."""
         while True:
             choices = [
+                ("livemap", "Live NOC Map        Real-time browser view"),
                 ("coverage", "Coverage Map        Generate coverage map"),
                 ("topology", "Network Topology    D3.js graph view"),
                 ("traffic", "Traffic Inspector   Wireshark-grade visibility"),
-                ("nodes", "Node Map            All nodes on map"),
                 ("quality", "Link Quality        Quality analysis"),
                 ("export", "Export Data         GeoJSON, CSV, GraphML"),
+                ("ai", "AI Diagnostics      Knowledge base, assistant"),
                 ("back", "Back"),
             ]
 
@@ -909,23 +910,20 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "coverage":
-                self._ai_tools_menu()
+            if choice == "livemap":
+                self._open_live_map()
+            elif choice == "coverage":
+                self._generate_coverage_map()
             elif choice == "topology":
                 self._topology_menu()
             elif choice == "traffic":
                 self.menu_traffic_inspector()
-            elif choice == "nodes":
-                self._open_node_map()
             elif choice == "quality":
                 self._link_quality_menu()
             elif choice == "export":
                 self._export_data_menu()
-
-    def _open_node_map(self):
-        """Open the node map in browser."""
-        # Trigger map generation and open
-        self._ai_tools_menu()
+            elif choice == "ai":
+                self._ai_tools_menu()
 
     def _export_data_menu(self):
         """Export data in various formats."""
@@ -1074,16 +1072,11 @@ class MeshForgeLauncher(
             elif choice == "logs":
                 self._logs_menu()
             elif choice == "network":
-                self._network_tools_submenu()
+                self._network_menu()
             elif choice == "shell":
                 self._drop_to_shell()
             elif choice == "reboot":
                 self._reboot_menu()
-
-    def _network_tools_submenu(self):
-        """Network diagnostic tools."""
-        # Delegate to existing network menu
-        self._network_menu()
 
     def _drop_to_shell(self):
         """Drop to a bash shell."""
@@ -1176,45 +1169,6 @@ SUPPORT:
     # =========================================================================
     # Legacy menu handler (for backward compatibility)
     # =========================================================================
-
-    def _handle_choice(self, choice: str):
-        """Handle menu selection (legacy - kept for compatibility)."""
-        if choice == "status":
-            self._run_terminal_status()
-        elif choice == "quick":
-            self._quick_actions_menu()
-        elif choice == "radio":
-            self._radio_menu()
-        elif choice == "services":
-            self._service_menu()
-        elif choice == "emcomm":
-            self._emergency_mode()
-        elif choice == "logs":
-            self._logs_menu()
-        elif choice == "network":
-            self._network_menu()
-        elif choice == "rns":
-            self._rns_menu()
-        elif choice == "aredn":
-            self._aredn_menu()
-        elif choice == "metrics":
-            self._metrics_menu()
-        elif choice == "rf":
-            self._rf_tools_menu()
-        elif choice == "sdr":
-            self._rf_awareness_menu()
-        elif choice == "maps":
-            self._ai_tools_menu()
-        elif choice == "config":
-            self._config_menu()
-        elif choice == "hardware":
-            self._hardware_menu()
-        elif choice == "system":
-            self._system_tools_menu()
-        elif choice == "web":
-            self._open_web_client()
-        elif choice == "about":
-            self._show_about()
 
     # Radio Menu methods moved to radio_menu_mixin.py (v0.4.8)
 
@@ -1395,7 +1349,7 @@ Features:
 - Node monitoring
 
 GitHub: github.com/Nursedude/meshforge
-License: MIT
+License: GPL-3.0
 
 Made with aloha for the mesh community
 73 de WH6GXZ"""

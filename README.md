@@ -71,6 +71,32 @@ RF tools only (no sudo, no radio):
 python3 src/standalone.py
 ```
 
+### TUI Menu Structure
+
+The TUI uses a raspi-config style interface (whiptail/dialog) designed for SSH and
+headless operation. Navigation is keyboard-driven with max 10 items per menu level:
+
+```
+Main Menu (MeshForge NOC)
+├── 1. Dashboard             Service status, health, alerts, data path check
+├── 2. Mesh Networks         Meshtastic, RNS/Reticulum, AREDN, MQTT, Gateway
+├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
+├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
+├── 5. Configuration         Radio, channels, RNS config, services, backup
+├── 6. System                Hardware detect, logs, network tools, shell, reboot
+├── q. Quick Actions         Common shortcuts (2-tap access)
+├── e. Emergency Mode        Field operations (stripped-down menu)
+├── a. About                 Version, web client, help
+└── x. Exit
+```
+
+**Design principles** (inspired by
+[raspi-config](https://www.raspberrypi.com/documentation/computers/configuration.html)):
+- Max 10 items per menu (cognitive load limit)
+- Grouped by user task, not technical domain
+- 2-tap max for common operations via Quick Actions
+- Startup checks detect conflicts, verify services, warn on misconfigs
+
 ---
 
 ## Upgrading MeshForge
@@ -483,9 +509,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus
+│   ├── main.py            # NOC dispatcher + menus (1,440 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
-│   └── *_mixin.py         # Feature modules (RF, channels, AI, system)
+│   ├── startup_checks.py  # Environment checks + conflict resolution
+│   ├── status_bar.py      # Service status bar
+│   └── *_mixin.py         # 30 feature modules (RF, channels, AI, system, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -589,6 +617,36 @@ See `dashboards/README.md` and `docs/METRICS.md` for full setup instructions.
 | 8080 | MeshForge Web UI | Maps, node browser |
 | 9090 | Prometheus metrics | Optional |
 | 9443 | meshtasticd Web UI | Official Meshtastic UI |
+
+---
+
+## Code Health
+
+Auto-review system scans 243 files for security, reliability, and performance issues:
+
+```bash
+cd src && python3 -c "
+from utils.auto_review import ReviewOrchestrator
+r = ReviewOrchestrator()
+report = r.run_full_review()
+print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanned}')
+"
+```
+
+**Tracked issues** (see `.claude/foundations/persistent_issues.md`):
+
+| Rule | Description | Status |
+|------|-------------|--------|
+| MF001 | `Path.home()` → use `get_real_user_home()` for sudo safety | Active monitoring |
+| MF002 | No `shell=True` in subprocess calls | Active monitoring |
+| MF003 | No bare `except:` — specify exception types | Active monitoring |
+| MF004 | All subprocess calls need `timeout` parameter | Active monitoring |
+
+**Reliability patterns** (inspired by [Raspberry Pi systemd best practices](https://www.thedigitalpictureframe.com/ultimate-guide-systemd-autostart-scripts-raspberry-pi/)):
+- Services use `Restart=always` with `RestartSec=3` for auto-recovery
+- Pre-flight `check_service()` before connecting to meshtasticd/rnsd
+- Shared connection manager prevents TCP:4403 client contention
+- Exponential backoff reconnection (1s → 2s → 4s → ... → 30s max)
 
 ---
 
