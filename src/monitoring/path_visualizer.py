@@ -318,9 +318,21 @@ class PathVisualizer:
         return len(self._paths)
 
     def get_path_stats(self) -> Dict[str, Any]:
-        """Get statistics across all paths."""
+        """Get statistics across all paths.
+
+        Always returns a complete dict with all keys, even when empty.
+        """
         if not self._paths:
-            return {}
+            return {
+                "total_paths": 0,
+                "success_rate": 0,
+                "avg_hops": 0,
+                "max_hops": 0,
+                "avg_snr": None,
+                "min_snr": None,
+                "avg_latency_ms": None,
+                "unique_nodes": len(self._nodes),
+            }
 
         all_snr = []
         all_latency = []
@@ -337,8 +349,8 @@ class PathVisualizer:
         return {
             "total_paths": len(self._paths),
             "success_rate": success_count / len(self._paths) if self._paths else 0,
-            "avg_hops": sum(p.total_hops for p in self._paths) / len(self._paths),
-            "max_hops": max(p.total_hops for p in self._paths),
+            "avg_hops": sum(p.total_hops for p in self._paths) / len(self._paths) if self._paths else 0,
+            "max_hops": max((p.total_hops for p in self._paths), default=0),
             "avg_snr": sum(all_snr) / len(all_snr) if all_snr else None,
             "min_snr": min(all_snr) if all_snr else None,
             "avg_latency_ms": sum(all_latency) / len(all_latency) if all_latency else None,
