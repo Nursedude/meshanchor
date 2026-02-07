@@ -219,7 +219,7 @@ class TestHealthMetricsCollection:
         mock_record.consecutive_fails = 0
         mock_state.get_all_services.return_value = [mock_record]
 
-        with patch('utils.metrics_export.SharedHealthState', return_value=mock_state):
+        with patch('utils.prometheus_exporter.SharedHealthState', new=MagicMock(return_value=mock_state), create=True):
             exporter = PrometheusExporter()
             output = exporter.export()
 
@@ -244,7 +244,7 @@ class TestMessageMetricsCollection:
             "dead_letter": 2,
         }
 
-        with patch('utils.metrics_export.PersistentMessageQueue', return_value=mock_queue):
+        with patch('utils.prometheus_exporter.PersistentMessageQueue', new=MagicMock(return_value=mock_queue), create=True):
             exporter = PrometheusExporter()
             output = exporter.export()
 
@@ -349,15 +349,17 @@ class TestTextfileExporter:
 
             assert thread.is_alive()
 
-            # Wait for first write
-            time.sleep(1.5)
-
-            # Check file was created
+            # Wait for first write with retries
             metrics_file = Path(temp_dir) / "meshforge.prom"
-            assert metrics_file.exists()
+            for _ in range(10):
+                time.sleep(0.5)
+                if metrics_file.exists():
+                    break
 
-            content = metrics_file.read_text()
-            assert "meshforge_info" in content
+            assert metrics_file.exists(), f"File not created in {temp_dir}"
+
+            file_content = metrics_file.read_text()
+            assert "meshforge_info" in file_content
 
 
 class TestJSONAPIEndpoints:

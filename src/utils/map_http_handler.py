@@ -957,9 +957,16 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
     def log_message(self, format, *args):
-        """Suppress ALL request logging to prevent TUI corruption.
+        """Route request logging through Python logger instead of stderr.
 
-        The HTTP server runs in a background thread and logging to
-        stdout/stderr can corrupt the whiptail/dialog TUI display.
+        The HTTP server runs in a background thread. Writing to
+        stdout/stderr corrupts the whiptail/dialog TUI display,
+        but errors still need to be visible in log files for debugging.
         """
-        pass  # Complete silence - no logging at all
+        # Route through Python logger (goes to log file, not TUI)
+        message = format % args if args else format
+        if '40' in str(args) or '50' in str(args):
+            # 4xx/5xx responses logged as warnings for debugging
+            logger.warning("MapHTTP: %s", message)
+        else:
+            logger.debug("MapHTTP: %s", message)

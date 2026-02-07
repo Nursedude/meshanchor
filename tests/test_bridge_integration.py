@@ -188,10 +188,6 @@ class TestRnsToMeshFlow:
 
     def test_process_rns_to_mesh_success(self, bridge):
         """Process queued RNS message and send to Meshtastic."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
-
         msg = BridgedMessage(
             source_network="rns",
             source_id="abcdef0123456789",
@@ -199,22 +195,20 @@ class TestRnsToMeshFlow:
             content="Reply from RNS",
         )
 
-        bridge._process_rns_to_mesh(msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_send:
+            bridge._process_rns_to_mesh(msg)
 
-        # Verify meshtastic send with prefixed content
-        mock_interface.sendText.assert_called_once()
-        call_args = mock_interface.sendText.call_args
-        sent_text = call_args[0][0]
-        assert "[RNS:abcd]" in sent_text
-        assert "Reply from RNS" in sent_text
+            # Verify meshtastic send with prefixed content
+            mock_send.assert_called_once()
+            sent_text = mock_send.call_args[0][0]
+            assert "[RNS:abcd]" in sent_text
+            assert "Reply from RNS" in sent_text
 
         # Stats updated
         assert bridge.stats['messages_rns_to_mesh'] == 1
 
     def test_process_rns_to_mesh_failure(self, bridge):
         """Failed Meshtastic send increments error counter."""
-        bridge._connected_mesh = False
-
         msg = BridgedMessage(
             source_network="rns",
             source_id="abcdef0123456789",
@@ -222,7 +216,8 @@ class TestRnsToMeshFlow:
             content="Will fail",
         )
 
-        bridge._process_rns_to_mesh(msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=False):
+            bridge._process_rns_to_mesh(msg)
 
         assert bridge.stats['errors'] == 1
         assert bridge.stats['messages_rns_to_mesh'] == 0
@@ -233,10 +228,7 @@ class TestRoundTrip:
 
     def test_full_mesh_rns_mesh_roundtrip(self, bridge):
         """Complete Meshtastic→RNS→Meshtastic round trip."""
-        bridge._connected_mesh = True
         bridge._connected_rns = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
 
         # Track received messages via callback
         received_messages = []
@@ -287,11 +279,12 @@ class TestRoundTrip:
         assert rns_msg.source_network == "rns"
 
         # Step 6: Bridge processes and sends to Meshtastic
-        bridge._process_rns_to_mesh(rns_msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_mesh_send:
+            bridge._process_rns_to_mesh(rns_msg)
 
         # Verify Meshtastic received the reply with RNS prefix
-        mock_interface.sendText.assert_called_once()
-        mesh_content = mock_interface.sendText.call_args[0][0]
+        mock_mesh_send.assert_called_once()
+        mesh_content = mock_mesh_send.call_args[0][0]
         assert "[RNS:dead]" in mesh_content
         assert "WH6GXZ de KH6ABC 73" in mesh_content
         assert bridge.stats['messages_rns_to_mesh'] == 1
@@ -313,13 +306,10 @@ class TestRoundTrip:
 
     def test_roundtrip_with_bridge_loop_thread(self, bridge):
         """Test round trip using the bridge_loop thread for queue processing."""
-        bridge._connected_mesh = True
         bridge._connected_rns = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
 
-        # Mock send_to_rns to succeed
-        with patch.object(bridge, 'send_to_rns', return_value=True):
+        # Mock both send methods to succeed
+        with patch.object(bridge, 'send_to_rns', return_value=True),              patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_mesh_send:
             # Start bridge loop in background
             bridge._running = True
             bridge_thread = threading.Thread(
@@ -358,7 +348,7 @@ class TestRoundTrip:
 
                 # RNS→Mesh should be processed
                 assert bridge.stats['messages_rns_to_mesh'] == 1
-                mock_interface.sendText.assert_called_once()
+                mock_mesh_send.assert_called_once()
 
             finally:
                 bridge._running = False
@@ -502,10 +492,6 @@ class TestHealthIntegration:
 
     def test_successful_rns_to_mesh_records_health(self, bridge):
         """Successful RNS→Mesh records health event."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
-
         msg = BridgedMessage(
             source_network="rns",
             source_id="abcdef0123456789",
@@ -513,7 +499,8 @@ class TestHealthIntegration:
             content="Health check",
         )
 
-        bridge._process_rns_to_mesh(msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True):
+            bridge._process_rns_to_mesh(msg)
 
         summary = bridge.health.get_summary()
         assert summary['messages']['rns_to_mesh'] == 1
@@ -670,10 +657,6 @@ class TestEdgeCases:
 
     def test_unicode_content_preserved(self, bridge):
         """Unicode content survives the bridge flow."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
-
         msg = BridgedMessage(
             source_network="rns",
             source_id="abcdef0123456789",
@@ -681,9 +664,10 @@ class TestEdgeCases:
             content="Aloha \u2708 73 de WH6GXZ",
         )
 
-        bridge._process_rns_to_mesh(msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_send:
+            bridge._process_rns_to_mesh(msg)
 
-        sent_text = mock_interface.sendText.call_args[0][0]
+        sent_text = mock_send.call_args[0][0]
         assert "Aloha \u2708 73 de WH6GXZ" in sent_text
 
     def test_long_source_id_prefix_truncation(self, bridge):
@@ -706,10 +690,6 @@ class TestEdgeCases:
 
     def test_rns_source_prefix_uses_first_4(self, bridge):
         """RNS prefix uses first 4 chars of source hash."""
-        bridge._connected_mesh = True
-        mock_interface = MagicMock()
-        bridge._mesh_interface = mock_interface
-
         msg = BridgedMessage(
             source_network="rns",
             source_id="fedcba9876543210",
@@ -717,9 +697,10 @@ class TestEdgeCases:
             content="Prefix test",
         )
 
-        bridge._process_rns_to_mesh(msg)
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_send:
+            bridge._process_rns_to_mesh(msg)
 
-        sent = mock_interface.sendText.call_args[0][0]
+        sent = mock_send.call_args[0][0]
         assert "[RNS:fedc]" in sent
 
     def test_malformed_packet_no_crash(self, bridge):

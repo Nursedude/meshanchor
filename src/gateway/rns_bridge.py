@@ -284,6 +284,7 @@ class RNSMeshtasticBridge:
             message_queue=self._mesh_to_rns_queue,
             message_callback=self._notify_message,
             status_callback=lambda status: self._notify_status(status),
+            should_bridge=self._should_bridge,
         )
 
         # Register Meshtastic sender now that handler exists
@@ -665,6 +666,15 @@ class RNSMeshtasticBridge:
         if self._persistent_queue:
             return self._persistent_queue.get_stats()
         return {}
+
+    def _on_meshtastic_receive(self, packet: dict) -> None:
+        """Handle incoming Meshtastic packet (compatibility shim).
+
+        Delegates to MeshtasticHandler._on_receive. Kept for backward
+        compatibility with integration tests and external callers.
+        """
+        if self._mesh_handler:
+            self._mesh_handler._on_receive(packet)
 
     def register_message_callback(self, callback: Callable):
         """Register callback for bridged messages"""

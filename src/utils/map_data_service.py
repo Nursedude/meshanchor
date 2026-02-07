@@ -341,7 +341,10 @@ class MapServer:
     @property
     def url(self) -> str:
         """Get the server URL."""
-        return f"http://{self.host}:{self.port}"
+        host = self.host
+        if host == "0.0.0.0":
+            host = "localhost"
+        return f"http://{host}:{self.port}"
 
 
 def main():

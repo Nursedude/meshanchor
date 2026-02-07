@@ -34,6 +34,7 @@ Usage:
         controller.connect()
 """
 
+import copy
 import logging
 import time
 from dataclasses import dataclass
@@ -125,7 +126,7 @@ class DevicePersistence:
         else:
             # Fallback for testing without full utils
             self._settings = None
-            self._memory_store = DEVICE_PERSISTENCE_DEFAULTS.copy()
+            self._memory_store = copy.deepcopy(DEVICE_PERSISTENCE_DEFAULTS)
             logger.warning("SettingsManager not available, using memory storage")
 
     def _get(self, key: str, default: Any = None) -> Any:
