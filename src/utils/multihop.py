@@ -38,6 +38,10 @@ from utils.preset_impact import (
     DEFAULT_FREQ_MHZ,
     DEFAULT_PAYLOAD_BYTES,
 )
+from utils.rf import (
+    DeployEnvironment,
+    log_distance_path_loss,
+)
 
 
 # Meshtastic protocol constants
@@ -198,8 +202,8 @@ def margin_to_probability(margin_db: float) -> float:
 class HopAnalyzer:
     """Analyzes multi-hop paths in a Meshtastic mesh network.
 
-    Combines FSPL propagation with LoRa preset parameters to determine
-    per-hop link quality and end-to-end path reliability.
+    Combines environment-aware propagation with LoRa preset parameters to
+    determine per-hop link quality and end-to-end path reliability.
 
     Args:
         preset: Meshtastic LoRa preset name (e.g., 'LONG_FAST').
@@ -208,6 +212,7 @@ class HopAnalyzer:
         payload_bytes: Payload size for airtime calculation.
         tx_gain_dbi: Transmit antenna gain.
         rx_gain_dbi: Receive antenna gain.
+        environment: Deployment environment for path loss modeling.
     """
 
     def __init__(self,
@@ -216,7 +221,8 @@ class HopAnalyzer:
                  freq_mhz: float = DEFAULT_FREQ_MHZ,
                  payload_bytes: int = DEFAULT_PAYLOAD_BYTES,
                  tx_gain_dbi: float = 2.15,
-                 rx_gain_dbi: float = 2.15):
+                 rx_gain_dbi: float = 2.15,
+                 environment: DeployEnvironment = DeployEnvironment.FREE_SPACE):
         if preset not in PRESET_PARAMS:
             raise ValueError(f"Unknown preset: {preset}")
 
@@ -226,6 +232,7 @@ class HopAnalyzer:
         self.payload_bytes = payload_bytes
         self.tx_gain_dbi = tx_gain_dbi
         self.rx_gain_dbi = rx_gain_dbi
+        self.environment = environment
 
         # Pre-calculate preset-dependent values
         self._analyzer = PresetAnalyzer(
@@ -250,8 +257,8 @@ class HopAnalyzer:
     def analyze_hop(self, from_node: RelayNode, to_node: RelayNode) -> HopResult:
         """Analyze a single hop between two nodes.
 
-        Calculates FSPL, link margin, and success probability for the
-        link between from_node and to_node.
+        Uses environment-aware log-distance path loss model when an
+        environment is set, falling back to FSPL for FREE_SPACE.
 
         Args:
             from_node: Transmitting node.
@@ -265,8 +272,9 @@ class HopAnalyzer:
                                to_node.lat, to_node.lon)
         dist_m = max(dist_km * 1000, 1.0)  # Minimum 1m to avoid log(0)
 
-        # FSPL
-        path_loss = fspl_db(dist_m, self.freq_mhz)
+        # Environment-aware path loss (log-distance model)
+        path_loss = log_distance_path_loss(dist_m, self.freq_mhz,
+                                           environment=self.environment)
 
         # Transmit power (node-specific or default)
         tx_power = from_node.tx_power_dbm or self.tx_power_dbm
@@ -401,6 +409,7 @@ class HopAnalyzer:
                 payload_bytes=self.payload_bytes,
                 tx_gain_dbi=self.tx_gain_dbi,
                 rx_gain_dbi=self.rx_gain_dbi,
+                environment=self.environment,
             )
             results.append(analyzer.analyze_path(nodes))
 
@@ -460,7 +469,7 @@ def format_path_report(result: PathResult) -> str:
         lines.append(
             f"  Hop {i}: {hop.from_node} → {hop.to_node}")
         lines.append(
-            f"         {hop.distance_km:.1f} km  |  FSPL {hop.fspl_db:.1f} dB  |  "
+            f"         {hop.distance_km:.1f} km  |  PL {hop.fspl_db:.1f} dB  |  "
             f"Margin {hop.link_margin_db:+.1f} dB [{margin_indicator}]  |  "
             f"P(success) {prob_pct:.0f}%")
         lines.append("")
