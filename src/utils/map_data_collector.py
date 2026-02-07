@@ -469,12 +469,16 @@ class MapDataCollector:
                             "id": node.node_id,
                             "name": node.long_name or node.short_name or node.node_id,
                             "short_name": node.short_name,
+                            "network": "meshtastic",
                             "hardware": node.hw_model,
                             "snr": node.snr,
                             "last_heard": last_heard,
                             "via_mqtt": node.via_mqtt,
-                            "role": "node",
-                            "online": is_online,
+                            "role": node.role or "node",
+                            "is_online": is_online,
+                            "is_local": getattr(node, 'hops_away', None) == 0,
+                            "is_gateway": getattr(node, 'role', '') in ('ROUTER', 'ROUTER_CLIENT'),
+                            "hops_away": getattr(node, 'hops_away', None),
                             "altitude": node.altitude,
                             "source": "meshtasticd_http",
                         },
@@ -1055,8 +1059,12 @@ class MapDataCollector:
 
         Checks user-configured IPs first, then common AREDN defaults.
         Configure via map_settings.json: "aredn_node_ips": ["10.54.25.1"]
+
+        Validates with HTTP API response (not just socket test) to confirm
+        the host is actually an AREDN node, not some other service on 8080.
         """
         import socket
+        import urllib.request
 
         # User-configured AREDN node IPs (checked first)
         custom_ips = []
@@ -1070,15 +1078,31 @@ class MapDataCollector:
 
         for host in custom_ips + default_hosts:
             try:
+                # Quick socket pre-check (2s timeout) to avoid slow HTTP timeouts
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 try:
-                    # AREDN nodes serve HTTP on port 8080, not 80
                     result = sock.connect_ex((host, 8080))
-                    if result == 0:
-                        return host
+                    if result != 0:
+                        continue
                 finally:
                     sock.close()
+
+                # Validate with actual HTTP API response
+                url = f"http://{host}:8080/a/sysinfo"
+                req = urllib.request.Request(url, method='GET')
+                req.add_header('User-Agent', 'MeshForge/1.0')
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    data = response.read().decode('utf-8')
+                    import json as _json
+                    info = _json.loads(data)
+                    # Verify it looks like an AREDN response
+                    if isinstance(info, dict) and ('node' in info or 'sysinfo' in info
+                                                    or 'meshrf' in info):
+                        logger.debug(f"AREDN node confirmed at {host}")
+                        return host
+                    else:
+                        logger.debug(f"Host {host}:8080 responds but not AREDN format")
             except Exception:
                 continue
         return None

@@ -195,6 +195,11 @@
         .node-marker-alert svg {
             animation: gentle-pulse 1.5s ease-in-out infinite;
         }
+        /* Stale/offline nodes fade to indicate they haven't been heard recently */
+        .node-marker-stale {
+            opacity: 0.4;
+            filter: grayscale(60%);
+        }
 
         /* Link lines */
         .link-line {
@@ -2382,6 +2387,7 @@
         const cls = ['node-marker'];
         if (isNew) cls.push('node-marker-new');
         if (props.battery !== null && props.battery < 20) cls.push('node-marker-alert');
+        if (!props.is_online) cls.push('node-marker-stale');
 
         return L.divIcon({
             html: html,
@@ -2425,6 +2431,48 @@
                 </div>`;
         }
 
+        // Hop count + relay info (meshtastic-map inspired)
+        let hopHtml = '';
+        if (props.hops_away !== null && props.hops_away !== undefined) {
+            hopHtml = `<div class="info-label">Hops</div><div class="info-value">${props.hops_away} hop${props.hops_away !== 1 ? 's' : ''}</div>`;
+        }
+        if (props.relay_node) {
+            hopHtml += `<div class="info-label">Relay</div><div class="info-value" style="font-size:11px">via !..${String(props.relay_node).padStart(2,'0')}</div>`;
+        }
+
+        // AREDN link quality (AREDN world map inspired)
+        let arednHtml = '';
+        if (props.network === 'aredn') {
+            if (props.link_type) {
+                const ltColor = props.link_type === 'RF' ? '#4fc3f7' :
+                                props.link_type === 'DTD' ? '#66bb6a' :
+                                props.link_type === 'TUN' ? '#ab47bc' : '#888';
+                arednHtml += `<div class="info-label">Link</div><div class="info-value" style="color:${ltColor}">${props.link_type}</div>`;
+            }
+            if (props.link_quality !== null && props.link_quality !== undefined) {
+                const lqPct = Math.round(props.link_quality * 100);
+                const lqColor = lqPct > 80 ? '#66bb6a' : lqPct > 50 ? '#ffa726' : '#ef5350';
+                arednHtml += `<div class="info-label">Quality</div><div class="info-value" style="color:${lqColor}">${lqPct}%</div>`;
+            }
+        }
+
+        // Environment sensors (if present)
+        let envHtml = '';
+        if (props.temperature !== null && props.temperature !== undefined) {
+            envHtml += `<div class="info-label">Temp</div><div class="info-value">${props.temperature.toFixed(1)}°C</div>`;
+        }
+        if (props.humidity !== null && props.humidity !== undefined) {
+            envHtml += `<div class="info-label">Humidity</div><div class="info-value">${props.humidity.toFixed(0)}%</div>`;
+        }
+
+        // Congestion indicator
+        let congestionHtml = '';
+        if (props.is_congested) {
+            congestionHtml = `<div class="info-label">Channel</div><div class="info-value" style="color:#ef5350">⚠ Congested</div>`;
+        } else if (props.channel_utilization !== null && props.channel_utilization !== undefined) {
+            congestionHtml = `<div class="info-label">ChUtil</div><div class="info-value">${props.channel_utilization.toFixed(1)}%</div>`;
+        }
+
         return `
             <div class="node-popup">
                 <h3>${props.name || props.id || 'Unknown'}</h3>
@@ -2439,8 +2487,12 @@
                     ${props.via_mqtt ? `<div class="info-label">Via</div><div class="info-value" style="color:#ab47bc">MQTT</div>` : ''}
                     <div class="info-label">Last seen</div>
                     <div class="info-value">${props.last_seen || 'Unknown'}</div>
+                    ${hopHtml}
                     ${snrHtml}
                     ${batteryHtml}
+                    ${arednHtml}
+                    ${envHtml}
+                    ${congestionHtml}
                     ${props.hardware ? `<div class="info-label">Hardware</div><div class="info-value" style="font-size:11px">${props.hardware}</div>` : ''}
                     <div class="info-label">Position</div>
                     <div class="info-value" style="font-size:11px">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</div>
