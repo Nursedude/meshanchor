@@ -894,3 +894,79 @@ class TestCoordinateValidation:
         c = self._make_collector(tmp_path)
         assert c._is_valid_coordinate("abc", "-157.8") is False
         assert c._is_valid_coordinate(21.3, "xyz") is False
+
+
+class TestAREDNValidation:
+    """Test AREDN node discovery and validation."""
+
+    def _make_collector(self, tmp_path):
+        from utils.map_data_service import MapDataCollector
+        return MapDataCollector(cache_dir=tmp_path)
+
+    def test_aredn_node_ip_returns_none_when_no_nodes(self, tmp_path):
+        """Returns None when no AREDN nodes are reachable."""
+        collector = self._make_collector(tmp_path)
+        # With no AREDN network, should return None quickly
+        result = collector._get_aredn_node_ip()
+        assert result is None
+
+    def test_collect_aredn_empty_when_no_network(self, tmp_path):
+        """AREDN collection returns empty list when no AREDN network."""
+        collector = self._make_collector(tmp_path)
+        features = collector._collect_aredn()
+        assert features == []
+
+    def test_aredn_node_to_feature_needs_location(self, tmp_path):
+        """AREDN nodes without location return None."""
+        collector = self._make_collector(tmp_path)
+        try:
+            from utils.aredn import AREDNNode
+            node = AREDNNode(hostname="TEST-NODE", ip="10.0.0.1")
+            # No lat/lon set
+            result = collector._aredn_node_to_feature(node)
+            assert result is None
+        except ImportError:
+            pytest.skip("AREDN module not available")
+
+
+class TestHTTPFeatureFormat:
+    """Test HTTP API feature format normalization."""
+
+    def _make_collector(self, tmp_path):
+        from utils.map_data_service import MapDataCollector
+        return MapDataCollector(cache_dir=tmp_path)
+
+    def test_make_feature_includes_network(self, tmp_path):
+        """_make_feature includes network field."""
+        collector = self._make_collector(tmp_path)
+        feature = collector._make_feature(
+            node_id="!test", name="Test", lat=21.3, lon=-157.8,
+            network="meshtastic"
+        )
+        assert feature["properties"]["network"] == "meshtastic"
+
+    def test_make_feature_includes_is_online(self, tmp_path):
+        """_make_feature uses 'is_online' not 'online'."""
+        collector = self._make_collector(tmp_path)
+        feature = collector._make_feature(
+            node_id="!test", name="Test", lat=21.3, lon=-157.8,
+            is_online=True
+        )
+        assert feature["properties"]["is_online"] is True
+        assert "online" not in feature["properties"]  # No old format
+
+    def test_make_feature_sensor_data_optional(self, tmp_path):
+        """Sensor data only included when present (no null clutter)."""
+        collector = self._make_collector(tmp_path)
+        feature = collector._make_feature(
+            node_id="!test", name="Test", lat=21.3, lon=-157.8,
+        )
+        assert "temperature" not in feature["properties"]
+        assert "humidity" not in feature["properties"]
+
+        feature_with_sensor = collector._make_feature(
+            node_id="!test2", name="Sensor", lat=21.3, lon=-157.8,
+            temperature=25.5, humidity=65.0
+        )
+        assert feature_with_sensor["properties"]["temperature"] == 25.5
+        assert feature_with_sensor["properties"]["humidity"] == 65.0
