@@ -11,12 +11,15 @@ Features:
 - Coverage Map Generation (opens in browser)
 """
 
+import logging
 import os
 import subprocess
 import sys
 import webbrowser
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AIToolsMixin:
@@ -111,8 +114,8 @@ class AIToolsMixin:
                 root_logger.setLevel(old_level)
 
             self._map_server = server
-        except Exception:
-            pass  # Non-fatal, don't interrupt startup
+        except Exception as e:
+            logger.debug("Map server auto-start failed: %s", e)
 
     def _try_start_map_service_quiet(self) -> bool:
         """Try to start map server via systemd (quiet, no TUI output).
@@ -152,7 +155,8 @@ class AIToolsMixin:
                     pass
 
             return False
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Map systemd service start failed: %s", e)
             return False
 
     def _get_map_settings_file(self) -> Path:
@@ -407,7 +411,8 @@ class AIToolsMixin:
                     pass
 
             return False
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Map service restart failed: %s", e)
             return False
 
     def _get_map_service_status(self) -> str:
@@ -425,7 +430,8 @@ class AIToolsMixin:
             elif result.returncode != 0:
                 return "in-process (TUI)"
             return f"systemd ({status})"
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Map service status check failed: %s", e)
             return "in-process (TUI)"
 
     def _toggle_auto_map(self):
@@ -898,7 +904,8 @@ class AIToolsMixin:
             }
         except ImportError:
             return {"type": "FeatureCollection", "features": []}
-        except Exception:
+        except Exception as e:
+            logger.debug("GeoJSON collection failed: %s", e)
             return {"type": "FeatureCollection", "features": []}
 
     def _open_in_browser(self, url: str):

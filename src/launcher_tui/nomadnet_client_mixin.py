@@ -302,8 +302,8 @@ class NomadNetClientMixin:
                     for line in result.stdout.strip().split('\n'):
                         if 'pgrep' not in line:
                             print(f"             {line.strip()}")
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.debug("NomadNet process check failed: %s", e)
         else:
             print("  Process:   not running")
 
@@ -350,7 +350,8 @@ class NomadNetClientMixin:
             else:
                 print("  rnsd:      NOT running")
                 print("  WARNING:   NomadNet needs rnsd or share_instance=Yes")
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("rnsd status check failed: %s", e)
             print("  rnsd:      (check failed)")
 
         self._wait_for_enter()
@@ -482,7 +483,8 @@ class NomadNetClientMixin:
                                 error_hints.append(f"rnsd runs as '{rnsd_user}', you are '{sudo_user}'")
                             else:
                                 error_hints.append("Check that rnsd uses the same ~/.reticulum/ identity")
-                        except Exception:
+                        except (subprocess.SubprocessError, OSError) as e:
+                            logger.debug("rnsd user lookup failed: %s", e)
                             error_hints.append("Ensure rnsd and NomadNet use the same RNS identity")
                         break
                     elif 'KeyError' in line and 'textui' in line.lower():
@@ -941,7 +943,8 @@ class NomadNetClientMixin:
                     if pid.strip() and pid.strip() != str(os.getpid()):
                         return True
             return False
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("NomadNet running check failed: %s", e)
             return False
 
     def _find_nomadnet_binary(self) -> str:
@@ -1018,8 +1021,8 @@ class NomadNetClientMixin:
                         can_write = True
                     except (OSError, PermissionError):
                         pass
-            except Exception:
-                pass
+            except (OSError, ValueError) as e:
+                logger.debug("RNS storage dir check failed: %s", e)
 
             if not can_write:
                 # /etc/reticulum exists but is not writable
@@ -1089,7 +1092,8 @@ class NomadNetClientMixin:
                 capture_output=True, text=True, timeout=5
             )
             rnsd_user = result.stdout.strip() if result.returncode == 0 else None
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("rnsd user detection failed: %s", e)
             rnsd_user = None
 
         if not rnsd_user:
