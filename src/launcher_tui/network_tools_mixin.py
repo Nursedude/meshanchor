@@ -212,7 +212,8 @@ class NetworkToolsMixin:
                     print(f"  \033[0;32m●\033[0m {port:<6} {desc}")
                 else:
                     print(f"  \033[2m○\033[0m {port:<6} {desc} (not listening)")
-            except Exception:
+            except OSError as e:
+                logger.debug("Port %d check failed: %s", port, e)
                 print(f"  ? {port:<6} {desc} (check failed)")
 
         # Local IP
@@ -226,7 +227,8 @@ class NetworkToolsMixin:
             finally:
                 s.close()
             print(f"  Local IP: {local_ip}")
-        except Exception:
+        except OSError as e:
+            logger.debug("Local IP detection failed: %s", e)
             print("  Local IP: Unable to determine")
 
         # Internet connectivity
@@ -243,7 +245,8 @@ class NetworkToolsMixin:
                 print(f"  \033[0;32m●\033[0m Internet (Google DNS)")
             else:
                 print(f"  \033[0;31m●\033[0m Internet (no route to 8.8.8.8)")
-        except Exception:
+        except OSError as e:
+            logger.debug("Internet connectivity check failed: %s", e)
             print(f"  \033[0;31m●\033[0m Internet (unreachable)")
 
         print()

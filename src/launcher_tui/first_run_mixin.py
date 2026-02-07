@@ -14,11 +14,14 @@ Enhanced in v0.4.8:
 - Region selection
 """
 
+import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Import path utilities
 try:
@@ -494,8 +497,8 @@ class FirstRunMixin:
                 settings['region'] = choice
 
                 settings_file.write_text(json.dumps(settings, indent=2))
-            except Exception:
-                pass
+            except (OSError, ValueError) as e:
+                logger.debug("Failed to save region setting: %s", e)
 
     def _find_usb_serial_devices(self) -> List[Dict[str, str]]:
         """Find USB serial devices."""
@@ -525,8 +528,8 @@ class FirstRunMixin:
                         kw in (vendor + model).lower()
                         for kw in ['meshtastic', 't-beam', 'heltec', 'rak', 'lilygo', 'cp210', 'ch340']
                     )
-                except Exception:
-                    pass
+                except (subprocess.SubprocessError, OSError) as e:
+                    logger.debug("USB device detection for %s failed: %s", path, e)
 
                 devices.append(device)
 
@@ -708,8 +711,8 @@ Serial:
             if model.exists():
                 if 'Raspberry Pi' in model.read_text():
                     return True
-        except Exception:
-            pass
+        except OSError as e:
+            logger.debug("RPi detection failed: %s", e)
         return False
 
     def _offer_enable_spi(self) -> bool:

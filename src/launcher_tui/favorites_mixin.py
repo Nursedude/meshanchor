@@ -59,7 +59,8 @@ class FavoritesMixin:
                 return 0
             nodes = tracker.get_meshtastic_nodes()
             return sum(1 for n in nodes if getattr(n, 'is_favorite', False))
-        except Exception:
+        except Exception as e:
+            logger.debug("Favorites count failed: %s", e)
             return 0
 
     def _get_node_tracker(self):

@@ -100,8 +100,8 @@ class MQTTMixin:
             finally:
                 root_logger.setLevel(old_level)
 
-        except Exception:
-            pass  # Non-fatal, don't interrupt startup
+        except Exception as e:
+            logger.debug("MQTT auto-start failed: %s", e)
 
     def _auto_start_mqtt_quiet(self, config: Dict[str, Any]):
         """Quietly start MQTT subscriber without any UI feedback.
@@ -157,11 +157,13 @@ class MQTTMixin:
             # Get current status and mode (safe - must not crash menu loop)
             try:
                 status = self._get_mqtt_status()
-            except Exception:
+            except Exception as e:
+                logger.debug("MQTT status check failed: %s", e)
                 status = "Unknown"
             try:
                 config = self._load_mqtt_config()
-            except Exception:
+            except Exception as e:
+                logger.debug("MQTT config load failed: %s", e)
                 config = {}
             broker = config.get('broker', 'mqtt.meshtastic.org')
             mode = "Local" if broker == "localhost" else "Public"
@@ -169,7 +171,8 @@ class MQTTMixin:
             # Check WebSocket bridge status
             try:
                 ws_status = self._get_ws_bridge_status()
-            except Exception:
+            except Exception as e:
+                logger.debug("WebSocket bridge status check failed: %s", e)
                 ws_status = "Unknown"
 
             choices = [

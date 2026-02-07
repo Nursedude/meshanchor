@@ -120,7 +120,8 @@ class QuickActionsMixin:
                     print(f"  ! {svc:<18} FAILED")
                 else:
                     print(f"  - {svc:<18} {status}")
-            except Exception:
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.debug("Service status check for %s failed: %s", svc, e)
                 print(f"  ? {svc:<18} unknown")
 
         # Bridge process (not a systemd service — no boot persistence check)
@@ -138,7 +139,8 @@ class QuickActionsMixin:
             bridge_status = "running" if bridge_running else "not running"
             sym = "*" if bridge_running else "-"
             print(f"  {sym} {'rns_bridge':<18} {bridge_status}")
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Bridge process check failed: %s", e)
             print(f"  ? {'rns_bridge':<18} unknown")
 
         # Surface actionable warning for services that won't survive reboot
@@ -263,7 +265,8 @@ class QuickActionsMixin:
                     print(f"  * {port:<6} {desc}")
                 else:
                     print(f"  - {port:<6} {desc} (not listening)")
-            except Exception:
+            except (OSError, ValueError) as e:
+                logger.debug("Port %d check failed: %s", port, e)
                 print(f"  ? {port:<6} {desc} (check failed)")
 
         print()
@@ -376,8 +379,8 @@ class QuickActionsMixin:
                             'lat': node.lat,
                             'lon': node.lon,
                         })
-            except Exception:
-                pass  # Node inventory not available
+            except Exception as e:
+                logger.debug("Node inventory for GPS report unavailable: %s", e)
 
             # Display position report
             report = gps.format_position_report(nodes=nodes if nodes else None)
