@@ -16,6 +16,7 @@ import sys
 import shutil
 import subprocess
 import logging
+import traceback
 from pathlib import Path
 from typing import Optional, List
 
@@ -231,6 +232,109 @@ class MeshForgeLauncher(
             self.dialog.set_status_bar(self._status_bar)
         except Exception:
             self._status_bar = None
+
+    def _get_error_log_path(self) -> Path:
+        """Get the path to the TUI error log file."""
+        try:
+            log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return log_dir / "tui_errors.log"
+        except Exception:
+            return Path("/tmp/meshforge_tui_errors.log")
+
+    def _log_error(self, context: str, exc: Exception) -> None:
+        """Write error details to the TUI error log file.
+
+        This preserves full tracebacks for debugging while keeping
+        the TUI display clean for the user.
+        """
+        try:
+            import datetime
+            log_path = self._get_error_log_path()
+            with open(log_path, 'a') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"[{datetime.datetime.now().isoformat()}] {context}\n")
+                f.write(f"Exception: {type(exc).__name__}: {exc}\n")
+                f.write(traceback.format_exc())
+                f.write(f"{'='*60}\n")
+        except Exception:
+            pass  # Logging failure must never compound the original error
+
+    def _safe_call(self, method_name: str, method, *args, **kwargs):
+        """Safely call a mixin method with exception handling.
+
+        If the method raises an exception:
+        1. Logs full traceback to the error log file
+        2. Shows a user-friendly error dialog with the error summary
+        3. Returns to the calling menu instead of crashing
+
+        Args:
+            method_name: Human-readable name for error messages
+            method: The callable to invoke
+            *args, **kwargs: Passed through to the method
+        """
+        try:
+            return method(*args, **kwargs)
+        except KeyboardInterrupt:
+            # Let Ctrl+C propagate - user wants to exit
+            raise
+        except ImportError as e:
+            module = str(e).replace("No module named ", "").strip("'\"")
+            self._log_error(f"ImportError in {method_name}", e)
+            self.dialog.msgbox(
+                "Module Not Available",
+                f"Required module not installed: {module}\n\n"
+                f"This feature requires additional dependencies.\n"
+                f"Try: pip3 install {module}\n\n"
+                f"Details logged to:\n"
+                f"  {self._get_error_log_path()}"
+            )
+        except subprocess.TimeoutExpired as e:
+            self._log_error(f"Timeout in {method_name}", e)
+            self.dialog.msgbox(
+                "Operation Timed Out",
+                f"{method_name} took too long to respond.\n\n"
+                f"Possible causes:\n"
+                f"  - Service not responding\n"
+                f"  - Network connectivity issue\n"
+                f"  - System under heavy load\n\n"
+                f"Try checking service status from Dashboard."
+            )
+        except PermissionError as e:
+            self._log_error(f"PermissionError in {method_name}", e)
+            self.dialog.msgbox(
+                "Permission Denied",
+                f"Insufficient permissions for {method_name}.\n\n"
+                f"{e}\n\n"
+                f"Make sure MeshForge is running with sudo."
+            )
+        except FileNotFoundError as e:
+            self._log_error(f"FileNotFoundError in {method_name}", e)
+            self.dialog.msgbox(
+                "File Not Found",
+                f"A required file or command was not found:\n\n"
+                f"{e}\n\n"
+                f"The tool or file may not be installed."
+            )
+        except ConnectionError as e:
+            self._log_error(f"ConnectionError in {method_name}", e)
+            self.dialog.msgbox(
+                "Connection Failed",
+                f"Could not connect to service for {method_name}.\n\n"
+                f"{e}\n\n"
+                f"Check that the required service is running."
+            )
+        except Exception as e:
+            self._log_error(f"Unexpected error in {method_name}", e)
+            self.dialog.msgbox(
+                "Error",
+                f"An error occurred in {method_name}:\n\n"
+                f"{type(e).__name__}: {e}\n\n"
+                f"Full details logged to:\n"
+                f"  {self._get_error_log_path()}\n\n"
+                f"Please report this at:\n"
+                f"  github.com/Nursedude/meshforge/issues"
+            )
 
     def _detect_environment(self) -> dict:
         """Detect the current environment."""
@@ -506,25 +610,27 @@ class MeshForgeLauncher(
         return "Network Operations Center"
 
     def _handle_main_choice(self, choice: str):
-        """Handle main menu selection (v0.4.8 restructured)."""
-        if choice == "1":
-            self._dashboard_menu()
-        elif choice == "2":
-            self._mesh_networks_menu()
-        elif choice == "3":
-            self._rf_sdr_menu()
-        elif choice == "4":
-            self._maps_viz_menu()
-        elif choice == "5":
-            self._configuration_menu()
-        elif choice == "6":
-            self._system_menu()
-        elif choice == "q":
-            self._quick_actions_menu()
-        elif choice == "e":
-            self._emergency_mode()
-        elif choice == "a":
-            self._about_menu()
+        """Handle main menu selection (v0.4.8 restructured).
+
+        All dispatches go through _safe_call to ensure unhandled
+        exceptions in any mixin show a user-friendly error dialog
+        instead of crashing the TUI.
+        """
+        dispatch = {
+            "1": ("Dashboard", self._dashboard_menu),
+            "2": ("Mesh Networks", self._mesh_networks_menu),
+            "3": ("RF & SDR Tools", self._rf_sdr_menu),
+            "4": ("Maps & Visualization", self._maps_viz_menu),
+            "5": ("Configuration", self._configuration_menu),
+            "6": ("System Tools", self._system_menu),
+            "q": ("Quick Actions", self._quick_actions_menu),
+            "e": ("Emergency Mode", self._emergency_mode),
+            "a": ("About", self._about_menu),
+        }
+        entry = dispatch.get(choice)
+        if entry:
+            name, method = entry
+            self._safe_call(name, method)
 
     # =========================================================================
     # NEW Submenu: Dashboard (1)
@@ -552,18 +658,17 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._service_status_display()
-            elif choice == "network":
-                self._network_menu()
-            elif choice == "nodes":
-                self._show_node_counts()
-            elif choice == "datapath":
-                self._data_path_diagnostic()
-            elif choice == "metrics":
-                self._metrics_menu()
-            elif choice == "alerts":
-                self._show_alerts()
+            dispatch = {
+                "status": ("Service Status", self._service_status_display),
+                "network": ("Network Status", self._network_menu),
+                "nodes": ("Node Count", self._show_node_counts),
+                "datapath": ("Data Path Check", self._data_path_diagnostic),
+                "metrics": ("Historical Trends", self._metrics_menu),
+                "alerts": ("View Alerts", self._show_alerts),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _service_status_display(self):
         """Show comprehensive service status."""
@@ -837,18 +942,17 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "meshtastic":
-                self._radio_menu()
-            elif choice == "rns":
-                self._rns_menu()
-            elif choice == "gateway":
-                self._gateway_config_menu()
-            elif choice == "aredn":
-                self._aredn_menu()
-            elif choice == "mqtt":
-                self._mqtt_menu()
-            elif choice == "services":
-                self._service_menu()
+            dispatch = {
+                "meshtastic": ("Meshtastic Radio", self._radio_menu),
+                "rns": ("RNS / Reticulum", self._rns_menu),
+                "gateway": ("Gateway Bridge", self._gateway_config_menu),
+                "aredn": ("AREDN Mesh", self._aredn_menu),
+                "mqtt": ("MQTT Monitor", self._mqtt_menu),
+                "services": ("Service Control", self._service_menu),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # =========================================================================
     # NEW Submenu: RF & SDR (3)
@@ -874,14 +978,15 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "link":
-                self._rf_tools_menu()
-            elif choice == "site":
-                self._site_planner_menu()
-            elif choice == "freq":
-                self._calc_frequency_slot()
-            elif choice == "sdr":
-                self._rf_awareness_menu()
+            dispatch = {
+                "link": ("Link Budget", self._rf_tools_menu),
+                "site": ("Site Planner", self._site_planner_menu),
+                "freq": ("Frequency Slots", self._calc_frequency_slot),
+                "sdr": ("SDR Monitor", self._rf_awareness_menu),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # =========================================================================
     # NEW Submenu: Maps & Viz (4)
@@ -910,20 +1015,18 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "livemap":
-                self._open_live_map()
-            elif choice == "coverage":
-                self._generate_coverage_map()
-            elif choice == "topology":
-                self._topology_menu()
-            elif choice == "traffic":
-                self.menu_traffic_inspector()
-            elif choice == "quality":
-                self._link_quality_menu()
-            elif choice == "export":
-                self._export_data_menu()
-            elif choice == "ai":
-                self._ai_tools_menu()
+            dispatch = {
+                "livemap": ("Live NOC Map", self._open_live_map),
+                "coverage": ("Coverage Map", self._generate_coverage_map),
+                "topology": ("Network Topology", self._topology_menu),
+                "traffic": ("Traffic Inspector", self.menu_traffic_inspector),
+                "quality": ("Link Quality", self._link_quality_menu),
+                "export": ("Export Data", self._export_data_menu),
+                "ai": ("AI Diagnostics", self._ai_tools_menu),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _export_data_menu(self):
         """Export data in various formats."""
@@ -1025,22 +1128,19 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "radio":
-                self._config_menu()
-            elif choice == "channels":
-                self._channel_config_menu()
-            elif choice == "rns-config":
-                self._edit_rns_config()
-            elif choice == "services":
-                self._service_menu()
-            elif choice == "backup":
-                self._device_backup_menu()
-            elif choice == "updates":
-                self._updates_menu()
-            elif choice == "meshforge":
-                self._settings_menu()
-            elif choice == "wizard":
-                self._run_first_run_wizard()
+            dispatch = {
+                "radio": ("Radio Config", self._config_menu),
+                "channels": ("Channel Config", self._channel_config_menu),
+                "rns-config": ("RNS Config", self._edit_rns_config),
+                "services": ("Service Config", self._service_menu),
+                "backup": ("Device Backup", self._device_backup_menu),
+                "updates": ("Software Updates", self._updates_menu),
+                "meshforge": ("MeshForge Settings", self._settings_menu),
+                "wizard": ("Setup Wizard", self._run_first_run_wizard),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # =========================================================================
     # NEW Submenu: System (6)
@@ -1067,16 +1167,16 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "hardware":
-                self._hardware_menu()
-            elif choice == "logs":
-                self._logs_menu()
-            elif choice == "network":
-                self._network_menu()
-            elif choice == "shell":
-                self._drop_to_shell()
-            elif choice == "reboot":
-                self._reboot_menu()
+            dispatch = {
+                "hardware": ("Hardware Detection", self._hardware_menu),
+                "logs": ("Log Viewer", self._logs_menu),
+                "network": ("Network Tools", self._network_menu),
+                "shell": ("Linux Shell", self._drop_to_shell),
+                "reboot": ("Reboot/Shutdown", self._reboot_menu),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _drop_to_shell(self):
         """Drop to a bash shell."""
@@ -1132,12 +1232,14 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            if choice == "version":
-                self._show_about()
-            elif choice == "web":
-                self._open_web_client()
-            elif choice == "help":
-                self._show_help()
+            dispatch = {
+                "version": ("Version Info", self._show_about),
+                "web": ("Web Client", self._open_web_client),
+                "help": ("Help", self._show_help),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _show_help(self):
         """Show help documentation."""
@@ -1205,22 +1307,19 @@ SUPPORT:
             if choice is None or choice == "back":
                 break
 
-            if choice == "view":
-                self._view_active_config()
-            elif choice == "overlays":
-                self._view_config_overlays()
-            elif choice == "available":
-                self._view_available_hats()
-            elif choice == "presets":
-                self._radio_presets_menu()
-            elif choice == "channels":
-                self._channel_config_menu()
-            elif choice == "meshtasticd":
-                self._meshtasticd_menu()
-            elif choice == "settings":
-                self._settings_menu()
-            elif choice == "wizard":
-                self._run_first_run_wizard()
+            dispatch = {
+                "view": ("View Active Config", self._view_active_config),
+                "overlays": ("Config Overlays", self._view_config_overlays),
+                "available": ("Available HAT Configs", self._view_available_hats),
+                "presets": ("LoRa Presets", self._radio_presets_menu),
+                "channels": ("Channel Config", self._channel_config_menu),
+                "meshtasticd": ("Advanced Config", self._meshtasticd_menu),
+                "settings": ("MeshForge Settings", self._settings_menu),
+                "wizard": ("Setup Wizard", self._run_first_run_wizard),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _view_active_config(self):
         """Show the active meshtasticd config.yaml."""
@@ -1375,6 +1474,7 @@ def main():
     # Redirect to file so errors can still be debugged
     import logging
     import os
+    import datetime
 
     # Set all loggers to CRITICAL to prevent output during TUI
     logging.getLogger().setLevel(logging.CRITICAL)
@@ -1398,11 +1498,39 @@ def main():
         pass  # Keep original stderr if can't redirect
 
     launcher = None
+    exit_code = 0
     try:
         launcher = MeshForgeLauncher()
         launcher.run()
     except KeyboardInterrupt:
         print("\n\nExiting MeshForge...")
+    except Exception as e:
+        # Restore stderr FIRST so the user can see the error message
+        try:
+            if sys.stderr != _original_stderr:
+                sys.stderr.close()
+                sys.stderr = _original_stderr
+        except Exception:
+            pass
+
+        # Log full traceback to file
+        try:
+            with open(stderr_log, 'a') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"[{datetime.datetime.now().isoformat()}] FATAL ERROR\n")
+                f.write(traceback.format_exc())
+                f.write(f"{'='*60}\n")
+        except Exception:
+            pass
+
+        # Show user-friendly message on terminal
+        print(f"\n\nMeshForge encountered a fatal error:\n")
+        print(f"  {type(e).__name__}: {e}\n")
+        print(f"Full error details saved to:")
+        print(f"  {stderr_log}\n")
+        print(f"To report this issue:")
+        print(f"  https://github.com/Nursedude/meshforge/issues\n")
+        exit_code = 1
     finally:
         # Stop MQTT subscriber if running (prevents hang on exit)
         if launcher is not None:
@@ -1418,6 +1546,20 @@ def main():
                     launcher._mqtt_ws_bridge = None
             except Exception:
                 pass
+            # Stop map server if running
+            try:
+                if hasattr(launcher, '_map_server_process') and launcher._map_server_process:
+                    launcher._map_server_process.terminate()
+                    launcher._map_server_process = None
+            except Exception:
+                pass
+            # Stop telemetry poller if running
+            try:
+                if hasattr(launcher, '_telemetry_poller') and launcher._telemetry_poller:
+                    launcher._telemetry_poller.stop()
+                    launcher._telemetry_poller = None
+            except Exception:
+                pass
 
         # Restore stderr
         try:
@@ -1426,7 +1568,7 @@ def main():
                 sys.stderr = _original_stderr
         except Exception:
             pass
-        sys.exit(0)
+        sys.exit(exit_code)
 
 
 if __name__ == '__main__':

@@ -92,44 +92,54 @@ class RNSMenuMixin(RNSSnifferMixin):
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== RNS Status ===\n")
-                self._run_rns_tool(['rnstatus'], 'rnstatus')
-                self._wait_for_enter()
-            elif choice == "paths":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== RNS Path Table ===\n")
-                self._run_rns_tool(['rnpath', '-t'], 'rnpath')
-                self._wait_for_enter()
-            elif choice == "sniffer":
-                self._rns_traffic_sniffer()
-            elif choice == "topology":
-                self._topology_menu()
-            elif choice == "quality":
-                self._link_quality_menu()
-            elif choice == "probe":
-                self._rns_probe_destination()
-            elif choice == "identity":
-                self._rns_identity_info()
-            elif choice == "nodes":
-                self._rns_known_destinations()
-            elif choice == "positions":
-                self._rns_set_node_positions()
-            elif choice == "diag":
-                self._rns_diagnostics()
-            elif choice == "bridge":
-                self._run_bridge()
-            elif choice == "nomadnet":
-                self._nomadnet_menu()
-            elif choice == "ifaces":
-                self._rns_interfaces_menu()
-            elif choice == "config":
-                self._view_rns_config()
-            elif choice == "edit":
-                self._edit_rns_config()
-            elif choice == "check":
-                self._check_rns_setup()
+            try:
+                if choice == "status":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== RNS Status ===\n")
+                    self._run_rns_tool(['rnstatus'], 'rnstatus')
+                    self._wait_for_enter()
+                elif choice == "paths":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== RNS Path Table ===\n")
+                    self._run_rns_tool(['rnpath', '-t'], 'rnpath')
+                    self._wait_for_enter()
+                elif choice == "sniffer":
+                    self._rns_traffic_sniffer()
+                elif choice == "topology":
+                    self._topology_menu()
+                elif choice == "quality":
+                    self._link_quality_menu()
+                elif choice == "probe":
+                    self._rns_probe_destination()
+                elif choice == "identity":
+                    self._rns_identity_info()
+                elif choice == "nodes":
+                    self._rns_known_destinations()
+                elif choice == "positions":
+                    self._rns_set_node_positions()
+                elif choice == "diag":
+                    self._rns_diagnostics()
+                elif choice == "bridge":
+                    self._run_bridge()
+                elif choice == "nomadnet":
+                    self._nomadnet_menu()
+                elif choice == "ifaces":
+                    self._rns_interfaces_menu()
+                elif choice == "config":
+                    self._view_rns_config()
+                elif choice == "edit":
+                    self._edit_rns_config()
+                elif choice == "check":
+                    self._check_rns_setup()
+            except KeyboardInterrupt:
+                pass  # Return to RNS menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "RNS Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
+                    f"Check that rnsd is running:\n"
+                    f"  sudo systemctl status rnsd"
+                )
 
     def _rns_probe_destination(self):
         """Probe an RNS destination to test reachability."""
