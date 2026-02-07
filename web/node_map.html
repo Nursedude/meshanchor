@@ -1267,6 +1267,22 @@
                 <label><input type="checkbox" id="filter-clustering"> Cluster view</label>
                 <label><input type="checkbox" id="filter-messages"> Message flow</label>
             </div>
+            <div class="filter-section" style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #1a2a3a;">
+                <span style="font-size: 10px; color: #888; display: block; margin-bottom: 4px;">Node Role</span>
+                <select id="filter-role" style="width: 100%; background: #0a1622; color: #e0e0e0; border: 1px solid #2a3a4a; border-radius: 4px; padding: 3px 6px; font-size: 11px;">
+                    <option value="">All Roles</option>
+                    <option value="ROUTER">Router</option>
+                    <option value="ROUTER_CLIENT">Router+Client</option>
+                    <option value="CLIENT">Client</option>
+                    <option value="CLIENT_MUTE">Client (Mute)</option>
+                    <option value="REPEATER">Repeater</option>
+                    <option value="TRACKER">Tracker</option>
+                    <option value="SENSOR">Sensor</option>
+                    <option value="TAK">TAK</option>
+                    <option value="CLIENT_HIDDEN">Hidden</option>
+                    <option value="rns">RNS Node</option>
+                </select>
+            </div>
 
             <button class="btn-action primary" onclick="refreshNodes()">Refresh</button>
             <button class="btn-action" onclick="fitAllNodes()">Fit All</button>
@@ -1551,7 +1567,13 @@
         // WebSocket for real-time messages
         websocket: null,         // WebSocket connection
         websocketConnected: false,
-        websocketRetries: 0
+        websocketRetries: 0,
+        // API health tracking
+        apiConnected: true,
+        apiFailCount: 0,
+        lastSuccessfulFetch: null,
+        // Role filter state
+        activeRoleFilter: null   // null = show all, string = specific role
     };
 
     // ============================================
@@ -2483,6 +2505,7 @@
         const onlineOnly = document.getElementById('filter-online-only').checked;
         const showCoverage = document.getElementById('filter-coverage').checked;
         const showLinks = document.getElementById('filter-links').checked;
+        const roleFilter = document.getElementById('filter-role').value;
 
         // Track which nodes are in this update
         const activeIds = new Set();
@@ -2506,6 +2529,15 @@
             if (props.network === 'meshtastic' && !showMeshtastic) return;
             if (props.network === 'rns' && !showRNS) return;
             if (props.network === 'aredn' && !showAREDN) return;
+            // Role filter (RMAP-inspired node type filtering)
+            if (roleFilter) {
+                if (roleFilter === 'rns') {
+                    if (props.network !== 'rns') return;
+                } else {
+                    const nodeRole = (props.role || '').toUpperCase();
+                    if (nodeRole !== roleFilter) return;
+                }
+            }
 
             activeIds.add(id);
 
@@ -3167,10 +3199,33 @@
     // Data Loading
     // ============================================
 
+    function updateApiStatus(connected, error) {
+        const indicator = document.getElementById('update-indicator');
+        const text = document.getElementById('update-text');
+        const dot = indicator.querySelector('.update-dot');
+
+        if (connected) {
+            state.apiConnected = true;
+            state.apiFailCount = 0;
+            state.lastSuccessfulFetch = Date.now();
+            text.textContent = 'Live';
+            dot.style.background = '#4caf50';
+        } else {
+            state.apiConnected = false;
+            state.apiFailCount++;
+            const mins = state.lastSuccessfulFetch
+                ? Math.round((Date.now() - state.lastSuccessfulFetch) / 60000)
+                : 0;
+            text.textContent = mins > 0 ? `Stale (${mins}m)` : 'Disconnected';
+            dot.style.background = state.apiFailCount > 3 ? '#ef5350' : '#ff9800';
+        }
+    }
+
     async function refreshNodes() {
         // 1. Check for embedded data (injected by GTK panel)
         if (window.meshforgeData) {
             loadNodes(window.meshforgeData);
+            updateApiStatus(true);
             return;
         }
 
@@ -3179,9 +3234,13 @@
             const response = await fetch('/api/nodes/geojson');
             if (response.ok) {
                 loadNodes(await response.json());
+                updateApiStatus(true);
                 return;
             }
-        } catch (e) { /* not available */ }
+            updateApiStatus(false, `HTTP ${response.status}`);
+        } catch (e) {
+            updateApiStatus(false, e.message);
+        }
 
         // 3. Check URL params
         const params = new URLSearchParams(window.location.search);
@@ -3414,6 +3473,12 @@
     // ============================================
     // Filter Event Listeners
     // ============================================
+    // Role filter dropdown
+    document.getElementById('filter-role').addEventListener('change', () => {
+        state.activeRoleFilter = document.getElementById('filter-role').value || null;
+        updateDisplay();
+    });
+
     ['filter-meshtastic', 'filter-rns', 'filter-aredn', 'filter-online-only',
      'filter-coverage', 'filter-links', 'filter-link-anim', 'filter-heatmap'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {

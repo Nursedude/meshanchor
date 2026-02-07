@@ -15,6 +15,7 @@ Usage:
 
 import json
 import logging
+import math
 import os
 import socket
 import subprocess
@@ -94,6 +95,37 @@ class MapDataCollector:
                 self._history = NodeHistoryDB(db_path=db_path)
             except Exception as e:
                 logger.debug(f"Node history disabled: {e}")
+
+    @staticmethod
+    def _is_valid_coordinate(lat, lon) -> bool:
+        """Validate geographic coordinates.
+
+        Rejects:
+        - None values
+        - NaN or Infinity
+        - Out-of-range (lat must be -90..90, lon must be -180..180)
+        - Default zero (both lat AND lon are exactly 0 — unset GPS)
+
+        Accepts:
+        - Nodes near the equator/prime meridian where only ONE coord is near zero
+        - Any valid coordinate pair within range
+        """
+        if lat is None or lon is None:
+            return False
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(lat) or not math.isfinite(lon):
+            return False
+        if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+            return False
+        # Reject default-zero GPS (both exactly 0.0 = unset), but allow
+        # nodes where only one axis is near zero (legitimate equator/meridian)
+        if lat == 0.0 and lon == 0.0:
+            return False
+        return True
 
     def get_node_cache_max_age_seconds(self) -> int:
         """Get max age for node_cache.json in seconds."""
@@ -643,9 +675,7 @@ class MapDataCollector:
             lon = lon_i / 1e7 if lon_i is not None else None
 
         # Skip nodes without valid coordinates
-        if lat is None or lon is None:
-            return None
-        if abs(lat) < 0.001 and abs(lon) < 0.001:
+        if not self._is_valid_coordinate(lat, lon):
             return None
 
         # Extract user info
@@ -653,9 +683,13 @@ class MapDataCollector:
         device_metrics = data.get('deviceMetrics', {})
 
         # Determine online status from lastHeard (configurable threshold)
-        # Default to online if node exists in nodedb (matches other mesh maps)
         last_heard = data.get('lastHeard', 0)
-        is_online = True  # Node exists in nodedb = online
+        if last_heard and (now - last_heard) <= online_threshold_seconds:
+            is_online = True
+        elif last_heard:
+            is_online = False  # Heard too long ago
+        else:
+            is_online = False  # Never heard
 
         # Format last_seen as human-readable
         if last_heard:
@@ -810,7 +844,7 @@ class MapDataCollector:
                             lon_i = pos.get('longitudeI')
                             lon = lon_i / 1e7 if lon_i else None
 
-                        if lat and lon and not (abs(lat) < 0.001 and abs(lon) < 0.001):
+                        if self._is_valid_coordinate(lat, lon):
                             user = data.get('user', {})
                             device_metrics = data.get('deviceMetrics', {})
                             feature = self._make_feature(
@@ -1287,7 +1321,7 @@ class MapDataCollector:
                 lat = pos.get("latitude") or (pos.get("latitudeI", 0) / 1e7)
                 lon = pos.get("longitude") or (pos.get("longitudeI", 0) / 1e7)
 
-        if not lat or not lon or (abs(lat) < 0.001 and abs(lon) < 0.001):
+        if not self._is_valid_coordinate(lat, lon):
             return None
 
         return self._make_feature(
@@ -1316,7 +1350,7 @@ class MapDataCollector:
                 lat = pos.get("latitude", 0)
                 lon = pos.get("longitude", 0)
 
-        if not lat or not lon or (abs(lat) < 0.001 and abs(lon) < 0.001):
+        if not self._is_valid_coordinate(lat, lon):
             return None
 
         return self._make_feature(
