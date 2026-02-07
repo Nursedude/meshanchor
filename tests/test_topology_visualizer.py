@@ -235,6 +235,18 @@ class TestTopologyVisualizer:
         assert stats["meshtastic_nodes"] == 1
         assert stats["avg_hops"] == 1.5  # (1 + 2) / 2
 
+    def test_get_stats_empty(self):
+        """Stats work with no nodes or edges (regression: max() on empty sequence)."""
+        from utils.topology_visualizer import TopologyVisualizer
+
+        viz = TopologyVisualizer()
+        stats = viz.get_stats()
+
+        assert stats["total_nodes"] == 0
+        assert stats["total_edges"] == 0
+        assert stats["avg_hops"] == 0
+        assert stats["max_hops"] == 0
+
     def test_add_event(self):
         """Test adding topology events."""
         from utils.topology_visualizer import TopologyVisualizer

@@ -348,10 +348,11 @@ class TestChannelMonitorDeviceQuery:
             stdout="Channels:\n  0: LongFast (PRIMARY)\n  1: Admin (SECONDARY)\n"
         )
         monitor = ChannelMonitor()
-        channels = monitor.query_device_channels()
+        # Mock find_meshtastic_cli inside the method via import patching
+        with patch.dict('sys.modules', {'utils.cli': MagicMock(find_meshtastic_cli=MagicMock(return_value='meshtastic'))}):
+            channels = monitor.query_device_channels()
         # Should parse at least one channel
         assert mock_run.called
-
     @patch('subprocess.run')
     def test_query_not_installed(self, mock_run):
         mock_run.side_effect = FileNotFoundError("meshtastic not found")

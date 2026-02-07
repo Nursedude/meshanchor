@@ -817,3 +817,80 @@ class TestMapDataCollectorIntegration:
         assert result["type"] == "FeatureCollection"
         assert result["features"] == []
         assert result["properties"]["source_count"] == 0
+
+
+class TestCoordinateValidation:
+    """Test _is_valid_coordinate for reliability edge cases."""
+
+    def _make_collector(self, tmp_path):
+        from utils.map_data_service import MapDataCollector
+        return MapDataCollector(cache_dir=tmp_path)
+
+    def test_valid_coordinates(self, tmp_path):
+        """Normal coordinates are accepted."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(21.3069, -157.8583) is True
+        assert c._is_valid_coordinate(-33.8688, 151.2093) is True  # Sydney
+        assert c._is_valid_coordinate(64.1466, -21.9426) is True   # Reykjavik
+
+    def test_none_rejected(self, tmp_path):
+        """None values are rejected."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(None, -157.8) is False
+        assert c._is_valid_coordinate(21.3, None) is False
+        assert c._is_valid_coordinate(None, None) is False
+
+    def test_nan_rejected(self, tmp_path):
+        """NaN coordinates are rejected (prevents map rendering crash)."""
+        import math
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(float('nan'), -157.8) is False
+        assert c._is_valid_coordinate(21.3, float('nan')) is False
+
+    def test_infinity_rejected(self, tmp_path):
+        """Infinity coordinates are rejected."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(float('inf'), -157.8) is False
+        assert c._is_valid_coordinate(21.3, float('-inf')) is False
+
+    def test_out_of_range_rejected(self, tmp_path):
+        """Coordinates outside valid range are rejected."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(91.0, 0.0) is False   # lat > 90
+        assert c._is_valid_coordinate(-91.0, 0.0) is False  # lat < -90
+        assert c._is_valid_coordinate(0.0, 181.0) is False  # lon > 180
+        assert c._is_valid_coordinate(0.0, -181.0) is False # lon < -180
+
+    def test_default_zero_rejected(self, tmp_path):
+        """Both-zero coordinates (unset GPS default) are rejected."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate(0.0, 0.0) is False
+
+    def test_equator_accepted(self, tmp_path):
+        """Nodes near equator with valid lon are NOT rejected (was a bug)."""
+        c = self._make_collector(tmp_path)
+        # Quito, Ecuador (near equator)
+        assert c._is_valid_coordinate(0.1807, -78.4678) is True
+        # Singapore (near equator)
+        assert c._is_valid_coordinate(1.3521, 103.8198) is True
+        # Node exactly on equator but with valid lon
+        assert c._is_valid_coordinate(0.0, 36.8219) is True  # Nairobi meridian
+
+    def test_prime_meridian_accepted(self, tmp_path):
+        """Nodes near prime meridian with valid lat are NOT rejected (was a bug)."""
+        c = self._make_collector(tmp_path)
+        # London (near prime meridian)
+        assert c._is_valid_coordinate(51.5074, 0.0) is True
+        # Accra, Ghana (on prime meridian, near equator)
+        assert c._is_valid_coordinate(5.6037, 0.0) is True
+
+    def test_string_coordinates_handled(self, tmp_path):
+        """String values that can be parsed are accepted."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate("21.3", "-157.8") is True
+
+    def test_invalid_string_rejected(self, tmp_path):
+        """Non-numeric strings are rejected."""
+        c = self._make_collector(tmp_path)
+        assert c._is_valid_coordinate("abc", "-157.8") is False
+        assert c._is_valid_coordinate(21.3, "xyz") is False

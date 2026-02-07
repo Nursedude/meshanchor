@@ -20,11 +20,16 @@ class TestDevicePersistence:
 
     @pytest.fixture(autouse=True)
     def reset_singleton(self):
-        """Reset singleton before each test."""
+        """Reset singleton before each test and force memory storage."""
+        import utils.device_persistence as dp_mod
         from utils.device_persistence import DevicePersistence
         DevicePersistence.reset_instance()
+        # Force memory-only storage to avoid cross-test disk persistence
+        self._orig_sm = dp_mod.SettingsManager
+        dp_mod.SettingsManager = None
         yield
         DevicePersistence.reset_instance()
+        dp_mod.SettingsManager = self._orig_sm
 
     @pytest.fixture
     def persistence(self):
