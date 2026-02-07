@@ -62,7 +62,11 @@ except ImportError:
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
             return Path(f'/home/{sudo_user}')
-        return Path.home()
+        # Fallback: check LOGNAME before defaulting to /root (MF001)
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            return Path(f'/home/{logname}')
+        return Path('/root')
 
 
 class ServiceRunState(Enum):

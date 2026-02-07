@@ -134,6 +134,9 @@ from gateway_config_mixin import GatewayConfigMixin
 from favorites_mixin import FavoritesMixin
 from network_tools_mixin import NetworkToolsMixin
 from web_client_mixin import WebClientMixin
+from node_health_mixin import NodeHealthMixin
+from amateur_radio_mixin import AmateurRadioMixin
+from dashboard_mixin import DashboardMixin
 
 
 class MeshForgeLauncher(
@@ -167,7 +170,10 @@ class MeshForgeLauncher(
     GatewayConfigMixin,
     FavoritesMixin,
     NetworkToolsMixin,
-    WebClientMixin
+    WebClientMixin,
+    NodeHealthMixin,
+    AmateurRadioMixin,
+    DashboardMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -463,8 +469,9 @@ class MeshForgeLauncher(
             )
             if result.returncode == 0:
                 rnsd_user = result.stdout.strip()
-        except Exception:
-            pass
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            # ps command failed - non-critical, skip user mismatch check
+            logger.debug(f"Could not check rnsd user: {e}")
 
         # If rnsd is running as a regular user, warn about the mismatch
         if rnsd_user and rnsd_user != 'root':
@@ -643,6 +650,7 @@ class MeshForgeLauncher(
                 ("status", "Service Status      All services with health"),
                 ("network", "Network Status      Ports, interfaces, conflicts"),
                 ("nodes", "Node Count          Meshtastic + RNS nodes"),
+                ("health", "Node Health         Battery, signal, latency"),
                 ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
                 ("alerts", "View Alerts         Current warnings"),
@@ -662,6 +670,7 @@ class MeshForgeLauncher(
                 "status": ("Service Status", self._service_status_display),
                 "network": ("Network Status", self._network_menu),
                 "nodes": ("Node Count", self._show_node_counts),
+                "health": ("Node Health", self._node_health_menu),
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
                 "metrics": ("Historical Trends", self._metrics_menu),
                 "alerts": ("View Alerts", self._show_alerts),
@@ -670,251 +679,7 @@ class MeshForgeLauncher(
             if entry:
                 self._safe_call(*entry)
 
-    def _service_status_display(self):
-        """Show comprehensive service status."""
-        # Delegate to existing service menu status
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Service Status ===\n")
-
-        if self._env_state:
-            for name, info in self._env_state.services.items():
-                if info.state == ServiceRunState.RUNNING:
-                    print(f"  \033[0;32m●\033[0m {name:<18} running")
-                elif info.state == ServiceRunState.FAILED:
-                    print(f"  \033[0;31m●\033[0m {name:<18} FAILED")
-                else:
-                    print(f"  \033[2m○\033[0m {name:<18} stopped")
-        else:
-            # Fallback to systemctl
-            for svc in ['meshtasticd', 'rnsd', 'mosquitto']:
-                try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', svc],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    status = result.stdout.strip()
-                    if status == 'active':
-                        print(f"  \033[0;32m●\033[0m {svc:<18} running")
-                    else:
-                        print(f"  \033[2m○\033[0m {svc:<18} {status}")
-                except Exception:
-                    print(f"  ? {svc:<18} unknown")
-
-        print()
-        self._wait_for_enter()
-
-    def _show_node_counts(self):
-        """Show node counts from all sources."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Node Counts ===\n")
-
-        # Meshtastic nodes
-        try:
-            cli = self._get_meshtastic_cli()
-            result = subprocess.run(
-                [cli, '--host', 'localhost', '--info'],
-                capture_output=True, text=True, timeout=30
-            )
-            # Count nodes in output
-            node_count = result.stdout.count('Node ')
-            print(f"  Meshtastic nodes: {node_count}")
-        except Exception as e:
-            print(f"  Meshtastic: unavailable ({e})")
-
-        # RNS destinations
-        try:
-            result = subprocess.run(
-                ['rnstatus', '-a'],
-                capture_output=True, text=True, timeout=10
-            )
-            # Count lines that look like destinations
-            dest_count = len([l for l in result.stdout.splitlines() if l.strip().startswith('<')])
-            print(f"  RNS destinations: {dest_count}")
-        except Exception:
-            print("  RNS: unavailable")
-
-        print()
-        self._wait_for_enter()
-
-    def _data_path_diagnostic(self):
-        """Test all data collection paths to diagnose zero-data issues."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Data Path Diagnostic ===\n")
-        print("Testing all data sources...\n")
-
-        results = []
-
-        # Test 1: meshtasticd TCP connection
-        print("[1/6] Testing meshtasticd TCP (port 4403)...")
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            result = sock.connect_ex(('localhost', 4403))
-            sock.close()
-            if result == 0:
-                results.append(("meshtasticd TCP", "OK", "Port 4403 accepting connections"))
-                print("      \033[0;32mOK\033[0m - Port 4403 reachable")
-            else:
-                results.append(("meshtasticd TCP", "FAIL", f"Connection refused (code {result})"))
-                print(f"      \033[0;31mFAIL\033[0m - Connection refused")
-        except Exception as e:
-            results.append(("meshtasticd TCP", "FAIL", str(e)))
-            print(f"      \033[0;31mFAIL\033[0m - {e}")
-
-        # Test 2: meshtastic CLI node count
-        print("[2/6] Testing meshtastic CLI...")
-        try:
-            result = subprocess.run(
-                ['meshtastic', '--host', 'localhost', '--info'],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.returncode == 0:
-                # Count nodes from output
-                node_lines = [l for l in result.stdout.split('\n') if 'Node' in l or '!' in l]
-                results.append(("meshtastic CLI", "OK", f"Responded, ~{len(node_lines)} node refs"))
-                print(f"      \033[0;32mOK\033[0m - CLI responded")
-            else:
-                results.append(("meshtastic CLI", "WARN", result.stderr[:50] if result.stderr else "No output"))
-                print(f"      \033[0;33mWARN\033[0m - Non-zero exit")
-        except FileNotFoundError:
-            results.append(("meshtastic CLI", "SKIP", "CLI not installed"))
-            print("      \033[0;33mSKIP\033[0m - CLI not found")
-        except subprocess.TimeoutExpired:
-            results.append(("meshtastic CLI", "FAIL", "Timeout after 15s"))
-            print("      \033[0;31mFAIL\033[0m - Timeout")
-        except Exception as e:
-            results.append(("meshtastic CLI", "FAIL", str(e)[:50]))
-            print(f"      \033[0;31mFAIL\033[0m - {e}")
-
-        # Test 3: meshtastic Python API
-        print("[3/6] Testing meshtastic Python API...")
-        try:
-            import meshtastic.tcp_interface
-            iface = meshtastic.tcp_interface.TCPInterface(hostname='localhost', connectNow=True)
-            node_count = len(iface.nodes) if iface.nodes else 0
-            iface.close()
-            results.append(("meshtastic API", "OK", f"{node_count} nodes in nodeDB"))
-            print(f"      \033[0;32mOK\033[0m - {node_count} nodes found")
-        except ImportError:
-            results.append(("meshtastic API", "SKIP", "meshtastic module not installed"))
-            print("      \033[0;33mSKIP\033[0m - Module not installed")
-        except Exception as e:
-            err_msg = str(e)[:50]
-            results.append(("meshtastic API", "FAIL", err_msg))
-            print(f"      \033[0;31mFAIL\033[0m - {err_msg}")
-
-        # Test 4: pubsub availability
-        print("[4/6] Testing pubsub (for live capture)...")
-        try:
-            from pubsub import pub
-            # Check if any listeners on meshtastic.receive
-            listeners = pub.getDefaultTopicMgr().getTopic('meshtastic.receive', okIfNone=True)
-            if listeners:
-                count = len(list(listeners.getListeners()))
-                results.append(("pubsub", "OK", f"{count} listener(s) on meshtastic.receive"))
-                print(f"      \033[0;32mOK\033[0m - {count} listener(s) registered")
-            else:
-                results.append(("pubsub", "WARN", "Topic exists but no listeners"))
-                print("      \033[0;33mWARN\033[0m - No listeners registered")
-        except ImportError:
-            results.append(("pubsub", "SKIP", "pubsub module not installed"))
-            print("      \033[0;33mSKIP\033[0m - Module not installed")
-        except Exception as e:
-            results.append(("pubsub", "WARN", str(e)[:50]))
-            print(f"      \033[0;33mWARN\033[0m - {e}")
-
-        # Test 5: MapDataCollector
-        print("[5/6] Testing MapDataCollector...")
-        try:
-            from utils.map_data_collector import MapDataCollector
-            collector = MapDataCollector(enable_history=False)
-            geojson = collector.collect(max_age_seconds=30)
-            props = geojson.get('properties', {})
-            total = props.get('total_nodes', 0)
-            with_gps = props.get('nodes_with_position', 0)
-            sources = props.get('sources', {})
-            active_sources = [k for k, v in sources.items() if v > 0]
-            if total > 0:
-                results.append(("MapDataCollector", "OK", f"{total} nodes ({with_gps} with GPS)"))
-                print(f"      \033[0;32mOK\033[0m - {total} nodes, sources: {active_sources}")
-            else:
-                results.append(("MapDataCollector", "WARN", "0 nodes returned"))
-                print("      \033[0;33mWARN\033[0m - 0 nodes (check meshtasticd connection)")
-        except ImportError:
-            results.append(("MapDataCollector", "SKIP", "Module not available"))
-            print("      \033[0;33mSKIP\033[0m - Module not available")
-        except Exception as e:
-            results.append(("MapDataCollector", "FAIL", str(e)[:50]))
-            print(f"      \033[0;31mFAIL\033[0m - {e}")
-
-        # Test 6: RNS path table
-        print("[6/6] Testing RNS path table...")
-        try:
-            result = subprocess.run(
-                ['rnpath', '-t'],
-                capture_output=True, text=True, timeout=10
-            )
-            lines = [l for l in result.stdout.splitlines() if l.strip() and not l.startswith('Path')]
-            path_count = len(lines)
-            if path_count > 0:
-                results.append(("RNS paths", "OK", f"{path_count} known paths"))
-                print(f"      \033[0;32mOK\033[0m - {path_count} paths in table")
-            else:
-                results.append(("RNS paths", "WARN", "Path table empty"))
-                print("      \033[0;33mWARN\033[0m - No paths (normal if no RNS traffic yet)")
-        except FileNotFoundError:
-            results.append(("RNS paths", "SKIP", "rnpath not installed"))
-            print("      \033[0;33mSKIP\033[0m - rnpath not found")
-        except Exception as e:
-            results.append(("RNS paths", "WARN", str(e)[:50]))
-            print(f"      \033[0;33mWARN\033[0m - {e}")
-
-        # Summary
-        print("\n" + "=" * 50)
-        print("SUMMARY")
-        print("=" * 50)
-        ok_count = len([r for r in results if r[1] == "OK"])
-        fail_count = len([r for r in results if r[1] == "FAIL"])
-        warn_count = len([r for r in results if r[1] == "WARN"])
-
-        for test, status, detail in results:
-            if status == "OK":
-                print(f"  \033[0;32m✓\033[0m {test:<20} {detail}")
-            elif status == "FAIL":
-                print(f"  \033[0;31m✗\033[0m {test:<20} {detail}")
-            elif status == "WARN":
-                print(f"  \033[0;33m!\033[0m {test:<20} {detail}")
-            else:
-                print(f"  \033[2m-\033[0m {test:<20} {detail}")
-
-        print()
-        if fail_count > 0:
-            print(f"Result: {fail_count} FAILED - check service connections")
-        elif warn_count > 0 and ok_count == 0:
-            print("Result: No data sources working - check meshtasticd")
-        elif ok_count > 0:
-            print(f"Result: {ok_count} sources OK - data should be flowing")
-        print()
-        self._wait_for_enter()
-
-    def _show_alerts(self):
-        """Show current alerts from environment state."""
-        subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Current Alerts ===\n")
-
-        if self._env_state:
-            alerts = self._env_state.get_alerts()
-            if alerts:
-                for alert in alerts:
-                    print(f"  \033[0;33m!\033[0m {alert}")
-            else:
-                print("  No alerts - system healthy")
-        else:
-            print("  Environment state not available")
-
-        print()
-        self._wait_for_enter()
+    # Dashboard display methods are in DashboardMixin (dashboard_mixin.py)
 
     # =========================================================================
     # NEW Submenu: Mesh Networks (2)
@@ -929,6 +694,7 @@ class MeshForgeLauncher(
                 ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
+                ("ham", "Ham Radio           Callsign, Part 97, ARES"),
                 ("services", "Service Control     Start/stop/restart"),
                 ("back", "Back"),
             ]
@@ -948,6 +714,7 @@ class MeshForgeLauncher(
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
+                "ham": ("Ham Radio Tools", self._amateur_radio_menu),
                 "services": ("Service Control", self._service_menu),
             }
             entry = dispatch.get(choice)
@@ -1153,6 +920,8 @@ class MeshForgeLauncher(
                 ("hardware", "Hardware            Detect SPI/I2C/USB"),
                 ("logs", "Logs                View/follow logs"),
                 ("network", "Network Tools       Ping, ports, interfaces"),
+                ("diagnose", "Diagnostics         System health check"),
+                ("status", "Quick Status        One-shot status display"),
                 ("shell", "Linux Shell         Drop to bash"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
                 ("back", "Back"),
@@ -1171,6 +940,8 @@ class MeshForgeLauncher(
                 "hardware": ("Hardware Detection", self._hardware_menu),
                 "logs": ("Log Viewer", self._logs_menu),
                 "network": ("Network Tools", self._network_menu),
+                "diagnose": ("Diagnostics", self._run_diagnostics),
+                "status": ("Quick Status", self._run_terminal_status),
                 "shell": ("Linux Shell", self._drop_to_shell),
                 "reboot": ("Reboot/Shutdown", self._reboot_menu),
             }
@@ -1410,6 +1181,28 @@ SUPPORT:
     # Terminal-native utilities (used by menus above)
     # =========================================================================
 
+    def _run_diagnostics(self):
+        """Run the MeshForge diagnostic tool."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        try:
+            result = subprocess.run(
+                [sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')],
+                timeout=30
+            )
+            if result.returncode != 0:
+                print("\nDiagnostics encountered an error.")
+        except subprocess.TimeoutExpired:
+            print("\n\nDiagnostics timed out (30s).")
+        except FileNotFoundError:
+            print("\nDiagnostic tool not found at: src/cli/diagnose.py")
+        except KeyboardInterrupt:
+            print("\n\nAborted.")
+
+        try:
+            self._wait_for_enter("\nPress Enter to return to menu...")
+        except KeyboardInterrupt:
+            print()
+
     def _run_terminal_status(self):
         """Run meshforge-status (terminal-native one-shot status)."""
         subprocess.run(['clear'], check=False, timeout=5)
@@ -1532,34 +1325,28 @@ def main():
         print(f"  https://github.com/Nursedude/meshforge/issues\n")
         exit_code = 1
     finally:
-        # Stop MQTT subscriber if running (prevents hang on exit)
+        # Stop background services (prevents hang on exit)
         if launcher is not None:
-            try:
-                if hasattr(launcher, '_mqtt_subscriber') and launcher._mqtt_subscriber:
-                    launcher._mqtt_subscriber.stop()
-                    launcher._mqtt_subscriber = None
-            except Exception:
-                pass
-            try:
-                if hasattr(launcher, '_mqtt_ws_bridge') and launcher._mqtt_ws_bridge:
-                    launcher._mqtt_ws_bridge.stop()
-                    launcher._mqtt_ws_bridge = None
-            except Exception:
-                pass
-            # Stop map server if running
+            _cleanup_items = [
+                ('_mqtt_subscriber', 'stop', 'MQTT subscriber'),
+                ('_mqtt_ws_bridge', 'stop', 'MQTT WebSocket bridge'),
+                ('_telemetry_poller', 'stop', 'Telemetry poller'),
+            ]
+            for attr, method, name in _cleanup_items:
+                try:
+                    obj = getattr(launcher, attr, None)
+                    if obj:
+                        getattr(obj, method)()
+                        setattr(launcher, attr, None)
+                except Exception as e:
+                    logger.warning(f"Cleanup failed for {name}: {e}")
+            # Stop map server if running (uses terminate, not stop)
             try:
                 if hasattr(launcher, '_map_server_process') and launcher._map_server_process:
                     launcher._map_server_process.terminate()
                     launcher._map_server_process = None
-            except Exception:
-                pass
-            # Stop telemetry poller if running
-            try:
-                if hasattr(launcher, '_telemetry_poller') and launcher._telemetry_poller:
-                    launcher._telemetry_poller.stop()
-                    launcher._telemetry_poller = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Cleanup failed for map server: {e}")
 
         # Restore stderr
         try:
