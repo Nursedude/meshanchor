@@ -376,7 +376,8 @@ class StartupChecker:
                         return False  # We could bind, so port is not in use
                     except OSError:
                         return True  # Port is in use
-        except Exception:
+        except OSError as e:
+            logger.debug("Port check for %d failed: %s", port, e)
             return False
 
     def _check_port_conflicts(self, services: Dict[str, ServiceInfo]) -> List[PortConflict]:
@@ -504,8 +505,8 @@ class StartupChecker:
                         for kw in ['meshtastic', 't-beam', 'heltec', 'rak', 'lilygo', 'cp210', 'ch340']
                     )
 
-                except Exception:
-                    pass
+                except (subprocess.SubprocessError, OSError) as e:
+                    logger.debug("USB device detection for %s failed: %s", path, e)
 
                 devices.append(device)
 
