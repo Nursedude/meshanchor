@@ -15,7 +15,14 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from gateway import RNSMeshtasticBridge, GatewayConfig
+from gateway import (
+    RNSMeshtasticBridge,
+    GatewayConfig,
+    MeshtasticPresetBridge,
+    create_mesh_bridge,
+    RNSMeshtasticTransport,
+    create_rns_transport,
+)
 from utils.service_check import check_service, check_port
 
 # Setup logging
@@ -126,7 +133,6 @@ def main():
 
     print("\n" + "="*50)
     print("  MeshForge Gateway Bridge")
-    print("  RNS <-> Meshtastic Message Bridge")
     print("="*50)
 
     # Load config
@@ -137,17 +143,60 @@ def main():
         print(f"\nWarning: Could not load config, using defaults: {e}")
         config = GatewayConfig()  # Use default config, not None
 
-    # Pre-flight service checks
+    bridge_mode = config.bridge_mode
+
+    # Auto-fix: validate bridge_mode against available resources
+    if bridge_mode == "mesh_bridge":
+        if not config.mesh_bridge.enabled:
+            logger.warning("bridge_mode is 'mesh_bridge' but mesh_bridge.enabled is False")
+            logger.warning("Auto-correcting to 'message_bridge'")
+            print("\nWARNING: bridge_mode='mesh_bridge' but mesh_bridge is not enabled.")
+            print("         Falling back to 'message_bridge' mode.\n")
+            bridge_mode = "message_bridge"
+        else:
+            sec = config.mesh_bridge.secondary
+            if not check_port(sec.port, sec.host, timeout=2.0):
+                logger.warning(
+                    "bridge_mode is 'mesh_bridge' but secondary meshtasticd "
+                    "(%s:%d) is not reachable", sec.host, sec.port
+                )
+                logger.warning("Auto-correcting to 'message_bridge'")
+                print(f"\nWARNING: bridge_mode='mesh_bridge' but secondary meshtasticd")
+                print(f"         ({sec.host}:{sec.port}) is not reachable.")
+                print(f"         Falling back to 'message_bridge' mode.\n")
+                bridge_mode = "message_bridge"
+
+    mode_labels = {
+        "message_bridge": "RNS <-> Meshtastic Message Bridge",
+        "rns_transport": "RNS Over Meshtastic Transport",
+        "mesh_bridge": "Meshtastic Preset Bridge",
+    }
+    print(f"  Mode: {mode_labels.get(bridge_mode, bridge_mode)}")
+
+    # Pre-flight service checks (use resolved bridge_mode)
+    original_mode = config.bridge_mode
+    config.bridge_mode = bridge_mode
     if not preflight_checks(config):
         print("Pre-flight checks FAILED")
         print("Please start required services and try again.")
+        config.bridge_mode = original_mode
         sys.exit(1)
+    config.bridge_mode = original_mode
 
-    # Create bridge
-    bridge = RNSMeshtasticBridge(config)
+    # Create bridge based on resolved mode
+    if bridge_mode == "mesh_bridge":
+        bridge = create_mesh_bridge(config)
+        logger.info("Created MeshtasticPresetBridge (mesh_bridge mode)")
+    elif bridge_mode == "rns_transport":
+        bridge = create_rns_transport(config.rns_transport)
+        logger.info("Created RNSMeshtasticTransport (rns_transport mode)")
+    else:
+        bridge = RNSMeshtasticBridge(config)
+        logger.info("Created RNSMeshtasticBridge (message_bridge mode)")
 
-    # Register message callback
-    bridge.register_message_callback(on_message)
+    # Register message callback (only for bridges that support it)
+    if hasattr(bridge, 'register_message_callback'):
+        bridge.register_message_callback(on_message)
 
     # Handle Ctrl+C
     running = True

@@ -5,12 +5,15 @@ Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 Sniffer methods further extracted to rns_sniffer_mixin.py.
 """
 
+import logging
 import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from rns_sniffer_mixin import RNSSnifferMixin
 
@@ -1040,8 +1043,8 @@ class RNSMenuMixin(RNSSnifferMixin):
                                     f"  sudo cp {edited_path} {root_config}\n"
                                     f"  sudo systemctl restart rnsd"
                                 )
-                except Exception:
-                    pass
+                except (OSError, subprocess.SubprocessError) as e:
+                    logger.debug("RNS config apply failed: %s", e)
                 return  # Only check the first existing root config
 
     def _validate_rns_config_content(self, content: str) -> list:
@@ -1279,7 +1282,8 @@ class RNSMenuMixin(RNSSnifferMixin):
                         capture_output=True, text=True, timeout=5
                     )
                     pid = pid_result.stdout.strip().split('\n')[0] if pid_result.stdout else 'unknown'
-                except Exception:
+                except (subprocess.SubprocessError, OSError) as e:
+                    logger.debug("rnsd PID lookup failed: %s", e)
                     pid = 'unknown'
                 print(f"rnsd is running (PID: {pid}) but may need a restart:")
                 print("  sudo systemctl restart rnsd")
@@ -1288,7 +1292,8 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("  Find it:    sudo lsof -i UDP:29716")
                 print("  Kill stale: pkill -f rnsd")
                 print("  Or wait ~30s for the socket to timeout")
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("RNS port conflict diagnosis failed: %s", e)
             print("  Try: sudo systemctl restart rnsd")
 
     # Sniffer methods (_rns_traffic_sniffer, _rns_sniffer_*) are inherited

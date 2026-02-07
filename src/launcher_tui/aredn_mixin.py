@@ -4,7 +4,10 @@ AREDN Menu Mixin - AREDN mesh network menu handlers.
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
 
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 
 
 class AREDNMixin:
@@ -59,7 +62,8 @@ class AREDNMixin:
                         return host
                 finally:
                     sock.close()
-            except Exception:
+            except OSError as e:
+                logger.debug("AREDN probe %s failed: %s", host, e)
                 continue
         return ""
 
@@ -287,8 +291,8 @@ class AREDNMixin:
                         if neighbor and neighbor.has_location():
                             neighbors_with_loc += 1
                             print(f"    ✓ {neighbor.hostname} has location")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("AREDN neighbor check failed: %s", e)
 
             if len(node.links) > 5:
                 print(f"    ... and {len(node.links) - 5} more neighbors")
@@ -311,8 +315,8 @@ class AREDNMixin:
                 if sock.connect_ex(('localhost', 5000)) == 0:
                     print("\n  Map server is running: http://localhost:5000")
                 sock.close()
-            except Exception:
-                pass
+            except OSError as e:
+                logger.debug("AREDN map server check failed: %s", e)
 
         except ImportError as e:
             print(f"AREDN utilities not available: {e}")

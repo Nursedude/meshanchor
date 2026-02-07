@@ -4,9 +4,12 @@ Hardware Menu Mixin - Hardware detection and configuration handlers.
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
 
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class HardwareMenuMixin:
@@ -198,6 +201,6 @@ class HardwareMenuMixin:
             if model.exists():
                 if 'Raspberry Pi' in model.read_text():
                     return True
-        except Exception:
-            pass
+        except OSError as e:
+            logger.debug("RPi detection failed: %s", e)
         return False
