@@ -131,8 +131,8 @@ class TopologyMixin:
                         elif network == 'both':
                             rns_count += 1
                             mesh_count += 1
-                except Exception:
-                    pass
+                except (AttributeError, TypeError) as e:
+                    logger.debug("Node network count failed: %s", e)
 
             # Use the higher of topology nodes or tracker nodes
             topo_node_count = stats.get('node_count', 0)
@@ -175,8 +175,8 @@ class TopologyMixin:
                         for svc_name, count in sorted(svc_stats.items()):
                             lines.append(f"  {svc_name}: {count}")
                         lines.append("")
-                except Exception:
-                    pass
+                except (AttributeError, TypeError) as e:
+                    logger.debug("Service stats lookup failed: %s", e)
 
             # Show help if no data
             if node_count == 0 and stats.get('edge_count', 0) == 0:
@@ -275,8 +275,8 @@ class TopologyMixin:
         if tracker:
             try:
                 node_data = tracker.get_node(node_id)
-            except Exception:
-                pass
+            except (KeyError, AttributeError) as e:
+                logger.debug("Node data lookup for %s failed: %s", node_id, e)
 
         # Display basic node info
         if node_data:
@@ -801,11 +801,12 @@ class TopologyMixin:
                     if result.returncode != 0:
                         # Fallback to webbrowser module
                         webbrowser.open(f"file://{output_path}")
-                except Exception:
+                except (subprocess.SubprocessError, OSError) as e:
+                    logger.debug("xdg-open failed, trying webbrowser: %s", e)
                     try:
                         webbrowser.open(f"file://{output_path}")
-                    except Exception:
-                        pass
+                    except OSError as e2:
+                        logger.debug("webbrowser fallback also failed: %s", e2)
 
             threading.Thread(target=open_browser, daemon=True).start()
 

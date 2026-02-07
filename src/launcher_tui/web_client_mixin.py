@@ -37,8 +37,8 @@ class WebClientMixin:
                 local_ip = s.getsockname()[0]
             finally:
                 s.close()
-        except Exception:
-            pass
+        except OSError as e:
+            logger.debug("Local IP detection failed: %s", e)
 
         web_url = f"https://{local_ip}:9443"
         localhost_url = "https://localhost:9443"

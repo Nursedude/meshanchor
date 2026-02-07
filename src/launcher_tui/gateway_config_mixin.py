@@ -44,7 +44,8 @@ class GatewayConfigMixin:
             )
             try:
                 config = GatewayConfig()
-            except Exception:
+            except Exception as e:
+                logger.debug("Default GatewayConfig creation failed: %s", e)
                 self.dialog.msgbox(
                     "Gateway Error",
                     "Cannot create gateway configuration.\n"

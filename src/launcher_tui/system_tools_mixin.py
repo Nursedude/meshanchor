@@ -841,8 +841,8 @@ class SystemToolsMixin:
                         direction = (gpio_dir / 'direction').read_text().strip()
                         value = (gpio_dir / 'value').read_text().strip()
                         print(f"{gpio_dir.name}: direction={direction}, value={value}")
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        logger.debug("GPIO %s read failed: %s", gpio_dir.name, e)
         else:
             print("No GPIO interface found.")
 
