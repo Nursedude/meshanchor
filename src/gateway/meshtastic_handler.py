@@ -64,6 +64,7 @@ class MeshtasticHandler:
         message_queue,  # Queue for mesh->rns messages
         message_callback: Optional[Callable] = None,
         status_callback: Optional[Callable] = None,
+        should_bridge: Optional[Callable] = None,
     ):
         self.config = config
         self.node_tracker = node_tracker
@@ -76,6 +77,7 @@ class MeshtasticHandler:
         # Callbacks
         self._message_callback = message_callback
         self._status_callback = status_callback
+        self._should_bridge = should_bridge
 
         # Connection state
         self._connected = False
@@ -410,14 +412,18 @@ class MeshtasticHandler:
         except Exception as e:
             logger.debug(f"Could not broadcast to WebSocket: {e}")
 
-        # Queue for bridging if enabled (non-blocking to prevent deadlock)
+        # Queue for bridging if routing rules allow it (non-blocking to prevent deadlock)
         if self._mesh_to_rns_queue is not None:
-            try:
-                self._mesh_to_rns_queue.put_nowait(msg)
-            except Full:
-                logger.warning("Mesh→RNS queue full, dropping message")
-                with self._stats_lock:
-                    self.stats['errors'] += 1
+            # Check routing rules before queueing
+            if self._should_bridge and not self._should_bridge(msg):
+                logger.debug(f"Message from {from_id} blocked by routing rules")
+            else:
+                try:
+                    self._mesh_to_rns_queue.put_nowait(msg)
+                except Full:
+                    logger.warning("Mesh→RNS queue full, dropping message")
+                    with self._stats_lock:
+                        self.stats['errors'] += 1
 
         # Notify callback
         if self._message_callback:

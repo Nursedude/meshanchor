@@ -46,6 +46,10 @@ class MockLauncher(QuickActionsMixin):
         self.dialog = MockDialog()
         self._status_bar = None
 
+    def _get_meshtastic_cli(self) -> str:
+        """Return meshtastic CLI path for testing."""
+        return 'meshtastic'
+
     @staticmethod
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
         pass

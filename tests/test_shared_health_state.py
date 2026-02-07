@@ -193,14 +193,15 @@ class TestSharedHealthState:
         events = state.get_recent_events(service="test")
         assert len(events) == 2
 
-        # First event: unknown -> healthy
-        assert events[0].old_state == "unknown"
-        assert events[0].new_state == "healthy"
+        # Events are returned newest first (ORDER BY timestamp DESC)
+        # Second event (newest): healthy -> unhealthy
+        assert events[0].old_state == "healthy"
+        assert events[0].new_state == "unhealthy"
+        assert events[0].reason == "timeout"
 
-        # Second event: healthy -> unhealthy
-        assert events[1].old_state == "healthy"
-        assert events[1].new_state == "unhealthy"
-        assert events[1].reason == "timeout"
+        # First event (oldest): unknown -> healthy
+        assert events[1].old_state == "unknown"
+        assert events[1].new_state == "healthy"
 
         state.close()
 
