@@ -12,6 +12,7 @@ Author: Claude Code (Opus 4.5)
 Session: claude/config-api-restful-ETusS
 """
 
+import copy
 import json
 import os
 import sys
@@ -49,17 +50,17 @@ class MockSettingsManager:
 
     def __init__(self, name="test", defaults=None):
         self._name = name
-        self._defaults = defaults or {}
-        self._settings = self._defaults.copy()
+        self._defaults = copy.deepcopy(defaults) if defaults else {}
+        self._settings = copy.deepcopy(self._defaults)
 
     def all(self):
-        return self._settings.copy()
+        return copy.deepcopy(self._settings)
 
     def save(self):
         return True
 
     def reset(self):
-        self._settings = self._defaults.copy()
+        self._settings = copy.deepcopy(self._defaults)
 
 
 @pytest.fixture

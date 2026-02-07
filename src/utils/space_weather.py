@@ -372,6 +372,19 @@ class SpaceWeatherAPI:
         # Score based on A-index (lower = better, affects low bands)
         # A-index scale: <7 Quiet, 7-15 Unsettled, 15-30 Active, 30-50 Minor storm
         a_score = 4  # Default excellent if unknown
+        if a_index is None and k_index is not None:
+            # Infer A-index from K-index when not available
+            # During a geomagnetic storm (high K), A-index is typically also elevated
+            if k_index <= 1:
+                a_score = 4  # Quiet
+            elif k_index <= 3:
+                a_score = 3  # Unsettled
+            elif k_index <= 4:
+                a_score = 2  # Active
+            elif k_index <= 5:
+                a_score = 1  # Minor storm
+            else:
+                a_score = 0  # Major storm
         if a_index is not None:
             if a_index < 7:
                 a_score = 4  # Quiet
