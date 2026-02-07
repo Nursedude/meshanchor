@@ -8,11 +8,14 @@ Provides unified discovery of all mesh network services:
 - USB devices (serial ports)
 """
 
+import logging
 import re
 import socket
 import subprocess
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 # Import service check for consistent status detection
 try:
@@ -139,7 +142,8 @@ class ServiceDiscoveryMixin:
             )
             # AREDN uses 10.x.x.x addresses
             return '10.' in result.stdout and 'inet 10.' in result.stdout
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("AREDN network check failed: %s", e)
             return False
 
     def _full_network_scan(self):
@@ -183,8 +187,8 @@ class ServiceDiscoveryMixin:
                         parts = line.split()
                         if len(parts) >= 2:
                             found_devices.append(parts[1])
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.debug("nmap scan failed: %s", e)
         else:
             # Manual scan
             base = '.'.join(network.split('.')[:3])
@@ -214,8 +218,8 @@ class ServiceDiscoveryMixin:
                 gateway_idx = parts.index('via') + 1
                 gateway = parts[gateway_idx]
                 return '.'.join(gateway.split('.')[:3]) + '.0/24'
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
+            logger.debug("Network range detection failed: %s", e)
         return "192.168.1.0/24"
 
     def _usb_device_scan(self):

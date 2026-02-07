@@ -677,8 +677,8 @@ class MetricsMixin:
                 capture_output=True, text=True, timeout=5
             )
             grafana_running = result.stdout.strip() == 'active'
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Grafana status check failed: %s", e)
 
         # Find dashboards directory
         src_dir = Path(__file__).parent.parent.parent
@@ -762,8 +762,8 @@ class MetricsMixin:
         def open_browser():
             try:
                 subprocess.run(['xdg-open', url], timeout=10)
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
+                logger.debug("Failed to open Grafana URL: %s", e)
 
         threading.Thread(target=open_browser, daemon=True).start()
         self.dialog.msgbox(
