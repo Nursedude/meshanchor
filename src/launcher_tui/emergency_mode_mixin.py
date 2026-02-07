@@ -26,8 +26,25 @@ EMCOMM_PREFIX = "[EMCOMM] "
 class EmergencyModeMixin:
     """Simplified EMCOMM interface for field operations."""
 
+    def _get_emcomm_cli(self) -> str:
+        """Get meshtastic CLI path with emergency-safe error handling.
+
+        Returns the CLI path or 'meshtastic' as fallback.
+        Emergency mode must never crash on CLI lookup.
+        """
+        try:
+            return self._get_meshtastic_cli()
+        except Exception as e:
+            logger.warning(f"CLI lookup failed in EMCOMM mode: {e}")
+            return 'meshtastic'  # Best-effort fallback
+
     def _emergency_mode(self):
-        """Run emergency mode — simplified menu for field ops."""
+        """Run emergency mode — simplified menu for field ops.
+
+        This mode is designed for high-stress field use.
+        Every action is individually protected to ensure the menu
+        always returns, even if individual operations fail.
+        """
         while True:
             choices = [
                 ("send", "SEND MESSAGE (broadcast)"),
@@ -48,18 +65,29 @@ class EmergencyModeMixin:
             if choice is None or choice == "exit":
                 break
 
-            if choice == "send":
-                self._emcomm_broadcast()
-            elif choice == "direct":
-                self._emcomm_direct()
-            elif choice == "status":
-                self._emcomm_status()
-            elif choice == "msgs":
-                self._emcomm_messages()
-            elif choice == "pos":
-                self._emcomm_position()
-            elif choice == "sos":
-                self._emcomm_sos_beacon()
+            # Emergency mode wraps every action individually.
+            # Field operators must never be dumped to a traceback.
+            try:
+                if choice == "send":
+                    self._emcomm_broadcast()
+                elif choice == "direct":
+                    self._emcomm_direct()
+                elif choice == "status":
+                    self._emcomm_status()
+                elif choice == "msgs":
+                    self._emcomm_messages()
+                elif choice == "pos":
+                    self._emcomm_position()
+                elif choice == "sos":
+                    self._emcomm_sos_beacon()
+            except KeyboardInterrupt:
+                pass  # Ctrl+C returns to emergency menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "EMCOMM Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
+                    f"Returning to Emergency Mode menu."
+                )
 
     def _emcomm_broadcast(self):
         """Send a broadcast message to all nodes."""
@@ -88,7 +116,7 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"Broadcasting: {full_msg}\n")
         try:
-            cli_path = self._get_meshtastic_cli()
+            cli_path = self._get_emcomm_cli()
             subprocess.run(
                 [cli_path, '--sendtext', full_msg],
                 timeout=30
@@ -152,7 +180,7 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print(f"Sending to {dest_clean}: {full_msg}\n")
         try:
-            cli_path = self._get_meshtastic_cli()
+            cli_path = self._get_emcomm_cli()
             subprocess.run(
                 [cli_path, '--dest', dest_clean, '--sendtext', full_msg],
                 timeout=30
@@ -172,7 +200,7 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== NODES ONLINE ===\n")
         try:
-            cli_path = self._get_meshtastic_cli()
+            cli_path = self._get_emcomm_cli()
             subprocess.run(
                 [cli_path, '--nodes'],
                 timeout=30
@@ -231,7 +259,7 @@ class EmergencyModeMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== MY POSITION ===\n")
         try:
-            cli_path = self._get_meshtastic_cli()
+            cli_path = self._get_emcomm_cli()
             subprocess.run(
                 [cli_path, '--get', 'position'],
                 timeout=30
@@ -286,7 +314,7 @@ class EmergencyModeMixin:
                 count += 1
                 print(f"  [{count}] Sending beacon... ", end="", flush=True)
                 try:
-                    cli_path = self._get_meshtastic_cli()
+                    cli_path = self._get_emcomm_cli()
                     result = subprocess.run(
                         [cli_path, '--sendtext', beacon_msg],
                         capture_output=True, timeout=30

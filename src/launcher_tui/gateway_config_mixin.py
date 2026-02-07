@@ -33,7 +33,24 @@ class GatewayConfigMixin:
             return
 
         # Load current config
-        config = GatewayConfig.load()
+        try:
+            config = GatewayConfig.load()
+        except Exception as e:
+            self.dialog.msgbox(
+                "Config Load Error",
+                f"Could not load gateway configuration:\n\n"
+                f"{type(e).__name__}: {e}\n\n"
+                f"Starting with default configuration."
+            )
+            try:
+                config = GatewayConfig()
+            except Exception:
+                self.dialog.msgbox(
+                    "Gateway Error",
+                    "Cannot create gateway configuration.\n"
+                    "Check that gateway/config.py is valid."
+                )
+                return
 
         while True:
             # Show current status

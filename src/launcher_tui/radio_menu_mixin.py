@@ -82,33 +82,43 @@ class RadioMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "install-cli" or choice == "reinstall-cli":
-                self._install_meshtastic_cli()
-                continue
+            try:
+                if choice == "install-cli" or choice == "reinstall-cli":
+                    self._install_meshtastic_cli()
+                    continue
 
-            cli = self._get_meshtastic_cli()
-            # Use --host localhost to connect via meshtasticd (required for HAT radios)
-            conn_args = ['--host', 'localhost']
-            if choice == "info":
-                self._radio_run([cli] + conn_args + ['--info'], "Radio Info")
-            elif choice == "nodes":
-                self._radio_run([cli] + conn_args + ['--nodes'], "Node List")
-            elif choice == "favorites":
-                self._favorites_menu()  # From FavoritesMixin
-            elif choice == "channels":
-                self._radio_run([cli] + conn_args + ['--ch-index', '0', '--ch-getall'], "Channels")
-            elif choice == "position":
-                self._radio_position_menu()
-            elif choice == "send":
-                self._radio_send_message()
-            elif choice == "set-region":
-                self._radio_set_region()
-            elif choice == "set-txpower":
-                self._radio_set_tx_power()
-            elif choice == "set-name":
-                self._radio_set_name()
-            elif choice == "reboot":
-                self._radio_reboot()
+                cli = self._get_meshtastic_cli()
+                # Use --host localhost to connect via meshtasticd (required for HAT radios)
+                conn_args = ['--host', 'localhost']
+                if choice == "info":
+                    self._radio_run([cli] + conn_args + ['--info'], "Radio Info")
+                elif choice == "nodes":
+                    self._radio_run([cli] + conn_args + ['--nodes'], "Node List")
+                elif choice == "favorites":
+                    self._favorites_menu()  # From FavoritesMixin
+                elif choice == "channels":
+                    self._radio_run([cli] + conn_args + ['--ch-index', '0', '--ch-getall'], "Channels")
+                elif choice == "position":
+                    self._radio_position_menu()
+                elif choice == "send":
+                    self._radio_send_message()
+                elif choice == "set-region":
+                    self._radio_set_region()
+                elif choice == "set-txpower":
+                    self._radio_set_tx_power()
+                elif choice == "set-name":
+                    self._radio_set_name()
+                elif choice == "reboot":
+                    self._radio_reboot()
+            except KeyboardInterrupt:
+                pass  # Return to radio menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "Radio Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
+                    f"Check that meshtasticd is running:\n"
+                    f"  sudo systemctl status meshtasticd"
+                )
 
     def _radio_run(self, cmd: list, title: str):
         """Run a meshtastic CLI command and show output in terminal."""

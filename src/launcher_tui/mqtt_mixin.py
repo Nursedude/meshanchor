@@ -154,14 +154,23 @@ class MQTTMixin:
     def _mqtt_menu(self):
         """MQTT monitoring menu - nodeless mesh observation."""
         while True:
-            # Get current status and mode
-            status = self._get_mqtt_status()
-            config = self._load_mqtt_config()
+            # Get current status and mode (safe - must not crash menu loop)
+            try:
+                status = self._get_mqtt_status()
+            except Exception:
+                status = "Unknown"
+            try:
+                config = self._load_mqtt_config()
+            except Exception:
+                config = {}
             broker = config.get('broker', 'mqtt.meshtastic.org')
             mode = "Local" if broker == "localhost" else "Public"
 
             # Check WebSocket bridge status
-            ws_status = self._get_ws_bridge_status()
+            try:
+                ws_status = self._get_ws_bridge_status()
+            except Exception:
+                ws_status = "Unknown"
 
             choices = [
                 ("status", f"Status              {status}"),
@@ -195,24 +204,31 @@ class MQTTMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._show_mqtt_status()
-            elif choice == "start":
-                self._start_mqtt_subscriber()
-            elif choice == "stop":
-                self._stop_mqtt_subscriber()
-            elif choice == "config":
-                self._configure_mqtt()
-            elif choice == "nodes":
-                self._show_mqtt_nodes()
-            elif choice == "stats":
-                self._show_mqtt_stats()
-            elif choice == "telemetry":
-                self._request_telemetry_menu()
-            elif choice == "export":
-                self._export_mqtt_data()
-            elif choice == "websocket":
-                self._toggle_ws_bridge()
+            try:
+                if choice == "status":
+                    self._show_mqtt_status()
+                elif choice == "start":
+                    self._start_mqtt_subscriber()
+                elif choice == "stop":
+                    self._stop_mqtt_subscriber()
+                elif choice == "config":
+                    self._configure_mqtt()
+                elif choice == "nodes":
+                    self._show_mqtt_nodes()
+                elif choice == "stats":
+                    self._show_mqtt_stats()
+                elif choice == "telemetry":
+                    self._request_telemetry_menu()
+                elif choice == "export":
+                    self._export_mqtt_data()
+                elif choice == "websocket":
+                    self._toggle_ws_bridge()
+            except Exception as e:
+                self.dialog.msgbox(
+                    "MQTT Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
+                    f"Check MQTT broker connection and configuration."
+                )
 
     def _get_mqtt_status(self) -> str:
         """Get current MQTT subscriber status."""
