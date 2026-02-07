@@ -6,9 +6,12 @@ hardware config, and channel management.
 Extracted from main.py to reduce file size.
 """
 
+import logging
 import subprocess
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
 try:
@@ -98,7 +101,8 @@ class MeshtasticdConfigMixin:
                     s.connect(("8.8.8.8", 80))
                     local_ip = s.getsockname()[0]
                     s.close()
-            except Exception:
+            except OSError as e:
+                logger.debug("Local IP detection failed: %s", e)
                 local_ip = "YOUR_PI_IP"
 
             self.dialog.msgbox(

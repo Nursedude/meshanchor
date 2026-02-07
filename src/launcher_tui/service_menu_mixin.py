@@ -4,12 +4,15 @@ Service Menu Mixin - Service and bridge management handlers.
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
 
+import logging
 import os
 import sys
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Import centralized service checking
 try:
@@ -101,7 +104,8 @@ class ServiceMenuMixin:
                 capture_output=True, text=True, timeout=5
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Bridge process check failed: %s", e)
             return False
 
     def _start_bridge_background(self):
@@ -141,7 +145,8 @@ class ServiceMenuMixin:
                 # Read log for error info
                 try:
                     error_text = log_path.read_text()[-300:]
-                except Exception:
+                except OSError as e:
+                    logger.debug("Bridge log read failed: %s", e)
                     error_text = "(no log output)"
                 self.dialog.msgbox("Failed",
                     f"Bridge failed to start.\n\n{error_text}")
@@ -321,7 +326,8 @@ class ServiceMenuMixin:
                             print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
                         else:
                             print(f"  \033[2m○\033[0m {svc:<18} {status}")
-                    except Exception:
+                    except (subprocess.SubprocessError, OSError) as e:
+                        logger.debug("Service status check for %s failed: %s", svc, e)
                         print(f"  ? {svc:<18} unknown")
                 print()
 
@@ -347,8 +353,8 @@ class ServiceMenuMixin:
                                 timeout=10
                             )
                             print()
-                    except Exception:
-                        pass
+                    except (subprocess.SubprocessError, OSError) as e:
+                        logger.debug("Failure log check for %s failed: %s", svc, e)
 
                 # Show rnsd failure logs if systemd-managed and failed
                 if not use_direct_rnsd:
@@ -367,8 +373,8 @@ class ServiceMenuMixin:
                                 timeout=10
                             )
                             print()
-                    except Exception:
-                        pass
+                    except (subprocess.SubprocessError, OSError) as e:
+                        logger.debug("rnsd failure log check failed: %s", e)
                 self._wait_for_enter()
             elif choice == "restart-mesh":
                 subprocess.run(['clear'], check=False, timeout=5)
@@ -679,7 +685,8 @@ WantedBy=multi-user.target
                 timeout=5
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("systemd unit check for %s failed: %s", service_name, e)
             return False
 
     def _is_rnsd_running(self) -> bool:
@@ -698,7 +705,8 @@ WantedBy=multi-user.target
                 timeout=5
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("rnsd process check failed: %s", e)
             return False
 
     def _start_rnsd_direct(self) -> bool:
@@ -809,8 +817,8 @@ WantedBy=multi-user.target
                             ['pgrep', '-a', '-x', 'rnsd'],
                             timeout=5
                         )
-                    except Exception:
-                        pass
+                    except (subprocess.SubprocessError, OSError) as e:
+                        logger.debug("rnsd process info display failed: %s", e)
                 else:
                     print(f"\033[0;31m○\033[0m rnsd is \033[0;31mnot running\033[0m")
                     print("\nTo start: Select 'Start Service' from the menu")
@@ -982,7 +990,8 @@ WantedBy=multi-user.target
                 capture_output=True, text=True, timeout=5
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("mosquitto install check failed: %s", e)
             return False
 
     def _install_mosquitto(self) -> bool:
@@ -1054,7 +1063,8 @@ WantedBy=multi-user.target
                 )
                 return result.stdout.strip() == 'active'
 
-        except Exception:
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("mosquitto start/verify failed: %s", e)
             return False
 
     def _auto_detect_primary_channel(self) -> Optional[str]:
@@ -1080,8 +1090,8 @@ WantedBy=multi-user.target
                             if name and name.lower() != 'none':
                                 return name
 
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
+            logger.debug("Channel auto-detect failed: %s", e)
 
         return None
 

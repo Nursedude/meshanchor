@@ -5,11 +5,14 @@ Provides a whiptail/dialog backend for terminal UI dialogs.
 Works over SSH, without X display, on any terminal.
 """
 
+import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Tuple, Optional, List
+
+logger = logging.getLogger(__name__)
 
 
 class DialogBackend:
@@ -65,8 +68,8 @@ class DialogBackend:
                     backtitle = self._status_bar.get_status_line()
                     if backtitle:
                         full_args = ['--backtitle', backtitle] + full_args
-                except Exception:
-                    pass  # Status bar failure must never block UI
+                except Exception as e:
+                    logger.debug("Status bar update failed: %s", e)
 
             # Build command as list args (safe, no shell needed)
             cmd_parts = [self.backend] + [str(a) for a in full_args]
