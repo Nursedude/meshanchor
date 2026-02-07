@@ -4,8 +4,76 @@
 > *Build. Test. Deploy. Monitor.*
 
 ## Current Version: 0.5.0-beta
-## Last Updated: 2026-02-05
-## Branch: `claude/fix-mqtt-hang-uWguu` (ready for PR)
+## Last Updated: 2026-02-07
+## Branch: `claude/improve-tui-reliability-b5i4j`
+
+---
+
+## Session: 2026-02-07 - TUI Reliability & Error Handling
+
+**Branch:** `claude/improve-tui-reliability-b5i4j`
+**Status:** Committed and pushed
+**Commit:** `b7067d7`
+
+### Problem
+
+Any unhandled exception in any of the 30+ TUI mixin methods would crash the entire application, dumping the user to a Python traceback. This was especially dangerous in Emergency Mode during field operations. The exception propagation path was:
+
+```
+Mixin method raises exception
+  -> Submenu dispatch (NO try/except)
+    -> _handle_main_choice (NO try/except)
+      -> _run_main_menu while loop BREAKS
+        -> main() only caught KeyboardInterrupt
+          -> User sees traceback, TUI exits
+```
+
+### Solution: Defense-in-Depth Error Handling
+
+**Layer 1 - Dispatch Wrapper (`_safe_call`):**
+- New method catches ImportError, TimeoutExpired, PermissionError, FileNotFoundError, ConnectionError, and generic Exception
+- Shows user-friendly error dialog with specific guidance per exception type
+- Logs full traceback to `~/.cache/meshforge/logs/tui_errors.log`
+- Returns to calling menu instead of crashing
+
+**Layer 2 - All 9 submenu dispatchers wrapped:**
+- Dashboard, Mesh Networks, RF/SDR, Maps, Configuration, System, About, Config, Export
+- Each uses dispatch dict + `_safe_call()` pattern
+
+**Layer 3 - Internal mixin dispatch loops protected:**
+- RNS menu, Radio menu, MQTT menu, Topology menu
+- Each has try/except inside while loop with error dialog + return to menu
+
+**Layer 4 - Emergency Mode hardened:**
+- New `_get_emcomm_cli()` method with silent fallback (CLI lookup must never crash EMCOMM)
+- Each action wrapped individually - field operators never see tracebacks
+
+**Layer 5 - main() improved:**
+- Catches all exceptions, restores stderr, shows friendly error + log path
+- Cleanup expanded: map server, telemetry poller, MQTT subscriber, WS bridge
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/launcher_tui/main.py` | _safe_call, _log_error, dispatch wrappers, main() hardening |
+| `src/launcher_tui/emergency_mode_mixin.py` | _get_emcomm_cli, individual action wrapping |
+| `src/launcher_tui/gateway_config_mixin.py` | GatewayConfig.load() error handling |
+| `src/launcher_tui/topology_mixin.py` | Menu dispatch try/except |
+| `src/launcher_tui/mqtt_mixin.py` | Safe status/config loading, dispatch protection |
+| `src/launcher_tui/rns_menu_mixin.py` | Menu dispatch try/except |
+| `src/launcher_tui/radio_menu_mixin.py` | Menu dispatch try/except |
+
+### Test Results
+- 3280 passed, 18 skipped, 0 failures
+- Lint: 0 issues in modified files
+- All syntax checks pass
+
+### Next Session Priorities
+1. Continue TUI reliability - fix remaining mixin internal methods
+2. Gateway bridge mode auto-fix (mesh_bridge -> message_bridge)
+3. MQTT/mosquitto status investigation
+4. Test with actual hardware if available
 
 ---
 
