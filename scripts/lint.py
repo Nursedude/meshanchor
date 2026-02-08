@@ -84,6 +84,8 @@ class MeshForgeLinter:
         # MF001: Path.home() violation
         # Skip the paths.py utility file that defines get_real_user_home()
         if 'Path.home()' in line and 'paths.py' not in filepath:
+            # Skip string literals (changelog entries, documentation)
+            is_string_literal = stripped.startswith('"') or stripped.startswith("'")
             # Acceptable fallback patterns:
             # 1. return Path.home() in a fallback function
             # 2. else Path.home() in a ternary after SUDO_USER check
@@ -100,7 +102,7 @@ class MeshForgeLinter:
                 'from utils.paths import' in nearby_context and
                 'except ImportError' in nearby_context
             )
-            if not is_fallback_pattern and not has_import_fallback:
+            if not is_string_literal and not is_fallback_pattern and not has_import_fallback:
                 issues.append(LintIssue(
                     filepath, lineno, Severity.ERROR, "MF001",
                     "Use get_real_user_home() instead of Path.home() for sudo compatibility"
