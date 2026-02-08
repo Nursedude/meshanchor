@@ -42,6 +42,7 @@ try:
         "sources": {
             "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
             "hamclock": {"host": "localhost", "port": 8080, "enabled": False, "timeout": 10},
+            "pskreporter": {"enabled": False, "callsign": "", "bands": [], "modes": []},
         }
     })
     _HAS_SETTINGS = True
@@ -55,6 +56,7 @@ class DataSource(Enum):
     NOAA = "noaa"                  # NOAA SWPC (primary, always available)
     OPENHAMCLOCK = "openhamclock"  # OpenHamClock (optional REST API)
     HAMCLOCK = "hamclock"          # Original HamClock (legacy, optional)
+    PSKREPORTER = "pskreporter"   # PSKReporter MQTT feed (real-time spots)
 
 
 @dataclass
@@ -65,6 +67,10 @@ class SourceConfig:
     port: int = 0
     enabled: bool = False
     timeout: int = 10
+    # PSKReporter-specific fields
+    callsign: str = ""
+    bands: List[str] = field(default_factory=list)
+    modes: List[str] = field(default_factory=list)
 
     @property
     def base_url(self) -> str:
@@ -86,6 +92,9 @@ _sources: Dict[DataSource, SourceConfig] = {
     DataSource.HAMCLOCK: SourceConfig(
         source=DataSource.HAMCLOCK, port=8080, enabled=False
     ),
+    DataSource.PSKREPORTER: SourceConfig(
+        source=DataSource.PSKREPORTER, enabled=False
+    ),
 }
 
 
@@ -105,6 +114,16 @@ def _load_sources() -> None:
                 enabled=cfg.get("enabled", False),
                 timeout=cfg.get("timeout", 10),
             )
+    # PSKReporter (MQTT-based, different config shape)
+    pskr_cfg = saved.get("pskreporter")
+    if pskr_cfg and isinstance(pskr_cfg, dict):
+        _sources[DataSource.PSKREPORTER] = SourceConfig(
+            source=DataSource.PSKREPORTER,
+            enabled=pskr_cfg.get("enabled", False),
+            callsign=pskr_cfg.get("callsign", ""),
+            bands=pskr_cfg.get("bands", []),
+            modes=pskr_cfg.get("modes", []),
+        )
 
 
 def _save_sources() -> bool:
@@ -122,6 +141,15 @@ def _save_sources() -> bool:
                 "enabled": cfg.enabled,
                 "timeout": cfg.timeout,
             }
+    # PSKReporter (MQTT-based, different config shape)
+    pskr_cfg = _sources.get(DataSource.PSKREPORTER)
+    if pskr_cfg:
+        data["pskreporter"] = {
+            "enabled": pskr_cfg.enabled,
+            "callsign": pskr_cfg.callsign,
+            "bands": pskr_cfg.bands,
+            "modes": pskr_cfg.modes,
+        }
     _settings.set("sources", data)
     return _settings.save()
 
@@ -136,21 +164,51 @@ def configure_source(
     port: int = 0,
     enabled: bool = True,
     timeout: int = 10,
+    callsign: str = "",
+    bands: Optional[List[str]] = None,
+    modes: Optional[List[str]] = None,
 ) -> CommandResult:
     """Configure an optional data source.
 
-    NOAA is always enabled. This configures HamClock/OpenHamClock as
-    supplementary sources.
+    NOAA is always enabled. This configures supplementary sources.
 
     Args:
         source: Which data source to configure
-        host: Hostname or IP
-        port: Port number (0 = use default)
+        host: Hostname or IP (REST sources)
+        port: Port number (0 = use default, REST sources)
         enabled: Whether to use this source
         timeout: Request timeout in seconds
+        callsign: Callsign filter (PSKReporter only)
+        bands: Band filter list (PSKReporter only)
+        modes: Mode filter list (PSKReporter only)
     """
     if source == DataSource.NOAA:
         return CommandResult.ok("NOAA is always enabled as primary source")
+
+    # PSKReporter uses MQTT, not REST
+    if source == DataSource.PSKREPORTER:
+        _sources[source] = SourceConfig(
+            source=source,
+            enabled=enabled,
+            callsign=callsign.strip().upper() if callsign else "",
+            bands=bands or [],
+            modes=modes or [],
+        )
+        saved = _save_sources()
+        desc = f"PSKReporter MQTT (enabled={enabled})"
+        if callsign:
+            desc += f", callsign={callsign.strip().upper()}"
+        return CommandResult.ok(
+            desc,
+            data={
+                'source': source.value,
+                'enabled': enabled,
+                'callsign': callsign,
+                'bands': bands or [],
+                'modes': modes or [],
+                'persisted': saved,
+            }
+        )
 
     if not host:
         return CommandResult.fail("Host cannot be empty")
@@ -442,6 +500,21 @@ def get_enhanced_data() -> CommandResult:
                 data=enhanced
             )
 
+    # Try PSKReporter (MQTT-based, real-time spots)
+    pskr_cfg = _sources.get(DataSource.PSKREPORTER)
+    if pskr_cfg and pskr_cfg.enabled:
+        result = _fetch_pskreporter_data()
+        if result:
+            enhanced.update(result)
+            if not enhanced.get('enhanced_source'):
+                enhanced['enhanced_source'] = 'PSKReporter'
+            else:
+                enhanced['enhanced_source'] += ' + PSKReporter'
+            return CommandResult.ok(
+                f"Enhanced data from {enhanced['enhanced_source']} + NOAA",
+                data=enhanced
+            )
+
     return CommandResult.ok(
         "Space weather from NOAA (no enhanced sources configured)",
         data=enhanced
@@ -463,8 +536,52 @@ def check_source(source: DataSource) -> CommandResult:
         return _test_openhamclock()
     elif source == DataSource.HAMCLOCK:
         return _test_hamclock()
+    elif source == DataSource.PSKREPORTER:
+        return _test_pskreporter()
     else:
         return CommandResult.fail(f"Unknown source: {source}")
+
+
+# ==================== Internal: PSKReporter ====================
+
+def _test_pskreporter() -> CommandResult:
+    """Test PSKReporter MQTT connectivity."""
+    cfg = _sources.get(DataSource.PSKREPORTER)
+    if not cfg or not cfg.enabled:
+        return CommandResult.fail(
+            "PSKReporter not configured",
+            data={'hint': 'Configure with: propagation.configure_source(DataSource.PSKREPORTER, enabled=True)'}
+        )
+
+    try:
+        from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
+        sub = get_pskreporter_subscriber()
+        if sub.is_connected():
+            stats = sub.get_stats()
+            return CommandResult.ok(
+                f"PSKReporter MQTT connected ({stats.get('spots_received', 0)} spots)",
+                data={
+                    'status': 'connected',
+                    'source': 'PSKReporter',
+                    'spots_received': stats.get('spots_received', 0),
+                    'bands_active': stats.get('bands_active', 0),
+                }
+            )
+        else:
+            return CommandResult.fail(
+                "PSKReporter MQTT not connected",
+                data={'hint': 'Check network connectivity to mqtt.pskreporter.info'}
+            )
+    except ImportError:
+        return CommandResult.fail(
+            "PSKReporter module not available",
+            data={'hint': 'pip install paho-mqtt'}
+        )
+    except Exception as e:
+        return CommandResult.fail(
+            f"PSKReporter check failed: {e}",
+            data={'hint': 'Check paho-mqtt installation'}
+        )
 
 
 # ==================== Internal: NOAA ====================
@@ -563,6 +680,26 @@ def _fetch_openhamclock_data(cfg: SourceConfig) -> Optional[Dict[str, Any]]:
         logger.debug(f"OpenHamClock DX spots fetch failed: {e}")
 
     return enhanced if enhanced else None
+
+
+# ==================== Internal: PSKReporter Data ====================
+
+def _fetch_pskreporter_data() -> Optional[Dict[str, Any]]:
+    """Fetch propagation data from PSKReporter MQTT subscriber.
+
+    Returns:
+        Dict with PSKReporter propagation data or None on failure
+    """
+    try:
+        from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
+        sub = get_pskreporter_subscriber()
+        if sub.is_connected():
+            return sub.get_propagation_data()
+    except ImportError:
+        logger.debug("PSKReporter module not available")
+    except Exception as e:
+        logger.debug(f"PSKReporter data fetch failed: {e}")
+    return None
 
 
 # ==================== Standalone: DX Cluster (Telnet) ====================

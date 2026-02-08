@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from enum import Enum
 
-from utils.ports import MESHTASTICD_PORT, HAMCLOCK_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
+from utils.ports import MESHTASTICD_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +100,6 @@ KNOWN_SERVICES = {
         'is_systemd': False,  # rnsd is a user-space daemon, NOT a systemd service
         'description': 'Reticulum Network Stack daemon',
         'fix_hint': 'Start with: rnsd (run as user, not root)',
-    },
-    'hamclock': {
-        'port': HAMCLOCK_PORT,
-        'systemd_name': 'hamclock',
-        'is_systemd': True,
-        'description': 'HamClock space weather display',
-        'fix_hint': 'Start with: sudo systemctl start hamclock',
     },
     'mosquitto': {
         'port': MQTT_PORT,
@@ -396,7 +389,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
         - "Unknown" is better than wrong state
 
     Args:
-        name: Service name (e.g., 'meshtasticd', 'hamclock', 'rnsd')
+        name: Service name (e.g., 'meshtasticd', 'rnsd', 'mosquitto')
         port: Override port to check (uses known default if not specified)
         host: Host to check (default localhost)
 
@@ -408,7 +401,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
         - ServiceStatus.available: bool indicating if service is ready
         - ServiceStatus.state: ServiceState enum (AVAILABLE, NOT_RUNNING, etc.)
         - ServiceStatus.detection_method: How status was determined
-        - Known services: meshtasticd, rnsd, hamclock, mosquitto
+        - Known services: meshtasticd, rnsd, mosquitto, nomadnet
     """
     config = KNOWN_SERVICES.get(name, {})
     check_port_num = port or config.get('port')

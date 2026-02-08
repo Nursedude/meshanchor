@@ -32,7 +32,7 @@ except ImportError:
 _VALID_SERVICE_NAME = re.compile(r'^[a-zA-Z0-9_\-@.]+$')
 
 # Security: Whitelist of allowed binaries for get_version()
-ALLOWED_BINARIES = {'meshtasticd', 'rnsd', 'hamclock', 'mosquitto', 'meshtastic'}
+ALLOWED_BINARIES = {'meshtasticd', 'rnsd', 'mosquitto', 'meshtastic'}
 
 
 def _validate_service_name(name: str) -> bool:
@@ -59,12 +59,6 @@ KNOWN_SERVICES = {
         'description': 'Reticulum Network Stack daemon',
         'start_cmd': 'rnsd',  # or sudo systemctl start rnsd
         'stop_cmd': 'sudo systemctl stop rnsd',
-    },
-    'hamclock': {
-        'port': 8080,
-        'description': 'HamClock space weather display',
-        'start_cmd': 'sudo systemctl start hamclock',
-        'stop_cmd': 'sudo systemctl stop hamclock',
     },
     'mosquitto': {
         'port': 1883,

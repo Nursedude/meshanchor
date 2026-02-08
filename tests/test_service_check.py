@@ -137,16 +137,16 @@ class TestCheckService:
             assert status.port == 4403
             assert status.detection_method == "systemctl"
 
-    def test_hamclock_not_running(self):
-        """Test detection of stopped hamclock (Issue #17: systemctl only)."""
+    def test_mosquitto_not_running(self):
+        """Test detection of stopped mosquitto (Issue #17: systemctl only)."""
         with patch('subprocess.run') as mock_run:
-            # systemctl is-active hamclock returns "inactive"
+            # systemctl is-active mosquitto returns "inactive"
             mock_run.return_value = MagicMock(
                 returncode=3,
                 stdout='inactive\n'
             )
 
-            status = check_service('hamclock')
+            status = check_service('mosquitto')
 
             assert status.available is False
             assert status.state == ServiceState.NOT_RUNNING
@@ -217,11 +217,9 @@ class TestKnownServices:
         assert config['port'] == 4403
         assert 'systemctl' in config['fix_hint']
 
-    def test_hamclock_config(self):
-        """Test hamclock configuration."""
-        assert 'hamclock' in KNOWN_SERVICES
-        config = KNOWN_SERVICES['hamclock']
-        assert config['port'] == 8080
+    def test_hamclock_removed(self):
+        """Test hamclock removed from KNOWN_SERVICES (now optional data source only)."""
+        assert 'hamclock' not in KNOWN_SERVICES
 
     def test_rnsd_config(self):
         """Test rnsd configuration."""
