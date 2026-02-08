@@ -24,6 +24,7 @@ import urllib.request
 import urllib.error
 import json
 import logging
+import warnings
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -895,11 +896,15 @@ def get_space_weather_auto() -> CommandResult:
     """
     Get space weather — NOAA primary, HamClock as optional enhancement.
 
-    Uses NOAA SWPC as the primary data source. If HamClock is configured
-    and available, merges additional data (VOACAP, DX spots).
-
-    For new code, prefer: commands.propagation.get_space_weather()
+    .. deprecated::
+        Use ``commands.propagation.get_space_weather()`` instead.
     """
+    warnings.warn(
+        "hamclock.get_space_weather_auto() is deprecated. "
+        "Use commands.propagation.get_space_weather() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # NOAA is primary (always works, no external service needed)
     result = get_native_space_weather()
 
@@ -924,8 +929,15 @@ def get_band_conditions_auto() -> CommandResult:
     """
     Get band conditions — NOAA primary, HamClock as optional enhancement.
 
-    For new code, prefer: commands.propagation.get_band_conditions()
+    .. deprecated::
+        Use ``commands.propagation.get_band_conditions()`` instead.
     """
+    warnings.warn(
+        "hamclock.get_band_conditions_auto() is deprecated. "
+        "Use commands.propagation.get_band_conditions() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # NOAA-based estimate is primary
     result = get_noaa_solar_data()
     if result.success:
@@ -951,10 +963,15 @@ def get_propagation_summary() -> CommandResult:
     """
     Get a summary of current propagation conditions.
 
-    Uses NOAA SWPC as primary source. Works without HamClock.
-
-    For new code, prefer: commands.propagation.get_propagation_summary()
+    .. deprecated::
+        Use ``commands.propagation.get_propagation_summary()`` instead.
     """
+    warnings.warn(
+        "hamclock.get_propagation_summary() is deprecated. "
+        "Use commands.propagation.get_propagation_summary() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     summary = {
         'timestamp': '',
         'overall': 'Unknown',

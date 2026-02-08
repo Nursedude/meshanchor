@@ -71,24 +71,32 @@ Features:
 
 **3311 passed, 19 skipped, 0 failures**
 
-## What Remains (Future Sessions)
+## Completed (Session 2026-02-08b — branch: claude/persist-config-docs-Kpb7l)
 
-### P1 — Should Do
-- [ ] Persist propagation source configuration to disk (SettingsManager)
-- [ ] Update CLAUDE.md architecture section and usage examples
-- [ ] Update `.claude/research/hamclock_complete.md` with OpenHamClock info
+### P1 — Done ✅
+- [x] Persist propagation source config to disk via SettingsManager
+  - `propagation.json` in `~/.config/meshforge/`
+  - Auto-loads on module import, auto-saves on `configure_source()`
+  - Graceful degradation if SettingsManager unavailable
+- [x] Update CLAUDE.md: Added `commands/` to architecture, propagation docs section
+- [x] Update `hamclock_complete.md`: Added OpenHamClock section, sunset warning, feature comparison
 
-### P2 — Nice to Have
-- [ ] Add OpenHamClock as Docker service option in service manager
-- [ ] Direct DX cluster telnet support (bypass HamClock for DX spots)
-- [ ] VOACAP online service integration (independent of HamClock)
-- [ ] Add ionosonde data from prop.kc2g.com (like OpenHamClock does)
-- [ ] PSKReporter integration via MQTT (like OpenHamClock)
+### P2 — Done ✅
+- [x] Docker OpenHamClock management in service menu (start/stop/status/logs)
+  - Auto-configures MeshForge propagation source on first Docker start
+- [x] Direct DX cluster telnet: `get_dx_spots_telnet()` — connects to DX Spider nodes
+- [x] VOACAP online: `get_voacap_online()` — public VOACAP P2P predictions
+- [x] Ionosonde data: `get_ionosonde_data()` — real foF2/MUF from prop.kc2g.com
+- [ ] PSKReporter integration via MQTT (like OpenHamClock) — future
 
-### P3 — Consider
-- [ ] Deprecation warnings for code calling hamclock module directly
-- [ ] Remove HamClock from KNOWN_SERVICES if sunset confirmed
-- [ ] CelesTrak TLE integration for standalone satellite tracking
+### P3 — Done ✅
+- [x] Deprecation warnings on `hamclock.get_space_weather_auto()`, `get_band_conditions_auto()`, `get_propagation_summary()`
+- [x] CelesTrak TLE: `get_satellite_tle()` — standalone satellite tracking
+- [ ] Remove HamClock from KNOWN_SERVICES if sunset confirmed — future
+
+### Tests
+- 46 tests in `test_propagation.py` (was 31) — all passing
+- 155 tests across affected test files — all passing
 
 ## Data Source Comparison
 
