@@ -40,7 +40,7 @@ try:
     from utils.ports import (
         MESHTASTICD_PORT, MESHTASTICD_WEB_PORT,
         RNS_SHARED_INSTANCE_PORT, RNS_TCP_SERVER_PORT,
-        HAMCLOCK_PORT, MQTT_PORT
+        MQTT_PORT
     )
 except ImportError:
     # Fallback constants if utils not available
@@ -48,7 +48,6 @@ except ImportError:
     MESHTASTICD_WEB_PORT = 9443
     RNS_SHARED_INSTANCE_PORT = 37428
     RNS_TCP_SERVER_PORT = 4242
-    HAMCLOCK_PORT = 8080
     MQTT_PORT = 1883
     check_service = None
     ServiceState = None

@@ -99,17 +99,6 @@ class ServiceDiscoveryMixin:
             details=rns_status.message or ""
         ))
 
-        # Check HamClock (optional enhanced data source)
-        hc_status = check_service('hamclock')
-        if hc_status.available:
-            services.append(DiscoveredService(
-                name="HamClock (optional)",
-                status="running",
-                address="localhost:8080",
-                service_type="hamclock",
-                details="Enhanced propagation data source"
-            ))
-
         # Check for AREDN (10.x.x.x network)
         aredn_found = self._check_aredn_network()
         services.append(DiscoveredService(
@@ -273,11 +262,6 @@ class ServiceDiscoveryMixin:
             ('rnsd', 'Reticulum Network Stack'),
         ]
 
-        # Optional services (enhanced data sources)
-        optional_services = [
-            ('hamclock', 'HamClock (optional)'),
-        ]
-
         lines = ["MeshForge Service Status\n"]
         lines.append("=" * 40)
 
@@ -308,13 +292,10 @@ class ServiceDiscoveryMixin:
             if status.message:
                 lines.append(f"  Info: {status.message}")
 
-        # Optional services (only show if running)
+        # Optional data sources info
         lines.append("\n\nOptional Data Sources:")
         lines.append("  Space weather: NOAA SWPC (always active)")
-        for svc_id, svc_name in optional_services:
-            status = check_service(svc_id)
-            if status.available:
-                lines.append(f"  ✓ {svc_name}: running")
+        lines.append("  Configure more in Settings > Propagation Data Sources")
 
         if warnings:
             lines.append("\n" + "-" * 40)

@@ -31,9 +31,10 @@ class TestDataSource:
         assert DataSource.NOAA.value == "noaa"
         assert DataSource.OPENHAMCLOCK.value == "openhamclock"
         assert DataSource.HAMCLOCK.value == "hamclock"
+        assert DataSource.PSKREPORTER.value == "pskreporter"
 
     def test_all_sources_defined(self):
-        assert len(DataSource) == 3
+        assert len(DataSource) == 4
 
 
 class TestSourceConfig:
