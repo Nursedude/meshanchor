@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.2--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.3--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3360%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3861%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -207,7 +207,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.5.2-beta)
+## What Works (v0.5.3-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
@@ -223,7 +223,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Beta |
 | **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Beta |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge (LXMF), persistent queue (SQLite), WebSocket broadcast | Alpha |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge (LXMF), persistent queue (SQLite), circuit breaker, WebSocket broadcast | Beta |
 | **Traffic Inspector** | Packet capture from meshtastic callbacks, protocol tree, display filters, path tracing | Beta |
 | **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Beta |
 | **Grafana Dashboards** | Pre-built JSON dashboards, manual import required | Dashboards Ready |
@@ -500,11 +500,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,364 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,488 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 30 feature modules (RF, channels, AI, system, etc.)
+│   └── *_mixin.py         # 35 feature modules (RF, channels, AI, system, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -676,6 +676,28 @@ connection (port 4403):
 ---
 
 ## Code Health
+
+### Test Coverage
+
+**3,861 tests passing** across the gateway, monitoring, and utility layers:
+
+| Test File | Tests | Covers |
+|-----------|-------|--------|
+| `test_rns_bridge.py` | 136 | Core bridge: routing, circuit breaker, message processing, callbacks, lifecycle |
+| `test_rns_transport.py` | 97 | Packet fragmentation, reassembly, transport stats, connection management |
+| `test_message_queue.py` | 72 | Persistent SQLite queue, retry policy, dead letter, overflow shedding |
+| `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
+| `test_meshtastic_handler.py` | 147 | Meshtastic connection, message handling, node tracking |
+| `test_packet_dissectors.py` | 130 | Protocol analysis, packet tree, display filters |
+| `test_rf.py` | 200+ | RF calculations, link budget, Fresnel zone, path loss |
+
+```bash
+python3 -m pytest tests/ -v            # Run all tests
+python3 -m pytest tests/ -v -x         # Stop on first failure
+python3 -m pytest tests/test_rns_bridge.py -v  # Gateway bridge tests only
+```
+
+### Auto-Review
 
 Auto-review system scans 243 files for security, reliability, and performance issues:
 
