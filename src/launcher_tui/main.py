@@ -877,6 +877,8 @@ class MeshForgeLauncher(
             choices = [
                 ("livemap", "Live NOC Map        Real-time browser view"),
                 ("coverage", "Coverage Map        Generate coverage map"),
+                ("heatmap", "Heatmap             Node density heatmap"),
+                ("tiles", "Offline Tiles       Cache map tiles"),
                 ("topology", "Network Topology    D3.js graph view"),
                 ("traffic", "Traffic Inspector   Packet capture & analysis"),
                 ("quality", "Link Quality        Quality analysis"),
@@ -897,6 +899,8 @@ class MeshForgeLauncher(
             dispatch = {
                 "livemap": ("Live NOC Map", self._open_live_map),
                 "coverage": ("Coverage Map", self._generate_coverage_map),
+                "heatmap": ("Heatmap", self._generate_heatmap),
+                "tiles": ("Offline Tile Cache", self._tile_cache_menu),
                 "topology": ("Network Topology", self._topology_menu),
                 "traffic": ("Traffic Inspector", self.menu_traffic_inspector),
                 "quality": ("Link Quality", self._link_quality_menu),
@@ -1041,6 +1045,7 @@ class MeshForgeLauncher(
                 ("logs", "Logs                View/follow logs"),
                 ("network", "Network Tools       Ping, ports, interfaces"),
                 ("diagnose", "Diagnostics         System health check"),
+                ("review", "Code Review         Auto-review codebase"),
                 ("status", "Quick Status        One-shot status display"),
                 ("shell", "Linux Shell         Drop to bash"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
@@ -1061,6 +1066,7 @@ class MeshForgeLauncher(
                 "logs": ("Log Viewer", self._logs_menu),
                 "network": ("Network Tools", self._network_menu),
                 "diagnose": ("Diagnostics", self._run_diagnostics),
+                "review": ("Code Review", self._auto_review_menu),
                 "status": ("Quick Status", self._run_terminal_status),
                 "shell": ("Linux Shell", self._drop_to_shell),
                 "reboot": ("Reboot/Shutdown", self._reboot_menu),
