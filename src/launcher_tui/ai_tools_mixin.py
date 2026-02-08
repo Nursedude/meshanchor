@@ -953,3 +953,380 @@ class AIToolsMixin:
                     pass
 
         threading.Thread(target=do_open, daemon=True).start()
+
+    # =========================================================================
+    # Heatmap Generation
+    # =========================================================================
+
+    def _generate_heatmap(self):
+        """Generate a node density heatmap and open in browser."""
+        self.dialog.infobox("Generating", "Creating node density heatmap...")
+
+        try:
+            from utils.coverage_map import CoverageMapGenerator
+            from utils.paths import get_real_user_home
+
+            generator = CoverageMapGenerator()
+
+            # Collect nodes from all sources
+            try:
+                from utils.map_data_service import MapDataCollector
+                collector = MapDataCollector()
+                geojson = collector.collect()
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                else:
+                    self.dialog.msgbox(
+                        "No Nodes",
+                        "No nodes found from any source.\n\n"
+                        "Check meshtasticd, MQTT, or node cache."
+                    )
+                    return
+            except ImportError as e:
+                self.dialog.msgbox("Error", f"MapDataCollector not available: {e}")
+                return
+
+            # Generate heatmap
+            output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = str(output_dir / "coverage_heatmap.html")
+
+            result_path = generator.generate_heatmap(output_path=output_file)
+
+            if not result_path:
+                self.dialog.msgbox(
+                    "Error",
+                    "Heatmap generation failed.\n\n"
+                    "Folium with HeatMap plugin is required:\n"
+                    "pip3 install folium"
+                )
+                return
+
+            self.dialog.msgbox(
+                "Heatmap Generated",
+                f"Node density heatmap saved to:\n{result_path}\n\n"
+                "Opening in browser..."
+            )
+            self._open_in_browser(result_path)
+
+        except ImportError as e:
+            self.dialog.msgbox(
+                "Error",
+                f"Coverage map generator not available: {e}\n\n"
+                "You may need to install folium:\n"
+                "pip3 install folium"
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Heatmap generation failed: {e}")
+
+    # =========================================================================
+    # Tile Cache Manager
+    # =========================================================================
+
+    def _tile_cache_menu(self):
+        """Manage offline tile cache for maps."""
+        while True:
+            choices = [
+                ("stats", "Cache Stats         View tile cache status"),
+                ("download", "Download Region     Cache tiles for area"),
+                ("estimate", "Estimate Size       Preview download size"),
+                ("clear", "Clear Expired       Remove old tiles"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Offline Tile Cache",
+                "Manage cached map tiles for offline use:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            dispatch = {
+                "stats": ("Cache Stats", self._tile_cache_stats),
+                "download": ("Download Region", self._tile_cache_download),
+                "estimate": ("Estimate Size", self._tile_cache_estimate),
+                "clear": ("Clear Expired", self._tile_cache_clear),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+
+    def _tile_cache_stats(self):
+        """Display tile cache statistics."""
+        try:
+            from utils.tile_cache import TileCache
+            cache = TileCache()
+            stats = cache.get_stats()
+
+            info = [
+                f"Cached Tiles: {stats['tile_count']}",
+                f"Cache Size:   {stats['size_mb']:.1f} MB",
+            ]
+            if stats.get('oldest'):
+                info.append(f"Oldest Tile:  {stats['oldest']}")
+            if stats.get('newest'):
+                info.append(f"Newest Tile:  {stats['newest']}")
+            if stats['tile_count'] == 0:
+                info.append("")
+                info.append("No tiles cached yet. Use 'Download Region'")
+                info.append("to cache tiles for offline map viewing.")
+
+            self.dialog.msgbox("Tile Cache Stats", "\n".join(info))
+        except ImportError:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Failed to get cache stats: {e}")
+
+    def _tile_cache_download(self):
+        """Download tiles for a geographic region."""
+        try:
+            from utils.tile_cache import TileCache, HAWAII_BOUNDS
+
+            # Get bounds from user
+            region_choices = [
+                ("hawaii", "Hawaii              (18.5-22.5N, 160.5-154.5W)"),
+                ("custom", "Custom Region       Enter coordinates"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Download Region",
+                "Select region to cache tiles for:",
+                region_choices
+            )
+
+            if choice is None or choice == "back":
+                return
+
+            if choice == "hawaii":
+                bounds = HAWAII_BOUNDS
+            elif choice == "custom":
+                coords = self.dialog.inputbox(
+                    "Custom Region",
+                    "Enter bounds as: south,west,north,east\n"
+                    "Example: 21.0,-158.5,21.7,-157.5"
+                )
+                if not coords:
+                    return
+                try:
+                    parts = [float(x.strip()) for x in coords.split(',')]
+                    if len(parts) != 4:
+                        self.dialog.msgbox("Error", "Enter exactly 4 coordinates.")
+                        return
+                    bounds = tuple(parts)
+                except ValueError:
+                    self.dialog.msgbox("Error", "Invalid coordinates.")
+                    return
+            else:
+                return
+
+            # Estimate first
+            estimate = TileCache.estimate_download_size(bounds)
+            if 'error' in estimate:
+                self.dialog.msgbox("Error", estimate['error'])
+                return
+
+            confirm = self.dialog.yesno(
+                "Confirm Download",
+                f"Tiles to download: {estimate['total_tiles']}\n"
+                f"Estimated size: {estimate['estimated_mb']:.1f} MB\n\n"
+                "Proceed with download?"
+            )
+
+            if not confirm:
+                return
+
+            self.dialog.infobox("Downloading", "Caching tiles... This may take a while.")
+
+            cache = TileCache()
+            result = cache.download_region(bounds)
+
+            if 'error' in result:
+                self.dialog.msgbox("Error", result['error'])
+            else:
+                self.dialog.msgbox(
+                    "Download Complete",
+                    f"Downloaded: {result['downloaded']} tiles\n"
+                    f"Skipped (cached): {result['skipped']}\n"
+                    f"Failed: {result['failed']}"
+                )
+
+        except ImportError:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Tile download failed: {e}")
+
+    def _tile_cache_estimate(self):
+        """Estimate download size for a region."""
+        try:
+            from utils.tile_cache import TileCache, HAWAII_BOUNDS
+
+            coords = self.dialog.inputbox(
+                "Estimate Size",
+                "Enter bounds as: south,west,north,east\n"
+                "Example: 21.0,-158.5,21.7,-157.5\n"
+                "(Leave empty for Hawaii)"
+            )
+
+            if coords:
+                try:
+                    parts = [float(x.strip()) for x in coords.split(',')]
+                    if len(parts) != 4:
+                        self.dialog.msgbox("Error", "Enter exactly 4 coordinates.")
+                        return
+                    bounds = tuple(parts)
+                except ValueError:
+                    self.dialog.msgbox("Error", "Invalid coordinates.")
+                    return
+            else:
+                bounds = HAWAII_BOUNDS
+
+            estimate = TileCache.estimate_download_size(bounds)
+
+            if 'error' in estimate:
+                self.dialog.msgbox("Error", estimate['error'])
+            else:
+                self.dialog.msgbox(
+                    "Download Estimate",
+                    f"Region: ({bounds[0]:.1f}, {bounds[1]:.1f}) to "
+                    f"({bounds[2]:.1f}, {bounds[3]:.1f})\n"
+                    f"Tile count: {estimate['total_tiles']}\n"
+                    f"Estimated size: {estimate['estimated_mb']:.1f} MB\n"
+                    f"Within limit: {'Yes' if estimate['within_limit'] else 'No'}"
+                )
+
+        except ImportError:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Estimation failed: {e}")
+
+    def _tile_cache_clear(self):
+        """Clear expired tiles from cache."""
+        try:
+            from utils.tile_cache import TileCache
+
+            confirm = self.dialog.yesno(
+                "Clear Expired Tiles",
+                "Remove tiles older than 30 days?\n\n"
+                "This frees disk space but requires re-download\n"
+                "for offline use."
+            )
+
+            if not confirm:
+                return
+
+            cache = TileCache()
+            result = cache.clear_expired()
+
+            freed_mb = result['bytes_freed'] / (1024 * 1024)
+            self.dialog.msgbox(
+                "Cache Cleared",
+                f"Removed: {result['removed']} expired tiles\n"
+                f"Space freed: {freed_mb:.1f} MB"
+            )
+
+        except ImportError:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Cache clear failed: {e}")
+
+    # =========================================================================
+    # Auto-Review System
+    # =========================================================================
+
+    def _auto_review_menu(self):
+        """Code review system - run automated code analysis."""
+        while True:
+            choices = [
+                ("full", "Full Review         Run all review agents"),
+                ("security", "Security Review     Command injection, creds"),
+                ("redundancy", "Redundancy Review   Duplicate code, imports"),
+                ("performance", "Performance Review  Timeouts, loops, memory"),
+                ("reliability", "Reliability Review  Error handling, TODOs"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Code Review",
+                "Automated code analysis agents:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            dispatch = {
+                "full": ("Full Review", lambda: self._run_auto_review("ALL")),
+                "security": ("Security Review", lambda: self._run_auto_review("SECURITY")),
+                "redundancy": ("Redundancy Review", lambda: self._run_auto_review("REDUNDANCY")),
+                "performance": ("Performance Review", lambda: self._run_auto_review("PERFORMANCE")),
+                "reliability": ("Reliability Review", lambda: self._run_auto_review("RELIABILITY")),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+
+    def _run_auto_review(self, scope_name: str):
+        """Execute an auto-review with the specified scope."""
+        self.dialog.infobox("Reviewing", f"Running {scope_name.lower()} review...")
+
+        try:
+            from utils.auto_review import ReviewOrchestrator, ReviewScope
+
+            scope_map = {
+                "ALL": ReviewScope.ALL,
+                "SECURITY": ReviewScope.SECURITY,
+                "REDUNDANCY": ReviewScope.REDUNDANCY,
+                "PERFORMANCE": ReviewScope.PERFORMANCE,
+                "RELIABILITY": ReviewScope.RELIABILITY,
+            }
+            scope = scope_map.get(scope_name, ReviewScope.ALL)
+
+            orchestrator = ReviewOrchestrator()
+            report = orchestrator.run_full_review(scope=scope)
+
+            # Build summary
+            lines = [
+                f"Scope: {scope_name}",
+                f"Files Scanned: {report.total_files_scanned}",
+                f"Total Issues: {report.total_issues}",
+                f"Fixes Applied: {report.total_fixes_applied}",
+                "",
+            ]
+
+            for category, result in report.agent_results.items():
+                lines.append(
+                    f"  {category.value.upper()}: "
+                    f"{result.total_issues} issues "
+                    f"({result.critical_count} critical, "
+                    f"{result.high_count} high)"
+                )
+
+            # Show top findings
+            findings = report.get_all_findings()
+            if findings:
+                lines.append("")
+                lines.append("Top findings:")
+                for finding in findings[:10]:
+                    lines.append(
+                        f"  [{finding.severity.value.upper()}] "
+                        f"{finding.file_path}:{finding.line_number or '?'}"
+                    )
+                    lines.append(f"    {finding.issue}")
+
+                if len(findings) > 10:
+                    lines.append(f"  ... and {len(findings) - 10} more")
+
+            self.dialog.msgbox("Review Results", "\n".join(lines))
+
+        except ImportError:
+            self.dialog.msgbox(
+                "Error",
+                "Auto-review module not available.\n\n"
+                "Ensure you're running from the src/ directory."
+            )
+        except Exception as e:
+            self.dialog.msgbox("Error", f"Review failed: {e}")
