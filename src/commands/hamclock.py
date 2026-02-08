@@ -1,17 +1,23 @@
 """
-HamClock Commands
+HamClock Commands — Optional Data Source Plugin
 
-Provides unified interface for HamClock API operations.
-Used by both GTK and CLI interfaces.
+Provides REST API client for HamClock (legacy) and OpenHamClock.
+This module is an OPTIONAL enhancement — MeshForge works without it.
 
-HamClock provides:
-- Space weather data (SFI, Kp, A index, X-ray flux)
-- Band conditions (HF propagation status)
-- VOACAP propagation predictions
+For standalone space weather and propagation data, use:
+    from commands import propagation  # NOAA-based, always works
+
+HamClock/OpenHamClock provide supplementary data:
+- VOACAP propagation predictions (requires HamClock)
 - DX cluster spots
 - Satellite tracking
+- Space weather (also available from NOAA directly)
 
-Reference: https://www.clearskyinstitute.com/ham/HamClock/
+Original HamClock: https://www.clearskyinstitute.com/ham/HamClock/
+    NOTE: Original HamClock backend sunsets June 2026.
+
+OpenHamClock: https://github.com/accius/openhamclock
+    Modern open-source replacement (MIT license, self-hostable).
 """
 
 import urllib.request
@@ -880,48 +886,62 @@ def get_native_space_weather() -> CommandResult:
     )
 
 
-# ==================== Unified API (Auto-Fallback) ====================
+# ==================== Unified API (NOAA Primary) ====================
+#
+# NOTE: For new code, prefer using `commands.propagation` instead.
+# These functions are kept for backward compatibility.
 
 def get_space_weather_auto() -> CommandResult:
     """
-    Get space weather with automatic fallback.
+    Get space weather — NOAA primary, HamClock as optional enhancement.
 
-    Tries HamClock first, falls back to NOAA if unavailable.
-    This is the recommended function to use.
+    Uses NOAA SWPC as the primary data source. If HamClock is configured
+    and available, merges additional data (VOACAP, DX spots).
+
+    For new code, prefer: commands.propagation.get_space_weather()
     """
-    # Try HamClock first
-    if is_available():
-        result = get_space_weather()
-        if result.success:
-            result.data['source'] = 'HamClock'
-            result.data['hamclock_available'] = True
-            return result
+    # NOAA is primary (always works, no external service needed)
+    result = get_native_space_weather()
 
-    # Fall back to native NOAA
-    logger.info("HamClock not available, using native NOAA API")
-    return get_native_space_weather()
+    # Enhance with HamClock data if available
+    if is_available():
+        hc_result = get_space_weather()
+        if hc_result.success and result.success:
+            result.data['hamclock_available'] = True
+            result.data['source'] = 'NOAA SWPC + HamClock'
+            # Merge any HamClock-specific fields not in NOAA
+            for key in ('proton', 'aurora'):
+                if key in hc_result.data:
+                    result.data[key] = hc_result.data[key]
+    else:
+        if result.success:
+            result.data['hamclock_available'] = False
+
+    return result
 
 
 def get_band_conditions_auto() -> CommandResult:
     """
-    Get band conditions with automatic fallback.
+    Get band conditions — NOAA primary, HamClock as optional enhancement.
 
-    Tries HamClock first, derives from NOAA SFI if unavailable.
+    For new code, prefer: commands.propagation.get_band_conditions()
     """
-    # Try HamClock first
-    if is_available():
-        result = get_band_conditions()
-        if result.success:
-            return result
-
-    # Fall back to NOAA-based estimate
+    # NOAA-based estimate is primary
     result = get_noaa_solar_data()
     if result.success:
         data = result.data
-        data['source'] = 'NOAA estimate'
-        data['note'] = 'Band conditions estimated from Solar Flux Index'
+        data['source'] = 'NOAA SWPC'
+        data['note'] = 'Band conditions derived from NOAA Solar Flux Index'
+
+        # If HamClock available, use its band conditions instead
+        if is_available():
+            hc_result = get_band_conditions()
+            if hc_result.success:
+                data['source'] = 'NOAA SWPC + HamClock'
+                data['hamclock_bands'] = hc_result.data.get('bands', {})
+
         return CommandResult.ok(
-            f"Band conditions: {data.get('conditions', 'Unknown')} (SFI-based estimate)",
+            f"Band conditions: {data.get('conditions', 'Unknown')}",
             data=data
         )
     return result
@@ -931,7 +951,9 @@ def get_propagation_summary() -> CommandResult:
     """
     Get a summary of current propagation conditions.
 
-    Works with or without HamClock installed.
+    Uses NOAA SWPC as primary source. Works without HamClock.
+
+    For new code, prefer: commands.propagation.get_propagation_summary()
     """
     summary = {
         'timestamp': '',
@@ -941,7 +963,7 @@ def get_propagation_summary() -> CommandResult:
         'source': 'NOAA SWPC'
     }
 
-    # Get space weather
+    # Get space weather (NOAA primary)
     result = get_space_weather_auto()
     if result.success:
         data = result.data
