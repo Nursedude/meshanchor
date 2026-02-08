@@ -90,6 +90,7 @@ class SettingsMenuMixin:
         while True:
             choices = [
                 ("noaa", "NOAA SWPC (Primary - always active)"),
+                ("pskreporter", "PSKReporter MQTT (Real-time spots)"),
                 ("openhamclock", "OpenHamClock (Optional)"),
                 ("hamclock", "HamClock Legacy (Optional)"),
                 ("test", "Test All Sources"),
@@ -99,8 +100,8 @@ class SettingsMenuMixin:
             choice = self.dialog.menu(
                 "Propagation Data Sources",
                 "NOAA is always active as primary source.\n"
-                "Optionally configure HamClock/OpenHamClock for\n"
-                "enhanced data (VOACAP, DX spots).",
+                "PSKReporter provides real-time HF spots via MQTT.\n"
+                "OpenHamClock adds VOACAP, DX spots.",
                 choices
             )
 
@@ -109,6 +110,8 @@ class SettingsMenuMixin:
 
             if choice == "noaa":
                 self._test_noaa_source()
+            elif choice == "pskreporter":
+                self._configure_pskreporter()
             elif choice == "openhamclock":
                 self._configure_openhamclock()
             elif choice == "hamclock":
@@ -146,6 +149,110 @@ class SettingsMenuMixin:
                 self.dialog.msgbox("Error", f"Cannot reach NOAA SWPC:\n{result.message}")
         except ImportError:
             self.dialog.msgbox("Error", "Propagation module not available.")
+
+    def _configure_pskreporter(self):
+        """Configure PSKReporter MQTT as propagation data source."""
+        try:
+            from commands import propagation
+        except ImportError:
+            self.dialog.msgbox("Error", "Propagation module not available.")
+            return
+
+        while True:
+            # Get current config
+            pskr_cfg = propagation._sources.get(propagation.DataSource.PSKREPORTER)
+            current_call = pskr_cfg.callsign if pskr_cfg else ""
+            current_bands = ", ".join(pskr_cfg.bands) if pskr_cfg and pskr_cfg.bands else "all"
+            is_enabled = pskr_cfg.enabled if pskr_cfg else False
+            status = "ENABLED" if is_enabled else "disabled"
+
+            choices = [
+                ("enable", f"Enable/Disable (currently: {status})"),
+                ("callsign", f"Set Callsign Filter ({current_call or 'none'})"),
+                ("bands", f"Set Band Filter ({current_bands})"),
+                ("test", "Test Connection"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "PSKReporter MQTT",
+                "Real-time amateur radio reception reports\n"
+                "from mqtt.pskreporter.info (by M0LTE).\n"
+                "Provides band activity & propagation data.\n"
+                f"\nStatus: {status}  Callsign: {current_call or 'all'}",
+                choices,
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "enable":
+                new_state = not is_enabled
+                result = propagation.configure_source(
+                    propagation.DataSource.PSKREPORTER,
+                    enabled=new_state,
+                    callsign=current_call,
+                    bands=pskr_cfg.bands if pskr_cfg else [],
+                    modes=pskr_cfg.modes if pskr_cfg else [],
+                )
+                state_str = "enabled" if new_state else "disabled"
+                self.dialog.msgbox(
+                    "PSKReporter",
+                    f"PSKReporter MQTT {state_str}.\n\n"
+                    f"{'Spots will stream from mqtt.pskreporter.info' if new_state else 'Feed stopped.'}"
+                )
+
+            elif choice == "callsign":
+                call = self.dialog.inputbox(
+                    "Callsign Filter",
+                    "Enter your callsign to filter spots:\n"
+                    "(Leave empty to monitor all spots)\n\n"
+                    "Examples: WH6GXZ, KH6RS",
+                    current_call,
+                )
+                if call is not None:
+                    propagation.configure_source(
+                        propagation.DataSource.PSKREPORTER,
+                        enabled=is_enabled,
+                        callsign=call.strip(),
+                        bands=pskr_cfg.bands if pskr_cfg else [],
+                        modes=pskr_cfg.modes if pskr_cfg else [],
+                    )
+
+            elif choice == "bands":
+                bands_input = self.dialog.inputbox(
+                    "Band Filter",
+                    "Enter bands to monitor (comma-separated):\n"
+                    "(Leave empty for all bands)\n\n"
+                    "Examples: 20m,40m,15m",
+                    ", ".join(pskr_cfg.bands) if pskr_cfg and pskr_cfg.bands else "",
+                )
+                if bands_input is not None:
+                    bands = [b.strip() for b in bands_input.split(",") if b.strip()]
+                    propagation.configure_source(
+                        propagation.DataSource.PSKREPORTER,
+                        enabled=is_enabled,
+                        callsign=current_call,
+                        bands=bands,
+                        modes=pskr_cfg.modes if pskr_cfg else [],
+                    )
+
+            elif choice == "test":
+                result = propagation.check_source(propagation.DataSource.PSKREPORTER)
+                if result.success:
+                    self.dialog.msgbox(
+                        "PSKReporter Connected",
+                        f"{result.message}\n\n"
+                        f"Spots: {result.data.get('spots_received', 0)}\n"
+                        f"Bands active: {result.data.get('bands_active', 0)}"
+                    )
+                else:
+                    self.dialog.msgbox(
+                        "PSKReporter",
+                        f"{result.message}\n\n"
+                        "Ensure PSKReporter is enabled and\n"
+                        "paho-mqtt is installed."
+                    )
 
     def _configure_openhamclock(self):
         """Configure OpenHamClock as optional data source."""
@@ -274,6 +381,14 @@ class SettingsMenuMixin:
             noaa = propagation.check_source(propagation.DataSource.NOAA)
             status = "Connected" if noaa.success else "Unreachable"
             lines.append(f"NOAA SWPC (primary): {status}")
+
+            # PSKReporter
+            pskr = propagation.check_source(propagation.DataSource.PSKREPORTER)
+            if pskr.success:
+                spots = pskr.data.get('spots_received', 0)
+                lines.append(f"PSKReporter MQTT: Connected ({spots} spots)")
+            else:
+                lines.append(f"PSKReporter MQTT: Not configured")
 
             # OpenHamClock
             ohc = propagation.check_source(propagation.DataSource.OPENHAMCLOCK)

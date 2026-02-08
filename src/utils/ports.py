@@ -77,7 +77,6 @@ RNS_ALL_PORTS = {
 # Common service ports for health checks
 SERVICE_PORTS = {
     'meshtasticd': MESHTASTICD_PORT,
-    'hamclock': HAMCLOCK_PORT,
     'mqtt': MQTT_PORT,
     'openwebrx': OPENWEBRX_PORT,
     'nomadnet': None,  # NomadNet uses RNS shared instance, no dedicated port
