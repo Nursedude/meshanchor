@@ -82,36 +82,36 @@ class RadioMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            try:
-                if choice == "install-cli" or choice == "reinstall-cli":
-                    self._install_meshtastic_cli()
-                    continue
+            if choice in ("install-cli", "reinstall-cli"):
+                self._safe_call("Install CLI", self._install_meshtastic_cli)
+                continue
 
+            dispatch = {
+                "favorites": ("Favorites", self._favorites_menu),
+                "position": ("Position", self._radio_position_menu),
+                "send": ("Send Message", self._radio_send_message),
+                "set-region": ("Set Region", self._radio_set_region),
+                "set-txpower": ("Set TX Power", self._radio_set_tx_power),
+                "set-name": ("Set Node Name", self._radio_set_name),
+                "reboot": ("Reboot Radio", self._radio_reboot),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+                continue
+
+            # CLI commands that build args dynamically
+            try:
                 cli = self._get_meshtastic_cli()
-                # Use --host localhost to connect via meshtasticd (required for HAT radios)
                 conn_args = ['--host', 'localhost']
                 if choice == "info":
                     self._radio_run([cli] + conn_args + ['--info'], "Radio Info")
                 elif choice == "nodes":
                     self._radio_run([cli] + conn_args + ['--nodes'], "Node List")
-                elif choice == "favorites":
-                    self._favorites_menu()  # From FavoritesMixin
                 elif choice == "channels":
                     self._radio_run([cli] + conn_args + ['--ch-index', '0', '--ch-getall'], "Channels")
-                elif choice == "position":
-                    self._radio_position_menu()
-                elif choice == "send":
-                    self._radio_send_message()
-                elif choice == "set-region":
-                    self._radio_set_region()
-                elif choice == "set-txpower":
-                    self._radio_set_tx_power()
-                elif choice == "set-name":
-                    self._radio_set_name()
-                elif choice == "reboot":
-                    self._radio_reboot()
             except KeyboardInterrupt:
-                pass  # Return to radio menu
+                pass
             except Exception as e:
                 self.dialog.msgbox(
                     "Radio Error",

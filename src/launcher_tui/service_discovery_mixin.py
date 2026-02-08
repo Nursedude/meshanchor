@@ -64,14 +64,15 @@ class ServiceDiscoveryMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "scan":
-                self._quick_scan()
-            elif choice == "full":
-                self._full_network_scan()
-            elif choice == "usb":
-                self._usb_device_scan()
-            elif choice == "status":
-                self._service_status_overview()
+            dispatch = {
+                "scan": ("Quick Scan", self._quick_scan),
+                "full": ("Full Network Scan", self._full_network_scan),
+                "usb": ("USB Device Scan", self._usb_device_scan),
+                "status": ("Service Status Overview", self._service_status_overview),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _quick_scan(self):
         """Quick scan of local services"""

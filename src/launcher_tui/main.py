@@ -184,6 +184,7 @@ class MeshForgeLauncher(
         self._setup_status_bar()
         self._meshtastic_path = None  # Cached CLI path
         self._bridge_log_path = None  # Path to active bridge log file
+        self._config_api_server = None  # Config API HTTP server
         # Enhanced startup checker (v0.4.8)
         self._startup_checker = StartupChecker() if HAS_STARTUP_CHECKS else None
         self._env_state: Optional[EnvironmentState] = None
@@ -397,7 +398,13 @@ class MeshForgeLauncher(
         # Auto-start MQTT subscriber and TelemetryPoller if configured
         self._maybe_auto_start_mqtt_and_telemetry()
 
-        self._run_main_menu()
+        # Auto-start Config API Server on localhost
+        self._maybe_auto_start_config_api()
+
+        try:
+            self._run_main_menu()
+        finally:
+            self._stop_config_api_server()
 
     def _run_startup_checks(self) -> bool:
         """
@@ -566,6 +573,94 @@ class MeshForgeLauncher(
 
         if self.dialog.yesno("Service Misconfiguration", msg):
             self._fix_spi_config(has_native)
+
+    def _maybe_auto_start_config_api(self):
+        """Auto-start Config API Server on TUI launch.
+
+        Provides RESTful configuration API on localhost:8081.
+        Silent operation - no dialogs on failure.
+        """
+        try:
+            from utils.config_api import create_gateway_config_api, ConfigAPIServer
+        except ImportError:
+            logger.debug("Config API module not available")
+            return
+
+        try:
+            api = create_gateway_config_api()
+            self._config_api_server = ConfigAPIServer(api, host="127.0.0.1", port=8081)
+            if self._config_api_server.start():
+                logger.info("Config API server started on 127.0.0.1:8081")
+            else:
+                logger.debug("Config API server failed to start")
+                self._config_api_server = None
+        except Exception as e:
+            logger.debug("Config API auto-start failed: %s", e)
+            self._config_api_server = None
+
+    def _stop_config_api_server(self):
+        """Stop the Config API Server on TUI exit."""
+        if self._config_api_server and self._config_api_server.is_running:
+            try:
+                self._config_api_server.stop()
+                logger.info("Config API server stopped")
+            except Exception as e:
+                logger.debug("Config API stop failed: %s", e)
+            self._config_api_server = None
+
+    def _config_api_menu(self):
+        """Config API Server start/stop/status menu."""
+        while True:
+            running = self._config_api_server and self._config_api_server.is_running
+            status = "RUNNING on 127.0.0.1:8081" if running else "STOPPED"
+
+            choices = [
+                ("status", f"Status              {status}"),
+            ]
+            if running:
+                choices.append(("stop", "Stop Config API Server"))
+            else:
+                choices.append(("start", "Start Config API Server"))
+            choices.append(("back", "Back"))
+
+            choice = self.dialog.menu(
+                "Config API Server",
+                "RESTful configuration API for dynamic reconfiguration.\n\n"
+                f"Status: {status}",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                if running:
+                    self.dialog.msgbox(
+                        "Config API Status",
+                        "Config API Server is RUNNING\n\n"
+                        "  Endpoint: http://127.0.0.1:8081/config\n"
+                        "  GET /config/<path> - Read config value\n"
+                        "  PUT /config/<path> - Set config value\n"
+                        "  DELETE /config/<path> - Remove value\n"
+                        "  GET /config/_paths - List all paths\n"
+                        "  GET /config/_audit - Audit log"
+                    )
+                else:
+                    self.dialog.msgbox(
+                        "Config API Status",
+                        "Config API Server is STOPPED\n\n"
+                        "Start it to enable dynamic reconfiguration\n"
+                        "via RESTful API."
+                    )
+            elif choice == "start":
+                self._maybe_auto_start_config_api()
+                if self._config_api_server and self._config_api_server.is_running:
+                    self.dialog.msgbox("Started", "Config API Server started on 127.0.0.1:8081")
+                else:
+                    self.dialog.msgbox("Error", "Failed to start Config API Server.\nCheck logs for details.")
+            elif choice == "stop":
+                self._stop_config_api_server()
+                self.dialog.msgbox("Stopped", "Config API Server stopped.")
 
     def _run_main_menu(self):
         """Display the main NOC menu.
@@ -884,6 +979,7 @@ class MeshForgeLauncher(
                 ("backup", "Device Backup       Backup/restore configs"),
                 ("updates", "Software Updates    One-click updates"),
                 ("meshforge", "MeshForge Settings  App preferences"),
+                ("config-api", "Config API Server   REST config endpoint"),
                 ("wizard", "Setup Wizard        First-run wizard"),
                 ("back", "Back"),
             ]
@@ -905,6 +1001,7 @@ class MeshForgeLauncher(
                 "backup": ("Device Backup", self._device_backup_menu),
                 "updates": ("Software Updates", self._updates_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
+                "config-api": ("Config API Server", self._config_api_menu),
                 "wizard": ("Setup Wizard", self._run_first_run_wizard),
             }
             entry = dispatch.get(choice)
