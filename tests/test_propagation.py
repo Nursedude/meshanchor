@@ -248,6 +248,170 @@ class TestModuleExports:
         assert hasattr(hamclock, 'get_voacap')
 
 
+class TestConfigPersistence:
+    """Test that source config persists to disk via SettingsManager."""
+
+    def test_configure_source_returns_persisted_flag(self):
+        """configure_source result includes persisted status."""
+        result = configure_source(
+            DataSource.OPENHAMCLOCK, host="persist-test", port=3000
+        )
+        assert result.success is True
+        assert 'persisted' in result.data
+
+    def test_save_and_load_round_trip(self, tmp_path):
+        """Config survives save/load cycle."""
+        import commands.propagation as prop
+
+        # Patch SettingsManager to use temp directory
+        from utils.common import SettingsManager
+        test_settings = SettingsManager(
+            "propagation_test", config_dir=tmp_path,
+            defaults={"sources": {
+                "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
+                "hamclock": {"host": "localhost", "port": 8080, "enabled": False, "timeout": 10},
+            }}
+        )
+
+        # Swap in test settings
+        orig_settings = prop._settings
+        orig_has = prop._HAS_SETTINGS
+        prop._settings = test_settings
+        prop._HAS_SETTINGS = True
+
+        try:
+            # Configure a source (triggers save)
+            result = configure_source(
+                DataSource.OPENHAMCLOCK, host="10.0.0.5", port=3001
+            )
+            assert result.success is True
+            assert result.data['persisted'] is True
+
+            # Reset in-memory to defaults
+            prop._sources[DataSource.OPENHAMCLOCK] = SourceConfig(
+                source=DataSource.OPENHAMCLOCK, port=3000, enabled=False
+            )
+            assert prop._sources[DataSource.OPENHAMCLOCK].host == "localhost"
+
+            # Reload from disk
+            prop._load_sources()
+            cfg = prop._sources[DataSource.OPENHAMCLOCK]
+            assert cfg.host == "10.0.0.5"
+            assert cfg.port == 3001
+            assert cfg.enabled is True
+        finally:
+            prop._settings = orig_settings
+            prop._HAS_SETTINGS = orig_has
+
+    def test_noaa_config_not_persisted(self):
+        """NOAA config is not persisted (always enabled)."""
+        result = configure_source(DataSource.NOAA)
+        assert result.success is True
+        assert 'persisted' not in result.data
+
+    def test_persistence_graceful_without_settings(self):
+        """Module works even if SettingsManager unavailable."""
+        import commands.propagation as prop
+
+        orig_has = prop._HAS_SETTINGS
+        prop._HAS_SETTINGS = False
+        try:
+            result = configure_source(
+                DataSource.HAMCLOCK, host="fallback-test", port=8080
+            )
+            assert result.success is True
+            assert result.data['persisted'] is False
+        finally:
+            prop._HAS_SETTINGS = orig_has
+
+    def test_settings_file_created(self, tmp_path):
+        """Settings file is actually written to disk."""
+        import commands.propagation as prop
+        from utils.common import SettingsManager
+
+        test_settings = SettingsManager(
+            "propagation_file_test", config_dir=tmp_path,
+            defaults={"sources": {}}
+        )
+
+        orig_settings = prop._settings
+        orig_has = prop._HAS_SETTINGS
+        prop._settings = test_settings
+        prop._HAS_SETTINGS = True
+
+        try:
+            configure_source(DataSource.HAMCLOCK, host="filetest", port=8082)
+            assert (tmp_path / "propagation_file_test.json").exists()
+        finally:
+            prop._settings = orig_settings
+            prop._HAS_SETTINGS = orig_has
+
+
+class TestStandaloneFunctions:
+    """Test standalone data source functions."""
+
+    def test_dx_spots_telnet_importable(self):
+        from commands.propagation import get_dx_spots_telnet
+        assert callable(get_dx_spots_telnet)
+
+    def test_voacap_online_requires_coordinates(self):
+        from commands.propagation import get_voacap_online
+        result = get_voacap_online()
+        assert result.success is False
+        assert "coordinates" in result.message.lower()
+
+    def test_voacap_online_importable(self):
+        from commands.propagation import get_voacap_online
+        assert callable(get_voacap_online)
+
+    def test_ionosonde_importable(self):
+        from commands.propagation import get_ionosonde_data
+        assert callable(get_ionosonde_data)
+
+    def test_satellite_tle_importable(self):
+        from commands.propagation import get_satellite_tle
+        assert callable(get_satellite_tle)
+
+    def test_parse_dx_spot(self):
+        from commands.propagation import _parse_dx_spot
+        spot = _parse_dx_spot("DX de W1AW:     14074.0  JA1ABC       FT8 -12 dB 1234Z")
+        assert spot.get('spotter') == 'W1AW'
+        assert spot.get('dx_call') == 'JA1ABC'
+
+    def test_parse_dx_spot_minimal(self):
+        from commands.propagation import _parse_dx_spot
+        spot = _parse_dx_spot("DX de W1AW: 14074.0 JA1ABC comment 1234Z")
+        assert 'raw' in spot
+
+
+class TestDeprecationWarnings:
+    """Test that deprecated hamclock functions emit warnings."""
+
+    def test_get_space_weather_auto_warns(self):
+        import warnings
+        from commands import hamclock
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            hamclock.get_space_weather_auto()
+            assert any("deprecated" in str(warning.message).lower() for warning in w)
+
+    def test_get_band_conditions_auto_warns(self):
+        import warnings
+        from commands import hamclock
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            hamclock.get_band_conditions_auto()
+            assert any("deprecated" in str(warning.message).lower() for warning in w)
+
+    def test_get_propagation_summary_warns(self):
+        import warnings
+        from commands import hamclock
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            hamclock.get_propagation_summary()
+            assert any("deprecated" in str(warning.message).lower() for warning in w)
+
+
 class TestBackwardCompatibility:
     """Ensure existing hamclock tests still pass."""
 
