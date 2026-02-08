@@ -110,28 +110,22 @@ class TrafficInspectorMixin:
             if not choice:
                 return
 
-            if choice == "capture":
-                self._toggle_capture()
-            elif choice == "1":
-                self._traffic_live_view()
-            elif choice == "2":
-                self._traffic_packet_list()
-            elif choice == "3":
-                self._traffic_apply_filter()
-            elif choice == "4":
-                self._traffic_packet_detail()
-            elif choice == "5":
-                self._traffic_path_visualization()
-            elif choice == "6":
-                self._traffic_statistics()
-            elif choice == "7":
-                self._traffic_view_log()
-            elif choice == "8":
-                self._traffic_filter_reference()
-            elif choice == "9":
-                self._traffic_export()
-            elif choice == "0":
-                self._traffic_clear()
+            dispatch = {
+                "capture": ("Toggle Capture", self._toggle_capture),
+                "1": ("Live Traffic", self._traffic_live_view),
+                "2": ("Packet List", self._traffic_packet_list),
+                "3": ("Apply Filter", self._traffic_apply_filter),
+                "4": ("Packet Details", self._traffic_packet_detail),
+                "5": ("Path Visualization", self._traffic_path_visualization),
+                "6": ("Traffic Statistics", self._traffic_statistics),
+                "7": ("Traffic Log", self._traffic_view_log),
+                "8": ("Filter Reference", self._traffic_filter_reference),
+                "9": ("Export Data", self._traffic_export),
+                "0": ("Clear Capture", self._traffic_clear),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _toggle_capture(self) -> None:
         """Start or stop packet capture."""

@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.5.1-beta"
-__version_info__ = (0, 5, 1, 'beta')
-__release_date__ = "2026-02-06"
+__version__ = "0.5.2-beta"
+__version_info__ = (0, 5, 2, 'beta')
+__release_date__ = "2026-02-08"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
@@ -14,6 +14,23 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.5.2-beta",
+        "date": "2026-02-08",
+        "status": "beta",
+        "changes": [
+            "NEW: EAS Alerts accessible from Emergency Mode and Dashboard",
+            "NEW: Favorites menu in Mesh Networks (BaseUI 2.7+ node favorites)",
+            "RELIABILITY: 16 mixin dispatch loops converted to _safe_call pattern",
+            "RELIABILITY: All top-level TUI menus now catch exceptions gracefully",
+            "RELIABILITY: Quick Actions, RF Tools, Site Planner, AI, Channel Config protected",
+            "RELIABILITY: Traffic Inspector, Metrics, Logs, Network Tools, AREDN protected",
+            "RELIABILITY: Hardware, Backup, Updates, Settings, SDR, Config menus protected",
+            "FIX: Gateway bridge mode auto-fix now persists corrected mode",
+            "FIX: bridge_cli.py no longer restores stale mesh_bridge after auto-correction",
+            "DOCS: README updated with v0.5.2 changes, test counts, feature accessibility",
+        ]
+    },
     {
         "version": "0.5.1-beta",
         "date": "2026-02-06",

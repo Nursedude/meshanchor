@@ -79,20 +79,18 @@ class ChannelConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "list":
-                self._view_all_channels()
-            elif choice == "edit":
-                self._edit_channel_menu()
-            elif choice == "add":
-                self._add_channel()
-            elif choice == "disable":
-                self._disable_channel()
-            elif choice == "primary":
-                self._set_primary_channel()
-            elif choice == "gateway":
-                self._set_gateway_channel()
-            elif choice == "psk":
-                self._generate_psk()
+            dispatch = {
+                "list": ("View Channels", self._view_all_channels),
+                "edit": ("Edit Channel", self._edit_channel_menu),
+                "add": ("Add Channel", self._add_channel),
+                "disable": ("Disable Channel", self._disable_channel),
+                "primary": ("Set Primary Channel", self._set_primary_channel),
+                "gateway": ("Gateway Channel", self._set_gateway_channel),
+                "psk": ("Generate PSK", self._generate_psk),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _view_all_channels(self):
         """View all 8 channels with their configuration."""

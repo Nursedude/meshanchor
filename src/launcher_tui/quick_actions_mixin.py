@@ -71,12 +71,12 @@ class QuickActionsMixin:
             if choice is None or choice == 'b':
                 break
 
-            # Find and execute the matching action
-            for tag, _, method_name in QUICK_ACTIONS:
+            # Find and execute the matching action via _safe_call
+            for tag, desc, method_name in QUICK_ACTIONS:
                 if choice == tag:
                     method = getattr(self, method_name, None)
                     if method:
-                        method()
+                        self._safe_call(desc, method)
                     break
 
     def _qa_service_status(self):

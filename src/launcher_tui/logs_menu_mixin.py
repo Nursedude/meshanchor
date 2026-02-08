@@ -51,69 +51,77 @@ class LogsMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            subprocess.run(['clear'], check=False, timeout=5)
+            try:
+                subprocess.run(['clear'], check=False, timeout=5)
 
-            if choice == "live-mesh":
-                print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
-                try:
+                if choice == "live-mesh":
+                    print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
+                    try:
+                        subprocess.run(
+                            ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
+                            timeout=None
+                        )
+                    except KeyboardInterrupt:
+                        pass
+                elif choice == "live-rns":
+                    print("=== rnsd live log (Ctrl+C to stop) ===\n")
+                    try:
+                        subprocess.run(
+                            ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
+                            timeout=None
+                        )
+                    except KeyboardInterrupt:
+                        pass
+                elif choice == "live-all":
+                    print("=== All services live log (Ctrl+C to stop) ===\n")
+                    try:
+                        subprocess.run(
+                            ['journalctl', '-f', '-n', '30', '--no-pager'],
+                            timeout=None
+                        )
+                    except KeyboardInterrupt:
+                        pass
+                elif choice == "errors":
+                    print("=== Errors (last hour, priority err+) ===\n")
                     subprocess.run(
-                        ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
-                        timeout=None
+                        ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
+                        timeout=30
                     )
-                except KeyboardInterrupt:
-                    pass
-            elif choice == "live-rns":
-                print("=== rnsd live log (Ctrl+C to stop) ===\n")
-                try:
+                    self._wait_for_enter()
+                elif choice == "mesh-50":
+                    print("=== meshtasticd (last 50 lines) ===\n")
                     subprocess.run(
-                        ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
-                        timeout=None
+                        ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
+                        timeout=15
                     )
-                except KeyboardInterrupt:
-                    pass
-            elif choice == "live-all":
-                print("=== All services live log (Ctrl+C to stop) ===\n")
-                try:
+                    self._wait_for_enter()
+                elif choice == "rns-50":
+                    print("=== rnsd (last 50 lines) ===\n")
                     subprocess.run(
-                        ['journalctl', '-f', '-n', '30', '--no-pager'],
-                        timeout=None
+                        ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
+                        timeout=15
                     )
-                except KeyboardInterrupt:
-                    pass
-            elif choice == "errors":
-                print("=== Errors (last hour, priority err+) ===\n")
-                subprocess.run(
-                    ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
-                    timeout=30
+                    self._wait_for_enter()
+                elif choice == "boot":
+                    print("=== Boot messages (this boot) ===\n")
+                    subprocess.run(
+                        ['journalctl', '-b', '-n', '100', '--no-pager'],
+                        timeout=15
+                    )
+                    self._wait_for_enter()
+                elif choice == "kernel":
+                    print("=== Kernel messages (dmesg) ===\n")
+                    subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "meshforge":
+                    self._view_meshforge_logs()
+            except KeyboardInterrupt:
+                pass  # Return to log menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "Log Viewer Error",
+                    f"Failed to view logs:\n{type(e).__name__}: {e}"
                 )
-                self._wait_for_enter()
-            elif choice == "mesh-50":
-                print("=== meshtasticd (last 50 lines) ===\n")
-                subprocess.run(
-                    ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
-                    timeout=15
-                )
-                self._wait_for_enter()
-            elif choice == "rns-50":
-                print("=== rnsd (last 50 lines) ===\n")
-                subprocess.run(
-                    ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
-                    timeout=15
-                )
-                self._wait_for_enter()
-            elif choice == "boot":
-                print("=== Boot messages (this boot) ===\n")
-                subprocess.run(
-                    ['journalctl', '-b', '-n', '100', '--no-pager'],
-                    timeout=15
-                )
-                self._wait_for_enter()
-            elif choice == "kernel":
-                print("=== Kernel messages (dmesg) ===\n")
-                subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "meshforge":
-                self._view_meshforge_logs()
 
     def _view_meshforge_logs(self):
         """View MeshForge application logs."""
