@@ -35,6 +35,20 @@ from .base import CommandResult
 
 logger = logging.getLogger(__name__)
 
+# Settings persistence for source configuration
+try:
+    from utils.common import SettingsManager
+    _settings = SettingsManager("propagation", defaults={
+        "sources": {
+            "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
+            "hamclock": {"host": "localhost", "port": 8080, "enabled": False, "timeout": 10},
+        }
+    })
+    _HAS_SETTINGS = True
+except ImportError:
+    _settings = None
+    _HAS_SETTINGS = False
+
 
 class DataSource(Enum):
     """Available propagation data sources."""
@@ -61,7 +75,7 @@ class SourceConfig:
         return ""
 
 
-# Module-level source configuration
+# Module-level source configuration (defaults)
 _sources: Dict[DataSource, SourceConfig] = {
     DataSource.NOAA: SourceConfig(
         source=DataSource.NOAA, enabled=True
@@ -73,6 +87,47 @@ _sources: Dict[DataSource, SourceConfig] = {
         source=DataSource.HAMCLOCK, port=8080, enabled=False
     ),
 }
+
+
+def _load_sources() -> None:
+    """Load source configuration from disk (if available)."""
+    if not _HAS_SETTINGS or _settings is None:
+        return
+    saved = _settings.get("sources", {})
+    for key, src_enum in [("openhamclock", DataSource.OPENHAMCLOCK),
+                          ("hamclock", DataSource.HAMCLOCK)]:
+        cfg = saved.get(key)
+        if cfg and isinstance(cfg, dict):
+            _sources[src_enum] = SourceConfig(
+                source=src_enum,
+                host=cfg.get("host", "localhost"),
+                port=cfg.get("port", _sources[src_enum].port),
+                enabled=cfg.get("enabled", False),
+                timeout=cfg.get("timeout", 10),
+            )
+
+
+def _save_sources() -> bool:
+    """Persist source configuration to disk."""
+    if not _HAS_SETTINGS or _settings is None:
+        return False
+    data = {}
+    for key, src_enum in [("openhamclock", DataSource.OPENHAMCLOCK),
+                          ("hamclock", DataSource.HAMCLOCK)]:
+        cfg = _sources.get(src_enum)
+        if cfg:
+            data[key] = {
+                "host": cfg.host,
+                "port": cfg.port,
+                "enabled": cfg.enabled,
+                "timeout": cfg.timeout,
+            }
+    _settings.set("sources", data)
+    return _settings.save()
+
+
+# Load persisted config on module import
+_load_sources()
 
 
 def configure_source(
@@ -117,6 +172,9 @@ def configure_source(
         timeout=timeout,
     )
 
+    # Persist to disk
+    saved = _save_sources()
+
     return CommandResult.ok(
         f"{source.value} configured: {host}:{actual_port} (enabled={enabled})",
         data={
@@ -124,6 +182,7 @@ def configure_source(
             'host': host,
             'port': actual_port,
             'enabled': enabled,
+            'persisted': saved,
         }
     )
 
@@ -505,6 +564,346 @@ def _fetch_openhamclock_data(cfg: SourceConfig) -> Optional[Dict[str, Any]]:
 
     return enhanced if enhanced else None
 
+
+# ==================== Standalone: DX Cluster (Telnet) ====================
+
+def get_dx_spots_telnet(
+    server: str = "dxc.nc7j.com",
+    port: int = 7373,
+    callsign: str = "N0CALL",
+    max_spots: int = 20,
+    timeout: int = 15,
+) -> CommandResult:
+    """Get DX cluster spots via direct telnet connection.
+
+    Bypasses HamClock — connects directly to a DX Spider cluster node.
+    Common public DX clusters:
+        dxc.nc7j.com:7373, telnet.reversebeacon.net:7000
+
+    Args:
+        server: DX cluster hostname
+        port: DX cluster port
+        callsign: Login callsign (some clusters require a valid call)
+        max_spots: Maximum spots to collect
+        timeout: Connection timeout in seconds
+
+    Returns:
+        CommandResult with DX spots list
+    """
+    import socket
+
+    spots = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((server, port))
+
+        # Read login prompt and send callsign
+        data = sock.recv(4096).decode('utf-8', errors='replace')
+        sock.sendall(f"{callsign}\n".encode('utf-8'))
+
+        # Collect spot data
+        buffer = ""
+        import time
+        deadline = time.monotonic() + timeout
+        while len(spots) < max_spots and time.monotonic() < deadline:
+            try:
+                chunk = sock.recv(4096).decode('utf-8', errors='replace')
+                if not chunk:
+                    break
+                buffer += chunk
+                lines = buffer.split('\n')
+                buffer = lines[-1]  # Keep incomplete line
+                for line in lines[:-1]:
+                    line = line.strip()
+                    if line.startswith('DX de ') or 'DX de' in line[:10]:
+                        spots.append(_parse_dx_spot(line))
+            except socket.timeout:
+                break
+
+        sock.sendall(b"bye\n")
+        sock.close()
+
+    except socket.timeout:
+        if not spots:
+            return CommandResult.fail(
+                f"Connection to {server}:{port} timed out",
+                data={'hint': f'Check connectivity to {server}'}
+            )
+    except socket.gaierror:
+        return CommandResult.fail(
+            f"Cannot resolve {server}",
+            data={'hint': 'Check DNS or use IP address'}
+        )
+    except ConnectionRefusedError:
+        return CommandResult.fail(
+            f"Connection refused by {server}:{port}",
+            data={'hint': 'Server may be down or port incorrect'}
+        )
+    except Exception as e:
+        if not spots:
+            return CommandResult.fail(f"DX cluster error: {e}")
+
+    if not spots:
+        return CommandResult.fail("No DX spots received")
+
+    return CommandResult.ok(
+        f"{len(spots)} DX spots from {server}",
+        data={
+            'spots': spots,
+            'count': len(spots),
+            'server': server,
+            'source': 'DX Cluster (telnet)',
+        }
+    )
+
+
+def _parse_dx_spot(line: str) -> Dict[str, Any]:
+    """Parse a DX cluster spot line.
+
+    Format: DX de <spotter>: <freq> <dx_call> <comment> <time>Z
+    """
+    spot: Dict[str, Any] = {'raw': line}
+    try:
+        parts = line.split()
+        if len(parts) >= 5:
+            spot['spotter'] = parts[2].rstrip(':')
+            spot['frequency'] = parts[3]
+            spot['dx_call'] = parts[4]
+            # Comment is everything between dx_call and time
+            if len(parts) > 5:
+                # Last token might be time (e.g., "1234Z")
+                if parts[-1].endswith('Z') and parts[-1][:-1].isdigit():
+                    spot['time'] = parts[-1]
+                    spot['comment'] = ' '.join(parts[5:-1])
+                else:
+                    spot['comment'] = ' '.join(parts[5:])
+    except (IndexError, ValueError):
+        pass
+    return spot
+
+
+# ==================== Standalone: VOACAP Online ====================
+
+def get_voacap_online(
+    tx_lat: float = 0.0,
+    tx_lon: float = 0.0,
+    rx_lat: float = 0.0,
+    rx_lon: float = 0.0,
+    timeout: int = 15,
+) -> CommandResult:
+    """Get VOACAP propagation prediction from VOACAP online service.
+
+    Uses the public VOACAP point-to-point prediction service.
+    Independent of HamClock — works standalone.
+
+    Args:
+        tx_lat: Transmitter latitude
+        tx_lon: Transmitter longitude
+        rx_lat: Receiver latitude
+        rx_lon: Receiver longitude
+        timeout: Request timeout
+
+    Returns:
+        CommandResult with band reliability predictions
+    """
+    import urllib.request
+    import json
+
+    if tx_lat == 0 and tx_lon == 0 and rx_lat == 0 and rx_lon == 0:
+        return CommandResult.fail(
+            "Coordinates required for VOACAP prediction",
+            data={'hint': 'Provide TX and RX lat/lon coordinates'}
+        )
+
+    # VOACAP online API (public, no auth required)
+    url = (
+        f"https://www.voacap.com/prediction.json"
+        f"?tx_lat={tx_lat}&tx_lon={tx_lon}"
+        f"&rx_lat={rx_lat}&rx_lon={rx_lon}"
+        f"&mode=SSB&power=100"
+    )
+
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'MeshForge/1.0')
+
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        bands = {}
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if 'm' in key.lower() or key.isdigit():
+                    bands[key] = value
+
+        return CommandResult.ok(
+            f"VOACAP prediction: {len(bands)} bands",
+            data={
+                'bands': bands,
+                'tx': {'lat': tx_lat, 'lon': tx_lon},
+                'rx': {'lat': rx_lat, 'lon': rx_lon},
+                'source': 'VOACAP Online',
+                'raw': data,
+            }
+        )
+    except Exception as e:
+        return CommandResult.fail(
+            f"VOACAP online error: {e}",
+            data={'hint': 'Check internet connectivity'}
+        )
+
+
+# ==================== Standalone: Ionosonde Data (prop.kc2g.com) ====================
+
+def get_ionosonde_data(timeout: int = 15) -> CommandResult:
+    """Get real-time ionosonde data from prop.kc2g.com.
+
+    Provides critical frequency (foF2) and Maximum Usable Frequency (MUF)
+    data from ionosonde stations. This is real measured ionospheric data,
+    not modeled predictions.
+
+    Args:
+        timeout: Request timeout
+
+    Returns:
+        CommandResult with ionosonde measurements
+    """
+    import urllib.request
+    import json
+
+    url = "https://prop.kc2g.com/api/stations.json"
+
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'MeshForge/1.0')
+
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        if not data:
+            return CommandResult.fail("No ionosonde data available")
+
+        stations = []
+        for station in data[:30]:  # Limit to 30 stations
+            entry: Dict[str, Any] = {
+                'name': station.get('name', ''),
+                'lat': station.get('lat'),
+                'lon': station.get('lon'),
+            }
+            if 'fof2' in station:
+                entry['fof2'] = station['fof2']
+            if 'muf' in station:
+                entry['muf'] = station['muf']
+            if 'hmf2' in station:
+                entry['hmf2'] = station['hmf2']
+            stations.append(entry)
+
+        # Calculate averages for summary
+        fof2_values = [s['fof2'] for s in stations if s.get('fof2')]
+        muf_values = [s['muf'] for s in stations if s.get('muf')]
+        avg_fof2 = sum(fof2_values) / len(fof2_values) if fof2_values else None
+        avg_muf = sum(muf_values) / len(muf_values) if muf_values else None
+
+        summary_parts = []
+        if avg_fof2:
+            summary_parts.append(f"foF2={avg_fof2:.1f}MHz")
+        if avg_muf:
+            summary_parts.append(f"MUF={avg_muf:.1f}MHz")
+
+        return CommandResult.ok(
+            f"Ionosonde: {len(stations)} stations ({', '.join(summary_parts)})",
+            data={
+                'stations': stations,
+                'count': len(stations),
+                'avg_fof2': avg_fof2,
+                'avg_muf': avg_muf,
+                'source': 'prop.kc2g.com',
+            }
+        )
+    except Exception as e:
+        return CommandResult.fail(
+            f"Ionosonde data error: {e}",
+            data={'hint': 'Check internet connectivity'}
+        )
+
+
+# ==================== Standalone: CelesTrak TLE (Satellites) ====================
+
+def get_satellite_tle(
+    satellite: str = "ISS",
+    timeout: int = 15,
+) -> CommandResult:
+    """Get satellite TLE data from CelesTrak.
+
+    Provides Two-Line Element sets for satellite tracking.
+    Independent of HamClock — uses CelesTrak public API directly.
+
+    Args:
+        satellite: Satellite name or NORAD catalog number
+        timeout: Request timeout
+
+    Returns:
+        CommandResult with TLE data
+    """
+    import urllib.request
+    import json
+
+    # Common satellite name mappings
+    name_map = {
+        'ISS': '25544',
+        'NOAA-19': '33591',
+        'NOAA-18': '28654',
+        'ISS (ZARYA)': '25544',
+        'SO-50': '27607',
+        'AO-91': '43017',
+    }
+
+    # Determine query: by name or NORAD ID
+    norad_id = name_map.get(satellite.upper(), '')
+    if norad_id:
+        url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad_id}&FORMAT=JSON"
+    elif satellite.isdigit():
+        url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={satellite}&FORMAT=JSON"
+    else:
+        url = f"https://celestrak.org/NORAD/elements/gp.php?NAME={satellite}&FORMAT=JSON"
+
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'MeshForge/1.0')
+
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        if not data:
+            return CommandResult.fail(
+                f"No TLE data for '{satellite}'",
+                data={'hint': 'Check satellite name or NORAD ID'}
+            )
+
+        # CelesTrak returns JSON GP format
+        sat_data = data[0] if isinstance(data, list) else data
+        result = {
+            'name': sat_data.get('OBJECT_NAME', satellite),
+            'norad_id': sat_data.get('NORAD_CAT_ID', ''),
+            'epoch': sat_data.get('EPOCH', ''),
+            'inclination': sat_data.get('INCLINATION', ''),
+            'eccentricity': sat_data.get('ECCENTRICITY', ''),
+            'period_min': sat_data.get('PERIOD', ''),
+            'tle_line1': sat_data.get('TLE_LINE1', ''),
+            'tle_line2': sat_data.get('TLE_LINE2', ''),
+            'source': 'CelesTrak',
+        }
+
+        return CommandResult.ok(
+            f"TLE: {result['name']} (NORAD {result['norad_id']})",
+            data=result
+        )
+    except Exception as e:
+        return CommandResult.fail(
+            f"CelesTrak error: {e}",
+            data={'hint': 'Check internet connectivity'}
+        )
 
 # ==================== Internal: HamClock (Legacy) ====================
 

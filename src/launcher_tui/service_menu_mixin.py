@@ -269,6 +269,7 @@ class ServiceMenuMixin:
                 ("restart-rns", "Restart rnsd"),
                 ("install", "Install meshtasticd"),
                 ("mqtt-setup", "MQTT Setup           Install & configure broker"),
+                ("openhamclock", "OpenHamClock Docker  Start/stop/status"),
                 ("back", "Back"),
             ]
 
@@ -409,6 +410,8 @@ class ServiceMenuMixin:
                 self._install_native_meshtasticd()
             elif choice == "mqtt-setup":
                 self._mqtt_setup_wizard()
+            elif choice == "openhamclock":
+                self._manage_openhamclock_docker()
             else:
                 self._manage_service(choice)
 
@@ -890,6 +893,192 @@ WantedBy=multi-user.target
                     timeout=15
                 )
             self._wait_for_enter()
+
+    # =========================================================================
+    # OpenHamClock Docker Management
+    # =========================================================================
+
+    def _manage_openhamclock_docker(self):
+        """Manage OpenHamClock as a Docker container."""
+        docker_bin = shutil.which('docker')
+        if not docker_bin:
+            self.dialog.msgbox(
+                "Docker Not Found",
+                "Docker is required for OpenHamClock.\n\n"
+                "Install Docker:\n"
+                "  curl -fsSL https://get.docker.com | sh\n"
+                "  sudo usermod -aG docker $USER"
+            )
+            return
+
+        while True:
+            # Check current container status
+            running = self._is_openhamclock_running()
+            status_str = "Running" if running else "Stopped"
+
+            choices = [
+                ("status", f"Status: {status_str}"),
+                ("start", "Start OpenHamClock"),
+                ("stop", "Stop OpenHamClock"),
+                ("logs", "View Logs"),
+                ("configure", "Configure in MeshForge"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "OpenHamClock (Docker)",
+                "Manage OpenHamClock container.\n"
+                "Community replacement for HamClock.\n"
+                "https://github.com/accius/openhamclock",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "status":
+                self._openhamclock_docker_status()
+            elif choice == "start":
+                self._start_openhamclock_docker()
+            elif choice == "stop":
+                self._stop_openhamclock_docker()
+            elif choice == "logs":
+                self._openhamclock_docker_logs()
+            elif choice == "configure":
+                # Delegate to settings menu mixin
+                try:
+                    self._configure_openhamclock()
+                except AttributeError:
+                    self.dialog.msgbox("Error", "Settings menu not available.")
+
+    def _is_openhamclock_running(self) -> bool:
+        """Check if OpenHamClock Docker container is running."""
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', 'name=openhamclock',
+                 '--filter', 'status=running', '--format', '{{.Names}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            return 'openhamclock' in result.stdout.lower()
+        except (subprocess.SubprocessError, OSError):
+            return False
+
+    def _openhamclock_docker_status(self):
+        """Show OpenHamClock Docker container status."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== OpenHamClock Docker Status ===\n")
+
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--filter', 'name=openhamclock',
+                 '--format', 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                print(result.stdout)
+            else:
+                print("No OpenHamClock container found.\n")
+                print("Start with: docker run -d --name openhamclock -p 3000:3000 openhamclock")
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"Error checking status: {e}")
+
+        self._wait_for_enter()
+
+    def _start_openhamclock_docker(self):
+        """Start OpenHamClock Docker container."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Starting OpenHamClock ===\n")
+
+        # Check if container already exists
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--filter', 'name=openhamclock',
+                 '--format', '{{.Names}}'],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if 'openhamclock' in result.stdout.lower():
+                # Container exists, just start it
+                print("Starting existing container...")
+                result = subprocess.run(
+                    ['docker', 'start', 'openhamclock'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    print("\033[0;32m✓\033[0m OpenHamClock started on port 3000")
+                else:
+                    print(f"\033[0;31mError:\033[0m {result.stderr}")
+            else:
+                # Need to create the container
+                print("Pulling and starting OpenHamClock...")
+                print("(This may take a moment on first run)\n")
+                result = subprocess.run(
+                    ['docker', 'run', '-d',
+                     '--name', 'openhamclock',
+                     '-p', '3000:3000',
+                     '--restart', 'unless-stopped',
+                     'ghcr.io/accius/openhamclock:latest'],
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode == 0:
+                    print("\033[0;32m✓\033[0m OpenHamClock started on port 3000")
+                    print("\nAuto-configuring MeshForge...")
+                    try:
+                        from commands import propagation
+                        propagation.configure_source(
+                            propagation.DataSource.OPENHAMCLOCK,
+                            host="localhost", port=3000
+                        )
+                        print("\033[0;32m✓\033[0m MeshForge configured for OpenHamClock")
+                    except ImportError:
+                        pass
+                else:
+                    print(f"\033[0;31mError:\033[0m {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            print("\033[0;31mError:\033[0m Docker operation timed out.")
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"\033[0;31mError:\033[0m {e}")
+
+        self._wait_for_enter()
+
+    def _stop_openhamclock_docker(self):
+        """Stop OpenHamClock Docker container."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Stopping OpenHamClock ===\n")
+
+        try:
+            result = subprocess.run(
+                ['docker', 'stop', 'openhamclock'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                print("\033[0;32m✓\033[0m OpenHamClock stopped.")
+            else:
+                print(f"\033[0;31mError:\033[0m {result.stderr}")
+        except subprocess.TimeoutExpired:
+            print("\033[0;31mError:\033[0m Stop operation timed out.")
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"\033[0;31mError:\033[0m {e}")
+
+        self._wait_for_enter()
+
+    def _openhamclock_docker_logs(self):
+        """Show OpenHamClock Docker container logs."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== OpenHamClock Logs (last 30) ===\n")
+
+        try:
+            subprocess.run(
+                ['docker', 'logs', '--tail', '30', 'openhamclock'],
+                timeout=15
+            )
+        except subprocess.TimeoutExpired:
+            print("Log retrieval timed out.")
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"Error: {e}")
+
+        self._wait_for_enter()
 
     # =========================================================================
     # MQTT Setup Wizard - Local broker for multi-consumer architecture

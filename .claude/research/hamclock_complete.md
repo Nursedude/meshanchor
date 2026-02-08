@@ -1,7 +1,20 @@
 # HamClock Integration - Complete Reference
 
 > Consolidated documentation for MeshForge HamClock integration
-> Updated: 2026-01-08
+> Updated: 2026-02-08
+
+## Status Update (2026-02-08)
+
+**Original HamClock backend sunsets June 2026** (author Elwood Downey WB0OEW is SK).
+
+MeshForge now uses **NOAA SWPC as the primary data source** via `commands.propagation`.
+HamClock and OpenHamClock are optional enhancements — see `src/commands/propagation.py`.
+
+**OpenHamClock** (https://github.com/accius/openhamclock) is the community replacement:
+- MIT license, React/Node.js, Docker-friendly
+- REST API on port 3000
+- Adds: PSKReporter MQTT, POTA/SOTA, ionosonde data from prop.kc2g.com
+- CelesTrak TLE for satellite tracking
 
 ## Overview
 
@@ -223,11 +236,73 @@ SFI (Solar Flux Index) above 100 generally indicates good HF conditions.
 
 ---
 
+## OpenHamClock (Community Replacement)
+
+### Overview
+
+OpenHamClock (https://github.com/accius/openhamclock) is the community fork/replacement
+for HamClock, designed to survive the June 2026 backend sunset.
+
+- **License**: MIT
+- **Stack**: React + Node.js
+- **Port**: 3000 (default)
+- **Deployment**: Docker recommended
+
+### Docker Installation
+
+```bash
+# Clone and run
+git clone https://github.com/accius/openhamclock.git
+cd openhamclock
+docker compose up -d
+```
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/dxcluster/spots` | DX cluster spots (JSON) |
+| `/api/spaceweather` | Space weather (proxied from NOAA) |
+| `/api/satellites` | Satellite tracking (CelesTrak TLE) |
+| `/api/propagation` | ITU-R P.533 predictions |
+
+### MeshForge Integration
+
+```python
+from commands import propagation
+from commands.propagation import DataSource
+
+# Configure (persists to ~/.config/meshforge/propagation.json)
+propagation.configure_source(DataSource.OPENHAMCLOCK, host="localhost", port=3000)
+
+# Check connectivity
+result = propagation.check_source(DataSource.OPENHAMCLOCK)
+
+# Get enhanced data (NOAA + OpenHamClock)
+result = propagation.get_enhanced_data()
+```
+
+### Feature Comparison vs HamClock
+
+| Feature | OpenHamClock | HamClock (legacy) |
+|---------|--------------|-------------------|
+| DX Spots | Yes (DX Spider) | Yes |
+| VOACAP | ITU-R P.533 | Yes |
+| Satellites | CelesTrak TLE | Yes |
+| PSKReporter | Yes (MQTT) | No |
+| POTA/SOTA | Yes | No |
+| Ionosonde | Yes (prop.kc2g.com) | No |
+| Self-hosted | Docker | Build from source |
+| License | MIT | Proprietary |
+
 ## References
 
-- [HamClock Official](https://www.clearskyinstitute.com/ham/HamClock/)
+- [HamClock Official](https://www.clearskyinstitute.com/ham/HamClock/) *(sunsets June 2026)*
 - [HamClock User Guide (PDF)](https://www.clearskyinstitute.com/ham/HamClock/HamClockKey.pdf)
 - [pa28/hamclock-systemd](https://github.com/pa28/hamclock-systemd)
+- [OpenHamClock](https://github.com/accius/openhamclock) *(community replacement)*
+- [NOAA SWPC](https://services.swpc.noaa.gov/) *(primary data source)*
 
 ---
 *Consolidated from hamclock.md, hamclock_api.md, hamclock_integration.md*
+*Updated 2026-02-08: Added OpenHamClock, NOAA primary architecture*
