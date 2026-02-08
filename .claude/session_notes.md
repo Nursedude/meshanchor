@@ -53,24 +53,41 @@ Fixed false positive MF001 in `scripts/lint.py` — linter now skips `Path.home(
 ### Commits This Session
 - (pending) fix: Linter MF001 false positive on string literals
 
+### Test Coverage Update (2026-02-08)
+
+Three files previously listed as "zero tests" already had comprehensive suites:
+- `meshtastic_protobuf_client.py` — 1,027 lines of tests in `test_meshtastic_protobuf.py`
+- `meshtastic_handler.py` — 929 lines of tests in `test_meshtastic_handler.py`
+- `packet_dissectors.py` — 1,029 lines of tests in `test_packet_dissectors.py`
+
+New test file added this session:
+- `rns_transport.py` — **97 tests** in `test_rns_transport.py` (Fragment, PendingPacket, TransportStats, fragmentation, callbacks, receive handler, connection, start/stop, RNS adapter, factory, end-to-end pipeline)
+
+**All 244 tests pass** (147 existing + 97 new) for these 4 modules.
+
 ### Remaining Work (Next Session Priorities)
 
-#### Test Coverage Gaps (High-Value)
-- `meshtastic_protobuf_client.py` (1,263 lines, zero tests) — Meshtastic protocol
-- `meshtastic_handler.py` (602 lines, zero tests) — connection state machine
-- `packet_dissectors.py` (663 lines, zero tests) — malformed packet robustness
-- `rns_transport.py` (685 lines, zero tests) — message bridge flow
+#### Reliability Improvements (from persistent_issues.md)
+1. **Gateway bridge mode fix** — `mesh_bridge` → `message_bridge` for single-radio setups (Issue #16)
+2. **Grafana metrics** — needs gateway running for metrics server on port 9090
+3. **MQTT service check** — verify `mosquitto` service status detection works (Issue #20 Phase 1)
+4. **Service detection simplification** — trust systemctl only for systemd services (Issue #20 Phase 1, LOW effort / HIGH impact)
+5. **Status display separation** — separate "service running" from "preset detected" in UI (Issue #20 Phase 2)
+6. **RX message event bus** — messages received by gateway not displayed in UI (Issue #20 Phase 3)
+7. **Post-install verification** — ensure `verify_post_install.sh` runs automatically (Issue #23)
+8. **Python environment mismatch** — rnsd can't find meshtastic module when installed via pipx (Issue #24)
+
+#### Additional Test Coverage Targets
+- `rns_bridge.py` (1,614 lines) — core gateway bridge logic
+- `node_tracker.py` (930 lines) — unified node tracking
+- `message_queue.py` — persistent SQLite queue
+- `reconnect.py` — reconnection strategy with backoff
 
 #### Hardware Testing
 - Maps on actual Pi with radio connected
 - Coverage map with real GPS nodes
 - AREDN integration with actual AREDN hardware
 - Headless/SSH browser detection path
-
-#### Operational Blockers (from prior sessions)
-1. Gateway bridge mode: `mesh_bridge` → `message_bridge` for single radio
-2. Grafana: needs gateway running for metrics server on port 9090
-3. MQTT: check `mosquitto` service status
 
 ### File Sizes (All Under 1,500 lines)
 - launcher_tui/main.py: ~1,433 lines
