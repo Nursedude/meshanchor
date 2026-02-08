@@ -38,6 +38,10 @@ python3 -c "from src.__version__ import __version__; print(__version__)"
 src/
 ├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
 │   └── main.py        # NOC dispatcher (whiptail/dialog)
+├── commands/          # Command modules
+│   ├── propagation.py # Space weather & HF propagation (NOAA primary)
+│   ├── hamclock.py    # HamClock client (optional/legacy)
+│   └── base.py        # CommandResult base class
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway bridge
 │   └── message_queue.py # Persistent message queue (SQLite)
@@ -285,6 +289,33 @@ gen = CoverageMapGenerator()
 gen.add_nodes_from_geojson(geojson_data)
 gen.generate("coverage_map.html")
 ```
+
+## Propagation Data Sources
+
+**Architecture**: NOAA SWPC is the PRIMARY data source (always works). HamClock and OpenHamClock are optional enhancements.
+
+```python
+from commands import propagation
+from commands.propagation import DataSource
+
+# Get space weather (always works - uses NOAA)
+result = propagation.get_space_weather()
+
+# Configure optional sources (persists to ~/.config/meshforge/propagation.json)
+propagation.configure_source(DataSource.OPENHAMCLOCK, host="localhost", port=3000)
+
+# Get enhanced data (NOAA + optional sources)
+result = propagation.get_enhanced_data()
+```
+
+**Data source priority:**
+1. NOAA SWPC — Primary, always available, no dependencies
+2. OpenHamClock — Optional, self-hosted Docker (port 3000)
+3. HamClock (legacy) — Optional, sunsets June 2026
+
+**Config persistence**: Source configuration auto-saves to `~/.config/meshforge/propagation.json` via `SettingsManager`. Settings survive restarts.
+
+**For legacy code**: `commands.hamclock` still works for backward compatibility but new code should use `commands.propagation`.
 
 ## Contact
 
