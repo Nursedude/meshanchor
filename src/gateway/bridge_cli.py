@@ -174,14 +174,12 @@ def main():
     print(f"  Mode: {mode_labels.get(bridge_mode, bridge_mode)}")
 
     # Pre-flight service checks (use resolved bridge_mode)
-    original_mode = config.bridge_mode
+    # Persist the auto-corrected mode so downstream code sees the right value
     config.bridge_mode = bridge_mode
     if not preflight_checks(config):
         print("Pre-flight checks FAILED")
         print("Please start required services and try again.")
-        config.bridge_mode = original_mode
         sys.exit(1)
-    config.bridge_mode = original_mode
 
     # Create bridge based on resolved mode
     if bridge_mode == "mesh_bridge":

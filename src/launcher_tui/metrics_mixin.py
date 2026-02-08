@@ -44,24 +44,20 @@ class MetricsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "stats":
-                self._metrics_stats()
-            elif choice == "trends":
-                self._metrics_trends()
-            elif choice == "node":
-                self._metrics_node_summary()
-            elif choice == "edge":
-                self._metrics_edge_summary()
-            elif choice == "recent":
-                self._metrics_recent()
-            elif choice == "export":
-                self._metrics_export()
-            elif choice == "prometheus":
-                self._metrics_prometheus()
-            elif choice == "grafana":
-                self._grafana_menu()
-            elif choice == "cleanup":
-                self._metrics_cleanup()
+            dispatch = {
+                "stats": ("Metrics Stats", self._metrics_stats),
+                "trends": ("Metric Trends", self._metrics_trends),
+                "node": ("Node Summary", self._metrics_node_summary),
+                "edge": ("Edge Summary", self._metrics_edge_summary),
+                "recent": ("Recent Changes", self._metrics_recent),
+                "export": ("Export Metrics", self._metrics_export),
+                "prometheus": ("Prometheus Server", self._metrics_prometheus),
+                "grafana": ("Grafana Dashboards", self._grafana_menu),
+                "cleanup": ("Database Maintenance", self._metrics_cleanup),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_metrics_history(self):
         """Get the MetricsHistory instance."""

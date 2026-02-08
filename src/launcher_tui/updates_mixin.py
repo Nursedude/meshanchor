@@ -62,18 +62,17 @@ class UpdatesMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "check":
-                self._check_updates()
-            elif choice == "update-all":
-                self._update_all()
-            elif choice == "meshforge":
-                self._update_meshforge()
-            elif choice == "meshtasticd":
-                self._update_meshtasticd()
-            elif choice == "cli":
-                self._update_cli()
-            elif choice == "firmware":
-                self._firmware_info()
+            dispatch = {
+                "check": ("Check Updates", self._check_updates),
+                "update-all": ("Update All", self._update_all),
+                "meshforge": ("Update MeshForge", self._update_meshforge),
+                "meshtasticd": ("Update meshtasticd", self._update_meshtasticd),
+                "cli": ("Update CLI", self._update_cli),
+                "firmware": ("Firmware Info", self._firmware_info),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _check_updates(self) -> Optional[Dict[str, Any]]:
         """Check for available updates and display results."""

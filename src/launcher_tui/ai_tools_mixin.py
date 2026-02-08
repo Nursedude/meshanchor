@@ -46,16 +46,16 @@ class AIToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "livemap":
-                self._open_live_map()
-            elif choice == "diagnose":
-                self._intelligent_diagnostics()
-            elif choice == "knowledge":
-                self._knowledge_base_query()
-            elif choice == "assistant":
-                self._claude_assistant()
-            elif choice == "coverage":
-                self._generate_coverage_map()
+            dispatch = {
+                "livemap": ("Live Network Map", self._open_live_map),
+                "diagnose": ("Intelligent Diagnostics", self._intelligent_diagnostics),
+                "knowledge": ("Knowledge Base Query", self._knowledge_base_query),
+                "assistant": ("Claude Assistant", self._claude_assistant),
+                "coverage": ("Coverage Map", self._generate_coverage_map),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _maybe_auto_start_map(self):
         """Start map server on TUI launch if user has enabled auto-open.

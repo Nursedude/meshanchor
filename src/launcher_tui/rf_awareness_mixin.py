@@ -44,20 +44,18 @@ class RFAwarenessMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._rf_status()
-            elif choice == "spectrum":
-                self._rf_spectrum_snapshot()
-            elif choice == "waterfall":
-                self._rf_waterfall()
-            elif choice == "utilization":
-                self._rf_utilization()
-            elif choice == "survey":
-                self._rf_survey()
-            elif choice == "interference":
-                self._rf_interference()
-            elif choice == "settings":
-                self._rf_settings()
+            dispatch = {
+                "status": ("RF Status", self._rf_status),
+                "spectrum": ("Spectrum Snapshot", self._rf_spectrum_snapshot),
+                "waterfall": ("Waterfall Display", self._rf_waterfall),
+                "utilization": ("Channel Utilization", self._rf_utilization),
+                "survey": ("Signal Survey", self._rf_survey),
+                "interference": ("Interference Detection", self._rf_interference),
+                "settings": ("SDR Settings", self._rf_settings),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_rf_awareness(self):
         """Get or create RFAwareness instance."""

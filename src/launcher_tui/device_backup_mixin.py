@@ -31,14 +31,15 @@ class DeviceBackupMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "create":
-                self._create_device_backup()
-            elif choice == "list":
-                self._list_device_backups()
-            elif choice == "restore":
-                self._restore_device_backup()
-            elif choice == "delete":
-                self._delete_device_backup()
+            dispatch = {
+                "create": ("Create Backup", self._create_device_backup),
+                "list": ("List Backups", self._list_device_backups),
+                "restore": ("Restore Backup", self._restore_device_backup),
+                "delete": ("Delete Backup", self._delete_device_backup),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _create_device_backup(self):
         """Create a new device backup."""

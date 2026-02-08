@@ -58,26 +58,21 @@ class MeshtasticdConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "web":
-                self._show_web_client_info()
-            elif choice == "status":
-                self._meshtasticd_status()
-            elif choice == "owner":
-                self._set_owner_name()
-            elif choice == "presets":
-                self._radio_presets_menu()
-            elif choice == "hardware":
-                self._hardware_config_menu()
-            elif choice == "channels":
-                self._channel_config_menu()
-            elif choice == "mqtt":
-                self._mqtt_device_config()
-            elif choice == "gateway":
-                self._gateway_template_menu()
-            elif choice == "edit":
-                self._edit_config_menu()
-            elif choice == "restart":
-                self._restart_meshtasticd()
+            dispatch = {
+                "web": ("Web Client", self._show_web_client_info),
+                "status": ("Service Status", self._meshtasticd_status),
+                "owner": ("Set Owner Name", self._set_owner_name),
+                "presets": ("Radio Presets", self._radio_presets_menu),
+                "hardware": ("Hardware Config", self._hardware_config_menu),
+                "channels": ("Channel Config", self._channel_config_menu),
+                "mqtt": ("MQTT Config", self._mqtt_device_config),
+                "gateway": ("Gateway Template", self._gateway_template_menu),
+                "edit": ("Edit Config Files", self._edit_config_menu),
+                "restart": ("Restart Service", self._restart_meshtasticd),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _show_web_client_info(self):
         """Show meshtasticd web client with browser launch option.

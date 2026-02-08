@@ -39,18 +39,17 @@ class LinkQualityMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "overview":
-                self._show_quality_overview()
-            elif choice == "best":
-                self._show_best_links()
-            elif choice == "worst":
-                self._show_worst_links()
-            elif choice == "alerts":
-                self._show_quality_alerts()
-            elif choice == "score":
-                self._score_link_interactive()
-            elif choice == "trends":
-                self._show_quality_trends()
+            dispatch = {
+                "overview": ("Quality Overview", self._show_quality_overview),
+                "best": ("Best Links", self._show_best_links),
+                "worst": ("Worst Links", self._show_worst_links),
+                "alerts": ("Quality Alerts", self._show_quality_alerts),
+                "score": ("Score Link", self._score_link_interactive),
+                "trends": ("Quality Trends", self._show_quality_trends),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_link_scorer(self):
         """Get the link quality scorer instance."""
