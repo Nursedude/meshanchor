@@ -80,9 +80,14 @@ class TileCacheManager:
         cache.clear(older_than_days=30)
     """
 
-    def __init__(self, provider: str = 'openstreetmap'):
+    # Default max cache size in MB (500 MB)
+    DEFAULT_MAX_CACHE_MB = 500
+
+    def __init__(self, provider: str = 'openstreetmap',
+                 max_cache_mb: int = DEFAULT_MAX_CACHE_MB):
         self.provider = provider
         self._cache_dir = get_tile_cache_dir()
+        self._max_cache_bytes = max_cache_mb * 1024 * 1024
         self._provider_info = OFFLINE_TILE_PROVIDERS.get(
             provider, OFFLINE_TILE_PROVIDERS['openstreetmap']
         )
@@ -149,7 +154,55 @@ class TileCacheManager:
             else:
                 result['tiles_failed'] += 1
 
+        # Auto-enforce cache size limit
+        self._enforce_cache_limit()
+
         return result
+
+    def _enforce_cache_limit(self) -> None:
+        """Remove oldest tiles if total cache exceeds max_cache_bytes.
+
+        Prevents unbounded disk growth on resource-constrained systems.
+        """
+        if not self._cache_dir.exists():
+            return
+
+        try:
+            # Collect all tiles with size and mtime
+            tiles = []
+            total_size = 0
+            for tile_path in self._cache_dir.rglob("*.png"):
+                try:
+                    stat = tile_path.stat()
+                    tiles.append((stat.st_mtime, stat.st_size, tile_path))
+                    total_size += stat.st_size
+                except OSError:
+                    continue
+
+            if total_size <= self._max_cache_bytes:
+                return
+
+            # Sort oldest first, remove until under limit
+            tiles.sort()
+            removed = 0
+            for mtime, size, path in tiles:
+                if total_size <= self._max_cache_bytes:
+                    break
+                try:
+                    path.unlink()
+                    total_size -= size
+                    removed += 1
+                except OSError:
+                    continue
+
+            if removed:
+                import logging
+                logging.getLogger(__name__).info(
+                    f"Tile cache cleanup: removed {removed} oldest tiles "
+                    f"to stay under {self._max_cache_bytes // (1024*1024)} MB limit"
+                )
+        except Exception:
+            pass  # Cache enforcement is non-critical
 
     def get_stats(self) -> Dict[str, Any]:
         """

@@ -254,10 +254,25 @@ class MeshForgeLauncher(
 
         This preserves full tracebacks for debugging while keeping
         the TUI display clean for the user.
+
+        Rotates the log when it exceeds 1 MB to prevent unbounded
+        disk growth on resource-constrained systems (e.g. Pi).
         """
         try:
             import datetime
             log_path = self._get_error_log_path()
+
+            # Rotate if log exceeds 1 MB
+            _MAX_LOG_BYTES = 1_048_576
+            try:
+                if log_path.exists() and log_path.stat().st_size > _MAX_LOG_BYTES:
+                    rotated = log_path.with_suffix('.log.1')
+                    if rotated.exists():
+                        rotated.unlink()
+                    log_path.rename(rotated)
+            except OSError:
+                pass  # Rotation failure is non-critical
+
             with open(log_path, 'a') as f:
                 f.write(f"\n{'='*60}\n")
                 f.write(f"[{datetime.datetime.now().isoformat()}] {context}\n")
