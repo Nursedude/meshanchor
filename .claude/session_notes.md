@@ -3,72 +3,80 @@
 **Last Updated**: 2026-02-08
 **Current Branch**: `claude/session-management-setup-Jx4Oq`
 **Version**: v0.5.2-beta
-**Tests**: 3360 passing, 19 skipped, 0 failures
+**Tests**: 3397 passing, 19 skipped, 0 failures (+37 new tests)
 
-## Session Focus: Complete _safe_call Dispatch Protection
+## Session Focus: Reliability Fixes + Test Coverage
 
-### What Was Done
+### Phase 1: Complete _safe_call Dispatch Protection
 
-#### 1. Full Mixin Audit (11 files)
+Audited all 30+ TUI mixins. Converted the 3 remaining unprotected files:
+- `service_menu_mixin.py` — inline if/elif → unified dispatch (10 entries)
+- `logs_menu_mixin.py` — bare subprocess chain → dispatch (9 entries)
+- `web_client_mixin.py` — direct calls → dispatch with lambdas
 
-Systematically audited every mixin file mentioned in previous session notes for unprotected dispatch loops:
+All TUI mixins now use `_safe_call` dispatch. No remaining unprotected loops.
 
-| File | Top-Level _safe_call | Internal Protection | Action |
-|------|:---:|:---:|--------|
-| `system_tools_mixin.py` | Yes | Yes (parent _safe_call) | Already protected |
-| `ai_tools_mixin.py` | Yes | Yes | Already protected |
-| `metrics_mixin.py` | Yes | Yes | Already protected |
-| `meshtasticd_config_mixin.py` | Yes | Yes | Already protected |
-| `channel_config_mixin.py` | Yes | Yes | Already protected |
-| `rf_awareness_mixin.py` | Yes | Yes | Already protected |
-| `traffic_inspector_mixin.py` | Yes | Yes | Already protected |
-| `settings_menu_mixin.py` | Yes | Yes | Already protected |
-| `service_menu_mixin.py` | Partial | **No** | **Converted** |
-| `logs_menu_mixin.py` | **No** | **No** | **Converted** |
-| `web_client_mixin.py` | **No** | Partial | **Converted** |
+### Phase 2: Reliability Fixes (4 data integrity improvements)
 
-Also checked leaf-method files (no dispatch loops — no action needed):
-- `dashboard_mixin.py` — leaf methods only, no dispatch
-- `first_run_mixin.py` — linear wizard, no dispatch
+#### Fix 1: TUI Error Log Rotation (`main.py`)
+- **Was**: Append-only, grows unbounded — fills Pi SD card
+- **Now**: Rotates to `.log.1` when exceeding 1 MB
+- Keeps one rotated backup for debugging
 
-#### 2. Conversions Performed
+#### Fix 2: SQLite WAL Mode (`message_queue.py`)
+- **Was**: Default journal mode — corruption risk on crash
+- **Now**: `PRAGMA journal_mode=WAL` on every connection
+- Crash-safe writes, better concurrent read/write
 
-##### service_menu_mixin.py — Inline if/elif → _safe_call dispatch
-- **Was**: Split dispatch — 3 methods via `_safe_call`, 5 inline operations in try/except
-- **Now**: Unified dispatch dict with 10 entries, all via `_safe_call`
-- **Extracted methods**: `_show_all_service_status()`, `_restart_meshtasticd_service()`, `_start_rnsd_service()`, `_restart_rnsd_service()`
-- **Benefit**: All service operations now get logged error handling, specific exception messages
+#### Fix 3: Node Cache Corruption Backup (`node_tracker.py`)
+- **Was**: Corrupted JSON silently swallowed, data lost
+- **Now**: `JSONDecodeError` caught specifically, file backed up to `.json.bak`
+- Matches SettingsManager pattern from `common.py`
 
-##### logs_menu_mixin.py — No protection → full _safe_call dispatch
-- **Was**: Inline if/elif chain with bare subprocess calls, generic try/except
-- **Now**: Dispatch dict with 9 entries, each as a separate method via `_safe_call`
-- **Extracted methods**: `_view_live_meshtasticd()`, `_view_live_rnsd()`, `_view_live_all()`, `_view_error_logs()`, `_view_meshtasticd_recent()`, `_view_rnsd_recent()`, `_view_boot_messages()`, `_view_kernel_messages()`
-- **Benefit**: Errors in log viewing get logged, specific exception types handled
+#### Fix 4: Tile Cache Auto-Limit (`coverage_map.py`)
+- **Was**: Manual `clear()` only, unbounded disk growth
+- **Now**: `_enforce_cache_limit()` runs after every `cache_area()` call
+- Default limit: 500 MB, removes oldest tiles first
+- Configurable via `max_cache_mb` constructor param
 
-##### web_client_mixin.py — Direct calls → _safe_call dispatch
-- **Was**: Direct elif chain calling methods without `_safe_call`
-- **Now**: Dispatch dict with lambdas for methods needing arguments
-- **Benefit**: Browser launch errors and SSL check errors properly handled
+### Phase 3: New Tests (37 tests)
 
-#### 3. Test Results
-- Full suite: 3360 pass, 0 fail, 19 skip (unchanged from baseline)
-- Linter: 1 pre-existing MF001 issue in `__version__.py` (not from this session)
+#### test_safe_call.py — 17 tests
+Proves the `_safe_call` dispatch pattern actually works:
+- Success path: returns values, passes args/kwargs, lambda dispatch
+- Exception handling: ImportError, TimeoutExpired, PermissionError, FileNotFoundError, ConnectionError, generic Exception
+- KeyboardInterrupt propagation (clean exit)
+- Error logging: traceback written to log file
+- Log rotation: rotates at 1 MB, preserves under limit
 
-### Mixin Protection Status — COMPLETE
+#### test_message_queue_lifecycle.py — 20 tests
+Core message lifecycle the overflow tests didn't cover:
+- Happy path: enqueue → pending → in_progress → delivered
+- Retry lifecycle: fail → retry → succeed, and fail → max retries → dead_letter
+- Deduplication: same payload suppressed, different destinations allowed
+- Priority ordering: HIGH > NORMAL > LOW
+- WAL mode: verified enabled on database
+- Purge: removes old delivered, preserves pending
+- Destination filtering: get_pending filters correctly
 
-All 30+ TUI mixins now use `_safe_call` dispatch pattern at the top level. The remaining mixins without explicit `_safe_call` are leaf-only files (dashboard, first_run) that don't have dispatch loops.
+### Test Results
+- Full suite: 3397 pass, 0 fail, 19 skip
+- Linter: 1 pre-existing MF001 issue in `__version__.py`
 
-**Coverage summary:**
-- 30+ mixins with `_safe_call` dispatch
-- `system_tools_mixin.py` — 9 internal handler methods called through parent `_safe_call`
-- `quick_actions_mixin.py` — uses `_safe_call` with QUICK_ACTIONS list (different pattern)
-- No remaining unprotected dispatch loops
+### Commits
+- `6356827` — fix: Complete _safe_call dispatch protection for remaining 3 unprotected mixins
+- (pending) — fix: Data integrity improvements + test coverage
 
 ### Remaining Work (Next Session Priorities)
 
-#### Feature Gaps (Lower Priority)
+#### Test Coverage Gaps (High-Value)
+- `meshtastic_protobuf_client.py` (1,263 lines, zero tests) — all Meshtastic protocol
+- `meshtastic_handler.py` (602 lines, zero tests) — connection state machine
+- `packet_dissectors.py` (663 lines, zero tests) — malformed packet robustness
+- `rns_transport.py` (685 lines, zero tests) — message bridge flow
+
+#### Feature Gaps
 - Auto-Review System — not accessible from TUI (command-line only)
-- Device Persistence — no view/reset UI (internal only)
 - Heatmap — code exists but no TUI menu entry
 - Tile caching — code exists but no TUI menu entry for pre-caching
 - Map settings — no TUI menu to configure cache ages, thresholds, AREDN IPs
@@ -80,30 +88,6 @@ All 30+ TUI mixins now use `_safe_call` dispatch pattern at the top level. The r
 - Headless/SSH browser detection path
 
 ### File Sizes (All Under 1,500 lines)
-- launcher_tui/main.py: ~1,375 lines
-- service_menu_mixin.py: ~1,450 lines (grew from method extraction, still under limit)
-- ai_tools_mixin.py: ~945 lines
+- launcher_tui/main.py: ~1,390 lines
+- service_menu_mixin.py: ~1,358 lines
 - All other modified files: well under threshold
-
-### Architecture Notes for Future Sessions
-
-**_safe_call dispatch pattern (standard across all mixins):**
-```python
-while True:
-    choice = self.dialog.menu(...)
-    if choice is None or choice == "back":
-        break
-    dispatch = {
-        "key": ("Error Label", self._method),
-    }
-    entry = dispatch.get(choice)
-    if entry:
-        self._safe_call(*entry)
-```
-
-**Lambda pattern for methods needing arguments:**
-```python
-dispatch = {
-    "key": ("Label", lambda: self._method(arg1, arg2)),
-}
-```
