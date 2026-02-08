@@ -912,9 +912,15 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
-            # Delegate to topology export functions
-            if choice in ["geojson", "csv", "graphml", "d3"]:
-                self._export_topology_data(choice)
+            dispatch = {
+                "geojson": ("GeoJSON Export", lambda: self._export_topology_data("geojson")),
+                "csv": ("CSV Export", lambda: self._export_topology_data("csv")),
+                "graphml": ("GraphML Export", lambda: self._export_topology_data("graphml")),
+                "d3": ("D3.js Export", lambda: self._export_topology_data("d3")),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _export_topology_data(self, format_type: str):
         """Export topology data in specified format."""
