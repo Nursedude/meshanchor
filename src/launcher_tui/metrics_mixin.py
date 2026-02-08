@@ -436,7 +436,12 @@ class MetricsMixin:
             if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
                 export_dir = Path(f'/home/{sudo_user}') / ".cache" / "meshforge"
             else:
-                export_dir = Path.home() / ".cache" / "meshforge"
+                # Fallback: use LOGNAME or /tmp to avoid /root with sudo (MF001)
+                logname = os.environ.get('LOGNAME', '')
+                if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+                    export_dir = Path(f'/home/{logname}') / ".cache" / "meshforge"
+                else:
+                    export_dir = Path('/tmp') / "meshforge"
 
         export_dir.mkdir(parents=True, exist_ok=True)
 
