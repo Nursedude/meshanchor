@@ -1,107 +1,70 @@
 # MeshForge Session Notes
 
 **Last Updated**: 2026-02-08
-**Current Branch**: `claude/analyze-maps-integration-O7C5q`
+**Current Branch**: `claude/session-management-setup-Jx4Oq`
 **Version**: v0.5.2-beta
 **Tests**: 3360 passing, 19 skipped, 0 failures
 
-## Session Focus: Maps Integration Analysis & Reliability
+## Session Focus: Complete _safe_call Dispatch Protection
 
 ### What Was Done
 
-#### 1. Full Maps System Audit (~9,000 lines across 7 files)
+#### 1. Full Mixin Audit (11 files)
 
-Systematically analyzed every maps-related component:
+Systematically audited every mixin file mentioned in previous session notes for unprotected dispatch loops:
 
-| File | Lines | Assessment |
-|------|-------|------------|
-| `map_data_collector.py` | 1,507 | Solid — 7 data sources, all try/except guarded |
-| `coverage_map.py` | 1,145 | Solid — Folium → Leaflet.js fallback |
-| `map_http_handler.py` | 973 | Solid — CORS, path traversal protection, error handling |
-| `map_data_service.py` | 521 | Solid — daemon threads, graceful shutdown |
-| `ai_tools_mixin.py` (map fns) | ~800 | **Fixed** — see below |
-| `main.py` (maps menu) | ~75 | **Fixed** — see below |
-| `node_map.html` | 4,750 | Solid — 4-level data loading cascade |
+| File | Top-Level _safe_call | Internal Protection | Action |
+|------|:---:|:---:|--------|
+| `system_tools_mixin.py` | Yes | Yes (parent _safe_call) | Already protected |
+| `ai_tools_mixin.py` | Yes | Yes | Already protected |
+| `metrics_mixin.py` | Yes | Yes | Already protected |
+| `meshtasticd_config_mixin.py` | Yes | Yes | Already protected |
+| `channel_config_mixin.py` | Yes | Yes | Already protected |
+| `rf_awareness_mixin.py` | Yes | Yes | Already protected |
+| `traffic_inspector_mixin.py` | Yes | Yes | Already protected |
+| `settings_menu_mixin.py` | Yes | Yes | Already protected |
+| `service_menu_mixin.py` | Partial | **No** | **Converted** |
+| `logs_menu_mixin.py` | **No** | **No** | **Converted** |
+| `web_client_mixin.py` | **No** | Partial | **Converted** |
 
-**Data Source Chain (MapDataCollector):**
-1. UnifiedNodeTracker (RNS + Meshtastic merged)
-2. meshtasticd (HTTP API → TCP → CLI fallback)
-3. Direct USB radio (serial, when meshtasticd not running)
-4. MQTT subscriber (live → cached GeoJSON fallback)
-5. Node tracker cache files (node_cache.json)
-6. AREDN mesh network (local node → neighbors)
-7. RNS direct query (rnsd path table + NomadNet peers)
-8. Last-known disk cache (24h max age)
+Also checked leaf-method files (no dispatch loops — no action needed):
+- `dashboard_mixin.py` — leaf methods only, no dispatch
+- `first_run_mixin.py` — linear wizard, no dispatch
 
-**Frontend Resilience (node_map.html):**
-1. `window.meshforgeData` (injected by TUI snapshot)
-2. `fetch('/api/nodes/geojson')` (live API)
-3. URL query parameter `?data=`
-4. Demo data (development/preview)
-- Auto-refresh every 30 seconds (API mode only)
-- WebSocket for real-time message stream
+#### 2. Conversions Performed
 
-#### 2. Issues Found & Fixed
+##### service_menu_mixin.py — Inline if/elif → _safe_call dispatch
+- **Was**: Split dispatch — 3 methods via `_safe_call`, 5 inline operations in try/except
+- **Now**: Unified dispatch dict with 10 entries, all via `_safe_call`
+- **Extracted methods**: `_show_all_service_status()`, `_restart_meshtasticd_service()`, `_start_rnsd_service()`, `_restart_rnsd_service()`
+- **Benefit**: All service operations now get logged error handling, specific exception messages
 
-##### Fix 1: `_open_live_map` — dispatch + loop pattern
-- **Was**: Raw if/elif (browser/server/autostart), no `_safe_call`, single-shot
-- **Now**: `_safe_call` dispatch dict, wrapped in `while True` loop
-- **Benefit**: Menu re-displays after toggling auto-start; crash protection
+##### logs_menu_mixin.py — No protection → full _safe_call dispatch
+- **Was**: Inline if/elif chain with bare subprocess calls, generic try/except
+- **Now**: Dispatch dict with 9 entries, each as a separate method via `_safe_call`
+- **Extracted methods**: `_view_live_meshtasticd()`, `_view_live_rnsd()`, `_view_live_all()`, `_view_error_logs()`, `_view_meshtasticd_recent()`, `_view_rnsd_recent()`, `_view_boot_messages()`, `_view_kernel_messages()`
+- **Benefit**: Errors in log viewing get logged, specific exception types handled
 
-##### Fix 2: `_export_data_menu` — `_safe_call` dispatch
-- **Was**: Raw `if choice in [...]` delegation (line 916)
-- **Now**: Proper dispatch dict with `_safe_call` wrapping
-- **Benefit**: Exception in any export format won't crash TUI
-
-##### Fix 3: `_open_in_browser` — headless detection
-- **Was**: Silently failed on SSH/headless sessions (no $DISPLAY)
-- **Now**: Calls `_is_headless()` before attempting browser, shows URL dialog
-- **Benefit**: Users on SSH see the URL and can copy it to their local browser
-
-##### Fix 4: `_toggle_auto_map` — recursion removal
-- **Was**: Called `self._open_live_map()` recursively after toggle
-- **Now**: Returns to caller; `_open_live_map` loop handles re-display
-- **Benefit**: Cleaner control flow, no recursive stack growth
+##### web_client_mixin.py — Direct calls → _safe_call dispatch
+- **Was**: Direct elif chain calling methods without `_safe_call`
+- **Now**: Dispatch dict with lambdas for methods needing arguments
+- **Benefit**: Browser launch errors and SSL check errors properly handled
 
 #### 3. Test Results
-- 63 core map tests — all pass
-- 88 map-related tests (broader keyword search) — all pass
-- 52 coverage-related tests — all pass
 - Full suite: 3360 pass, 0 fail, 19 skip (unchanged from baseline)
+- Linter: 1 pre-existing MF001 issue in `__version__.py` (not from this session)
 
-### Maps Features — User Access Paths
+### Mixin Protection Status — COMPLETE
 
-| Feature | Path | Status |
-|---------|------|--------|
-| Live NOC Map (snapshot) | Maps & Viz → Live NOC Map → Browser | Working |
-| Live NOC Map (server) | Maps & Viz → Live NOC Map → Server | Working |
-| Auto-start map on launch | Maps & Viz → Live NOC Map → Auto-open | Working |
-| Coverage Map (all sources) | Maps & Viz → Coverage Map → All sources | Working |
-| Coverage Map (single source) | Maps & Viz → Coverage Map → meshtasticd/MQTT | Working |
-| Network Topology (D3.js) | Maps & Viz → Network Topology | Working |
-| Export GeoJSON/CSV/GraphML/D3 | Maps & Viz → Export Data | Working |
-| Coverage prediction API | GET /api/coverage/lat/lon/alt | Working |
-| Line-of-sight API | GET /api/los/lat1/lon1/lat2/lon2 | Working |
-| Historical snapshot | GET /api/nodes/snapshot | Working |
-| Node trajectory | GET /api/nodes/trajectory/id | Working |
-| Radio control API | GET/POST /api/radio/* | Working |
-| WebSocket real-time | ws://localhost:5001/ | Working |
-| Offline tile caching | TileCacheManager | Available |
-| Heatmap generation | CoverageMapGenerator.generate_heatmap() | Available |
-| AI Diagnostics | Maps & Viz → AI Diagnostics | Working |
+All 30+ TUI mixins now use `_safe_call` dispatch pattern at the top level. The remaining mixins without explicit `_safe_call` are leaf-only files (dashboard, first_run) that don't have dispatch loops.
+
+**Coverage summary:**
+- 30+ mixins with `_safe_call` dispatch
+- `system_tools_mixin.py` — 9 internal handler methods called through parent `_safe_call`
+- `quick_actions_mixin.py` — uses `_safe_call` with QUICK_ACTIONS list (different pattern)
+- No remaining unprotected dispatch loops
 
 ### Remaining Work (Next Session Priorities)
-
-#### Still-Unprotected Sub-Menus (~20 loops in deeper nesting)
-- `service_menu_mixin.py` — 4 internal dispatch loops (complex, interacts with systemd)
-- `system_tools_mixin.py` — 9 internal dispatch loops (biggest risk)
-- `ai_tools_mixin.py` — 2 sub-menus (`_intelligent_diagnostics`, `_knowledge_base_query`)
-- `settings_menu_mixin.py` — 2 sub-menus
-- `metrics_mixin.py` — 2 sub-menus
-- `meshtasticd_config_mixin.py` — 1 sub-menu
-- `channel_config_mixin.py` — 1 sub-menu
-- `rf_awareness_mixin.py` — 1 sub-menu
-- `traffic_inspector_mixin.py` — 1 sub-menu
 
 #### Feature Gaps (Lower Priority)
 - Auto-Review System — not accessible from TUI (command-line only)
@@ -118,24 +81,29 @@ Systematically analyzed every maps-related component:
 
 ### File Sizes (All Under 1,500 lines)
 - launcher_tui/main.py: ~1,375 lines
+- service_menu_mixin.py: ~1,450 lines (grew from method extraction, still under limit)
 - ai_tools_mixin.py: ~945 lines
 - All other modified files: well under threshold
 
-### Commits
-- `51d3762` — fix: Maps integration reliability — dispatch protection, headless detection, recursion fix
-
 ### Architecture Notes for Future Sessions
 
-**Maps data flow:**
-```
-TUI Menu → MapDataCollector.collect() → 7 sources (all try/except)
-    → Aggregated GeoJSON → CoverageMapGenerator or MapServer
-    → HTML output or HTTP API → Web Browser (node_map.html)
+**_safe_call dispatch pattern (standard across all mixins):**
+```python
+while True:
+    choice = self.dialog.menu(...)
+    if choice is None or choice == "back":
+        break
+    dispatch = {
+        "key": ("Error Label", self._method),
+    }
+    entry = dispatch.get(choice)
+    if entry:
+        self._safe_call(*entry)
 ```
 
-**Key design decisions:**
-- MapDataCollector merges by node ID (dedup), prefers newer data
-- meshtasticd HTTP API is preferred over TCP (doesn't need lock)
-- Direct USB radio only attempted when TCP returns nothing
-- AREDN validates with actual HTTP API response, not just socket test
-- Frontend demo data ensures map always renders even with no data
+**Lambda pattern for methods needing arguments:**
+```python
+dispatch = {
+    "key": ("Label", lambda: self._method(arg1, arg2)),
+}
+```
