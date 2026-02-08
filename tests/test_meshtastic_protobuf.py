@@ -18,6 +18,9 @@ import pytest
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Skip entire module if meshtastic is not installed
+meshtastic = pytest.importorskip("meshtastic", reason="meshtastic package not installed")
+
 from meshtastic.protobuf import (
     admin_pb2,
     config_pb2,
