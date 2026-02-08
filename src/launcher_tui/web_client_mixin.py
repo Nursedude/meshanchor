@@ -99,12 +99,15 @@ class WebClientMixin:
 
             if choice is None or choice == "back":
                 break
-            elif choice == "open":
-                self._launch_web_client_browser(localhost_url)
-            elif choice == "url":
-                self._show_web_client_urls(local_ip)
-            elif choice == "ssl":
-                self._show_ssl_certificate_help(local_ip)
+
+            dispatch = {
+                "open": ("Launch Browser", lambda: self._launch_web_client_browser(localhost_url)),
+                "url": ("Show URLs", lambda: self._show_web_client_urls(local_ip)),
+                "ssl": ("SSL Help", lambda: self._show_ssl_certificate_help(local_ip)),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _launch_web_client_browser(self, url: str):
         """Launch meshtasticd web client in browser."""
