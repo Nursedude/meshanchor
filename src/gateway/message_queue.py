@@ -470,9 +470,14 @@ class PersistentMessageQueue:
 
     @contextmanager
     def _get_connection(self):
-        """Get database connection with context management."""
+        """Get database connection with context management.
+
+        Enables WAL journal mode for crash resilience and better
+        concurrent read/write performance on resource-constrained systems.
+        """
         conn = sqlite3.connect(self._db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
             conn.commit()

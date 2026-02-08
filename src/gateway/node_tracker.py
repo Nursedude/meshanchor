@@ -609,6 +609,15 @@ instance_control_port = 37429
 
             logger.info(f"Loaded {len(self._nodes)} nodes from cache")
 
+        except json.JSONDecodeError as e:
+            logger.warning(f"Corrupted node cache: {e}")
+            # Backup corrupted file for debugging (matches SettingsManager pattern)
+            try:
+                backup = cache_file.with_suffix('.json.bak')
+                cache_file.rename(backup)
+                logger.info(f"Corrupted cache backed up to {backup}")
+            except Exception:
+                pass  # Backup failure is non-critical
         except Exception as e:
             logger.warning(f"Failed to load node cache: {e}")
 
