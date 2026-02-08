@@ -237,20 +237,18 @@ class NomadNetClientMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._nomadnet_status()
-            elif choice == "textui":
-                self._launch_nomadnet_textui()
-            elif choice == "daemon":
-                self._launch_nomadnet_daemon()
-            elif choice == "stop":
-                self._stop_nomadnet()
-            elif choice == "config":
-                self._view_nomadnet_config()
-            elif choice == "edit":
-                self._edit_nomadnet_config()
-            elif choice == "install":
-                self._install_nomadnet()
+            dispatch = {
+                "status": ("NomadNet Status", self._nomadnet_status),
+                "textui": ("Launch NomadNet TUI", self._launch_nomadnet_textui),
+                "daemon": ("Start NomadNet Daemon", self._launch_nomadnet_daemon),
+                "stop": ("Stop NomadNet", self._stop_nomadnet),
+                "config": ("View NomadNet Config", self._view_nomadnet_config),
+                "edit": ("Edit NomadNet Config", self._edit_nomadnet_config),
+                "install": ("Install NomadNet", self._install_nomadnet),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # ------------------------------------------------------------------
     # Status

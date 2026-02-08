@@ -45,19 +45,17 @@ class RNSInterfacesMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "list":
-                self._rns_list_interfaces()
-            elif choice == "add":
-                self._rns_add_interface()
-            elif choice == "enable":
-                self._rns_toggle_interface(enable=True)
-            elif choice == "disable":
-                self._rns_toggle_interface(enable=False)
-            elif choice == "remove":
-                self._rns_remove_interface()
-            elif choice == "plugin":
-                # Defined in MeshForgeLauncher (main.py), resolved via MRO
-                self._install_meshtastic_interface_plugin()
+            dispatch = {
+                "list": ("List Interfaces", self._rns_list_interfaces),
+                "add": ("Add Interface", self._rns_add_interface),
+                "enable": ("Enable Interface", lambda: self._rns_toggle_interface(enable=True)),
+                "disable": ("Disable Interface", lambda: self._rns_toggle_interface(enable=False)),
+                "remove": ("Remove Interface", self._rns_remove_interface),
+                "plugin": ("Install Meshtastic Plugin", self._install_meshtastic_interface_plugin),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # ------------------------------------------------------------------
     # List interfaces

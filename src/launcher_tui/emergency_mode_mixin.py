@@ -68,29 +68,18 @@ class EmergencyModeMixin:
 
             # Emergency mode wraps every action individually.
             # Field operators must never be dumped to a traceback.
-            try:
-                if choice == "send":
-                    self._emcomm_broadcast()
-                elif choice == "direct":
-                    self._emcomm_direct()
-                elif choice == "status":
-                    self._emcomm_status()
-                elif choice == "msgs":
-                    self._emcomm_messages()
-                elif choice == "pos":
-                    self._emcomm_position()
-                elif choice == "sos":
-                    self._emcomm_sos_beacon()
-                elif choice == "alerts":
-                    self._emcomm_eas_alerts()
-            except KeyboardInterrupt:
-                pass  # Ctrl+C returns to emergency menu
-            except Exception as e:
-                self.dialog.msgbox(
-                    "EMCOMM Error",
-                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
-                    f"Returning to Emergency Mode menu."
-                )
+            dispatch = {
+                "send": ("EMCOMM Broadcast", self._emcomm_broadcast),
+                "direct": ("EMCOMM Direct Message", self._emcomm_direct),
+                "status": ("EMCOMM Node Status", self._emcomm_status),
+                "msgs": ("EMCOMM Messages", self._emcomm_messages),
+                "pos": ("EMCOMM Position", self._emcomm_position),
+                "sos": ("EMCOMM SOS Beacon", self._emcomm_sos_beacon),
+                "alerts": ("EMCOMM EAS Alerts", self._emcomm_eas_alerts),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _emcomm_broadcast(self):
         """Send a broadcast message to all nodes."""

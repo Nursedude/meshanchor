@@ -78,16 +78,16 @@ class ServiceMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "start":
-                self._start_bridge_background()
-            elif choice == "start-fg":
-                self._start_bridge_foreground()
-            elif choice == "status":
-                self._show_bridge_status()
-            elif choice == "stop":
-                self._stop_bridge()
-            elif choice == "logs":
-                self._show_bridge_logs()
+            dispatch = {
+                "start": ("Start Bridge (bg)", self._start_bridge_background),
+                "start-fg": ("Start Bridge (fg)", self._start_bridge_foreground),
+                "status": ("Bridge Status", self._show_bridge_status),
+                "stop": ("Stop Bridge", self._stop_bridge),
+                "logs": ("Bridge Logs", self._show_bridge_logs),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _is_bridge_running(self) -> bool:
         """Check if the gateway bridge process is running.
@@ -282,138 +282,146 @@ class ServiceMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Service Status ===\n")
-                warnings = []
-                use_direct_rnsd = not self._has_systemd_unit('rnsd')
+            # Method-call branches via _safe_call
+            dispatch = {
+                "install": ("Install meshtasticd", self._install_native_meshtasticd),
+                "mqtt-setup": ("MQTT Setup", self._mqtt_setup_wizard),
+                "openhamclock": ("OpenHamClock Docker", self._manage_openhamclock_docker),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+                continue
 
-                for svc in ['meshtasticd', 'rnsd', 'meshforge']:
-                    # Special handling for rnsd without systemd unit
-                    if svc == 'rnsd' and use_direct_rnsd:
-                        if self._is_rnsd_running():
-                            print(f"  \033[0;32m●\033[0m {svc:<18} running (process)")
-                        else:
-                            print(f"  \033[2m○\033[0m {svc:<18} stopped")
-                        continue
+            # Inline service operations wrapped in try/except
+            try:
+                if choice == "status":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Service Status ===\n")
+                    warnings = []
+                    use_direct_rnsd = not self._has_systemd_unit('rnsd')
 
-                    try:
-                        if _HAS_SERVICE_CHECK:
-                            is_running, is_enabled = check_systemd_service(svc)
-                            status = 'active' if is_running else 'inactive'
-                        else:
-                            # Fallback to direct systemctl call
-                            result = subprocess.run(
-                                ['systemctl', 'is-active', svc],
-                                capture_output=True, text=True, timeout=5
-                            )
-                            status = result.stdout.strip()
-                            # Check boot persistence via fallback
-                            enabled_result = subprocess.run(
-                                ['systemctl', 'is-enabled', svc],
-                                capture_output=True, text=True, timeout=5
-                            )
-                            is_enabled = enabled_result.returncode == 0
+                    for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+                        # Special handling for rnsd without systemd unit
+                        if svc == 'rnsd' and use_direct_rnsd:
+                            if self._is_rnsd_running():
+                                print(f"  \033[0;32m●\033[0m {svc:<18} running (process)")
+                            else:
+                                print(f"  \033[2m○\033[0m {svc:<18} stopped")
+                            continue
 
-                        # Check boot persistence
-                        boot_info = ""
-                        if status == 'active' and not is_enabled:
-                            boot_info = "  (not enabled at boot)"
-                            warnings.append(svc)
+                        try:
+                            if _HAS_SERVICE_CHECK:
+                                is_running, is_enabled = check_systemd_service(svc)
+                                status = 'active' if is_running else 'inactive'
+                            else:
+                                result = subprocess.run(
+                                    ['systemctl', 'is-active', svc],
+                                    capture_output=True, text=True, timeout=5
+                                )
+                                status = result.stdout.strip()
+                                enabled_result = subprocess.run(
+                                    ['systemctl', 'is-enabled', svc],
+                                    capture_output=True, text=True, timeout=5
+                                )
+                                is_enabled = enabled_result.returncode == 0
 
-                        if status == 'active':
-                            print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
-                        elif status == 'failed':
-                            print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
-                        else:
-                            print(f"  \033[2m○\033[0m {svc:<18} {status}")
-                    except (subprocess.SubprocessError, OSError) as e:
-                        logger.debug("Service status check for %s failed: %s", svc, e)
-                        print(f"  ? {svc:<18} unknown")
-                print()
+                            boot_info = ""
+                            if status == 'active' and not is_enabled:
+                                boot_info = "  (not enabled at boot)"
+                                warnings.append(svc)
 
-                # Surface actionable warning
-                if warnings:
-                    print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
-                    print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
+                            if status == 'active':
+                                print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
+                            elif status == 'failed':
+                                print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
+                            else:
+                                print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                        except (subprocess.SubprocessError, OSError) as e:
+                            logger.debug("Service status check for %s failed: %s", svc, e)
+                            print(f"  ? {svc:<18} unknown")
+                    print()
 
-                # Show failed service logs (only for systemd services)
-                for svc in ['meshtasticd']:
-                    try:
-                        if _HAS_SERVICE_CHECK:
-                            status = check_service(svc)
-                            is_failed = status.state == ServiceState.FAILED
-                        else:
-                            r = subprocess.run(['systemctl', 'is-active', svc],
-                                               capture_output=True, text=True, timeout=5)
-                            is_failed = r.stdout.strip() == 'failed'
-                        if is_failed:
-                            print(f"\033[0;31m{svc} failure:\033[0m")
-                            subprocess.run(
-                                ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
-                                timeout=10
-                            )
-                            print()
-                    except (subprocess.SubprocessError, OSError) as e:
-                        logger.debug("Failure log check for %s failed: %s", svc, e)
+                    if warnings:
+                        print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
+                        print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
 
-                # Show rnsd failure logs if systemd-managed and failed
-                if not use_direct_rnsd:
-                    try:
-                        if _HAS_SERVICE_CHECK:
-                            status = check_service('rnsd')
-                            is_failed = status.state == ServiceState.FAILED
-                        else:
-                            r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
-                                               capture_output=True, text=True, timeout=5)
-                            is_failed = r.stdout.strip() == 'failed'
-                        if is_failed:
-                            print(f"\033[0;31mrnsd failure:\033[0m")
-                            subprocess.run(
-                                ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],
-                                timeout=10
-                            )
-                            print()
-                    except (subprocess.SubprocessError, OSError) as e:
-                        logger.debug("rnsd failure log check failed: %s", e)
-                self._wait_for_enter()
-            elif choice == "restart-mesh":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("Restarting meshtasticd...\n")
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
-                subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "start-rns":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("Starting rnsd...\n")
-                # Use direct process control if no systemd unit
-                if not self._has_systemd_unit('rnsd'):
-                    self._start_rnsd_direct()
+                    for svc in ['meshtasticd']:
+                        try:
+                            if _HAS_SERVICE_CHECK:
+                                status = check_service(svc)
+                                is_failed = status.state == ServiceState.FAILED
+                            else:
+                                r = subprocess.run(['systemctl', 'is-active', svc],
+                                                   capture_output=True, text=True, timeout=5)
+                                is_failed = r.stdout.strip() == 'failed'
+                            if is_failed:
+                                print(f"\033[0;31m{svc} failure:\033[0m")
+                                subprocess.run(
+                                    ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
+                                    timeout=10
+                                )
+                                print()
+                        except (subprocess.SubprocessError, OSError) as e:
+                            logger.debug("Failure log check for %s failed: %s", svc, e)
+
+                    if not use_direct_rnsd:
+                        try:
+                            if _HAS_SERVICE_CHECK:
+                                status = check_service('rnsd')
+                                is_failed = status.state == ServiceState.FAILED
+                            else:
+                                r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
+                                                   capture_output=True, text=True, timeout=5)
+                                is_failed = r.stdout.strip() == 'failed'
+                            if is_failed:
+                                print(f"\033[0;31mrnsd failure:\033[0m")
+                                subprocess.run(
+                                    ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],
+                                    timeout=10
+                                )
+                                print()
+                        except (subprocess.SubprocessError, OSError) as e:
+                            logger.debug("rnsd failure log check failed: %s", e)
+                    self._wait_for_enter()
+                elif choice == "restart-mesh":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("Restarting meshtasticd...\n")
+                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
+                    subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "start-rns":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("Starting rnsd...\n")
+                    if not self._has_systemd_unit('rnsd'):
+                        self._start_rnsd_direct()
+                    else:
+                        subprocess.run(['systemctl', 'start', 'rnsd'], timeout=30)
+                        subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "restart-rns":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("Restarting rnsd...\n")
+                    if not self._has_systemd_unit('rnsd'):
+                        self._stop_rnsd_direct()
+                        import time
+                        time.sleep(0.5)
+                        self._start_rnsd_direct()
+                    else:
+                        subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
+                        subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+                    self._wait_for_enter()
                 else:
-                    subprocess.run(['systemctl', 'start', 'rnsd'], timeout=30)
-                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "restart-rns":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("Restarting rnsd...\n")
-                # Use direct process control if no systemd unit
-                if not self._has_systemd_unit('rnsd'):
-                    self._stop_rnsd_direct()
-                    import time
-                    time.sleep(0.5)
-                    self._start_rnsd_direct()
-                else:
-                    subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
-                    subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "install":
-                self._install_native_meshtasticd()
-            elif choice == "mqtt-setup":
-                self._mqtt_setup_wizard()
-            elif choice == "openhamclock":
-                self._manage_openhamclock_docker()
-            else:
-                self._manage_service(choice)
+                    self._manage_service(choice)
+            except KeyboardInterrupt:
+                pass  # Return to service menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "Service Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
+                    f"Check service status with:\n"
+                    f"  sudo systemctl status <service>"
+                )
 
     def _fix_spi_config(self, has_native: bool = False):
         """Quick fix for SPI HAT with wrong USB config."""
@@ -936,20 +944,16 @@ WantedBy=multi-user.target
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._openhamclock_docker_status()
-            elif choice == "start":
-                self._start_openhamclock_docker()
-            elif choice == "stop":
-                self._stop_openhamclock_docker()
-            elif choice == "logs":
-                self._openhamclock_docker_logs()
-            elif choice == "configure":
-                # Delegate to settings menu mixin
-                try:
-                    self._configure_openhamclock()
-                except AttributeError:
-                    self.dialog.msgbox("Error", "Settings menu not available.")
+            dispatch = {
+                "status": ("OpenHamClock Status", self._openhamclock_docker_status),
+                "start": ("Start OpenHamClock", self._start_openhamclock_docker),
+                "stop": ("Stop OpenHamClock", self._stop_openhamclock_docker),
+                "logs": ("OpenHamClock Logs", self._openhamclock_docker_logs),
+                "configure": ("Configure OpenHamClock", self._configure_openhamclock),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _is_openhamclock_running(self) -> bool:
         """Check if OpenHamClock Docker container is running."""
