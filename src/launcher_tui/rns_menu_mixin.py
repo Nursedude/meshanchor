@@ -95,6 +95,28 @@ class RNSMenuMixin(RNSSnifferMixin):
             if choice is None or choice == "back":
                 break
 
+            dispatch = {
+                "sniffer": ("RNS Traffic Sniffer", self._rns_traffic_sniffer),
+                "topology": ("Network Topology", self._topology_menu),
+                "quality": ("Link Quality Analysis", self._link_quality_menu),
+                "probe": ("Probe Destination", self._rns_probe_destination),
+                "identity": ("Identity Info", self._rns_identity_info),
+                "nodes": ("Known Destinations", self._rns_known_destinations),
+                "positions": ("Set Node Positions", self._rns_set_node_positions),
+                "diag": ("RNS Diagnostics", self._rns_diagnostics),
+                "bridge": ("Gateway Bridge", self._run_bridge),
+                "nomadnet": ("NomadNet Client", self._nomadnet_menu),
+                "ifaces": ("Manage Interfaces", self._rns_interfaces_menu),
+                "config": ("View RNS Config", self._view_rns_config),
+                "edit": ("Edit RNS Config", self._edit_rns_config),
+                "check": ("Check RNS Setup", self._check_rns_setup),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+                continue
+
+            # Inline RNS tool commands
             try:
                 if choice == "status":
                     subprocess.run(['clear'], check=False, timeout=5)
@@ -106,36 +128,8 @@ class RNSMenuMixin(RNSSnifferMixin):
                     print("=== RNS Path Table ===\n")
                     self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                     self._wait_for_enter()
-                elif choice == "sniffer":
-                    self._rns_traffic_sniffer()
-                elif choice == "topology":
-                    self._topology_menu()
-                elif choice == "quality":
-                    self._link_quality_menu()
-                elif choice == "probe":
-                    self._rns_probe_destination()
-                elif choice == "identity":
-                    self._rns_identity_info()
-                elif choice == "nodes":
-                    self._rns_known_destinations()
-                elif choice == "positions":
-                    self._rns_set_node_positions()
-                elif choice == "diag":
-                    self._rns_diagnostics()
-                elif choice == "bridge":
-                    self._run_bridge()
-                elif choice == "nomadnet":
-                    self._nomadnet_menu()
-                elif choice == "ifaces":
-                    self._rns_interfaces_menu()
-                elif choice == "config":
-                    self._view_rns_config()
-                elif choice == "edit":
-                    self._edit_rns_config()
-                elif choice == "check":
-                    self._check_rns_setup()
             except KeyboardInterrupt:
-                pass  # Return to RNS menu
+                pass
             except Exception as e:
                 self.dialog.msgbox(
                     "RNS Error",
@@ -191,71 +185,75 @@ class RNSMenuMixin(RNSSnifferMixin):
             if choice is None or choice == "back":
                 break
 
-            if choice == "show":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Local RNS Identity ===\n")
-                # rnid with no args shows the local identity
-                self._run_rns_tool(['rnid'], 'rnid')
+            try:
+                if choice == "show":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Local RNS Identity ===\n")
+                    self._run_rns_tool(['rnid'], 'rnid')
 
-                # Also show MeshForge gateway identity path
-                try:
-                    from commands.rns import get_identity_path
-                    gw_id = get_identity_path()
-                    print(f"\nMeshForge gateway identity: {gw_id}")
-                    if gw_id.exists():
-                        print("  Status: exists")
-                    else:
-                        print("  Status: not created (starts on first bridge run)")
-                except ImportError:
-                    pass
-                self._wait_for_enter()
+                    try:
+                        from commands.rns import get_identity_path
+                        gw_id = get_identity_path()
+                        print(f"\nMeshForge gateway identity: {gw_id}")
+                        if gw_id.exists():
+                            print("  Status: exists")
+                        else:
+                            print("  Status: not created (starts on first bridge run)")
+                    except ImportError:
+                        pass
+                    self._wait_for_enter()
 
-            elif choice == "path":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== RNS Identity Paths ===\n")
-                config_dir = ReticulumPaths.get_config_dir()
-                identity_path = config_dir / 'identity'
-                print(f"RNS config dir:    {config_dir}")
-                print(f"RNS identity file: {identity_path}")
-                if identity_path.exists():
-                    stat = identity_path.stat()
-                    print(f"  Size: {stat.st_size} bytes")
-                    from datetime import datetime
-                    mtime = datetime.fromtimestamp(stat.st_mtime)
-                    print(f"  Modified: {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
-                else:
-                    print("  Not found (created on first rnsd start)")
-
-                # Show gateway identity
-                try:
-                    from commands.rns import get_identity_path
-                    gw_id = get_identity_path()
-                    print(f"\nMeshForge gateway:  {gw_id}")
-                    if gw_id.exists():
-                        stat = gw_id.stat()
+                elif choice == "path":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== RNS Identity Paths ===\n")
+                    config_dir = ReticulumPaths.get_config_dir()
+                    identity_path = config_dir / 'identity'
+                    print(f"RNS config dir:    {config_dir}")
+                    print(f"RNS identity file: {identity_path}")
+                    if identity_path.exists():
+                        stat = identity_path.stat()
                         print(f"  Size: {stat.st_size} bytes")
+                        from datetime import datetime
+                        mtime = datetime.fromtimestamp(stat.st_mtime)
+                        print(f"  Modified: {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
                     else:
-                        print("  Not created yet")
-                except ImportError:
-                    pass
-                self._wait_for_enter()
+                        print("  Not found (created on first rnsd start)")
 
-            elif choice == "recall":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Recall RNS Identity ===\n")
-                print("Look up a known identity by its destination hash.\n")
-                try:
-                    dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
-                except (KeyboardInterrupt, EOFError):
-                    print()
-                    continue
-                if dest_hash and dest_hash.lower() != 'q':
-                    # Validate hex format to prevent flag injection
-                    if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
-                        print("Error: Hash must contain only hex characters (0-9, a-f).")
-                    else:
-                        self._run_rns_tool(['rnid', '--recall', dest_hash], 'rnid')
-                self._wait_for_enter()
+                    try:
+                        from commands.rns import get_identity_path
+                        gw_id = get_identity_path()
+                        print(f"\nMeshForge gateway:  {gw_id}")
+                        if gw_id.exists():
+                            stat = gw_id.stat()
+                            print(f"  Size: {stat.st_size} bytes")
+                        else:
+                            print("  Not created yet")
+                    except ImportError:
+                        pass
+                    self._wait_for_enter()
+
+                elif choice == "recall":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Recall RNS Identity ===\n")
+                    print("Look up a known identity by its destination hash.\n")
+                    try:
+                        dest_hash = input("Destination hash (or 'q' to cancel): ").strip()
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        continue
+                    if dest_hash and dest_hash.lower() != 'q':
+                        if not re.match(r'^[0-9a-fA-F]+$', dest_hash):
+                            print("Error: Hash must contain only hex characters (0-9, a-f).")
+                        else:
+                            self._run_rns_tool(['rnid', '--recall', dest_hash], 'rnid')
+                    self._wait_for_enter()
+            except KeyboardInterrupt:
+                pass
+            except Exception as e:
+                self.dialog.msgbox(
+                    "Identity Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}"
+                )
 
     def _rns_known_destinations(self):
         """Show known RNS destinations from the running rnsd instance."""

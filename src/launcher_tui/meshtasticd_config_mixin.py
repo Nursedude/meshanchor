@@ -688,27 +688,20 @@ Press Cancel to keep current values."""
             if choice is None or choice == "back":
                 break
 
-            cli = self._get_meshtastic_cli()
-            conn_args = ['--host', 'localhost']
-
-            if choice == "view":
-                self._mqtt_view_settings()
-            elif choice == "enable":
-                self._mqtt_set_enabled(True)
-            elif choice == "disable":
-                self._mqtt_set_enabled(False)
-            elif choice == "broker":
-                self._mqtt_set_broker()
-            elif choice == "credentials":
-                self._mqtt_set_credentials()
-            elif choice == "topic":
-                self._mqtt_set_topic()
-            elif choice == "encryption":
-                self._mqtt_set_encryption()
-            elif choice == "uplink":
-                self._mqtt_configure_uplink()
-            elif choice == "downlink":
-                self._mqtt_configure_downlink()
+            dispatch = {
+                "view": ("MQTT View Settings", self._mqtt_view_settings),
+                "enable": ("Enable MQTT", lambda: self._mqtt_set_enabled(True)),
+                "disable": ("Disable MQTT", lambda: self._mqtt_set_enabled(False)),
+                "broker": ("Set MQTT Broker", self._mqtt_set_broker),
+                "credentials": ("Set MQTT Credentials", self._mqtt_set_credentials),
+                "topic": ("Set MQTT Topic", self._mqtt_set_topic),
+                "encryption": ("Set MQTT Encryption", self._mqtt_set_encryption),
+                "uplink": ("Configure Uplink", self._mqtt_configure_uplink),
+                "downlink": ("Configure Downlink", self._mqtt_configure_downlink),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _mqtt_view_settings(self):
         """View current MQTT settings."""

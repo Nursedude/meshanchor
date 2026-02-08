@@ -82,34 +82,35 @@ class GatewayConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._show_gateway_status(config)
-            elif choice == "mode":
-                self._set_bridge_mode(config)
-            elif choice == "enable":
+            # Inline toggles and save don't need _safe_call
+            if choice == "enable":
                 config.enabled = not config.enabled
                 self.dialog.msgbox(
                     "Gateway " + ("Enabled" if config.enabled else "Disabled"),
                     f"Gateway is now {'enabled' if config.enabled else 'disabled'}.\n\n"
                     "Save configuration to persist."
                 )
-            elif choice == "meshtastic":
-                self._config_meshtastic(config)
-            elif choice == "rns":
-                self._config_rns(config)
-            elif choice == "routing":
-                self._config_routing(config)
-            elif choice == "telemetry":
-                self._config_telemetry(config)
-            elif choice == "templates":
-                self._load_template(config)
-            elif choice == "validate":
-                self._validate_gateway_config(config)
+                continue
             elif choice == "save":
                 if config.save():
                     self.dialog.msgbox("Saved", "Gateway configuration saved.")
                 else:
                     self.dialog.msgbox("Error", "Failed to save configuration.")
+                continue
+
+            dispatch = {
+                "status": ("Gateway Status", self._show_gateway_status),
+                "mode": ("Bridge Mode", self._set_bridge_mode),
+                "meshtastic": ("Meshtastic Settings", self._config_meshtastic),
+                "rns": ("RNS Settings", self._config_rns),
+                "routing": ("Routing Rules", self._config_routing),
+                "telemetry": ("Telemetry Settings", self._config_telemetry),
+                "templates": ("Load Template", self._load_template),
+                "validate": ("Validate Config", self._validate_gateway_config),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(entry[0], entry[1], config)
 
     def _show_gateway_status(self, config):
         """Show detailed gateway status."""
@@ -295,19 +296,27 @@ class GatewayConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "default":
-                self._set_default_route(config)
-            elif choice == "add":
-                self._add_routing_rule(config)
-            elif choice == "clear":
+            # Inline operations
+            if choice == "clear":
                 if self.dialog.yesno("Clear Rules", "Remove all routing rules?"):
                     config.routing_rules = []
+                continue
             elif choice == "defaults":
                 if self.dialog.yesno("Load Defaults", "Replace rules with defaults?"):
                     config.routing_rules = config.get_default_rules()
+                continue
             elif choice.startswith("rule_"):
                 idx = int(choice.split("_")[1])
-                self._edit_routing_rule(config, idx)
+                self._safe_call(f"Edit Rule {idx}", self._edit_routing_rule, config, idx)
+                continue
+
+            dispatch = {
+                "default": ("Default Route", self._set_default_route),
+                "add": ("Add Routing Rule", self._add_routing_rule),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(entry[0], entry[1], config)
 
     def _set_default_route(self, config):
         """Set the default routing direction."""
