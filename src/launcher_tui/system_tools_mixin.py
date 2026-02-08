@@ -76,24 +76,20 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "monitor":
-                self._interactive_monitoring_menu()
-            elif choice == "process":
-                self._process_tools_menu()
-            elif choice == "network":
-                self._network_diagnostics_menu()
-            elif choice == "hardware":
-                self._hardware_info_menu()
-            elif choice == "performance":
-                self._performance_tools_menu()
-            elif choice == "storage":
-                self._storage_tools_menu()
-            elif choice == "services":
-                self._service_management_menu()
-            elif choice == "logs":
-                self._advanced_logs_menu()
-            elif choice == "shell":
-                self._drop_to_shell()
+            dispatch = {
+                "monitor": ("Interactive Monitoring", self._interactive_monitoring_menu),
+                "process": ("Process Management", self._process_tools_menu),
+                "network": ("Network Diagnostics", self._network_diagnostics_menu),
+                "hardware": ("Hardware Information", self._hardware_info_menu),
+                "performance": ("Performance Tools", self._performance_tools_menu),
+                "storage": ("Storage Tools", self._storage_tools_menu),
+                "services": ("Service Management", self._service_management_menu),
+                "logs": ("Advanced Log Analysis", self._advanced_logs_menu),
+                "shell": ("Drop to Shell", self._drop_to_shell),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     # =========================================================================
     # Interactive Monitoring (top, htop, btop)
@@ -137,7 +133,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_interactive_tool(choice)
+            self._safe_call(f"Monitor: {choice}", self._run_interactive_tool, choice)
 
     def _run_interactive_tool(self, tool: str):
         """Run an interactive monitoring tool."""
@@ -207,7 +203,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_process_command(choice)
+            self._safe_call(f"Process: {choice}", self._run_process_command, choice)
 
     def _run_process_command(self, cmd_type: str):
         """Run process-related command."""
@@ -388,7 +384,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_network_command(choice)
+            self._safe_call(f"Network: {choice}", self._run_network_command, choice)
 
     def _run_network_command(self, cmd_type: str):
         """Run network diagnostic command."""
@@ -780,7 +776,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_hardware_command(choice)
+            self._safe_call(f"Hardware: {choice}", self._run_hardware_command, choice)
 
     def _run_hardware_command(self, cmd_type: str):
         """Run hardware info command."""
@@ -914,7 +910,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_performance_command(choice)
+            self._safe_call(f"Performance: {choice}", self._run_performance_command, choice)
 
     def _run_performance_command(self, cmd_type: str):
         """Run performance monitoring command."""
@@ -1030,7 +1026,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_storage_command(choice)
+            self._safe_call(f"Storage: {choice}", self._run_storage_command, choice)
 
     def _run_storage_command(self, cmd_type: str):
         """Run storage command."""
@@ -1120,7 +1116,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_service_command(choice)
+            self._safe_call(f"Service: {choice}", self._run_service_command, choice)
 
     def _run_service_command(self, cmd_type: str):
         """Run service management command."""
@@ -1218,7 +1214,7 @@ class SystemToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            self._run_advanced_log_command(choice)
+            self._safe_call(f"Logs: {choice}", self._run_advanced_log_command, choice)
 
     def _run_advanced_log_command(self, cmd_type: str):
         """Run advanced log command."""

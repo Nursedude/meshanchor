@@ -155,10 +155,21 @@ class NetworkToolsMixin:
             if choice is None or choice == "back":
                 break
 
+            # Method-call dispatches via _safe_call
+            dispatch = {
+                "status": ("Network Status", self._run_terminal_network),
+                "ping": ("Ping Test", self._ping_test),
+                "dns": ("DNS Lookup", self._dns_lookup),
+                "discover": ("Device Discovery", self._meshtastic_discovery),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
+                continue
+
+            # Inline system commands
             try:
-                if choice == "status":
-                    self._run_terminal_network()
-                elif choice == "ports":
+                if choice == "ports":
                     subprocess.run(['clear'], check=False, timeout=5)
                     print("=== Listening Ports ===\n")
                     subprocess.run(['ss', '-tlnp'], timeout=10)
@@ -178,14 +189,8 @@ class NetworkToolsMixin:
                     print("=== Routing Table ===\n")
                     subprocess.run(['ip', 'route'], timeout=10)
                     self._wait_for_enter()
-                elif choice == "ping":
-                    self._ping_test()
-                elif choice == "dns":
-                    self._dns_lookup()
-                elif choice == "discover":
-                    self._meshtastic_discovery()
             except KeyboardInterrupt:
-                pass  # Return to network menu
+                pass
             except Exception as e:
                 self.dialog.msgbox(
                     "Network Tools Error",

@@ -111,16 +111,16 @@ class SettingsMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "noaa":
-                self._test_noaa_source()
-            elif choice == "pskreporter":
-                self._configure_pskreporter()
-            elif choice == "openhamclock":
-                self._configure_openhamclock()
-            elif choice == "hamclock":
-                self._configure_hamclock_legacy()
-            elif choice == "test":
-                self._test_all_sources()
+            dispatch = {
+                "noaa": ("NOAA SWPC Test", self._test_noaa_source),
+                "pskreporter": ("PSKReporter Config", self._configure_pskreporter),
+                "openhamclock": ("OpenHamClock Config", self._configure_openhamclock),
+                "hamclock": ("HamClock Legacy Config", self._configure_hamclock_legacy),
+                "test": ("Test All Sources", self._test_all_sources),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _test_noaa_source(self):
         """Test NOAA SWPC connectivity and show current data."""

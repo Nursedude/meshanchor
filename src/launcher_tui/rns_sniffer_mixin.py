@@ -67,26 +67,22 @@ class RNSSnifferMixin:
             if not choice:
                 return
 
-            if choice == "capture":
-                self._rns_sniffer_toggle_capture(sniffer, capturing)
-            elif choice == "1":
-                self._rns_sniffer_live_traffic(sniffer)
-            elif choice == "2":
-                self._rns_sniffer_path_table(sniffer)
-            elif choice == "3":
-                self._rns_sniffer_announces(sniffer)
-            elif choice == "4":
-                self._rns_sniffer_filter_destination(sniffer)
-            elif choice == "5":
-                self._rns_sniffer_probe_destination(sniffer)
-            elif choice == "6":
-                self._rns_sniffer_links(sniffer)
-            elif choice == "7":
-                self._rns_sniffer_statistics(sniffer)
-            elif choice == "8":
-                self._rns_sniffer_test_known_node(sniffer)
-            elif choice == "0":
-                self._rns_sniffer_clear(sniffer)
+            dispatch = {
+                "capture": ("Toggle Capture", self._rns_sniffer_toggle_capture, sniffer, capturing),
+                "1": ("Live Traffic", self._rns_sniffer_live_traffic, sniffer),
+                "2": ("Path Table", self._rns_sniffer_path_table, sniffer),
+                "3": ("Announces", self._rns_sniffer_announces, sniffer),
+                "4": ("Filter by Destination", self._rns_sniffer_filter_destination, sniffer),
+                "5": ("Probe Destination", self._rns_sniffer_probe_destination, sniffer),
+                "6": ("View Links", self._rns_sniffer_links, sniffer),
+                "7": ("Traffic Statistics", self._rns_sniffer_statistics, sniffer),
+                "8": ("Test Known Node", self._rns_sniffer_test_known_node, sniffer),
+                "0": ("Clear Capture", self._rns_sniffer_clear, sniffer),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                name, method, *args = entry
+                self._safe_call(name, method, *args)
 
     def _rns_sniffer_toggle_capture(self, sniffer, capturing):
         """Toggle RNS packet capture."""

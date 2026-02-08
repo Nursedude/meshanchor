@@ -411,14 +411,15 @@ class TrafficInspectorMixin:
             if not choice:
                 return
 
-            if choice == "1":
-                self._path_ascii_view()
-            elif choice == "2":
-                self._path_html_view()
-            elif choice == "3":
-                self._path_trace_message()
-            elif choice == "4":
-                self._path_statistics()
+            dispatch = {
+                "1": ("ASCII Path View", self._path_ascii_view),
+                "2": ("HTML Path View", self._path_html_view),
+                "3": ("Trace Message Path", self._path_trace_message),
+                "4": ("Path Statistics", self._path_statistics),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _path_ascii_view(self) -> None:
         """Show ASCII path visualization."""

@@ -212,14 +212,15 @@ class ChannelConfigMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "name":
-                self._set_channel_name(idx)
-            elif choice == "psk":
-                self._set_channel_psk(idx)
-            elif choice == "role":
-                self._set_channel_role(idx)
-            elif choice == "view":
-                self._view_single_channel(idx)
+            dispatch = {
+                "name": ("Set Channel Name", self._set_channel_name),
+                "psk": ("Set Channel PSK", self._set_channel_psk),
+                "role": ("Set Channel Role", self._set_channel_role),
+                "view": ("View Channel", self._view_single_channel),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(entry[0], entry[1], idx)
 
     def _set_channel_name(self, idx: int):
         """Set name for a specific channel."""

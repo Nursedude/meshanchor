@@ -47,30 +47,19 @@ class TopologyMixin:
             if choice is None or choice == "back":
                 break
 
-            try:
-                if choice == "stats":
-                    self._show_topology_stats()
-                elif choice == "nodes":
-                    self._show_topology_nodes()
-                elif choice == "edges":
-                    self._show_topology_edges()
-                elif choice == "events":
-                    self._show_topology_events()
-                elif choice == "trace":
-                    self._trace_path()
-                elif choice == "ascii":
-                    self._show_ascii_topology()
-                elif choice == "browser":
-                    self._open_topology_browser()
-                elif choice == "export":
-                    self._export_topology()
-            except Exception as e:
-                self.dialog.msgbox(
-                    "Topology Error",
-                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
-                    f"The topology data source may not be available.\n"
-                    f"Check that gateway services are running."
-                )
+            dispatch = {
+                "stats": ("Topology Statistics", self._show_topology_stats),
+                "nodes": ("View Nodes", self._show_topology_nodes),
+                "edges": ("View Links/Edges", self._show_topology_edges),
+                "events": ("Topology Events", self._show_topology_events),
+                "trace": ("Trace Path", self._trace_path),
+                "ascii": ("ASCII Topology", self._show_ascii_topology),
+                "browser": ("Browser Topology", self._open_topology_browser),
+                "export": ("Export Topology", self._export_topology),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_topology(self):
         """Get the network topology instance."""

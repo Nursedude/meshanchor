@@ -207,31 +207,20 @@ class MQTTMixin:
             if choice is None or choice == "back":
                 break
 
-            try:
-                if choice == "status":
-                    self._show_mqtt_status()
-                elif choice == "start":
-                    self._start_mqtt_subscriber()
-                elif choice == "stop":
-                    self._stop_mqtt_subscriber()
-                elif choice == "config":
-                    self._configure_mqtt()
-                elif choice == "nodes":
-                    self._show_mqtt_nodes()
-                elif choice == "stats":
-                    self._show_mqtt_stats()
-                elif choice == "telemetry":
-                    self._request_telemetry_menu()
-                elif choice == "export":
-                    self._export_mqtt_data()
-                elif choice == "websocket":
-                    self._toggle_ws_bridge()
-            except Exception as e:
-                self.dialog.msgbox(
-                    "MQTT Error",
-                    f"Operation failed:\n{type(e).__name__}: {e}\n\n"
-                    f"Check MQTT broker connection and configuration."
-                )
+            dispatch = {
+                "status": ("MQTT Status", self._show_mqtt_status),
+                "start": ("Start MQTT Subscriber", self._start_mqtt_subscriber),
+                "stop": ("Stop MQTT Subscriber", self._stop_mqtt_subscriber),
+                "config": ("MQTT Configuration", self._configure_mqtt),
+                "nodes": ("MQTT Nodes", self._show_mqtt_nodes),
+                "stats": ("MQTT Statistics", self._show_mqtt_stats),
+                "telemetry": ("Telemetry Requests", self._request_telemetry_menu),
+                "export": ("Export MQTT Data", self._export_mqtt_data),
+                "websocket": ("WebSocket Bridge", self._toggle_ws_bridge),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_mqtt_status(self) -> str:
         """Get current MQTT subscriber status."""
@@ -1169,14 +1158,15 @@ class MQTTMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "single":
-                self._request_single_telemetry()
-            elif choice == "silent":
-                self._show_silent_nodes()
-            elif choice == "batch":
-                self._batch_telemetry_request()
-            elif choice == "stats":
-                self._show_poller_stats()
+            dispatch = {
+                "single": ("Request Single Telemetry", self._request_single_telemetry),
+                "silent": ("Show Silent Nodes", self._show_silent_nodes),
+                "batch": ("Batch Telemetry Request", self._batch_telemetry_request),
+                "stats": ("Poller Statistics", self._show_poller_stats),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _request_single_telemetry(self):
         """Request telemetry from a single node by ID."""
