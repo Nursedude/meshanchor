@@ -99,15 +99,16 @@ class ServiceDiscoveryMixin:
             details=rns_status.message or ""
         ))
 
-        # Check HamClock
+        # Check HamClock (optional enhanced data source)
         hc_status = check_service('hamclock')
-        services.append(DiscoveredService(
-            name="HamClock",
-            status="running" if hc_status.available else "stopped",
-            address="localhost:8080",
-            service_type="hamclock",
-            details=hc_status.message or ""
-        ))
+        if hc_status.available:
+            services.append(DiscoveredService(
+                name="HamClock (optional)",
+                status="running",
+                address="localhost:8080",
+                service_type="hamclock",
+                details="Enhanced propagation data source"
+            ))
 
         # Check for AREDN (10.x.x.x network)
         aredn_found = self._check_aredn_network()
@@ -266,16 +267,24 @@ class ServiceDiscoveryMixin:
         self.dialog.infobox("Checking", "Checking service status...")
 
         # Check all known services
+        # Core services required for mesh operations
         services = [
             ('meshtasticd', 'Meshtastic Daemon'),
             ('rnsd', 'Reticulum Network Stack'),
-            ('hamclock', 'HamClock Space Weather'),
+        ]
+
+        # Optional services (enhanced data sources)
+        optional_services = [
+            ('hamclock', 'HamClock (optional)'),
         ]
 
         lines = ["MeshForge Service Status\n"]
         lines.append("=" * 40)
 
         warnings = []
+
+        # Core services
+        lines.append("\nCore Services:")
         for svc_id, svc_name in services:
             status = check_service(svc_id)
             icon = "✓" if status.available else "✗"
@@ -298,6 +307,14 @@ class ServiceDiscoveryMixin:
 
             if status.message:
                 lines.append(f"  Info: {status.message}")
+
+        # Optional services (only show if running)
+        lines.append("\n\nOptional Data Sources:")
+        lines.append("  Space weather: NOAA SWPC (always active)")
+        for svc_id, svc_name in optional_services:
+            status = check_service(svc_id)
+            if status.available:
+                lines.append(f"  ✓ {svc_name}: running")
 
         if warnings:
             lines.append("\n" + "-" * 40)

@@ -12,7 +12,7 @@ class SettingsMenuMixin:
         """Settings menu."""
         choices = [
             ("connection", "Meshtastic Connection"),
-            ("hamclock", "HamClock Settings"),
+            ("propagation", "Propagation Data Sources"),
             ("back", "Back"),
         ]
 
@@ -28,8 +28,8 @@ class SettingsMenuMixin:
 
             if choice == "connection":
                 self._configure_connection()
-            elif choice == "hamclock":
-                self._configure_hamclock()
+            elif choice == "propagation":
+                self._configure_propagation_sources()
 
     def _configure_connection(self):
         """Configure Meshtastic connection."""
@@ -81,35 +81,230 @@ class SettingsMenuMixin:
         except ImportError:
             pass  # MapDataCollector not available
 
-    def _configure_hamclock(self):
-        """Configure HamClock settings - test API connection."""
+    def _configure_propagation_sources(self):
+        """Configure propagation data sources.
+
+        NOAA SWPC is always active (primary). Users can optionally
+        enable HamClock or OpenHamClock for enhanced data.
+        """
+        while True:
+            choices = [
+                ("noaa", "NOAA SWPC (Primary - always active)"),
+                ("openhamclock", "OpenHamClock (Optional)"),
+                ("hamclock", "HamClock Legacy (Optional)"),
+                ("test", "Test All Sources"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Propagation Data Sources",
+                "NOAA is always active as primary source.\n"
+                "Optionally configure HamClock/OpenHamClock for\n"
+                "enhanced data (VOACAP, DX spots).",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "noaa":
+                self._test_noaa_source()
+            elif choice == "openhamclock":
+                self._configure_openhamclock()
+            elif choice == "hamclock":
+                self._configure_hamclock_legacy()
+            elif choice == "test":
+                self._test_all_sources()
+
+    def _test_noaa_source(self):
+        """Test NOAA SWPC connectivity and show current data."""
+        try:
+            from commands import propagation
+            result = propagation.check_source(propagation.DataSource.NOAA)
+            if result.success:
+                # Also get current conditions
+                wx = propagation.get_space_weather()
+                if wx.success:
+                    d = wx.data
+                    lines = [
+                        "NOAA SWPC - Connected",
+                        "",
+                        f"Solar Flux (SFI): {d.get('solar_flux', 'N/A')}",
+                        f"Kp Index: {d.get('k_index', 'N/A')}",
+                        f"A Index: {d.get('a_index', 'N/A')}",
+                        f"X-ray: {d.get('xray_flux', 'N/A')}",
+                        f"Geomagnetic: {d.get('geomag_storm', 'N/A')}",
+                        "",
+                        "Band Conditions:",
+                    ]
+                    for band, cond in d.get('band_conditions', {}).items():
+                        lines.append(f"  {band}: {cond}")
+                    self.dialog.msgbox("NOAA Space Weather", "\n".join(lines))
+                else:
+                    self.dialog.msgbox("NOAA SWPC", "Connected but no data available.")
+            else:
+                self.dialog.msgbox("Error", f"Cannot reach NOAA SWPC:\n{result.message}")
+        except ImportError:
+            self.dialog.msgbox("Error", "Propagation module not available.")
+
+    def _configure_openhamclock(self):
+        """Configure OpenHamClock as optional data source."""
         host = self.dialog.inputbox(
-            "HamClock Host",
-            "Enter HamClock hostname or IP:",
+            "OpenHamClock Host",
+            "Enter OpenHamClock hostname or IP:\n"
+            "(Docker: localhost, Remote: IP address)",
             "localhost"
         )
 
-        if host:
-            if not self._validate_hostname(host):
-                self.dialog.msgbox("Error", "Invalid hostname or IP address.")
-                return
+        if not host:
+            return
 
-            port = self.dialog.inputbox(
-                "HamClock API Port",
-                "Enter API port (default 8082):",
-                "8082"
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+            return
+
+        port = self.dialog.inputbox(
+            "OpenHamClock Port",
+            "Enter port (default 3000):",
+            "3000"
+        )
+
+        if not port:
+            return
+
+        if not self._validate_port(port):
+            self.dialog.msgbox("Error", "Invalid port number (1-65535).")
+            return
+
+        try:
+            from commands import propagation
+            result = propagation.configure_source(
+                propagation.DataSource.OPENHAMCLOCK,
+                host=host,
+                port=int(port),
             )
+            if result.success:
+                # Test connectivity
+                test = propagation.check_source(propagation.DataSource.OPENHAMCLOCK)
+                if test.success:
+                    self.dialog.msgbox(
+                        "OpenHamClock Connected",
+                        f"API: {host}:{port}\n\nOpenHamClock is now active as\n"
+                        "an enhanced data source."
+                    )
+                else:
+                    self.dialog.msgbox(
+                        "OpenHamClock Configured",
+                        f"Saved: {host}:{port}\n\n"
+                        f"Connection test failed:\n{test.message}\n\n"
+                        "Make sure OpenHamClock is running\n"
+                        "(docker compose up)"
+                    )
+            else:
+                self.dialog.msgbox("Error", result.message)
+        except ImportError:
+            self.dialog.msgbox("Error", "Propagation module not available.")
 
-            if port:
-                if not self._validate_port(port):
-                    self.dialog.msgbox("Error", "Invalid port number (1-65535).")
-                    return
+    def _configure_hamclock_legacy(self):
+        """Configure legacy HamClock as optional data source."""
+        host = self.dialog.inputbox(
+            "HamClock Host",
+            "Enter HamClock hostname or IP:\n"
+            "(NOTE: Original HamClock sunsets June 2026)",
+            "localhost"
+        )
 
-                try:
-                    import urllib.request
-                    url = f"http://{host}:{port}/get_de.txt"
-                    req = urllib.request.urlopen(url, timeout=5)
-                    data = req.read().decode()
-                    self.dialog.msgbox("HamClock Connected", f"API: {host}:{port}\n\nDE Station:\n{data}")
-                except Exception as e:
-                    self.dialog.msgbox("Error", f"Cannot reach HamClock at {host}:{port}\n\n{e}\n\nMake sure HamClock is running.")
+        if not host:
+            return
+
+        if not self._validate_hostname(host):
+            self.dialog.msgbox("Error", "Invalid hostname or IP address.")
+            return
+
+        port = self.dialog.inputbox(
+            "HamClock API Port",
+            "Enter API port (default 8080):",
+            "8080"
+        )
+
+        if not port:
+            return
+
+        if not self._validate_port(port):
+            self.dialog.msgbox("Error", "Invalid port number (1-65535).")
+            return
+
+        try:
+            from commands import propagation
+            result = propagation.configure_source(
+                propagation.DataSource.HAMCLOCK,
+                host=host,
+                port=int(port),
+            )
+            if result.success:
+                test = propagation.check_source(propagation.DataSource.HAMCLOCK)
+                if test.success:
+                    self.dialog.msgbox(
+                        "HamClock Connected",
+                        f"API: {host}:{port}\n\nHamClock is now active as\n"
+                        "an enhanced data source.\n\n"
+                        "NOTE: Consider migrating to OpenHamClock\n"
+                        "(original HamClock sunsets June 2026)"
+                    )
+                else:
+                    self.dialog.msgbox(
+                        "HamClock Configured",
+                        f"Saved: {host}:{port}\n\n"
+                        f"Connection test failed:\n{test.message}\n\n"
+                        "Make sure HamClock is running."
+                    )
+            else:
+                self.dialog.msgbox("Error", result.message)
+        except ImportError:
+            self.dialog.msgbox("Error", "Propagation module not available.")
+
+    def _test_all_sources(self):
+        """Test all configured propagation data sources."""
+        lines = ["Propagation Source Status", "=" * 35, ""]
+
+        try:
+            from commands import propagation
+
+            # NOAA (always)
+            noaa = propagation.check_source(propagation.DataSource.NOAA)
+            status = "Connected" if noaa.success else "Unreachable"
+            lines.append(f"NOAA SWPC (primary): {status}")
+
+            # OpenHamClock
+            ohc = propagation.check_source(propagation.DataSource.OPENHAMCLOCK)
+            if ohc.success:
+                lines.append(f"OpenHamClock: Connected")
+            else:
+                lines.append(f"OpenHamClock: Not configured")
+
+            # HamClock
+            hc = propagation.check_source(propagation.DataSource.HAMCLOCK)
+            if hc.success:
+                lines.append(f"HamClock (legacy): Connected")
+            else:
+                lines.append(f"HamClock (legacy): Not configured")
+
+            # Current data
+            wx = propagation.get_space_weather()
+            if wx.success:
+                d = wx.data
+                lines.append("")
+                lines.append("-" * 35)
+                lines.append("Current Conditions:")
+                sfi = d.get('solar_flux')
+                kp = d.get('k_index')
+                if sfi:
+                    lines.append(f"  SFI: {int(sfi)}")
+                if kp is not None:
+                    lines.append(f"  Kp: {kp}")
+                lines.append(f"  {d.get('geomag_storm', '')}")
+
+        except ImportError:
+            lines.append("Propagation module not available.")
+
+        self.dialog.msgbox("Source Status", "\n".join(lines))
