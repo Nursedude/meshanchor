@@ -51,77 +51,103 @@ class LogsMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            try:
-                subprocess.run(['clear'], check=False, timeout=5)
+            dispatch = {
+                "live-mesh": ("Live meshtasticd Logs", self._view_live_meshtasticd),
+                "live-rns": ("Live rnsd Logs", self._view_live_rnsd),
+                "live-all": ("Live All Logs", self._view_live_all),
+                "errors": ("Error Logs", self._view_error_logs),
+                "mesh-50": ("meshtasticd Logs", self._view_meshtasticd_recent),
+                "rns-50": ("rnsd Logs", self._view_rnsd_recent),
+                "boot": ("Boot Messages", self._view_boot_messages),
+                "kernel": ("Kernel Messages", self._view_kernel_messages),
+                "meshforge": ("MeshForge Logs", self._view_meshforge_logs),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
-                if choice == "live-mesh":
-                    print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
-                    try:
-                        subprocess.run(
-                            ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
-                            timeout=None
-                        )
-                    except KeyboardInterrupt:
-                        pass
-                elif choice == "live-rns":
-                    print("=== rnsd live log (Ctrl+C to stop) ===\n")
-                    try:
-                        subprocess.run(
-                            ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
-                            timeout=None
-                        )
-                    except KeyboardInterrupt:
-                        pass
-                elif choice == "live-all":
-                    print("=== All services live log (Ctrl+C to stop) ===\n")
-                    try:
-                        subprocess.run(
-                            ['journalctl', '-f', '-n', '30', '--no-pager'],
-                            timeout=None
-                        )
-                    except KeyboardInterrupt:
-                        pass
-                elif choice == "errors":
-                    print("=== Errors (last hour, priority err+) ===\n")
-                    subprocess.run(
-                        ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
-                        timeout=30
-                    )
-                    self._wait_for_enter()
-                elif choice == "mesh-50":
-                    print("=== meshtasticd (last 50 lines) ===\n")
-                    subprocess.run(
-                        ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
-                        timeout=15
-                    )
-                    self._wait_for_enter()
-                elif choice == "rns-50":
-                    print("=== rnsd (last 50 lines) ===\n")
-                    subprocess.run(
-                        ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
-                        timeout=15
-                    )
-                    self._wait_for_enter()
-                elif choice == "boot":
-                    print("=== Boot messages (this boot) ===\n")
-                    subprocess.run(
-                        ['journalctl', '-b', '-n', '100', '--no-pager'],
-                        timeout=15
-                    )
-                    self._wait_for_enter()
-                elif choice == "kernel":
-                    print("=== Kernel messages (dmesg) ===\n")
-                    subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
-                    self._wait_for_enter()
-                elif choice == "meshforge":
-                    self._view_meshforge_logs()
-            except KeyboardInterrupt:
-                pass  # Return to log menu
-            except Exception as e:
-                self.dialog.msgbox(
-                    "Log Viewer Error",
-                    f"Failed to view logs:\n{type(e).__name__}: {e}"
-                )
+    def _view_live_meshtasticd(self):
+        """View live meshtasticd log stream."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
+        try:
+            subprocess.run(
+                ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
+                timeout=None
+            )
+        except KeyboardInterrupt:
+            pass
+
+    def _view_live_rnsd(self):
+        """View live rnsd log stream."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== rnsd live log (Ctrl+C to stop) ===\n")
+        try:
+            subprocess.run(
+                ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
+                timeout=None
+            )
+        except KeyboardInterrupt:
+            pass
+
+    def _view_live_all(self):
+        """View live log stream for all services."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== All services live log (Ctrl+C to stop) ===\n")
+        try:
+            subprocess.run(
+                ['journalctl', '-f', '-n', '30', '--no-pager'],
+                timeout=None
+            )
+        except KeyboardInterrupt:
+            pass
+
+    def _view_error_logs(self):
+        """View error-level logs from the last hour."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Errors (last hour, priority err+) ===\n")
+        subprocess.run(
+            ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
+            timeout=30
+        )
+        self._wait_for_enter()
+
+    def _view_meshtasticd_recent(self):
+        """View recent meshtasticd log lines."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== meshtasticd (last 50 lines) ===\n")
+        subprocess.run(
+            ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
+            timeout=15
+        )
+        self._wait_for_enter()
+
+    def _view_rnsd_recent(self):
+        """View recent rnsd log lines."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== rnsd (last 50 lines) ===\n")
+        subprocess.run(
+            ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
+            timeout=15
+        )
+        self._wait_for_enter()
+
+    def _view_boot_messages(self):
+        """View boot messages from this boot."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Boot messages (this boot) ===\n")
+        subprocess.run(
+            ['journalctl', '-b', '-n', '100', '--no-pager'],
+            timeout=15
+        )
+        self._wait_for_enter()
+
+    def _view_kernel_messages(self):
+        """View kernel messages via dmesg."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Kernel messages (dmesg) ===\n")
+        subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
+        self._wait_for_enter()
 
     def _view_meshforge_logs(self):
         """View MeshForge application logs."""
