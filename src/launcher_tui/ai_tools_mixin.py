@@ -171,41 +171,45 @@ class AIToolsMixin:
         import json
         import socket
 
-        # Check current auto-open setting
-        auto_enabled = False
-        settings_file = self._get_map_settings_file()
-        if settings_file.exists():
-            try:
-                with open(settings_file) as f:
-                    auto_enabled = json.load(f).get("auto_open_map", False)
-            except (json.JSONDecodeError, OSError):
-                pass
+        while True:
+            # Check current auto-open setting (refresh each loop)
+            auto_enabled = False
+            settings_file = self._get_map_settings_file()
+            if settings_file.exists():
+                try:
+                    with open(settings_file) as f:
+                        auto_enabled = json.load(f).get("auto_open_map", False)
+                except (json.JSONDecodeError, OSError):
+                    pass
 
-        auto_label = "ON" if auto_enabled else "OFF"
-        choices = [
-            ("browser", "Open map in browser (snapshot)"),
-            ("server", "Start map server (live updates)"),
-            ("autostart", f"Auto-open on launch [{auto_label}]"),
-            ("back", "Back"),
-        ]
+            auto_label = "ON" if auto_enabled else "OFF"
+            choices = [
+                ("browser", "Open map in browser (snapshot)"),
+                ("server", "Start map server (live updates)"),
+                ("autostart", f"Auto-open on launch [{auto_label}]"),
+                ("back", "Back"),
+            ]
 
-        choice = self.dialog.menu(
-            "Live Network Map",
-            "Select map mode:",
-            choices
-        )
+            choice = self.dialog.menu(
+                "Live Network Map",
+                "Select map mode:",
+                choices
+            )
 
-        if choice is None or choice == "back":
-            return
+            if choice is None or choice == "back":
+                break
 
-        if choice == "server":
-            self._start_map_server()
-            return
+            dispatch = {
+                "browser": ("Browser Map Snapshot", self._open_live_map_browser),
+                "server": ("Map Server", self._start_map_server),
+                "autostart": ("Toggle Auto-open", self._toggle_auto_map),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
-        if choice == "autostart":
-            self._toggle_auto_map()
-            return
-
+    def _open_live_map_browser(self):
+        """Generate browser snapshot of the live map with current node data."""
         # Browser mode: collect data, inject into HTML, open
         self.dialog.infobox("Loading", "Collecting node data from all sources...")
 
@@ -477,8 +481,7 @@ class AIToolsMixin:
         except OSError as e:
             self.dialog.msgbox("Error", f"Failed to save setting: {e}")
 
-        # Re-show the live map menu
-        self._open_live_map()
+        # Return to caller — _open_live_map loop will re-show menu
 
     def _intelligent_diagnostics(self):
         """Run intelligent diagnostics with symptom analysis."""
@@ -912,9 +915,19 @@ class AIToolsMixin:
         """Open URL in browser (in background thread).
 
         Handles running as root by using sudo -u to run browser as real user.
+        On headless/SSH sessions, shows the URL for manual access instead.
         """
         import threading
         import os
+
+        # On headless/SSH, show URL instead of trying to open browser
+        if self._is_headless():
+            self.dialog.msgbox(
+                "No Display",
+                f"No graphical display detected (headless/SSH).\n\n"
+                f"Open this URL in your local browser:\n{url}"
+            )
+            return
 
         def do_open():
             try:
