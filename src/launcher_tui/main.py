@@ -694,6 +694,7 @@ class MeshForgeLauncher(
                 ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
+                ("favorites", "Favorites           Manage favorite nodes"),
                 ("ham", "Ham Radio           Callsign, Part 97, ARES"),
                 ("services", "Service Control     Start/stop/restart"),
                 ("back", "Back"),
@@ -714,6 +715,7 @@ class MeshForgeLauncher(
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
+                "favorites": ("Favorites", self._favorites_menu),
                 "ham": ("Ham Radio Tools", self._amateur_radio_menu),
                 "services": ("Service Control", self._service_menu),
             }

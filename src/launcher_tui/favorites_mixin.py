@@ -41,14 +41,15 @@ class FavoritesMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "list":
-                self._show_favorites_list()
-            elif choice == "all_nodes":
-                self._show_all_nodes_with_favorites()
-            elif choice == "toggle":
-                self._toggle_favorite_by_id()
-            elif choice == "sync":
-                self._sync_favorites_from_device()
+            dispatch = {
+                "list": ("View Favorites", self._show_favorites_list),
+                "all_nodes": ("All Nodes", self._show_all_nodes_with_favorites),
+                "toggle": ("Toggle Favorite", self._toggle_favorite_by_id),
+                "sync": ("Sync Favorites", self._sync_favorites_from_device),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _get_favorites_count(self) -> int:
         """Get count of favorite nodes."""

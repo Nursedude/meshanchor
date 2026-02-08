@@ -51,20 +51,18 @@ class SitePlannerMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "link":
-                self._calc_link_budget()  # From RFToolsMixin
-            elif choice == "range":
-                self._estimate_range()
-            elif choice == "presets":
-                self._compare_presets()
-            elif choice == "fresnel":
-                self._calc_fresnel()  # From RFToolsMixin
-            elif choice == "antenna":
-                self._antenna_guidelines()
-            elif choice == "freq":
-                self._frequency_reference()
-            elif choice == "tools":
-                self._external_tools()
+            dispatch = {
+                "link": ("Link Budget", self._calc_link_budget),
+                "range": ("Range Estimator", self._estimate_range),
+                "presets": ("Preset Comparison", self._compare_presets),
+                "fresnel": ("Fresnel Zone", self._calc_fresnel),
+                "antenna": ("Antenna Guidelines", self._antenna_guidelines),
+                "freq": ("Frequency Reference", self._frequency_reference),
+                "tools": ("External Tools", self._external_tools),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _select_environment(self):
         """Let the user pick a deployment environment.

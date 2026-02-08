@@ -32,16 +32,16 @@ class RFToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "freq":
-                self._calc_frequency_slot()
-            elif choice == "fspl":
-                self._calc_fspl()
-            elif choice == "link":
-                self._calc_link_budget()
-            elif choice == "fresnel":
-                self._calc_fresnel()
-            elif choice == "power":
-                self._calc_eirp()
+            dispatch = {
+                "freq": ("Frequency Slots", self._calc_frequency_slot),
+                "fspl": ("FSPL Calculator", self._calc_fspl),
+                "link": ("Link Budget", self._calc_link_budget),
+                "fresnel": ("Fresnel Zone", self._calc_fresnel),
+                "power": ("EIRP Calculator", self._calc_eirp),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _calc_frequency_slot(self):
         """

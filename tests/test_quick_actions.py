@@ -54,6 +54,10 @@ class MockLauncher(QuickActionsMixin):
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
         pass
 
+    def _safe_call(self, method_name, method, *args, **kwargs):
+        """Simplified _safe_call for testing — just call the method."""
+        return method(*args, **kwargs)
+
 
 class TestQuickActionDefinitions:
     """Test QUICK_ACTIONS list structure."""

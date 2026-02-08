@@ -26,10 +26,13 @@ class SettingsMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "connection":
-                self._configure_connection()
-            elif choice == "propagation":
-                self._configure_propagation_sources()
+            dispatch = {
+                "connection": ("Connection Settings", self._configure_connection),
+                "propagation": ("Propagation Sources", self._configure_propagation_sources),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _configure_connection(self):
         """Configure Meshtastic connection."""

@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.1--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.2--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2963%20functions-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3360%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -79,13 +79,13 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 ```
 Main Menu (MeshForge NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
-├── 2. Mesh Networks         Meshtastic, RNS/Reticulum, AREDN, MQTT, Gateway
+├── 2. Mesh Networks         Meshtastic, RNS, AREDN, MQTT, Gateway, Favorites
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
 ├── 5. Configuration         Radio, channels, RNS config, services, backup
 ├── 6. System                Hardware detect, logs, network tools, shell, reboot
 ├── q. Quick Actions         Common shortcuts (2-tap access)
-├── e. Emergency Mode        Field operations (stripped-down menu)
+├── e. Emergency Mode        Field ops, weather/EAS alerts, SOS beacon
 ├── a. About                 Version, web client, help
 └── x. Exit
 ```
@@ -207,15 +207,18 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.5.1-beta)
+## What Works (v0.5.2-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
 | **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics | Stable |
+| **TUI Reliability** | Defense-in-depth error handling — 16 mixin dispatch loops protected with `_safe_call` | Stable |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
 | **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
+| **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS — accessible from Emergency Mode | Beta |
+| **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device, filter by favorites | Beta |
 | **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Beta |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Beta |
 | **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
@@ -374,6 +377,7 @@ meshtasticd
 - **Standard Linux tools** — `systemctl`, `journalctl`, `meshtastic`, `rnstatus`
 - **Config overlays** — writes to `config.d/`, never overwrites defaults
 - **Graceful degradation** — missing dependencies disable features, don't crash
+- **Defense-in-depth** — every mixin dispatch uses `_safe_call` to catch exceptions and return to menu
 
 ---
 
@@ -496,7 +500,7 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,440 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,364 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar

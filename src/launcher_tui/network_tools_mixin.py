@@ -155,34 +155,42 @@ class NetworkToolsMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._run_terminal_network()
-            elif choice == "ports":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Listening Ports ===\n")
-                subprocess.run(['ss', '-tlnp'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "ifaces":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Network Interfaces ===\n")
-                subprocess.run(['ip', '-c', 'addr'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "conns":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Active Connections ===\n")
-                subprocess.run(['ss', '-tunp'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "routes":
-                subprocess.run(['clear'], check=False, timeout=5)
-                print("=== Routing Table ===\n")
-                subprocess.run(['ip', 'route'], timeout=10)
-                self._wait_for_enter()
-            elif choice == "ping":
-                self._ping_test()
-            elif choice == "dns":
-                self._dns_lookup()
-            elif choice == "discover":
-                self._meshtastic_discovery()
+            try:
+                if choice == "status":
+                    self._run_terminal_network()
+                elif choice == "ports":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Listening Ports ===\n")
+                    subprocess.run(['ss', '-tlnp'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "ifaces":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Network Interfaces ===\n")
+                    subprocess.run(['ip', '-c', 'addr'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "conns":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Active Connections ===\n")
+                    subprocess.run(['ss', '-tunp'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "routes":
+                    subprocess.run(['clear'], check=False, timeout=5)
+                    print("=== Routing Table ===\n")
+                    subprocess.run(['ip', 'route'], timeout=10)
+                    self._wait_for_enter()
+                elif choice == "ping":
+                    self._ping_test()
+                elif choice == "dns":
+                    self._dns_lookup()
+                elif choice == "discover":
+                    self._meshtastic_discovery()
+            except KeyboardInterrupt:
+                pass  # Return to network menu
+            except Exception as e:
+                self.dialog.msgbox(
+                    "Network Tools Error",
+                    f"Operation failed:\n{type(e).__name__}: {e}"
+                )
 
     def _run_terminal_network(self):
         """Show network diagnostics directly in terminal."""
