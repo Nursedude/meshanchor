@@ -55,20 +55,50 @@ sudo python3 src/launcher_tui/main.py
 
 ## Quick Start
 
+### Fresh Install
+
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
-sudo bash scripts/install_noc.sh    # Full install
+sudo bash scripts/install_noc.sh    # Full NOC stack install
 ```
 
-Or if you already have meshtasticd:
+The installer auto-detects your radio hardware (SPI HAT or USB), installs
+meshtasticd + Reticulum, and sets up systemd services. It will prompt you
+to select your HAT if SPI is detected.
+
+**Installer options:**
+```bash
+sudo bash scripts/install_noc.sh --skip-meshtasticd   # Don't install meshtasticd
+sudo bash scripts/install_noc.sh --skip-rns            # Don't install Reticulum
+sudo bash scripts/install_noc.sh --client-only         # MeshForge only (no daemons)
+sudo bash scripts/install_noc.sh --force-native        # Force SPI mode
+sudo bash scripts/install_noc.sh --force-python        # Force USB mode
+```
+
+### Already Have meshtasticd?
+
 ```bash
 sudo python3 src/launcher_tui/main.py
 ```
 
-RF tools only (no sudo, no radio):
+### RF Tools Only (no sudo, no radio)
+
 ```bash
 python3 src/standalone.py
+```
+
+### Reinstall / Update
+
+Already running MeshForge and want the latest version? See
+[Upgrading MeshForge](#upgrading-meshforge) for full details.
+
+```bash
+# Clean reinstall (recommended) — backs up configs, fresh clone, restores configs
+sudo bash /opt/meshforge/scripts/reinstall.sh
+
+# Quick update (minor changes only)
+cd /opt/meshforge && sudo bash scripts/update.sh
 ```
 
 ### TUI Menu Structure
@@ -411,34 +441,66 @@ print(response.suggested_actions)
 
 ---
 
-## uConsole: All-In-One Field Unit
-
-MeshForge has first-class support for the [HackerGadgets uConsole AIO V2](https://hackergadgets.com/products/uconsole-aio-v2) — a portable mesh operations terminal:
-
-| Component | Capability |
-|-----------|-----------|
-| **SX1262 LoRa** | 860-960MHz, 22dBm, native Meshtastic via SPI |
-| **RTL-SDR** | RTL2832U + R860, 100KHz-1.74GHz spectrum |
-| **GPS/GNSS** | Multi-constellation (GPS/BDS/GLONASS) |
-| **RTC** | PCF85063A with battery backup |
-| **Ethernet** | RJ45 Gigabit (wired AREDN backhaul) |
-
-Auto-detection, GPIO power control, and meshtasticd config generation are implemented. Hardware arrives Q2 2026.
-
----
-
 ## Hardware
 
 **Minimum:** Raspberry Pi 3B+ or Pi Zero 2W + any Meshtastic radio
+**Recommended:** Raspberry Pi 4/5 + SPI HAT (~$90)
 
 | Component | Options |
 |-----------|---------|
 | **Computer** | Raspberry Pi 4/5 (recommended), Pi 3B+, Pi Zero 2W |
 | **OS** | Raspberry Pi OS Bookworm 64-bit, Debian 12+, Ubuntu 22.04+ |
-| **Radio (SPI)** | Meshtoad, MeshAdv-Pi-Hat, Waveshare SX1262 |
-| **Radio (USB)** | Heltec V3, T-Beam, RAK4631 |
+| **Radio (SPI)** | See SPI HATs table below |
+| **Radio (USB)** | See USB Radios table below |
+| **Optional** | RTL-SDR (spectrum analysis), GPS module, NanoVNA |
 
-**Cost:** ~$90 (Pi 4 + SPI HAT)
+### SPI HATs
+
+Native SPI HATs connect directly to the Pi's GPIO header and are managed by `meshtasticd`.
+The installer auto-detects SPI and presents a HAT selection menu. Configs live in `/etc/meshtasticd/available.d/`.
+
+| HAT | Radio Module | TX Power | Notes |
+|-----|-------------|----------|-------|
+| **MeshAdv-Pi HAT** | SX1262 | 33dBm (1W) | High power, GPS, PPS |
+| **MeshAdv-Mini** | SX1262/SX1268 | 22dBm | GPS, temp sensor, fan, I2C/Qwiic |
+| **MeshAdv-Pi v1.1** | SX1262 | Standard | Standard Pi HAT |
+| **Waveshare SX126X** | SX1262 | Standard | DIO2 RF switch |
+| **Ebyte E22-900M30S** | SX1262 | 30dBm (1W) | 915MHz high power |
+| **Ebyte E22-400M30S** | SX1268 | 30dBm (1W) | 433MHz (EU/Asia) |
+| **RAK RAK2287** | SX1262 | Standard | WisBlock HAT |
+| **Adafruit RFM9x** | SX1276 | Standard | LoRa Bonnet |
+| **Elecrow RFM95** | SX1276 | Standard | LoRa HAT |
+| **FemtoFox** | SX1262 | Standard | DIO2/DIO3 support |
+| **Seeed SenseCAP E5** | SX1262 | Standard | - |
+| **PiTx LoRa** | SX1276 | Standard | - |
+
+### USB Radios
+
+USB radios run their own firmware. `meshtasticd` can manage them, or they work standalone via the `meshtastic` CLI.
+The installer auto-detects connected USB devices.
+
+| Device | Chipset | Notes |
+|--------|---------|-------|
+| **Heltec V3/V4** | ESP32-S3 (CDC) | V4 supports 28dBm TX, gateway capable |
+| **Station G2** | CP2102 | Gateway capable, PoE option |
+| **LILYGO T-Beam S3** | CH9102 | Built-in GPS, gateway capable |
+| **RAK4631** | nRF52840 | Ultra-low power, UF2 flashing |
+| **MeshToad / MeshTadpole** | CH340 | MtnMesh devices, 900mA peak draw |
+| **MeshStick** | Native USB | Official Meshtastic device |
+| **FTDI-based modules** | FT232 | Generic LoRa boards |
+
+### uConsole AIO V2 (Field Unit)
+
+The [HackerGadgets uConsole AIO V2](https://hackergadgets.com/products/uconsole-aio-v2) is a portable all-in-one mesh terminal. MeshForge auto-detects it and generates configs. Hardware arrives Q2 2026.
+
+| Component | Spec |
+|-----------|------|
+| **Compute** | CM5 8GB |
+| **LoRa** | SX1262 on SPI, 860-960MHz, 22dBm |
+| **RTL-SDR** | RTL2832U + R860, 100KHz-1.74GHz |
+| **GPS/GNSS** | Multi-constellation (GPS/BDS/GLONASS) |
+| **RTC** | PCF85063A with battery backup |
+| **Ethernet** | RJ45 Gigabit |
 
 ---
 
@@ -763,16 +825,12 @@ sudo bash /opt/meshforge/scripts/reinstall.sh
 
 See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup and troubleshooting.
 
-### Gateway Configurations
+### Gateway Nodes
 
-| Configuration | Setup | Status |
-|---------------|-------|--------|
-| **fleet-host-1** | USB LongFast ↔ Short Turbo | Stable |
-| **fleet-host-2** | HAT Short Turbo ↔ LongFast (two-radio) | Stable |
-| **fleet-host-3** | HAT LongFast ↔ TBD | Planned |
-| **VolcanoAI** | USB LongFast ↔ RNS (desktop) | Stable |
+Active gateway deployments: **fleet-host-1**, **fleet-host-2**, **fleet-host-3**, **VolcanoAI**.
+Configurations are managed per-node via the TUI and are subject to change.
 
-Gateway templates available in `templates/gateway-pair/` for multi-preset bridging.
+Gateway templates for multi-preset bridging are available in `templates/gateway-pair/`.
 
 ---
 
