@@ -3,8 +3,8 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.5.2-beta"
-__version_info__ = (0, 5, 2, 'beta')
+__version__ = "0.5.3-beta"
+__version_info__ = (0, 5, 3, 'beta')
 __release_date__ = "2026-02-08"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
@@ -14,6 +14,18 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.5.3-beta",
+        "date": "2026-02-08",
+        "status": "beta",
+        "changes": [
+            "TEST: 136 unit tests for rns_bridge.py (core bridge logic, highest-value coverage)",
+            "TEST: 97 unit tests for rns_transport.py (packet fragmentation, reassembly, callbacks)",
+            "TEST: 45 unit tests for reconnect.py (exponential backoff, jitter, slow start recovery)",
+            "TEST: 72 unit tests for message_queue.py (persistent queue, retry policy, circuit breaker)",
+            "DOCS: Substack article on Opus 4.6 development sprint",
+        ]
+    },
     {
         "version": "0.5.2-beta",
         "date": "2026-02-08",
