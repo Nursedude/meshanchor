@@ -33,10 +33,13 @@ class HardwareMenuMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "detect":
-                self._detect_hardware()
-            elif choice == "spi":
-                self._enable_spi()
+            dispatch = {
+                "detect": ("Detect Hardware", self._detect_hardware),
+                "spi": ("Enable SPI", self._enable_spi),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _detect_hardware(self):
         """Run hardware detection - terminal-native."""

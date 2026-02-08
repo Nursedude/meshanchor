@@ -5,7 +5,10 @@ Extracted from main.py to keep file size under 1,500 lines.
 Provides the display methods used by the Dashboard submenu.
 """
 
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 
 
 class DashboardMixin:
@@ -247,19 +250,42 @@ class DashboardMixin:
         self._wait_for_enter()
 
     def _show_alerts(self):
-        """Show current alerts from environment state."""
+        """Show current alerts from environment state and EAS."""
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Current Alerts ===\n")
 
+        # System/environment alerts
         if self._env_state:
             alerts = self._env_state.get_alerts()
             if alerts:
+                print("SYSTEM ALERTS:")
                 for alert in alerts:
                     print(f"  \033[0;33m!\033[0m {alert}")
             else:
-                print("  No alerts - system healthy")
+                print("  System: No alerts - healthy")
         else:
             print("  Environment state not available")
+
+        # EAS / Weather alerts
+        print()
+        try:
+            from plugins.eas_alerts import EASAlertsPlugin
+            plugin = EASAlertsPlugin()
+            eas_alerts = plugin.get_weather_alerts()
+            if eas_alerts:
+                print(f"WEATHER ALERTS ({len(eas_alerts)}):")
+                for alert in eas_alerts[:5]:
+                    severity = getattr(alert, 'severity', 'Unknown')
+                    headline = getattr(alert, 'headline', str(alert))
+                    if len(headline) > 65:
+                        headline = headline[:62] + "..."
+                    print(f"  \033[0;31m!\033[0m [{severity}] {headline}")
+            else:
+                print("  Weather: No active alerts")
+        except ImportError:
+            pass  # EAS plugin not installed, skip silently
+        except Exception as e:
+            logger.debug("EAS alert check failed: %s", e)
 
         print()
         self._wait_for_enter()

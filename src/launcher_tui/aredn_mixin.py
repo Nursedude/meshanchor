@@ -35,18 +35,17 @@ class AREDNMixin:
             if choice is None or choice == "back":
                 break
 
-            if choice == "status":
-                self._aredn_node_status()
-            elif choice == "neighbors":
-                self._aredn_neighbors()
-            elif choice == "services":
-                self._aredn_services()
-            elif choice == "map":
-                self._aredn_map()
-            elif choice == "web":
-                self._aredn_web()
-            elif choice == "scan":
-                self._aredn_scan()
+            dispatch = {
+                "status": ("AREDN Status", self._aredn_node_status),
+                "neighbors": ("Neighbors & Links", self._aredn_neighbors),
+                "services": ("AREDN Services", self._aredn_services),
+                "map": ("Show on Map", self._aredn_map),
+                "web": ("AREDN Web UI", self._aredn_web),
+                "scan": ("Scan Network", self._aredn_scan),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self._safe_call(*entry)
 
     def _aredn_get_node_ip(self) -> str:
         """Get AREDN node IP - try common defaults."""
