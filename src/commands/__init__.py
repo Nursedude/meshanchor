@@ -5,7 +5,7 @@ Unified command interface for GTK and CLI.
 All UI-independent operations go here.
 
 Usage:
-    from commands import meshtastic, service, hardware, gateway, diagnostics, hamclock, rns, messaging
+    from commands import meshtastic, service, hardware, gateway, diagnostics, propagation, rns, messaging
 
     # Meshtastic operations
     result = meshtastic.get_node_info()
@@ -28,11 +28,17 @@ Usage:
     result = diagnostics.get_system_health()
     result = diagnostics.run_gateway_diagnostics()
 
-    # HamClock - Space Weather & Propagation
+    # Propagation - Space Weather & HF Propagation (NOAA primary, standalone)
+    result = propagation.get_space_weather()       # Always works (NOAA)
+    result = propagation.get_band_conditions()     # Derived from NOAA data
+    result = propagation.get_propagation_summary() # One-line summary
+    result = propagation.get_enhanced_data()       # + optional HamClock/OpenHamClock
+
+    # HamClock - Optional data source plugin (legacy)
+    # For standalone propagation data, use `propagation` module instead.
     hamclock.configure("localhost", api_port=8082)
-    result = hamclock.get_space_weather()
-    result = hamclock.get_voacap()
-    result = hamclock.get_noaa_solar_data()  # NOAA fallback
+    result = hamclock.get_voacap()                 # HamClock-specific
+    result = hamclock.get_dx_spots()               # HamClock-specific
 
     # RNS - Reticulum Network Stack
     result = rns.get_status()
@@ -61,6 +67,7 @@ from . import service
 from . import hardware
 from . import gateway
 from . import diagnostics
+from . import propagation
 from . import hamclock
 from . import rns
 from . import messaging
@@ -74,6 +81,7 @@ __all__ = [
     'hardware',
     'gateway',
     'diagnostics',
+    'propagation',
     'hamclock',
     'rns',
     'messaging',
