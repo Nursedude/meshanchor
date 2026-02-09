@@ -136,33 +136,41 @@ class TestServiceCheckContract:
 
 
 class TestRnsdStatusAcrossUIs:
-    """Integration test: rnsd status should be consistent across all UIs."""
+    """Integration test: rnsd status should be consistent across all UIs.
 
-    @patch('src.utils.service_check.check_udp_port')
-    @patch('src.utils.service_check.check_process_running')
-    @patch('src.utils.service_check.check_systemd_service')
-    def test_rnsd_running_consistent(self, mock_systemd, mock_proc, mock_udp):
+    Note: rnsd is a systemd service (is_systemd=True), so check_service()
+    calls subprocess.run(['systemctl', ...]) directly — NOT the helper
+    functions check_systemd_service/check_udp_port/check_process_running.
+    We must mock subprocess.run to control behavior (same pattern as
+    TestMeshtasticdStatusConsistency).
+    """
+
+    @patch('subprocess.run')
+    def test_rnsd_running_consistent(self, mock_run):
         """When rnsd is running, all UIs should report it as running."""
-        # Simulate rnsd running (UDP port in use)
-        mock_udp.return_value = True  # Port check succeeds (in use)
-        mock_proc.return_value = True  # Process found
-        mock_systemd.return_value = (True, True)  # (active, enabled)
+        # First call: systemctl is-active → "active"
+        # Second call: systemctl show --property=SubState → "SubState=running"
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout='active\n'),
+            MagicMock(returncode=0, stdout='SubState=running\n'),
+        ]
 
         from src.utils.service_check import check_service
 
         result = check_service('rnsd')
         assert result.available is True, \
-            "rnsd should be reported as available when UDP port is in use"
+            "rnsd should be reported as available when systemctl says active"
+        assert result.detection_method == "systemctl", \
+            "rnsd status should be via systemctl"
 
-    @patch('src.utils.service_check.check_udp_port')
-    @patch('src.utils.service_check.check_process_running')
-    @patch('src.utils.service_check.check_systemd_service')
-    def test_rnsd_stopped_consistent(self, mock_systemd, mock_proc, mock_udp):
+    @patch('subprocess.run')
+    def test_rnsd_stopped_consistent(self, mock_run):
         """When rnsd is stopped, all UIs should report it as stopped."""
-        # Simulate rnsd stopped
-        mock_udp.return_value = False  # Port not in use
-        mock_proc.return_value = False  # No process
-        mock_systemd.return_value = (False, False)  # (inactive, disabled)
+        # systemctl is-active rnsd returns "inactive"
+        mock_run.return_value = MagicMock(
+            returncode=3,
+            stdout='inactive\n'
+        )
 
         from src.utils.service_check import check_service
 
