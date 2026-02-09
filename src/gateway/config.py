@@ -603,6 +603,17 @@ class GatewayConfig:
                 ))
             seen.add(name)
 
+        # Config drift detection: check if gateway's RNS config path
+        # matches what rnsd is actually using
+        try:
+            from utils.config_drift import validate_gateway_rns_config
+            drift_errors = validate_gateway_rns_config(self)
+            errors.extend(drift_errors)
+        except ImportError:
+            pass  # config_drift module not available
+        except Exception as e:
+            logger.debug("Config drift check failed: %s", e)
+
         # Determine if valid (only errors count, not warnings/info)
         is_valid = not any(e.severity == "error" for e in errors)
 

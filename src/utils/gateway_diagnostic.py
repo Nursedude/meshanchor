@@ -264,7 +264,7 @@ class GatewayDiagnostic:
             )
 
     def check_rns_config(self) -> CheckResult:
-        """Check RNS configuration file."""
+        """Check RNS configuration file and detect config drift."""
         from utils.paths import ReticulumPaths
         config_path = ReticulumPaths.get_config_file()
 
@@ -290,15 +290,27 @@ class GatewayDiagnostic:
             # Check for Meshtastic interface
             has_meshtastic = 'meshtastic' in content.lower()
 
+            # Check for config drift between gateway and rnsd
+            try:
+                from utils.config_drift import detect_rnsd_config_drift
+                drift = detect_rnsd_config_drift()
+                if drift.drifted:
+                    issues.append(
+                        f"Config drift: gateway uses {drift.gateway_config_dir} "
+                        f"but rnsd uses {drift.rnsd_config_dir}"
+                    )
+            except ImportError:
+                pass
+
             if issues:
                 return CheckResult(
                     name="RNS Config",
                     status=CheckStatus.WARN,
                     message=f"Config exists but: {'; '.join(issues)}",
-                    fix_hint="Edit ~/.reticulum/config to add interfaces"
+                    fix_hint=f"Config at: {config_path.parent}"
                 )
 
-            msg = "Config valid"
+            msg = f"Config valid ({config_path.parent})"
             if has_meshtastic:
                 msg += " (Meshtastic interface configured)"
 
@@ -312,7 +324,7 @@ class GatewayDiagnostic:
                 name="RNS Config",
                 status=CheckStatus.FAIL,
                 message=f"Error reading config: {e}",
-                fix_hint="Check file permissions on ~/.reticulum/config"
+                fix_hint=f"Check file permissions on {config_path}"
             )
 
     def check_rnsd_running(self) -> CheckResult:
