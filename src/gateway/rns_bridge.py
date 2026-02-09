@@ -826,6 +826,15 @@ class RNSMeshtasticBridge:
             logger.info("RNS not installed, will be handled in _connect_rns")
             return
 
+        # Ensure /etc/reticulum/storage/ratchets exists before RNS init.
+        # RNS Identity.persist_job() creates this in a background thread
+        # and crashes with PermissionError if it can't. Pre-creating it
+        # here (when running as root/sudo) prevents the crash.
+        if os.geteuid() == 0:
+            if not ReticulumPaths.ensure_system_dirs():
+                logger.warning("Could not create /etc/reticulum directories "
+                             "(filesystem may be read-only)")
+
         from utils.gateway_diagnostic import find_rns_processes
         rns_pids = find_rns_processes()
 
