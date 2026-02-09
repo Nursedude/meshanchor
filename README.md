@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.3--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3861%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3927%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -88,17 +88,26 @@ sudo python3 src/launcher_tui/main.py
 python3 src/standalone.py
 ```
 
-### Reinstall / Update
+### Upgrade / Reinstall
 
-Already running MeshForge and want the latest version? See
-[Upgrading MeshForge](#upgrading-meshforge) for full details.
+Already running MeshForge? Pick your path:
 
 ```bash
-# Clean reinstall (recommended) — backs up configs, fresh clone, restores configs
+# Option 1: Clean reinstall (recommended)
+# Backs up configs → removes code → fresh clone → restores configs
+# Your radio, RNS identity, and MQTT broker are NOT touched
 sudo bash /opt/meshforge/scripts/reinstall.sh
 
-# Quick update (minor changes only)
+# Option 2: Quick update (minor code changes only)
 cd /opt/meshforge && sudo bash scripts/update.sh
+
+# Option 3: Manual git pull (developers)
+cd /opt/meshforge && sudo git pull origin main
+```
+
+After any upgrade, verify:
+```bash
+sudo bash scripts/install_noc.sh --verify-install
 ```
 
 ### TUI Menu Structure
@@ -131,35 +140,59 @@ Main Menu (MeshForge NOC)
 
 ## Upgrading MeshForge
 
+### Decision Tree
+
+```
+Do you need to upgrade?
+  │
+  ├── Import errors, stale .pyc, major version bump, or something "feels off"
+  │   └── Clean Reinstall (recommended)
+  │
+  ├── Small code change, no new dependencies
+  │   └── Quick Update (git pull)
+  │
+  └── Switching from alpha branch to main
+      └── Branch Switch
+```
+
 ### Clean Reinstall (Recommended)
 
-The cleanest way to upgrade MeshForge — guarantees you get the latest code,
-dependencies, and system integration without stale files or merge conflicts:
+The safest upgrade path. Guarantees fresh code, correct dependencies, no stale files:
 
 ```bash
 sudo bash /opt/meshforge/scripts/reinstall.sh
 ```
 
-**What it does:**
-1. Backs up your configs (`/etc/meshforge/`, `/etc/meshtasticd/config.d/`, `~/.config/meshforge/`)
-2. Stops MeshForge services (meshforge, meshforge-map)
-3. Removes `/opt/meshforge` completely (source + venv)
+**What happens:**
+1. Backs up configs to `~/meshforge-backup-<timestamp>/`
+2. Stops MeshForge services
+3. Removes `/opt/meshforge` (source + venv only)
 4. Fresh `git clone` from GitHub
-5. Runs `install_noc.sh` to rebuild everything
-6. Restores your backed-up configs
+5. Runs `install_noc.sh` to rebuild
+6. Restores your configs from backup
 
-**What it does NOT touch:**
-- meshtasticd (apt package, service, `/etc/meshtasticd/config.yaml`)
-- Reticulum/rnsd installation
-- Your radio configs in `/etc/meshtasticd/config.d/`
-- MQTT broker (mosquitto)
-- System packages
+**What is preserved (never touched):**
+
+| Preserved | Path | Why |
+|-----------|------|-----|
+| meshtasticd | apt package + `/etc/meshtasticd/config.yaml` | Separate package, your radio config |
+| Radio hardware configs | `/etc/meshtasticd/config.d/` | Backed up + restored |
+| Reticulum identity | `~/.reticulum/` | Your RNS address + keys |
+| MeshForge user settings | `~/.config/meshforge/` | Backed up + restored |
+| MQTT broker | mosquitto service + config | Separate service |
+| System packages | pip, apt installs | Not managed by MeshForge |
 
 No need to re-image your Pi. Your radio stays configured.
 
+**Reinstall flags:**
+```bash
+sudo bash scripts/reinstall.sh --no-confirm    # Skip confirmation prompt
+sudo bash scripts/reinstall.sh --branch alpha   # Install specific branch
+```
+
 ### Quick Update (Git Pull)
 
-For developers or when you know the update is minor:
+For developers tracking the repo, when the update is minor:
 
 ```bash
 cd /opt/meshforge && sudo bash scripts/update.sh
@@ -170,18 +203,12 @@ Or manually:
 cd /opt/meshforge && sudo git pull origin main
 ```
 
-**When to use git pull:** Small code changes, you track the repo, no dependency changes.
-
-**When to use clean reinstall:** New dependencies, major version bumps, import errors,
-stale `.pyc` files, or anything that "doesn't look right" after a pull.
-
 ### Switch Branches
 
-All active development is on `main`. The `alpha` branch contains firmware
-and NanoVNA research work and is not synchronized with main.
+All active development is on `main`. The `alpha` branch has firmware/NanoVNA
+research and is not synchronized with main.
 
 ```bash
-# If you're on alpha, switch to main for current features:
 cd /opt/meshforge
 git checkout main
 sudo bash scripts/update.sh
@@ -189,17 +216,20 @@ sudo bash scripts/update.sh
 
 ### Post-Upgrade Verification
 
+Run the built-in verification after any upgrade:
+
 ```bash
-# Check new version
+# Automated check (recommended)
+sudo bash scripts/install_noc.sh --verify-install
+
+# Manual checks
 python3 -c "from src.__version__ import __version__; print(__version__)"
-
-# Verify TUI launches
+systemctl status meshtasticd rnsd
 sudo python3 src/launcher_tui/main.py
-
-# Check services are running
-systemctl status meshtasticd
-systemctl status rnsd
 ```
+
+The `--verify-install` flag checks Python imports, service status, config
+file integrity, and radio hardware detection without modifying anything.
 
 ### Troubleshooting Upgrades
 
@@ -207,26 +237,37 @@ systemctl status rnsd
 |-------|----------|
 | Python import errors | `sudo bash scripts/reinstall.sh` (clean reinstall) |
 | `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
-| Service won't start | Check logs: `journalctl -u meshtasticd -n 50` |
+| Service won't start | `journalctl -u meshtasticd -n 50` |
 | Config file conflicts | Restore from `~/meshforge-backup-*` or regenerate via TUI |
-| `meshtastic` module errors | See "Python Library Conflicts" below |
+| `meshtastic` module not found | See "Python Library Conflicts" below |
 | Stale `.pyc` files | Clean reinstall handles this automatically |
+| Wrong bridge mode after upgrade | TUI auto-defaults to `message_bridge` for single-radio |
 
 #### Python Library Conflicts
 
-On some systems (especially Raspberry Pi OS with externally-managed Python), the `meshtastic` library may fail to install due to version conflicts. If you see errors like "externally-managed-environment" or module import failures:
+On Raspberry Pi OS Bookworm+ (externally-managed Python), the `meshtastic`
+library may fail to install. If you see "externally-managed-environment" or
+module import failures:
 
 ```bash
-# Force reinstall meshtastic (use with caution)
+# Force reinstall (use with caution on managed Python)
 pip install meshtastic --break-system-packages --ignore-installed
 
-# Alternative: use a virtual environment
+# Alternative: virtual environment
 python3 -m venv ~/.meshforge-venv
 source ~/.meshforge-venv/bin/activate
 pip install meshtastic
 ```
 
-Note: The `--break-system-packages` flag bypasses PEP 668 protections. Only use this if you understand the implications for your system Python environment.
+The `--break-system-packages` flag bypasses PEP 668 protections. Only use
+this if you understand the implications for your system Python.
+
+MeshForge's diagnostics can detect this automatically:
+```bash
+# TUI: System → Diagnostics → Gateway Pre-flight
+# Or directly:
+sudo python3 src/launcher_tui/main.py  # Dashboard shows import warnings
+```
 
 ### Version History
 
@@ -562,11 +603,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,488 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,465 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 35 feature modules (RF, channels, AI, system, etc.)
+│   └── *_mixin.py         # 36 feature modules (RF, channels, AI, system, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -741,7 +782,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**3,861 tests passing** across the gateway, monitoring, and utility layers:
+**3,927 tests passing** across the gateway, monitoring, and utility layers:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -811,26 +852,20 @@ Active development on `main`. Feature branches via `claude/` prefix, merged by P
 git clone https://github.com/Nursedude/meshforge.git
 cd meshforge
 sudo bash scripts/install_noc.sh
+sudo bash scripts/install_noc.sh --verify-install  # Confirm everything works
 ```
 
-### Quick Update
+For upgrade paths see [Upgrading MeshForge](#upgrading-meshforge).
 
-```bash
-# Quick pull (minor updates)
-cd /opt/meshforge && sudo bash scripts/update.sh
+### Gateway Deployments
 
-# Clean reinstall (recommended for major updates)
-sudo bash /opt/meshforge/scripts/reinstall.sh
-```
+Active gateway nodes: **MOC1** (Pi5 + Meshtoad, LongFast, MQTT broker),
+**MOC2** (Pi HAT, ShortTurbo, RNS/NomadNet), **MOC3**, **VolcanoAI**.
 
-See [Upgrading MeshForge](#upgrading-meshforge) for complete instructions including backup and troubleshooting.
-
-### Gateway Nodes
-
-Active gateway deployments: **moc1**, **moc2**, **moc3**, **VolcanoAI**.
-Configurations are managed per-node via the TUI and are subject to change.
-
-Gateway templates for multi-preset bridging are available in `templates/gateway-pair/`.
+Templates for multi-node setups:
+- `templates/gateway-pair/` — dual-gateway preset bridging
+- `templates/meshforge-presets/` — per-node presets (MOC1 broker, etc.)
+- `templates/gateway-pair/moc-mqtt-bridge.md` — MQTT-bridged topology guide
 
 ---
 
