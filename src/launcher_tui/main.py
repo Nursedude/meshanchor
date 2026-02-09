@@ -130,6 +130,7 @@ from device_backup_mixin import DeviceBackupMixin
 from traffic_inspector_mixin import TrafficInspectorMixin
 from updates_mixin import UpdatesMixin
 from mqtt_mixin import MQTTMixin
+from broker_mixin import BrokerMixin
 from gateway_config_mixin import GatewayConfigMixin
 from favorites_mixin import FavoritesMixin
 from network_tools_mixin import NetworkToolsMixin
@@ -167,6 +168,7 @@ class MeshForgeLauncher(
     TrafficInspectorMixin,
     UpdatesMixin,
     MQTTMixin,
+    BrokerMixin,
     GatewayConfigMixin,
     FavoritesMixin,
     NetworkToolsMixin,
