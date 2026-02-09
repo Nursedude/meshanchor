@@ -1504,3 +1504,94 @@ RNS added **key ratcheting** support which requires a `ratchets/` subdirectory u
 ### Status: RESOLVED
 
 ---
+
+## Issue #26: ReticulumPaths Fallback Copies Cause Config Divergence
+
+### Symptom
+`.reticulum` interface configuration is "lost" between sessions. RNS config changes made in the TUI have no effect. rnsd uses a different config file than what MeshForge reads/writes.
+
+### Root Cause
+**Four separate copies** of `ReticulumPaths` existed in the codebase:
+1. `src/utils/paths.py` — **Canonical** (correct: checks `/etc/reticulum`, XDG, `~/.reticulum`)
+2. `src/launcher_tui/main.py` — Fallback (missing `get_interfaces_dir`, `ensure_system_dirs`)
+3. `src/launcher_tui/rns_menu_mixin.py` — Fallback (missing `ensure_system_dirs`)
+4. `src/core/diagnostics/checks/rns.py` — Fallback (**WRONG: skipped `/etc/reticulum` and XDG entirely**)
+5. `src/gateway/rns_bridge.py` — Fallback (missing `get_interfaces_dir`, `ensure_system_dirs`)
+
+The diagnostics fallback (`rns.py`) was the worst — it went directly to `~/.reticulum` without checking `/etc/reticulum/config` first. If a user had both `/etc/reticulum/config` (used by rnsd) and `~/.reticulum/config` (fallback), the diagnostics would read the wrong file and report incorrect status.
+
+Additionally, when running with sudo:
+- User edits: `/home/user/.reticulum/config`
+- rnsd reads: `/root/.reticulum/config` OR `/etc/reticulum/config`
+- Result: silent divergence, changes have no effect
+
+### Fix (v0.5.x, 2026-02-09)
+**Eliminated all fallback copies.** Every file now imports directly:
+```python
+# NO try/except, NO fallback class
+from utils.paths import ReticulumPaths
+```
+This ensures ONE definition is used everywhere. If `utils.paths` is unavailable, the import fails immediately with a clear `ImportError` — better than silently using a wrong path.
+
+### Files Changed
+- `src/launcher_tui/main.py` — Removed 16-line fallback
+- `src/launcher_tui/rns_menu_mixin.py` — Removed 20-line fallback
+- `src/gateway/rns_bridge.py` — Removed 20-line fallback
+- `src/core/diagnostics/checks/rns.py` — Removed 20-line WRONG fallback
+
+### Prevention
+- **NEVER** duplicate `ReticulumPaths`. Always import from `utils/paths.py`.
+- `utils/paths.py` is the SINGLE SOURCE OF TRUTH for all path resolution.
+- If a file needs `ReticulumPaths`, import it. No try/except fallback.
+
+### Status: RESOLVED
+
+---
+
+## Issue #27: rnsd is OPTIONAL for Meshtastic-only Deployments
+
+### Context
+MeshForge supports two independent transport layers:
+1. **MQTT** — Meshtastic native MQTT protocol (via mosquitto)
+2. **RNS** — Reticulum Network Stack (via rnsd)
+
+### When rnsd IS Needed
+- RNS/LXMF messaging (NomadNet, Sideband)
+- Cross-protocol bridging: Meshtastic <-> RNS/LXMF
+- RNS-only mesh networks (non-Meshtastic)
+
+### When rnsd is NOT Needed
+- Meshtastic-to-Meshtastic bridging across presets (e.g., LongFast <-> ShortTurbo)
+- MQTT monitoring (nodeless observation)
+- RF calculations, propagation tools
+- Node tracking via MQTT subscriber
+
+### Architecture: Meshtastic LF <-> Private Broker <-> Meshtastic ST
+For bridging between Meshtastic presets (e.g., LongFast slot 20 <-> ShortTurbo slot 8),
+**no gateway code or rnsd is needed**. Both radios connect to the same MQTT broker
+with the same channel name/PSK and use uplink_enabled + downlink_enabled:
+
+```
+Radio A (LONG_FAST)  --WiFi-->  mosquitto  <--WiFi--  Radio B (SHORT_TURBO)
+  Channel: "MeshBridge"         (broker)              Channel: "MeshBridge"
+  PSK: <custom_key>                                   PSK: <same_key>
+  uplink: true                                        uplink: true
+  downlink: true                                      downlink: true
+```
+
+Messages are bridged by the radios themselves via native Meshtastic MQTT.
+MeshForge's role is running mosquitto and monitoring traffic.
+
+### Architecture: Full MeshForge NOC (Meshtastic + RNS)
+For the complete NOC with both transports:
+
+```
+Meshtastic LF ──> mosquitto ──> MeshForge MQTT Subscriber (monitoring)
+Meshtastic ST ──>     │
+                      └──> RNS Gateway Bridge ──> rnsd ──> NomadNet/Sideband
+```
+
+Both MQTT and RNS can coexist. The private broker handles Meshtastic transport,
+RNS handles encrypted mesh-independent routing.
+
+### Status: DOCUMENTED
