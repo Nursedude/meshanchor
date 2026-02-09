@@ -31,6 +31,7 @@ from .rns import (
     check_rns_installed,
     check_rns_config,
     check_rns_port,
+    check_rns_storage_permissions,
     check_meshtastic_interface_file,
 )
 
@@ -84,6 +85,7 @@ __all__ = [
     'check_rns_installed',
     'check_rns_config',
     'check_rns_port',
+    'check_rns_storage_permissions',
     'check_meshtastic_interface_file',
     # Meshtastic
     'check_meshtastic_installed',

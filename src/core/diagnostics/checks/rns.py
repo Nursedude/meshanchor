@@ -4,6 +4,7 @@ RNS (Reticulum Network Stack) diagnostic checks.
 Checks for RNS installation, configuration, and Meshtastic interface.
 """
 
+import os
 import socket
 import time
 import logging
@@ -145,6 +146,63 @@ def check_rns_port() -> CheckResult:
             message=str(e),
             duration_ms=(time.time() - start) * 1000
         )
+
+
+def check_rns_storage_permissions() -> CheckResult:
+    """Check that RNS storage directories exist with correct permissions.
+
+    RNS Identity.persist_job() requires the 'ratchets' subdirectory under
+    the storage directory. If missing or not writable, rnsd crashes with
+    PermissionError in a background thread.
+    """
+    start = time.time()
+
+    # Only relevant for system-wide config
+    etc_storage = Path('/etc/reticulum/storage')
+    if not etc_storage.parent.exists():
+        return CheckResult(
+            name="RNS storage permissions",
+            category=CheckCategory.RNS,
+            status=CheckStatus.PASS,
+            message="System-wide config not used (OK)",
+            duration_ms=(time.time() - start) * 1000
+        )
+
+    ratchets_dir = etc_storage / 'ratchets'
+    issues = []
+
+    if not etc_storage.exists():
+        issues.append("storage/ directory missing")
+    elif not os.access(str(etc_storage), os.W_OK):
+        issues.append("storage/ not writable")
+
+    if not ratchets_dir.exists():
+        issues.append("storage/ratchets/ directory missing")
+    elif not os.access(str(ratchets_dir), os.W_OK):
+        issues.append("storage/ratchets/ not writable")
+
+    duration = (time.time() - start) * 1000
+
+    if issues:
+        return CheckResult(
+            name="RNS storage permissions",
+            category=CheckCategory.RNS,
+            status=CheckStatus.FAIL,
+            message="; ".join(issues),
+            fix_hint=(
+                "sudo mkdir -p /etc/reticulum/storage/ratchets && "
+                "sudo chmod 755 /etc/reticulum/storage /etc/reticulum/storage/ratchets"
+            ),
+            duration_ms=duration
+        )
+
+    return CheckResult(
+        name="RNS storage permissions",
+        category=CheckCategory.RNS,
+        status=CheckStatus.PASS,
+        message="storage/ and ratchets/ directories OK",
+        duration_ms=duration
+    )
 
 
 def check_meshtastic_interface_file() -> CheckResult:

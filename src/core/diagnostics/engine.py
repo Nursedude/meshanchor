@@ -49,6 +49,7 @@ from .checks import (
     check_rns_installed,
     check_rns_config,
     check_rns_port,
+    check_rns_storage_permissions,
     check_meshtastic_interface_file,
     # Meshtastic
     check_meshtastic_installed,
@@ -300,6 +301,7 @@ class DiagnosticEngine:
         results.append(check_rns_config())
         results.append(check_process('rnsd', 'RNS daemon'))
         results.append(check_rns_port())
+        results.append(check_rns_storage_permissions())
         results.append(check_meshtastic_interface_file())
         self._update_subsystem_health('rns', results)
         return results

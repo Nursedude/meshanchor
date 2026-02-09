@@ -97,9 +97,9 @@ KNOWN_SERVICES = {
         'port': RNS_SHARED_INSTANCE_PORT,
         'port_type': 'udp',
         'systemd_name': 'rnsd',
-        'is_systemd': False,  # rnsd is a user-space daemon, NOT a systemd service
+        'is_systemd': True,  # rnsd runs as systemd service (install_noc.sh creates unit)
         'description': 'Reticulum Network Stack daemon',
-        'fix_hint': 'Start with: rnsd (run as user, not root)',
+        'fix_hint': 'Start with: sudo systemctl start rnsd',
     },
     'mosquitto': {
         'port': MQTT_PORT,
