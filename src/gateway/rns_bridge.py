@@ -831,9 +831,25 @@ class RNSMeshtasticBridge:
         # and crashes with PermissionError if it can't. Pre-creating it
         # here (when running as root/sudo) prevents the crash.
         if os.geteuid() == 0:
+            ratchets_missing = (
+                ReticulumPaths.ETC_BASE.exists()
+                and not ReticulumPaths.ETC_RATCHETS.exists()
+            )
             if not ReticulumPaths.ensure_system_dirs():
                 logger.warning("Could not create /etc/reticulum directories "
                              "(filesystem may be read-only)")
+            elif ratchets_missing:
+                # Dirs were just created — restart rnsd so it stops crashing
+                logger.info("Created missing RNS ratchets dir, restarting rnsd")
+                try:
+                    from utils.service_check import apply_config_and_restart
+                    success, msg = apply_config_and_restart('rnsd')
+                    if success:
+                        logger.info("rnsd restarted successfully")
+                    else:
+                        logger.warning("rnsd restart failed: %s", msg)
+                except (ImportError, Exception) as e:
+                    logger.debug("rnsd restart skipped: %s", e)
 
         from utils.gateway_diagnostic import find_rns_processes
         rns_pids = find_rns_processes()

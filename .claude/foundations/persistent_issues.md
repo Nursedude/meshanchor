@@ -1472,3 +1472,35 @@ The gateway diagnostic (`src/utils/gateway_diagnostic.py`) should be updated to:
 - Document in installation wizard that meshtastic must be installed system-wide
 
 ---
+
+## Issue #25: rnsd PermissionError on /etc/reticulum/storage/ratchets
+
+### Symptom
+rnsd crashes in a background thread with:
+```
+PermissionError: [Errno 13] Permission denied: '/etc/reticulum/storage/ratchets'
+```
+Additionally, `/etc/reticulum/identity` is never created, and the TUI "Show local identity" shows "No identity provided, cannot continue."
+
+### Root Cause
+RNS added **key ratcheting** support which requires a `ratchets/` subdirectory under storage. `Identity.persist_job()` runs in a background thread and calls `os.makedirs(ratchetdir)`. The install script didn't create this directory, and `ReticulumPaths.ensure_system_dirs()` was defined but never called at runtime.
+
+### Fix (v0.5.x, 2026-02-09)
+**Self-healing at runtime** — MeshForge now creates the directories automatically:
+1. `startup_checks.check_all()` calls `ensure_system_dirs()` at TUI launch
+2. `rns_bridge._init_rns_main_thread()` calls it before RNS init
+3. `install_noc.sh` creates `storage/ratchets/` during install
+4. `check_rns_storage_permissions()` diagnostic detects the issue
+5. After fixing dirs, MeshForge auto-restarts rnsd via `apply_config_and_restart()`
+
+### Files
+- `src/utils/paths.py` — `ETC_RATCHETS`, `ensure_system_dirs()`
+- `src/gateway/rns_bridge.py` — Self-heal in `_init_rns_main_thread()`
+- `src/launcher_tui/startup_checks.py` — Self-heal in `check_all()`
+- `src/core/diagnostics/checks/rns.py` — `check_rns_storage_permissions()`
+- `scripts/install_noc.sh` — Pre-create dirs
+- `src/launcher_tui/rns_menu_mixin.py` — Fixed `rnid` invocation
+
+### Status: RESOLVED
+
+---

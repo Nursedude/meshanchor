@@ -242,12 +242,7 @@ class StartupChecker:
         # Ensure RNS storage directories exist (self-healing)
         # Prevents rnsd PermissionError on /etc/reticulum/storage/ratchets
         if env.is_root:
-            try:
-                from utils.paths import ReticulumPaths
-                if not ReticulumPaths.ensure_system_dirs():
-                    logger.debug("Could not create /etc/reticulum directories")
-            except ImportError:
-                pass
+            self._heal_rns_storage_dirs()
 
         # Check services
         env.services = self._check_services()
@@ -267,6 +262,48 @@ class StartupChecker:
     def invalidate_cache(self):
         """Clear the cached environment state."""
         self._cache = None
+
+    def _heal_rns_storage_dirs(self):
+        """Create missing RNS storage directories and restart rnsd if needed.
+
+        RNS Identity.persist_job() requires /etc/reticulum/storage/ratchets/.
+        If the directory is missing, we create it and restart rnsd so it
+        picks up the fix without requiring manual intervention.
+        """
+        try:
+            from utils.paths import ReticulumPaths
+        except ImportError:
+            return
+
+        ratchets = ReticulumPaths.ETC_RATCHETS
+        needs_restart = (
+            ReticulumPaths.ETC_BASE.exists()
+            and not ratchets.exists()
+        )
+
+        if not ReticulumPaths.ensure_system_dirs():
+            logger.debug("Could not create /etc/reticulum directories")
+            return
+
+        if needs_restart:
+            # Directories were just created — restart rnsd so it stops crashing
+            logger.info("Created missing RNS storage/ratchets dir, restarting rnsd")
+            try:
+                from utils.service_check import apply_config_and_restart
+                success, msg = apply_config_and_restart('rnsd')
+                if success:
+                    logger.info("rnsd restarted after storage dir fix")
+                else:
+                    logger.warning("rnsd restart failed: %s", msg)
+            except ImportError:
+                # Fallback if service_check not available
+                try:
+                    subprocess.run(
+                        ['systemctl', 'restart', 'rnsd'],
+                        timeout=30, capture_output=True
+                    )
+                except Exception as e:
+                    logger.debug("rnsd restart fallback failed: %s", e)
 
     def _check_services(self) -> Dict[str, ServiceInfo]:
         """Check status of all known services."""
