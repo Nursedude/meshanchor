@@ -828,15 +828,37 @@ class RNSMeshtasticBridge:
         from utils.gateway_diagnostic import find_rns_processes
         rns_pids = find_rns_processes()
 
-        # Determine config directory: explicit config > RNS default resolution
+        # Determine config directory: explicit config > rnsd's actual path > default
         config_dir = self.config.rns.config_dir or None
         if config_dir:
             logger.info(f"Using explicit RNS config dir: {config_dir}")
         else:
-            # Let RNS resolve its own config path (matches rnsd's resolution)
-            rns_config = ReticulumPaths.get_config_file()
-            logger.info(f"RNS config path: {rns_config} "
-                       f"(exists: {rns_config.exists()})")
+            # Active drift fix: prefer rnsd's actual config path over default
+            # resolution. This prevents the gateway from reading a different
+            # config than the running daemon (e.g. ~/.reticulum vs /etc/reticulum)
+            try:
+                from utils.config_drift import (
+                    detect_rnsd_config_drift, get_rnsd_effective_config_dir
+                )
+                drift = detect_rnsd_config_drift()
+                if drift.drifted:
+                    logger.warning(drift.message)
+                    if drift.fix_hint:
+                        logger.info("Drift fix: %s", drift.fix_hint)
+                    # Use rnsd's actual path as the active fix
+                    config_dir = str(drift.rnsd_config_dir)
+                    logger.info("Active fix: using rnsd's config dir %s "
+                               "instead of gateway's resolved %s",
+                               drift.rnsd_config_dir, drift.gateway_config_dir)
+                else:
+                    rns_config = ReticulumPaths.get_config_file()
+                    logger.info(f"RNS config path: {rns_config} "
+                               f"(exists: {rns_config.exists()}) "
+                               f"[{drift.detection_method}]")
+            except ImportError:
+                rns_config = ReticulumPaths.get_config_file()
+                logger.info(f"RNS config path: {rns_config} "
+                           f"(exists: {rns_config.exists()})")
 
         try:
             if rns_pids:
@@ -895,6 +917,15 @@ class RNSMeshtasticBridge:
                 from utils.gateway_diagnostic import find_rns_processes
                 rns_pids = find_rns_processes()
                 config_dir = self.config.rns.config_dir or None
+
+                # Active drift fix: prefer rnsd's actual config path
+                if not config_dir:
+                    try:
+                        from utils.config_drift import get_rnsd_effective_config_dir
+                        effective = get_rnsd_effective_config_dir()
+                        config_dir = str(effective)
+                    except ImportError:
+                        pass
 
                 if rns_pids:
                     logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
