@@ -25,8 +25,6 @@ class WebClientMixin:
 
     def _open_web_client(self):
         """Show/open meshtasticd web client for full radio configuration."""
-        import webbrowser
-
         # Get local IP for network access
         local_ip = "localhost"
         try:
@@ -110,12 +108,36 @@ class WebClientMixin:
                 self._safe_call(*entry)
 
     def _launch_web_client_browser(self, url: str):
-        """Launch meshtasticd web client in browser."""
+        """Launch meshtasticd web client in browser.
+
+        On headless systems (no DISPLAY/WAYLAND), only shows the URL
+        since terminal browsers (lynx) can't render the JS web UI
+        and would corrupt the TUI if launched in a background thread.
+        """
+        import shutil
+
+        has_display = bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+
+        if not has_display:
+            # Headless: no graphical browser available
+            # DO NOT launch lynx/w3m - they are terminal programs that
+            # would fight with whiptail for the terminal and corrupt the TUI
+            self.dialog.msgbox(
+                "No Graphical Browser",
+                f"No display detected (headless/SSH).\n\n"
+                f"Access from a device with a browser:\n"
+                f"  {url}\n\n"
+                f"The web UI requires JavaScript.\n"
+                f"Text browsers (lynx) cannot render it.",
+                height=13, width=55
+            )
+            return
+
+        # Graphical display available - launch browser in background
         import webbrowser
 
         def do_open():
             try:
-                # When running as root, use sudo -u to run as real user
                 real_user = os.environ.get('SUDO_USER')
                 if os.geteuid() == 0 and real_user:
                     subprocess.run(
@@ -142,10 +164,8 @@ class WebClientMixin:
             f"Opening: {url}\n\n"
             "If you see an SSL certificate warning:\n"
             "  Click 'Advanced' then 'Proceed'\n"
-            "  Or generate a trusted cert (SSL menu)\n\n"
-            "Note: Requires a graphical browser with\n"
-            "JavaScript. lynx/w3m will not work.",
-            height=14, width=55
+            "  Or generate a trusted cert (SSL menu)",
+            height=11, width=55
         )
 
     def _show_web_client_urls(self, local_ip: str):
@@ -228,7 +248,15 @@ class WebClientMixin:
             )
             return
 
-        self.dialog.infobox("SSL Certificate", "Generating trusted certificate...")
+        # Use msgbox (not infobox) so terminal is in a clean state
+        # before running openssl subprocesses
+        self.dialog.msgbox(
+            "Generate Certificate",
+            "This will generate a trusted SSL certificate\n"
+            "for localhost and install it system-wide.\n\n"
+            "Press OK to continue.",
+            height=10, width=50
+        )
 
         success, msg = generate_localhost_cert()
 
