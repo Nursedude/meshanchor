@@ -1013,6 +1013,33 @@ Common Issues:
     ))
 
     kb._add_guide(TroubleshootingGuide(
+        problem="rnsd_ratchets_permission",
+        description="rnsd crashes with PermissionError on /etc/reticulum/storage/ratchets",
+        prerequisites=["rnsd installed", "Using system-wide config at /etc/reticulum/"],
+        steps=[
+            TroubleshootingStep(
+                instruction="Check if ratchets directory exists",
+                command="ls -la /etc/reticulum/storage/ratchets",
+                expected_result="Directory exists with write permissions",
+                if_fail="Directory missing — RNS Identity.persist_job() needs it for key ratcheting",
+            ),
+            TroubleshootingStep(
+                instruction="Create the ratchets directory with correct permissions",
+                command="sudo mkdir -p /etc/reticulum/storage/ratchets && sudo chmod 755 /etc/reticulum/storage/ratchets",
+                expected_result="Directory created successfully",
+                if_fail="Check filesystem is not mounted read-only",
+            ),
+            TroubleshootingStep(
+                instruction="Restart rnsd to verify the fix",
+                command="sudo systemctl restart rnsd",
+                expected_result="Active: active (running)",
+                if_fail="Check journalctl -u rnsd for other errors",
+            ),
+        ],
+        related_problems=["rnsd_not_starting"],
+    ))
+
+    kb._add_guide(TroubleshootingGuide(
         problem="rns_path_failure",
         description="Cannot reach RNS destination — path not found",
         prerequisites=["rnsd running", "At least one interface active"],

@@ -109,6 +109,7 @@ class ReticulumPaths:
     # System-wide paths
     ETC_BASE = Path('/etc/reticulum')
     ETC_STORAGE = ETC_BASE / 'storage'
+    ETC_RATCHETS = ETC_STORAGE / 'ratchets'
     ETC_INTERFACES = ETC_BASE / 'interfaces'
 
     @classmethod
@@ -119,6 +120,10 @@ class ReticulumPaths:
         When using /etc/reticulum/config, this means /etc/reticulum/storage
         must exist with proper permissions before rnsd can start.
 
+        The 'ratchets' subdirectory is required by RNS Identity.persist_job()
+        for key ratcheting support (added in newer RNS versions). Without it,
+        rnsd crashes with PermissionError in a background thread.
+
         Returns:
             True if directories exist or were created, False on permission error.
 
@@ -128,6 +133,7 @@ class ReticulumPaths:
         try:
             cls.ETC_BASE.mkdir(mode=0o755, parents=True, exist_ok=True)
             cls.ETC_STORAGE.mkdir(mode=0o755, parents=True, exist_ok=True)
+            cls.ETC_RATCHETS.mkdir(mode=0o755, parents=True, exist_ok=True)
             cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
             return True
         except PermissionError:
