@@ -1,0 +1,117 @@
+# MeshForge MOC1 - MQTT Broker Node Configuration
+# Hardware: Meshtoad (SX1262 via CH341) on Raspberry Pi 5
+# Preset: LongFast (wide-area coverage)
+# Role: MeshForge private MQTT broker
+#
+# Architecture:
+#   LongFast Mesh --RF--> Meshtoad --MQTT uplink--> mosquitto (localhost)
+#                                                       |
+#                                                       +--> MeshForge MQTT subscriber
+#                                                       +--> MOC2 (ShortTurbo, RNS)
+#                                                       +--> Other consumers
+#
+# Created: 2026-02-09
+# Author: WH6GXZ / Dude AI
+
+# === LoRa Configuration (Meshtoad CH341 SPI) ===
+Lora:
+  Module: sx1262
+  spidev: ch341
+  CS: 0
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+# === Radio Settings ===
+# LongFast: Best range for wide-area mesh coverage
+Radio:
+  Region: US
+  ModemPreset: LONG_FAST
+  HopLimit: 3
+  TxPower: 30
+
+# === Device Identity ===
+Device:
+  Role: ROUTER
+  # Set your node name:
+  # LongName: "meshforge-fleet-host-1"
+  # ShortName: "MOC1"
+
+# === MQTT Configuration ===
+# Uplink to local mosquitto broker
+# This is the KEY configuration for broker mode
+MQTT:
+  Enabled: true
+  Address: localhost
+  # Username/password set via MeshForge TUI broker setup
+  # or manually: meshtastic --set mqtt.username meshforge
+  EncryptionEnabled: true
+  JSONEnabled: true
+  TLSEnabled: false
+
+# === Channel 0: Primary ===
+Channel0:
+  Role: PRIMARY
+  Name: LongFast
+  UplinkEnabled: true
+  DownlinkEnabled: true
+  PositionPrecision: 32
+
+# === Webserver ===
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+
+# === Telemetry ===
+Telemetry:
+  DeviceMetricsEnabled: true
+  EnvironmentMetricsEnabled: true
+  AirQualityEnabled: false
+
+# === Position ===
+Position:
+  PositionBroadcastSecs: 900
+  GpsEnabled: false
+  FixedPosition: true
+  # Set your coordinates:
+  # Latitude: 0.0
+  # Longitude: 0.0
+  # Altitude: 0
+
+# === Logging ===
+Logging:
+  LogLevel: info
+
+# === General ===
+General:
+  MaxNodes: 200
+  MaxMessageQueue: 100
+
+# === MOC1 Deployment Checklist ===
+#
+# 1. Install meshtasticd:
+#    sudo apt install meshtasticd
+#
+# 2. Copy this config:
+#    sudo cp fleet-host-1-broker.yaml /etc/meshtasticd/config.d/
+#
+# 3. Copy Meshtoad hardware template:
+#    sudo cp meshtoad.yaml /etc/meshtasticd/config.d/
+#    (or ensure meshtoad.yaml is already in config.d/)
+#
+# 4. Install mosquitto:
+#    sudo apt install mosquitto mosquitto-clients
+#
+# 5. Configure broker via MeshForge TUI:
+#    sudo python3 src/launcher_tui/main.py
+#    -> MQTT Broker Manager -> Setup Private Broker
+#
+# 6. Restart services:
+#    sudo systemctl restart meshtasticd
+#    sudo systemctl restart mosquitto
+#
+# 7. Verify:
+#    curl -k https://localhost:9443
+#    mosquitto_sub -h localhost -u meshforge -P <password> -t "msh/#" -v

@@ -1,12 +1,26 @@
 # MeshForge Session Notes
 
-**Last Updated**: 2026-02-08
-**Current Branch**: `claude/session-management-tasks-qh0rR`
+**Last Updated**: 2026-02-09
+**Current Branch**: `claude/configure-meshforge-broker-h1VTf`
 **Version**: v0.5.2-beta
-**Tests**: 3397+ passing, 19 skipped, 0 failures
+**Tests**: 3926 passed, 1 failed (pre-existing rnsd sandbox), 19 skipped
 **Linter**: 0 issues (clean)
 
-## Session Focus: Feature Accessibility Audit
+## Session Focus: MOC1 Broker Configuration (2026-02-09)
+
+Configured MeshForge broker templates for MOC1 (Pi5 + Meshtoad + LongFast) with
+MQTT-bridged topology to MOC2 (Pi HAT + ShortTurbo + RNS/NomadNet).
+
+See: `.claude/session_notes_moc_broker.md` for full details.
+
+### Changes This Session
+- **NEW** `templates/meshtoad.yaml` — Meshtoad CH341 SPI hardware template
+- **NEW** `templates/meshforge-presets/fleet-host-1-broker.yaml` — MOC1 full preset
+- **NEW** `templates/gateway-pair/moc-mqtt-bridge.md` — MQTT-bridged deployment guide
+- **UPDATED** `templates/gateway-pair/README.md` — MQTT topology reference
+- **UPDATED** `meshtasticd_config_mixin.py` — Broker-aware MQTT default
+
+## Previous Session: Feature Accessibility Audit (2026-02-08)
 
 ### Full TUI Feature Audit (2026-02-08)
 

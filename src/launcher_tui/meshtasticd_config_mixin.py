@@ -752,14 +752,24 @@ Press Cancel to keep current values."""
 
     def _mqtt_set_broker(self):
         """Set MQTT broker address."""
+        # Default to active broker profile's host if available
+        default_broker = "mqtt.meshtastic.org"
+        try:
+            from utils.broker_profiles import get_active_profile
+            active = get_active_profile()
+            if active:
+                default_broker = active.host
+        except ImportError:
+            pass
+
         broker = self.dialog.inputbox(
             "MQTT Broker",
             "Enter MQTT broker address:\n\n"
             "Examples:\n"
-            "  mqtt.meshtastic.org (public)\n"
-            "  192.168.1.100 (local)\n"
-            "  mybroker.example.com:1883",
-            init="mqtt.meshtastic.org"
+            "  localhost (private broker on this machine)\n"
+            "  192.168.1.100 (private broker on LAN)\n"
+            "  mqtt.meshtastic.org (public)",
+            init=default_broker
         )
 
         if not broker:
