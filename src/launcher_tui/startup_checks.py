@@ -239,6 +239,16 @@ class StartupChecker:
         )
         env.is_ssh = bool(os.environ.get('SSH_CLIENT') or os.environ.get('SSH_TTY'))
 
+        # Ensure RNS storage directories exist (self-healing)
+        # Prevents rnsd PermissionError on /etc/reticulum/storage/ratchets
+        if env.is_root:
+            try:
+                from utils.paths import ReticulumPaths
+                if not ReticulumPaths.ensure_system_dirs():
+                    logger.debug("Could not create /etc/reticulum directories")
+            except ImportError:
+                pass
+
         # Check services
         env.services = self._check_services()
 
