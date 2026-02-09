@@ -14,32 +14,11 @@ from ..models import CheckResult, CheckStatus, CheckCategory
 
 logger = logging.getLogger(__name__)
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import ReticulumPaths
-    PATHS_AVAILABLE = True
-except ImportError:
-    PATHS_AVAILABLE = False
-    import os as _os
-    # Fallback paths with sudo-safe home resolution
-    def _fallback_home() -> Path:
-        sudo_user = _os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
-
-    _fb_home = _fallback_home()
-
-    class ReticulumPaths:
-        _home = _fb_home
-
-        @staticmethod
-        def get_config_file():
-            return ReticulumPaths._home / '.reticulum' / 'config'
-
-        @staticmethod
-        def get_interfaces_dir():
-            return ReticulumPaths._home / '.reticulum' / 'interfaces'
+# Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
+# See: utils/paths.py (ReticulumPaths)
+# NO FALLBACK: the old fallback was WRONG - it skipped /etc/reticulum
+# and XDG paths entirely, going directly to ~/.reticulum (Issue #25+)
+from utils.paths import ReticulumPaths
 
 
 def check_rns_installed() -> CheckResult:
