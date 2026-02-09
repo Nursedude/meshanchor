@@ -264,18 +264,19 @@ class WebClientMixin:
             # Update meshtasticd config to use the new cert
             config_updated = self._update_meshtasticd_ssl_config()
 
-            result_lines = "Trusted SSL certificate generated.\n"
             if config_updated:
-                result_lines += (
-                    "Config updated with cert paths.\n\n"
-                    "Restart meshtasticd to apply:\n"
-                    "  sudo systemctl restart meshtasticd"
+                # Offer to restart meshtasticd to apply new cert
+                self._offer_meshtasticd_restart()
+            else:
+                self.dialog.msgbox(
+                    "Certificate Generated",
+                    "Trusted SSL certificate generated.\n\n"
+                    "Could not update config.yaml automatically.\n"
+                    "Add to Webserver section manually:\n"
+                    "  SSLCert: /etc/meshtasticd/ssl/certificate.pem\n"
+                    "  SSLKey: /etc/meshtasticd/ssl/private_key.pem",
+                    height=12, width=60
                 )
-
-            self.dialog.msgbox(
-                "Certificate Generated", result_lines,
-                height=12, width=60
-            )
         else:
             self.dialog.msgbox("Certificate Error", msg,
                                height=10, width=65)
@@ -290,10 +291,12 @@ class WebClientMixin:
 
         try:
             content = config_path.read_text()
+            cert_path = "/etc/meshtasticd/ssl/certificate.pem"
+            key_path = "/etc/meshtasticd/ssl/private_key.pem"
 
-            # Check if SSLCert is already configured
-            if "SSLCert:" in content and "meshforge" in content.lower():
-                return True  # Already configured with our cert
+            # Check if already configured with our cert paths
+            if f"SSLCert: {cert_path}" in content and f"SSLKey: {key_path}" in content:
+                return True
 
             import re
 
@@ -302,20 +305,20 @@ class WebClientMixin:
                 # Replace existing SSLCert/SSLKey lines
                 content = re.sub(
                     r'(\s+)SSLCert:.*',
-                    r'\1SSLCert: /etc/meshtasticd/ssl/certificate.pem',
+                    rf'\1SSLCert: {cert_path}',
                     content
                 )
                 content = re.sub(
                     r'(\s+)SSLKey:.*',
-                    r'\1SSLKey: /etc/meshtasticd/ssl/private_key.pem',
+                    rf'\1SSLKey: {key_path}',
                     content
                 )
             elif "Webserver:" in content:
                 # Add SSL paths after existing Webserver entries
                 content = re.sub(
                     r'(Webserver:.*?\n(?:\s+\w+:.*\n)*)',
-                    r'\1  SSLCert: /etc/meshtasticd/ssl/certificate.pem\n'
-                    r'  SSLKey: /etc/meshtasticd/ssl/private_key.pem\n',
+                    rf'\1  SSLCert: {cert_path}\n'
+                    rf'  SSLKey: {key_path}\n',
                     content
                 )
             else:
@@ -328,6 +331,50 @@ class WebClientMixin:
         except Exception as e:
             logger.error("Failed to update meshtasticd SSL config: %s", e)
             return False
+
+    def _offer_meshtasticd_restart(self):
+        """Offer to restart meshtasticd after SSL cert update."""
+        choice = self.dialog.yesno(
+            "Restart meshtasticd?",
+            "Certificate generated and config updated.\n\n"
+            "meshtasticd must restart to use the new cert.\n"
+            "Restart now?",
+            height=10, width=50
+        )
+        if choice:
+            try:
+                from utils.service_check import apply_config_and_restart
+                ok, restart_msg = apply_config_and_restart('meshtasticd')
+            except ImportError:
+                result = subprocess.run(
+                    ['systemctl', 'restart', 'meshtasticd'],
+                    capture_output=True, text=True, timeout=30
+                )
+                ok = result.returncode == 0
+                restart_msg = result.stderr if not ok else "Restarted"
+
+            if ok:
+                self.dialog.msgbox(
+                    "Restarted",
+                    "meshtasticd restarted with new SSL cert.\n"
+                    "Web UI should now work without warnings.",
+                    height=9, width=50
+                )
+            else:
+                self.dialog.msgbox(
+                    "Restart Failed",
+                    f"Could not restart meshtasticd:\n{restart_msg}\n\n"
+                    "Try manually:\n"
+                    "  sudo systemctl restart meshtasticd",
+                    height=12, width=55
+                )
+        else:
+            self.dialog.msgbox(
+                "Certificate Ready",
+                "Restart meshtasticd when ready:\n"
+                "  sudo systemctl restart meshtasticd",
+                height=8, width=50
+            )
 
     def _show_manual_ssl_help(self):
         """Show manual SSL certificate acceptance guidance."""
