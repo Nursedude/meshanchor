@@ -182,14 +182,8 @@ def generate_localhost_cert() -> Tuple[bool, str]:
         for f in [SERVER_KEY, SERVER_CERT, CA_KEY, CA_CERT]:
             os.chmod(str(f), 0o600)
 
-        logger.info("SSL certificates generated and installed")
-        return True, (
-            "SSL certificate generated and trusted.\n"
-            f"  CA cert:     {CA_CERT}\n"
-            f"  Server cert: {SERVER_CERT}\n"
-            f"  Server key:  {SERVER_KEY}\n\n"
-            "System trust store updated."
-        )
+        logger.info("SSL certificates generated at %s", SSL_DIR)
+        return True, "SSL certificate generated and trusted."
 
     except subprocess.TimeoutExpired:
         return False, "Certificate generation timed out"
