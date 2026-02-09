@@ -147,13 +147,31 @@ rnpath <destination_hash>
    sqlite3 ~/.local/share/meshforge/message_queue.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 10;"
    ```
 
+## Alternative: MQTT-Bridged Topology (Multi-Pi)
+
+For deployments where each radio runs on a separate Raspberry Pi, use the
+**MQTT-bridged** topology instead of same-Pi RNS bridging.
+
+See: [moc-mqtt-bridge.md](moc-mqtt-bridge.md)
+
+```
+MOC1 (Pi5, Meshtoad, LongFast)     MOC2 (Pi, HAT, ShortTurbo)
+  mosquitto broker  <--- MQTT --->  meshtasticd MQTT uplink
+  MeshForge NOC                     RNS/NomadNet gateway
+```
+
+This approach uses MQTT as the transport between nodes instead of
+dual-radio RNS bridging on a single Pi.
+
 ## Related Files
 
 - `src/gateway/rns_bridge.py` - Main bridge logic
 - `src/gateway/message_queue.py` - SQLite persistence
+- `src/utils/broker_profiles.py` - MQTT broker profile management
 - `~/.reticulum/config` - RNS interface configuration
+- `moc-mqtt-bridge.md` - Multi-Pi MQTT-bridged deployment guide
 
 ---
 
-*Template version: 0.5.0-beta*
-*Tested: [date] by [callsign]*
+*Template version: 0.5.2-beta*
+*Tested: 2026-02-09 by WH6GXZ*
