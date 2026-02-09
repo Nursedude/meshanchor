@@ -166,7 +166,14 @@ class MQTTMixin:
                 logger.debug("MQTT config load failed: %s", e)
                 config = {}
             broker = config.get('broker', 'mqtt.meshtastic.org')
-            mode = "Local" if broker == "localhost" else "Public"
+
+            # Determine mode from broker profile or config
+            if broker in ("localhost", "127.0.0.1"):
+                mode = "Private"
+            elif broker == "mqtt.meshtastic.org":
+                mode = "Public"
+            else:
+                mode = "Custom"
 
             # Check WebSocket bridge status
             try:
@@ -179,7 +186,8 @@ class MQTTMixin:
                 ("status", f"Status              {status}"),
                 ("start", "Start Subscriber    Connect to MQTT broker"),
                 ("stop", "Stop Subscriber     Disconnect from broker"),
-                ("config", f"Configure           Mode: {mode}"),
+                ("broker", f"Broker Manager      Mode: {mode}"),
+                ("config", "Configure           Advanced settings"),
                 ("nodes", "View Nodes          Show discovered nodes"),
                 ("stats", "Statistics          Node counts, activity"),
                 ("telemetry", "Request Telemetry   Poll silent 2.7+ nodes"),
@@ -192,11 +200,13 @@ class MQTTMixin:
 
             choices.append(("back", "Back"))
 
-            subtitle = f"MQTT Mode: {mode} ({broker})\n"
-            if mode == "Local":
-                subtitle += "Multi-consumer: shares messages with other apps"
-            else:
+            subtitle = f"MQTT Broker: {mode} ({broker})\n"
+            if mode == "Private":
+                subtitle += "MeshForge private broker (multi-consumer)"
+            elif mode == "Public":
                 subtitle += "Nodeless monitoring without local radio"
+            else:
+                subtitle += f"Custom broker: {broker}"
 
             choice = self.dialog.menu(
                 "MQTT Monitoring",
@@ -211,6 +221,7 @@ class MQTTMixin:
                 "status": ("MQTT Status", self._show_mqtt_status),
                 "start": ("Start MQTT Subscriber", self._start_mqtt_subscriber),
                 "stop": ("Stop MQTT Subscriber", self._stop_mqtt_subscriber),
+                "broker": ("Broker Manager", self._broker_menu),
                 "config": ("MQTT Configuration", self._configure_mqtt),
                 "nodes": ("MQTT Nodes", self._show_mqtt_nodes),
                 "stats": ("MQTT Statistics", self._show_mqtt_stats),
