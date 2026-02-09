@@ -1,0 +1,57 @@
+{
+  "_name": "MeshForge Private Broker Template",
+  "_description": "Run your own MQTT broker for Meshtastic <-> RNS bridging. Full control, no zero-hop restriction.",
+  "_usage": "Use 'MQTT Broker Manager > Setup Private Broker' in the TUI, or configure manually below.",
+  "_docs": "https://meshtastic.org/docs/software/integrations/mqtt/mosquitto/",
+
+  "broker": "localhost",
+  "port": 1883,
+  "topic": "msh/US/2/json/LongFast/#",
+  "username": "meshforge",
+  "password": "CHANGE_THIS_PASSWORD",
+  "use_tls": false,
+
+  "_mosquitto_setup": {
+    "install": "sudo apt install mosquitto mosquitto-clients",
+    "create_password": "sudo mosquitto_passwd -c /etc/mosquitto/meshforge_passwd meshforge",
+    "config_file": "Copy examples/configs/broker-private.conf to /etc/mosquitto/conf.d/meshforge.conf",
+    "acl_file": "Copy examples/configs/broker-private-acl.conf to /etc/mosquitto/meshforge_acl",
+    "restart": "sudo systemctl restart mosquitto",
+    "enable_boot": "sudo systemctl enable mosquitto"
+  },
+
+  "_radio_setup": {
+    "description": "Configure each Meshtastic gateway radio to connect to this broker",
+    "note": "Replace YOUR_SERVER_IP with the LAN IP of the machine running mosquitto",
+    "commands": [
+      "meshtastic --host localhost --set mqtt.enabled true",
+      "meshtastic --host localhost --set mqtt.address YOUR_SERVER_IP",
+      "meshtastic --host localhost --set mqtt.username meshforge",
+      "meshtastic --host localhost --set mqtt.password CHANGE_THIS_PASSWORD",
+      "meshtastic --host localhost --set mqtt.encryption_enabled true",
+      "meshtastic --host localhost --set mqtt.json_enabled true",
+      "meshtastic --host localhost --set mqtt.tls_enabled false",
+      "meshtastic --host localhost --ch-set uplink_enabled true --ch-index 0",
+      "meshtastic --host localhost --ch-set downlink_enabled true --ch-index 0"
+    ]
+  },
+
+  "_architecture": {
+    "description": "MeshForge as central MQTT hub for mesh bridging",
+    "flow": [
+      "Meshtastic LongFast Radio -> WiFi -> mosquitto (this broker)",
+      "mosquitto -> MeshForge MQTT Subscriber (monitoring)",
+      "mosquitto -> RNS Gateway Bridge (Meshtastic <-> RNS)",
+      "mosquitto -> Other consumers (Home Assistant, logging, etc.)",
+      "",
+      "Enables: Meshtastic LF <-> Private Broker <-> RNS Gateway <-> Meshtastic ST"
+    ]
+  },
+
+  "_notes": {
+    "security": "NEVER use the default PSK (AQ==) as your only security on a private broker. Always use authentication + custom channel PSK.",
+    "no_zero_hop": "Unlike the public broker, private brokers do NOT enforce zero-hop. Downlinked messages WILL propagate into the mesh.",
+    "json_topic": "Using json topic (msh/2/json/) for local broker gives parsed messages. Use e/ for encrypted protobuf.",
+    "multi_consumer": "Multiple apps can subscribe to the same broker simultaneously (MeshForge, Home Assistant, Node-RED, etc.)"
+  }
+}
