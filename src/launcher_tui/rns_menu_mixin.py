@@ -189,14 +189,31 @@ class RNSMenuMixin(RNSSnifferMixin):
                 if choice == "show":
                     subprocess.run(['clear'], check=False, timeout=5)
                     print("=== Local RNS Identity ===\n")
-                    self._run_rns_tool(['rnid'], 'rnid')
+
+                    # Find the rnsd identity file
+                    # RNS stores it at <configdir>/identity
+                    config_dir = ReticulumPaths.get_config_dir()
+                    rnsd_identity = config_dir / 'identity'
+                    if rnsd_identity.exists():
+                        print(f"rnsd identity: {rnsd_identity}")
+                        self._run_rns_tool(
+                            ['rnid', '-i', str(rnsd_identity), '-p'],
+                            'rnid'
+                        )
+                    else:
+                        print(f"rnsd identity: {rnsd_identity}")
+                        print("  Not found — rnsd has not created one yet.")
+                        print("  Ensure rnsd can write to its config directory.\n")
 
                     try:
                         from commands.rns import get_identity_path
                         gw_id = get_identity_path()
                         print(f"\nMeshForge gateway identity: {gw_id}")
                         if gw_id.exists():
-                            print("  Status: exists")
+                            self._run_rns_tool(
+                                ['rnid', '-i', str(gw_id), '-p'],
+                                'rnid'
+                            )
                         else:
                             print("  Status: not created (starts on first bridge run)")
                     except ImportError:
