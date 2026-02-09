@@ -81,7 +81,7 @@ class WebClientMixin:
             choices = [
                 ("open", "Open in Browser      Launch in default browser"),
                 ("url", "Show URLs            Copy to access from other devices"),
-                ("ssl", "SSL Certificate      First-time setup help"),
+                ("ssl", "SSL Certificate      Fix warnings / generate cert"),
                 ("back", "Back"),
             ]
 
@@ -165,12 +165,146 @@ class WebClientMixin:
         )
 
     def _show_ssl_certificate_help(self, local_ip: str):
-        """Show SSL certificate acceptance guidance."""
+        """Show SSL certificate menu with generation option."""
+        try:
+            from utils.ssl_cert import is_cert_installed
+            cert_installed = is_cert_installed()
+        except ImportError:
+            cert_installed = False
+
+        if cert_installed:
+            status_line = "Trusted certificate: INSTALLED"
+        else:
+            status_line = "Trusted certificate: NOT installed (using meshtasticd default)"
+
+        while True:
+            choices = [
+                ("generate", "Generate Trusted Cert   Eliminate browser warnings"),
+                ("manual", "Manual Accept Help     Browser-specific instructions"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "SSL Certificate",
+                f"{status_line}\n\n"
+                "meshtasticd uses HTTPS with a self-signed certificate.\n"
+                "This causes warnings in browsers and blocks lynx/curl.\n\n"
+                "Generate a trusted certificate to fix this permanently.",
+                choices,
+                height=18, width=65
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "generate":
+                self._generate_trusted_cert()
+                # Refresh status
+                try:
+                    cert_installed = is_cert_installed()
+                except Exception:
+                    pass
+            elif choice == "manual":
+                self._show_manual_ssl_help()
+
+    def _generate_trusted_cert(self):
+        """Generate and install a trusted localhost SSL certificate."""
+        try:
+            from utils.ssl_cert import generate_localhost_cert
+        except ImportError:
+            self.dialog.msgbox(
+                "Error",
+                "SSL certificate module not available.\n"
+                "Ensure src/utils/ssl_cert.py exists."
+            )
+            return
+
+        if os.geteuid() != 0:
+            self.dialog.msgbox(
+                "Root Required",
+                "Certificate generation requires root privileges.\n\n"
+                "MeshForge should already be running with sudo.\n"
+                "If not, restart with: sudo python3 src/launcher_tui/main.py"
+            )
+            return
+
+        self.dialog.infobox("SSL Certificate", "Generating trusted certificate...")
+
+        success, msg = generate_localhost_cert()
+
+        if success:
+            # Update meshtasticd config to use the new cert
+            config_updated = self._update_meshtasticd_ssl_config()
+
+            restart_msg = ""
+            if config_updated:
+                restart_msg = (
+                    "\nmeshtasticd config updated with new cert paths.\n"
+                    "Restart meshtasticd to apply:\n"
+                    "  sudo systemctl restart meshtasticd"
+                )
+
+            self.dialog.msgbox(
+                "Certificate Generated",
+                f"{msg}\n{restart_msg}"
+            )
+        else:
+            self.dialog.msgbox("Certificate Error", msg)
+
+    def _update_meshtasticd_ssl_config(self) -> bool:
+        """Add SSL cert/key paths to meshtasticd config.yaml."""
+        from pathlib import Path
+
+        config_path = Path("/etc/meshtasticd/config.yaml")
+        if not config_path.exists():
+            return False
+
+        try:
+            content = config_path.read_text()
+
+            # Check if SSLCert is already configured
+            if "SSLCert:" in content and "meshforge" in content.lower():
+                return True  # Already configured with our cert
+
+            import re
+
+            # Look for Webserver section and add/update SSL paths
+            if "SSLCert:" in content:
+                # Replace existing SSLCert/SSLKey lines
+                content = re.sub(
+                    r'(\s+)SSLCert:.*',
+                    r'\1SSLCert: /etc/meshtasticd/ssl/certificate.pem',
+                    content
+                )
+                content = re.sub(
+                    r'(\s+)SSLKey:.*',
+                    r'\1SSLKey: /etc/meshtasticd/ssl/private_key.pem',
+                    content
+                )
+            elif "Webserver:" in content:
+                # Add SSL paths after existing Webserver entries
+                content = re.sub(
+                    r'(Webserver:.*?\n(?:\s+\w+:.*\n)*)',
+                    r'\1  SSLCert: /etc/meshtasticd/ssl/certificate.pem\n'
+                    r'  SSLKey: /etc/meshtasticd/ssl/private_key.pem\n',
+                    content
+                )
+            else:
+                return False  # No Webserver section found
+
+            config_path.write_text(content)
+            logger.info("Updated meshtasticd config with SSL cert paths")
+            return True
+
+        except Exception as e:
+            logger.error("Failed to update meshtasticd SSL config: %s", e)
+            return False
+
+    def _show_manual_ssl_help(self):
+        """Show manual SSL certificate acceptance guidance."""
         self.dialog.msgbox(
-            "SSL Certificate Help",
-            "meshtasticd uses a self-signed SSL certificate.\n"
-            "Browsers show a warning - this is expected.\n\n"
-            "To accept the certificate:\n\n"
+            "Manual SSL Accept",
+            "If you prefer to manually accept the certificate:\n\n"
             "Chrome/Edge:\n"
             "  1. Click 'Advanced'\n"
             "  2. Click 'Proceed to localhost (unsafe)'\n\n"
@@ -180,6 +314,8 @@ class WebClientMixin:
             "Safari:\n"
             "  1. Click 'Show Details'\n"
             "  2. Click 'visit this website'\n\n"
-            "This only needs to be done ONCE per browser.\n"
-            "The certificate is local and safe to accept."
+            "lynx:\n"
+            "  Type 'y' at the certificate prompt\n\n"
+            "This must be done per-browser.\n"
+            "Generate a trusted cert to avoid this entirely."
         )
