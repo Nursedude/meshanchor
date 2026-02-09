@@ -471,7 +471,7 @@ class SystemDiagnostics:
             # Try vcgencmd (Raspberry Pi)
             result = subprocess.run(
                 ['vcgencmd', 'measure_temp'],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
                 # Parse "temp=XX.X'C"
@@ -544,7 +544,7 @@ class SystemDiagnostics:
         try:
             result = subprocess.run(
                 ['vcgencmd', 'get_throttled'],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
                 throttle = result.stdout.strip()
@@ -771,7 +771,7 @@ class SystemDiagnostics:
         try:
             result = subprocess.run(
                 ['dpkg', '-l', 'meshtasticd'],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             return 'ii' in result.stdout
         except Exception:
