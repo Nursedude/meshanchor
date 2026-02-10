@@ -313,8 +313,9 @@ class MeshtasticApiProxy:
         The Meshtastic web client (React) crashes when clicking nodes
         that have incomplete data — typically phantom nodes heard via
         MQTT that lack a 'user' object or role field. The web client
-        tries to access properties like user.longName or role without
-        null checks, triggering "Cannot read properties of undefined".
+        tries to access properties like user.longName, role,
+        position.latitude, and deviceMetrics without null checks,
+        triggering "Cannot read properties of undefined".
 
         This method ensures every node has the minimum required fields
         so the web client can render them without crashing.
@@ -342,6 +343,8 @@ class MeshtasticApiProxy:
                     'longName': f'Node {node_key[-4:] if len(str(node_key)) >= 4 else node_key}',
                     'shortName': '????',
                     'hwModel': 'UNSET',
+                    'macaddr': '',
+                    'publicKey': '',
                 }
                 modified = True
             else:
@@ -361,6 +364,39 @@ class MeshtasticApiProxy:
             # Ensure 'role' field exists (prevents CLIENT_BASE crash)
             if 'role' not in node_data:
                 node_data['role'] = 'CLIENT'
+                modified = True
+
+            # Ensure 'position' is a dict if present but null/invalid.
+            # The web client accesses position.latitude etc. without
+            # null checks.  A missing position is fine (web client
+            # handles undefined), but a null/non-dict value crashes.
+            if 'position' in node_data and not isinstance(node_data.get('position'), dict):
+                node_data['position'] = {}
+                modified = True
+
+            # Ensure 'deviceMetrics' is a dict if present but
+            # null/invalid.  The web client reads batteryLevel,
+            # voltage, etc. from this object.
+            if 'deviceMetrics' in node_data and not isinstance(node_data.get('deviceMetrics'), dict):
+                node_data['deviceMetrics'] = {}
+                modified = True
+
+            # Ensure 'lastHeard' exists — the web client uses this
+            # for "last seen" display and sorts by it.
+            if 'lastHeard' not in node_data:
+                node_data['lastHeard'] = 0
+                modified = True
+
+            # Ensure 'num' field exists — used as internal node ID
+            if 'num' not in node_data:
+                # Try to parse from hex key like "!aabbccdd"
+                try:
+                    if node_key.startswith('!'):
+                        node_data['num'] = int(node_key[1:], 16)
+                    else:
+                        node_data['num'] = int(node_key, 16)
+                except (ValueError, TypeError):
+                    node_data['num'] = 0
                 modified = True
 
         if modified:

@@ -152,9 +152,11 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         # ─────────────────────────────────────────────────────────────
         if self.path.startswith('/api/v1/toradio'):
             self._proxy_toradio()
-        elif self.path == '/json/blink' or self.path == '/json/blink/':
+        elif self.path.startswith('/mesh/api/v1/toradio'):
+            self._proxy_toradio()
+        elif self.path in ('/json/blink', '/json/blink/', '/mesh/json/blink', '/mesh/json/blink/'):
             self._proxy_toradio_json('/json/blink')
-        elif self.path == '/restart' or self.path == '/restart/':
+        elif self.path in ('/restart', '/restart/', '/mesh/restart', '/mesh/restart/'):
             # Restrict device restart to localhost only
             if self.client_address[0] not in ('127.0.0.1', '::1'):
                 self.send_error(403, "Restart only allowed from localhost")
@@ -171,6 +173,8 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
     def do_PUT(self):
         """Handle PUT requests (meshtastic web client uses PUT for toradio)."""
         if self.path.startswith('/api/v1/toradio'):
+            self._proxy_toradio()
+        elif self.path.startswith('/mesh/api/v1/toradio'):
             self._proxy_toradio()
         else:
             self.send_error(404, "Not Found")
@@ -1069,6 +1073,13 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
         /mesh/         -> meshtasticd's index.html
         /mesh/assets/* -> meshtasticd's static assets
+
+        API endpoints under /mesh/ are routed through MeshForge's proper
+        handlers (sanitized, multiplexed) instead of raw proxy_static():
+        - /mesh/json/nodes   -> proxy_json (sanitizes phantom nodes)
+        - /mesh/json/report  -> proxy_json
+        - /mesh/api/v1/fromradio -> multiplexed fromradio
+        - /mesh/api/v1/toradio   -> forwarded toradio
         """
         if not self.api_proxy:
             # Return a helpful page instead of an error
@@ -1081,6 +1092,27 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             path = '/'
         elif path.startswith('/mesh/'):
             path = path[5:]  # Strip /mesh prefix
+
+        # Route API endpoints through proper handlers instead of raw proxy.
+        # The web client makes relative fetch() calls which resolve under
+        # /mesh/ due to <base href="/mesh/">.  Without this routing,
+        # /mesh/json/nodes bypasses sanitization and phantom nodes crash
+        # the React UI.
+        if path == '/json/nodes' or path == '/json/nodes/':
+            self._proxy_json('/json/nodes')
+            return
+        if path == '/json/report' or path == '/json/report/':
+            self._proxy_json('/json/report')
+            return
+        if path == '/json/blink' or path == '/json/blink/':
+            self._proxy_json('/json/blink')
+            return
+        if path.startswith('/api/v1/fromradio'):
+            self._proxy_fromradio()
+            return
+        if path.startswith('/api/v1/toradio'):
+            self._proxy_toradio()
+            return
 
         result = self.api_proxy.proxy_static(path)
         if result:
