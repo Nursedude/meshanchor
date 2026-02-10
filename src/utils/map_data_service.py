@@ -142,7 +142,7 @@ class MapServer:
                  enable_message_listener: bool = True,
                  enable_websocket: bool = True,
                  websocket_port: int = 5001,
-                 enable_api_proxy: bool = True,
+                 enable_api_proxy: bool = False,
                  meshtasticd_host: str = 'localhost',
                  meshtasticd_port: int = 9443,
                  meshtasticd_tls: bool = True):
@@ -161,7 +161,10 @@ class MapServer:
             enable_message_listener: Start MessageListener for inbound messages (default True)
             enable_websocket: Start WebSocket server for real-time message push (default True)
             websocket_port: WebSocket server port (default 5001)
-            enable_api_proxy: Start Meshtastic API proxy for web client (default True)
+            enable_api_proxy: Start Meshtastic API proxy for web client (default False).
+                When False, meshtasticd's native web client at :9443 works normally.
+                When True, MeshForge consumes all fromradio packets and multiplexes
+                them — the native web client will show no data in this mode.
             meshtasticd_host: meshtasticd host for API proxy (default 'localhost')
             meshtasticd_port: meshtasticd web port for API proxy (default 9443)
             meshtasticd_tls: Use TLS for API proxy (default True)
@@ -236,8 +239,19 @@ class MapServer:
         MeshForge becomes the sole consumer of meshtasticd's HTTP API,
         multiplexing packets to all connected web clients. This fixes
         the 'waiting for delivery' bug and enables multi-client access.
+
+        WARNING: When enabled, this consumes ALL fromradio packets from
+        meshtasticd's HTTP API (port 9443). The native web client will
+        show no data — use /mesh/ on MeshForge's port instead.
+
+        Default is DISABLED so the native web client at :9443 works.
         """
         if not self.enable_api_proxy:
+            logger.info(
+                "API proxy disabled — meshtasticd web client at :%d works natively. "
+                "Gateway uses TCP:%d (separate channel).",
+                self.meshtasticd_port, 4403
+            )
             return
 
         try:
@@ -387,13 +401,22 @@ class MapServer:
             print("  Access via any of these URLs:")
             for ip in ips:
                 print(f"    NOC Map:    http://{ip}:{self.port}/")
-                print(f"    Mesh Client: http://{ip}:{self.port}/mesh/")
+                if self.enable_api_proxy:
+                    print(f"    Mesh Client: http://{ip}:{self.port}/mesh/")
+                else:
+                    print(f"    Mesh Client: https://{ip}:{self.meshtasticd_port}/ (native)")
         elif self.host in ("127.0.0.1", "localhost"):
             print(f"  NOC Map:     http://localhost:{self.port}/")
-            print(f"  Mesh Client: http://localhost:{self.port}/mesh/")
+            if self.enable_api_proxy:
+                print(f"  Mesh Client: http://localhost:{self.port}/mesh/")
+            else:
+                print(f"  Mesh Client: https://localhost:{self.meshtasticd_port}/ (native)")
         else:
             print(f"  NOC Map:     http://{self.host}:{self.port}/")
-            print(f"  Mesh Client: http://{self.host}:{self.port}/mesh/")
+            if self.enable_api_proxy:
+                print(f"  Mesh Client: http://{self.host}:{self.port}/mesh/")
+            else:
+                print(f"  Mesh Client: https://{self.host}:{self.meshtasticd_port}/ (native)")
         print("  Press Ctrl+C to stop")
 
         try:
@@ -485,6 +508,10 @@ Examples:
     parser.add_argument("--pid-file", type=str,
                         default="/run/meshforge/map-server.pid",
                         help="PID file location (default: /run/meshforge/map-server.pid)")
+    parser.add_argument("--enable-api-proxy", action="store_true",
+                        help="Enable API proxy (MeshForge consumes fromradio packets "
+                             "and serves web client at /mesh/). "
+                             "Disables native web client at :9443.")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose logging")
     args = parser.parse_args()
@@ -527,7 +554,11 @@ Examples:
         _write_pid_file(args.pid_file)
 
     # Create and start server
-    server = MapServer(port=args.port, host=args.host)
+    server = MapServer(
+        port=args.port,
+        host=args.host,
+        enable_api_proxy=args.enable_api_proxy,
+    )
 
     # Signal handlers for graceful shutdown
     def handle_signal(signum, frame):

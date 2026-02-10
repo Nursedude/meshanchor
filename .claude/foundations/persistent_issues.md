@@ -1595,3 +1595,72 @@ Both MQTT and RNS can coexist. The private broker handles Meshtastic transport,
 RNS handles encrypted mesh-independent routing.
 
 ### Status: DOCUMENTED
+
+---
+
+## Issue #28: API Proxy Steals fromradio Packets from Native Web Client
+
+**Date Identified**: 2026-02-10
+**Severity**: Critical (breaks meshtasticd web client at :9443)
+
+### Symptom
+When MeshForge is running, the Meshtastic web client at `ip:9443` shows
+no data. Wireshark/traffic inspector shows empty responses. The gateway
+bridge works fine (RX green), NomadNet talks to other RNS nodes normally.
+Only the native web client is broken.
+
+### Root Cause
+`MeshtasticApiProxy` (in `gateway/meshtastic_api_proxy.py`) was **enabled
+by default** (`enable_api_proxy=True` in `MapServer.__init__`).
+
+When enabled, it runs a background thread that continuously polls
+`GET /api/v1/fromradio` from meshtasticd's HTTP API on port 9443.
+This endpoint is **queue-based** — each GET pops the next protobuf packet.
+Once MeshForge consumes a packet, it's gone from meshtasticd's buffer.
+
+The proxy code literally documents this: *"MeshForge becomes the sole
+consumer of meshtasticd's /api/v1/fromradio"*.
+
+Result: the native web client polls the same endpoint but gets nothing
+because MeshForge already drained the queue.
+
+**Why the gateway is unaffected:** The gateway uses TCP port 4403 (the
+meshtastic Python library's `TCPInterface`), which is a completely
+separate channel from the HTTP API on port 9443.
+
+### Connection Architecture
+```
+Port 4403 (TCP protobuf) ── Gateway Bridge (meshtastic_handler.py)
+                            └── Works independently, unaffected
+
+Port 9443 (HTTP API)     ── MeshtasticApiProxy (DRAINS THE QUEUE)
+                            └── Native web client gets nothing
+```
+
+### Fix Applied
+1. **Default `enable_api_proxy` to `False`** in `MapServer.__init__`
+2. **Added `--enable-api-proxy` CLI flag** for explicit opt-in
+3. **`/mesh/` redirects to native `:9443`** when proxy is disabled
+4. **Clear logging** when proxy is disabled explaining coexistence
+
+### When to Enable the Proxy
+Only enable when you specifically need:
+- Multiple browser tabs viewing the web client simultaneously
+- Phantom node filtering (MQTT nodes without User data crash React)
+- MeshForge-owned packet inspection/logging
+
+```bash
+# Opt in to API proxy (disables native web client at :9443)
+python -m utils.map_data_service --enable-api-proxy
+```
+
+### Files Involved
+- `src/utils/map_data_service.py` — `enable_api_proxy` default changed to `False`
+- `src/utils/map_http_handler.py` — `/mesh/` redirects to native :9443
+- `src/gateway/meshtastic_api_proxy.py` — the proxy itself (unchanged)
+
+### Prevention
+Never enable the API proxy by default. The gateway (TCP:4403) and
+web client (HTTP:9443) are separate channels and should coexist.
+
+### Status: RESOLVED
