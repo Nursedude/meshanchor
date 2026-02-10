@@ -204,24 +204,36 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
             conn = self._get_radio_connection()
             if not conn:
-                self._serve_json({"error": "meshtastic library not available"}, status=500)
+                self._serve_json({
+                    "error": "Radio not available",
+                    "detail": "meshtastic Python library not installed. "
+                              "Install with: pip3 install meshtastic",
+                }, status=503)
                 return
 
             success = conn.send_message(text, destination)
             if success:
                 self._serve_json({
                     "success": True,
-                    "message": "Message sent",
+                    "message": "Sent via radio (delivery best-effort)",
                     "destination": destination,
                     "connection_mode": conn.get_mode()
                 })
             else:
-                self._serve_json({"error": "Failed to send message"}, status=500)
+                self._serve_json({
+                    "error": "Send failed — check meshtasticd TCP connection (port 4403)",
+                    "detail": "The message could not be sent. Verify meshtasticd is running "
+                              "and TCP is enabled.",
+                }, status=502)
 
         except json.JSONDecodeError:
             self._serve_json({"error": "Invalid JSON"}, status=400)
         except Exception as e:
-            self._serve_json({"error": str(e)}, status=500)
+            logger.warning(f"Radio message send error: {e}")
+            self._serve_json({
+                "error": f"Send error: {e}",
+                "detail": "Check meshtasticd logs: journalctl -u meshtasticd -f",
+            }, status=500)
 
     def _serve_static_html(self):
         """Serve static HTML files with no-cache headers."""
@@ -1119,16 +1131,40 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             content, content_type = result
 
             # For the index.html, inject base href so relative paths work
+            # Also inject phantom node error protection as a safety net
             if path == '/' or path.endswith('.html'):
                 if isinstance(content, bytes):
                     content_str = content.decode('utf-8', errors='replace')
-                    # Rewrite API URLs to go through MeshForge proxy
+                    # Rewrite API URLs + inject phantom node protection
                     content_str = content_str.replace(
                         '</head>',
                         '<base href="/mesh/">\n'
                         '<script>\n'
-                        '// MeshForge API proxy: rewrite API calls to go through MeshForge\n'
+                        '// MeshForge API proxy + phantom node protection\n'
                         'window.__MESHFORGE_PROXY__ = true;\n'
+                        '// Safety net: catch null-property errors from incomplete\n'
+                        '// MQTT phantom nodes that slip past protobuf filtering.\n'
+                        '(function(){\n'
+                        '  var origError = window.onerror;\n'
+                        '  window.onerror = function(msg, src, line, col, err) {\n'
+                        '    if (typeof msg === "string" &&\n'
+                        '        (msg.indexOf("Cannot read properties of null") !== -1 ||\n'
+                        '         msg.indexOf("Cannot read properties of undefined") !== -1 ||\n'
+                        '         msg.indexOf("Cannot read property") !== -1)) {\n'
+                        '      console.warn("[MeshForge] Phantom node error caught:", msg);\n'
+                        '      return true;\n'
+                        '    }\n'
+                        '    return origError ? origError(msg, src, line, col, err) : false;\n'
+                        '  };\n'
+                        '  window.addEventListener("unhandledrejection", function(e) {\n'
+                        '    var m = (e.reason && e.reason.message) || String(e.reason || "");\n'
+                        '    if (m.indexOf("Cannot read properties of null") !== -1 ||\n'
+                        '        m.indexOf("Cannot read properties of undefined") !== -1) {\n'
+                        '      console.warn("[MeshForge] Phantom node rejection caught:", m);\n'
+                        '      e.preventDefault();\n'
+                        '    }\n'
+                        '  });\n'
+                        '})();\n'
                         '</script>\n'
                         '</head>'
                     )
