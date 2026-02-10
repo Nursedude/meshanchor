@@ -242,12 +242,20 @@
             border-radius: 10px;
             padding: 16px;
             min-width: 210px;
+            max-height: calc(100vh - 20px);
+            display: flex;
+            flex-direction: column;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
             transition: transform 0.2s;
         }
         .control-panel.collapsed {
             min-width: auto;
             padding: 8px 12px;
+        }
+        .panel-body {
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
         }
         .control-panel.collapsed .panel-body {
             display: none;
@@ -435,6 +443,7 @@
                 right: 10px;
                 left: 10px;
                 min-width: auto;
+                max-height: 60vh;
             }
             .legend {
                 bottom: auto;

@@ -223,3 +223,120 @@ class TestSanitizeNodesJson:
 
         # Should use last 4 chars of key for default name
         assert "ccdd" in parsed["!aabbccdd"]["user"]["longName"]
+
+    def test_null_position_replaced_with_dict(self):
+        """Node with null position gets empty dict to prevent crash."""
+        nodes = {
+            "!aabb0022": {
+                "num": 100,
+                "user": {
+                    "id": "!aabb0022",
+                    "longName": "TestNode",
+                    "shortName": "TST",
+                    "hwModel": "RAK4631",
+                },
+                "role": "CLIENT",
+                "position": None,
+            }
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        assert isinstance(parsed["!aabb0022"]["position"], dict)
+
+    def test_null_device_metrics_replaced_with_dict(self):
+        """Node with null deviceMetrics gets empty dict."""
+        nodes = {
+            "!aabb0033": {
+                "num": 200,
+                "user": {
+                    "id": "!aabb0033",
+                    "longName": "TestNode2",
+                    "shortName": "TS2",
+                    "hwModel": "HELTEC_V3",
+                },
+                "role": "ROUTER",
+                "deviceMetrics": None,
+            }
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        assert isinstance(parsed["!aabb0033"]["deviceMetrics"], dict)
+
+    def test_missing_last_heard_gets_default(self):
+        """Phantom node missing lastHeard gets default 0."""
+        nodes = {
+            "!aabb0044": {
+                "num": 300,
+                # No user, no role, no lastHeard — full phantom
+            }
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        assert parsed["!aabb0044"]["lastHeard"] == 0
+
+    def test_missing_num_parsed_from_hex_key(self):
+        """Node missing 'num' gets it parsed from hex node key."""
+        nodes = {
+            "!deadbeef": {
+                "user": {
+                    "id": "!deadbeef",
+                    "longName": "Phantom",
+                    "shortName": "PHT",
+                    "hwModel": "UNSET",
+                },
+                "role": "CLIENT",
+            }
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        assert parsed["!deadbeef"]["num"] == 0xdeadbeef
+
+    def test_valid_position_dict_unchanged(self):
+        """Node with valid position dict is not replaced."""
+        nodes = {
+            "!aabb0055": {
+                "num": 400,
+                "user": {
+                    "id": "!aabb0055",
+                    "longName": "GPS Node",
+                    "shortName": "GPS",
+                    "hwModel": "RAK4631",
+                },
+                "role": "CLIENT",
+                "position": {"latitude": 21.3069, "longitude": -157.8583, "altitude": 5},
+                "lastHeard": 1707500000,
+            }
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        # Position preserved exactly
+        assert parsed["!aabb0055"]["position"]["latitude"] == 21.3069
+        assert parsed["!aabb0055"]["position"]["longitude"] == -157.8583
+
+    def test_full_phantom_node_all_fields_patched(self):
+        """Completely bare phantom node gets all required fields."""
+        nodes = {
+            "!ff001122": {}
+        }
+        data = json.dumps(nodes).encode()
+        result = MeshtasticApiProxy._sanitize_nodes_json(data)
+        parsed = json.loads(result)
+
+        node = parsed["!ff001122"]
+        assert isinstance(node["user"], dict)
+        assert node["user"]["longName"]
+        assert node["user"]["shortName"] == "????"
+        assert node["user"]["hwModel"] == "UNSET"
+        assert node["role"] == "CLIENT"
+        assert node["lastHeard"] == 0
+        assert "num" in node
