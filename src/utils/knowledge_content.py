@@ -1713,3 +1713,112 @@ For MeshForge MQTT subscriber:
         related_entries=["MQTT for Meshtastic"],
         expertise_level="intermediate",
     ))
+
+    kb._add_entry(KnowledgeEntry(
+        topic=KnowledgeTopic.MQTT,
+        title="MQTT Downlink Echo Loop",
+        content="""
+MQTT Downlink Echo Loop — the #1 cause of meshtasticd web client hangs.
+
+The Problem:
+When MQTT uplink AND downlink are both enabled on the same channel,
+the device publishes packets to the broker (uplink), then the broker
+echoes them right back (downlink). This creates a feedback loop that
+floods the device's tophone queue.
+
+Symptoms:
+- meshtasticd logs: "tophone queue status queue is full, discard oldest"
+- Web client at :9443 hangs/freezes after partial load
+- Node names appear but UI is unresponsive
+- Packet loss on the RF mesh (dropped from full queue)
+
+Root Cause:
+  Device TX → MQTT broker (uplink publish)
+                  ↓
+  MQTT broker → Device RX queue (downlink subscribe)  ← LOOP
+
+The device subscribes to the same topic it publishes to.
+Every outgoing packet comes back in as an incoming packet,
+filling the queue faster than the radio can drain it.
+
+Fix:
+  # Disable downlink on primary channel
+  meshtastic --host localhost --ch-index 0 --ch-set downlink_enabled false
+
+  # Or in MeshForge TUI:
+  Meshtasticd > MQTT > Configure Downlink
+
+When to use downlink:
+- Only if you need MQTT→radio message injection
+- Remote apps sending commands to mesh nodes
+- Never on a monitoring/broker node that only collects data
+
+When to DISABLE downlink:
+- Broker/monitoring nodes (most common)
+- Nodes that only publish to MQTT
+- Any node experiencing queue overflow
+""",
+        keywords=["mqtt", "downlink", "echo", "loop", "queue", "full", "overflow",
+                 "tophone", "hang", "web client", "freeze", "flood"],
+        related_entries=["MQTT for Meshtastic", "Web Client Phantom Nodes"],
+        expertise_level="intermediate",
+    ))
+
+    kb._add_entry(KnowledgeEntry(
+        topic=KnowledgeTopic.MESHTASTIC,
+        title="Web Client Phantom Nodes",
+        content="""
+Phantom Nodes — why the meshtasticd web client crashes on search.
+
+The Problem:
+The meshtasticd web client (React app at :9443) crashes with
+"This is a little embarrassing..." when clicking certain nodes
+in the search results. The nodes appear in search but clicking
+them triggers a JavaScript error.
+
+Root Cause:
+Phantom nodes are incomplete entries in the device's node database —
+typically received via MQTT from distant nodes. They have a node ID
+but are missing required fields:
+- No 'user' object (longName, shortName, hwModel missing)
+- No 'role' field
+- No position data
+
+The React web client tries to render these fields without null checks:
+  node.user.longName.replace(...)  → crashes on undefined
+
+This is upstream bug: https://github.com/meshtastic/web/issues/862
+
+How phantom nodes accumulate:
+1. MQTT downlink enabled → broker sends nodeinfo from entire mesh
+2. Many nodes on public MQTT have incomplete data
+3. Device stores them in nodedb with missing fields
+4. MaxNodes: 200 (default) allows hundreds of phantoms
+
+Fixes:
+1. MeshForge Node DB Cleanup:
+   Meshtasticd > Node DB Cleanup > Scan for Phantom Nodes
+   Identifies and removes nodes with no name data.
+
+2. Reset node database (nuclear option):
+   meshtastic --host localhost --reset-nodedb
+   Clears ALL nodes. Legitimate nodes re-appear within minutes.
+
+3. Reduce MaxNodes in /etc/meshtasticd/config.yaml:
+   General:
+     MaxNodes: 100  # Down from 200
+
+4. Disable MQTT downlink (prevents new phantoms):
+   meshtastic --host localhost --ch-index 0 --ch-set downlink_enabled false
+
+5. MeshForge API proxy sanitization:
+   When web client is routed through MeshForge's proxy, the
+   _sanitize_nodes_json() method fills in missing fields with
+   safe defaults, preventing the React crash entirely.
+""",
+        keywords=["phantom", "ghost", "node", "crash", "web client", "search",
+                 "embarrassing", "react", "undefined", "missing", "user",
+                 "longName", "role", "M3GO", "nodedb", "cleanup"],
+        related_entries=["MQTT Downlink Echo Loop", "MQTT for Meshtastic"],
+        expertise_level="intermediate",
+    ))
