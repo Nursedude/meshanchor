@@ -1,98 +1,81 @@
 # MeshForge Session Notes
 
 **Last Updated**: 2026-02-10
-**Current Branch**: `claude/session-management-system-TW5ho`
+**Current Branch**: `claude/fix-mesh-blank-screen-qrwGe`
 **Version**: v0.5.2-beta
-**Tests**: 151 passed (21 web_client_ownership + 34 api_proxy_sanitize + 78 message_queue + 18 security), linter clean
-**Linter**: Clean
-
-## Session Focus: MeshForge Owns the Browser (2026-02-10)
-
-### The Problem
-meshtasticd's protobuf stream (`/api/v1/fromradio`) is single-consumer. When MeshForge opens it for the NOC, the web client at port 9443 starves. Users going to ip:9443 directly also bypass MeshForge's phantom node filtering. The hybrid browser at ip:5000 tried to replicate messaging that the Meshtastic web client already does well.
-
-### Architecture Decision: Own the Browser
-MeshForge now **owns the delivery** of the Meshtastic web client:
-```
-User → ip:5000 ─┬─ /          → MeshForge NOC dashboard
-                 ├─ /mesh/     → Meshtastic web client (from disk)
-                 ├─ /mesh/api/v1/*  → multiplexed proxy (phantom filtered)
-                 └─ /mesh/json/*    → sanitized proxy
-meshtasticd:9443 → localhost only (iptables blocks external)
-```
-
-### What Was Done
-
-**1. Static file serving from disk** (`map_http_handler.py`)
-- Replaced `_proxy_mesh_client()` (fragile HTML proxy + JS injection) with `_serve_mesh_web_client()`
-- Serves files directly from `/usr/share/meshtasticd/web/` — no proxying HTML/JS/CSS
-- SPA fallback: non-file routes get index.html (React router support)
-- Path traversal protection (reject `..`, resolve symlinks, check dir boundary)
-- Proper cache headers (no-cache for HTML, 1hr for static assets)
-- CORS headers on all responses
-
-**2. Removed fragile code**
-- Deleted `_proxy_mesh_client()` — 101 lines of HTML proxying + JS injection
-- Deleted `_serve_mesh_client_fallback()` — replaced with `_serve_mesh_client_unavailable()`
-- Removed `<base href="/mesh/">` injection hack
-- Removed `window.onerror` / `unhandledrejection` JS injection
-- Removed `window.__MESHFORGE_PROXY__` flag
-- Renamed `proxy_static()` → `proxy_endpoint()` (clarity: it proxies action endpoints, not static files)
-
-**3. API routing preserved**
-- `/mesh/api/v1/fromradio` → multiplexed proxy (stream sharing)
-- `/mesh/api/v1/toradio` → forwarded to meshtasticd
-- `/mesh/json/nodes` → sanitized proxy (phantom node filtering)
-- `/mesh/json/report`, `/mesh/json/blink` → proxied
-- All root-level routes unchanged (`/api/v1/*`, `/json/*`)
-
-**4. Radio panel removed from NOC** (`node_map.html`)
-- Removed radio control HTML panel (status, mode, send message form)
-- Removed `refreshRadioStatus()` and `sendRadioMessage()` JS functions
-- Removed `setInterval(refreshRadioStatus, 30000)` init call
-- Added "Open Meshtastic Web Client" link to `/mesh/`
-
-**5. TUI updated** (`web_client_mixin.py`)
-- URLs now point to `http://ip:5000/mesh/` instead of `https://ip:9443`
-- Health check verifies both port 5000 (MeshForge) and port 9443 (meshtasticd API)
-- Menu text updated to reflect MeshForge-owned serving
-- URL display shows `/mesh/` path and NOC at `/`
-
-**6. Port lockdown** (`service_check.py`)
-- Added `lock_port_external(port)` — iptables rule blocks external access
-- Added `unlock_port_external(port)` — removes the rule
-- Idempotent (no duplicate rules), handles missing iptables
-- Default: port 9443 (meshtasticd)
-
-**7. Tests** (`test_web_client_ownership.py`)
-- 13 tests for static file serving (root, assets, API routing, SPA fallback, path traversal, caching, no injection)
-- 6 tests for port lockdown (add, idempotent, custom port, no iptables, unlock)
-- 2 tests for proxy_endpoint rename verification
-- All 151 tests pass
-
-### Files Changed
-- `src/utils/map_http_handler.py` — static file handler, removed HTML proxy
-- `src/gateway/meshtastic_api_proxy.py` — proxy_static → proxy_endpoint rename
-- `web/node_map.html` — removed radio panel, added web client link
-- `src/launcher_tui/web_client_mixin.py` — URLs to port 5000/mesh/
-- `src/utils/service_check.py` — lock_port_external/unlock_port_external
-- `tests/test_web_client_ownership.py` — 21 new tests
-
-### Hardware Testing Needed
-- Verify `/mesh/` serves meshtasticd's React app from `/usr/share/meshtasticd/web/`
-- Verify the web client can send/receive messages through the multiplexed proxy
-- Verify `lock_port_external(9443)` blocks external access
-- Test from mobile device: `http://ip:5000/mesh/`
-
-### Remaining / Next Session
-- **iptables persistence**: Rule is not persistent across reboot — needs `iptables-persistent` or systemd service
-- **TUI menu**: Add "Lock Port 9443" option to service management menu
-- **HTTPS on port 5000**: Currently HTTP only — may need SSL for production
-- **Startup integration**: Auto-call `lock_port_external(9443)` when MeshForge starts
 
 ---
 
-## Previous Session: Port 9443 Phantom Nodes + Web UI Fixes (2026-02-10)
+## NEXT SESSION: /mesh/ Architecture Rethink (2026-02-10)
+
+### Status: Needs fundamental rethink — current approach feels like bloatware
+
+The `/mesh/` subpath approach has been attempted from multiple angles across several sessions. Each fix adds complexity (HTML rewriting, CSS injection, base tag manipulation, regex path stripping) and the blank screen / UI glitches persist. The core problem is **fighting the web client's build assumptions** rather than working with them.
+
+### What We Tried (and why each is fragile)
+
+| Attempt | Approach | Why it breaks |
+|---------|----------|---------------|
+| Session 1 | `_proxy_mesh_client()` — full HTML proxy + JS injection | 101 lines of fragile proxying, broke on every meshtasticd update |
+| Session 2 | Serve files from disk + `<base href="/mesh/">` injection | `<base>` doesn't affect root-absolute paths (`/assets/x.js`) |
+| Session 3 | Regex strip leading `/` from src/href + replace existing `<base>` | Still blank — Vite builds have paths in JS bundles too, not just HTML |
+| Session 3 | CSS injection (`overflow:hidden`) for scrollbar covering sidebar | Treating symptoms, not the cause |
+
+### The fundamental tension
+
+meshtasticd builds its web client for serving at **root `/`**. MeshForge wants to serve it at **`/mesh/`**. Every approach to bridge this gap adds a layer of fragile rewriting. The JS bundles themselves contain hardcoded paths (dynamic imports, fetch calls, worker URLs) that HTML-level rewriting can't reach.
+
+### Clean architectural options for next session
+
+**Option A: Serve web client at root, move NOC map to subpath**
+```
+ip:5000/           → meshtastic web client (no rewriting needed)
+ip:5000/noc/       → MeshForge NOC dashboard
+ip:5000/api/*      → MeshForge APIs
+```
+- Simplest. Web client works as-is. NOC dashboard is our code so we control its paths.
+- Trade-off: `/` is no longer the NOC map.
+
+**Option B: Separate ports**
+```
+ip:5000             → MeshForge NOC dashboard
+ip:5001             → meshtastic web client (served by MeshForge, no subpath)
+meshtasticd:9443    → locked down (iptables)
+```
+- Zero path rewriting. Each app owns its root.
+- MeshForge still proxies the API (phantom filtering, stream multiplexing).
+- Trade-off: Two ports to remember.
+
+**Option C: Rebuild web client with correct base path**
+```
+vite build --base=/mesh/
+```
+- Ship a pre-built copy with correct paths baked in.
+- Trade-off: Must rebuild on every meshtasticd web client update. Maintenance burden.
+
+**Option D: Reverse proxy (nginx/caddy)**
+- Let a proper reverse proxy handle subpath rewriting.
+- Trade-off: Adds a dependency. MeshForge's "zero-dependency" design principle.
+
+### Recommendation for discussion
+Option A or B are cleanest. Option A requires only moving the NOC map to `/noc/` and serving meshtasticd files at `/`. Option B is the most isolated but means two ports.
+
+### MapDataCollector type error — FIXED this session
+Separate from the /mesh/ issue. `_get_source_summary()` puts `"meshtasticd_via": "http"` (string) in the sources dict. Dashboard did `v > 0` on all values → TypeError. Fixed with `isinstance(v, (int, float))` guard. Also hardened AREDN `tunnel_count` int conversion.
+
+### Commits on branch
+1. `a16ad6d` — fix: Fix /mesh/ blank white screen by rewriting Vite root-absolute paths
+2. `e3b2f06` — fix: Fix MapDataCollector type error and /mesh/ scrollbar covering sidebar
+
+### Files changed this session
+- `src/utils/map_http_handler.py` — `_rewrite_mesh_html()`, MIME types, CSS injection
+- `src/utils/map_data_collector.py` — AREDN tunnel_count int conversion
+- `src/launcher_tui/dashboard_mixin.py` — isinstance guard on source values
+- `tests/test_map_data_service.py` — 13 new TestRewriteMeshHtml tests
+
+---
+
+## Previous Session: MeshForge Owns the Browser (2026-02-10)
 
 ### Root Cause Found — P0 Phantom Nodes
 The Meshtastic React web client gets node data via **protobuf streaming** (`/api/v1/fromradio`), NOT from `/json/nodes`. The previous fix sanitized JSON but the protobuf packets were forwarded raw to clients. Phantom NodeInfo packets (MQTT nodes without User data) caused React to crash on `node.user.longName`.
