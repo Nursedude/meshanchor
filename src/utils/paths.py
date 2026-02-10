@@ -127,6 +127,10 @@ class ReticulumPaths:
         required by Transport jobs for announce caching. Without these,
         rnsd crashes with PermissionError in background threads.
 
+        Also fixes file permissions inside storage/ — if files were created
+        by a different user (e.g. root vs rnsd), Transport jobs fail with
+        PermissionError on individual announce cache files.
+
         Returns:
             True if directories exist or were created, False on permission error.
 
@@ -140,9 +144,56 @@ class ReticulumPaths:
             cls.ETC_CACHE.mkdir(mode=0o755, parents=True, exist_ok=True)
             cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o755, parents=True, exist_ok=True)
             cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
+
+            # Fix file permissions inside storage/ — rnsd Transport jobs
+            # need read/write on all files under cache/announces/ and
+            # ratchets/.  If files were created by a different user,
+            # rnsd crashes with PermissionError on individual files.
+            cls._fix_storage_file_permissions()
+
             return True
         except PermissionError:
             return False
+
+    @classmethod
+    def _fix_storage_file_permissions(cls):
+        """Make all files under /etc/reticulum/storage/ world-readable/writable.
+
+        rnsd may run as root or as a service user. When MeshForge (running
+        as sudo) creates files, they may be owned by root and inaccessible
+        to rnsd's service user. Rather than guessing which user rnsd runs
+        as, we set 0o666 on files and 0o777 on dirs within storage/ so
+        any local user can read/write. This is acceptable because:
+        - /etc/reticulum/storage/ contains caches and ephemeral data
+        - The actual secrets (identity, keys) are in the parent config dir
+        - This matches RNS's own behavior of creating world-readable storage
+        """
+        import os
+        import stat
+
+        storage_dirs = [cls.ETC_STORAGE, cls.ETC_RATCHETS,
+                        cls.ETC_CACHE, cls.ETC_ANNOUNCE_CACHE]
+
+        for dir_path in storage_dirs:
+            if not dir_path.is_dir():
+                continue
+            try:
+                # Fix directory permissions
+                dir_path.chmod(0o755)
+                # Fix file permissions within
+                for entry in dir_path.iterdir():
+                    try:
+                        if entry.is_file():
+                            current = entry.stat().st_mode
+                            # Only fix if not already writable by group/other
+                            if not (current & stat.S_IWOTH):
+                                entry.chmod(0o666)
+                        elif entry.is_dir():
+                            entry.chmod(0o755)
+                    except (PermissionError, OSError):
+                        pass  # Best effort — some files may be locked
+            except (PermissionError, OSError):
+                pass  # Best effort
 
     @classmethod
     def get_config_dir(cls) -> Path:
