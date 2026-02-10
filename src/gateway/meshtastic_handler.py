@@ -255,11 +255,16 @@ class MeshtasticHandler:
                 # For broadcasts, use ^all instead of None
                 dest = destination if destination else "^all"
                 logger.info(f"Sending to Meshtastic: dest={dest}, ch={channel}, msg={message[:50]}")
-                self._interface.sendText(
+                result = self._interface.sendText(
                     message,
                     destinationId=dest,
                     channelIndex=channel
                 )
+                if result is None or result is False:
+                    logger.warning(f"sendText returned {result} — TX may have failed "
+                                   f"(dest={dest}, ch={channel})")
+                    return False
+                logger.debug(f"sendText returned: {result}")
                 return True
             else:
                 # Fallback to CLI
@@ -290,7 +295,10 @@ class MeshtasticHandler:
         try:
             if self._interface:
                 dest = destination if destination else "^all"
-                self._interface.sendText(message, destinationId=dest, channelIndex=channel)
+                result = self._interface.sendText(message, destinationId=dest, channelIndex=channel)
+                if result is None or result is False:
+                    logger.warning(f"Queue sendText returned {result} — TX may have failed")
+                    return False
                 return True
             return False
         except Exception as e:
