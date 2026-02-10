@@ -1101,10 +1101,24 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         multiplexed proxy so the web client gets proper phantom-node
         filtering and stream multiplexing.
 
+        When API proxy is disabled, redirects to meshtasticd's native
+        web client at :9443 so MeshForge doesn't consume fromradio packets.
+
         Static files:  /mesh/*           -> disk read from MESHTASTICD_WEB_DIR
         API proxied:   /mesh/api/v1/*    -> MeshForge multiplexed proxy
                        /mesh/json/*      -> MeshForge sanitized proxy
         """
+        # When API proxy is disabled, redirect to native meshtasticd web client.
+        # This avoids MeshForge consuming fromradio packets that the native
+        # web client needs.
+        if not self.api_proxy:
+            host = self.headers.get('Host', 'localhost:5000').split(':')[0]
+            redirect_url = f"https://{host}:9443/"
+            self.send_response(302)
+            self.send_header('Location', redirect_url)
+            self.end_headers()
+            return
+
         # Map /mesh/ to / within the web client dir
         path = self.path
         if path == '/mesh' or path == '/mesh/':

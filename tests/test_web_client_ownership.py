@@ -21,13 +21,23 @@ import pytest
 class TestMeshWebClientServing:
     """Test _serve_mesh_web_client() static file handler."""
 
-    def _make_handler(self, path, web_dir=None, api_proxy=None):
-        """Create a minimal mock handler for testing."""
+    def _make_handler(self, path, web_dir=None, api_proxy='_default_mock_'):
+        """Create a minimal mock handler for testing.
+
+        Args:
+            api_proxy: Set to None to test redirect behavior (proxy disabled).
+                       Default provides a mock proxy for testing serving behavior.
+        """
         from utils.map_http_handler import MapRequestHandler, MESHTASTICD_WEB_DIR
 
         handler = MagicMock(spec=MapRequestHandler)
         handler.path = path
-        handler.api_proxy = api_proxy
+        # Default to a mock proxy so tests exercise the serving path.
+        # Pass api_proxy=None explicitly to test the redirect behavior.
+        if api_proxy == '_default_mock_':
+            handler.api_proxy = MagicMock()
+        else:
+            handler.api_proxy = api_proxy
         handler.wfile = MagicMock()
         handler.headers = {}
         handler.client_address = ('127.0.0.1', 12345)
@@ -35,6 +45,7 @@ class TestMeshWebClientServing:
         # Bind the real methods
         handler._serve_mesh_web_client = MapRequestHandler._serve_mesh_web_client.__get__(handler)
         handler._serve_mesh_client_unavailable = MapRequestHandler._serve_mesh_client_unavailable.__get__(handler)
+        handler._rewrite_mesh_html = MapRequestHandler._rewrite_mesh_html
         handler._send_cors_header = MagicMock()
         handler._proxy_json = MagicMock()
         handler._proxy_fromradio = MagicMock()
@@ -211,6 +222,21 @@ class TestMeshWebClientServing:
         # Old fragile JS injection should NOT be present
         assert b'window.onerror' not in written
         assert b'__MESHFORGE_PROXY__' not in written
+
+    def test_mesh_redirects_to_native_when_proxy_disabled(self):
+        """GET /mesh/ should redirect to native :9443 when API proxy is off."""
+        handler = self._make_handler('/mesh/', api_proxy=None)
+        handler.headers = {'Host': '192.168.1.100:5000'}
+
+        handler._serve_mesh_web_client()
+
+        handler.send_response.assert_called_with(302)
+        location_calls = [
+            c for c in handler.send_header.call_args_list
+            if c[0][0] == 'Location'
+        ]
+        assert len(location_calls) == 1
+        assert ':9443' in location_calls[0][0][1]
 
     def test_base_href_not_duplicated(self, tmp_path):
         """If HTML already has a <base> tag, don't inject another one."""
