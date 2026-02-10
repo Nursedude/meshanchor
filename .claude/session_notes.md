@@ -1,12 +1,59 @@
 # MeshForge Session Notes
 
 **Last Updated**: 2026-02-10
-**Current Branch**: `claude/fix-scroll-phantom-nodes-krlBn`
+**Current Branch**: `claude/fix-port-9443-nodes-MM2kH`
 **Version**: v0.5.2-beta
-**Tests**: 17 passed (api_proxy_sanitize), full suite not run this session
-**Linter**: Not run this session
+**Tests**: 62 passed (34 api_proxy_sanitize + 28 common), linter clean
+**Linter**: Clean
 
-## Session Focus: Web UI Fixes — Scroll + Phantom Nodes (2026-02-10)
+## Session Focus: Port 9443 Phantom Nodes + Web UI Fixes (2026-02-10)
+
+### Root Cause Found — P0 Phantom Nodes
+The Meshtastic React web client gets node data via **protobuf streaming** (`/api/v1/fromradio`), NOT from `/json/nodes`. The previous fix sanitized JSON but the protobuf packets were forwarded raw to clients. Phantom NodeInfo packets (MQTT nodes without User data) caused React to crash on `node.user.longName`.
+
+### What Was Done
+
+**P0: Phantom Node Fix — TWO-LAYER DEFENSE**
+1. **Server-side protobuf filtering** (`meshtastic_api_proxy.py`):
+   - Added raw protobuf wire format parser (`_read_varint`, `_extract_protobuf_fields`)
+   - `_is_phantom_nodeinfo()` detects `FromRadio.node_info` packets missing User field
+   - `_distribute_packet()` now drops phantom NodeInfo before distributing to clients
+   - Added `phantom_nodes_filtered` stats counter
+2. **Client-side JS error protection** (`map_http_handler.py`):
+   - Injected `window.onerror` + `unhandledrejection` handlers into proxied HTML
+   - Catches "Cannot read properties of null/undefined" as safety net
+   - Prevents React white-screen-of-death from any remaining phantom data
+
+**P1: Right Panel Info Clipping — FIXED** (`web/node_map.html`)
+- Added `max-width: 280px` to `.control-panel`
+- Added `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` to `.stat-row .value`
+- Added `flex-shrink: 0` to `.stat-row .label` so labels don't compress
+- Added `gap: 8px` between label and value for consistent spacing
+
+**P2: Radio Message "Went Nowhere" — IMPROVED** (`map_http_handler.py`, `node_map.html`)
+- Improved error messages: now returns actionable detail (library install, TCP port check)
+- Changed success to "Sent via radio (delivery best-effort)" — sets correct user expectation
+- JS now shows `data.detail` as tooltip, longer display for errors (8s vs 3s)
+- HTTP status codes: 503 for missing library, 502 for send failure
+
+### Changes This Session
+- `src/gateway/meshtastic_api_proxy.py` — protobuf phantom filtering, wire format parser
+- `src/utils/map_http_handler.py` — JS error protection injection, radio API error improvement
+- `web/node_map.html` — panel CSS overflow fix, radio send feedback improvement
+- `tests/test_api_proxy_sanitize.py` — 17 new tests (protobuf filtering + wire format)
+
+### What About ip:9443 Directly?
+Users going to ip:9443 bypass MeshForge entirely — there's no fix possible at the proxy level. Options for next session:
+- **Tell users to use ip:5000/mesh/** — this is now the sanitized path
+- **iptables redirect** 9443→5000 (requires root, add to install script)
+- **Disable meshtasticd web server** and serve exclusively through MeshForge
+
+### P3: rnsd Permission Fix — UNTESTED
+Committed last session. Needs hardware verification on MOC2.
+
+---
+
+## Previous Session: Web UI Fixes — Scroll + Phantom Nodes (2026-02-10)
 
 User reported two issues from hardware testing:
 1. **ip:5000** — Right menu won't scroll, can't see bottom information
