@@ -41,6 +41,7 @@ import logging
 import math
 import mimetypes
 import os
+import re
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
@@ -52,6 +53,13 @@ logger = logging.getLogger(__name__)
 # Default path where meshtasticd installs its web client files.
 # MeshForge serves these directly from disk instead of proxying HTML.
 MESHTASTICD_WEB_DIR = '/usr/share/meshtasticd/web'
+
+# Ensure modern web asset MIME types are recognized (Python may lack these)
+mimetypes.add_type('application/javascript', '.mjs')
+mimetypes.add_type('font/woff2', '.woff2')
+mimetypes.add_type('application/wasm', '.wasm')
+mimetypes.add_type('image/webp', '.webp')
+mimetypes.add_type('image/avif', '.avif')
 
 
 class MapRequestHandler(SimpleHTTPRequestHandler):
@@ -1158,17 +1166,20 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         try:
             data = file_path.read_bytes()
 
-            # Inject <base href="/mesh/"> into index.html so the React SPA
-            # resolves its asset paths (JS/CSS/fonts) relative to /mesh/
-            # instead of /.  Without this, asset requests go to
-            # http://ip:5000/static/... (MeshForge NOC dir) instead of
-            # http://ip:5000/mesh/static/... (meshtasticd web dir),
-            # producing a blank white screen.
+            # Rewrite HTML so the React SPA works under the /mesh/ subpath.
+            #
+            # meshtasticd builds its web client for serving at root /.
+            # Vite produces root-absolute paths: src="/assets/index-xxx.js"
+            # <base href> does NOT affect root-absolute paths, only relative
+            # ones.  So we must:
+            #   1. Set <base href="/mesh/"> (replace existing or inject)
+            #   2. Strip the leading / from src= and href= values, making
+            #      them relative so the <base> tag takes effect:
+            #      "/assets/x.js" -> "assets/x.js" -> resolves to /mesh/assets/x.js
             if content_type and content_type.startswith('text/html'):
                 html = data.decode('utf-8', errors='replace')
-                if '<base' not in html.lower():
-                    html = html.replace('<head>', '<head><base href="/mesh/">', 1)
-                    data = html.encode('utf-8')
+                html = self._rewrite_mesh_html(html)
+                data = html.encode('utf-8')
 
             self.send_response(200)
             self.send_header('Content-Type', content_type)
@@ -1185,6 +1196,57 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         except (OSError, PermissionError) as e:
             logger.error("Failed to serve mesh web client file %s: %s", file_path, e)
             self.send_error(500, "Failed to read file")
+
+    @staticmethod
+    def _rewrite_mesh_html(html: str) -> str:
+        """Rewrite HTML asset paths so the meshtastic SPA works at /mesh/.
+
+        Vite/CRA build tools emit root-absolute paths (src="/assets/x.js").
+        The HTML <base> tag only affects *relative* URLs, not root-absolute
+        ones, so we must also strip the leading "/" to make them relative.
+
+        Steps:
+          1. Replace or inject <base href="/mesh/">
+          2. Convert root-absolute src/href values to relative paths
+             e.g. src="/assets/x.js" -> src="assets/x.js"
+             The browser then resolves "assets/x.js" via <base> as
+             /mesh/assets/x.js — which routes to _serve_mesh_web_client.
+        """
+        base_tag = '<base href="/mesh/">'
+
+        # Step 1: Ensure correct <base> tag
+        if re.search(r'<base\b', html, re.IGNORECASE):
+            # Replace existing <base> (e.g. <base href="/">) with ours
+            html = re.sub(
+                r'<base\b[^>]*>',
+                base_tag, html, count=1, flags=re.IGNORECASE,
+            )
+        else:
+            # Inject after <head> (handles <head lang="en">, <head\n>, etc.)
+            html = re.sub(
+                r'(<head\b[^>]*>)',
+                rf'\1{base_tag}',
+                html, count=1, flags=re.IGNORECASE,
+            )
+
+        # Step 2: Strip leading "/" from root-absolute src= and href= values
+        # so they become relative and resolve through <base href="/mesh/">.
+        #
+        #   src="/assets/index.js"  -> src="assets/index.js"
+        #   href="/favicon.svg"     -> href="favicon.svg"
+        #
+        # Preserved (not rewritten):
+        #   /mesh/...  (already correct)
+        #   //cdn...   (protocol-relative)
+        #   href="/"   (bare root — requires [^"']+ i.e. at least 1 char)
+        html = re.sub(
+            r'((?:src|href)\s*=\s*["\'])/((?!mesh/|/)[^"\']+)',
+            r'\1\2',
+            html,
+            flags=re.IGNORECASE,
+        )
+
+        return html
 
     def _serve_mesh_client_unavailable(self):
         """Serve a page when meshtasticd web client files are not on disk."""
