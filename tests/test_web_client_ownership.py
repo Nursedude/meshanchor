@@ -196,8 +196,8 @@ class TestMeshWebClientServing:
         ]
         assert any('max-age' in str(c) for c in cache_calls)
 
-    def test_no_base_href_injection(self, tmp_path):
-        """HTML should NOT have base href injected (old fragile approach)."""
+    def test_base_href_injection(self, tmp_path):
+        """HTML should have <base href="/mesh/"> for SPA subpath serving."""
         index = tmp_path / "index.html"
         index.write_text("<html><head></head><body>OK</body></html>")
 
@@ -207,9 +207,23 @@ class TestMeshWebClientServing:
             handler._serve_mesh_web_client()
 
         written = handler.wfile.write.call_args[0][0]
-        assert b'<base href' not in written
+        assert b'<base href="/mesh/">' in written
+        # Old fragile JS injection should NOT be present
         assert b'window.onerror' not in written
         assert b'__MESHFORGE_PROXY__' not in written
+
+    def test_base_href_not_duplicated(self, tmp_path):
+        """If HTML already has a <base> tag, don't inject another one."""
+        index = tmp_path / "index.html"
+        index.write_text('<html><head><base href="/"></head><body>OK</body></html>')
+
+        handler = self._make_handler('/mesh/')
+
+        with patch('utils.map_http_handler.MESHTASTICD_WEB_DIR', str(tmp_path)):
+            handler._serve_mesh_web_client()
+
+        written = handler.wfile.write.call_args[0][0]
+        assert written.count(b'<base') == 1  # Only the original, no duplication
 
 
 # ─────────────────────────────────────────────────────────────────
