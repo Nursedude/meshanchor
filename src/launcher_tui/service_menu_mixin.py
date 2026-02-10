@@ -270,6 +270,7 @@ class ServiceMenuMixin:
                 ("install", "Install meshtasticd"),
                 ("mqtt-setup", "MQTT Setup           Install & configure broker"),
                 ("openhamclock", "OpenHamClock Docker  Start/stop/status"),
+                ("lock-9443", "Lock Port 9443       Restrict to localhost"),
                 ("back", "Back"),
             ]
 
@@ -292,6 +293,7 @@ class ServiceMenuMixin:
                 "restart-rns": ("Restart rnsd", self._restart_rnsd_service),
                 "meshtasticd": ("Manage meshtasticd", lambda: self._manage_service("meshtasticd")),
                 "rnsd": ("Manage rnsd", lambda: self._manage_service("rnsd")),
+                "lock-9443": ("Port 9443 Lockdown", self._manage_port_lockdown),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -387,6 +389,85 @@ class ServiceMenuMixin:
             except (subprocess.SubprocessError, OSError) as e:
                 logger.debug("rnsd failure log check failed: %s", e)
         self._wait_for_enter()
+
+    def _manage_port_lockdown(self):
+        """Lock/unlock external access to meshtasticd port 9443."""
+        try:
+            from utils.service_check import (
+                lock_port_external, unlock_port_external,
+                check_port_locked, persist_iptables,
+            )
+        except ImportError:
+            self.dialog.msgbox(
+                "Unavailable",
+                "Port lockdown requires utils.service_check module."
+            )
+            return
+
+        while True:
+            locked = check_port_locked(9443)
+            status_str = "\033[0;32mLOCKED\033[0m (localhost only)" if locked else "\033[0;31mOPEN\033[0m (external access allowed)"
+
+            choices = [
+                ("lock", "Lock Port 9443       Block external access"),
+                ("unlock", "Unlock Port 9443     Allow external access"),
+                ("persist", "Save Rules           Survive reboot"),
+                ("status", "Check Status         Current lock state"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Port 9443 Lockdown",
+                f"Current: {status_str}\n\n"
+                "MeshForge proxies meshtasticd at :5000/mesh/\n"
+                "Locking port 9443 forces traffic through MeshForge.",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "lock":
+                subprocess.run(['clear'], check=False, timeout=5)
+                success, msg = lock_port_external(9443)
+                if success:
+                    print(f"\033[0;32m✓\033[0m {msg}")
+                    # Offer to persist
+                    print("\nTo survive reboot, select 'Save Rules' from the menu.")
+                else:
+                    print(f"\033[0;31m✗\033[0m {msg}")
+                self._wait_for_enter()
+
+            elif choice == "unlock":
+                subprocess.run(['clear'], check=False, timeout=5)
+                success, msg = unlock_port_external(9443)
+                if success:
+                    print(f"\033[0;32m✓\033[0m {msg}")
+                else:
+                    print(f"\033[0;31m✗\033[0m {msg}")
+                self._wait_for_enter()
+
+            elif choice == "persist":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("Saving iptables rules for reboot persistence...\n")
+                success, msg = persist_iptables()
+                if success:
+                    print(f"\033[0;32m✓\033[0m {msg}")
+                else:
+                    print(f"\033[0;31m✗\033[0m {msg}")
+                self._wait_for_enter()
+
+            elif choice == "status":
+                subprocess.run(['clear'], check=False, timeout=5)
+                print("=== Port 9443 Status ===\n")
+                if locked:
+                    print("  \033[0;32m●\033[0m Port 9443: LOCKED (localhost only)")
+                else:
+                    print("  \033[0;31m●\033[0m Port 9443: OPEN (external access allowed)")
+                print()
+                print("  Lock blocks external access via iptables.")
+                print("  MeshForge proxies at :5000/mesh/ with filtering.")
+                self._wait_for_enter()
 
     def _restart_meshtasticd_service(self):
         """Restart the meshtasticd service."""
