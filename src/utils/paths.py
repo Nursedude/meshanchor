@@ -139,10 +139,13 @@ class ReticulumPaths:
         """
         try:
             cls.ETC_BASE.mkdir(mode=0o755, parents=True, exist_ok=True)
-            cls.ETC_STORAGE.mkdir(mode=0o755, parents=True, exist_ok=True)
-            cls.ETC_RATCHETS.mkdir(mode=0o755, parents=True, exist_ok=True)
-            cls.ETC_CACHE.mkdir(mode=0o755, parents=True, exist_ok=True)
-            cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o755, parents=True, exist_ok=True)
+            # Storage directories need world-writable so rnsd (which may
+            # run as a non-root service user) can create and modify cache
+            # files, ratchets, and announce entries.
+            cls.ETC_STORAGE.mkdir(mode=0o777, parents=True, exist_ok=True)
+            cls.ETC_RATCHETS.mkdir(mode=0o777, parents=True, exist_ok=True)
+            cls.ETC_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
+            cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
             cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
 
             # Fix file permissions inside storage/ — rnsd Transport jobs
@@ -168,7 +171,6 @@ class ReticulumPaths:
         - The actual secrets (identity, keys) are in the parent config dir
         - This matches RNS's own behavior of creating world-readable storage
         """
-        import os
         import stat
 
         storage_dirs = [cls.ETC_STORAGE, cls.ETC_RATCHETS,
@@ -178,8 +180,9 @@ class ReticulumPaths:
             if not dir_path.is_dir():
                 continue
             try:
-                # Fix directory permissions
-                dir_path.chmod(0o755)
+                # Fix directory permissions — rnsd needs write access to
+                # create/modify cache files inside these directories.
+                dir_path.chmod(0o777)
                 # Fix file permissions within
                 for entry in dir_path.iterdir():
                     try:
@@ -189,7 +192,7 @@ class ReticulumPaths:
                             if not (current & stat.S_IWOTH):
                                 entry.chmod(0o666)
                         elif entry.is_dir():
-                            entry.chmod(0o755)
+                            entry.chmod(0o777)
                     except (PermissionError, OSError):
                         pass  # Best effort — some files may be locked
             except (PermissionError, OSError):
