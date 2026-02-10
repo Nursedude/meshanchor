@@ -20,9 +20,13 @@ Endpoints:
 Meshtastic API Proxy (MeshForge-owned):
 - GET  /api/v1/fromradio -> multiplexed protobuf packets from meshtasticd
 - PUT  /api/v1/toradio   -> forwarded to meshtasticd
-- GET  /json/nodes       -> proxied from meshtasticd
+- GET  /json/nodes       -> proxied + sanitized from meshtasticd
 - GET  /json/report      -> proxied from meshtasticd
-- GET  /mesh/*           -> meshtastic web client (proxied from meshtasticd)
+
+Meshtastic Web Client (MeshForge-owned, served from disk):
+- GET  /mesh/            -> meshtastic web client (from /usr/share/meshtasticd/web/)
+- GET  /mesh/api/v1/*    -> routed through MeshForge multiplexed proxy
+- GET  /mesh/json/*      -> routed through MeshForge sanitized proxy
 
 Radio Control API (MeshForge-owned):
 - GET /api/radio/info     -> radio device information
@@ -35,6 +39,7 @@ Radio Control API (MeshForge-owned):
 import json
 import logging
 import math
+import mimetypes
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
@@ -42,6 +47,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Default path where meshtasticd installs its web client files.
+# MeshForge serves these directly from disk instead of proxying HTML.
+MESHTASTICD_WEB_DIR = '/usr/share/meshtasticd/web'
 
 
 class MapRequestHandler(SimpleHTTPRequestHandler):
@@ -121,7 +130,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/json/blink' or self.path == '/json/blink/':
             self._proxy_json('/json/blink')
         elif self.path.startswith('/mesh/') or self.path == '/mesh':
-            self._proxy_mesh_client()
+            self._serve_mesh_web_client()
         elif self.path == '/api/proxy/status' or self.path == '/api/proxy/status/':
             self._serve_proxy_status()
         # ─────────────────────────────────────────────────────────────
@@ -1068,7 +1077,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self.send_error(503, "Meshtastic API proxy not running")
             return
 
-        result = self.api_proxy.proxy_static(path)
+        result = self.api_proxy.proxy_endpoint(path)
         if result:
             content, content_type = result
             self.send_response(200)
@@ -1080,36 +1089,29 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         else:
             self.send_error(502, f"Could not proxy {path}")
 
-    def _proxy_mesh_client(self):
-        """Serve the Meshtastic web client proxied from meshtasticd.
+    def _serve_mesh_web_client(self):
+        """Serve the Meshtastic web client from disk.
 
-        /mesh/         -> meshtasticd's index.html
-        /mesh/assets/* -> meshtasticd's static assets
+        MeshForge owns the browser — serves meshtasticd's web client files
+        directly from /usr/share/meshtasticd/web/ instead of proxying HTML
+        through the network.  API calls are routed through MeshForge's
+        multiplexed proxy so the web client gets proper phantom-node
+        filtering and stream multiplexing.
 
-        API endpoints under /mesh/ are routed through MeshForge's proper
-        handlers (sanitized, multiplexed) instead of raw proxy_static():
-        - /mesh/json/nodes   -> proxy_json (sanitizes phantom nodes)
-        - /mesh/json/report  -> proxy_json
-        - /mesh/api/v1/fromradio -> multiplexed fromradio
-        - /mesh/api/v1/toradio   -> forwarded toradio
+        Static files:  /mesh/*           -> disk read from MESHTASTICD_WEB_DIR
+        API proxied:   /mesh/api/v1/*    -> MeshForge multiplexed proxy
+                       /mesh/json/*      -> MeshForge sanitized proxy
         """
-        if not self.api_proxy:
-            # Return a helpful page instead of an error
-            self._serve_mesh_client_fallback()
-            return
-
-        # Map /mesh/ to / on meshtasticd
+        # Map /mesh/ to / within the web client dir
         path = self.path
         if path == '/mesh' or path == '/mesh/':
-            path = '/'
+            path = '/index.html'
         elif path.startswith('/mesh/'):
-            path = path[5:]  # Strip /mesh prefix
+            path = path[5:]  # Strip /mesh prefix -> /index.html, /static/...
 
-        # Route API endpoints through proper handlers instead of raw proxy.
-        # The web client makes relative fetch() calls which resolve under
-        # /mesh/ due to <base href="/mesh/">.  Without this routing,
-        # /mesh/json/nodes bypasses sanitization and phantom nodes crash
-        # the React UI.
+        # Route API endpoints through MeshForge's sanitized, multiplexed
+        # proxy.  The web client's fetch() calls resolve here because
+        # they are relative to the /mesh/ origin.
         if path == '/json/nodes' or path == '/json/nodes/':
             self._proxy_json('/json/nodes')
             return
@@ -1126,64 +1128,59 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._proxy_toradio()
             return
 
-        result = self.api_proxy.proxy_static(path)
-        if result:
-            content, content_type = result
+        # Serve static files from meshtasticd's web directory on disk
+        web_dir = Path(MESHTASTICD_WEB_DIR)
+        if not web_dir.is_dir():
+            self._serve_mesh_client_unavailable()
+            return
 
-            # For the index.html, inject base href so relative paths work
-            # Also inject phantom node error protection as a safety net
-            if path == '/' or path.endswith('.html'):
-                if isinstance(content, bytes):
-                    content_str = content.decode('utf-8', errors='replace')
-                    # Rewrite API URLs + inject phantom node protection
-                    content_str = content_str.replace(
-                        '</head>',
-                        '<base href="/mesh/">\n'
-                        '<script>\n'
-                        '// MeshForge API proxy + phantom node protection\n'
-                        'window.__MESHFORGE_PROXY__ = true;\n'
-                        '// Safety net: catch null-property errors from incomplete\n'
-                        '// MQTT phantom nodes that slip past protobuf filtering.\n'
-                        '(function(){\n'
-                        '  var origError = window.onerror;\n'
-                        '  window.onerror = function(msg, src, line, col, err) {\n'
-                        '    if (typeof msg === "string" &&\n'
-                        '        (msg.indexOf("Cannot read properties of null") !== -1 ||\n'
-                        '         msg.indexOf("Cannot read properties of undefined") !== -1 ||\n'
-                        '         msg.indexOf("Cannot read property") !== -1)) {\n'
-                        '      console.warn("[MeshForge] Phantom node error caught:", msg);\n'
-                        '      return true;\n'
-                        '    }\n'
-                        '    return origError ? origError(msg, src, line, col, err) : false;\n'
-                        '  };\n'
-                        '  window.addEventListener("unhandledrejection", function(e) {\n'
-                        '    var m = (e.reason && e.reason.message) || String(e.reason || "");\n'
-                        '    if (m.indexOf("Cannot read properties of null") !== -1 ||\n'
-                        '        m.indexOf("Cannot read properties of undefined") !== -1) {\n'
-                        '      console.warn("[MeshForge] Phantom node rejection caught:", m);\n'
-                        '      e.preventDefault();\n'
-                        '    }\n'
-                        '  });\n'
-                        '})();\n'
-                        '</script>\n'
-                        '</head>'
-                    )
-                    content = content_str.encode('utf-8')
-                    content_type = 'text/html; charset=utf-8'
+        # Reject path traversal
+        if '..' in path:
+            self.send_error(400, "Invalid path")
+            return
+
+        file_path = web_dir / path.lstrip('/')
+
+        # SPA fallback: non-file routes get index.html (React router)
+        if not file_path.is_file():
+            file_path = web_dir / 'index.html'
+            if not file_path.is_file():
+                self._serve_mesh_client_unavailable()
+                return
+
+        # Prevent path traversal via symlinks
+        try:
+            resolved = file_path.resolve()
+            if not str(resolved).startswith(str(web_dir.resolve())):
+                self.send_error(403, "Forbidden")
+                return
+        except (OSError, ValueError):
+            self.send_error(400, "Invalid path")
+            return
+
+        # Read and serve the file
+        content_type = mimetypes.guess_type(str(file_path))[0] or 'application/octet-stream'
+        try:
+            data = file_path.read_bytes()
 
             self.send_response(200)
             self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', str(len(content)))
+            self.send_header('Content-Length', str(len(data)))
             self._send_cors_header()
             if content_type.startswith('text/html'):
                 self.send_header('Cache-Control', 'no-cache')
+            else:
+                # Cache static assets (JS/CSS/fonts/images) for 1 hour
+                self.send_header('Cache-Control', 'public, max-age=3600')
             self.end_headers()
-            self.wfile.write(content)
-        else:
-            self.send_error(502, "Could not proxy from meshtasticd web server")
+            self.wfile.write(data)
 
-    def _serve_mesh_client_fallback(self):
-        """Serve a fallback page when meshtasticd web server is unavailable."""
+        except (OSError, PermissionError) as e:
+            logger.error("Failed to serve mesh web client file %s: %s", file_path, e)
+            self.send_error(500, "Failed to read file")
+
+    def _serve_mesh_client_unavailable(self):
+        """Serve a page when meshtasticd web client files are not on disk."""
         html = """<!DOCTYPE html>
 <html><head><title>MeshForge - Meshtastic Web Client</title>
 <style>
@@ -1198,19 +1195,20 @@ code { background: #1a2a3a; padding: 2px 8px; border-radius: 4px; }
 </style></head><body>
 <div class="card">
 <h1>Meshtastic Web Client</h1>
-<p>The meshtasticd web server is not reachable.</p>
-<p>Make sure meshtasticd is running with its web server enabled:</p>
+<p>Web client files not found at <code>%s</code></p>
+<p>Install meshtasticd to get the web client:</p>
 <pre style="text-align:left;background:#1a2a3a;padding:1em;border-radius:8px;">
-# /etc/meshtasticd/config.yaml
+sudo apt install meshtasticd</pre>
+<p>Or check your <code>/etc/meshtasticd/config.yaml</code>:</p>
+<pre style="text-align:left;background:#1a2a3a;padding:1em;border-radius:8px;">
 Webserver:
   Port: 9443
-</pre>
-<p>Then restart: <code>sudo systemctl restart meshtasticd</code></p>
+  RootPath: /usr/share/meshtasticd/web</pre>
 <p style="margin-top:2em;">
   <a href="/">MeshForge NOC Map</a> |
   <a href="/api/proxy/status">Proxy Status</a>
 </p>
-</div></body></html>"""
+</div></body></html>""" % MESHTASTICD_WEB_DIR
         data = html.encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
