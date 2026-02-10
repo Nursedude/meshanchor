@@ -312,16 +312,35 @@ class StartupChecker:
 
     @staticmethod
     def _has_permission_issues(dir_path: Path) -> bool:
-        """Check if any files inside dir_path are not writable.
+        """Check if any files inside dir_path are not writable by non-root users.
 
         Returns True if there are files that could cause PermissionError
         for rnsd Transport jobs.
+
+        Note: Cannot use os.access(os.W_OK) here because MeshForge runs
+        as root (sudo), and root always passes access checks regardless
+        of actual file mode bits.  Instead, inspect the mode directly:
+        files need 0o666 (world-writable) and directories need 0o777.
         """
+        import stat
+
         try:
             if not dir_path.is_dir():
                 return False
+
+            # Check directory itself — needs world-writable for rnsd
+            dir_mode = dir_path.stat().st_mode
+            if not (dir_mode & stat.S_IWOTH):
+                return True
+
             for entry in dir_path.iterdir():
-                if entry.is_file() and not os.access(str(entry), os.W_OK):
+                try:
+                    mode = entry.stat().st_mode
+                    if entry.is_file() and not (mode & stat.S_IWOTH):
+                        return True
+                    elif entry.is_dir() and not (mode & stat.S_IWOTH):
+                        return True
+                except (PermissionError, OSError):
                     return True
         except (PermissionError, OSError):
             return True
