@@ -184,7 +184,7 @@ class DashboardMixin:
             total = props.get('total_nodes', 0)
             with_gps = props.get('nodes_with_position', 0)
             sources = props.get('sources', {})
-            active_sources = [k for k, v in sources.items() if v > 0]
+            active_sources = [k for k, v in sources.items() if isinstance(v, (int, float)) and v > 0]
             if total > 0:
                 results.append(("MapDataCollector", "OK", f"{total} nodes ({with_gps} with GPS)"))
                 print(f"      \033[0;32mOK\033[0m - {total} nodes, sources: {active_sources}")

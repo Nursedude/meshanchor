@@ -1125,7 +1125,10 @@ class MapDataCollector:
 
         # Determine if this is a "gateway" type node
         # AREDN nodes with tunnels act as gateways
-        is_gateway = node.tunnel_count > 0
+        try:
+            is_gateway = int(node.tunnel_count) > 0
+        except (TypeError, ValueError):
+            is_gateway = False
 
         return self._make_feature(
             node_id=f"aredn_{node.hostname}",
