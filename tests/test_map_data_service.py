@@ -1070,6 +1070,9 @@ class TestRewriteMeshHtml:
         assert 'src="/assets' not in result
         assert 'href="/assets' not in result
         assert 'href="/favicon' not in result
+        # Scrollbar fix CSS injected before </head>
+        assert 'data-meshforge' in result
+        assert 'overflow:hidden' in result
 
     def test_cra_build_index_html(self):
         """Create React App style index.html with existing base tag."""

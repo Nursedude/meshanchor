@@ -1246,6 +1246,22 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             flags=re.IGNORECASE,
         )
 
+        # Step 3: Inject CSS to prevent body-level scrollbar.
+        # The meshtastic SPA is full-viewport; all scrolling happens inside
+        # React components.  A body scrollbar steals width from the right
+        # side, partially covering the sidebar/drawer menu.
+        scrollbar_fix = (
+            '<style data-meshforge>'
+            'html,body{overflow:hidden;margin:0;padding:0;'
+            'height:100%;width:100%}'
+            '</style>'
+        )
+        html = re.sub(
+            r'(</head>)',
+            rf'{scrollbar_fix}\1',
+            html, count=1, flags=re.IGNORECASE,
+        )
+
         return html
 
     def _serve_mesh_client_unavailable(self):
