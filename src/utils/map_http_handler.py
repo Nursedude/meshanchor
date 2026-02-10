@@ -40,6 +40,7 @@ import json
 import logging
 import math
 import mimetypes
+import os
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
@@ -973,10 +974,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._send_cors_header()
             self.send_header('Cache-Control', 'no-cache, no-store')
             if needs_cookie:
-                import hashlib
-                session = hashlib.sha256(
-                    f"{self.client_address}{time.time()}".encode()
-                ).hexdigest()[:16]
+                session = os.urandom(8).hex()
                 self.send_header('Set-Cookie',
                                  f'meshforge_session={session}; Path=/; SameSite=Lax')
             self.end_headers()
@@ -989,10 +987,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             self._send_cors_header()
             self.send_header('Cache-Control', 'no-cache, no-store')
             if needs_cookie:
-                import hashlib
-                session = hashlib.sha256(
-                    f"{self.client_address}{time.time()}".encode()
-                ).hexdigest()[:16]
+                session = os.urandom(8).hex()
                 self.send_header('Set-Cookie',
                                  f'meshforge_session={session}; Path=/; SameSite=Lax')
             self.end_headers()
@@ -1163,11 +1158,23 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         try:
             data = file_path.read_bytes()
 
+            # Inject <base href="/mesh/"> into index.html so the React SPA
+            # resolves its asset paths (JS/CSS/fonts) relative to /mesh/
+            # instead of /.  Without this, asset requests go to
+            # http://ip:5000/static/... (MeshForge NOC dir) instead of
+            # http://ip:5000/mesh/static/... (meshtasticd web dir),
+            # producing a blank white screen.
+            if content_type and content_type.startswith('text/html'):
+                html = data.decode('utf-8', errors='replace')
+                if '<base' not in html.lower():
+                    html = html.replace('<head>', '<head><base href="/mesh/">', 1)
+                    data = html.encode('utf-8')
+
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))
             self._send_cors_header()
-            if content_type.startswith('text/html'):
+            if content_type and content_type.startswith('text/html'):
                 self.send_header('Cache-Control', 'no-cache')
             else:
                 # Cache static assets (JS/CSS/fonts/images) for 1 hour
