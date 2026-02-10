@@ -131,8 +131,9 @@ def check_rns_storage_permissions() -> CheckResult:
     """Check that RNS storage directories exist with correct permissions.
 
     RNS Identity.persist_job() requires the 'ratchets' subdirectory under
-    the storage directory. If missing or not writable, rnsd crashes with
-    PermissionError in a background thread.
+    the storage directory. Transport jobs require 'cache/announces/'.
+    If missing or not writable, rnsd crashes with PermissionError in a
+    background thread.
     """
     start = time.time()
 
@@ -147,18 +148,20 @@ def check_rns_storage_permissions() -> CheckResult:
             duration_ms=(time.time() - start) * 1000
         )
 
-    ratchets_dir = etc_storage / 'ratchets'
+    # All subdirectories RNS Transport needs to write to
+    required_dirs = [
+        (etc_storage, "storage/"),
+        (etc_storage / 'ratchets', "storage/ratchets/"),
+        (etc_storage / 'cache', "storage/cache/"),
+        (etc_storage / 'cache' / 'announces', "storage/cache/announces/"),
+    ]
     issues = []
 
-    if not etc_storage.exists():
-        issues.append("storage/ directory missing")
-    elif not os.access(str(etc_storage), os.W_OK):
-        issues.append("storage/ not writable")
-
-    if not ratchets_dir.exists():
-        issues.append("storage/ratchets/ directory missing")
-    elif not os.access(str(ratchets_dir), os.W_OK):
-        issues.append("storage/ratchets/ not writable")
+    for dir_path, label in required_dirs:
+        if not dir_path.exists():
+            issues.append(f"{label} directory missing")
+        elif not os.access(str(dir_path), os.W_OK):
+            issues.append(f"{label} not writable")
 
     duration = (time.time() - start) * 1000
 
@@ -169,8 +172,8 @@ def check_rns_storage_permissions() -> CheckResult:
             status=CheckStatus.FAIL,
             message="; ".join(issues),
             fix_hint=(
-                "sudo mkdir -p /etc/reticulum/storage/ratchets && "
-                "sudo chmod 755 /etc/reticulum/storage /etc/reticulum/storage/ratchets"
+                "sudo mkdir -p /etc/reticulum/storage/{ratchets,cache/announces} && "
+                "sudo chown -R $(whoami) /etc/reticulum/storage/"
             ),
             duration_ms=duration
         )
@@ -179,7 +182,7 @@ def check_rns_storage_permissions() -> CheckResult:
         name="RNS storage permissions",
         category=CheckCategory.RNS,
         status=CheckStatus.PASS,
-        message="storage/ and ratchets/ directories OK",
+        message="storage/, ratchets/, cache/announces/ directories OK",
         duration_ms=duration
     )
 
