@@ -28,6 +28,7 @@ import socket
 import subprocess
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Tuple
 from enum import Enum
 
@@ -51,6 +52,8 @@ __all__ = [
     # Port lockdown (MeshForge owns the browser)
     'lock_port_external',        # Block external access to a port
     'unlock_port_external',      # Restore external access to a port
+    'check_port_locked',         # Check if port is locked to localhost
+    'persist_iptables',          # Save iptables rules to survive reboot
     # Data classes
     'ServiceStatus',        # Return type from check_service
     'ServiceState',         # Status enum (AVAILABLE, DEGRADED, FAILED, etc.)
@@ -944,4 +947,82 @@ def unlock_port_external(port: int = 9443, timeout: int = 10) -> Tuple[bool, str
     except subprocess.TimeoutExpired:
         return False, "iptables command timed out"
     except Exception as e:
+        return False, f"Error: {e}"
+
+
+def check_port_locked(port: int = 9443, timeout: int = 10) -> bool:
+    """Check if the iptables rule blocking external access exists.
+
+    Args:
+        port: TCP port to check (default: 9443)
+        timeout: subprocess timeout in seconds
+
+    Returns:
+        True if the port is locked to localhost, False otherwise.
+    """
+    rule_args = ['-p', 'tcp', '--dport', str(port),
+                 '!', '-s', '127.0.0.1', '-j', 'REJECT']
+    try:
+        result = subprocess.run(
+            ['iptables', '-C', 'INPUT'] + rule_args,
+            capture_output=True, text=True, timeout=timeout
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def persist_iptables(timeout: int = 30) -> Tuple[bool, str]:
+    """Save current iptables rules so they survive reboot.
+
+    Tries netfilter-persistent first, then falls back to iptables-save
+    to /etc/iptables/rules.v4.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    # Method 1: netfilter-persistent (Debian/Ubuntu with iptables-persistent)
+    try:
+        result = subprocess.run(
+            ['netfilter-persistent', 'save'],
+            capture_output=True, text=True, timeout=timeout
+        )
+        if result.returncode == 0:
+            logger.info("iptables rules saved via netfilter-persistent")
+            return True, "Rules saved (netfilter-persistent)"
+    except FileNotFoundError:
+        pass  # Not installed, try fallback
+    except subprocess.TimeoutExpired:
+        return False, "netfilter-persistent save timed out"
+
+    # Method 2: Manual iptables-save to rules.v4
+    import shutil
+    if not shutil.which('iptables-save'):
+        return False, (
+            "No persistence tool found.\n"
+            "Install: sudo apt install iptables-persistent"
+        )
+
+    try:
+        rules_dir = Path('/etc/iptables')
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        rules_file = rules_dir / 'rules.v4'
+
+        save_result = subprocess.run(
+            ['iptables-save'],
+            capture_output=True, text=True, timeout=timeout
+        )
+        if save_result.returncode != 0:
+            return False, f"iptables-save failed: {save_result.stderr.strip()}"
+
+        rules_file.write_text(save_result.stdout)
+        logger.info("iptables rules saved to %s", rules_file)
+        return True, f"Rules saved to {rules_file}"
+
+    except subprocess.TimeoutExpired:
+        return False, "iptables-save timed out"
+    except OSError as e:
+        return False, f"Failed to write rules file: {e}"
+    except Exception as e:
+        logger.error("persist_iptables error: %s", e)
         return False, f"Error: {e}"

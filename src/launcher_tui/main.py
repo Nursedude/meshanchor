@@ -393,6 +393,9 @@ class MeshForgeLauncher(
         # Auto-start Config API Server on localhost
         self._maybe_auto_start_config_api()
 
+        # Auto-lock port 9443 so meshtasticd web is only via MeshForge proxy
+        self._maybe_auto_lock_port()
+
         try:
             self._run_main_menu()
         finally:
@@ -599,6 +602,26 @@ class MeshForgeLauncher(
             except Exception as e:
                 logger.debug("Config API stop failed: %s", e)
             self._config_api_server = None
+
+    def _maybe_auto_lock_port(self):
+        """Auto-lock port 9443 on startup so meshtasticd web is MeshForge-only.
+
+        Silent operation - logs result but no dialogs on failure.
+        """
+        try:
+            from utils.service_check import lock_port_external
+        except ImportError:
+            logger.debug("Port lockdown not available (missing service_check)")
+            return
+
+        try:
+            success, msg = lock_port_external(9443)
+            if success:
+                logger.info("Startup port lock: %s", msg)
+            else:
+                logger.warning("Startup port lock failed: %s", msg)
+        except Exception as e:
+            logger.debug("Auto port lock error: %s", e)
 
     def _config_api_menu(self):
         """Config API Server start/stop/status menu."""
