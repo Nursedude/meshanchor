@@ -138,15 +138,21 @@ class ReticulumPaths:
             Requires root/sudo to create directories in /etc.
         """
         try:
-            cls.ETC_BASE.mkdir(mode=0o755, parents=True, exist_ok=True)
-            # Storage directories need world-writable so rnsd (which may
-            # run as a non-root service user) can create and modify cache
-            # files, ratchets, and announce entries.
-            cls.ETC_STORAGE.mkdir(mode=0o777, parents=True, exist_ok=True)
-            cls.ETC_RATCHETS.mkdir(mode=0o777, parents=True, exist_ok=True)
-            cls.ETC_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
-            cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
-            cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
+            # Save and clear umask so mkdir gets the actual mode we request.
+            # Default umask 0o022 would turn 0o777 into 0o755.
+            old_umask = os.umask(0)
+            try:
+                cls.ETC_BASE.mkdir(mode=0o755, parents=True, exist_ok=True)
+                # Storage directories need world-writable so rnsd (which may
+                # run as a non-root service user) can create and modify cache
+                # files, ratchets, and announce entries.
+                cls.ETC_STORAGE.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_RATCHETS.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
+            finally:
+                os.umask(old_umask)
 
             # Fix file permissions inside storage/ — rnsd Transport jobs
             # need read/write on all files under cache/announces/ and
@@ -170,33 +176,37 @@ class ReticulumPaths:
         - /etc/reticulum/storage/ contains caches and ephemeral data
         - The actual secrets (identity, keys) are in the parent config dir
         - This matches RNS's own behavior of creating world-readable storage
+
+        Uses os.walk for full recursion — RNS may create subdirectories
+        beyond the ones we explicitly know about (e.g. new cache categories).
         """
         import stat
 
-        storage_dirs = [cls.ETC_STORAGE, cls.ETC_RATCHETS,
-                        cls.ETC_CACHE, cls.ETC_ANNOUNCE_CACHE]
+        storage_root = cls.ETC_STORAGE
+        if not storage_root.is_dir():
+            return
 
-        for dir_path in storage_dirs:
-            if not dir_path.is_dir():
-                continue
-            try:
-                # Fix directory permissions — rnsd needs write access to
-                # create/modify cache files inside these directories.
-                dir_path.chmod(0o777)
-                # Fix file permissions within
-                for entry in dir_path.iterdir():
+        try:
+            for dirpath, dirnames, filenames in os.walk(str(storage_root)):
+                dp = Path(dirpath)
+                # Fix directory permissions
+                try:
+                    if dp.stat().st_mode & 0o777 != 0o777:
+                        dp.chmod(0o777)
+                except (PermissionError, OSError):
+                    pass
+
+                # Fix file permissions
+                for fname in filenames:
                     try:
-                        if entry.is_file():
-                            current = entry.stat().st_mode
-                            # Only fix if not already writable by group/other
-                            if not (current & stat.S_IWOTH):
-                                entry.chmod(0o666)
-                        elif entry.is_dir():
-                            entry.chmod(0o777)
+                        fpath = dp / fname
+                        current = fpath.stat().st_mode
+                        if not (current & stat.S_IWOTH):
+                            fpath.chmod(0o666)
                     except (PermissionError, OSError):
                         pass  # Best effort — some files may be locked
-            except (PermissionError, OSError):
-                pass  # Best effort
+        except (PermissionError, OSError):
+            pass  # Best effort
 
     @classmethod
     def get_config_dir(cls) -> Path:
