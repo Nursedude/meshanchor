@@ -536,8 +536,10 @@ class MeshtasticApiProxy:
 
         return False
 
-    def proxy_static(self, path: str) -> Optional[tuple]:
-        """Proxy a static file from meshtasticd's web server.
+    def proxy_endpoint(self, path: str) -> Optional[tuple]:
+        """Proxy a GET request to meshtasticd and return the response.
+
+        Used for action endpoints like /json/blink, /restart, etc.
 
         Returns:
             Tuple of (content_bytes, content_type) or None on error.
