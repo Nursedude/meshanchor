@@ -1,41 +1,87 @@
 # MeshForge Session Notes
 
-**Last Updated**: 2026-02-09
-**Current Branch**: `claude/session-management-tasks-ZV5yT`
+**Last Updated**: 2026-02-10
+**Current Branch**: `claude/fix-scroll-phantom-nodes-krlBn`
 **Version**: v0.5.2-beta
-**Tests**: 3927 passed, 0 failed, 19 skipped
-**Linter**: 0 issues (clean)
+**Tests**: 17 passed (api_proxy_sanitize), full suite not run this session
+**Linter**: Not run this session
 
-## Session Focus: Reliability Audit & Test Fix (2026-02-09)
+## Session Focus: Web UI Fixes — Scroll + Phantom Nodes (2026-02-10)
 
-Systematic review of all remaining work items from prior sessions. Found that
-8 of 8 priority items were already completed in previous sessions. Fixed the
-one pre-existing test failure.
+User reported two issues from hardware testing:
+1. **ip:5000** — Right menu won't scroll, can't see bottom information
+2. **ip:9443** — Phantom nodes crash web client, proxy fixes not working
 
-### Changes This Session
-- **FIXED** `tests/test_status_consistency.py` — `test_rnsd_running_consistent` now
-  correctly mocks `subprocess.run` instead of helper functions. rnsd is a systemd
-  service (`is_systemd=True`), so `check_service()` calls subprocess.run directly,
-  bypassing the mocked helpers. Same pattern as the meshtasticd tests.
+### What Was Done
 
-### Audit Results — All Priority Items Complete
+**Port 5000 scroll — FIXED (partially)**
+- Added `max-height: calc(100vh - 20px)`, `display: flex`, `flex-direction: column` to `.control-panel`
+- Added `overflow-y: auto`, `flex: 1`, `min-height: 0` to `.panel-body`
+- Mobile: capped at `60vh`
+- **Scroll works now** but user reports "info can't be seen on the right of the menu" — text/values getting clipped or truncated on the right edge. Panel has `min-width: 210px` but no `max-width`, values in stat rows may overflow.
 
-| Priority Item | Issue | Status |
-|--------------|-------|--------|
-| Service detection simplification | #20 Phase 1 | Done — systemctl-only for systemd services |
-| MQTT service check (mosquitto) | #20 Phase 1 | Done — `is_systemd: True` in KNOWN_SERVICES |
-| Gateway bridge mode fix | #16 | Done — defaults to `message_bridge`, auto-corrects |
-| Status display separation | #20 Phase 2 | Done — `detection_method` field in ServiceStatus |
-| RX message event bus | #20 Phase 3 | Done — `event_bus.py` (306 lines), rns_bridge emits |
-| Post-install verification | #23 | Done — `verify_post_install.sh`, `--verify-install` flag |
-| Python environment mismatch | #24 | Done — `gateway_diagnostic.py` checks root importability |
-| Test coverage (4 gateway modules) | — | Done — 321+ tests across rns_bridge/node_tracker/message_queue/reconnect |
+**Port 9443 phantom nodes — ROOT CAUSE FOUND, partial fix**
+- `_proxy_mesh_client()` was sending ALL `/mesh/*` requests through `proxy_static()`, completely bypassing `_sanitize_nodes_json()`. This was the core bug.
+- Fixed routing: `/mesh/json/nodes` → `proxy_json()` (sanitized), `/mesh/api/v1/fromradio` → multiplexed, `/mesh/api/v1/toradio` → forwarded
+- Enhanced sanitization: added `position`, `deviceMetrics`, `lastHeard`, `num`, `macaddr`, `publicKey`
+- **Still broken according to user** — "same problem, persistent issue"
 
-### Test Results
-- Full suite: **3927 passed, 0 failed, 19 skipped** (was 3926+1 failed)
-- Linter: 0 issues
+**rnsd permission fix**
+- `ensure_system_dirs()` now fixes file permissions recursively inside storage/
+- Startup checker detects non-writable announce cache files and triggers rnsd restart
 
-## Previous Session: MOC1 Broker Configuration (2026-02-09)
+**Radio message "went nowhere"**
+- User sent a message from port 5000 radio control panel — no delivery feedback
+- Needs investigation: is `sendRadioMessage()` JS function actually connected? Does the API endpoint work?
+
+### Changes Committed (2 commits on branch)
+1. `589ba1c` — fix: Fix scroll on port 5000 right menu and phantom node proxy routing
+2. `1abebea` — fix: Self-heal rnsd storage file permissions (cache/announces)
+
+### Files Changed
+- `web/node_map.html` — scroll CSS fix
+- `src/utils/map_http_handler.py` — route /mesh/ API paths through proper handlers
+- `src/gateway/meshtastic_api_proxy.py` — enhanced sanitization
+- `tests/test_api_proxy_sanitize.py` — 6 new tests (17 total)
+- `src/utils/paths.py` — recursive file permission fixing
+- `src/launcher_tui/startup_checks.py` — detect announce cache permission issues
+
+---
+
+## NEXT SESSION PRIORITIES (ordered)
+
+### P0: Port 9443 Phantom Nodes — STILL BROKEN
+**The fundamental architecture problem**: The Meshtastic web client at port 9443 is served by meshtasticd directly. When users go to `ip:9443`, they bypass MeshForge entirely — no sanitization, no proxy. The `/mesh/` route on port 5000 was supposed to solve this, but:
+
+1. **User expectation**: They want `ip:9443` to work, not `ip:5000/mesh/`
+2. **The React app may use absolute URLs** that don't go through the `/mesh/` prefix routing
+3. **Need to research**: What exact API calls does the Meshtastic React web client make? Are they relative or absolute? Does `<base href="/mesh/">` actually intercept them all?
+
+**Possible approaches:**
+- A) **Redirect port 9443 through MeshForge** — intercept at network level (iptables redirect 9443→5000, then proxy everything through sanitization). Heavy but guarantees all requests are sanitized.
+- B) **MeshForge-owned web client** — Fork/patch the meshtastic web client to handle phantom nodes. Ship it as part of MeshForge at `/mesh/` and deprecate direct 9443 access.
+- C) **Fix the proxy routing completely** — Debug exactly why `/mesh/` still has problems. May need to intercept all `/mesh/**` JSON endpoints, not just `/json/nodes`.
+- D) **Inject JavaScript into proxied HTML** — When serving the React app at `/mesh/`, inject a script that patches `fetch()` to handle null user/position/etc. client-side.
+
+**Research needed**: Open the Meshtastic web client source, trace which API calls it makes and how it accesses node data. The crash happens when clicking a node — trace the React component that renders node details.
+
+### P1: Port 5000 Right Panel — Info Clipped on Right
+- Text values in stat rows overflow the panel width
+- Possible fix: add `max-width` to `.control-panel`, add `overflow: hidden; text-overflow: ellipsis` to `.stat-row .value`, or increase `min-width`
+- Also check if the simulation results / radio control sections are too wide
+
+### P2: Radio Message "Went Nowhere"
+- `sendRadioMessage()` JS function in `node_map.html` — verify it calls the right API endpoint
+- Check `/api/radio/message` endpoint in `map_http_handler.py` — does it actually work?
+- May need connection to meshtasticd to function
+
+### P3: rnsd Permission Spam
+- Fix was committed but not tested on hardware
+- Verify on MOC2: does MeshForge TUI startup now fix the permissions and restart rnsd?
+
+---
+
+## Previous Session: Reliability Audit & Test Fix (2026-02-09)
 
 Configured MeshForge broker templates for MOC1 (Pi5 + Meshtoad + LongFast) with
 MQTT-bridged topology to MOC2 (Pi HAT + ShortTurbo + RNS/NomadNet).
