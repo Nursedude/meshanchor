@@ -71,6 +71,7 @@ class ProxyStats:
     json_proxied: int = 0
     active_clients: int = 0
     errors: int = 0
+    phantom_nodes_filtered: int = 0
     started_at: Optional[datetime] = None
     last_packet_time: Optional[datetime] = None
 
@@ -405,6 +406,136 @@ class MeshtasticApiProxy:
 
         return data
 
+    # ─────────────────────────────────────────────────────────────────
+    # Protobuf-level phantom node filtering
+    # ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_varint(data: bytes, pos: int):
+        """Read a protobuf varint from data at position.
+
+        Returns:
+            (value, new_pos) on success, (None, None) on error.
+        """
+        result = 0
+        shift = 0
+        while pos < len(data):
+            byte = data[pos]
+            pos += 1
+            result |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                return result, pos
+            shift += 7
+            if shift > 63:
+                return None, None
+        return None, None
+
+    @staticmethod
+    def _extract_protobuf_fields(data: bytes):
+        """Extract top-level field numbers and payloads from raw protobuf.
+
+        Returns:
+            Dict mapping field_number -> list of (wire_type, value).
+            For wire_type 2 (length-delimited), value is raw bytes.
+            For wire_type 0 (varint), value is int.
+        """
+        fields = {}
+        pos = 0
+        while pos < len(data):
+            tag, new_pos = MeshtasticApiProxy._read_varint(data, pos)
+            if new_pos is None or tag is None:
+                break
+            pos = new_pos
+
+            field_number = tag >> 3
+            wire_type = tag & 0x07
+
+            if wire_type == 0:  # Varint
+                value, new_pos = MeshtasticApiProxy._read_varint(data, pos)
+                if new_pos is None:
+                    break
+                pos = new_pos
+            elif wire_type == 2:  # Length-delimited
+                length, new_pos = MeshtasticApiProxy._read_varint(data, pos)
+                if new_pos is None or length is None:
+                    break
+                pos = new_pos
+                if pos + length > len(data):
+                    break
+                value = data[pos:pos + length]
+                pos += length
+            elif wire_type == 5:  # 32-bit fixed
+                if pos + 4 > len(data):
+                    break
+                value = data[pos:pos + 4]
+                pos += 4
+            elif wire_type == 1:  # 64-bit fixed
+                if pos + 8 > len(data):
+                    break
+                value = data[pos:pos + 8]
+                pos += 8
+            else:
+                break  # Unknown wire type
+
+            if field_number not in fields:
+                fields[field_number] = []
+            fields[field_number].append((wire_type, value))
+
+        return fields
+
+    @staticmethod
+    def _is_phantom_nodeinfo(data: bytes) -> bool:
+        """Check if a FromRadio packet is a phantom NodeInfo without User.
+
+        The Meshtastic React web client crashes when it receives NodeInfo
+        protobuf messages that lack a User sub-message.  These typically
+        come from MQTT phantom nodes.
+
+        Protobuf wire format reference:
+            FromRadio field 4 (node_info) = tag 0x22 (length-delimited)
+            NodeInfo  field 2 (user)      = tag 0x12 (length-delimited)
+
+        Returns:
+            True if the packet is a NodeInfo WITHOUT User (should be filtered).
+            False for all other packets (pass through).
+        """
+        if not data or len(data) < 4:
+            return False
+
+        try:
+            top_fields = MeshtasticApiProxy._extract_protobuf_fields(data)
+        except Exception:
+            return False  # Parse error — don't filter
+
+        # Check for FromRadio field 4 (node_info)
+        if 4 not in top_fields:
+            return False  # Not a NodeInfo packet — pass through
+
+        # Extract the NodeInfo payload
+        for wire_type, value in top_fields[4]:
+            if wire_type != 2 or not isinstance(value, bytes):
+                continue
+
+            # Parse NodeInfo sub-message
+            try:
+                ni_fields = MeshtasticApiProxy._extract_protobuf_fields(value)
+            except Exception:
+                continue
+
+            # Check for NodeInfo field 2 (user)
+            if 2 not in ni_fields:
+                return True  # NodeInfo without User → phantom node
+
+            # User field exists — check if it has any content
+            for uw, uv in ni_fields[2]:
+                if uw == 2 and isinstance(uv, bytes) and len(uv) > 0:
+                    return False  # Has User data → legitimate node
+
+            # User field is present but empty → still phantom
+            return True
+
+        return False
+
     def proxy_static(self, path: str) -> Optional[tuple]:
         """Proxy a static file from meshtasticd's web server.
 
@@ -503,7 +634,16 @@ class MeshtasticApiProxy:
             return None
 
     def _distribute_packet(self, data: bytes):
-        """Copy a FromRadio packet to all registered client buffers."""
+        """Copy a FromRadio packet to all registered client buffers.
+
+        Filters out phantom NodeInfo packets (MQTT nodes without User data)
+        that crash the Meshtastic React web client.
+        """
+        if self._is_phantom_nodeinfo(data):
+            self._stats.phantom_nodes_filtered += 1
+            logger.debug("Filtered phantom NodeInfo (no User field) from fromradio stream")
+            return
+
         with self._lock:
             delivered = 0
             for session in self._clients.values():
