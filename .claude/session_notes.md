@@ -1,14 +1,24 @@
 # MeshForge Session Notes
 
 **Last Updated**: 2026-02-10
-**Current Branch**: `claude/fix-mesh-blank-screen-qrwGe`
+**Current Branch**: `claude/meshforge-meshtastic-integration-WjzT5`
 **Version**: v0.5.2-beta
 
 ---
 
-## NEXT SESSION: /mesh/ Architecture Rethink (2026-02-10)
+## Latest Session: API Proxy fromradio Fix (2026-02-10)
 
-### Status: Needs fundamental rethink — current approach feels like bloatware
+**See**: `.claude/session_notes/2026-02-10_api_proxy_fromradio_fix.md` for full details.
+
+**TL;DR**: `MeshtasticApiProxy` was enabled by default, draining ALL fromradio packets from port 9443. Native web client got nothing. Fixed: proxy defaults to OFF. Gateway uses TCP:4403 (unaffected). Web client at :9443 works natively now.
+
+**Next priorities**: P0 = Gateway TX (RX works, TX doesn't). P1 = Verify :9443 web client works. P2 = Plan for upstream meshtastic web client updates.
+
+---
+
+## Previous Session: /mesh/ Architecture Rethink (2026-02-10)
+
+### Status: SUPERSEDED — user decided meshtasticd owns its web client
 
 The `/mesh/` subpath approach has been attempted from multiple angles across several sessions. Each fix adds complexity (HTML rewriting, CSS injection, base tag manipulation, regex path stripping) and the blank screen / UI glitches persist. The core problem is **fighting the web client's build assumptions** rather than working with them.
 
@@ -166,34 +176,20 @@ User reported two issues from hardware testing:
 
 ## NEXT SESSION PRIORITIES (ordered)
 
-### P0: Port 9443 Phantom Nodes — STILL BROKEN
-**The fundamental architecture problem**: The Meshtastic web client at port 9443 is served by meshtasticd directly. When users go to `ip:9443`, they bypass MeshForge entirely — no sanitization, no proxy. The `/mesh/` route on port 5000 was supposed to solve this, but:
+### P0: Gateway TX — Green RX but No TX
+Gateway receives Meshtastic messages (RX green) but doesn't transmit back. Investigate `meshtastic_handler.py` TX path, channel/PSK config, and gateway logs.
 
-1. **User expectation**: They want `ip:9443` to work, not `ip:5000/mesh/`
-2. **The React app may use absolute URLs** that don't go through the `/mesh/` prefix routing
-3. **Need to research**: What exact API calls does the Meshtastic React web client make? Are they relative or absolute? Does `<base href="/mesh/">` actually intercept them all?
+### P1: Verify Web Client at :9443 Works Now
+API proxy disabled by default (Issue #28 fix). User should confirm native web client shows data. If it still doesn't, the issue is meshtasticd-side (not MeshForge).
 
-**Possible approaches:**
-- A) **Redirect port 9443 through MeshForge** — intercept at network level (iptables redirect 9443→5000, then proxy everything through sanitization). Heavy but guarantees all requests are sanitized.
-- B) **MeshForge-owned web client** — Fork/patch the meshtastic web client to handle phantom nodes. Ship it as part of MeshForge at `/mesh/` and deprecate direct 9443 access.
-- C) **Fix the proxy routing completely** — Debug exactly why `/mesh/` still has problems. May need to intercept all `/mesh/**` JSON endpoints, not just `/json/nodes`.
-- D) **Inject JavaScript into proxied HTML** — When serving the React app at `/mesh/`, inject a script that patches `fetch()` to handle null user/position/etc. client-side.
+### P2: Meshtastic Web Client Upstream Updates
+User plans to track meshtastic web client updates. MeshForge should NOT own/fork it. Phantom node fixes should be contributed upstream to meshtastic/web.
 
-**Research needed**: Open the Meshtastic web client source, trace which API calls it makes and how it accesses node data. The crash happens when clicking a node — trace the React component that renders node details.
+### P3: rnsd Permission Fix — UNTESTED
+Needs hardware verification on MOC2.
 
-### P1: Port 5000 Right Panel — Info Clipped on Right
-- Text values in stat rows overflow the panel width
-- Possible fix: add `max-width` to `.control-panel`, add `overflow: hidden; text-overflow: ellipsis` to `.stat-row .value`, or increase `min-width`
-- Also check if the simulation results / radio control sections are too wide
-
-### P2: Radio Message "Went Nowhere"
-- `sendRadioMessage()` JS function in `node_map.html` — verify it calls the right API endpoint
-- Check `/api/radio/message` endpoint in `map_http_handler.py` — does it actually work?
-- May need connection to meshtasticd to function
-
-### P3: rnsd Permission Spam
-- Fix was committed but not tested on hardware
-- Verify on MOC2: does MeshForge TUI startup now fix the permissions and restart rnsd?
+### P4: Grafana Metrics
+Needs gateway running with metrics server on port 9090.
 
 ---
 
