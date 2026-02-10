@@ -970,3 +970,130 @@ class TestHTTPFeatureFormat:
         )
         assert feature_with_sensor["properties"]["temperature"] == 25.5
         assert feature_with_sensor["properties"]["humidity"] == 65.0
+
+
+class TestRewriteMeshHtml:
+    """Test _rewrite_mesh_html fixes asset paths for /mesh/ subpath."""
+
+    @staticmethod
+    def _rewrite(html: str) -> str:
+        from utils.map_http_handler import MapRequestHandler
+        return MapRequestHandler._rewrite_mesh_html(html)
+
+    def test_injects_base_tag_when_missing(self):
+        """Injects <base href="/mesh/"> after <head>."""
+        html = '<!DOCTYPE html><html><head><title>Test</title></head></html>'
+        result = self._rewrite(html)
+        assert '<base href="/mesh/">' in result
+        assert result.index('<base') > result.index('<head>')
+
+    def test_replaces_existing_base_tag(self):
+        """Replaces <base href="/"> with <base href="/mesh/">."""
+        html = '<html><head><base href="/"><title>T</title></head></html>'
+        result = self._rewrite(html)
+        assert '<base href="/mesh/">' in result
+        assert 'href="/"' not in result.split('<base')[0] + result.split('">')[1]
+
+    def test_handles_head_with_attributes(self):
+        """Handles <head lang="en"> and similar."""
+        html = '<html><head lang="en"><title>T</title></head></html>'
+        result = self._rewrite(html)
+        assert '<base href="/mesh/">' in result
+
+    def test_strips_leading_slash_from_src(self):
+        """Converts src="/assets/x.js" to src="assets/x.js"."""
+        html = '<head></head><script src="/assets/index-abc.js"></script>'
+        result = self._rewrite(html)
+        assert 'src="assets/index-abc.js"' in result
+
+    def test_strips_leading_slash_from_href(self):
+        """Converts href="/assets/x.css" to href="assets/x.css"."""
+        html = '<head></head><link href="/assets/index-abc.css">'
+        result = self._rewrite(html)
+        assert 'href="assets/index-abc.css"' in result
+
+    def test_strips_favicon_path(self):
+        """Converts href="/favicon.svg" to href="favicon.svg"."""
+        html = '<head></head><link rel="icon" href="/favicon.svg">'
+        result = self._rewrite(html)
+        assert 'href="favicon.svg"' in result
+
+    def test_preserves_mesh_prefix(self):
+        """Does NOT strip /mesh/ paths (already correct)."""
+        html = '<head></head><a href="/mesh/api/status">link</a>'
+        result = self._rewrite(html)
+        assert 'href="/mesh/api/status"' in result
+
+    def test_preserves_protocol_relative_urls(self):
+        """Does NOT strip //cdn.example.com paths."""
+        html = '<head></head><script src="//cdn.example.com/lib.js"></script>'
+        result = self._rewrite(html)
+        assert 'src="//cdn.example.com/lib.js"' in result
+
+    def test_preserves_bare_root(self):
+        """Does NOT break href="/" (bare root link)."""
+        html = '<head></head><a href="/">Home</a>'
+        result = self._rewrite(html)
+        assert 'href="/"' in result
+
+    def test_preserves_relative_paths(self):
+        """Already-relative paths are not modified."""
+        html = '<head></head><script src="app.js"></script>'
+        result = self._rewrite(html)
+        assert 'src="app.js"' in result
+
+    def test_vite_build_index_html(self):
+        """Full Vite-style index.html gets properly rewritten."""
+        html = (
+            '<!DOCTYPE html>\n'
+            '<html lang="en">\n'
+            '  <head>\n'
+            '    <meta charset="UTF-8" />\n'
+            '    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />\n'
+            '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n'
+            '    <title>Meshtastic</title>\n'
+            '    <script type="module" crossorigin src="/assets/index-DqxB3FhK.js"></script>\n'
+            '    <link rel="stylesheet" crossorigin href="/assets/index-C4kz1b2q.css">\n'
+            '  </head>\n'
+            '  <body><div id="root"></div></body>\n'
+            '</html>'
+        )
+        result = self._rewrite(html)
+
+        # Base tag injected
+        assert '<base href="/mesh/">' in result
+        # All root-absolute paths converted to relative
+        assert 'href="favicon.svg"' in result
+        assert 'src="assets/index-DqxB3FhK.js"' in result
+        assert 'href="assets/index-C4kz1b2q.css"' in result
+        # No root-absolute asset paths remain
+        assert 'src="/assets' not in result
+        assert 'href="/assets' not in result
+        assert 'href="/favicon' not in result
+
+    def test_cra_build_index_html(self):
+        """Create React App style index.html with existing base tag."""
+        html = (
+            '<!DOCTYPE html>\n'
+            '<html><head>\n'
+            '<base href="/">\n'
+            '<link rel="icon" href="/favicon.ico" />\n'
+            '<script defer src="/static/js/main.12345.js"></script>\n'
+            '<link href="/static/css/main.abcde.css" rel="stylesheet">\n'
+            '</head><body><div id="root"></div></body></html>'
+        )
+        result = self._rewrite(html)
+
+        # Existing base tag replaced
+        assert '<base href="/mesh/">' in result
+        assert '<base href="/">' not in result
+        # Root-absolute paths made relative
+        assert 'href="favicon.ico"' in result
+        assert 'src="static/js/main.12345.js"' in result
+        assert 'href="static/css/main.abcde.css"' in result
+
+    def test_single_quotes(self):
+        """Handles single-quoted attribute values."""
+        html = "<head></head><script src='/assets/app.js'></script>"
+        result = self._rewrite(html)
+        assert "src='assets/app.js'" in result
