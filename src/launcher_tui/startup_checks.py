@@ -276,9 +276,14 @@ class StartupChecker:
             return
 
         ratchets = ReticulumPaths.ETC_RATCHETS
+        announces = ReticulumPaths.ETC_ANNOUNCE_CACHE
         needs_restart = (
             ReticulumPaths.ETC_BASE.exists()
-            and not ratchets.exists()
+            and (
+                not ratchets.exists()
+                or not announces.exists()
+                or self._has_permission_issues(announces)
+            )
         )
 
         if not ReticulumPaths.ensure_system_dirs():
@@ -304,6 +309,23 @@ class StartupChecker:
                     )
                 except Exception as e:
                     logger.debug("rnsd restart fallback failed: %s", e)
+
+    @staticmethod
+    def _has_permission_issues(dir_path: Path) -> bool:
+        """Check if any files inside dir_path are not writable.
+
+        Returns True if there are files that could cause PermissionError
+        for rnsd Transport jobs.
+        """
+        try:
+            if not dir_path.is_dir():
+                return False
+            for entry in dir_path.iterdir():
+                if entry.is_file() and not os.access(str(entry), os.W_OK):
+                    return True
+        except (PermissionError, OSError):
+            return True
+        return False
 
     def _check_services(self) -> Dict[str, ServiceInfo]:
         """Check status of all known services."""
