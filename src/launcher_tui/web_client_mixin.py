@@ -74,6 +74,19 @@ class WebClientMixin:
             )
             return
 
+        # Pre-flight health check — detect issues that hang/crash the web client
+        warnings = self._web_client_preflight()
+        if warnings:
+            # Show warnings and let user choose to continue or fix
+            warning_text = "\n".join(warnings)
+            if not self.dialog.yesno(
+                "Web Client Health Check",
+                f"Potential issues detected:\n\n{warning_text}\n\n"
+                "Open web client anyway?",
+                default_no=True
+            ):
+                return
+
         # Web client is running - show options
         while True:
             choices = [
@@ -395,3 +408,59 @@ class WebClientMixin:
             "This must be done per-browser.\n"
             "Generate a trusted cert to avoid this entirely."
         )
+
+    def _web_client_preflight(self):
+        """Pre-flight check for issues that hang/crash the web client.
+
+        Checks:
+        1. Phantom nodes (incomplete data → React crash on click)
+        2. MQTT queue overflow from logs (downlink echo → browser hang)
+
+        Returns:
+            List of warning strings, empty if all clear.
+        """
+        warnings = []
+
+        # Check 1: Phantom nodes via HTTP API
+        try:
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                nodes = client.get_nodes()
+                phantom_count = 0
+                for node in nodes:
+                    has_name = bool(
+                        (node.long_name or "").strip()
+                        or (node.short_name or "").strip()
+                    )
+                    if not has_name:
+                        phantom_count += 1
+
+                if phantom_count > 0:
+                    warnings.append(
+                        f"[!] {phantom_count} phantom node(s) with no name data.\n"
+                        "    Clicking these in search will crash the web client.\n"
+                        "    Fix: Meshtasticd > Node DB Cleanup > Scan"
+                    )
+        except Exception as e:
+            logger.debug("Preflight phantom node check failed: %s", e)
+
+        # Check 2: MQTT tophone queue overflow in recent logs
+        try:
+            result = subprocess.run(
+                ['journalctl', '-u', 'meshtasticd', '--since', '5 min ago',
+                 '--no-pager', '-q'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and 'queue is full' in result.stdout:
+                warnings.append(
+                    "[!] MQTT queue overflow detected (tophone queue full).\n"
+                    "    Browser will hang. MQTT downlink is flooding the device.\n"
+                    "    Fix: Meshtasticd > Node DB Cleanup > Check MaxNodes\n"
+                    "    Or disable downlink: meshtastic --ch-index 0\n"
+                    "         --ch-set downlink_enabled false"
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            logger.debug("Preflight journal check failed: %s", e)
+
+        return warnings
