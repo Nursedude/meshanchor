@@ -24,7 +24,12 @@ class WebClientMixin:
     """Mixin providing meshtasticd web client tools for the TUI launcher."""
 
     def _open_web_client(self):
-        """Show/open meshtasticd web client for full radio configuration."""
+        """Show/open Meshtastic web client served by MeshForge.
+
+        MeshForge owns the browser — the Meshtastic web client is served
+        at http://ip:5000/mesh/ through MeshForge's multiplexed API proxy.
+        This ensures phantom node filtering and proper stream sharing.
+        """
         # Get local IP for network access
         local_ip = "localhost"
         try:
@@ -38,38 +43,56 @@ class WebClientMixin:
         except OSError as e:
             logger.debug("Local IP detection failed: %s", e)
 
-        web_url = f"https://{local_ip}:9443"
-        localhost_url = "https://localhost:9443"
+        meshforge_port = 5000
+        web_url = f"http://{local_ip}:{meshforge_port}/mesh/"
+        localhost_url = f"http://localhost:{meshforge_port}/mesh/"
 
-        # Check if web server is responding (try localhost first, then IP)
-        port_ok = False
-        for check_host in ["localhost", local_ip]:
-            if check_host == local_ip and local_ip == "localhost":
-                continue  # Skip duplicate check
+        # Check MeshForge web server is running (port 5000)
+        meshforge_ok = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                try:
-                    sock.settimeout(2)
-                    if sock.connect_ex((check_host, 9443)) == 0:
-                        port_ok = True
-                        break
-                finally:
-                    sock.close()
-            except Exception as e:
-                logger.debug(f"Socket check for web client ({check_host}): {e}")
+                sock.settimeout(2)
+                if sock.connect_ex(("localhost", meshforge_port)) == 0:
+                    meshforge_ok = True
+            finally:
+                sock.close()
+        except Exception as e:
+            logger.debug("Socket check for MeshForge web server: %s", e)
 
-        if not port_ok:
-            # Web client not responding - show setup help
+        # Check meshtasticd is running (needed for API backend)
+        meshtasticd_ok = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.settimeout(2)
+                if sock.connect_ex(("localhost", 9443)) == 0:
+                    meshtasticd_ok = True
+            finally:
+                sock.close()
+        except Exception as e:
+            logger.debug("Socket check for meshtasticd: %s", e)
+
+        if not meshforge_ok:
             self.dialog.msgbox(
-                "Web Client Not Running",
-                "meshtasticd Web Client is NOT responding.\n\n"
-                "To enable the web interface:\n\n"
+                "MeshForge Web Server Not Running",
+                "MeshForge web server is NOT responding on port 5000.\n\n"
+                "The web server starts with the NOC map.\n"
+                "Check Maps & Viz > NOC Node Map to start it.\n\n"
+                "Or start it from command line:\n"
+                "  sudo python3 src/launcher_tui/main.py"
+            )
+            return
+
+        if not meshtasticd_ok:
+            self.dialog.msgbox(
+                "meshtasticd Not Running",
+                "meshtasticd is NOT responding on port 9443.\n\n"
+                "The web client needs meshtasticd for radio access.\n\n"
                 "1. Start meshtasticd:\n"
                 "   sudo systemctl start meshtasticd\n\n"
                 "2. Check status:\n"
                 "   sudo systemctl status meshtasticd\n\n"
-                "3. View logs for errors:\n"
-                "   sudo journalctl -u meshtasticd -f\n\n"
                 "Note: Ensure config has Webserver section with Port: 9443"
             )
             return
@@ -77,7 +100,6 @@ class WebClientMixin:
         # Pre-flight health check — detect issues that hang/crash the web client
         warnings = self._web_client_preflight()
         if warnings:
-            # Show warnings and let user choose to continue or fix
             warning_text = "\n".join(warnings)
             if not self.dialog.yesno(
                 "Web Client Health Check",
@@ -87,7 +109,7 @@ class WebClientMixin:
             ):
                 return
 
-        # Web client is running - show options
+        # Both services running - show options
         while True:
             choices = [
                 ("open", "Open in Browser      Launch in default browser"),
@@ -98,11 +120,11 @@ class WebClientMixin:
 
             choice = self.dialog.menu(
                 "Meshtastic Web Client",
-                "Web Client is RUNNING on port 9443\n\n"
+                "Web Client available at port 5000/mesh/\n"
+                "Served by MeshForge (multiplexed API proxy)\n\n"
                 "Full radio configuration via browser:\n"
-                "  Config, Channels, Device, Position\n\n"
+                "  Config, Channels, Device, Position, Messaging\n\n"
                 "Requires a graphical browser (JavaScript).\n"
-                "Text browsers (lynx) cannot render the UI.\n"
                 "Use Show URLs to access from another device.",
                 choices,
                 height=20, width=65
@@ -186,13 +208,13 @@ class WebClientMixin:
         self.dialog.msgbox(
             "Web Client URLs",
             f"Access from THIS device:\n"
-            f"  https://localhost:9443\n\n"
+            f"  http://localhost:5000/mesh/\n\n"
             f"Access from OTHER devices on network:\n"
-            f"  https://{local_ip}:9443\n\n"
-            f"Mobile/tablet (same WiFi):\n"
-            f"  Use the IP address above\n\n"
+            f"  http://{local_ip}:5000/mesh/\n\n"
+            f"MeshForge NOC Map:\n"
+            f"  http://{local_ip}:5000/\n\n"
             f"Requires graphical browser (JavaScript).\n"
-            f"Port 9443 = HTTPS Web UI\n"
+            f"Port 5000 = MeshForge (web client + NOC)\n"
             f"Port 4403 = TCP API (CLI/SDK)",
             height=18, width=60
         )
