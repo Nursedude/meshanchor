@@ -38,6 +38,7 @@ Reference:
 """
 
 import collections
+import json
 import logging
 import ssl
 import threading
@@ -269,6 +270,10 @@ class MeshtasticApiProxy:
     def proxy_json(self, path: str) -> Optional[bytes]:
         """Proxy a JSON endpoint from meshtasticd.
 
+        For /json/nodes, sanitizes the response to ensure all nodes have
+        required fields. Incomplete "phantom" nodes (from MQTT) crash the
+        Meshtastic web client's React UI when clicked.
+
         Args:
             path: URL path (e.g., '/json/nodes', '/json/report')
 
@@ -291,11 +296,78 @@ class MeshtasticApiProxy:
             with urllib.request.urlopen(req, timeout=READ_TIMEOUT, context=ctx) as resp:
                 if resp.status == 200:
                     self._stats.json_proxied += 1
-                    return resp.read()
+                    data = resp.read()
+                    # Sanitize /json/nodes to prevent web client crash
+                    if path == '/json/nodes':
+                        data = self._sanitize_nodes_json(data)
+                    return data
             return None
         except Exception as e:
             logger.debug(f"JSON proxy failed for {path}: {e}")
             return None
+
+    @staticmethod
+    def _sanitize_nodes_json(data: bytes) -> bytes:
+        """Sanitize /json/nodes response to prevent web client crash.
+
+        The Meshtastic web client (React) crashes when clicking nodes
+        that have incomplete data — typically phantom nodes heard via
+        MQTT that lack a 'user' object or role field. The web client
+        tries to access properties like user.longName or role without
+        null checks, triggering "Cannot read properties of undefined".
+
+        This method ensures every node has the minimum required fields
+        so the web client can render them without crashing.
+
+        See: https://github.com/meshtastic/web/issues/862
+        """
+        try:
+            parsed = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return data  # Not valid JSON, pass through unchanged
+
+        if not isinstance(parsed, dict):
+            return data  # Unexpected format, pass through
+
+        modified = False
+        for node_key, node_data in parsed.items():
+            if not isinstance(node_data, dict):
+                continue
+
+            # Ensure 'user' object exists with required fields
+            if 'user' not in node_data or not isinstance(node_data.get('user'), dict):
+                node_id = node_data.get('num', node_key)
+                node_data['user'] = {
+                    'id': str(node_id),
+                    'longName': f'Node {node_key[-4:] if len(str(node_key)) >= 4 else node_key}',
+                    'shortName': '????',
+                    'hwModel': 'UNSET',
+                }
+                modified = True
+            else:
+                user = node_data['user']
+                # Fill in missing required user fields
+                if not user.get('longName'):
+                    node_id = user.get('id', node_key)
+                    user['longName'] = f'Node {str(node_id)[-4:]}'
+                    modified = True
+                if not user.get('shortName'):
+                    user['shortName'] = '????'
+                    modified = True
+                if not user.get('hwModel'):
+                    user['hwModel'] = 'UNSET'
+                    modified = True
+
+            # Ensure 'role' field exists (prevents CLIENT_BASE crash)
+            if 'role' not in node_data:
+                node_data['role'] = 'CLIENT'
+                modified = True
+
+        if modified:
+            logger.debug("Sanitized /json/nodes: patched incomplete node records")
+            return json.dumps(parsed).encode('utf-8')
+
+        return data
 
     def proxy_static(self, path: str) -> Optional[tuple]:
         """Proxy a static file from meshtasticd's web server.
