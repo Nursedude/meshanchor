@@ -242,11 +242,13 @@
             border-radius: 10px;
             padding: 16px;
             min-width: 210px;
+            max-width: 280px;
             max-height: calc(100vh - 20px);
             display: flex;
             flex-direction: column;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
             transition: transform 0.2s;
+            overflow: hidden;
         }
         .control-panel.collapsed {
             min-width: auto;
@@ -285,11 +287,21 @@
         .stat-row {
             display: flex;
             justify-content: space-between;
+            align-items: baseline;
             padding: 3px 0;
             font-size: 12px;
+            gap: 8px;
         }
-        .stat-row .label { color: #6a7a8a; }
-        .stat-row .value { color: #e0e0e0; font-weight: 600; }
+        .stat-row .label { color: #6a7a8a; white-space: nowrap; flex-shrink: 0; }
+        .stat-row .value {
+            color: #e0e0e0;
+            font-weight: 600;
+            text-align: right;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
         .stat-row .value.online { color: #66bb6a; }
 
         .filter-section {
@@ -4447,20 +4459,24 @@
             const data = await response.json();
 
             if (response.ok && data.success) {
-                statusEl.textContent = 'Message sent!';
+                statusEl.textContent = data.message || 'Sent (best-effort)';
                 statusEl.style.color = '#66bb6a';
                 document.getElementById('radio-message-text').value = '';
+                // Keep success message visible longer
+                setTimeout(() => { statusEl.textContent = ''; }, 5000);
             } else {
                 statusEl.textContent = data.error || 'Send failed';
                 statusEl.style.color = '#ef5350';
+                if (data.detail) {
+                    statusEl.title = data.detail;
+                }
+                setTimeout(() => { statusEl.textContent = ''; }, 8000);
             }
         } catch (e) {
-            statusEl.textContent = 'Network error';
+            statusEl.textContent = 'Network error — is MeshForge running?';
             statusEl.style.color = '#ef5350';
+            setTimeout(() => { statusEl.textContent = ''; }, 5000);
         }
-
-        // Clear status after 3 seconds
-        setTimeout(() => { statusEl.textContent = ''; }, 3000);
     }
 
     // ============================================
