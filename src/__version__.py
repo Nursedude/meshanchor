@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.5.3-beta"
-__version_info__ = (0, 5, 3, 'beta')
-__release_date__ = "2026-02-08"
+__version__ = "0.5.4-beta"
+__version_info__ = (0, 5, 4, 'beta')
+__release_date__ = "2026-02-11"
 __app_name__ = "MeshForge"
 __app_description__ = "LoRa Mesh Network Development & Operations Suite"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
@@ -14,6 +14,23 @@ __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.5.4-beta",
+        "date": "2026-02-11",
+        "status": "beta",
+        "changes": [
+            "ARCHITECTURE: Gateway bridge rewritten to use MQTT transport (zero interference)",
+            "NEW: MQTTBridgeHandler - subscribes to meshtasticd MQTT, sends via CLI",
+            "NEW: MQTT bridge is now default mode (web client on :9443 works uninterrupted)",
+            "NEW: Deployment templates: mosquitto.conf, rnsd-user.service, setup script",
+            "NEW: MQTT bridge settings menu in TUI with setup guide",
+            "NEW: template_mqtt_bridge() configuration template (recommended)",
+            "FIX: Gateway no longer holds persistent TCP:4403 connection",
+            "FIX: Web client no longer blocked when gateway bridge is running",
+            "DEPRECATED: meshtastic_api_proxy.py (source of web client interference)",
+            "BACKWARD COMPAT: Existing configs preserved, TCP bridge still available as legacy",
+        ]
+    },
     {
         "version": "0.5.3-beta",
         "date": "2026-02-08",
