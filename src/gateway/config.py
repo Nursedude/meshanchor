@@ -63,7 +63,7 @@ def validate_data_speed(speed: int, field_name: str) -> Optional[ConfigValidatio
 
 def validate_bridge_mode(mode: str, field_name: str) -> Optional[ConfigValidationError]:
     """Validate bridge mode."""
-    valid_modes = ["message_bridge", "rns_transport", "mesh_bridge"]
+    valid_modes = ["mqtt_bridge", "message_bridge", "rns_transport", "mesh_bridge"]
     if mode not in valid_modes:
         return ConfigValidationError(field_name, f"Invalid bridge mode '{mode}'. Valid: {valid_modes}")
     return None
@@ -195,6 +195,35 @@ class MeshtasticBridgeConfig:
 
 
 @dataclass
+class MQTTBridgeConfig:
+    """
+    MQTT configuration for gateway bridge transport.
+
+    meshtasticd publishes mesh packets to MQTT natively. The gateway
+    subscribes to receive mesh traffic without holding a TCP connection.
+
+    This is the zero-interference path: meshtasticd simultaneously
+    serves the web client on :9443, accepts TCP on :4403, AND publishes
+    to MQTT. These are independent subsystems.
+
+    Requires:
+        - MQTT broker running (apt install mosquitto)
+        - meshtasticd mqtt.enabled=true, mqtt.json_enabled=true
+    """
+    broker: str = "localhost"
+    port: int = 1883
+    use_tls: bool = False
+    username: str = ""
+    password: str = ""
+    # Topic structure: {root_topic}/{region}/2/json/{channel}/{node_id}
+    root_topic: str = "msh"
+    region: str = "US"
+    channel: str = "LongFast"
+    # JSON mode (recommended - human-readable, no protobuf dependency)
+    json_enabled: bool = True
+
+
+@dataclass
 class RNSConfig:
     """Reticulum Network Stack configuration"""
     config_dir: str = ""  # Empty = default ~/.reticulum
@@ -292,15 +321,19 @@ class GatewayConfig:
     enabled: bool = False
     auto_start: bool = False
 
-    # Bridge mode: "message_bridge", "rns_transport", or "mesh_bridge"
-    # - message_bridge: Translates messages between RNS/LXMF and Meshtastic
+    # Bridge mode: "mqtt_bridge", "message_bridge", "rns_transport", or "mesh_bridge"
+    # - mqtt_bridge: MQTT-based bridge (recommended - zero interference with web client)
+    # - message_bridge: TCP-based message bridge (legacy - blocks web client)
     # - rns_transport: RNS uses Meshtastic as network transport layer
     # - mesh_bridge: Bridges two Meshtastic networks with different presets
-    bridge_mode: str = "message_bridge"
+    bridge_mode: str = "mqtt_bridge"
 
     # Network configurations
     meshtastic: MeshtasticConfig = field(default_factory=MeshtasticConfig)
     rns: RNSConfig = field(default_factory=RNSConfig)
+
+    # MQTT bridge transport (used when bridge_mode="mqtt_bridge")
+    mqtt_bridge: MQTTBridgeConfig = field(default_factory=MQTTBridgeConfig)
 
     # RNS Over Meshtastic transport (used when bridge_mode="rns_transport")
     rns_transport: RNSOverMeshtasticConfig = field(default_factory=RNSOverMeshtasticConfig)
@@ -375,13 +408,18 @@ class GatewayConfig:
                 prefix_format=mesh_bridge_data.get('prefix_format', '[{source_preset}] '),
             )
 
+            # Handle MQTTBridgeConfig
+            mqtt_bridge_data = data.get('mqtt_bridge', {})
+            mqtt_bridge = MQTTBridgeConfig(**mqtt_bridge_data) if mqtt_bridge_data else MQTTBridgeConfig()
+
             # Reconstruct nested dataclasses
             config = cls(
                 enabled=data.get('enabled', False),
                 auto_start=data.get('auto_start', False),
-                bridge_mode=data.get('bridge_mode', 'message_bridge'),
+                bridge_mode=data.get('bridge_mode', 'mqtt_bridge'),
                 meshtastic=MeshtasticConfig(**data.get('meshtastic', {})),
                 rns=RNSConfig(**data.get('rns', {})),
+                mqtt_bridge=mqtt_bridge,
                 rns_transport=rns_transport,
                 mesh_bridge=mesh_bridge,
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
@@ -441,6 +479,7 @@ class GatewayConfig:
                 'bridge_mode': self.bridge_mode,
                 'meshtastic': asdict(self.meshtastic),
                 'rns': asdict(self.rns),
+                'mqtt_bridge': asdict(self.mqtt_bridge),
                 'rns_transport': rns_transport_data,
                 'mesh_bridge': mesh_bridge_data,
                 'routing_rules': [asdict(r) for r in self.routing_rules],
@@ -639,9 +678,44 @@ class GatewayConfig:
     # =========================================================================
 
     @classmethod
+    def template_mqtt_bridge(cls, broker: str = "localhost",
+                              region: str = "US",
+                              channel: str = "LongFast") -> 'GatewayConfig':
+        """
+        MQTT-based bridge between Meshtastic and RNS (RECOMMENDED).
+
+        Zero interference with meshtasticd web client. Uses MQTT for
+        receiving mesh traffic and meshtastic CLI for sending.
+
+        Use case: Bridge Meshtastic <-> RNS without blocking web client
+        Requirements:
+            - mosquitto running on localhost:1883
+            - meshtasticd with mqtt.enabled=true, mqtt.json_enabled=true
+            - rnsd running (user systemd service)
+
+        Args:
+            broker: MQTT broker address
+            region: LoRa region code (US, EU_868, etc.)
+            channel: Meshtastic channel name
+        """
+        config = cls()
+        config.enabled = True
+        config.bridge_mode = "mqtt_bridge"
+        config.mqtt_bridge.broker = broker
+        config.mqtt_bridge.region = region
+        config.mqtt_bridge.channel = channel
+        config.mqtt_bridge.json_enabled = True
+        config.default_route = "bidirectional"
+        config.routing_rules = config.get_default_rules()
+        return config
+
+    @classmethod
     def template_basic_bridge(cls) -> 'GatewayConfig':
         """
-        Basic message bridge between Meshtastic and RNS.
+        Basic message bridge between Meshtastic and RNS (LEGACY).
+
+        WARNING: Uses TCP connection that blocks meshtasticd web client.
+        Prefer template_mqtt_bridge() instead.
 
         Use case: Simple bidirectional message forwarding
         Requirements: meshtasticd running on localhost:4403, rnsd running
@@ -761,7 +835,8 @@ class GatewayConfig:
     def get_available_templates(cls) -> Dict[str, str]:
         """Get list of available configuration templates with descriptions."""
         return {
-            "basic_bridge": "Simple bidirectional Meshtastic ↔ RNS message bridge",
+            "mqtt_bridge": "MQTT-based Meshtastic <-> RNS bridge (RECOMMENDED, zero interference)",
+            "basic_bridge": "TCP-based Meshtastic <-> RNS bridge (legacy, blocks web client)",
             "rns_over_mesh": "Run RNS apps over LoRa mesh (transport mode)",
             "dual_preset_bridge": "Bridge two Meshtastic networks with different presets",
             "mqtt_monitor": "Monitor Meshtastic network via MQTT (no radio needed)",
@@ -781,6 +856,7 @@ class GatewayConfig:
             GatewayConfig or None if template not found
         """
         templates = {
+            "mqtt_bridge": cls.template_mqtt_bridge,
             "basic_bridge": cls.template_basic_bridge,
             "rns_over_mesh": cls.template_rns_over_mesh,
             "dual_preset_bridge": cls.template_dual_preset_bridge,
