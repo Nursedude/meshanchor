@@ -380,6 +380,7 @@ apt-get install -y -qq \
     python3 python3-pip python3-venv \
     git wget curl gnupg \
     libusb-1.0-0 \
+    mosquitto mosquitto-clients \
     &>/dev/null
 
 echo -e "  ${GREEN}✓ System dependencies installed${NC}"
@@ -502,7 +503,7 @@ UDEV_RULES
                 if ! $NATIVE_INSTALLED; then
                     echo -e "  ${YELLOW}Native meshtasticd required for SPI radios${NC}"
                     echo -e "  ${YELLOW}Install from: https://meshtastic.org/docs/software/linux-native/${NC}"
-                    pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+                    pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
 
                     # Create placeholder service explaining the requirement
                     cat > /etc/systemd/system/meshtasticd.service << 'SPI_NEEDS_NATIVE'
@@ -820,7 +821,7 @@ NATIVE_SERVICE
             echo -e "  ${CYAN}Installing for USB serial radio...${NC}"
 
             # Install meshtastic Python package for CLI tools
-            pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
 
             USB_DEV=$(get_usb_device)
             echo -e "  ${GREEN}✓ Python meshtastic CLI installed${NC}"
@@ -902,7 +903,7 @@ USB_PLACEHOLDER
             echo -e "  ${YELLOW}⚠ No radio detected${NC}"
             echo -e "  ${YELLOW}  Installing Python meshtastic CLI tools${NC}"
 
-            pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
 
             # Check if native meshtasticd is available
             if command -v meshtasticd &> /dev/null; then
@@ -1018,7 +1019,7 @@ RNSD_SERVICE
     # This is required for the RNS-over-Meshtastic bridge to work (Issue #24)
     if [[ -f "/etc/reticulum/interfaces/Meshtastic_Interface.py" ]]; then
         echo "  Meshtastic_Interface.py detected, installing meshtastic module..."
-        pip3 install $PIP_ARGS --ignore-installed -q meshtastic
+        pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
         echo -e "  ${GREEN}✓ meshtastic module installed for rnsd${NC}"
     fi
 
