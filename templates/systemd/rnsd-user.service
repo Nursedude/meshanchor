@@ -1,0 +1,48 @@
+# MeshForge - rnsd User Service
+# ==============================
+#
+# RNS should run as the user, not as root. This is the standard convention.
+#
+# Install:
+#   pip install --user rns
+#   mkdir -p ~/.config/systemd/user
+#   cp rnsd-user.service ~/.config/systemd/user/rnsd.service
+#
+# Enable:
+#   systemctl --user daemon-reload
+#   systemctl --user enable rnsd
+#   systemctl --user start rnsd
+#
+# Persist after logout (required for headless/server):
+#   loginctl enable-linger $USER
+#
+# Config: ~/.reticulum/config
+# Generate example: rnsd --exampleconfig
+#
+# Status:
+#   systemctl --user status rnsd
+#   rnstatus
+
+[Unit]
+Description=Reticulum Network Stack Daemon
+After=default.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=3
+
+# rnsd binary installed by pip --user
+ExecStart=%h/.local/bin/rnsd --service
+
+# Use user's config directory
+Environment=HOME=%h
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rnsd
+
+[Install]
+WantedBy=default.target

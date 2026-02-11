@@ -23,6 +23,14 @@ from .bridge_health import (
 )
 from .meshtastic_handler import MeshtasticHandler
 
+# MQTT bridge handler (zero-interference, recommended)
+try:
+    from .mqtt_bridge_handler import MQTTBridgeHandler
+    HAS_MQTT_BRIDGE = True
+except ImportError:
+    HAS_MQTT_BRIDGE = False
+    MQTTBridgeHandler = None
+
 # Import circuit breaker for destination-level failure handling
 try:
     from .circuit_breaker import CircuitBreakerRegistry
@@ -247,19 +255,40 @@ class RNSMeshtasticBridge:
         # MQTT filtering configuration
         self._filter_mqtt_messages = False  # Set True to drop MQTT-originated messages
 
-        # Initialize Meshtastic handler with dependency injection
-        self._mesh_handler = MeshtasticHandler(
-            config=self.config,
-            node_tracker=self.node_tracker,
-            health=self.health,
-            stop_event=self._stop_event,
-            stats=self.stats,
-            stats_lock=self._stats_lock,
-            message_queue=self._mesh_to_rns_queue,
-            message_callback=self._notify_message,
-            status_callback=lambda status: self._notify_status(status),
-            should_bridge=self._should_bridge,
-        )
+        # Initialize Meshtastic handler based on bridge mode
+        # MQTT bridge (recommended): zero interference with web client
+        # TCP bridge (legacy): holds persistent connection, blocks web client
+        if self.config.bridge_mode == "mqtt_bridge" and HAS_MQTT_BRIDGE:
+            logger.info("Using MQTT bridge handler (zero-interference mode)")
+            self._mesh_handler = MQTTBridgeHandler(
+                config=self.config,
+                node_tracker=self.node_tracker,
+                health=self.health,
+                stop_event=self._stop_event,
+                stats=self.stats,
+                stats_lock=self._stats_lock,
+                message_queue=self._mesh_to_rns_queue,
+                message_callback=self._notify_message,
+                status_callback=lambda status: self._notify_status(status),
+                should_bridge=self._should_bridge,
+            )
+        else:
+            if self.config.bridge_mode == "mqtt_bridge" and not HAS_MQTT_BRIDGE:
+                logger.warning("MQTT bridge requested but paho-mqtt not available, "
+                             "falling back to TCP handler")
+            logger.info("Using TCP Meshtastic handler (legacy mode)")
+            self._mesh_handler = MeshtasticHandler(
+                config=self.config,
+                node_tracker=self.node_tracker,
+                health=self.health,
+                stop_event=self._stop_event,
+                stats=self.stats,
+                stats_lock=self._stats_lock,
+                message_queue=self._mesh_to_rns_queue,
+                message_callback=self._notify_message,
+                status_callback=lambda status: self._notify_status(status),
+                should_bridge=self._should_bridge,
+            )
 
         # Register Meshtastic sender now that handler exists
         if self._persistent_queue:
