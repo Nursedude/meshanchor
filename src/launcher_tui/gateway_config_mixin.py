@@ -297,12 +297,13 @@ class GatewayConfigMixin:
                     "  meshtastic --set mqtt.json_enabled true\n\n"
                     "Step 3: Enable uplink on channel\n"
                     "  meshtastic --ch-index 0 --ch-set uplink_enabled true\n\n"
-                    "Step 4: Enable downlink (for sending)\n"
+                    "Step 4: Downlink (only for bidirectional bridge)\n"
                     "  meshtastic --ch-index 0 --ch-set downlink_enabled true\n\n"
                     "Step 5: Verify\n"
                     "  mosquitto_sub -h localhost -t 'msh/#' -v\n\n"
                     "Or run the setup script:\n"
-                    "  templates/mqtt/meshtasticd-mqtt-setup.sh",
+                    "  meshtasticd-mqtt-setup.sh --monitor  (read-only)\n"
+                    "  meshtasticd-mqtt-setup.sh --bridge   (bidirectional)",
                     width=60, height=25
                 )
 

@@ -1,11 +1,15 @@
 # MeshForge Dependencies
 
-# Meshtastic Python library (required for radio communication)
-meshtastic>=2.3.0
+# MQTT client (required for gateway bridge and monitoring)
+paho-mqtt>=1.6.0
 
 # Reticulum Network Stack (RNS) - for gateway bridge
 rns>=0.7.0
 lxmf>=0.4.0
+
+# Meshtastic CLI is used for radio configuration (installed via pipx)
+# The meshtastic Python library is only needed for legacy TCP bridge mode
+# meshtastic>=2.3.0  # Optional: only for bridge_mode="message_bridge"
 
 # Terminal formatting (used by TUI config menus)
 rich>=13.0.0
