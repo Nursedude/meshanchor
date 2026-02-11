@@ -21,8 +21,6 @@ from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker, classify_error,
     BridgeStatus, MessageOrigin
 )
-from .meshtastic_handler import MeshtasticHandler
-
 # MQTT bridge handler (zero-interference, recommended)
 try:
     from .mqtt_bridge_handler import MQTTBridgeHandler
@@ -30,6 +28,14 @@ try:
 except ImportError:
     HAS_MQTT_BRIDGE = False
     MQTTBridgeHandler = None
+
+# TCP-based handler (legacy, requires meshtastic Python library)
+try:
+    from .meshtastic_handler import MeshtasticHandler
+    HAS_MESHTASTIC_LIB = True
+except ImportError:
+    HAS_MESHTASTIC_LIB = False
+    MeshtasticHandler = None
 
 # Import circuit breaker for destination-level failure handling
 try:
@@ -272,7 +278,7 @@ class RNSMeshtasticBridge:
                 status_callback=lambda status: self._notify_status(status),
                 should_bridge=self._should_bridge,
             )
-        else:
+        elif HAS_MESHTASTIC_LIB:
             if self.config.bridge_mode == "mqtt_bridge" and not HAS_MQTT_BRIDGE:
                 logger.warning("MQTT bridge requested but paho-mqtt not available, "
                              "falling back to TCP handler")
@@ -288,6 +294,11 @@ class RNSMeshtasticBridge:
                 message_callback=self._notify_message,
                 status_callback=lambda status: self._notify_status(status),
                 should_bridge=self._should_bridge,
+            )
+        else:
+            raise ImportError(
+                "No Meshtastic handler available. Install paho-mqtt for MQTT bridge "
+                "(recommended) or meshtastic Python library for legacy TCP bridge."
             )
 
         # Register Meshtastic sender now that handler exists
