@@ -1,17 +1,19 @@
 """
 MQTT Bridge Handler for RNS Gateway.
 
-Replaces TCP-based MeshtasticHandler with zero-interference MQTT approach.
+Replaces TCP-based MeshtasticHandler with zero-interference approach.
 
-Receives mesh traffic via MQTT subscription (no TCP connection needed).
-Sends to mesh via meshtastic CLI (transient, no persistent connection).
+RX: Receives mesh traffic via MQTT subscription (no TCP connection needed).
+TX: Sends to mesh via HTTP protobuf (/api/v1/toradio), CLI as fallback.
 
 Architecture:
-    Meshtastic mesh -> meshtasticd -> MQTT broker -> MQTTBridgeHandler
-    MQTTBridgeHandler -> meshtastic CLI -> meshtasticd -> Meshtastic mesh
+    RX: Meshtastic mesh -> meshtasticd -> MQTT broker -> MQTTBridgeHandler
+    TX: MQTTBridgeHandler -> HTTP protobuf -> meshtasticd -> Meshtastic mesh
+        (fallback: CLI subprocess -> meshtasticd TCP -> Meshtastic mesh)
 
 Zero interference:
-    - No persistent TCP connection to meshtasticd
+    - RX via MQTT: no TCP connection to meshtasticd
+    - TX via HTTP protobuf: uses /api/v1/toradio (same as web client)
     - Web client on :9443 works uninterrupted
     - Multiple monitoring tools can coexist
 
@@ -19,6 +21,7 @@ Requires:
     - mosquitto (or any MQTT broker) running locally
     - meshtasticd configured with mqtt.enabled=true, mqtt.json_enabled=true
     - paho-mqtt (pip install paho-mqtt)
+    - meshtastic Python package (for protobuf TX; CLI used as fallback)
 
 Usage:
     handler = MQTTBridgeHandler(config, node_tracker, health, ...)
@@ -470,10 +473,10 @@ class MQTTBridgeHandler:
 
     def send_text(self, message: str, destination: str = None, channel: int = 0) -> bool:
         """
-        Send a text message to Meshtastic network via CLI.
+        Send a text message to Meshtastic network.
 
-        Uses transient meshtastic CLI command - no persistent connection.
-        The CLI connects, sends, disconnects. Web client is unaffected.
+        Primary: HTTP protobuf via /api/v1/toradio (no TCP, no subprocess).
+        Fallback: meshtastic CLI (transient subprocess).
 
         Args:
             message: Text content to send
@@ -482,6 +485,78 @@ class MQTTBridgeHandler:
 
         Returns:
             True if message sent successfully, False otherwise.
+        """
+        # Try HTTP protobuf first (preferred — no TCP contention, no subprocess)
+        if self._send_via_http_protobuf(message, destination, channel):
+            return True
+
+        # Fall back to CLI
+        logger.debug("HTTP protobuf TX unavailable, falling back to CLI")
+        return self._send_via_cli(message, destination, channel)
+
+    def _send_via_http_protobuf(
+        self, message: str, destination: str = None, channel: int = 0
+    ) -> bool:
+        """Send text via HTTP protobuf transport (preferred TX path).
+
+        Uses MeshtasticProtobufClient.send_text() which POSTs a serialized
+        ToRadio protobuf to /api/v1/toradio. Same endpoint the web client
+        uses — zero TCP contention, no subprocess overhead.
+        """
+        try:
+            from .meshtastic_protobuf_client import get_protobuf_client
+        except ImportError:
+            return False
+
+        try:
+            client = get_protobuf_client()
+
+            if not client.is_connected:
+                if not client.connect():
+                    logger.debug("Protobuf client failed to connect for TX")
+                    return False
+
+            # Convert hex node ID string to int (e.g. "!aabbccdd" -> 0xaabbccdd)
+            dest_num = None
+            if destination:
+                dest_num = self._node_id_to_num(destination)
+
+            return client.send_text(
+                text=message,
+                destination=dest_num,
+                channel_index=channel,
+            )
+        except Exception as e:
+            logger.debug(f"HTTP protobuf TX failed: {e}")
+            return False
+
+    @staticmethod
+    def _node_id_to_num(node_id: str) -> Optional[int]:
+        """Convert a Meshtastic node ID string to numeric form.
+
+        Args:
+            node_id: Node ID like "!aabbccdd" or "0xaabbccdd" or decimal string
+
+        Returns:
+            Integer node number, or None if unparseable
+        """
+        if not node_id:
+            return None
+        try:
+            cleaned = node_id.lstrip('!')
+            return int(cleaned, 16)
+        except ValueError:
+            try:
+                return int(node_id)
+            except ValueError:
+                logger.warning(f"Cannot parse node ID: {node_id}")
+                return None
+
+    def _send_via_cli(self, message: str, destination: str = None, channel: int = 0) -> bool:
+        """Send text via meshtastic CLI (fallback TX path).
+
+        Spawns a transient CLI process that connects via TCP, sends, exits.
+        Works but slower and uses the TCP slot briefly.
         """
         cli = self._find_cli()
         if not cli:
