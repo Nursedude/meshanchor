@@ -172,13 +172,46 @@ class NodeHealthMixin:
         self._wait_for_enter()
 
     def _get_meshtastic_node_telemetry(self):
-        """Get node telemetry from meshtastic.
+        """Get node telemetry via meshtasticd HTTP API.
 
         Returns dict of node_id -> {battery_level, voltage, short_name, ...}
         """
         nodes = {}
 
-        # Try meshtastic Python API first
+        # Primary: meshtasticd HTTP API (no TCP lock, no Python lib needed)
+        try:
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                report = client.get_report()
+                http_nodes = client.get_nodes()
+                # Device report has battery for the local node
+                if report and report.has_battery:
+                    nodes['local'] = {
+                        'battery_level': report.battery_percent,
+                        'voltage': report.battery_voltage_mv / 1000.0 if report.battery_voltage_mv else None,
+                        'short_name': 'Local',
+                        'long_name': 'Local Device',
+                    }
+                # Node list has per-node data
+                for node in http_nodes:
+                    # HTTP API doesn't expose per-node battery yet,
+                    # but we get the node list for signal/position data
+                    nodes[node.node_id] = {
+                        'battery_level': None,
+                        'voltage': None,
+                        'short_name': node.short_name or node.node_id[:8],
+                        'long_name': node.long_name or '',
+                        'snr': node.snr,
+                    }
+                if nodes:
+                    return nodes
+        except ImportError:
+            logger.debug("meshtastic_http module not available")
+        except Exception as e:
+            logger.debug(f"HTTP API telemetry query failed: {e}")
+
+        # Fallback: meshtastic TCP API (legacy, needs meshtastic Python lib)
         try:
             import meshtastic.tcp_interface
             iface = meshtastic.tcp_interface.TCPInterface(
@@ -197,30 +230,11 @@ class NodeHealthMixin:
                         }
             iface.close()
         except ImportError:
-            logger.debug("meshtastic module not installed, skipping API telemetry")
+            logger.debug("meshtastic module not installed, skipping TCP telemetry")
         except (ConnectionRefusedError, OSError, TimeoutError) as e:
             logger.debug(f"meshtasticd not reachable for telemetry: {e}")
         except Exception as e:
             logger.warning(f"Unexpected error querying meshtastic telemetry: {e}")
-
-        # Fallback: try meshtastic CLI --info
-        if not nodes:
-            try:
-                cli = self._get_meshtastic_cli()
-                result = subprocess.run(
-                    [cli, '--host', 'localhost', '--info'],
-                    capture_output=True, text=True, timeout=15
-                )
-                if result.returncode == 0:
-                    # Parse basic node info from CLI output
-                    for line in result.stdout.splitlines():
-                        if 'batteryLevel' in line or 'battery_level' in line:
-                            # Basic parsing - CLI output varies
-                            pass
-            except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-                logger.debug(f"meshtastic CLI unavailable for telemetry: {e}")
-            except Exception as e:
-                logger.warning(f"Unexpected error querying meshtastic CLI: {e}")
 
         return nodes
 
@@ -279,12 +293,33 @@ class NodeHealthMixin:
         self._wait_for_enter()
 
     def _get_meshtastic_node_signals(self):
-        """Get SNR/RSSI data from meshtastic nodes.
+        """Get SNR/RSSI data via meshtasticd HTTP API.
 
         Returns dict of node_id -> {snr, rssi, short_name, hops_away}
         """
         nodes = {}
 
+        # Primary: meshtasticd HTTP API
+        try:
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                for node in client.get_nodes():
+                    if node.snr:
+                        nodes[node.node_id] = {
+                            'snr': node.snr,
+                            'rssi': None,  # HTTP /json/nodes doesn't expose RSSI
+                            'short_name': node.short_name or node.node_id[:8],
+                            'hops_away': None,
+                        }
+                if nodes:
+                    return nodes
+        except ImportError:
+            logger.debug("meshtastic_http module not available")
+        except Exception as e:
+            logger.debug(f"HTTP API signal query failed: {e}")
+
+        # Fallback: meshtastic TCP API (legacy)
         try:
             import meshtastic.tcp_interface
             iface = meshtastic.tcp_interface.TCPInterface(

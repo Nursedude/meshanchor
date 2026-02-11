@@ -57,16 +57,17 @@ class DashboardMixin:
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Node Counts ===\n")
 
-        # Meshtastic nodes
+        # Meshtastic nodes via HTTP API
         try:
-            cli = self._get_meshtastic_cli()
-            result = subprocess.run(
-                [cli, '--host', 'localhost', '--info'],
-                capture_output=True, text=True, timeout=30
-            )
-            # Count nodes in output
-            node_count = result.stdout.count('Node ')
-            print(f"  Meshtastic nodes: {node_count}")
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                nodes = client.get_nodes()
+                print(f"  Meshtastic nodes: {len(nodes)}")
+            else:
+                print("  Meshtastic: HTTP API unavailable")
+        except ImportError:
+            print("  Meshtastic: meshtastic_http module not available")
         except Exception as e:
             print(f"  Meshtastic: unavailable ({e})")
 
@@ -138,21 +139,24 @@ class DashboardMixin:
             results.append(("meshtastic CLI", "FAIL", str(e)[:50]))
             print(f"      \033[0;31mFAIL\033[0m - {e}")
 
-        # Test 3: meshtastic Python API
-        print("[3/6] Testing meshtastic Python API...")
+        # Test 3: meshtasticd HTTP API
+        print("[3/6] Testing meshtasticd HTTP API...")
         try:
-            import meshtastic.tcp_interface
-            iface = meshtastic.tcp_interface.TCPInterface(hostname='localhost', connectNow=True)
-            node_count = len(iface.nodes) if iface.nodes else 0
-            iface.close()
-            results.append(("meshtastic API", "OK", f"{node_count} nodes in nodeDB"))
-            print(f"      \033[0;32mOK\033[0m - {node_count} nodes found")
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                nodes = client.get_nodes()
+                results.append(("meshtasticd HTTP", "OK", f"{len(nodes)} nodes via /json/nodes"))
+                print(f"      \033[0;32mOK\033[0m - {len(nodes)} nodes found")
+            else:
+                results.append(("meshtasticd HTTP", "FAIL", "HTTP API not reachable"))
+                print("      \033[0;31mFAIL\033[0m - HTTP API not reachable")
         except ImportError:
-            results.append(("meshtastic API", "SKIP", "meshtastic module not installed"))
-            print("      \033[0;33mSKIP\033[0m - Module not installed")
+            results.append(("meshtasticd HTTP", "SKIP", "meshtastic_http module not available"))
+            print("      \033[0;33mSKIP\033[0m - Module not available")
         except Exception as e:
             err_msg = str(e)[:50]
-            results.append(("meshtastic API", "FAIL", err_msg))
+            results.append(("meshtasticd HTTP", "FAIL", err_msg))
             print(f"      \033[0;31mFAIL\033[0m - {err_msg}")
 
         # Test 4: pubsub availability
