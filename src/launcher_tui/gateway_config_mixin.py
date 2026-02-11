@@ -62,7 +62,15 @@ class GatewayConfigMixin:
                 ("status", f"Status              {status}"),
                 ("mode", f"Bridge Mode         {mode}"),
                 ("enable", "Enable Gateway" if not config.enabled else "Disable Gateway"),
-                ("meshtastic", "Meshtastic Settings"),
+            ]
+
+            # Show mode-specific settings
+            if config.bridge_mode == "mqtt_bridge":
+                choices.append(("mqtt_bridge", "MQTT Bridge Settings"))
+            else:
+                choices.append(("meshtastic", "Meshtastic Settings"))
+
+            choices.extend([
                 ("rns", "RNS Settings"),
                 ("routing", "Routing Rules"),
                 ("telemetry", "Telemetry Settings"),
@@ -70,7 +78,7 @@ class GatewayConfigMixin:
                 ("validate", "Validate Config"),
                 ("save", "Save Configuration"),
                 ("back", "Back"),
-            ]
+            ])
 
             choice = self.dialog.menu(
                 "Gateway Configuration",
@@ -102,6 +110,7 @@ class GatewayConfigMixin:
                 "status": ("Gateway Status", self._show_gateway_status),
                 "mode": ("Bridge Mode", self._set_bridge_mode),
                 "meshtastic": ("Meshtastic Settings", self._config_meshtastic),
+                "mqtt_bridge": ("MQTT Bridge Settings", self._config_mqtt_bridge),
                 "rns": ("RNS Settings", self._config_rns),
                 "routing": ("Routing Rules", self._config_routing),
                 "telemetry": ("Telemetry Settings", self._config_telemetry),
@@ -122,12 +131,29 @@ class GatewayConfigMixin:
             f"Auto-start:   {config.auto_start}",
             f"Bridge Mode:  {config.bridge_mode}",
             "",
-            "MESHTASTIC:",
-            f"  Host:       {config.meshtastic.host}",
-            f"  Port:       {config.meshtastic.port}",
-            f"  Channel:    {config.meshtastic.channel}",
-            f"  MQTT:       {config.meshtastic.use_mqtt}",
-            "",
+        ]
+
+        if config.bridge_mode == "mqtt_bridge":
+            lines.extend([
+                "MQTT BRIDGE (zero interference):",
+                f"  Broker:     {config.mqtt_bridge.broker}",
+                f"  Port:       {config.mqtt_bridge.port}",
+                f"  Region:     {config.mqtt_bridge.region}",
+                f"  Channel:    {config.mqtt_bridge.channel}",
+                f"  JSON mode:  {config.mqtt_bridge.json_enabled}",
+                f"  TLS:        {config.mqtt_bridge.use_tls}",
+                "",
+            ])
+        else:
+            lines.extend([
+                "MESHTASTIC (TCP - legacy):",
+                f"  Host:       {config.meshtastic.host}",
+                f"  Port:       {config.meshtastic.port}",
+                f"  Channel:    {config.meshtastic.channel}",
+                "",
+            ])
+
+        lines.extend([
             "RNS:",
             f"  Identity:   {config.rns.identity_name}",
             f"  Announce:   every {config.rns.announce_interval}s",
@@ -140,23 +166,28 @@ class GatewayConfigMixin:
             f"  Position:   {config.telemetry.share_position}",
             f"  Battery:    {config.telemetry.share_battery}",
             f"  Interval:   {config.telemetry.update_interval}s",
-        ]
+        ])
 
         self.dialog.msgbox("Gateway Status", "\n".join(lines), width=50, height=25)
 
     def _set_bridge_mode(self, config):
         """Set the bridge operating mode."""
         choices = [
-            ("message_bridge", "Message Bridge      RNS <-> Meshtastic messages"),
-            ("rns_transport", "RNS Transport       RNS over LoRa mesh"),
-            ("mesh_bridge", "Mesh Bridge         Bridge two Meshtastic networks"),
+            ("mqtt_bridge", "MQTT Bridge (Recommended)  Zero interference"),
+            ("message_bridge", "TCP Message Bridge         Legacy, blocks web client"),
+            ("rns_transport", "RNS Transport              RNS over LoRa mesh"),
+            ("mesh_bridge", "Mesh Bridge                Bridge two Meshtastic nets"),
             ("back", "Back"),
         ]
 
         choice = self.dialog.menu(
             "Bridge Mode",
             "Select how the gateway should operate:\n\n"
-            "Message Bridge: Translate messages between networks\n"
+            "MQTT Bridge: Uses MQTT for receive, CLI for send.\n"
+            "  Web client on :9443 works uninterrupted.\n"
+            "  Requires: mosquitto + meshtasticd mqtt.enabled\n\n"
+            "TCP Bridge: Legacy mode, holds TCP connection.\n"
+            "  Blocks meshtasticd web client while running.\n\n"
             "RNS Transport: Use Meshtastic as RNS network layer\n"
             "Mesh Bridge: Connect two Meshtastic presets",
             choices
@@ -169,6 +200,111 @@ class GatewayConfigMixin:
                 f"Bridge mode set to: {choice}\n\n"
                 "Save configuration to persist."
             )
+
+    def _config_mqtt_bridge(self, config):
+        """Configure MQTT bridge settings."""
+        while True:
+            mqtt = config.mqtt_bridge
+            choices = [
+                ("broker", f"Broker              {mqtt.broker}"),
+                ("port", f"Port                {mqtt.port}"),
+                ("region", f"Region              {mqtt.region}"),
+                ("channel", f"Channel             {mqtt.channel}"),
+                ("tls", f"TLS                 {mqtt.use_tls}"),
+                ("auth", f"Auth                {'Set' if mqtt.username else 'None'}"),
+                ("setup", "Run MQTT Setup Guide"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "MQTT Bridge Settings",
+                "Configure MQTT transport for zero-interference bridging.\n\n"
+                "Requires: mosquitto + meshtasticd mqtt.enabled=true",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "broker":
+                val = self.dialog.inputbox(
+                    "MQTT Broker",
+                    "Enter MQTT broker address:",
+                    init=mqtt.broker
+                )
+                if val:
+                    mqtt.broker = val.strip()
+
+            elif choice == "port":
+                val = self.dialog.inputbox(
+                    "MQTT Port",
+                    "Enter MQTT broker port (1883 default, 8883 TLS):",
+                    init=str(mqtt.port)
+                )
+                if val and val.isdigit():
+                    mqtt.port = int(val)
+
+            elif choice == "region":
+                val = self.dialog.inputbox(
+                    "LoRa Region",
+                    "Enter LoRa region code (US, EU_868, etc.):",
+                    init=mqtt.region
+                )
+                if val:
+                    mqtt.region = val.strip()
+
+            elif choice == "channel":
+                val = self.dialog.inputbox(
+                    "Meshtastic Channel",
+                    "Enter Meshtastic channel name:",
+                    init=mqtt.channel
+                )
+                if val:
+                    mqtt.channel = val.strip()
+
+            elif choice == "tls":
+                mqtt.use_tls = not mqtt.use_tls
+                if mqtt.use_tls and mqtt.port == 1883:
+                    mqtt.port = 8883
+
+            elif choice == "auth":
+                user = self.dialog.inputbox(
+                    "MQTT Username",
+                    "Enter MQTT username (blank for none):",
+                    init=mqtt.username
+                )
+                if user is not None:
+                    mqtt.username = user.strip()
+                    if mqtt.username:
+                        pw = self.dialog.inputbox(
+                            "MQTT Password",
+                            "Enter MQTT password:",
+                            init=""
+                        )
+                        if pw is not None:
+                            mqtt.password = pw
+                    else:
+                        mqtt.password = ""
+
+            elif choice == "setup":
+                self.dialog.msgbox(
+                    "MQTT Setup Guide",
+                    "Step 1: Install mosquitto\n"
+                    "  sudo apt install mosquitto mosquitto-clients\n\n"
+                    "Step 2: Configure meshtasticd MQTT\n"
+                    "  meshtastic --set mqtt.enabled true\n"
+                    "  meshtastic --set mqtt.address 127.0.0.1\n"
+                    "  meshtastic --set mqtt.json_enabled true\n\n"
+                    "Step 3: Enable uplink on channel\n"
+                    "  meshtastic --ch-index 0 --ch-set uplink_enabled true\n\n"
+                    "Step 4: Enable downlink (for sending)\n"
+                    "  meshtastic --ch-index 0 --ch-set downlink_enabled true\n\n"
+                    "Step 5: Verify\n"
+                    "  mosquitto_sub -h localhost -t 'msh/#' -v\n\n"
+                    "Or run the setup script:\n"
+                    "  templates/mqtt/meshtasticd-mqtt-setup.sh",
+                    width=60, height=25
+                )
 
     def _config_meshtastic(self, config):
         """Configure Meshtastic connection settings."""
@@ -518,6 +654,7 @@ class GatewayConfigMixin:
                     config.bridge_mode = new_config.bridge_mode
                     config.meshtastic = new_config.meshtastic
                     config.rns = new_config.rns
+                    config.mqtt_bridge = new_config.mqtt_bridge
                     config.rns_transport = new_config.rns_transport
                     config.mesh_bridge = new_config.mesh_bridge
                     config.routing_rules = new_config.routing_rules
