@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.3--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3927%20passing-brightgreen.svg" alt="Tests"></a>
@@ -29,10 +29,12 @@
 **MeshForge turns a Raspberry Pi into a mesh network operations center.**
 
 Plug in a LoRa radio, run the installer, and you get:
-- A **gateway** bridging Meshtastic and Reticulum networks
+- A **gateway** bridging Meshtastic and Reticulum via MQTT (zero interference)
 - **Live NOC maps** showing Meshtastic AND RNS nodes on one map
 - **Coverage maps** with SNR-based link quality
+- **Wireshark-grade packet inspection** for both networks
 - **RF engineering tools** for site planning
+- **meshtastic CLI** integration for radio config (transient, no interference)
 - **AI diagnostics** that work offline
 
 ### The Vision
@@ -241,7 +243,7 @@ file integrity, and radio hardware detection without modifying anything.
 | Config file conflicts | Restore from `~/meshforge-backup-*` or regenerate via TUI |
 | `meshtastic` module not found | See "Python Library Conflicts" below |
 | Stale `.pyc` files | Clean reinstall handles this automatically |
-| Wrong bridge mode after upgrade | TUI auto-defaults to `message_bridge` for single-radio |
+| Wrong bridge mode after upgrade | New installs default to `mqtt_bridge`; existing configs preserved |
 
 #### Python Library Conflicts
 
@@ -278,7 +280,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ---
 
-## What Works (v0.5.3-beta)
+## What Works (v0.5.4-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
@@ -294,7 +296,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Beta |
 | **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
 | **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Beta |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge (LXMF), persistent queue (SQLite), circuit breaker, WebSocket broadcast | Beta |
+| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge via MQTT (zero interference), CLI send, persistent queue, circuit breaker | Beta |
 | **Traffic Inspector** | Packet capture from meshtastic callbacks, protocol tree, display filters, path tracing | Beta |
 | **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Beta |
 | **Grafana Dashboards** | Pre-built JSON dashboards, manual import required | Dashboards Ready |
@@ -323,8 +325,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 |---------|-----------|------------|
 | **Live NOC Map** | Node trails require historical data | Enable MQTT subscriber for data collection |
 | **Grafana** | Dashboards require manual import | See `dashboards/README.md` for instructions |
-| **TCP:4403** | Only one client can connect | Use MQTT path for multi-consumer scenarios |
-| **WebSocket** | Requires Gateway Bridge or MQTT bridge | Start one of the bridges first |
+| **TCP:4403** | Only one client can connect | Gateway now uses MQTT (v0.5.4+), TCP free for CLI |
 
 *Goal: Complete network operations visibility with historical analysis.*
 
@@ -342,7 +343,7 @@ graph TB
 
     subgraph MeshForge Core
         LAUNCHER[Launcher<br>Auto-detect display]
-        GATEWAY[Gateway Bridge<br>Message routing + SQLite queue]
+        GATEWAY[Gateway Bridge<br>MQTT transport + SQLite queue]
         MONITOR[MQTT Subscriber<br>Nodeless node tracking]
         TRAFFIC[Traffic Inspector<br>Packet capture + path tracing]
         MAPS[Coverage Maps<br>Folium + offline tiles]
@@ -375,9 +376,10 @@ graph TB
     LAUNCHER --> DIAG
     DIAG --> AI
 
-    GATEWAY --> MESHTASTICD
+    GATEWAY --> MQTT
     GATEWAY --> RNSD
     MONITOR --> MQTT
+    MQTT --> MESHTASTICD
     TRAFFIC --> GATEWAY
     TRAFFIC --> MONITOR
     MAPS --> MONITOR
@@ -397,49 +399,62 @@ graph TB
     style UCONSOLE fill:#5c4a1a,color:#fff
 ```
 
-### Data Flow: Multi-Mesh Bridge
+### Data Flow: MQTT Bridge (v0.5.4+)
 
 ```mermaid
 sequenceDiagram
     participant M as Meshtastic Node
     participant D as meshtasticd
+    participant B as MQTT Broker
     participant G as MeshForge Gateway
     participant R as rnsd (Reticulum)
     participant N as RNS Node
 
     M->>D: LoRa packet (protobuf)
-    D->>G: TCP:4403 (mesh packet)
+    D->>B: MQTT publish (JSON)
+    B->>G: MQTT subscribe
     G->>G: Classify, queue (SQLite)
     G->>R: LXMF message
     R->>N: RNS transport
 
     N->>R: RNS reply
     R->>G: LXMF delivery
-    G->>D: TCP:4403 (mesh packet)
+    G->>D: meshtastic CLI (transient)
     D->>M: LoRa broadcast
 ```
 
-### MQTT Multi-Consumer Architecture
+**Key change in v0.5.4**: The gateway no longer holds a persistent TCP:4403 connection.
+It receives via MQTT subscription and sends via transient CLI commands.
+The web client on :9443 works uninterrupted.
 
-MeshForge supports dual data paths from meshtasticd:
+### MQTT Architecture (Zero Interference)
+
+All MeshForge components use MQTT. Nothing fights for the TCP connection:
 
 ```
 meshtasticd
-    ├── TCP:4403 → Gateway Bridge → RNS transport → WebSocket:5001
-    │              (exclusive - one client)
+    ├── Web Client :9443    (always works, no interference)
+    ├── TCP:4403            (available for meshtastic CLI, one client)
     │
-    └── MQTT → mosquitto:1883 → MQTT Subscriber (MeshForge)
-                              → meshing-around
+    └── MQTT → mosquitto:1883 → MeshForge Gateway (bridge to RNS)
+                              → MQTT Subscriber (monitoring)
+                              → Traffic Inspector (packet capture)
+                              → Coverage Maps (position data)
                               → Grafana/InfluxDB
                               → other consumers (unlimited)
 ```
 
-**Key insight**: TCP:4403 allows only one client, but MQTT supports unlimited subscribers.
+**Setup:**
+```bash
+sudo apt install mosquitto                     # MQTT broker
+./templates/mqtt/meshtasticd-mqtt-setup.sh     # Configure meshtasticd MQTT
+# TUI: Gateway Config → Templates → mqtt_bridge
+```
 
 **Setup via TUI**:
-- MQTT Setup Wizard: `Configuration → Service Config → MQTT Setup`
+- Gateway Bridge: `Mesh Networks → Gateway Config → Templates → mqtt_bridge`
 - MQTT Monitor: `Mesh Networks → MQTT Monitor → Configure → Use Local Broker`
-- WebSocket Bridge: `MQTT Monitor → WebSocket Bridge` (for web UI without Gateway Bridge)
+- MQTT Settings: `Gateway Config → MQTT Bridge Settings → Run Setup Guide`
 
 ### Design Principles
 
