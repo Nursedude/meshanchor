@@ -352,6 +352,8 @@ class FavoritesMixin:
     def _set_favorite_on_device(self, node_id: str, set_favorite: bool) -> bool:
         """Set or remove favorite status on the Meshtastic device.
 
+        Uses meshtastic CLI (no Python library needed).
+
         Args:
             node_id: Node ID (e.g., !ba4bf9d0)
             set_favorite: True to set as favorite, False to remove
@@ -359,37 +361,40 @@ class FavoritesMixin:
         Returns:
             True if successful, False otherwise
         """
+        import subprocess as sp
+
         try:
-            from meshtastic.tcp_interface import TCPInterface
+            cli = self._get_meshtastic_cli()
+        except Exception:
+            logger.warning("meshtastic CLI not found")
+            return False
 
-            # Connect to meshtasticd
-            interface = TCPInterface(hostname='localhost')
-
-            try:
-                # Get local node to send admin commands
-                local_node = interface.getNode(interface.myInfo.my_node_num)
-
-                if set_favorite:
-                    local_node.setFavorite(node_id)
-                    logger.info(f"Set favorite: {node_id}")
-                else:
-                    local_node.removeFavorite(node_id)
-                    logger.info(f"Removed favorite: {node_id}")
-
+        try:
+            action_flag = '--set-favorite' if set_favorite else '--remove-favorite'
+            result = sp.run(
+                [cli, '--host', 'localhost', action_flag, node_id],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                logger.info(f"{'Set' if set_favorite else 'Removed'} favorite: {node_id}")
                 return True
-
-            finally:
-                interface.close()
-
-        except ImportError:
-            logger.warning("meshtastic package not installed")
+            else:
+                logger.warning(f"CLI favorite command failed: {result.stderr}")
+                return False
+        except (sp.TimeoutExpired, FileNotFoundError) as e:
+            logger.warning(f"Failed to update favorite via CLI: {e}")
             return False
         except Exception as e:
             logger.warning(f"Failed to update favorite on device: {e}")
             return False
 
     def _sync_favorites_from_device(self):
-        """Sync favorites from the connected Meshtastic device."""
+        """Sync favorites from the connected Meshtastic device.
+
+        Note: The isFavorite flag is only available via the TCP/protobuf API.
+        The HTTP /json/nodes endpoint does not expose it. Falls back to TCP
+        if the meshtastic Python library is installed.
+        """
         self.dialog.infobox("Syncing...", "Reading favorites from device...")
 
         try:
@@ -449,9 +454,11 @@ class FavoritesMixin:
 
         except ImportError:
             self.dialog.msgbox(
-                "Package Missing",
-                "meshtastic Python package not installed.\n\n"
-                "Install with: pip install meshtastic"
+                "Favorites Sync Unavailable",
+                "The isFavorite flag requires the meshtastic Python library\n"
+                "(TCP/protobuf API). The HTTP API does not expose it.\n\n"
+                "Install with: pip install meshtastic\n\n"
+                "You can still set favorites via the meshtastic CLI."
             )
         except ConnectionRefusedError:
             self.dialog.msgbox(
