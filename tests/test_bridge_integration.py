@@ -40,6 +40,7 @@ def bridge_config():
     """Create a test config with bridging enabled."""
     config = GatewayConfig()
     config.enabled = True
+    config.bridge_mode = "message_bridge"  # Use TCP mode for direct packet tests
     config.default_route = "bidirectional"
     config.routing_rules = [
         RoutingRule(

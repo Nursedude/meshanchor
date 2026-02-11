@@ -1,4 +1,14 @@
 """
+DEPRECATED: Meshtastic API Proxy.
+
+This module is DEPRECATED as of v0.5.0. The proxy approach of sitting between
+the user and meshtasticd was the primary source of interference with the web
+client. The MQTT bridge (mqtt_bridge_handler.py) replaces this with a
+zero-interference approach.
+
+See: gateway/mqtt_bridge_handler.py for the replacement.
+
+--- Original description ---
 Meshtastic API Proxy - MeshForge owns the web client API.
 
 Solves the fundamental "single client" limitation of meshtasticd's HTTP API
