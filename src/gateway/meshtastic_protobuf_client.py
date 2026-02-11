@@ -656,6 +656,58 @@ class MeshtasticProtobufClient:
         return None
 
     # ------------------------------------------------------------------
+    # Text message sending
+    # ------------------------------------------------------------------
+
+    def send_text(
+        self,
+        text: str,
+        destination: Optional[int] = None,
+        channel_index: int = 0,
+        want_ack: bool = True,
+    ) -> bool:
+        """Send a text message via HTTP protobuf (no CLI, no TCP).
+
+        This is the preferred TX path — uses the same /api/v1/toradio
+        endpoint as the meshtasticd web client. No TCP contention,
+        no subprocess overhead.
+
+        Args:
+            text: Message text to send
+            destination: Destination node number (None = broadcast)
+            channel_index: Channel to send on (0 = primary)
+            want_ack: Request delivery acknowledgment
+
+        Returns:
+            True if message was accepted by meshtasticd
+        """
+        if not _pb2_available:
+            logger.error("Cannot send text: meshtastic protobuf not available")
+            return False
+
+        if not self._connected:
+            logger.error("Cannot send text: protobuf session not connected")
+            return False
+
+        dest = destination if destination is not None else 0xFFFFFFFF
+        payload = text.encode('utf-8')
+
+        packet_id = self.send_mesh_packet(
+            payload=payload,
+            dest_num=dest,
+            portnum=portnums_pb2.PortNum.TEXT_MESSAGE_APP,
+            want_ack=want_ack,
+            channel_index=channel_index,
+        )
+
+        if packet_id:
+            logger.info(f"Sent text via HTTP protobuf (id={packet_id}): {text[:50]}...")
+            return True
+
+        logger.warning("Failed to send text via HTTP protobuf")
+        return False
+
+    # ------------------------------------------------------------------
     # Low-level packet sending
     # ------------------------------------------------------------------
 
