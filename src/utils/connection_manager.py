@@ -287,12 +287,38 @@ class _ConnectionManager:
         """
         Get nodes from meshtasticd, with cache fallback.
 
+        Tries HTTP API first (no TCP lock needed), falls back to TCP,
+        then cache.
+
         Args:
             use_cache_on_busy: Return cached data if connection busy
 
         Returns:
             List of node dicts
         """
+        # Primary: HTTP API (no lock contention, no meshtastic lib needed)
+        try:
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                http_nodes = client.get_nodes()
+                if http_nodes:
+                    nodes = [
+                        {
+                            'id': n.node_id,
+                            'name': n.long_name,
+                            'short': n.short_name,
+                        }
+                        for n in http_nodes
+                    ]
+                    self.save_to_cache(nodes=nodes)
+                    return nodes
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"HTTP API get_nodes failed: {e}")
+
+        # Fallback: TCP connection (legacy, needs meshtastic Python lib)
         try:
             conn = self.get_connection(blocking=False, connect=True, caller="get_nodes")
             try:
@@ -324,12 +350,44 @@ class _ConnectionManager:
         """
         Get device info from meshtasticd, with cache fallback.
 
+        Tries HTTP API first (no TCP lock needed), falls back to TCP,
+        then cache.
+
         Args:
             use_cache_on_busy: Return cached data if connection busy
 
         Returns:
             Device info dict
         """
+        # Primary: HTTP API (no lock contention, no meshtastic lib needed)
+        try:
+            from utils.meshtastic_http import get_http_client
+            client = get_http_client()
+            if client.is_available:
+                report = client.get_report()
+                nodes = client.get_nodes()
+                if report or nodes:
+                    info = {}
+                    if report:
+                        info['frequency'] = report.frequency
+                        info['channel_utilization'] = report.channel_utilization
+                        info['battery_percent'] = report.battery_percent
+                        info['seconds_since_boot'] = report.seconds_since_boot
+                    # Find local node (first node is typically local)
+                    if nodes:
+                        local = nodes[0]
+                        info['long_name'] = local.long_name
+                        info['short_name'] = local.short_name
+                        info['node_id'] = local.node_id
+                        info['hardware'] = local.hw_model
+                    self.save_to_cache(info=info)
+                    return info
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"HTTP API get_device_info failed: {e}")
+
+        # Fallback: TCP connection (legacy, needs meshtastic Python lib)
         try:
             conn = self.get_connection(blocking=False, connect=True, caller="get_device_info")
             try:
