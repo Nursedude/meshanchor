@@ -217,22 +217,50 @@ class MeshtasticHTTPClient:
         )
 
     def _probe_url(self, url: str) -> bool:
-        """Check if a URL responds with valid data."""
+        """Check if a URL responds with valid meshtasticd data."""
+        ctx = self._ssl_ctx if url.startswith("https") else None
+
+        # Primary probe: /json/report — accept any valid JSON object
         try:
             req = urllib.request.Request(
                 f"{url}/json/report",
                 method='GET',
                 headers={'Accept': 'application/json'},
             )
-            ctx = self._ssl_ctx if url.startswith("https") else None
             with urllib.request.urlopen(req, timeout=CONNECT_TIMEOUT, context=ctx) as resp:
                 if resp.status == 200:
                     data = resp.read(4096)
-                    # Verify it looks like a meshtasticd response
-                    if data and (b'airtime' in data or b'memory' in data or b'power' in data):
-                        return True
+                    if data:
+                        # Accept any JSON object (meshtasticd always returns {})
+                        parsed = json.loads(data)
+                        if isinstance(parsed, dict):
+                            return True
+        except (json.JSONDecodeError, ValueError):
+            # Server responded but not valid JSON — might still be meshtasticd
+            # Fall through to secondary probe
+            pass
         except Exception:
             pass
+
+        # Secondary probe: /api/v1/fromradio — protobuf endpoint always exists
+        # on meshtasticd webserver even if JSON endpoints are unavailable
+        try:
+            req = urllib.request.Request(
+                f"{url}/api/v1/fromradio",
+                method='GET',
+                headers={'Accept': 'application/x-protobuf'},
+            )
+            with urllib.request.urlopen(req, timeout=CONNECT_TIMEOUT, context=ctx) as resp:
+                # 200 = data available, 204 = no data but server is alive
+                if resp.status in (200, 204):
+                    return True
+        except urllib.error.HTTPError as e:
+            # 400/404 still means the webserver is running
+            if e.code in (400, 404, 405):
+                return True
+        except Exception:
+            pass
+
         return False
 
     @property
