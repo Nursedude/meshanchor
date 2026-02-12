@@ -29,7 +29,7 @@ python3 src/standalone.py               # Zero-dependency RF tools
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
-# Version is in src/__version__.py (currently 0.5.0-beta)
+# Version is in src/__version__.py (currently 0.5.4-beta)
 ```
 
 ## Architecture Overview
@@ -196,37 +196,27 @@ success, msg = daemon_reload()
 | `enable_service(name, start=False)` | After creating service files |
 | `daemon_reload()` | After modifying .service units |
 
-### Fallback Pattern (for compatibility)
-```python
-try:
-    from utils.service_check import apply_config_and_restart
-    _HAS_APPLY_RESTART = True
-except ImportError:
-    _HAS_APPLY_RESTART = False
-
-# Usage:
-if _HAS_APPLY_RESTART:
-    success, msg = apply_config_and_restart('meshtasticd')
-else:
-    subprocess.run(['systemctl', 'daemon-reload'], timeout=30)
-    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
-```
+### Note on Fallbacks
+Legacy fallback patterns were removed in v0.5.2 (Issue #26). All code now imports
+directly from `utils.service_check` — no try/except compatibility shims needed.
 
 ## File Size Guidelines
 
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
 
-**All files under threshold (2026-02-06):**
+**File size audit (2026-02-12):**
+- ⚠️ `rns_bridge.py` (1,694 lines) - Over threshold, needs extraction
+- ⚠️ `knowledge_content.py` (1,824 lines) - Content file by design, acceptable
+- ✅ `map_data_collector.py` (1,509 lines) - Borderline, monitor
+- ✅ `launcher_tui/main.py` (1,488 lines) - 30 mixins, dead code removed
 - ✅ `traffic_inspector.py` (442 lines)
-- ✅ `rns_bridge.py` (1,614 lines) - Meshtastic handler extracted
 - ✅ `node_tracker.py` (930 lines) - Data classes extracted
-- ✅ `launcher_tui/main.py` (1,433 lines) - 30 mixins, dead code removed
 - ✅ `rns_menu_mixin.py` (1,210 lines) - Sniffer methods extracted
 - ✅ `metrics_export.py` (96 lines) - Split to 3 modules
 
 **Refactoring history:**
-- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433)
-- `rns_bridge.py` (was 1,991 → 1,614, MeshtasticHandler extracted)
+- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488)
+- `rns_bridge.py` (was 1,991 → 1,614 → 1,694, MeshtasticHandler extracted, needs further split)
 - `node_tracker.py` (was 1,808 → 930, node_models.py extracted)
 - `rns_menu_mixin.py` (was 1,524 → 1,210, rns_sniffer_mixin.py extracted)
 - `metrics_export.py` (was 1,762 → 96, split to common/prometheus/influxdb)

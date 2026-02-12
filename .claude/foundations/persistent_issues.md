@@ -46,7 +46,10 @@ Many files still use `Path.home()`. Priority fixes completed:
 
 ---
 
-## Issue #2: WebKit Disabled When Running as Root
+## Issue #2: WebKit Disabled When Running as Root (MOOT — GTK removed)
+
+> **Status**: No longer relevant. GTK4 UI was removed; TUI is the only interface.
+> Kept for historical reference only.
 
 ### Symptom
 Embedded web views (HamClock live view) show "Open in Browser" instead of embedded content.
