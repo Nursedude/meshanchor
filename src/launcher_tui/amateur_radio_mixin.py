@@ -11,6 +11,7 @@ Emergency Mode for EMCOMM operations.
 """
 
 import subprocess
+from backend import clear_screen
 
 
 class AmateurRadioMixin:
@@ -62,7 +63,7 @@ class AmateurRadioMixin:
             return
 
         callsign = callsign.strip().upper()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Callsign Lookup: {callsign} ===\n")
 
         try:
@@ -109,7 +110,7 @@ class AmateurRadioMixin:
 
     def _band_plan_display(self):
         """Display Part 97 band plan reference."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Part 97 Band Plan (ISM/LoRa Relevant) ===\n")
 
         try:
@@ -155,7 +156,7 @@ class AmateurRadioMixin:
 
     def _compliance_check(self):
         """Check compliance for current radio configuration."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Compliance Check ===\n")
 
         try:
@@ -251,7 +252,7 @@ class AmateurRadioMixin:
 
     def _ics213_compose(self):
         """Compose an ICS-213 formal traffic message."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== ICS-213 General Message Form ===\n")
 
         try:
@@ -290,7 +291,7 @@ class AmateurRadioMixin:
             return
 
         # Display formatted message
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== ICS-213 GENERAL MESSAGE ===")
         print(f"  Priority:  {priority}")
         print(f"  To:        {to_field}")
@@ -320,7 +321,7 @@ class AmateurRadioMixin:
 
     def _net_checklist(self):
         """Display net control operator checklist."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Net Control Operator Checklist ===\n")
 
         try:
@@ -353,7 +354,7 @@ class AmateurRadioMixin:
 
     def _ares_net_status(self):
         """Show current ARES/RACES net status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== ARES/RACES Net Status ===\n")
 
         try:

@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,7 @@ class RFAwarenessMixin:
             return
 
         # Show waterfall in terminal (exit TUI temporarily)
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== RF Waterfall Display ===")
         print(f"Band: {band.description}")
         print(f"Center: {band.center_freq / 1e6:.3f} MHz")

@@ -21,6 +21,7 @@ import subprocess
 import time
 import logging
 from pathlib import Path
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +257,7 @@ class NomadNetClientMixin:
 
     def _nomadnet_status(self):
         """Show comprehensive NomadNet status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== NomadNet Status ===\n")
 
         # Installation
@@ -389,7 +390,7 @@ class NomadNetClientMixin:
         rns_config_path = self._get_rns_config_for_user()
 
         # Clear screen before launching
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Launching NomadNet ===")
         if rns_config_path:
             print(f"Using RNS config: {rns_config_path}")
@@ -647,7 +648,7 @@ class NomadNetClientMixin:
 
     def _view_nomadnet_config(self):
         """View NomadNet configuration."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== NomadNet Configuration ===\n")
 
         config_path = self._get_nomadnet_config_path()
@@ -799,7 +800,7 @@ class NomadNetClientMixin:
         ):
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Installing NomadNet ===\n")
 
         # Determine if we should install as a different user (when running via sudo)

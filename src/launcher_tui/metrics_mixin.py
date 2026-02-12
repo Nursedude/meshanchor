@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -554,7 +555,7 @@ class MetricsMixin:
         port = self._prometheus_port
         url = f"http://localhost:{port}/metrics"
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Testing Prometheus Endpoint ===")
         print(f"URL: {url}\n")
 
