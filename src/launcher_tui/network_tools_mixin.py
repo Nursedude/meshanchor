@@ -15,6 +15,7 @@ import logging
 import socket as sock
 import subprocess
 from pathlib import Path
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -170,22 +171,22 @@ class NetworkToolsMixin:
             # Inline system commands
             try:
                 if choice == "ports":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Listening Ports ===\n")
                     subprocess.run(['ss', '-tlnp'], timeout=10)
                     self._wait_for_enter()
                 elif choice == "ifaces":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Network Interfaces ===\n")
                     subprocess.run(['ip', '-c', 'addr'], timeout=10)
                     self._wait_for_enter()
                 elif choice == "conns":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Active Connections ===\n")
                     subprocess.run(['ss', '-tunp'], timeout=10)
                     self._wait_for_enter()
                 elif choice == "routes":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Routing Table ===\n")
                     subprocess.run(['ip', 'route'], timeout=10)
                     self._wait_for_enter()
@@ -199,7 +200,7 @@ class NetworkToolsMixin:
 
     def _run_terminal_network(self):
         """Show network diagnostics directly in terminal."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("MeshForge Network Status")
         print("=" * 50)
         print()

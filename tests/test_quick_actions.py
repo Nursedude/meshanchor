@@ -192,15 +192,12 @@ class TestQuickActionMethods:
         ]
         assert len(restart_calls) == 1
 
-    @patch('subprocess.run')
     @patch('builtins.input', return_value='')
-    def test_port_check_runs(self, mock_input, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_port_check_runs(self, mock_input):
         launcher = MockLauncher()
         # Port check uses socket, not subprocess for the actual checks
         launcher._qa_port_check()
-        # Should at least call clear
-        mock_run.assert_called()
+        # Should complete without error
 
     @patch('builtins.input', return_value='')
     def test_generate_report_runs(self, mock_input):

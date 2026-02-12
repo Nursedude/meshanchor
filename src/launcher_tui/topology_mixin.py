@@ -16,6 +16,7 @@ import threading
 import webbrowser
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -757,7 +758,7 @@ class TopologyMixin:
                 )
                 if choice == "lynx":
                     # Open with lynx in foreground
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     subprocess.run(['lynx', output_path], timeout=300)
                 elif choice == "path":
                     self.dialog.msgbox(

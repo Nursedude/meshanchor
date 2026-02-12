@@ -9,10 +9,21 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Tuple, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+def clear_screen() -> None:
+    """Clear the terminal using ANSI escape codes.
+
+    Much faster than subprocess.run(['clear']) — no subprocess spawn,
+    no visible flash between clear and redraw.
+    """
+    sys.stdout.write('\033[H\033[2J')
+    sys.stdout.flush()
 
 
 class DialogBackend:

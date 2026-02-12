@@ -6,6 +6,7 @@ Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 
 import subprocess
 from pathlib import Path
+from backend import clear_screen
 
 # Import centralized path utility
 try:
@@ -68,7 +69,7 @@ class LogsMenuMixin:
 
     def _view_live_meshtasticd(self):
         """View live meshtasticd log stream."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
         try:
             subprocess.run(
@@ -80,7 +81,7 @@ class LogsMenuMixin:
 
     def _view_live_rnsd(self):
         """View live rnsd log stream."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== rnsd live log (Ctrl+C to stop) ===\n")
         try:
             subprocess.run(
@@ -92,7 +93,7 @@ class LogsMenuMixin:
 
     def _view_live_all(self):
         """View live log stream for all services."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== All services live log (Ctrl+C to stop) ===\n")
         try:
             subprocess.run(
@@ -104,7 +105,7 @@ class LogsMenuMixin:
 
     def _view_error_logs(self):
         """View error-level logs from the last hour."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Errors (last hour, priority err+) ===\n")
         subprocess.run(
             ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager'],
@@ -114,7 +115,7 @@ class LogsMenuMixin:
 
     def _view_meshtasticd_recent(self):
         """View recent meshtasticd log lines."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== meshtasticd (last 50 lines) ===\n")
         subprocess.run(
             ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
@@ -124,7 +125,7 @@ class LogsMenuMixin:
 
     def _view_rnsd_recent(self):
         """View recent rnsd log lines."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== rnsd (last 50 lines) ===\n")
         subprocess.run(
             ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
@@ -134,7 +135,7 @@ class LogsMenuMixin:
 
     def _view_boot_messages(self):
         """View boot messages from this boot."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Boot messages (this boot) ===\n")
         subprocess.run(
             ['journalctl', '-b', '-n', '100', '--no-pager'],
@@ -144,7 +145,7 @@ class LogsMenuMixin:
 
     def _view_kernel_messages(self):
         """View kernel messages via dmesg."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Kernel messages (dmesg) ===\n")
         subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
         self._wait_for_enter()
@@ -169,7 +170,7 @@ class LogsMenuMixin:
             content = latest_log.read_text()
             lines = content.strip().split('\n')[-50:]  # Last 50 lines
 
-            subprocess.run(['clear'], check=False, timeout=5)
+            clear_screen()
             print(f"=== MeshForge Log: {latest_log.name} ===\n")
             print('\n'.join(lines))
             print("\n" + "=" * 50)

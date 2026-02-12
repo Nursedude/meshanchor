@@ -22,6 +22,7 @@ import sys
 import subprocess
 import logging
 from pathlib import Path
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class QuickActionsMixin:
 
         Uses centralized service_check module when available.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Quick Service Status ===\n")
 
         services = ['meshtasticd', 'rnsd', 'mosquitto', 'meshforge']
@@ -153,7 +154,7 @@ class QuickActionsMixin:
 
     def _qa_node_list(self):
         """Quick: show meshtastic node list."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Node List ===\n")
         try:
             cli_path = self._get_meshtastic_cli()
@@ -173,7 +174,7 @@ class QuickActionsMixin:
 
     def _qa_follow_logs(self):
         """Quick: follow meshtasticd journal logs."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== meshtasticd Logs (Ctrl+C to stop, auto-exits after 2 min) ===\n")
         try:
             subprocess.run(
@@ -190,7 +191,7 @@ class QuickActionsMixin:
 
     def _qa_restart_meshtasticd(self):
         """Quick: restart meshtasticd service."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Restarting meshtasticd...\n")
         try:
             subprocess.run(
@@ -213,7 +214,7 @@ class QuickActionsMixin:
 
     def _qa_restart_rnsd(self):
         """Quick: restart rnsd service."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Restarting rnsd...\n")
         try:
             subprocess.run(
@@ -240,7 +241,7 @@ class QuickActionsMixin:
         Uses centralized service_check module when available.
         """
         import socket as sock
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Port Check ===\n")
 
         ports = [
@@ -274,7 +275,7 @@ class QuickActionsMixin:
 
     def _qa_generate_report(self):
         """Quick: generate and display a status report."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Generating status report...\n")
 
         try:
@@ -303,7 +304,7 @@ class QuickActionsMixin:
 
     def _qa_node_inventory(self):
         """Quick: show tracked node inventory."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Node Inventory ===\n")
 
         try:
@@ -355,7 +356,7 @@ class QuickActionsMixin:
 
     def _qa_gps_position(self):
         """Quick: show GPS position and distance to nodes."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== GPS Position ===\n")
 
         try:
@@ -406,7 +407,7 @@ class QuickActionsMixin:
 
     def _qa_run_diagnostics(self):
         """Quick: run diagnostic engine health check."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Diagnostic Health Check ===\n")
 
         try:
@@ -440,7 +441,7 @@ class QuickActionsMixin:
 
     def _qa_channel_scan(self):
         """Quick: show channel activity scan."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Channel Activity ===\n")
 
         try:

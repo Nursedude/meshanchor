@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ class ServiceMenuMixin:
                 "Stop it first to run in foreground.")
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Starting Gateway Bridge (foreground)...")
         print("Press Ctrl+C to stop\n")
         try:
@@ -251,7 +252,7 @@ class ServiceMenuMixin:
             self.dialog.msgbox("No Logs", "No gateway log found.")
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         try:
             subprocess.run(['less', '-R', '-X', '+G', str(log_path)], timeout=300)
         except KeyboardInterrupt:
@@ -300,10 +301,15 @@ class ServiceMenuMixin:
                 self._safe_call(*entry)
 
     def _show_all_service_status(self):
-        """Show status of all mesh services."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        """Show status of all mesh services.
+
+        Uses check_service() as the single source of truth to avoid
+        contradictions between lightweight and detailed status checks.
+        """
+        clear_screen()
         print("=== Service Status ===\n")
         warnings = []
+        failed_services = []
         use_direct_rnsd = not self._has_systemd_unit('rnsd')
 
         for svc in ['meshtasticd', 'rnsd', 'meshforge']:
@@ -317,8 +323,24 @@ class ServiceMenuMixin:
 
             try:
                 if _HAS_SERVICE_CHECK:
-                    is_running, is_enabled = check_systemd_service(svc)
-                    status = 'active' if is_running else 'inactive'
+                    # Use detailed check_service() as single source of truth
+                    svc_status = check_service(svc)
+                    _, is_enabled = check_systemd_service(svc)
+
+                    boot_info = ""
+                    if svc_status.available and not is_enabled:
+                        boot_info = "  (not enabled at boot)"
+                        warnings.append(svc)
+
+                    if svc_status.available:
+                        print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
+                    elif svc_status.state in (ServiceState.FAILED, ServiceState.DEGRADED):
+                        print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
+                        failed_services.append(svc)
+                    elif svc_status.state == ServiceState.NOT_RUNNING:
+                        print(f"  \033[2m○\033[0m {svc:<18} stopped")
+                    else:
+                        print(f"  \033[2m○\033[0m {svc:<18} {svc_status.state.value}")
                 else:
                     result = subprocess.run(
                         ['systemctl', 'is-active', svc],
@@ -331,17 +353,18 @@ class ServiceMenuMixin:
                     )
                     is_enabled = enabled_result.returncode == 0
 
-                boot_info = ""
-                if status == 'active' and not is_enabled:
-                    boot_info = "  (not enabled at boot)"
-                    warnings.append(svc)
+                    boot_info = ""
+                    if status == 'active' and not is_enabled:
+                        boot_info = "  (not enabled at boot)"
+                        warnings.append(svc)
 
-                if status == 'active':
-                    print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
-                elif status == 'failed':
-                    print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
-                else:
-                    print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                    if status == 'active':
+                        print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
+                    elif status == 'failed':
+                        print(f"  \033[0;31m●\033[0m {svc:<18} FAILED")
+                        failed_services.append(svc)
+                    else:
+                        print(f"  \033[2m○\033[0m {svc:<18} {status}")
             except (subprocess.SubprocessError, OSError) as e:
                 logger.debug("Service status check for %s failed: %s", svc, e)
                 print(f"  ? {svc:<18} unknown")
@@ -351,43 +374,17 @@ class ServiceMenuMixin:
             print(f"  \033[0;33mWarning:\033[0m {', '.join(warnings)} won't start on reboot.")
             print(f"  Fix: sudo systemctl enable {' '.join(warnings)}\n")
 
-        for svc in ['meshtasticd']:
+        # Show failure logs for services already identified as failed (no re-check)
+        for svc in failed_services:
             try:
-                if _HAS_SERVICE_CHECK:
-                    status = check_service(svc)
-                    is_failed = status.state == ServiceState.FAILED
-                else:
-                    r = subprocess.run(['systemctl', 'is-active', svc],
-                                       capture_output=True, text=True, timeout=5)
-                    is_failed = r.stdout.strip() == 'failed'
-                if is_failed:
-                    print(f"\033[0;31m{svc} failure:\033[0m")
-                    subprocess.run(
-                        ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
-                        timeout=10
-                    )
-                    print()
+                print(f"\033[0;31m{svc} failure:\033[0m")
+                subprocess.run(
+                    ['journalctl', '-u', svc, '-n', '5', '--no-pager'],
+                    timeout=10
+                )
+                print()
             except (subprocess.SubprocessError, OSError) as e:
                 logger.debug("Failure log check for %s failed: %s", svc, e)
-
-        if not use_direct_rnsd:
-            try:
-                if _HAS_SERVICE_CHECK:
-                    status = check_service('rnsd')
-                    is_failed = status.state == ServiceState.FAILED
-                else:
-                    r = subprocess.run(['systemctl', 'is-active', 'rnsd'],
-                                       capture_output=True, text=True, timeout=5)
-                    is_failed = r.stdout.strip() == 'failed'
-                if is_failed:
-                    print(f"\033[0;31mrnsd failure:\033[0m")
-                    subprocess.run(
-                        ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager'],
-                        timeout=10
-                    )
-                    print()
-            except (subprocess.SubprocessError, OSError) as e:
-                logger.debug("rnsd failure log check failed: %s", e)
         self._wait_for_enter()
 
     def _manage_port_lockdown(self):
@@ -428,7 +425,7 @@ class ServiceMenuMixin:
                 break
 
             if choice == "lock":
-                subprocess.run(['clear'], check=False, timeout=5)
+                clear_screen()
                 success, msg = lock_port_external(9443)
                 if success:
                     print(f"\033[0;32m✓\033[0m {msg}")
@@ -439,7 +436,7 @@ class ServiceMenuMixin:
                 self._wait_for_enter()
 
             elif choice == "unlock":
-                subprocess.run(['clear'], check=False, timeout=5)
+                clear_screen()
                 success, msg = unlock_port_external(9443)
                 if success:
                     print(f"\033[0;32m✓\033[0m {msg}")
@@ -448,7 +445,7 @@ class ServiceMenuMixin:
                 self._wait_for_enter()
 
             elif choice == "persist":
-                subprocess.run(['clear'], check=False, timeout=5)
+                clear_screen()
                 print("Saving iptables rules for reboot persistence...\n")
                 success, msg = persist_iptables()
                 if success:
@@ -458,7 +455,7 @@ class ServiceMenuMixin:
                 self._wait_for_enter()
 
             elif choice == "status":
-                subprocess.run(['clear'], check=False, timeout=5)
+                clear_screen()
                 print("=== Port 9443 Status ===\n")
                 if locked:
                     print("  \033[0;32m●\033[0m Port 9443: LOCKED (localhost only)")
@@ -471,7 +468,7 @@ class ServiceMenuMixin:
 
     def _restart_meshtasticd_service(self):
         """Restart the meshtasticd service."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Restarting meshtasticd...\n")
         subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
         subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
@@ -479,7 +476,7 @@ class ServiceMenuMixin:
 
     def _start_rnsd_service(self):
         """Start the rnsd service."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Starting rnsd...\n")
         if not self._has_systemd_unit('rnsd'):
             self._start_rnsd_direct()
@@ -490,7 +487,7 @@ class ServiceMenuMixin:
 
     def _restart_rnsd_service(self):
         """Restart the rnsd service."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Restarting rnsd...\n")
         if not self._has_systemd_unit('rnsd'):
             self._stop_rnsd_direct()
@@ -889,7 +886,7 @@ WantedBy=multi-user.target
         For rnsd: Uses direct process control if no systemd unit exists.
         For other services: Uses systemctl.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         # Check if rnsd needs direct process handling
         use_direct_rnsd = (service_name == 'rnsd' and
@@ -933,7 +930,7 @@ WantedBy=multi-user.target
 
         elif action == "stop":
             if self.dialog.yesno("Confirm", f"Stop {service_name}?", default_no=True):
-                subprocess.run(['clear'], check=False, timeout=5)
+                clear_screen()
                 print(f"Stopping {service_name}...\n")
                 if use_direct_rnsd:
                     self._stop_rnsd_direct()
@@ -1048,7 +1045,7 @@ WantedBy=multi-user.target
 
     def _openhamclock_docker_status(self):
         """Show OpenHamClock Docker container status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== OpenHamClock Docker Status ===\n")
 
         try:
@@ -1069,7 +1066,7 @@ WantedBy=multi-user.target
 
     def _start_openhamclock_docker(self):
         """Start OpenHamClock Docker container."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Starting OpenHamClock ===\n")
 
         # Check if container already exists
@@ -1127,7 +1124,7 @@ WantedBy=multi-user.target
 
     def _stop_openhamclock_docker(self):
         """Stop OpenHamClock Docker container."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Stopping OpenHamClock ===\n")
 
         try:
@@ -1148,7 +1145,7 @@ WantedBy=multi-user.target
 
     def _openhamclock_docker_logs(self):
         """Show OpenHamClock Docker container logs."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== OpenHamClock Logs (last 30) ===\n")
 
         try:
@@ -1271,7 +1268,7 @@ WantedBy=multi-user.target
 
         Returns True if installation succeeded.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Installing Mosquitto MQTT Broker ===\n")
 
         try:
@@ -1375,7 +1372,7 @@ WantedBy=multi-user.target
 
         Returns True if configuration succeeded.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Configuring meshtasticd for Local MQTT ===\n")
 
         cli = shutil.which('meshtastic') or 'meshtastic'
