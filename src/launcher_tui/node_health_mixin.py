@@ -104,9 +104,9 @@ class NodeHealthMixin:
         self._wait_for_enter()
 
     def _battery_forecast_display(self):
-        """Show battery forecasts for tracked nodes."""
+        """Show battery forecasts with drain rates and maintenance recommendations."""
         subprocess.run(['clear'], check=False, timeout=5)
-        print("=== Battery Forecast ===\n")
+        print("=== Battery Forecast & Maintenance ===\n")
 
         try:
             from utils.predictive_maintenance import MaintenancePredictor
@@ -136,9 +136,9 @@ class NodeHealthMixin:
             if battery_pct is not None:
                 predictor.record_battery(node_id, battery_pct, voltage=voltage)
 
-        # Display results
-        print(f"{'Node':<20} {'Battery':>8} {'Voltage':>8} {'Status':<12}")
-        print("-" * 52)
+        # Display battery status table
+        print(f"  {'Node':<16} {'Battery':>8} {'Voltage':>8} {'Drain Rate':>11} {'Critical In':>12} {'Status':<12}")
+        print(f"  {'-'*71}")
 
         for node_id, data in nodes.items():
             battery_pct = data.get('battery_level')
@@ -146,8 +146,27 @@ class NodeHealthMixin:
             name = data.get('short_name', node_id[:12])
 
             if battery_pct is None:
-                print(f"  {name:<20} {'---':>8}")
+                print(f"  {name:<16} {'---':>8}")
                 continue
+
+            # Get forecast for drain rate and time-to-critical
+            forecast = predictor.get_battery_forecast(node_id)
+            if forecast.trend == 'draining' and forecast.drain_rate_pct_per_hour > 0:
+                drain_str = f"{forecast.drain_rate_pct_per_hour:.2f}%/h"
+            elif forecast.trend == 'charging':
+                drain_str = "charging"
+            elif forecast.trend == 'stable':
+                drain_str = "stable"
+            else:
+                drain_str = "---"
+
+            if forecast.hours_to_critical is not None and forecast.hours_to_critical < 999:
+                if forecast.hours_to_critical < 1:
+                    crit_str = f"{forecast.hours_to_critical * 60:.0f}min"
+                else:
+                    crit_str = f"{forecast.hours_to_critical:.0f}h"
+            else:
+                crit_str = "---"
 
             # Color code battery level
             if battery_pct > 50:
@@ -164,7 +183,23 @@ class NodeHealthMixin:
                 status = "SHUTDOWN RISK"
 
             v_str = f"{voltage:.2f}V" if voltage else "---"
-            print(f"  {name:<20} {color}{battery_pct:>6.1f}%\033[0m {v_str:>8} {status:<12}")
+            print(f"  {name:<16} {color}{battery_pct:>6.1f}%\033[0m {v_str:>8} {drain_str:>11} {crit_str:>12} {status:<12}")
+
+        # Show maintenance recommendations
+        recs = predictor.get_maintenance_recommendations()
+        if recs:
+            priority_colors = {
+                'urgent': '\033[1;31m',   # bold red
+                'soon': '\033[0;33m',     # yellow
+                'scheduled': '\033[0;34m', # blue
+                'monitor': '\033[2m',     # dim
+            }
+            print(f"\n  Maintenance Recommendations ({len(recs)}):")
+            print(f"  {'-'*50}")
+            for rec in recs[:10]:
+                color = priority_colors.get(rec.priority, '')
+                print(f"  {color}[{rec.priority.upper():>9}]\033[0m {rec.node_id}: {rec.action}")
+                print(f"             Reason: {rec.reason}")
 
         print(f"\n  Note: Accurate forecasts require multiple samples over time.")
         print(f"  Battery drain rates calculated after 3+ readings.")
@@ -239,12 +274,12 @@ class NodeHealthMixin:
         return nodes
 
     def _signal_trending_display(self):
-        """Show signal trend analysis for nodes."""
+        """Show signal trend analysis for nodes with stability scoring."""
         subprocess.run(['clear'], check=False, timeout=5)
         print("=== Signal Trending Analysis ===\n")
 
         try:
-            from utils.signal_trending import SignalTrend
+            from utils.signal_trending import SignalTrend, SignalTrendingManager
         except ImportError:
             print("  Signal trending module not available.")
             print("  File: src/utils/signal_trending.py")
@@ -262,8 +297,18 @@ class NodeHealthMixin:
             self._wait_for_enter()
             return
 
-        print(f"{'Node':<20} {'SNR':>8} {'RSSI':>8} {'Hops':>6}")
-        print("-" * 46)
+        # Feed data into trending manager for analysis
+        manager = SignalTrendingManager()
+        now = time.time()
+        for node_id, data in nodes.items():
+            snr = data.get('snr')
+            rssi = data.get('rssi')
+            if snr is not None or rssi is not None:
+                manager.add_sample(node_id, now, snr=snr, rssi=rssi)
+
+        # Display signal table with trend info
+        print(f"  {'Node':<16} {'SNR':>8} {'RSSI':>8} {'Hops':>5} {'Stability':>10} {'Trend':>12}")
+        print(f"  {'-'*63}")
 
         for node_id, data in nodes.items():
             name = data.get('short_name', node_id[:12])
@@ -274,18 +319,49 @@ class NodeHealthMixin:
             snr_str = f"{snr:.1f}dB" if snr is not None else "---"
             rssi_str = f"{rssi}dBm" if rssi is not None else "---"
 
+            # Get report for trend/stability info
+            report = manager.get_report(node_id)
+            if report and report.stability_score >= 0:
+                stab_score = report.stability_score
+                if stab_score >= 80:
+                    stab_color = "\033[0;32m"
+                elif stab_score >= 50:
+                    stab_color = "\033[0;33m"
+                else:
+                    stab_color = "\033[0;31m"
+                stab_str = f"{stab_color}{stab_score:>3}/100\033[0m"
+                trend_str = report.trend_direction
+            else:
+                stab_str = "   ---"
+                trend_str = "---"
+
             # Color code SNR
             if snr is not None:
                 if snr > 5:
-                    color = "\033[0;32m"  # green - excellent
+                    color = "\033[0;32m"  # green
                 elif snr > 0:
-                    color = "\033[0;33m"  # yellow - acceptable
+                    color = "\033[0;33m"  # yellow
                 else:
-                    color = "\033[0;31m"  # red - poor
+                    color = "\033[0;31m"  # red
             else:
                 color = "\033[2m"  # dim
 
-            print(f"  {name:<20} {color}{snr_str:>8}\033[0m {rssi_str:>8} {hops:>6}")
+            hops_str = str(hops) if hops is not None else "?"
+            print(f"  {name:<16} {color}{snr_str:>8}\033[0m {rssi_str:>8} {hops_str:>5} {stab_str:>10} {trend_str:>12}")
+
+        # Summary: degrading and unstable nodes
+        degrading = manager.get_degrading_nodes()
+        if degrading:
+            print(f"\n  \033[0;33mWarning:\033[0m {len(degrading)} node(s) with degrading signal:")
+            for r in degrading[:5]:
+                rate = f"{r.trend_rate_db_per_hour:.2f} dB/hr" if r.trend_rate_db_per_hour else ""
+                print(f"    {r.node_id}: {rate}")
+
+        unstable = manager.get_unstable_nodes(threshold=40)
+        if unstable:
+            print(f"\n  \033[0;31mAlert:\033[0m {len(unstable)} node(s) with low stability (<40/100):")
+            for r in unstable[:5]:
+                print(f"    {r.node_id}: stability {r.stability_score}/100")
 
         print(f"\n  Note: Full trend analysis requires multiple observations.")
         print(f"  Re-run periodically to build signal history.")

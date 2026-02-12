@@ -761,8 +761,10 @@ class MeshForgeLauncher(
                 ("network", "Network Status      Ports, interfaces, conflicts"),
                 ("nodes", "Node Count          Meshtastic + RNS nodes"),
                 ("health", "Node Health         Battery, signal, latency"),
+                ("score", "Health Score        Network health snapshot"),
                 ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
+                ("reports", "Reports             Generate status report"),
                 ("alerts", "View Alerts         Current warnings"),
                 ("back", "Back"),
             ]
@@ -781,8 +783,10 @@ class MeshForgeLauncher(
                 "network": ("Network Status", self._network_menu),
                 "nodes": ("Node Count", self._show_node_counts),
                 "health": ("Node Health", self._node_health_menu),
+                "score": ("Health Score", self._health_score_display),
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
                 "metrics": ("Historical Trends", self._metrics_menu),
+                "reports": ("Reports", self._reports_menu),
                 "alerts": ("View Alerts", self._show_alerts),
             }
             entry = dispatch.get(choice)
@@ -844,6 +848,7 @@ class MeshForgeLauncher(
                 ("link", "Link Budget         FSPL, Fresnel, range"),
                 ("site", "Site Planner        Coverage estimation"),
                 ("freq", "Frequency Slots     Channel calculator"),
+                ("antenna", "Antenna Analysis    Compare antenna types"),
                 ("sdr", "SDR Monitor         RF awareness (Airspy)"),
                 ("back", "Back"),
             ]
@@ -861,6 +866,7 @@ class MeshForgeLauncher(
                 "link": ("Link Budget", self._rf_tools_menu),
                 "site": ("Site Planner", self._site_planner_menu),
                 "freq": ("Frequency Slots", self._calc_frequency_slot),
+                "antenna": ("Antenna Analysis", self._antenna_comparison),
                 "sdr": ("SDR Monitor", self._rf_awareness_menu),
             }
             entry = dispatch.get(choice)

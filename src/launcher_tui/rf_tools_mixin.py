@@ -19,6 +19,7 @@ class RFToolsMixin:
             ("link", "Link Budget Calculator"),
             ("fresnel", "Fresnel Zone"),
             ("power", "EIRP Calculator"),
+            ("antenna", "Antenna Comparison"),
             ("back", "Back"),
         ]
 
@@ -38,6 +39,7 @@ class RFToolsMixin:
                 "link": ("Link Budget", self._calc_link_budget),
                 "fresnel": ("Fresnel Zone", self._calc_fresnel),
                 "power": ("EIRP Calculator", self._calc_eirp),
+                "antenna": ("Antenna Comparison", self._antenna_comparison),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -402,3 +404,187 @@ Note: Check local regulations."""
             self.dialog.msgbox("Error", "Invalid number entered")
         except Exception as e:
             self.dialog.msgbox("Error", str(e))
+
+    def _antenna_comparison(self):
+        """Compare antenna types for Meshtastic deployments."""
+        import subprocess
+
+        try:
+            from utils.antenna_patterns import (
+                ANTENNA_PRESETS, get_antenna_preset,
+                format_antenna_comparison, coverage_with_antenna,
+            )
+        except ImportError:
+            self.dialog.msgbox(
+                "Not Available",
+                "Antenna patterns module not available.\n"
+                "File: src/utils/antenna_patterns.py"
+            )
+            return
+
+        while True:
+            choices = [
+                ("compare", "Compare All         Side-by-side comparison"),
+                ("coverage", "Coverage Estimate   Range with specific antenna"),
+                ("specs", "Antenna Specs       Detailed specifications"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Antenna Analysis",
+                "Compare antenna types for Meshtastic deployments:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "compare":
+                self._safe_call("Antenna Compare", self._antenna_compare_all)
+            elif choice == "coverage":
+                self._safe_call("Coverage Estimate", self._antenna_coverage_estimate)
+            elif choice == "specs":
+                self._safe_call("Antenna Specs", self._antenna_specs_display)
+
+    def _antenna_compare_all(self):
+        """Show side-by-side antenna comparison table."""
+        import subprocess
+
+        from utils.antenna_patterns import (
+            ANTENNA_PRESETS, get_antenna_preset,
+            format_antenna_comparison,
+        )
+
+        # Get target azimuth
+        az_str = self.dialog.inputbox(
+            "Target Azimuth",
+            "Target direction in degrees (0=North, 90=East):",
+            "0"
+        )
+        if not az_str:
+            return
+        azimuth = float(az_str)
+
+        # Get base range
+        range_str = self.dialog.inputbox(
+            "Base Range",
+            "Base range with stock antenna (km):",
+            "10"
+        )
+        if not range_str:
+            return
+        base_range = float(range_str)
+
+        # Build antenna list from all presets
+        antennas = []
+        for name in ANTENNA_PRESETS:
+            antenna = get_antenna_preset(name, aim_azimuth=azimuth)
+            antennas.append(antenna)
+
+        # Generate comparison table
+        subprocess.run(['clear'], check=False, timeout=5)
+        table = format_antenna_comparison(antennas, base_range, azimuth)
+        print(table)
+        print(f"\n  Base range (stock whip): {base_range:.1f} km")
+        print(f"  Target azimuth: {azimuth:.0f} degrees")
+        print(f"\n  Factor: range multiplier vs stock dipole (2.15 dBi)")
+        print()
+        self._wait_for_enter()
+
+    def _antenna_coverage_estimate(self):
+        """Estimate coverage with a specific antenna at all compass points."""
+        from utils.antenna_patterns import (
+            ANTENNA_PRESETS, get_antenna_preset,
+            coverage_with_antenna,
+        )
+
+        # Select antenna preset
+        preset_choices = []
+        for key in ANTENNA_PRESETS:
+            antenna = get_antenna_preset(key)
+            spec = antenna.spec()
+            preset_choices.append((key, f"{spec.name:<20} {spec.peak_gain_dbi:>5.1f} dBi"))
+        preset_choices.append(("back", "Back"))
+
+        preset = self.dialog.menu(
+            "Select Antenna",
+            "Choose antenna type:",
+            preset_choices
+        )
+        if not preset or preset == "back":
+            return
+
+        # Get azimuth
+        az_str = self.dialog.inputbox(
+            "Antenna Pointing Direction",
+            "Aim azimuth in degrees (0=N, 90=E, 180=S, 270=W):",
+            "0"
+        )
+        if not az_str:
+            return
+        azimuth = float(az_str)
+
+        # Get base range
+        range_str = self.dialog.inputbox(
+            "Base Range",
+            "Base range with stock antenna (km):",
+            "10"
+        )
+        if not range_str:
+            return
+        base_range = float(range_str)
+
+        antenna = get_antenna_preset(preset, aim_azimuth=azimuth)
+        spec = antenna.spec()
+
+        # Calculate coverage at 8 compass points
+        directions = [
+            (0, "N"), (45, "NE"), (90, "E"), (135, "SE"),
+            (180, "S"), (225, "SW"), (270, "W"), (315, "NW"),
+        ]
+
+        lines = [f"Antenna: {spec.name}"]
+        lines.append(f"Peak gain: {spec.peak_gain_dbi:.1f} dBi")
+        lines.append(f"H beamwidth: {spec.h_beamwidth_deg:.0f} deg")
+        lines.append(f"V beamwidth: {spec.v_beamwidth_deg:.0f} deg")
+        if spec.front_to_back_db > 0:
+            lines.append(f"F/B ratio: {spec.front_to_back_db:.0f} dB")
+        lines.append(f"Aim: {azimuth:.0f} deg")
+        lines.append(f"Base range: {base_range:.1f} km (stock whip)\n")
+        lines.append(f"{'Direction':>10} {'Gain':>8} {'Range':>8} {'Factor':>7}")
+        lines.append("-" * 37)
+
+        for deg, label in directions:
+            gain = antenna.gain_at(deg, 0.0)
+            rng = coverage_with_antenna(base_range, antenna, deg)
+            factor = antenna.effective_range_factor(deg)
+            lines.append(f"{label:>10} {gain:>6.1f}dBi {rng:>6.1f}km {factor:>6.2f}x")
+
+        self.dialog.msgbox("Coverage Estimate", "\n".join(lines))
+
+    def _antenna_specs_display(self):
+        """Show detailed specs for all antenna presets."""
+        import subprocess
+
+        from utils.antenna_patterns import ANTENNA_PRESETS, get_antenna_preset
+
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== Antenna Specifications ===\n")
+        print(f"  {'Name':<22} {'Type':<14} {'Gain':>6} {'H Beam':>7} {'V Beam':>7} {'F/B':>5}")
+        print(f"  {'-'*65}")
+
+        for key in ANTENNA_PRESETS:
+            antenna = get_antenna_preset(key)
+            spec = antenna.spec()
+            fb = f"{spec.front_to_back_db:.0f}dB" if spec.front_to_back_db > 0 else "---"
+            print(f"  {spec.name:<22} {spec.type_name:<14} "
+                  f"{spec.peak_gain_dbi:>5.1f}i {spec.h_beamwidth_deg:>5.0f}° "
+                  f"{spec.v_beamwidth_deg:>5.0f}° {fb:>5}")
+
+        print(f"\n  Notes:")
+        print(f"  - Gain in dBi (referenced to isotropic)")
+        print(f"  - H Beam: horizontal -3dB beamwidth")
+        print(f"  - V Beam: vertical -3dB beamwidth")
+        print(f"  - F/B: front-to-back ratio (directional only)")
+        print()
+        self._wait_for_enter()

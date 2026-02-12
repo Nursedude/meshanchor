@@ -253,6 +253,137 @@ class DashboardMixin:
         print()
         self._wait_for_enter()
 
+    def _reports_menu(self):
+        """Network status reports: generate, view, save."""
+        while True:
+            choices = [
+                ("generate", "Generate & View     Full status report"),
+                ("save", "Generate & Save     Save to file"),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Reports",
+                "Network status report generation:",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "generate":
+                self._safe_call("Generate Report", self._generate_and_view_report)
+            elif choice == "save":
+                self._safe_call("Save Report", self._generate_and_save_report)
+
+    def _generate_and_view_report(self):
+        """Generate a full status report and display it."""
+        import subprocess as _sp
+        _sp.run(['clear'], check=False, timeout=5)
+        print("=== Generating Network Status Report ===\n")
+        print("Collecting data from all subsystems...\n")
+
+        try:
+            from utils.report_generator import generate_report
+        except ImportError:
+            print("  Report generator module not available.")
+            print("  File: src/utils/report_generator.py")
+            self._wait_for_enter()
+            return
+
+        report = generate_report()
+        # Display the markdown report as plain text in terminal
+        print(report)
+        print()
+        self._wait_for_enter()
+
+    def _generate_and_save_report(self):
+        """Generate a report and save it to a file."""
+        import subprocess as _sp
+        _sp.run(['clear'], check=False, timeout=5)
+        print("=== Generating & Saving Report ===\n")
+
+        try:
+            from utils.report_generator import generate_and_save
+        except ImportError:
+            print("  Report generator module not available.")
+            print("  File: src/utils/report_generator.py")
+            self._wait_for_enter()
+            return
+
+        saved_path = generate_and_save()
+        print(f"Report saved to:\n  {saved_path}\n")
+        self._wait_for_enter()
+
+    def _health_score_display(self):
+        """Show comprehensive network health score with category breakdown."""
+        import subprocess as _sp
+        _sp.run(['clear'], check=False, timeout=5)
+        print("=== Network Health Score ===\n")
+
+        try:
+            from utils.health_score import HealthScorer
+        except ImportError:
+            print("  Health score module not available.")
+            print("  File: src/utils/health_score.py")
+            self._wait_for_enter()
+            return
+
+        scorer = HealthScorer()
+        snapshot = scorer.get_snapshot()
+
+        # Overall score with visual bar
+        score = snapshot.overall_score
+        bar_len = 30
+        filled = int(score / 100 * bar_len)
+        bar = "\033[0;32m" + "=" * filled + "\033[0m" + "-" * (bar_len - filled)
+
+        if score >= 80:
+            color = "\033[0;32m"  # green
+        elif score >= 60:
+            color = "\033[0;33m"  # yellow
+        elif score >= 40:
+            color = "\033[0;31m"  # red
+        else:
+            color = "\033[1;31m"  # bold red
+
+        print(f"  Overall: {color}{score:.0f}/100\033[0m ({snapshot.status})")
+        print(f"  [{bar}]\n")
+
+        # Category breakdown
+        print(f"  {'Category':<18} {'Score':>6}  Status")
+        print(f"  {'-'*42}")
+        for cat, cat_score in snapshot.category_scores.items():
+            if cat_score >= 80:
+                status = "Good"
+                c = "\033[0;32m"
+            elif cat_score >= 60:
+                status = "Fair"
+                c = "\033[0;33m"
+            elif cat_score >= 40:
+                status = "Degraded"
+                c = "\033[0;31m"
+            else:
+                status = "Critical"
+                c = "\033[1;31m"
+            print(f"  {cat.title():<18} {c}{cat_score:>5.0f}\033[0m  {status}")
+
+        # Stats
+        print(f"\n  Nodes reporting:  {snapshot.node_count}")
+        print(f"  Services tracked: {snapshot.service_count}")
+
+        # Trend
+        trend = scorer.get_trend()
+        trend_icons = {
+            'improving': '\033[0;32m  improving\033[0m',
+            'declining': '\033[0;31m  declining\033[0m',
+            'stable': '  stable',
+        }
+        print(f"  Trend:           {trend_icons.get(trend, trend)}")
+
+        print()
+        self._wait_for_enter()
+
     def _show_alerts(self):
         """Show current alerts from environment state and EAS."""
         subprocess.run(['clear'], check=False, timeout=5)
