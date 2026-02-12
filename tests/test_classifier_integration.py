@@ -65,20 +65,20 @@ class TestBridgeClassifierIntegration:
     def test_classifier_initialized(self, bridge):
         """Test classifier is initialized when available."""
         if CLASSIFIER_AVAILABLE:
-            assert bridge._classifier is not None
+            assert bridge._router._classifier is not None
         else:
-            assert bridge._classifier is None
+            assert bridge._router._classifier is None
 
     def test_should_bridge_mesh_message(self, bridge, mesh_message):
         """Test bridging decision for Meshtastic message."""
-        result = bridge._should_bridge(mesh_message)
+        result = bridge._router.should_bridge(mesh_message)
 
         # With classifier, should get a decision
         assert isinstance(result, bool)
 
     def test_should_bridge_rns_message(self, bridge, rns_message):
         """Test bridging decision for RNS message."""
-        result = bridge._should_bridge(rns_message)
+        result = bridge._router.should_bridge(rns_message)
 
         assert isinstance(result, bool)
 
@@ -87,14 +87,14 @@ class TestBridgeClassifierIntegration:
         config = GatewayConfig(enabled=False)
         bridge = RNSMeshtasticBridge(config)
 
-        result = bridge._should_bridge(mesh_message)
+        result = bridge._router.should_bridge(mesh_message)
 
         assert result is False
 
     @pytest.mark.skipif(not CLASSIFIER_AVAILABLE, reason="Classifier not available")
     def test_classification_recorded(self, bridge, mesh_message):
         """Test that classification is recorded."""
-        bridge._should_bridge(mesh_message)
+        bridge._router.should_bridge(mesh_message)
 
         last = bridge.get_last_classification()
         assert last is not None
@@ -104,7 +104,7 @@ class TestBridgeClassifierIntegration:
     @pytest.mark.skipif(not CLASSIFIER_AVAILABLE, reason="Classifier not available")
     def test_routing_stats_include_classifier(self, bridge, mesh_message):
         """Test routing stats include classifier data."""
-        bridge._should_bridge(mesh_message)
+        bridge._router.should_bridge(mesh_message)
 
         stats = bridge.get_routing_stats()
 
@@ -124,7 +124,7 @@ class TestBridgeClassifierIntegration:
             destination_id=None,
             content=""
         )
-        bridge._should_bridge(msg)
+        bridge._router.should_bridge(msg)
 
         # Should see some stats activity
         stats = bridge.get_routing_stats()
@@ -143,12 +143,12 @@ class TestBridgeClassifierIntegration:
         bridge = RNSMeshtasticBridge(config)
 
         # Temporarily disable classifier
-        original = bridge._classifier
-        bridge._classifier = None
+        original = bridge._router._classifier
+        bridge._router._classifier = None
 
-        result = bridge._should_bridge(mesh_message)
+        result = bridge._router.should_bridge(mesh_message)
 
-        bridge._classifier = original
+        bridge._router._classifier = original
 
         # Should still get a decision from legacy logic
         assert isinstance(result, bool)
@@ -338,8 +338,8 @@ class TestEndToEndIntegration:
         )
 
         # Both should get routing decisions
-        assert isinstance(bridge._should_bridge(emergency), bool)
-        assert isinstance(bridge._should_bridge(normal), bool)
+        assert isinstance(bridge._router.should_bridge(emergency), bool)
+        assert isinstance(bridge._router.should_bridge(normal), bool)
 
     def test_diagnostics_with_category(self):
         """Test diagnostics with check category."""
@@ -377,10 +377,10 @@ class TestEndToEndIntegration:
                 content=f"Message {i}",
                 is_broadcast=True
             )
-            bridge._should_bridge(msg)
+            bridge._router.should_bridge(msg)
 
         # Check receipts
-        receipts = bridge._classifier.get_receipts()
+        receipts = bridge._router._classifier.get_receipts()
         assert len(receipts) == 5
 
     def test_bounce_queue_accessible(self):
