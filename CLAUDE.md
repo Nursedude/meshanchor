@@ -205,7 +205,7 @@ directly from `utils.service_check` — no try/except compatibility shims needed
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
 
 **File size audit (2026-02-12):**
-- ⚠️ `rns_bridge.py` (1,694 lines) - Over threshold, needs extraction
+- ✅ `rns_bridge.py` (1,495 lines) - MessageRouter extracted to message_routing.py
 - ⚠️ `knowledge_content.py` (1,824 lines) - Content file by design, acceptable
 - ✅ `map_data_collector.py` (1,509 lines) - Borderline, monitor
 - ✅ `launcher_tui/main.py` (1,488 lines) - 30 mixins, dead code removed
@@ -216,7 +216,7 @@ Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md
 
 **Refactoring history:**
 - `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488)
-- `rns_bridge.py` (was 1,991 → 1,614 → 1,694, MeshtasticHandler extracted, needs further split)
+- `rns_bridge.py` (was 1,991 → 1,614 → 1,694 → 1,495, MeshtasticHandler + MessageRouter extracted)
 - `node_tracker.py` (was 1,808 → 930, node_models.py extracted)
 - `rns_menu_mixin.py` (was 1,524 → 1,210, rns_sniffer_mixin.py extracted)
 - `metrics_export.py` (was 1,762 → 96, split to common/prometheus/influxdb)
