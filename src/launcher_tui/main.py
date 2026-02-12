@@ -63,7 +63,7 @@ except ImportError:
     _HAS_APPLY_RESTART = False
 
 # Import dialog backend directly (not through package namespace)
-from backend import DialogBackend
+from backend import DialogBackend, clear_screen
 
 # Import startup checks and conflict resolution (v0.4.8)
 try:
@@ -1083,7 +1083,7 @@ class MeshForgeLauncher(
 
     def _drop_to_shell(self):
         """Drop to a bash shell."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("Dropping to shell. Type 'exit' to return to MeshForge.\n")
         subprocess.run(['bash'], check=False)  # Interactive shell - no timeout
 
@@ -1167,7 +1167,7 @@ DOCUMENTATION:
 SUPPORT:
   Issues: github.com/Nursedude/meshforge/issues
 """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(help_text)
         self._wait_for_enter()
 
@@ -1226,7 +1226,7 @@ SUPPORT:
 
     def _view_active_config(self):
         """Show the active meshtasticd config.yaml."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== meshtasticd config.yaml ===\n")
 
         config_path = Path('/etc/meshtasticd/config.yaml')
@@ -1246,7 +1246,7 @@ SUPPORT:
 
     def _view_config_overlays(self):
         """Show config.d/ overlay files."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== config.d/ Overlays ===\n")
 
         config_d = Path('/etc/meshtasticd/config.d')
@@ -1280,7 +1280,7 @@ SUPPORT:
 
     def _view_available_hats(self):
         """Show available HAT configurations from meshtasticd package."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Available HAT Configs ===\n")
 
         available_d = Path('/etc/meshtasticd/available.d')
@@ -1315,7 +1315,7 @@ SUPPORT:
 
     def _run_diagnostics(self):
         """Run the MeshForge diagnostic tool."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         try:
             result = subprocess.run(
                 [sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')],
@@ -1337,7 +1337,7 @@ SUPPORT:
 
     def _run_terminal_status(self):
         """Run meshforge-status (terminal-native one-shot status)."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         try:
             # Run status script directly, showing output in real-time
             result = subprocess.run(

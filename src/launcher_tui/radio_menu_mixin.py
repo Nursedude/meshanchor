@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from backend import clear_screen
 
 # Import centralized path utility
 try:
@@ -122,7 +123,7 @@ class RadioMenuMixin:
 
     def _radio_run(self, cmd: list, title: str):
         """Run a meshtastic CLI command and show output in terminal."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== {title} ===")
         print("(Ctrl+C to abort)\n")
         try:
@@ -158,7 +159,7 @@ class RadioMenuMixin:
 
     def _install_meshtastic_cli(self):
         """Install meshtastic CLI via pipx with live terminal output."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Installing Meshtastic CLI ===\n")
 
         # Determine if we should install as a different user (when running via sudo)

@@ -16,6 +16,7 @@ import sys
 import time
 import logging
 from typing import Optional
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class EmergencyModeMixin:
         ):
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"Broadcasting: {full_msg}\n")
         try:
             cli_path = self._get_emcomm_cli()
@@ -169,7 +170,7 @@ class EmergencyModeMixin:
         ):
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"Sending to {dest_clean}: {full_msg}\n")
         try:
             cli_path = self._get_emcomm_cli()
@@ -189,7 +190,7 @@ class EmergencyModeMixin:
 
     def _emcomm_status(self):
         """Show which nodes are currently online."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== NODES ONLINE ===\n")
         try:
             cli_path = self._get_emcomm_cli()
@@ -210,7 +211,7 @@ class EmergencyModeMixin:
 
     def _emcomm_messages(self):
         """Show recent messages from the mesh."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== RECENT MESSAGES ===\n")
 
         # Try to get messages from meshtasticd journal
@@ -248,7 +249,7 @@ class EmergencyModeMixin:
 
     def _emcomm_position(self):
         """Show current GPS position."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== MY POSITION ===\n")
         try:
             cli_path = self._get_emcomm_cli()
@@ -294,7 +295,7 @@ class EmergencyModeMixin:
         if info.strip():
             beacon_msg += f" - {info.strip()}"
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== SOS BEACON ACTIVE ===\n")
         print(f"Message: {beacon_msg}")
         print(f"Interval: 60 seconds")
@@ -336,7 +337,7 @@ class EmergencyModeMixin:
         Uses the EAS Alerts plugin to fetch current NOAA/NWS weather alerts.
         Designed for field operations: never crashes, always returns to menu.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== WEATHER / EAS ALERTS ===\n")
 
         try:

@@ -6,6 +6,7 @@ to reduce file size and improve maintainability.
 """
 
 import math
+from backend import clear_screen
 
 
 class RFToolsMixin:
@@ -482,7 +483,7 @@ Note: Check local regulations."""
             antennas.append(antenna)
 
         # Generate comparison table
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         table = format_antenna_comparison(antennas, base_range, azimuth)
         print(table)
         print(f"\n  Base range (stock whip): {base_range:.1f} km")
@@ -568,7 +569,7 @@ Note: Check local regulations."""
 
         from utils.antenna_patterns import ANTENNA_PRESETS, get_antenna_preset
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Antenna Specifications ===\n")
         print(f"  {'Name':<22} {'Type':<14} {'Gain':>6} {'H Beam':>7} {'V Beam':>7} {'F/B':>5}")
         print(f"  {'-'*65}")

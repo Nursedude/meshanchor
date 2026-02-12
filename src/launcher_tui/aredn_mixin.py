@@ -6,6 +6,7 @@ Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 
 import logging
 import subprocess
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class AREDNMixin:
 
     def _aredn_node_status(self):
         """Show local AREDN node status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== AREDN Node Status ===\n")
 
         try:
@@ -112,7 +113,7 @@ class AREDNMixin:
 
     def _aredn_neighbors(self):
         """Show AREDN neighbor links."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== AREDN Neighbors ===\n")
 
         try:
@@ -147,7 +148,7 @@ class AREDNMixin:
 
     def _aredn_services(self):
         """Show AREDN advertised services."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== AREDN Services ===\n")
 
         try:
@@ -207,7 +208,7 @@ class AREDNMixin:
 
     def _aredn_scan(self):
         """Scan for AREDN nodes on network."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== AREDN Network Scan ===\n")
         print("Scanning 10.0.0.0/24 for AREDN nodes...\n")
 
@@ -239,7 +240,7 @@ class AREDNMixin:
         AREDN nodes are displayed alongside Meshtastic and RNS nodes
         on the MeshForge map. Nodes must have location configured.
         """
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== AREDN Network Map ===\n")
 
         # Check for AREDN node

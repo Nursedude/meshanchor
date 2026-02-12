@@ -7,6 +7,7 @@ Provides the display methods used by the Dashboard submenu.
 
 import logging
 import subprocess
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class DashboardMixin:
 
     def _service_status_display(self):
         """Show comprehensive service status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Service Status ===\n")
 
         # Import here to avoid circular imports at module level
@@ -54,7 +55,7 @@ class DashboardMixin:
 
     def _show_node_counts(self):
         """Show node counts from all sources."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Node Counts ===\n")
 
         # Meshtastic nodes via HTTP API
@@ -89,7 +90,7 @@ class DashboardMixin:
 
     def _data_path_diagnostic(self):
         """Test all data collection paths to diagnose zero-data issues."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Data Path Diagnostic ===\n")
         print("Testing all data sources...\n")
 
@@ -386,7 +387,7 @@ class DashboardMixin:
 
     def _show_alerts(self):
         """Show current alerts from environment state and EAS."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Current Alerts ===\n")
 
         # System/environment alerts

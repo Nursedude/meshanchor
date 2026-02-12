@@ -10,6 +10,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -904,7 +905,7 @@ Press Cancel to keep current values."""
             return
 
         # Clear screen and run nano
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         subprocess.run(['nano', path])  # Interactive editor - no timeout
 
         # Ask to restart service
@@ -1055,7 +1056,7 @@ Press Cancel to keep current values."""
 
     def _mqtt_view_settings(self):
         """View current MQTT settings."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== MQTT Settings ===\n")
         cli = self._get_meshtastic_cli()
         try:
@@ -1085,7 +1086,7 @@ Press Cancel to keep current values."""
             return
 
         cli = self._get_meshtastic_cli()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== {'Enabling' if enabled else 'Disabling'} MQTT ===\n")
         try:
             result = subprocess.run(
@@ -1126,7 +1127,7 @@ Press Cancel to keep current values."""
             return
 
         cli = self._get_meshtastic_cli()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Setting MQTT Broker ===\n")
         try:
             result = subprocess.run(
@@ -1162,7 +1163,7 @@ Press Cancel to keep current values."""
             return
 
         cli = self._get_meshtastic_cli()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Setting MQTT Credentials ===\n")
         try:
             cmd = [cli, '--host', 'localhost']
@@ -1197,7 +1198,7 @@ Press Cancel to keep current values."""
             return
 
         cli = self._get_meshtastic_cli()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Setting MQTT Topic ===\n")
         try:
             result = subprocess.run(
@@ -1243,7 +1244,7 @@ Press Cancel to keep current values."""
             return
 
         cli = self._get_meshtastic_cli()
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         if choice == "json":
             print("=== Setting JSON Mode ===\n")
@@ -1291,7 +1292,7 @@ Press Cancel to keep current values."""
             default_no=True
         ):
             cli = self._get_meshtastic_cli()
-            subprocess.run(['clear'], check=False, timeout=5)
+            clear_screen()
             print("=== Enabling Uplink ===\n")
             try:
                 subprocess.run(
@@ -1322,7 +1323,7 @@ Press Cancel to keep current values."""
             default_no=True
         ):
             cli = self._get_meshtastic_cli()
-            subprocess.run(['clear'], check=False, timeout=5)
+            clear_screen()
             print("=== Enabling Downlink ===\n")
             try:
                 subprocess.run(

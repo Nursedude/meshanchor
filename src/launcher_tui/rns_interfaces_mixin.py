@@ -12,6 +12,7 @@ import re
 import sys
 import subprocess
 import logging
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class RNSInterfacesMixin:
 
     def _rns_list_interfaces(self):
         """Display all configured RNS interfaces."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Configured RNS Interfaces ===\n")
 
         result = self._rns_cmd_list_interfaces()

@@ -12,6 +12,7 @@ Provides menu methods callable from Dashboard and Maps submenus.
 import logging
 import subprocess
 import time
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class NodeHealthMixin:
 
     def _service_latency_probe(self):
         """Probe all NOC services and display latency/health."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Service Latency Probe ===\n")
         print("Probing services (2s timeout each)...\n")
 
@@ -105,7 +106,7 @@ class NodeHealthMixin:
 
     def _battery_forecast_display(self):
         """Show battery forecasts with drain rates and maintenance recommendations."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Battery Forecast & Maintenance ===\n")
 
         try:
@@ -275,7 +276,7 @@ class NodeHealthMixin:
 
     def _signal_trending_display(self):
         """Show signal trend analysis for nodes with stability scoring."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Signal Trending Analysis ===\n")
 
         try:
