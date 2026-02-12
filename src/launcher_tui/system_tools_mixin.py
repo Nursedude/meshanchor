@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import logging
+from backend import clear_screen
 logger = logging.getLogger(__name__)
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
@@ -137,7 +138,7 @@ class SystemToolsMixin:
 
     def _run_interactive_tool(self, tool: str):
         """Run an interactive monitoring tool."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         tool_commands = {
             'btop': ['btop'],
@@ -207,7 +208,7 @@ class SystemToolsMixin:
 
     def _run_process_command(self, cmd_type: str):
         """Run process-related command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         commands = {
             'ps_all': (['ps', 'aux', '--forest'], "All Processes (ps aux --forest)"),
@@ -256,7 +257,7 @@ class SystemToolsMixin:
 
     def _show_mesh_processes(self):
         """Show mesh-related processes."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Mesh-Related Processes ===\n")
 
         patterns = ['meshtastic', 'rnsd', 'lxmf', 'nomadnet', 'meshforge', 'python.*mesh']
@@ -316,7 +317,7 @@ class SystemToolsMixin:
             self.dialog.msgbox("Error", "Port must be a number between 1 and 65535")
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Who's Using Port {port}? ===\n")
 
         try:
@@ -388,7 +389,7 @@ class SystemToolsMixin:
 
     def _run_network_command(self, cmd_type: str):
         """Run network diagnostic command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         simple_commands = {
             'ss': (['ss', '-tuln'], "Listening Ports (ss -tuln)"),
@@ -447,7 +448,7 @@ class SystemToolsMixin:
             self.dialog.msgbox("Error", "Invalid hostname or IP address.")
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== DNS Lookup: {host} ===\n")
 
         # Try multiple DNS tools
@@ -493,7 +494,7 @@ class SystemToolsMixin:
             self.dialog.msgbox("Error", "Invalid hostname or IP address.")
             return
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Traceroute to {host} ===\n")
         print("(Ctrl+C to stop)\n")
 
@@ -538,7 +539,7 @@ class SystemToolsMixin:
         except ValueError:
             count = 5
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Ping {host} ===\n")
 
         cmd = ['ping', host]
@@ -556,7 +557,7 @@ class SystemToolsMixin:
 
     def _wifi_status(self):
         """Show WiFi status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== WiFi Status ===\n")
 
         # Try iw first (modern), then iwconfig (legacy)
@@ -578,7 +579,7 @@ class SystemToolsMixin:
 
     def _tcp_monitor_view(self):
         """Display TCP connections related to Meshtastic."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== TCP Connection Monitor ===\n")
         print("Monitoring connections to meshtasticd (port 4403) and web interfaces\n")
 
@@ -659,7 +660,7 @@ class SystemToolsMixin:
 
     def _network_scan_view(self):
         """Scan network for meshtasticd devices."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Network Device Discovery ===\n")
         print("Scanning for Meshtastic devices on the local network...\n")
 
@@ -682,7 +683,7 @@ class SystemToolsMixin:
             ""
         )
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Scanning Network ===\n")
 
         scanner = NetworkScanner(timeout=1.0, max_threads=50)
@@ -780,7 +781,7 @@ class SystemToolsMixin:
 
     def _run_hardware_command(self, cmd_type: str):
         """Run hardware info command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         simple_commands = {
             'lscpu': (['lscpu'], "CPU Information"),
@@ -819,7 +820,7 @@ class SystemToolsMixin:
 
     def _gpio_status(self):
         """Show GPIO status for Pi/SBC."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== GPIO Status ===\n")
 
         # Try raspi-gpio first, then gpioinfo
@@ -847,7 +848,7 @@ class SystemToolsMixin:
 
     def _spi_i2c_status(self):
         """Show SPI and I2C status."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== SPI/I2C Status ===\n")
 
         # SPI
@@ -914,7 +915,7 @@ class SystemToolsMixin:
 
     def _run_performance_command(self, cmd_type: str):
         """Run performance monitoring command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         simple_commands = {
             'free': (['free', '-h'], "Memory Usage"),
@@ -983,7 +984,7 @@ class SystemToolsMixin:
         except ValueError:
             duration = 10
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Stress Test ({duration}s) ===\n")
         print("Running CPU stress test...\n")
 
@@ -1030,7 +1031,7 @@ class SystemToolsMixin:
 
     def _run_storage_command(self, cmd_type: str):
         """Run storage command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         if cmd_type == 'df':
             print("=== Disk Free Space ===\n")
@@ -1120,7 +1121,7 @@ class SystemToolsMixin:
 
     def _run_service_command(self, cmd_type: str):
         """Run service management command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         if cmd_type == 'status_all':
             print("=== All Services Status ===\n")
@@ -1218,7 +1219,7 @@ class SystemToolsMixin:
 
     def _run_advanced_log_command(self, cmd_type: str):
         """Run advanced log command."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
 
         if cmd_type == 'journal_size':
             print("=== Journal Disk Usage ===\n")
@@ -1326,7 +1327,7 @@ class SystemToolsMixin:
             "  systemctl status meshtasticd"
         )
 
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== MeshForge Shell ===")
         print("Type 'exit' to return to the menu.\n")
 

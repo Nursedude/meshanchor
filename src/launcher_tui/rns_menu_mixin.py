@@ -28,6 +28,7 @@ except ImportError:
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
 from utils.paths import get_real_user_home, ReticulumPaths
+from backend import clear_screen
 
 
 class RNSMenuMixin(RNSSnifferMixin):
@@ -94,12 +95,12 @@ class RNSMenuMixin(RNSSnifferMixin):
             # Inline RNS tool commands
             try:
                 if choice == "status":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== RNS Status ===\n")
                     self._run_rns_tool(['rnstatus'], 'rnstatus')
                     self._wait_for_enter()
                 elif choice == "paths":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== RNS Path Table ===\n")
                     self._run_rns_tool(['rnpath', '-t'], 'rnpath')
                     self._wait_for_enter()
@@ -115,7 +116,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _rns_probe_destination(self):
         """Probe an RNS destination to test reachability."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Probe RNS Destination ===\n")
         print("Probe tests reachability of a destination on the RNS network.")
         print("Enter the full destination hash (32 hex chars), or a partial hash.\n")
@@ -140,7 +141,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _rns_identity_info(self):
         """Show RNS identity information."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== RNS Identity Info ===\n")
 
         while True:
@@ -162,7 +163,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
             try:
                 if choice == "show":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Local RNS Identity ===\n")
 
                     # Find the rnsd identity file
@@ -196,7 +197,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                     self._wait_for_enter()
 
                 elif choice == "path":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== RNS Identity Paths ===\n")
                     config_dir = ReticulumPaths.get_config_dir()
                     identity_path = config_dir / 'identity'
@@ -225,7 +226,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                     self._wait_for_enter()
 
                 elif choice == "recall":
-                    subprocess.run(['clear'], check=False, timeout=5)
+                    clear_screen()
                     print("=== Recall RNS Identity ===\n")
                     print("Look up a known identity by its destination hash.\n")
                     try:
@@ -249,7 +250,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _rns_known_destinations(self):
         """Show known RNS destinations from the running rnsd instance."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Known RNS Destinations ===\n")
 
         try:
@@ -294,7 +295,7 @@ class RNSMenuMixin(RNSSnifferMixin):
         Sideband nodes with GPS sharing will be auto-populated.
         """
         while True:
-            subprocess.run(['clear'], check=False, timeout=5)
+            clear_screen()
             print("=== Set RNS Node Positions ===\n")
             print("NomadNet nodes don't broadcast GPS. Set positions manually")
             print("so your RNS nodes appear on the live network map.\n")
@@ -351,7 +352,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _set_single_node_position(self, node):
         """Set position for a single RNS node."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print(f"=== Set Position for {node.name} ===\n")
         print(f"Node ID: {node.id}")
         if node.position.is_valid():
@@ -449,7 +450,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _rns_diagnostics(self):
         """Run comprehensive RNS diagnostics."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== RNS Diagnostics ===\n")
 
         try:
@@ -519,7 +520,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _rns_config_drift_check(self):
         """Check for config drift between gateway and rnsd."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== RNS Config Drift Check ===\n")
         print("Comparing gateway config path vs rnsd actual path...\n")
 
@@ -886,7 +887,7 @@ class RNSMenuMixin(RNSSnifferMixin):
 
     def _view_rns_config(self):
         """View current Reticulum config."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Reticulum Configuration ===\n")
 
         config_path = ReticulumPaths.get_config_file()

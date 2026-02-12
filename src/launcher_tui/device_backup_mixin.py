@@ -6,6 +6,7 @@ Provides UI for commands/device_backup.py functionality.
 """
 
 import subprocess
+from backend import clear_screen
 
 
 class DeviceBackupMixin:
@@ -147,7 +148,7 @@ class DeviceBackupMixin:
             return
 
         # Display backups in terminal for better formatting
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Device Backups ===\n")
 
         for backup in backups:

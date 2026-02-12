@@ -8,6 +8,7 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class HardwareMenuMixin:
 
     def _detect_hardware(self):
         """Run hardware detection - terminal-native."""
-        subprocess.run(['clear'], check=False, timeout=5)
+        clear_screen()
         print("=== Hardware Detection ===\n")
 
         # SPI

@@ -6,6 +6,7 @@ Extracted from rns_menu_mixin.py to reduce file size per CLAUDE.md guidelines.
 
 import re
 import subprocess
+from backend import clear_screen
 
 
 class RNSSnifferMixin:
@@ -446,7 +447,7 @@ class RNSSnifferMixin:
             self.dialog.msgbox("Filtered Packets", "\n".join(lines), height=22, width=55)
 
         elif choice == "4":
-            subprocess.run(['clear'], check=False, timeout=5)
+            clear_screen()
             print(f"=== Probing {identity_hash} ===\n")
             self._run_rns_tool(['rnprobe', identity_hash], 'rnprobe')
             self._wait_for_enter()
