@@ -1,12 +1,69 @@
 # MeshForge Session Notes
 
-**Last Updated**: 2026-02-10
-**Current Branch**: `claude/meshforge-meshtastic-integration-WjzT5`
-**Version**: v0.5.2-beta
+**Last Updated**: 2026-02-12
+**Current Branch**: `claude/feature-improvements-accessibility-F3KZw`
+**Version**: v0.5.4-beta
 
 ---
 
-## Latest Session: API Proxy fromradio Fix (2026-02-10)
+## Latest Session: Feature Accessibility Audit & Fixes (2026-02-12)
+
+### What We Did
+
+Systematic audit of all 110+ modules and 548+ methods to find features
+that existed in code but were NOT accessible through the TUI menus.
+
+### Changes Made (commit c3e7431)
+
+**6 features wired up to TUI menus:**
+
+| Feature | Menu Location | Source Module |
+|---------|--------------|---------------|
+| Network Status Reports | Dashboard > Reports | `report_generator.py` |
+| Health Score Dashboard | Dashboard > Health Score | `health_score.py` |
+| RNS Config Drift Check | RNS > Config Drift Check | `config_drift.py` |
+| Antenna Comparison | RF & SDR > Antenna Analysis | `antenna_patterns.py` |
+| Enhanced Signal Trends | Node Health > Signal Trends | `signal_trending.py` |
+| Enhanced Battery Forecast | Node Health > Battery Forecast | `predictive_maintenance.py` |
+
+**Files modified (5):**
+- `main.py` (+6 lines) — new menu items in Dashboard and RF&SDR
+- `dashboard_mixin.py` (+131 lines) — reports menu + health score display
+- `rns_menu_mixin.py` (+47 lines) — config drift check
+- `rf_tools_mixin.py` (+186 lines) — antenna analysis submenu
+- `node_health_mixin.py` (+106/-15 lines) — enhanced signal + battery displays
+
+**Tests**: 4009 passed, 19 skipped, 0 failures. Lint clean.
+
+### Remaining Accessibility Gaps (P2/P3 — for future sessions)
+
+| Module | TUI Status | Priority | Notes |
+|--------|-----------|----------|-------|
+| `analytics.py` | Not exposed | P2 | Predictive alerts, network forecast |
+| `webhooks.py` | Not exposed | P2 | Webhook endpoint management UI |
+| `active_health_probe.py` | Not exposed | P2 | NGINX-style service health checks |
+| `latency_monitor.py` | Partial | P3 | Background monitoring not wired |
+| `prometheus_exporter.py` | Not exposed | P3 | Export config only |
+| `influxdb_exporter.py` | Not exposed | P3 | Export config only |
+| `simulator.py` | Standalone only | P3 | By design |
+| `classifier.py` | Not exposed | P3 | Traffic classification |
+
+### Entropy Watch
+
+Session was clean — no scope creep. All changes were focused on wiring
+existing APIs to existing menus. No new functionality created, only
+plumbing. Stopped at the right time.
+
+### Next Session Priorities
+
+1. **P0**: If any PRs pending, review/merge
+2. **P1**: Wire up `analytics.py` predictive alerts to Dashboard
+3. **P1**: Wire up `webhooks.py` management UI (Configuration menu)
+4. **P2**: Gateway TX path (from prior session notes)
+
+---
+
+## Previous Session: API Proxy fromradio Fix (2026-02-10)
 
 **See**: `.claude/session_notes/2026-02-10_api_proxy_fromradio_fix.md` for full details.
 
