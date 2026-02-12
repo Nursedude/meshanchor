@@ -43,8 +43,8 @@ setup_venv() {
     python3 -m venv .venv --system-site-packages
 
     echo -e "${CYAN}Installing dependencies in venv...${NC}"
-    .venv/bin/pip install --upgrade pip
-    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install --timeout 60 --upgrade pip
+    .venv/bin/pip install --timeout 60 -r requirements.txt
 
     # Create activation helper
     cat > activate.sh << 'EOF'
@@ -76,7 +76,7 @@ EOF
 # Option 2: Install with --break-system-packages (simpler for dedicated Pi)
 setup_system() {
     echo -e "${CYAN}Installing dependencies system-wide...${NC}"
-    pip3 install --user --break-system-packages -r requirements.txt
+    pip3 install --user --break-system-packages --timeout 60 -r requirements.txt
 
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"

@@ -149,15 +149,15 @@ if [[ "$INSTALL_METHOD" == "venv" ]]; then
     fi
     # Install dependencies in virtual environment
     echo "  Installing packages in virtual environment..."
-    "$INSTALL_DIR/venv/bin/pip" install -q --upgrade pip
-    "$INSTALL_DIR/venv/bin/pip" install -q -r requirements.txt
+    "$INSTALL_DIR/venv/bin/pip" install -q --timeout 60 --upgrade pip
+    "$INSTALL_DIR/venv/bin/pip" install -q --timeout 60 -r requirements.txt
     echo -e "${GREEN}  ✓ Python dependencies installed (venv)${NC}"
 else
     # Install system-wide with --break-system-packages
     echo "  Installing packages system-wide..."
     # Use --ignore-installed to avoid conflicts with apt-installed packages
-    pip3 install --break-system-packages --ignore-installed --upgrade pip
-    pip3 install --break-system-packages --ignore-installed -r requirements.txt
+    pip3 install --break-system-packages --ignore-installed --timeout 60 --upgrade pip
+    pip3 install --break-system-packages --ignore-installed --timeout 60 -r requirements.txt
     # Mark that we're not using venv for the launcher scripts
     touch "$INSTALL_DIR/.no-venv"
     echo -e "${GREEN}  ✓ Python dependencies installed (system)${NC}"
