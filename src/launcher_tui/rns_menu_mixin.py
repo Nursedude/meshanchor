@@ -50,6 +50,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 ("nodes", "Known Destinations"),
                 ("positions", "Set Node Positions (for map)"),
                 ("diag", "RNS Diagnostics"),
+                ("drift", "Config Drift Check"),
                 ("bridge", "Gateway Bridge (start/stop)"),
                 ("nomadnet", "NomadNet Client"),
                 ("ifaces", "Manage Interfaces"),
@@ -77,6 +78,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 "nodes": ("Known Destinations", self._rns_known_destinations),
                 "positions": ("Set Node Positions", self._rns_set_node_positions),
                 "diag": ("RNS Diagnostics", self._rns_diagnostics),
+                "drift": ("Config Drift Check", self._rns_config_drift_check),
                 "bridge": ("Gateway Bridge", self._run_bridge),
                 "nomadnet": ("NomadNet Client", self._nomadnet_menu),
                 "ifaces": ("Manage Interfaces", self._rns_interfaces_menu),
@@ -513,6 +515,51 @@ class RNSMenuMixin(RNSSnifferMixin):
             else:
                 print(f"  {tool}: not found")
 
+        self._wait_for_enter()
+
+    def _rns_config_drift_check(self):
+        """Check for config drift between gateway and rnsd."""
+        subprocess.run(['clear'], check=False, timeout=5)
+        print("=== RNS Config Drift Check ===\n")
+        print("Comparing gateway config path vs rnsd actual path...\n")
+
+        try:
+            from utils.config_drift import detect_rnsd_config_drift
+        except ImportError:
+            print("  Config drift module not available.")
+            print("  File: src/utils/config_drift.py")
+            self._wait_for_enter()
+            return
+
+        result = detect_rnsd_config_drift()
+
+        # Display result
+        severity_colors = {
+            'info': '\033[0;34m',     # blue
+            'warning': '\033[0;33m',  # yellow
+            'error': '\033[0;31m',    # red
+        }
+        color = severity_colors.get(result.severity, '')
+        reset = '\033[0m'
+
+        if result.drifted:
+            print(f"  {color}CONFIG DRIFT DETECTED{reset}\n")
+            print(f"  Gateway resolves to: {result.gateway_config_dir}")
+            print(f"  rnsd actually uses:   {result.rnsd_config_dir}")
+            print(f"  Detection method:     {result.detection_method}")
+            if result.rnsd_pid:
+                print(f"  rnsd PID:             {result.rnsd_pid}")
+            print(f"\n  {color}Fix:{reset} {result.fix_hint}")
+        else:
+            print(f"  \033[0;32mNo drift detected\033[0m\n")
+            print(f"  {result.message}")
+            if result.gateway_config_dir:
+                print(f"  Config directory: {result.gateway_config_dir}")
+            if result.rnsd_pid:
+                print(f"  rnsd PID: {result.rnsd_pid}")
+            print(f"  Detection method: {result.detection_method}")
+
+        print()
         self._wait_for_enter()
 
     @staticmethod
