@@ -1,29 +1,17 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-02
+> **Last Updated:** 2026-02-12
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
 
 ## Branch Strategy
 
-| Branch | Purpose | Merges To |
-|--------|---------|-----------|
-| `main` | Stable releases, fixes, safe improvements | - |
-| `beta-from-main` | UI polish, features being tested | → main |
-| `alpha-from-main` | Experimental (firmware, hardware) | → beta |
+**Single-branch model** since v0.5.1 (alpha branch deprecated per DOCS changelog).
 
-### Feature → Branch Mapping
-
-| Feature | Branch | Risk Level |
-|---------|--------|------------|
-| Offline map tiles | main | Low |
-| Web UI dark mode | main | Low |
-| Custom markers | main | Low |
-| Device backup/restore | beta | Medium |
-| TUI dark mode + nav | beta | Low |
-| NanoVNA plugin | alpha | Medium |
-| Firmware flashing | alpha | **High** |
+| Branch | Purpose |
+|--------|---------|
+| `main` | All development — stable releases, features, fixes |
 
 ---
 
@@ -85,8 +73,8 @@
 - [x] **MQTT dashboard** - Bridge to MQTT brokers (2026-01-17)
 - [ ] **NanoVNA plugin** - Antenna tuning integration → `alpha`
 
-### Node Firmware (→ `alpha` branch)
-- [ ] **Firmware flashing from GTK** - Flash meshtastic firmware ⚠️ HIGH RISK
+### Node Firmware
+- [ ] **Firmware flashing from TUI** - Flash meshtastic firmware (future)
 - [x] **Device backup/restore** - Save and restore node configs (2026-01-17)
 
 ---
@@ -180,6 +168,9 @@
   - [x] Improved hardware-to-template mapping
   - [x] Improved auto-review index_no_check pattern (19→0 false positives)
   - [x] Created gateway-hawaiinet.yaml template
+- [x] **v0.5.2-beta** (2026-02-04): Refactoring wave — traffic_inspector, node_tracker, metrics_export, rns_menu_mixin splits
+- [x] **v0.5.3-beta** (2026-02-08): TUI service menu, MQTT mixin, meshtasticd config wizard
+- [x] **v0.5.4-beta** (2026-02-11): Gateway TX path fix — HTTP protobuf instead of CLI subprocess
 
 ---
 
@@ -196,25 +187,14 @@
 
 **Threshold: 1,500 lines max per file**
 
-**All TUI files now under threshold.**
-
 | File | Lines | Status |
 |------|-------|--------|
-| knowledge_content.py | 1688 | Over - static data, acceptable |
-| rns_bridge.py | 1587 | Just over - tightly coupled, acceptable |
+| knowledge_content.py | 1,824 | Over - static content data, acceptable by design |
+| rns_bridge.py | 1,694 | **Over - needs extraction** |
+| map_data_collector.py | 1,509 | Borderline, monitor |
+| launcher_tui/main.py | 1,488 | Under threshold |
 
-**Recently Fixed (2026-02-04):**
-| File | Before | After | Change |
-|------|--------|-------|--------|
-| diagnostics/engine.py | 1767 | 709 | -60% (checks extracted) |
-| traffic_inspector.py | 2194 | 442 | -80% |
-| node_tracker.py | 1808 | 911 | -50% |
-| launcher_tui/main.py | 1532 | 1404 | -8% |
-| metrics_export.py | 1762 | 96 | -95% (split to 3 modules) |
-| rns_menu_mixin.py | 1524 | 1069 | -30% (sniffer extracted) |
-
-*Note: Previous large files (mesh_tools.py, tools.py, tui/app.py) were refactored/consolidated.*
-*Last updated: 2026-02-04*
+*Last updated: 2026-02-12*
 
 ---
 
