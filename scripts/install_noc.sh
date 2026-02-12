@@ -388,11 +388,11 @@ echo -e "  ${GREEN}✓ System dependencies installed${NC}"
 # ─────────────────────────────────────────────────────────────────
 # Detect PEP 668 (externally-managed-environment)
 # ─────────────────────────────────────────────────────────────────
-PIP_ARGS=""
+PIP_ARGS="--timeout 60"
 # Check for EXTERNALLY-MANAGED file (Debian Bookworm, RPi OS)
 if ls /usr/lib/python3*/EXTERNALLY-MANAGED 1>/dev/null 2>&1; then
     echo -e "${YELLOW}  Detected: Externally managed Python (PEP 668)${NC}"
-    PIP_ARGS="--break-system-packages"
+    PIP_ARGS="--break-system-packages --timeout 60"
 fi
 
 # ─────────────────────────────────────────────────────────────────
@@ -1058,8 +1058,8 @@ if [[ ! -d "$VENV_DIR" ]]; then
     python3 -m venv "$VENV_DIR" --system-site-packages
 fi
 
-"$VENV_DIR/bin/pip" install -q --upgrade pip
-"$VENV_DIR/bin/pip" install -q -r requirements.txt
+"$VENV_DIR/bin/pip" install -q --timeout 60 --upgrade pip
+"$VENV_DIR/bin/pip" install -q --timeout 60 -r requirements.txt
 
 echo -e "  ${GREEN}✓ Python dependencies installed${NC}"
 
