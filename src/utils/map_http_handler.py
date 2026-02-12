@@ -366,8 +366,8 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
                 tcp_available = sock.connect_ex(('localhost', 4403)) == 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"TCP port check failed: {e}")
 
         # Check USB serial device
         import glob
@@ -679,8 +679,8 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                     with open(queue_cache) as f:
                         data = json.load(f)
                     messages = data.get("messages", [])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Queue cache read failed: {e}")
 
         self._serve_json({
             "messages": messages,
@@ -1057,8 +1057,8 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
                     if data:
                         self._serve_json(data)
                         return
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Protobuf client JSON request failed: {e}")
             self.send_error(503, "Meshtastic API proxy not running")
             return
 

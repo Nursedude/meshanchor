@@ -370,16 +370,16 @@ class MQTTNodelessSubscriber:
                 # Disconnect first (tells broker we're leaving)
                 try:
                     client.disconnect()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"MQTT disconnect error: {e}")
 
                 # loop_stop() can hang in some edge cases, use timeout thread
                 def stop_loop():
                     try:
                         # paho-mqtt v2.x removed the force parameter
                         client.loop_stop()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"MQTT loop_stop error: {e}")
 
                 stop_thread = threading.Thread(target=stop_loop, daemon=True)
                 stop_thread.start()
@@ -399,8 +399,8 @@ class MQTTNodelessSubscriber:
                 self._stop_event.set()
                 self._client.disconnect()
                 self._client.loop_stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"MQTT atexit cleanup error: {e}")
             self._client = None
 
     def _on_connect(self, client, userdata, flags, rc):
@@ -630,8 +630,8 @@ class MQTTNodelessSubscriber:
                     f"Merged relay node {partial_id} -> {full_node_id} "
                     f"({partial_node.long_name} -> {full_node.long_name or 'unknown'})"
                 )
-        except (ValueError, TypeError, KeyError):
-            pass
+        except (ValueError, TypeError, KeyError) as e:
+            logger.debug(f"Relay node merge failed: {e}")
 
     def _discover_relay_node(self, relay_byte: int, data: Dict) -> Optional[MQTTNode]:
         """
@@ -708,8 +708,8 @@ class MQTTNodelessSubscriber:
                         del self._nodes[partial_id]
                         logger.info(f"Merged relay node {partial_id} -> {full_node_id}")
                         return True
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Relay node match failed for {partial_id}: {e}")
         return False
 
     def _safe_float(self, value: Any, min_val: float, max_val: float) -> Optional[float]:
