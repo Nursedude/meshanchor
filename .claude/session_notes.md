@@ -1,21 +1,167 @@
 # MeshForge Session Notes
 
 **Last Updated**: 2026-02-12
-**Current Branch**: `claude/feature-improvements-accessibility-F3KZw`
 **Version**: v0.5.4-beta
+**Codebase**: 258 Python files, 291K lines, 4,009+ tests
 
 ---
 
-## Latest Session: Feature Accessibility Audit & Fixes (2026-02-12)
+## P2/P3 Remaining Gaps — Future Work Reference
 
-### What We Did
+> **Purpose**: Consolidated backlog of known gaps, ordered by priority.
+> Cross-referenced from `persistent_issues.md`, `missing_features.md`, `technical_debt_plan.md`, and session history.
 
-Systematic audit of all 110+ modules and 548+ methods to find features
-that existed in code but were NOT accessible through the TUI menus.
+---
 
-### Changes Made (commit c3e7431)
+### P2: Feature Accessibility (modules exist, not wired to TUI)
 
-**6 features wired up to TUI menus:**
+| # | Module | What It Does | Suggested Menu | Effort |
+|---|--------|-------------|----------------|--------|
+| 1 | `analytics.py` | Predictive alerts, network forecast | Dashboard > Analytics | LOW |
+| 2 | `webhooks.py` | Webhook endpoint management | Configuration > Webhooks | LOW |
+| 3 | `active_health_probe.py` | NGINX-style service health checks | Dashboard > Health Probes | LOW |
+| 4 | `messaging.py` | Message history viewer, search, export | Dashboard > Messages | LOW |
+| 5 | `device_backup.py` | Backup/restore device configs | Configuration > Backup | LOW |
+| 6 | `classifier.py` | Traffic classification | Mesh Networks > Traffic | LOW |
+| 7 | `rnode.py` | RNode device detection + config | Hardware > RNode Setup | MEDIUM |
+| 8 | `latency_monitor.py` | Background latency monitoring | Dashboard > Latency | MEDIUM |
+
+**Pattern**: All modules have working APIs. Work = add menu entry + display wrapper in mixin.
+
+---
+
+### P2: Persistent Issues (open, not yet fixed)
+
+| Issue | Summary | Root Cause | Effort |
+|-------|---------|-----------|--------|
+| **#20** | Service detection status flakiness | Multiple fallback methods (UDP/pgrep/systemctl) conflict | MEDIUM |
+| **#21** | CLI preset settings not reliably applied | Upstream meshtastic CLI bug (not MeshForge) | N/A (document) |
+| **#27** | rnsd optional — UI doesn't make this clear | Error messages assume rnsd required | LOW |
+
+**Issue #20 redesign spec**: Simplify `service_check.py` to systemctl-only for systemd services. Stop using port checks and pgrep as fallbacks. See `persistent_issues.md` Issue #20 for full spec.
+
+---
+
+### P2: Testing Gaps
+
+| Area | Estimated Coverage | Gap Description |
+|------|--------------------|-----------------|
+| AREDN integration | ~60% | Edge cases uncovered |
+| Plugin system (MeshChat/MeshCore) | ~50% | Framework exists, minimal plugin tests |
+| Web API error scenarios | ~70% | Happy path tested, error paths light |
+| Multi-node scenarios | ~40% | Single-node tested; scaling untested |
+| Performance/load testing | ~20% | No load/stress tests exist |
+
+---
+
+### P2: Architecture Gaps
+
+| Area | Gap | Impact |
+|------|-----|--------|
+| Event bus system | No pub/sub for RX messages — UI polls instead | RX messages don't propagate to TUI in real-time |
+| Offline-first mode | Gateway assumes real-time services | Queue exists but incomplete for store-and-forward |
+| Service independence | Gateway assumes rnsd + meshtasticd both running | Should degrade gracefully for MQTT-only deployments |
+| Web client serving | /mesh/ subpath abandoned (4 attempts failed) | Options A/B documented but not implemented |
+
+**Event bus**: Spec in `persistent_issues.md` Issue #20 Phase 3. Would enable RX display, live alerts, and cross-component notifications.
+
+---
+
+### P3: Code Quality / Technical Debt
+
+| Item | Scope | Effort | Reference |
+|------|-------|--------|-----------|
+| Import boilerplate (86 try/except blocks) | All panels | LOW | `technical_debt_plan.md` Phase 1.1 |
+| Configuration centralization (36 SETTINGS_DEFAULTS) | All panels | LOW | `technical_debt_plan.md` Phase 1.2 |
+| Subprocess wrapper abstraction | ~100 calls | MEDIUM | `technical_debt_plan.md` |
+| Type hints coverage (~30%) | Gradual | LOW | mypy.ini exists |
+| Plugin isolation (plugins in core codebase) | Structural | HIGH | No separate plugin runtime |
+
+---
+
+### P3: Feature Accessibility (lower priority)
+
+| Module | What It Does | Notes |
+|--------|-------------|-------|
+| `prometheus_exporter.py` | Prometheus export config | Only useful with Grafana stack |
+| `influxdb_exporter.py` | InfluxDB export config | Only useful with InfluxDB stack |
+| `simulator.py` | Network simulation | Standalone by design |
+| `firmware_flasher.py` | Firmware update/flash | Deliberately not exposed (risky) |
+| `nanovna.py` | NanoVNA antenna analysis | Alpha, hardware-dependent |
+
+---
+
+### P3: Documentation Gaps
+
+| Document | Status | Notes |
+|----------|--------|-------|
+| Deployment guides (Pi/uConsole) | Not started | Only `quick_start` exists |
+| Network planning guide | Not started | When to use RNS vs MQTT, preset selection |
+| Plugin development guide | Not started | How to write custom integrations |
+| API reference | Not started | Could auto-generate from commands/ |
+| Troubleshooting guide | Not started | Common issues and fixes (partial in persistent_issues.md) |
+| Architecture diagrams | Not started | Visual overview of module interactions |
+
+---
+
+### P3: Research Documents — Incomplete
+
+| Document | Completion | Notes |
+|----------|-----------|-------|
+| `maps_progress.md` | 50% | Offline tiles working; double-tap TODO |
+| `maps_double_tap.md` | 30% | UI mockup exists; implementation pending |
+| `nginx_reliability_patterns.md` | 80% | Patterns documented; metrics integration incomplete |
+| `uconsole_portable_noc.md` | 60% | Hardware research done; OS testing incomplete |
+| `firmware_viability.md` | 70% | Analysis complete; flashing not exposed |
+| `meshforge_enhancement_todos.md` | 40% | Feature list; needs prioritization |
+
+---
+
+### Hardware Testing Backlog (requires physical deployment)
+
+- [ ] Maps on actual Pi with radio connected
+- [ ] Coverage map with real GPS nodes
+- [ ] AREDN integration with actual AREDN hardware
+- [ ] Headless/SSH browser detection path
+- [ ] Cross-mesh message test: LongFast -> MQTT -> ShortTurbo
+- [ ] RNS bridge test: ShortTurbo -> Gateway -> RNS/NomadNet
+- [ ] rnsd permission fix verification on MOC2
+- [ ] Grafana metrics with gateway on port 9090
+
+---
+
+## Project Health Snapshot (2026-02-12)
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| Version | v0.5.4-beta | MQTT bridge release |
+| Python files | 258 | Well-modularized |
+| Total lines | 291,258 | Healthy |
+| Test count | 4,009+ | Comprehensive |
+| Tests passing | 4,009 pass, 19 skip, 0 fail | Clean |
+| Lint | Clean | MF001-MF004 all passing |
+| Files >1,500 loc | 1 (knowledge_content.py, by design) | Healthy |
+| Documentation | 51+ MD files | Extensive |
+| Session notes | 43+ entries | Good tracking |
+| Persistent issues | 28 tracked, 8 archived | Active maintenance |
+
+---
+
+## Session Log
+
+### Session: Session Notes Documentation (2026-02-12)
+
+**What**: Consolidated all P2/P3 gaps from across project documentation into a single reference in `session_notes.md`. Cross-referenced `persistent_issues.md`, `missing_features.md`, `technical_debt_plan.md`, `roadmap.md`, and all prior session notes.
+
+**Entropy watch**: Documentation-only session. No code changes. Clean.
+
+---
+
+### Session: Feature Accessibility Audit & Fixes (2026-02-12)
+
+**What**: Systematic audit of 110+ modules and 548+ methods. Wired 6 features to TUI menus.
+
+**Changes** (commit c3e7431):
 
 | Feature | Menu Location | Source Module |
 |---------|--------------|---------------|
@@ -26,322 +172,65 @@ that existed in code but were NOT accessible through the TUI menus.
 | Enhanced Signal Trends | Node Health > Signal Trends | `signal_trending.py` |
 | Enhanced Battery Forecast | Node Health > Battery Forecast | `predictive_maintenance.py` |
 
-**Files modified (5):**
-- `main.py` (+6 lines) — new menu items in Dashboard and RF&SDR
-- `dashboard_mixin.py` (+131 lines) — reports menu + health score display
-- `rns_menu_mixin.py` (+47 lines) — config drift check
-- `rf_tools_mixin.py` (+186 lines) — antenna analysis submenu
-- `node_health_mixin.py` (+106/-15 lines) — enhanced signal + battery displays
+**Files modified (5):** `main.py`, `dashboard_mixin.py`, `rns_menu_mixin.py`, `rf_tools_mixin.py`, `node_health_mixin.py`
 
-**Tests**: 4009 passed, 19 skipped, 0 failures. Lint clean.
-
-### Remaining Accessibility Gaps (P2/P3 — for future sessions)
-
-| Module | TUI Status | Priority | Notes |
-|--------|-----------|----------|-------|
-| `analytics.py` | Not exposed | P2 | Predictive alerts, network forecast |
-| `webhooks.py` | Not exposed | P2 | Webhook endpoint management UI |
-| `active_health_probe.py` | Not exposed | P2 | NGINX-style service health checks |
-| `latency_monitor.py` | Partial | P3 | Background monitoring not wired |
-| `prometheus_exporter.py` | Not exposed | P3 | Export config only |
-| `influxdb_exporter.py` | Not exposed | P3 | Export config only |
-| `simulator.py` | Standalone only | P3 | By design |
-| `classifier.py` | Not exposed | P3 | Traffic classification |
-
-### Entropy Watch
-
-Session was clean — no scope creep. All changes were focused on wiring
-existing APIs to existing menus. No new functionality created, only
-plumbing. Stopped at the right time.
-
-### Next Session Priorities
-
-1. **P0**: If any PRs pending, review/merge
-2. **P1**: Wire up `analytics.py` predictive alerts to Dashboard
-3. **P1**: Wire up `webhooks.py` management UI (Configuration menu)
-4. **P2**: Gateway TX path (from prior session notes)
+**Tests**: 4,009 passed, 19 skipped, 0 failures. Lint clean.
 
 ---
 
-## Previous Session: API Proxy fromradio Fix (2026-02-10)
+### Session: MQTT Bridge Architecture (2026-02-11)
 
-**See**: `.claude/session_notes/2026-02-10_api_proxy_fromradio_fix.md` for full details.
+**What**: Gateway bridge rewritten from TCP:4403 to MQTT transport. Zero interference with web client.
 
-**TL;DR**: `MeshtasticApiProxy` was enabled by default, draining ALL fromradio packets from port 9443. Native web client got nothing. Fixed: proxy defaults to OFF. Gateway uses TCP:4403 (unaffected). Web client at :9443 works natively now.
-
-**Next priorities**: P0 = Gateway TX (RX works, TX doesn't). P1 = Verify :9443 web client works. P2 = Plan for upstream meshtastic web client updates.
-
----
-
-## Previous Session: /mesh/ Architecture Rethink (2026-02-10)
-
-### Status: SUPERSEDED — user decided meshtasticd owns its web client
-
-The `/mesh/` subpath approach has been attempted from multiple angles across several sessions. Each fix adds complexity (HTML rewriting, CSS injection, base tag manipulation, regex path stripping) and the blank screen / UI glitches persist. The core problem is **fighting the web client's build assumptions** rather than working with them.
-
-### What We Tried (and why each is fragile)
-
-| Attempt | Approach | Why it breaks |
-|---------|----------|---------------|
-| Session 1 | `_proxy_mesh_client()` — full HTML proxy + JS injection | 101 lines of fragile proxying, broke on every meshtasticd update |
-| Session 2 | Serve files from disk + `<base href="/mesh/">` injection | `<base>` doesn't affect root-absolute paths (`/assets/x.js`) |
-| Session 3 | Regex strip leading `/` from src/href + replace existing `<base>` | Still blank — Vite builds have paths in JS bundles too, not just HTML |
-| Session 3 | CSS injection (`overflow:hidden`) for scrollbar covering sidebar | Treating symptoms, not the cause |
-
-### The fundamental tension
-
-meshtasticd builds its web client for serving at **root `/`**. MeshForge wants to serve it at **`/mesh/`**. Every approach to bridge this gap adds a layer of fragile rewriting. The JS bundles themselves contain hardcoded paths (dynamic imports, fetch calls, worker URLs) that HTML-level rewriting can't reach.
-
-### Clean architectural options for next session
-
-**Option A: Serve web client at root, move NOC map to subpath**
-```
-ip:5000/           → meshtastic web client (no rewriting needed)
-ip:5000/noc/       → MeshForge NOC dashboard
-ip:5000/api/*      → MeshForge APIs
-```
-- Simplest. Web client works as-is. NOC dashboard is our code so we control its paths.
-- Trade-off: `/` is no longer the NOC map.
-
-**Option B: Separate ports**
-```
-ip:5000             → MeshForge NOC dashboard
-ip:5001             → meshtastic web client (served by MeshForge, no subpath)
-meshtasticd:9443    → locked down (iptables)
-```
-- Zero path rewriting. Each app owns its root.
-- MeshForge still proxies the API (phantom filtering, stream multiplexing).
-- Trade-off: Two ports to remember.
-
-**Option C: Rebuild web client with correct base path**
-```
-vite build --base=/mesh/
-```
-- Ship a pre-built copy with correct paths baked in.
-- Trade-off: Must rebuild on every meshtasticd web client update. Maintenance burden.
-
-**Option D: Reverse proxy (nginx/caddy)**
-- Let a proper reverse proxy handle subpath rewriting.
-- Trade-off: Adds a dependency. MeshForge's "zero-dependency" design principle.
-
-### Recommendation for discussion
-Option A or B are cleanest. Option A requires only moving the NOC map to `/noc/` and serving meshtasticd files at `/`. Option B is the most isolated but means two ports.
-
-### MapDataCollector type error — FIXED this session
-Separate from the /mesh/ issue. `_get_source_summary()` puts `"meshtasticd_via": "http"` (string) in the sources dict. Dashboard did `v > 0` on all values → TypeError. Fixed with `isinstance(v, (int, float))` guard. Also hardened AREDN `tunnel_count` int conversion.
-
-### Commits on branch
-1. `a16ad6d` — fix: Fix /mesh/ blank white screen by rewriting Vite root-absolute paths
-2. `e3b2f06` — fix: Fix MapDataCollector type error and /mesh/ scrollbar covering sidebar
-
-### Files changed this session
-- `src/utils/map_http_handler.py` — `_rewrite_mesh_html()`, MIME types, CSS injection
-- `src/utils/map_data_collector.py` — AREDN tunnel_count int conversion
-- `src/launcher_tui/dashboard_mixin.py` — isinstance guard on source values
-- `tests/test_map_data_service.py` — 13 new TestRewriteMeshHtml tests
+**Key changes** (v0.5.4-beta):
+- NEW: `MQTTBridgeHandler` — subscribes to meshtasticd MQTT, sends via CLI
+- MQTT bridge is now default mode (web client on :9443 works uninterrupted)
+- DEPRECATED: `meshtastic_api_proxy.py` (was source of web client interference)
+- NEW: Deployment templates (mosquitto.conf, rnsd-user.service, setup script)
+- NEW: MQTT bridge settings menu in TUI
 
 ---
 
-## Previous Session: MeshForge Owns the Browser (2026-02-10)
+### Session: API Proxy fromradio Fix (2026-02-10)
 
-### Root Cause Found — P0 Phantom Nodes
-The Meshtastic React web client gets node data via **protobuf streaming** (`/api/v1/fromradio`), NOT from `/json/nodes`. The previous fix sanitized JSON but the protobuf packets were forwarded raw to clients. Phantom NodeInfo packets (MQTT nodes without User data) caused React to crash on `node.user.longName`.
+**What**: `MeshtasticApiProxy` was draining ALL fromradio packets from port 9443. Fixed: proxy defaults to OFF.
 
-### What Was Done
-
-**P0: Phantom Node Fix — TWO-LAYER DEFENSE**
-1. **Server-side protobuf filtering** (`meshtastic_api_proxy.py`):
-   - Added raw protobuf wire format parser (`_read_varint`, `_extract_protobuf_fields`)
-   - `_is_phantom_nodeinfo()` detects `FromRadio.node_info` packets missing User field
-   - `_distribute_packet()` now drops phantom NodeInfo before distributing to clients
-   - Added `phantom_nodes_filtered` stats counter
-2. **Client-side JS error protection** (`map_http_handler.py`):
-   - Injected `window.onerror` + `unhandledrejection` handlers into proxied HTML
-   - Catches "Cannot read properties of null/undefined" as safety net
-   - Prevents React white-screen-of-death from any remaining phantom data
-
-**P1: Right Panel Info Clipping — FIXED** (`web/node_map.html`)
-- Added `max-width: 280px` to `.control-panel`
-- Added `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` to `.stat-row .value`
-- Added `flex-shrink: 0` to `.stat-row .label` so labels don't compress
-- Added `gap: 8px` between label and value for consistent spacing
-
-**P2: Radio Message "Went Nowhere" — IMPROVED** (`map_http_handler.py`, `node_map.html`)
-- Improved error messages: now returns actionable detail (library install, TCP port check)
-- Changed success to "Sent via radio (delivery best-effort)" — sets correct user expectation
-- JS now shows `data.detail` as tooltip, longer display for errors (8s vs 3s)
-- HTTP status codes: 503 for missing library, 502 for send failure
-
-### Changes This Session
-- `src/gateway/meshtastic_api_proxy.py` — protobuf phantom filtering, wire format parser
-- `src/utils/map_http_handler.py` — JS error protection injection, radio API error improvement
-- `web/node_map.html` — panel CSS overflow fix, radio send feedback improvement
-- `tests/test_api_proxy_sanitize.py` — 17 new tests (protobuf filtering + wire format)
-
-### What About ip:9443 Directly?
-Users going to ip:9443 bypass MeshForge entirely — there's no fix possible at the proxy level. Options for next session:
-- **Tell users to use ip:5000/mesh/** — this is now the sanitized path
-- **iptables redirect** 9443→5000 (requires root, add to install script)
-- **Disable meshtasticd web server** and serve exclusively through MeshForge
-
-### P3: rnsd Permission Fix — UNTESTED
-Committed last session. Needs hardware verification on MOC2.
+**See**: `.claude/session_notes/2026-02-10_api_proxy_fromradio_fix.md`
 
 ---
 
-## Previous Session: Web UI Fixes — Scroll + Phantom Nodes (2026-02-10)
+### Session: /mesh/ Architecture Rethink (2026-02-10)
 
-User reported two issues from hardware testing:
-1. **ip:5000** — Right menu won't scroll, can't see bottom information
-2. **ip:9443** — Phantom nodes crash web client, proxy fixes not working
+**Status**: SUPERSEDED — meshtasticd owns its web client.
 
-### What Was Done
-
-**Port 5000 scroll — FIXED (partially)**
-- Added `max-height: calc(100vh - 20px)`, `display: flex`, `flex-direction: column` to `.control-panel`
-- Added `overflow-y: auto`, `flex: 1`, `min-height: 0` to `.panel-body`
-- Mobile: capped at `60vh`
-- **Scroll works now** but user reports "info can't be seen on the right of the menu" — text/values getting clipped or truncated on the right edge. Panel has `min-width: 210px` but no `max-width`, values in stat rows may overflow.
-
-**Port 9443 phantom nodes — ROOT CAUSE FOUND, partial fix**
-- `_proxy_mesh_client()` was sending ALL `/mesh/*` requests through `proxy_static()`, completely bypassing `_sanitize_nodes_json()`. This was the core bug.
-- Fixed routing: `/mesh/json/nodes` → `proxy_json()` (sanitized), `/mesh/api/v1/fromradio` → multiplexed, `/mesh/api/v1/toradio` → forwarded
-- Enhanced sanitization: added `position`, `deviceMetrics`, `lastHeard`, `num`, `macaddr`, `publicKey`
-- **Still broken according to user** — "same problem, persistent issue"
-
-**rnsd permission fix**
-- `ensure_system_dirs()` now fixes file permissions recursively inside storage/
-- Startup checker detects non-writable announce cache files and triggers rnsd restart
-
-**Radio message "went nowhere"**
-- User sent a message from port 5000 radio control panel — no delivery feedback
-- Needs investigation: is `sendRadioMessage()` JS function actually connected? Does the API endpoint work?
-
-### Changes Committed (2 commits on branch)
-1. `589ba1c` — fix: Fix scroll on port 5000 right menu and phantom node proxy routing
-2. `1abebea` — fix: Self-heal rnsd storage file permissions (cache/announces)
-
-### Files Changed
-- `web/node_map.html` — scroll CSS fix
-- `src/utils/map_http_handler.py` — route /mesh/ API paths through proper handlers
-- `src/gateway/meshtastic_api_proxy.py` — enhanced sanitization
-- `tests/test_api_proxy_sanitize.py` — 6 new tests (17 total)
-- `src/utils/paths.py` — recursive file permission fixing
-- `src/launcher_tui/startup_checks.py` — detect announce cache permission issues
+4 attempts at /mesh/ subpath serving all failed (HTML rewriting, CSS injection, base tag, regex stripping). Root cause: Vite builds hardcode paths in JS bundles. Clean options documented (serve at root or separate ports). See full analysis in previous session notes archive.
 
 ---
 
-## NEXT SESSION PRIORITIES (ordered)
+### Session: Phantom Nodes + Web UI Fixes (2026-02-10)
 
-### P0: Gateway TX — Green RX but No TX
-Gateway receives Meshtastic messages (RX green) but doesn't transmit back. Investigate `meshtastic_handler.py` TX path, channel/PSK config, and gateway logs.
-
-### P1: Verify Web Client at :9443 Works Now
-API proxy disabled by default (Issue #28 fix). User should confirm native web client shows data. If it still doesn't, the issue is meshtasticd-side (not MeshForge).
-
-### P2: Meshtastic Web Client Upstream Updates
-User plans to track meshtastic web client updates. MeshForge should NOT own/fork it. Phantom node fixes should be contributed upstream to meshtastic/web.
-
-### P3: rnsd Permission Fix — UNTESTED
-Needs hardware verification on MOC2.
-
-### P4: Grafana Metrics
-Needs gateway running with metrics server on port 9090.
+**What**: Two-layer phantom node defense (server-side protobuf filtering + client-side JS error protection). Right panel CSS overflow fix. Radio message feedback improvement.
 
 ---
 
-## Previous Session: Reliability Audit & Test Fix (2026-02-09)
+### Session: MOC Broker Templates (2026-02-09)
 
-Configured MeshForge broker templates for MOC1 (Pi5 + Meshtoad + LongFast) with
-MQTT-bridged topology to MOC2 (Pi HAT + ShortTurbo + RNS/NomadNet).
+**What**: Configured broker templates for MOC1 (Pi5 + Meshtoad + LongFast) with MQTT-bridged topology to MOC2 (Pi HAT + ShortTurbo + RNS/NomadNet).
 
-See: `.claude/session_notes_moc_broker.md` for full details.
+**See**: `.claude/session_notes_moc_broker.md`
 
-### Changes That Session
-- **NEW** `templates/meshtoad.yaml` — Meshtoad CH341 SPI hardware template
-- **NEW** `templates/meshforge-presets/fleet-host-1-broker.yaml` — MOC1 full preset
-- **NEW** `templates/gateway-pair/moc-mqtt-bridge.md` — MQTT-bridged deployment guide
-- **UPDATED** `templates/gateway-pair/README.md` — MQTT topology reference
-- **UPDATED** `meshtasticd_config_mixin.py` — Broker-aware MQTT default
+---
 
-## Previous Session: Feature Accessibility Audit (2026-02-08)
+### Session: Feature Accessibility Audit (2026-02-08)
 
-### Full TUI Feature Audit (2026-02-08)
+**What**: Verified all features accessible via TUI. 30 mixin files, zero dead menu entries. Added 97 tests for `rns_transport.py`. v0.5.2-beta and v0.5.3-beta releases.
 
-Verified ALL features are accessible to the user via TUI. No dead code, no orphaned features.
+---
 
-#### TUI Menu Structure (10 top-level + sub-menus)
+## Quick Reference: Next Session Pickup
 
-| Menu | Key Features | Status |
-|------|-------------|--------|
-| Dashboard | Service status, node health, alerts, EAS | OK |
-| Mesh Networks | Meshtastic, RNS, Gateway, AREDN, MQTT, **Favorites** | OK |
-| RF & SDR | Link budget, site planner, freq slots, SDR | OK |
-| Maps & Viz | NOC map, coverage, **heatmap**, **offline tiles**, topology | OK |
-| Configuration | Radio, channels, RNS, services, backup, updates, **PSKReporter** | OK |
-| System | Hardware, logs, network, diagnostics, **code review** | OK |
-| Quick Actions | Shortcuts to common ops | OK |
-| Emergency Mode | Broadcast, SOS, **EAS alerts** | OK |
-| About | Version, web client, help | OK |
-
-#### Previously Reported Feature Gaps — ALL RESOLVED
-
-| Feature | Prior Status | Current Status |
-|---------|-------------|----------------|
-| Auto-Review System | "command-line only" | System > Code Review |
-| Heatmap | "no TUI entry" | Maps & Viz > Heatmap |
-| Tile caching | "no TUI entry" | Maps & Viz > Offline Tiles |
-| EAS Alerts | new feature | Emergency Mode > Weather/EAS Alerts |
-| PSKReporter MQTT | new feature | Config > Settings > Propagation Sources |
-| Favorites | new feature | Mesh Networks > Favorites |
-
-### Linter Fix
-
-Fixed false positive MF001 in `scripts/lint.py` — linter now skips `Path.home()` references inside string literals (changelog entries). Previously flagged `__version__.py` line 50.
-
-### Mixin Coverage
-
-30 mixin files provide TUI functionality. All dispatch entries reference implemented methods. Zero broken/dead menu entries found.
-
-### Test Results
-- Core tests (RF, safe_call, message_queue): 99 pass, 0 fail
-- Full suite: 3397+ (may timeout in sandbox — runs fine on Pi)
-- Linter tests: 13 pass
-
-### Commits This Session
-- (pending) fix: Linter MF001 false positive on string literals
-
-### Test Coverage Update (2026-02-08)
-
-Three files previously listed as "zero tests" already had comprehensive suites:
-- `meshtastic_protobuf_client.py` — 1,027 lines of tests in `test_meshtastic_protobuf.py`
-- `meshtastic_handler.py` — 929 lines of tests in `test_meshtastic_handler.py`
-- `packet_dissectors.py` — 1,029 lines of tests in `test_packet_dissectors.py`
-
-New test file added this session:
-- `rns_transport.py` — **97 tests** in `test_rns_transport.py` (Fragment, PendingPacket, TransportStats, fragmentation, callbacks, receive handler, connection, start/stop, RNS adapter, factory, end-to-end pipeline)
-
-**All 244 tests pass** (147 existing + 97 new) for these 4 modules.
-
-### Remaining Work (Next Session Priorities)
-
-#### All Software Items RESOLVED (as of 2026-02-09)
-Issues #16, #20 (all phases), #23, #24 — all implemented and tested.
-Test coverage for all 4 gateway modules — all have comprehensive suites.
-
-#### Still Open
-1. **Grafana metrics** — needs gateway running for metrics server on port 9090
-2. **MOC1 hardware install** — flash meshtasticd, plug Meshtoad, run broker setup (see session_notes_moc_broker.md)
-
-#### Hardware Testing (requires physical deployment)
-- Maps on actual Pi with radio connected
-- Coverage map with real GPS nodes
-- AREDN integration with actual AREDN hardware
-- Headless/SSH browser detection path
-- Cross-mesh message test: LongFast → MQTT → ShortTurbo
-- RNS bridge test: ShortTurbo → Gateway → RNS/NomadNet
-
-### File Sizes (All Under 1,500 lines)
-- launcher_tui/main.py: ~1,433 lines
-- service_menu_mixin.py: ~1,358 lines
-- All other files: well under threshold
+1. **P2 quick wins**: Wire `analytics.py`, `webhooks.py`, `messaging.py` to TUI (LOW effort each)
+2. **P2 reliability**: Fix service detection flakiness (Issue #20 — simplify to systemctl-only)
+3. **P2 architecture**: Event bus for RX message propagation
+4. **P3 debt**: Import boilerplate consolidation (`safe_import()` pattern)
+5. **Hardware**: Test all backlog items on MOC1/MOC2
