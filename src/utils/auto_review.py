@@ -567,6 +567,10 @@ class ReviewAgent:
         if pattern_name == 'shell_true':
             if stripped.startswith('#') or 'no shell' in line.lower() or 'shell=false' in line.lower():
                 return True
+            # Changelog/docstring entries describing past fixes
+            if stripped.startswith('"') or stripped.startswith("'"):
+                if any(kw in line for kw in ['FIX:', 'FIXED:', 'NEW:', 'REFACTOR:', 'DOCS:']):
+                    return True
 
         # Redundancy patterns - check for legitimate uses
         if pattern_name == 'check_root_function':
@@ -959,6 +963,17 @@ class ReviewAgent:
             if 'return Path.home()' in line:
                 # Check context - if in a function that handles sudo, it's ok
                 return True
+            # Allow Path.home() inside a local get_real_user_home() helper
+            if lines and line_num > 0:
+                start = max(0, line_num - 15)
+                for i in range(start, line_num - 1):
+                    prev = lines[i].strip()
+                    if 'def get_real_user_home' in prev or 'SUDO_USER' in prev:
+                        return True
+            # Changelog/docstring entries describing past fixes
+            if stripped.startswith('"') or stripped.startswith("'"):
+                if any(kw in line for kw in ['FIX:', 'FIXED:', 'NEW:', 'REFACTOR:', 'DOCS:']):
+                    return True
 
         return False
 
