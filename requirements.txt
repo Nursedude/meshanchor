@@ -7,6 +7,11 @@ paho-mqtt>=1.6.0
 rns>=0.7.0
 lxmf>=0.4.0
 
+# PyOpenSSL - pin to >=25.3.0 to resolve dependency conflict:
+# System python3-openssl (25.0.0) requires cryptography<45, but RNS pulls
+# in cryptography 46.x. PyOpenSSL 25.3.0+ supports cryptography<47.
+pyopenssl>=25.3.0
+
 # Meshtastic CLI is used for radio configuration (installed via pipx)
 # The meshtastic Python library is only needed for legacy TCP bridge mode
 # meshtastic>=2.3.0  # Optional: only for bridge_mode="message_bridge"
