@@ -15,6 +15,30 @@ logger = logging.getLogger(__name__)
 class DashboardMixin:
     """TUI mixin for dashboard display methods."""
 
+    @staticmethod
+    def _check_webserver_config() -> str:
+        """Check if meshtasticd config.yaml has Webserver section enabled."""
+        from pathlib import Path
+        config_path = Path("/etc/meshtasticd/config.yaml")
+        if not config_path.exists():
+            return "Fix: /etc/meshtasticd/config.yaml not found"
+        try:
+            content = config_path.read_text()
+            if 'Webserver:' not in content:
+                return "Fix: Add 'Webserver: Port: 443' to /etc/meshtasticd/config.yaml"
+            # Webserver section exists but might be commented out
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('#'):
+                    continue
+                if 'Webserver:' in stripped:
+                    return "Config has Webserver section — check meshtasticd logs"
+            return "Fix: Webserver section may be commented out in config.yaml"
+        except PermissionError:
+            return "Cannot read config (try running with sudo)"
+        except Exception:
+            return "Fix: Check Webserver section in /etc/meshtasticd/config.yaml"
+
     def _service_status_display(self):
         """Show comprehensive service status."""
         clear_screen()
@@ -143,15 +167,22 @@ class DashboardMixin:
         # Test 3: meshtasticd HTTP API
         print("[3/6] Testing meshtasticd HTTP API...")
         try:
-            from utils.meshtastic_http import get_http_client
+            from utils.meshtastic_http import get_http_client, reset_http_client
+            # Reset singleton so we get a fresh probe (not stale cached state)
+            reset_http_client()
             client = get_http_client()
             if client.is_available:
                 nodes = client.get_nodes()
-                results.append(("meshtasticd HTTP", "OK", f"{len(nodes)} nodes via /json/nodes"))
-                print(f"      \033[0;32mOK\033[0m - {len(nodes)} nodes found")
+                results.append(("meshtasticd HTTP", "OK",
+                               f"{len(nodes)} nodes via {client._base_url}"))
+                print(f"      \033[0;32mOK\033[0m - {len(nodes)} nodes at {client._base_url}")
             else:
-                results.append(("meshtasticd HTTP", "FAIL", "HTTP API not reachable"))
-                print("      \033[0;31mFAIL\033[0m - HTTP API not reachable")
+                # Provide actionable fix guidance
+                hint = self._check_webserver_config()
+                detail = f"Not reachable (tried ports 9443,443,80,4403). {hint}"
+                results.append(("meshtasticd HTTP", "FAIL", detail))
+                print(f"      \033[0;31mFAIL\033[0m - HTTP API not reachable")
+                print(f"      \033[2m{hint}\033[0m")
         except ImportError:
             results.append(("meshtasticd HTTP", "SKIP", "meshtastic_http module not available"))
             print("      \033[0;33mSKIP\033[0m - Module not available")
