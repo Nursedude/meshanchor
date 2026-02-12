@@ -377,7 +377,7 @@ class TestRoutingDecisions:
     def test_direction_filter_mesh_to_rns_only(self, bridge):
         """Direction filter blocks wrong-direction messages."""
         # Disable classifier to test legacy routing
-        bridge._classifier = None
+        bridge._router._classifier = None
         bridge.config.routing_rules = [
             RoutingRule(
                 name="mesh_to_rns_only",
@@ -402,7 +402,7 @@ class TestRoutingDecisions:
     def test_source_filter_matches(self, bridge):
         """Source filter allows matching nodes."""
         # Disable classifier to test legacy routing
-        bridge._classifier = None
+        bridge._router._classifier = None
         bridge.config.routing_rules = [
             RoutingRule(
                 name="filter_node",

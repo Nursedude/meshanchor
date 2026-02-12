@@ -157,6 +157,7 @@ def bridge():
          patch("gateway.rns_bridge.CircuitBreakerRegistry") as MockCB, \
          patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
          patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
+         patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
          patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
          patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
@@ -192,6 +193,7 @@ def bridge_no_cb():
          patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
          patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
          patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
+         patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
          patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
          patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
@@ -514,6 +516,7 @@ class TestRoutingLegacy:
              patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
              patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
              patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
+             patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
              patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
              patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
              patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
@@ -548,77 +551,77 @@ class TestRoutingLegacy:
     def test_disabled_config_blocks_all(self):
         b = self._make_bridge_with_rules([], enabled=False)
         msg = self._make_msg()
-        assert b._should_bridge(msg) is False
+        assert b._router.should_bridge(msg) is False
 
     def test_no_rules_default_bidirectional(self):
         b = self._make_bridge_with_rules([], default_route="bidirectional")
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is True
+        assert b._router._should_bridge_legacy(msg) is True
 
     def test_no_rules_default_blocks(self):
         b = self._make_bridge_with_rules([], default_route="none")
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is False
+        assert b._router._should_bridge_legacy(msg) is False
 
     def test_matching_rule_passes(self):
         rule = self._make_rule(name="all", direction="bidirectional")
         b = self._make_bridge_with_rules([rule])
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is True
+        assert b._router._should_bridge_legacy(msg) is True
 
     def test_direction_filter_mesh_to_rns_blocks_rns_source(self):
         rule = self._make_rule(name="m2r", direction="mesh_to_rns")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg_rns = self._make_msg(source_network="rns")
-        assert b._should_bridge_legacy(msg_rns) is False
+        assert b._router._should_bridge_legacy(msg_rns) is False
 
     def test_direction_filter_rns_to_mesh_blocks_mesh_source(self):
         rule = self._make_rule(name="r2m", direction="rns_to_mesh")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg_mesh = self._make_msg(source_network="meshtastic")
-        assert b._should_bridge_legacy(msg_mesh) is False
+        assert b._router._should_bridge_legacy(msg_mesh) is False
 
     def test_direction_filter_allows_correct_direction(self):
         rule = self._make_rule(name="m2r", direction="mesh_to_rns")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg = self._make_msg(source_network="meshtastic")
-        assert b._should_bridge_legacy(msg) is True
+        assert b._router._should_bridge_legacy(msg) is True
 
     def test_source_filter_regex(self):
         rule = self._make_rule(name="src", direction="bidirectional", source_filter="!aabb.*")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg_match = self._make_msg(source_id="!aabb0042")
         msg_no_match = self._make_msg(source_id="!ccdd0099")
-        assert b._should_bridge_legacy(msg_match) is True
-        assert b._should_bridge_legacy(msg_no_match) is False
+        assert b._router._should_bridge_legacy(msg_match) is True
+        assert b._router._should_bridge_legacy(msg_no_match) is False
 
     def test_dest_filter_regex(self):
         rule = self._make_rule(name="dst", direction="bidirectional", dest_filter="!dest.*")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg_match = self._make_msg(destination_id="!dest1234")
         msg_no_match = self._make_msg(destination_id="!other")
-        assert b._should_bridge_legacy(msg_match) is True
-        assert b._should_bridge_legacy(msg_no_match) is False
+        assert b._router._should_bridge_legacy(msg_match) is True
+        assert b._router._should_bridge_legacy(msg_no_match) is False
 
     def test_message_filter_regex(self):
         rule = self._make_rule(name="msg", direction="bidirectional", message_filter="URGENT.*")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg_match = self._make_msg(content="URGENT: help needed")
         msg_no_match = self._make_msg(content="casual chat")
-        assert b._should_bridge_legacy(msg_match) is True
-        assert b._should_bridge_legacy(msg_no_match) is False
+        assert b._router._should_bridge_legacy(msg_match) is True
+        assert b._router._should_bridge_legacy(msg_no_match) is False
 
     def test_disabled_rule_skipped(self):
         rule = self._make_rule(name="off", direction="bidirectional", enabled=False)
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is False
+        assert b._router._should_bridge_legacy(msg) is False
 
     def test_invalid_regex_skipped(self):
         rule = self._make_rule(name="bad", direction="bidirectional", source_filter="[invalid")
         b = self._make_bridge_with_rules([rule], default_route="none")
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is False
+        assert b._router._should_bridge_legacy(msg) is False
 
     def test_multiple_rules_first_match_wins(self):
         rule1 = self._make_rule(name="r1", direction="bidirectional", source_filter="!aabb.*")
@@ -626,19 +629,19 @@ class TestRoutingLegacy:
         b = self._make_bridge_with_rules([rule1, rule2], default_route="none")
         msg = self._make_msg(source_id="!ccdd0099")
         # rule1 doesn't match source, but rule2 matches all
-        assert b._should_bridge_legacy(msg) is True
+        assert b._router._should_bridge_legacy(msg) is True
 
     def test_recompiles_when_rules_change(self):
         rule = self._make_rule(name="r1", direction="bidirectional")
         b = self._make_bridge_with_rules([rule], default_route="none")
         # First call compiles
         msg = self._make_msg()
-        assert b._should_bridge_legacy(msg) is True
+        assert b._router._should_bridge_legacy(msg) is True
         # Add new rule and verify recompilation
         new_rule = self._make_rule(name="r2", direction="bidirectional", source_filter="!xyz.*")
         b.config.routing_rules.append(new_rule)
         msg2 = self._make_msg(source_id="!xyz9999")
-        assert b._should_bridge_legacy(msg2) is True
+        assert b._router._should_bridge_legacy(msg2) is True
 
 
 # ---------------------------------------------------------------------------
@@ -652,7 +655,7 @@ class TestCompileRoutingRules:
         from gateway.config import RoutingRule
         rule = RoutingRule(name="test", source_filter="!aabb.*", dest_filter="", message_filter="hello")
         bridge.config.routing_rules = [rule]
-        compiled = bridge._compile_routing_rules()
+        compiled = bridge._router._compile_routing_rules()
         assert "test" in compiled
         assert 'source_filter' in compiled['test']
         assert compiled['test']['source_filter'] is not None
@@ -661,14 +664,14 @@ class TestCompileRoutingRules:
         from gateway.config import RoutingRule
         rule = RoutingRule(name="bad", source_filter="[invalid")
         bridge.config.routing_rules = [rule]
-        compiled = bridge._compile_routing_rules()
+        compiled = bridge._router._compile_routing_rules()
         assert compiled['bad']['source_filter'] is None
 
     def test_empty_patterns_not_compiled(self, bridge):
         from gateway.config import RoutingRule
         rule = RoutingRule(name="empty", source_filter="", dest_filter="", message_filter="")
         bridge.config.routing_rules = [rule]
-        compiled = bridge._compile_routing_rules()
+        compiled = bridge._router._compile_routing_rules()
         assert compiled['empty'] == {}
 
 
@@ -1017,29 +1020,29 @@ class TestRoutingStats:
     """Tests for routing stats and classification methods."""
 
     def test_get_routing_stats_no_classifier(self, bridge):
-        bridge._classifier = None
+        bridge._router._classifier = None
         stats = bridge.get_routing_stats()
         assert 'messages_mesh_to_rns' in stats
         assert 'classifier' not in stats
 
     def test_get_last_classification_none(self, bridge):
-        bridge._last_classification = None
+        bridge._router._last_classification = None
         assert bridge.get_last_classification() is None
 
     def test_get_last_classification_returns_dict(self, bridge):
         mock_result = MagicMock()
         mock_result.to_dict.return_value = {"category": "bridge_rns", "confidence": 0.9}
-        bridge._last_classification = mock_result
+        bridge._router._last_classification = mock_result
         result = bridge.get_last_classification()
         assert result["category"] == "bridge_rns"
 
     def test_fix_routing_no_classifier(self, bridge):
-        bridge._classifier = None
+        bridge._router._classifier = None
         assert bridge.fix_routing("msg-1", "bridge_rns") is False
 
     def test_fix_routing_no_fix_registry(self, bridge):
-        bridge._classifier = MagicMock()
-        bridge._classifier.fix_registry = None
+        bridge._router._classifier = MagicMock()
+        bridge._router._classifier.fix_registry = None
         assert bridge.fix_routing("msg-1", "bridge_rns") is False
 
 
@@ -1460,8 +1463,8 @@ class TestRegexInputLimit:
     """Tests for regex input length bounding."""
 
     def test_limit_is_set(self):
-        from gateway.rns_bridge import RNSMeshtasticBridge
-        assert RNSMeshtasticBridge._REGEX_INPUT_LIMIT == 512
+        from gateway.message_routing import MessageRouter
+        assert MessageRouter._REGEX_INPUT_LIMIT == 512
 
 
 # ---------------------------------------------------------------------------
