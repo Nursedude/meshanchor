@@ -20,8 +20,9 @@ class HardwareMenuMixin:
         """Hardware detection and configuration menu."""
         while True:
             choices = [
-                ("detect", "Detect Hardware"),
-                ("spi", "Enable SPI (for HAT radios)"),
+                ("detect", "Detect Hardware     SPI, I2C, Serial, USB"),
+                ("rnode", "RNode Setup         RNode device detection"),
+                ("spi", "Enable SPI          For HAT radios"),
                 ("back", "Back"),
             ]
 
@@ -36,6 +37,7 @@ class HardwareMenuMixin:
 
             dispatch = {
                 "detect": ("Detect Hardware", self._detect_hardware),
+                "rnode": ("RNode Setup", self._rnode_menu),
                 "spi": ("Enable SPI", self._enable_spi),
             }
             entry = dispatch.get(choice)

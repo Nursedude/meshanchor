@@ -1,8 +1,8 @@
 # MeshForge Session Notes
 
-**Last Updated**: 2026-02-12
+**Last Updated**: 2026-02-13
 **Version**: v0.5.4-beta
-**Codebase**: 258 Python files, 291K lines, 4,009+ tests
+**Codebase**: 261 Python files, 291K+ lines, 4,046+ tests
 
 ---
 
@@ -22,12 +22,12 @@
 | 3 | `active_health_probe.py` | NGINX-style service health checks | Dashboard > Health Probes | **DONE** (Phase 1) |
 | 4 | `messaging.py` | Message history viewer, search, export | Mesh Networks > Messaging | **DONE** |
 | 5 | `device_backup.py` | Backup/restore device configs | Configuration > Backup | **DONE** (prior) |
-| 6 | `classifier.py` | Traffic classification | Mesh Networks > Traffic | Pending (LOW) |
-| 7 | `rnode.py` | RNode device detection + config | Hardware > RNode Setup | Pending (MEDIUM) |
-| 8 | `latency_monitor.py` | Background latency monitoring | Dashboard > Latency | Pending (MEDIUM) |
+| 6 | `classifier.py` | Traffic classification | Mesh Networks > Traffic | **DONE** |
+| 7 | `rnode.py` | RNode device detection + config | Hardware > RNode Setup | **DONE** |
+| 8 | `latency_monitor.py` | Background latency monitoring | Dashboard > Latency | **DONE** |
 
 **Pattern**: All modules have working APIs. Work = add menu entry + display wrapper in mixin.
-**Progress**: 5 of 8 wired (2026-02-13). Remaining: classifier, rnode, latency_monitor.
+**Progress**: 8 of 8 wired (2026-02-13). **ALL COMPLETE.**
 
 ---
 
@@ -35,11 +35,11 @@
 
 | Issue | Summary | Root Cause | Effort |
 |-------|---------|-----------|--------|
-| **#20** | Service detection status flakiness | Multiple fallback methods (UDP/pgrep/systemctl) conflict | MEDIUM |
+| **#20** | Service detection status flakiness | ~~Multiple fallback methods~~ **FIXED**: systemctl-only, port fallback removed | **DONE** |
 | **#21** | CLI preset settings not reliably applied | Upstream meshtastic CLI bug (not MeshForge) | N/A (document) |
 | **#27** | rnsd optional — UI doesn't make this clear | Error messages assume rnsd required | LOW |
 
-**Issue #20 redesign spec**: Simplify `service_check.py` to systemctl-only for systemd services. Stop using port checks and pgrep as fallbacks. See `persistent_issues.md` Issue #20 for full spec.
+**Issue #20**: Phase 1 complete — systemctl-only for systemd services. Last port fallback for transitional sub-states removed (2026-02-13). Phase 2 (status display separation) and Phase 3 (event bus for RX) remain future work.
 
 ---
 
@@ -131,24 +131,46 @@
 
 ---
 
-## Project Health Snapshot (2026-02-12)
+## Project Health Snapshot (2026-02-13)
 
 | Metric | Value | Status |
 |--------|-------|--------|
 | Version | v0.5.4-beta | MQTT bridge release |
-| Python files | 258 | Well-modularized |
-| Total lines | 291,258 | Healthy |
-| Test count | 4,009+ | Comprehensive |
-| Tests passing | 4,009 pass, 19 skip, 0 fail | Clean |
+| Python files | 261 | Well-modularized |
+| Total lines | 291K+ | Healthy |
+| Test count | 4,046+ | Comprehensive |
+| Tests passing | 4,046 pass, 19 skip, 0 fail | Clean |
 | Lint | Clean | MF001-MF004 all passing |
-| Files >1,500 loc | 1 (knowledge_content.py, by design) | Healthy |
+| Files >1,500 loc | 2 (knowledge_content.py by design, main.py 1521 borderline) | Monitor |
+| TUI mixin files | 33 | All wired |
+| P2 feature accessibility | 8/8 complete | **DONE** |
 | Documentation | 51+ MD files | Extensive |
-| Session notes | 43+ entries | Good tracking |
-| Persistent issues | 28 tracked, 8 archived | Active maintenance |
+| Session notes | 44+ entries | Good tracking |
+| Persistent issues | Issue #20 fixed, #21 upstream, #27 open | Active |
 
 ---
 
 ## Session Log
+
+### Session: Final TUI Wiring + Issue #20 Fix (2026-02-13)
+
+**What**: Completed ALL P2 feature accessibility items and fixed Issue #20.
+
+**TUI Wiring (3 modules)**:
+- `classifier_mixin.py` → Mesh Networks > Traffic Classifier (routing stats, notifications, receipts, bounced items)
+- `rnode_mixin.py` → Hardware > RNode Setup (device detect, deep scan, recommended config)
+- `latency_mixin.py` → Dashboard > Latency Monitor (service latency, probe, degraded services)
+
+**Issue #20 Fix**: Removed last port-check fallback from `check_service()` for systemd services with transitional sub-states (start, auto-restart, reload). Now fully systemctl-only — no conflicting detection methods remain.
+
+**Files created (3)**: `classifier_mixin.py`, `rnode_mixin.py`, `latency_mixin.py`
+**Files modified (3)**: `main.py` (imports + inheritance + menu entries), `hardware_menu_mixin.py` (RNode menu entry), `service_check.py` (port fallback removed)
+
+**Tests**: 4046 passed, 19 skipped, 0 regressions. Lint clean.
+
+**Entropy watch**: None. Clean session, systematic task list followed.
+
+---
 
 ### Session: Wire Analytics, Webhooks, Messaging to TUI (2026-02-13)
 
@@ -240,8 +262,10 @@
 
 ## Quick Reference: Next Session Pickup
 
-1. **P2 quick wins**: Wire remaining `classifier.py`, `rnode.py`, `latency_monitor.py` to TUI
-2. **P2 reliability**: Fix service detection flakiness (Issue #20 — simplify to systemctl-only)
-3. **P2 architecture**: Event bus for RX message propagation
-4. **P3 debt**: Import boilerplate consolidation (`safe_import()` pattern)
-5. **Hardware**: Test all backlog items on MOC1/MOC2
+1. ~~**P2 quick wins**: Wire remaining modules to TUI~~ **DONE** (8/8 complete)
+2. ~~**P2 reliability**: Issue #20 service detection~~ **DONE** (systemctl-only, port fallback removed)
+3. **P2 architecture**: Event bus for RX message propagation (Issue #20 Phase 3)
+4. **P2 display**: Status display separation — service state vs CLI detection (Issue #20 Phase 2)
+5. **P3 debt**: Import boilerplate consolidation (`safe_import()` pattern, 86 try/except blocks)
+6. **P3 debt**: main.py at 1521 lines — borderline, consider extracting another menu method
+7. **Hardware**: Test all backlog items on MOC1/MOC2
