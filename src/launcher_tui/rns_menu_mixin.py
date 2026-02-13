@@ -814,12 +814,18 @@ class RNSMenuMixin(RNSSnifferMixin):
         except Exception as e:
             print(f"  Warning stopping rnsd: {e}")
 
-        # Clear stale shared_instance_* files that cause AuthenticationError
-        # These files contain auth tokens that become invalid after config changes
+        # Clear stale shared_instance_* files that cause AuthenticationError.
+        # These files contain auth tokens that become invalid after config changes.
+        # CRITICAL: Must clear from ALL locations — not just /etc and /root.
+        # If the real user has ~/.reticulum/storage/ with stale tokens, NomadNet
+        # (running as real user) will use those stale tokens → auth mismatch.
         print("  Clearing stale shared instance authentication files...")
+        user_home = get_real_user_home()
         storage_dirs = [
             Path('/etc/reticulum/storage'),
             Path('/root/.reticulum/storage'),
+            user_home / '.reticulum' / 'storage',
+            user_home / '.config' / 'reticulum' / 'storage',
         ]
         files_cleared = 0
         for storage_dir in storage_dirs:
