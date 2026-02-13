@@ -1448,9 +1448,37 @@ class RNSMenuMixin(RNSSnifferMixin):
             if entropy < 256:
                 print(f"Cause: Low system entropy ({entropy} bits available)")
                 print("       rnsd is likely hanging on cryptographic initialization.\n")
-                print("Fix:   Install entropy daemon:\n")
-                print("  sudo apt install rng-tools    # preferred on Pi")
-                print("  sudo systemctl enable --now rngd")
+                # Detect which entropy service/package is available
+                # Debian/Pi OS uses rng-tools-debian, others use rng-tools
+                rng_svc = None
+                rng_pkg = None
+                for svc in ['rng-tools-debian', 'rngd', 'rng-tools']:
+                    chk = subprocess.run(
+                        ['systemctl', 'list-unit-files', f'{svc}.service'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if svc in chk.stdout:
+                        rng_svc = svc
+                        break
+                if rng_svc:
+                    print(f"Fix:   Enable the entropy daemon ({rng_svc}):\n")
+                    print(f"  sudo systemctl enable --now {rng_svc}")
+                else:
+                    # Detect distro to suggest correct package
+                    rng_pkg = 'rng-tools-debian'
+                    try:
+                        chk = subprocess.run(
+                            ['dpkg', '--print-architecture'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if chk.returncode == 0:
+                            rng_pkg = 'rng-tools-debian'  # Debian/Pi OS
+                        else:
+                            rng_pkg = 'rng-tools'
+                    except (subprocess.SubprocessError, OSError):
+                        rng_pkg = 'rng-tools'
+                    print("Fix:   Install entropy daemon:\n")
+                    print(f"  sudo apt install {rng_pkg}")
                 print("\n  Then restart rnsd:")
                 print("  sudo systemctl restart rnsd")
                 return
