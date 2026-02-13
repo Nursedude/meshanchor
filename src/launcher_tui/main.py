@@ -168,11 +168,19 @@ class MeshForgeLauncher(
 
     @staticmethod
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
-        """Wait for user to press Enter, handling Ctrl+C gracefully."""
+        """Wait for user to press Enter, handling Ctrl+C gracefully.
+
+        Clears the screen (including scrollback) after input so that
+        print() output doesn't bleed through when whiptail/dialog redraws.
+        """
         try:
             input(msg)
         except (KeyboardInterrupt, EOFError):
-            print()  # Clean newline after ^C
+            pass  # Clean exit on ^C
+        # Clear screen + scrollback before returning to dialog menu.
+        # Without this, old print output stays in scrollback and causes
+        # "screen roll" — visible flash of terminal text behind the dialog.
+        clear_screen()
 
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
