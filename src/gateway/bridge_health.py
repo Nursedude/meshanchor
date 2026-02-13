@@ -34,6 +34,21 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+class SubsystemState(Enum):
+    """Independent state for each bridge subsystem (Phase 2: Circuit Breakers).
+
+    Each side of the bridge (Meshtastic, RNS) has its own lifecycle:
+    - HEALTHY: Connected and operational
+    - DEGRADED: Connected but experiencing issues (high error rate)
+    - DISCONNECTED: Not connected, will retry automatically
+    - DISABLED: Intentionally turned off by user or config
+    """
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    DISCONNECTED = "disconnected"
+    DISABLED = "disabled"
+
+
 class BridgeStatus(Enum):
     """Bridge operational status.
 
@@ -181,6 +196,14 @@ class BridgeHealthMonitor:
             "rns": 0.0,
         }
 
+        # Subsystem states (Phase 2: Circuit Breakers)
+        self._subsystem_states: Dict[str, SubsystemState] = {
+            "meshtastic": SubsystemState.DISCONNECTED,
+            "rns": SubsystemState.DISCONNECTED,
+        }
+        # Messages queued during degraded state
+        self._messages_queued_degraded: int = 0
+
     def record_connection_event(self, service: str, event: str,
                                 detail: str = "") -> None:
         """Record a connection state change.
@@ -210,6 +233,71 @@ class BridgeHealthMonitor:
                     self._uptime_seconds[service] += now - connected_at
                 self._connected[service] = False
                 self._last_disconnected[service] = now
+
+    # =========================================================================
+    # Subsystem State Management (Phase 2: Circuit Breakers)
+    # =========================================================================
+
+    def set_subsystem_state(self, subsystem: str, state: SubsystemState) -> Optional[SubsystemState]:
+        """Set the state of a subsystem, returning the previous state.
+
+        Args:
+            subsystem: "meshtastic" or "rns"
+            state: New SubsystemState value
+
+        Returns:
+            Previous SubsystemState, or None if subsystem unknown.
+        """
+        with self._lock:
+            if subsystem not in self._subsystem_states:
+                return None
+            old_state = self._subsystem_states[subsystem]
+            if old_state != state:
+                self._subsystem_states[subsystem] = state
+                logger.info(f"Subsystem {subsystem}: {old_state.value} → {state.value}")
+            return old_state
+
+    def get_subsystem_state(self, subsystem: str) -> SubsystemState:
+        """Get the current state of a subsystem.
+
+        Args:
+            subsystem: "meshtastic" or "rns"
+
+        Returns:
+            Current SubsystemState (defaults to DISCONNECTED).
+        """
+        with self._lock:
+            return self._subsystem_states.get(subsystem, SubsystemState.DISCONNECTED)
+
+    def get_subsystem_states(self) -> Dict[str, str]:
+        """Get all subsystem states as a dict of name→value strings."""
+        with self._lock:
+            return {k: v.value for k, v in self._subsystem_states.items()}
+
+    def record_message_queued_degraded(self) -> None:
+        """Record that a message was queued because the destination subsystem is down."""
+        with self._lock:
+            self._messages_queued_degraded += 1
+
+    def get_degraded_queue_count(self) -> int:
+        """Get count of messages queued during degraded state."""
+        with self._lock:
+            return self._messages_queued_degraded
+
+    def get_bridge_status_detailed(self) -> Dict[str, Any]:
+        """Get detailed bridge status including subsystem states.
+
+        Returns:
+            Dict with bridge_status, subsystem states, and degraded reason.
+        """
+        status = self.get_bridge_status()
+        reason = self.get_degraded_reason()
+        return {
+            "bridge_status": status.value,
+            "subsystems": self.get_subsystem_states(),
+            "degraded_reason": reason,
+            "messages_queued_degraded": self._messages_queued_degraded,
+        }
 
     def record_message_sent(self, direction: str) -> None:
         """Record a successfully bridged message.
@@ -347,6 +435,8 @@ class BridgeHealthMonitor:
                     "rate_per_min": self.get_message_rate(),
                 },
                 "errors": self.get_error_rate(),
+                "subsystems": self.get_subsystem_states(),
+                "messages_queued_degraded": self._messages_queued_degraded,
             }
 
     def is_healthy(self) -> bool:

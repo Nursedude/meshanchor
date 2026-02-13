@@ -82,6 +82,8 @@ class StatusBar:
         self._cache_time: float = 0.0
         self._node_count: Optional[int] = None
         self._bridge_running: Optional[bool] = None
+        # Subsystem states (Phase 2: Circuit Breakers)
+        self._subsystem_states: Dict[str, str] = {}  # e.g. {"meshtastic": "healthy"}
         # Space weather (separate cache with longer TTL)
         self._space_weather: Optional[str] = None
         self._space_weather_time: float = 0.0
@@ -119,10 +121,10 @@ class StatusBar:
         if self._node_count is not None:
             parts.append(f"nodes:{self._node_count}")
 
-        # Bridge status
+        # Bridge status with subsystem detail
         if self._bridge_running is not None:
-            bridge_sym = SYM_RUNNING if self._bridge_running else SYM_STOPPED
-            parts.append(f"bridge:{bridge_sym}")
+            bridge_label = self._format_bridge_status()
+            parts.append(bridge_label)
 
         # Space weather (compact format: SFI:125 K:2)
         if self._space_weather:
@@ -228,6 +230,50 @@ class StatusBar:
             logger.debug(f"Space weather fetch failed: {e}")
             self._space_weather = None
 
+    def _format_bridge_status(self) -> str:
+        """Format bridge status with subsystem detail.
+
+        Returns compact status like:
+        - bridge:* (both healthy)
+        - bridge:DEGRADED(rns) (one side down)
+        - bridge:- (bridge not running)
+        """
+        if not self._bridge_running:
+            return f"bridge:{SYM_STOPPED}"
+
+        if not self._subsystem_states:
+            return f"bridge:{SYM_RUNNING}"
+
+        mesh_state = self._subsystem_states.get("meshtastic", "disconnected")
+        rns_state = self._subsystem_states.get("rns", "disconnected")
+
+        mesh_ok = mesh_state == "healthy"
+        rns_ok = rns_state == "healthy"
+
+        if mesh_ok and rns_ok:
+            return f"bridge:{SYM_RUNNING}"
+
+        # Build degraded indicator showing which side(s) are down
+        down = []
+        if not mesh_ok:
+            down.append("mesh")
+        if not rns_ok:
+            down.append("rns")
+
+        if len(down) == 2:
+            return "bridge:OFFLINE"
+
+        return f"bridge:DEGRADED({down[0]})"
+
+    def set_subsystem_states(self, states: Dict[str, str]) -> None:
+        """Update subsystem states from bridge health data.
+
+        Args:
+            states: Dict of subsystem name → state value string.
+                   e.g. {"meshtastic": "healthy", "rns": "disconnected"}
+        """
+        self._subsystem_states = states
+
     def set_node_count(self, count: int) -> None:
         """Update the displayed node count.
 
@@ -278,10 +324,24 @@ class StatusBar:
 
         Updates the cache immediately so the next dialog render shows
         the new state without waiting for the TTL-based refresh.
+        Also handles bridge subsystem state events (bridge_meshtastic,
+        bridge_rns) emitted by the Phase 2 circuit breaker code.
         """
         service_name = getattr(event, 'service_name', None)
         if not service_name:
             return
+
+        # Handle bridge subsystem state updates (Phase 2)
+        if service_name.startswith('bridge_'):
+            subsystem = service_name.removeprefix('bridge_')
+            message = getattr(event, 'message', '')
+            # Extract state from message like "meshtastic: healthy"
+            if ':' in message:
+                state_str = message.split(':', 1)[1].strip()
+                self._subsystem_states[subsystem] = state_str
+                logger.debug(f"StatusBar subsystem {subsystem}: {state_str}")
+            return
+
         available = getattr(event, 'available', None)
         if available is not None:
             self._cache[service_name] = SYM_RUNNING if available else SYM_STOPPED
