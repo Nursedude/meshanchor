@@ -1,8 +1,8 @@
 [Unit]
 Description=MeshForge Mesh Network Operations Center
 Documentation=https://github.com/Nursedude/meshforge
-After=network.target meshtasticd.service
-Wants=meshtasticd.service
+After=network.target meshtasticd.service rnsd.service
+Wants=meshtasticd.service rnsd.service
 
 [Service]
 Type=simple

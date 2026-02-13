@@ -60,6 +60,77 @@ def get_identity_path() -> Path:
     return get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
 
 
+def create_identities() -> CommandResult:
+    """Create RNS and MeshForge gateway identities if they don't exist.
+
+    RNS identity: Created by RNS.Identity() in the config directory.
+    Gateway identity: MeshForge-specific, stored in ~/.config/meshforge/.
+
+    Returns:
+        CommandResult with created/existing identity info
+    """
+    results = {'rns_identity': None, 'gateway_identity': None, 'created': []}
+
+    # 1. RNS identity (rnsd config dir)
+    config_dir = ReticulumPaths.get_config_dir()
+    rns_identity_path = config_dir / 'identity'
+    results['rns_identity'] = str(rns_identity_path)
+
+    if rns_identity_path.exists():
+        results['rns_identity_status'] = 'exists'
+    else:
+        try:
+            import RNS
+            identity = RNS.Identity()
+            config_dir.mkdir(parents=True, exist_ok=True)
+            identity.to_file(str(rns_identity_path))
+            results['rns_identity_status'] = 'created'
+            results['created'].append('rns')
+            logger.info(f"Created RNS identity at {rns_identity_path}")
+        except ImportError:
+            results['rns_identity_status'] = 'error'
+            return CommandResult.fail(
+                "RNS module not installed — cannot create identity",
+                data=results
+            )
+        except Exception as e:
+            results['rns_identity_status'] = 'error'
+            return CommandResult.fail(
+                f"Failed to create RNS identity: {e}",
+                data=results
+            )
+
+    # 2. Gateway identity (meshforge config dir)
+    gw_identity_path = get_identity_path()
+    results['gateway_identity'] = str(gw_identity_path)
+
+    if gw_identity_path.exists():
+        results['gateway_identity_status'] = 'exists'
+    else:
+        try:
+            import RNS
+            identity = RNS.Identity()
+            gw_identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity.to_file(str(gw_identity_path))
+            results['gateway_identity_status'] = 'created'
+            results['created'].append('gateway')
+            logger.info(f"Created gateway identity at {gw_identity_path}")
+        except Exception as e:
+            results['gateway_identity_status'] = 'error'
+            return CommandResult.fail(
+                f"Failed to create gateway identity: {e}",
+                data=results
+            )
+
+    created = results['created']
+    if created:
+        return CommandResult.ok(
+            f"Created identities: {', '.join(created)}",
+            data=results
+        )
+    return CommandResult.ok("All identities already exist", data=results)
+
+
 def get_lxmf_storage_path() -> Path:
     """Get path to LXMF message storage.
 
@@ -713,14 +784,31 @@ def check_connectivity() -> CommandResult:
         'can_import_rns': False,
         'config_valid': False,
         'interfaces_enabled': 0,
-        'issues': []
+        'issues': [],
+        'warnings': [],
     }
 
     # Check rnsd
     status = get_status()
     connectivity['rnsd_running'] = status.data.get('rnsd_running', False)
     if not connectivity['rnsd_running']:
-        connectivity['issues'].append("rnsd daemon not running")
+        # Check if NomadNet is holding the port (common conflict)
+        nomadnet_running = False
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'nomadnet'],
+                capture_output=True, text=True, timeout=5
+            )
+            nomadnet_running = result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        if nomadnet_running:
+            connectivity['issues'].append(
+                "rnsd not running — NomadNet is holding port 37428 (shared instance conflict)"
+            )
+        else:
+            connectivity['issues'].append("rnsd daemon not running")
 
     # Check RNS import
     # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
@@ -754,6 +842,15 @@ def check_connectivity() -> CommandResult:
             connectivity['issues'].append("No interfaces enabled")
     else:
         connectivity['issues'].append(f"Config error: {config_result.message}")
+
+    # Check identities (warnings, not blocking issues)
+    config_dir = ReticulumPaths.get_config_dir()
+    rns_identity = config_dir / 'identity'
+    gw_identity = get_identity_path()
+    if not rns_identity.exists():
+        connectivity['warnings'].append("RNS identity not created")
+    if not gw_identity.exists():
+        connectivity['warnings'].append("Gateway identity not created")
 
     # Overall status
     is_ok = (
