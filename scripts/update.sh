@@ -14,7 +14,8 @@
 #   1. Fetches latest code from GitHub
 #   2. Updates Python dependencies if changed
 #   3. Reinstalls desktop integration (icons/launchers)
-#   4. Preserves: /etc/meshforge/, ~/.config/meshforge/, radio configs
+#   4. Updates systemd service files (rnsd, meshforge, nomadnet)
+#   5. Preserves: /etc/meshforge/, ~/.config/meshforge/, radio configs
 #
 # What it does NOT do:
 #   - Reinstall meshtasticd or rnsd (use install_noc.sh for that)
@@ -118,7 +119,7 @@ echo -e "Current branch: ${CYAN}$CURRENT_BRANCH${NC} ($CURRENT_COMMIT)"
 # Step 1: Fetch updates
 # ─────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[1/4] Fetching updates...${NC}"
+echo -e "${CYAN}[1/5] Fetching updates...${NC}"
 
 git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
@@ -165,7 +166,7 @@ fi
 # Step 2: Update Python dependencies
 # ─────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[2/4] Checking Python dependencies...${NC}"
+echo -e "${CYAN}[2/5] Checking Python dependencies...${NC}"
 
 if [[ "$SKIP_DEPS" == "true" ]]; then
     echo -e "${YELLOW}Skipped (--skip-deps)${NC}"
@@ -199,7 +200,7 @@ fi
 # Step 3: Update desktop integration
 # ─────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[3/4] Updating desktop integration...${NC}"
+echo -e "${CYAN}[3/5] Updating desktop integration...${NC}"
 
 if [[ "$SKIP_DESKTOP" == "true" ]]; then
     echo -e "${YELLOW}Skipped (--skip-desktop)${NC}"
@@ -211,10 +212,84 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Step 4: Verify installation
+# Step 4: Update service files
 # ─────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}[4/4] Verifying installation...${NC}"
+echo -e "${CYAN}[4/5] Updating systemd service files...${NC}"
+
+SVC_UPDATED=false
+
+# Update meshforge.service from repo template (if it exists in /etc/systemd/system/)
+if [[ -f /etc/systemd/system/meshforge.service ]] && [[ -f "$INSTALL_DIR/scripts/meshforge.service" ]]; then
+    cp "$INSTALL_DIR/scripts/meshforge.service" /etc/systemd/system/meshforge.service
+    echo -e "  ${GREEN}✓ meshforge.service updated${NC}"
+    SVC_UPDATED=true
+fi
+
+# Update rnsd.service (system-level) if it exists
+if [[ -f /etc/systemd/system/rnsd.service ]]; then
+    RNSD_BIN=$(command -v rnsd 2>/dev/null || echo "/usr/local/bin/rnsd")
+    # Only update if the current service lacks crash-loop protection
+    if ! grep -q "StartLimitBurst" /etc/systemd/system/rnsd.service 2>/dev/null; then
+        cat > /etc/systemd/system/rnsd.service << RNSD_SVC
+[Unit]
+Description=Reticulum Network Stack Daemon
+Documentation=https://reticulum.network
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=${RNSD_BIN} --service
+Restart=on-failure
+RestartSec=5
+
+# Stop crash-looping after 5 failures in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rnsd
+
+[Install]
+WantedBy=multi-user.target
+RNSD_SVC
+        echo -e "  ${GREEN}✓ rnsd.service updated (added crash-loop protection)${NC}"
+        SVC_UPDATED=true
+    else
+        echo -e "  ${GREEN}✓ rnsd.service already current${NC}"
+    fi
+fi
+
+# Deploy user-level service templates
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(eval echo "~${REAL_USER}")
+USER_SYSTEMD_DIR="${REAL_HOME}/.config/systemd/user"
+if [[ -d "$INSTALL_DIR/templates/systemd" ]]; then
+    mkdir -p "$USER_SYSTEMD_DIR"
+    for tmpl in "$INSTALL_DIR/templates/systemd/"*-user.service; do
+        if [[ -f "$tmpl" ]]; then
+            svc_name=$(basename "$tmpl" | sed 's/-user\.service/.service/')
+            cp "$tmpl" "$USER_SYSTEMD_DIR/$svc_name" 2>/dev/null || true
+        fi
+    done
+    chown -R "${REAL_USER}:" "$USER_SYSTEMD_DIR" 2>/dev/null || true
+    echo -e "  ${GREEN}✓ User service templates deployed${NC}"
+fi
+
+# Reload systemd if anything changed
+if $SVC_UPDATED; then
+    systemctl daemon-reload 2>/dev/null || true
+    echo -e "  ${GREEN}✓ systemctl daemon-reload${NC}"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+# Step 5: Verify installation
+# ─────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYAN}[5/5] Verifying installation...${NC}"
 
 # Check version
 VERSION=$(python3 -c "import sys; sys.path.insert(0, '$INSTALL_DIR/src'); from __version__ import __version__; print(__version__)" 2>/dev/null || echo "unknown")

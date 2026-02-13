@@ -341,13 +341,14 @@ class UpdatesMixin:
             "Update MeshForge",
             "This will:\n\n"
             "1. Pull latest code from GitHub (git pull)\n"
-            "2. Install/update Python dependencies\n\n"
+            "2. Install/update Python dependencies\n"
+            "3. Update systemd service files\n\n"
             "Continue?"
         ):
             return
 
         # Step 1: Git pull
-        self.dialog.infobox("Updating MeshForge", "Step 1/2: Pulling latest code from GitHub...")
+        self.dialog.infobox("Updating MeshForge", "Step 1/3: Pulling latest code from GitHub...")
 
         try:
             result = subprocess.run(
@@ -374,7 +375,7 @@ class UpdatesMixin:
             return
 
         # Step 2: Install dependencies
-        self.dialog.infobox("Updating MeshForge", "Step 2/2: Installing Python dependencies...")
+        self.dialog.infobox("Updating MeshForge", "Step 2/3: Installing Python dependencies...")
 
         requirements_file = meshforge_dir / 'requirements.txt'
         if not requirements_file.exists():
@@ -415,11 +416,52 @@ class UpdatesMixin:
             self.dialog.msgbox("Error", f"Pip install failed: {e}")
             return
 
+        # Step 3: Deploy updated service files
+        self.dialog.infobox("Updating MeshForge", "Step 3/3: Updating service files...")
+
+        svc_msgs = []
+        try:
+            # Update meshforge.service from repo
+            svc_src = meshforge_dir / 'scripts' / 'meshforge.service'
+            svc_dst = Path('/etc/systemd/system/meshforge.service')
+            if svc_src.exists() and svc_dst.exists():
+                import shutil
+                shutil.copy2(str(svc_src), str(svc_dst))
+                svc_msgs.append("meshforge.service")
+
+            # Update user-level service templates
+            from utils.paths import get_real_user_home
+            user_svc_dir = get_real_user_home() / '.config' / 'systemd' / 'user'
+            templates_dir = meshforge_dir / 'templates' / 'systemd'
+            if templates_dir.exists():
+                user_svc_dir.mkdir(parents=True, exist_ok=True)
+                for tmpl in templates_dir.glob('*-user.service'):
+                    svc_name = tmpl.name.replace('-user.service', '.service')
+                    dst = user_svc_dir / svc_name
+                    shutil.copy2(str(tmpl), str(dst))
+                    svc_msgs.append(svc_name)
+
+            # Reload systemd
+            if svc_msgs:
+                subprocess.run(
+                    ['systemctl', 'daemon-reload'],
+                    capture_output=True, timeout=10
+                )
+        except (OSError, PermissionError) as e:
+            svc_msgs.append(f"(warning: {e})")
+        except Exception:
+            pass
+
+        svc_info = ""
+        if svc_msgs:
+            svc_info = f"\nServices updated: {', '.join(svc_msgs)}\n"
+
         # Success!
         self.dialog.msgbox(
             "Update Complete",
             "MeshForge has been updated!\n\n"
-            f"Git: {git_output.strip()[:200]}\n\n"
+            f"Git: {git_output.strip()[:200]}\n"
+            f"{svc_info}\n"
             "Please restart MeshForge to apply changes.\n\n"
             "Run: sudo meshforge"
         )
