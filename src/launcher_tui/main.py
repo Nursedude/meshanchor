@@ -112,6 +112,9 @@ from network_tools_mixin import NetworkToolsMixin
 from web_client_mixin import WebClientMixin
 from node_health_mixin import NodeHealthMixin
 from amateur_radio_mixin import AmateurRadioMixin
+from analytics_mixin import AnalyticsMixin
+from webhooks_mixin import WebhooksMixin
+from messaging_mixin import MessagingMixin
 from dashboard_mixin import DashboardMixin
 
 
@@ -150,6 +153,9 @@ class MeshForgeLauncher(
     WebClientMixin,
     NodeHealthMixin,
     AmateurRadioMixin,
+    AnalyticsMixin,
+    WebhooksMixin,
+    MessagingMixin,
     DashboardMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
@@ -789,9 +795,7 @@ class MeshForgeLauncher(
             name, method = entry
             self._safe_call(name, method)
 
-    # =========================================================================
-    # NEW Submenu: Dashboard (1)
-    # =========================================================================
+    # --- Submenu: Dashboard (1) ---
 
     def _dashboard_menu(self):
         """Dashboard - Status, health, alerts."""
@@ -804,6 +808,7 @@ class MeshForgeLauncher(
                 ("score", "Health Score        Network health snapshot"),
                 ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
+                ("analytics", "Analytics           Coverage & link trends"),
                 ("reports", "Reports             Generate status report"),
                 ("alerts", "View Alerts         Current warnings"),
                 ("back", "Back"),
@@ -826,6 +831,7 @@ class MeshForgeLauncher(
                 "score": ("Health Score", self._health_score_display),
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
                 "metrics": ("Historical Trends", self._metrics_menu),
+                "analytics": ("Analytics", self._analytics_menu),
                 "reports": ("Reports", self._reports_menu),
                 "alerts": ("View Alerts", self._show_alerts),
             }
@@ -833,11 +839,7 @@ class MeshForgeLauncher(
             if entry:
                 self._safe_call(*entry)
 
-    # Dashboard display methods are in DashboardMixin (dashboard_mixin.py)
-
-    # =========================================================================
-    # NEW Submenu: Mesh Networks (2)
-    # =========================================================================
+    # --- Submenu: Mesh Networks (2) ---
 
     def _mesh_networks_menu(self):
         """Mesh Networks - Meshtastic, RNS, AREDN."""
@@ -847,6 +849,7 @@ class MeshForgeLauncher(
                 ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
                 ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
+                ("messaging", "Messaging           Send/receive messages"),
                 ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
                 ("favorites", "Favorites           Manage favorite nodes"),
                 ("ham", "Ham Radio           Callsign, Part 97, ARES"),
@@ -868,6 +871,7 @@ class MeshForgeLauncher(
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
+                "messaging": ("Messaging", self._messaging_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
                 "favorites": ("Favorites", self._favorites_menu),
                 "ham": ("Ham Radio Tools", self._amateur_radio_menu),
@@ -877,9 +881,7 @@ class MeshForgeLauncher(
             if entry:
                 self._safe_call(*entry)
 
-    # =========================================================================
-    # NEW Submenu: RF & SDR (3)
-    # =========================================================================
+    # --- NEW Submenu: RF & SDR (3) ---
 
     def _rf_sdr_menu(self):
         """RF & SDR - Calculators, SDR monitoring."""
@@ -913,9 +915,7 @@ class MeshForgeLauncher(
             if entry:
                 self._safe_call(*entry)
 
-    # =========================================================================
-    # NEW Submenu: Maps & Viz (4)
-    # =========================================================================
+    # --- NEW Submenu: Maps & Viz (4) ---
 
     def _maps_viz_menu(self):
         """Maps & Visualization - Coverage maps, topology."""
@@ -1035,9 +1035,7 @@ class MeshForgeLauncher(
         except Exception as e:
             self.dialog.msgbox("Export Failed", f"Error: {e}")
 
-    # =========================================================================
-    # NEW Submenu: Configuration (5)
-    # =========================================================================
+    # --- NEW Submenu: Configuration (5) ---
 
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
@@ -1049,6 +1047,7 @@ class MeshForgeLauncher(
                 ("services", "Service Config      systemd services"),
                 ("backup", "Device Backup       Backup/restore configs"),
                 ("updates", "Software Updates    One-click updates"),
+                ("webhooks", "Webhooks            External notifications"),
                 ("meshforge", "MeshForge Settings  App preferences"),
                 ("config-api", "Config API Server   REST config endpoint"),
                 ("wizard", "Setup Wizard        First-run wizard"),
@@ -1071,6 +1070,7 @@ class MeshForgeLauncher(
                 "services": ("Service Config", self._service_menu),
                 "backup": ("Device Backup", self._device_backup_menu),
                 "updates": ("Software Updates", self._updates_menu),
+                "webhooks": ("Webhooks", self._webhooks_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
                 "config-api": ("Config API Server", self._config_api_menu),
                 "wizard": ("Setup Wizard", self._run_first_run_wizard),
@@ -1079,9 +1079,7 @@ class MeshForgeLauncher(
             if entry:
                 self._safe_call(*entry)
 
-    # =========================================================================
-    # NEW Submenu: System (6)
-    # =========================================================================
+    # --- NEW Submenu: System (6) ---
 
     def _system_menu(self):
         """System - Hardware, logs, Linux tools."""
@@ -1152,9 +1150,7 @@ class MeshForgeLauncher(
                 if self.dialog.yesno("Confirm Shutdown", "Shutdown the system now?"):
                     subprocess.run(['systemctl', 'poweroff'], timeout=30)
 
-    # =========================================================================
-    # NEW Submenu: About (a)
-    # =========================================================================
+    # --- NEW Submenu: About (a) ---
 
     def _about_menu(self):
         """About - Version, help, web client."""
@@ -1211,20 +1207,7 @@ SUPPORT:
         print(help_text)
         self._wait_for_enter()
 
-    # =========================================================================
-    # Legacy menu handler (for backward compatibility)
-    # =========================================================================
-
-    # Radio Menu methods moved to radio_menu_mixin.py (v0.4.8)
-
-    # Logs Menu methods moved to logs_menu_mixin.py (v0.4.8)
-    # Network Menu methods moved to network_tools_mixin.py (v0.5.0)
-    # RNS Menu methods moved to rns_menu_mixin.py (v0.4.8)
-    # AREDN Menu methods moved to aredn_mixin.py (v0.4.8)
-
-    # =========================================================================
-    # Config Menu - meshtasticd config.d/ management
-    # =========================================================================
+    # --- Config Menu - meshtasticd config.d/ management ---
 
     def _config_menu(self):
         """Configuration management for meshtasticd."""
@@ -1347,11 +1330,7 @@ SUPPORT:
 
         self._wait_for_enter()
 
-    # Web client methods are in WebClientMixin
-
-    # =========================================================================
-    # Terminal-native utilities (used by menus above)
-    # =========================================================================
+    # --- Terminal-native utilities ---
 
     def _run_diagnostics(self):
         """Run the MeshForge diagnostic tool."""
@@ -1395,8 +1374,6 @@ SUPPORT:
             self._wait_for_enter("\nPress Enter to return to menu...")
         except KeyboardInterrupt:
             print()
-
-    # _run_terminal_network moved to network_tools_mixin.py (v0.5.0)
 
     def _show_about(self):
         """Show about information."""
