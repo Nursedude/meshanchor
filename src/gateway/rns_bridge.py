@@ -806,21 +806,24 @@ class RNSMeshtasticBridge:
             logger.info("RNS not installed, will be handled in _connect_rns")
             return
 
-        # Ensure /etc/reticulum/storage/ratchets exists before RNS init.
-        # RNS Identity.persist_job() creates this in a background thread
-        # and crashes with PermissionError if it can't. Pre-creating it
-        # here (when running as root/sudo) prevents the crash.
+        # Ensure /etc/reticulum/storage subdirs exist before RNS init.
+        # RNS requires ratchets/ (Identity.persist_job), resources/
+        # (Reticulum.__init__), and cache/announces/ (Transport).
+        # Pre-creating them (when running as root/sudo) prevents crashes.
         if os.geteuid() == 0:
-            ratchets_missing = (
+            dirs_missing = (
                 ReticulumPaths.ETC_BASE.exists()
-                and not ReticulumPaths.ETC_RATCHETS.exists()
+                and (
+                    not ReticulumPaths.ETC_RATCHETS.exists()
+                    or not ReticulumPaths.ETC_RESOURCES.exists()
+                )
             )
             if not ReticulumPaths.ensure_system_dirs():
                 logger.warning("Could not create /etc/reticulum directories "
                              "(filesystem may be read-only)")
-            elif ratchets_missing:
+            elif dirs_missing:
                 # Dirs were just created — restart rnsd so it stops crashing
-                logger.info("Created missing RNS ratchets dir, restarting rnsd")
+                logger.info("Created missing RNS storage dirs, restarting rnsd")
                 try:
                     from utils.service_check import apply_config_and_restart
                     success, msg = apply_config_and_restart('rnsd')
