@@ -354,14 +354,14 @@ class DashboardMixin:
         print("=== Network Health Score ===\n")
 
         try:
-            from utils.health_score import HealthScorer
+            from utils.health_score import get_health_scorer
         except ImportError:
             print("  Health score module not available.")
             print("  File: src/utils/health_score.py")
             self._wait_for_enter()
             return
 
-        scorer = HealthScorer()
+        scorer = get_health_scorer()
         snapshot = scorer.get_snapshot()
 
         # Overall score with visual bar
