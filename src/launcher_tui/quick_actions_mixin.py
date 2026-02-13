@@ -91,6 +91,25 @@ class QuickActionsMixin:
         services = ['meshtasticd', 'rnsd', 'mosquitto', 'meshforge']
         warnings = []
         for svc in services:
+            # MeshForge TUI IS MeshForge — if we're running, it's running.
+            if svc == 'meshforge':
+                is_systemd = False
+                try:
+                    if _HAS_SERVICE_CHECK:
+                        is_running, _ = check_systemd_service(svc)
+                        is_systemd = is_running
+                    else:
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', svc],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        is_systemd = result.stdout.strip() == 'active'
+                except Exception:
+                    pass
+                mode = "service" if is_systemd else "interactive"
+                print(f"  * {svc:<18} running ({mode})")
+                continue
+
             try:
                 if _HAS_SERVICE_CHECK:
                     is_running, is_enabled = check_systemd_service(svc)

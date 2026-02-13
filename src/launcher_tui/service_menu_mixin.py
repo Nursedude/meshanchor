@@ -468,6 +468,30 @@ class ServiceMenuMixin:
         use_direct_rnsd = not self._has_systemd_unit('rnsd')
 
         for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+            # MeshForge TUI IS MeshForge — if we're executing this code, it's running.
+            # systemctl only knows about the systemd unit, not interactive sessions.
+            if svc == 'meshforge':
+                # Check systemd first, fall back to interactive detection
+                is_systemd = False
+                try:
+                    if _HAS_SERVICE_CHECK:
+                        svc_status = check_service(svc)
+                        is_systemd = svc_status.available
+                    else:
+                        result = subprocess.run(
+                            ['systemctl', 'is-active', svc],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        is_systemd = result.stdout.strip() == 'active'
+                except Exception:
+                    pass
+
+                if is_systemd:
+                    print(f"  \033[0;32m●\033[0m {svc:<18} running (service)")
+                else:
+                    print(f"  \033[0;32m●\033[0m {svc:<18} running (interactive)")
+                continue
+
             # Special handling for rnsd without systemd unit
             if svc == 'rnsd' and use_direct_rnsd:
                 if self._is_rnsd_running():
