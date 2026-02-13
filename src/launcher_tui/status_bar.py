@@ -65,6 +65,10 @@ class StatusBar:
     """Collects and formats service status for the TUI backtitle.
 
     Caches results to avoid calling systemctl on every dialog render.
+
+    When the ActiveHealthProbe is running, the status bar receives push
+    updates via the EventBus instead of polling systemctl directly.
+    Polling is kept as fallback for when the probe is not started.
     """
 
     def __init__(self, version: str = ""):
@@ -86,6 +90,9 @@ class StatusBar:
         self._env_state: Optional[EnvironmentState] = None
         if HAS_STARTUP_CHECKER:
             self._startup_checker = StartupChecker()
+        # Event-driven status updates from ActiveHealthProbe
+        self._event_subscribed = False
+        self._subscribe_to_events()
 
     def get_status_line(self) -> str:
         """Get the formatted status line for --backtitle.
@@ -244,6 +251,44 @@ class StatusBar:
         """
         self._refresh_if_stale()
         return self._cache.get(service_name, SYM_UNKNOWN)
+
+    # =========================================================================
+    # Event Bus Integration (Phase 1 — reliability engineering)
+    # =========================================================================
+
+    def _subscribe_to_events(self) -> None:
+        """Subscribe to EventBus for push-based service status updates.
+
+        When the ActiveHealthProbe is running, it emits ServiceEvents on
+        state changes. We listen for those and update our cache immediately
+        instead of waiting for the next polling cycle.
+        """
+        if self._event_subscribed:
+            return
+        try:
+            from utils.event_bus import event_bus
+            event_bus.subscribe('service', self._on_service_event)
+            self._event_subscribed = True
+            logger.debug("StatusBar subscribed to EventBus service events")
+        except ImportError:
+            logger.debug("EventBus not available — StatusBar will poll only")
+
+    def _on_service_event(self, event) -> None:
+        """Handle a ServiceEvent from the EventBus.
+
+        Updates the cache immediately so the next dialog render shows
+        the new state without waiting for the TTL-based refresh.
+        """
+        service_name = getattr(event, 'service_name', None)
+        if not service_name:
+            return
+        available = getattr(event, 'available', None)
+        if available is not None:
+            self._cache[service_name] = SYM_RUNNING if available else SYM_STOPPED
+            logger.debug(
+                f"StatusBar updated {service_name} via event: "
+                f"{'running' if available else 'stopped'}"
+            )
 
     # =========================================================================
     # Enhanced Status Methods (v0.4.8)
