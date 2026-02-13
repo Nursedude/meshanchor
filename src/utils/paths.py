@@ -110,6 +110,7 @@ class ReticulumPaths:
     ETC_BASE = Path('/etc/reticulum')
     ETC_STORAGE = ETC_BASE / 'storage'
     ETC_RATCHETS = ETC_STORAGE / 'ratchets'
+    ETC_RESOURCES = ETC_STORAGE / 'resources'
     ETC_CACHE = ETC_STORAGE / 'cache'
     ETC_ANNOUNCE_CACHE = ETC_CACHE / 'announces'
     ETC_INTERFACES = ETC_BASE / 'interfaces'
@@ -123,9 +124,10 @@ class ReticulumPaths:
         must exist with proper permissions before rnsd can start.
 
         The 'ratchets' subdirectory is required by RNS Identity.persist_job()
-        for key ratcheting support. The 'cache/announces' subdirectory is
-        required by Transport jobs for announce caching. Without these,
-        rnsd crashes with PermissionError in background threads.
+        for key ratcheting support. The 'resources' subdirectory is required
+        by RNS Reticulum.__init__() for resource storage. The 'cache/announces'
+        subdirectory is required by Transport jobs for announce caching.
+        Without these, rnsd crashes with PermissionError.
 
         Also fixes file permissions inside storage/ — if files were created
         by a different user (e.g. root vs rnsd), Transport jobs fail with
@@ -148,6 +150,7 @@ class ReticulumPaths:
                 # files, ratchets, and announce entries.
                 cls.ETC_STORAGE.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_RATCHETS.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_RESOURCES.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)

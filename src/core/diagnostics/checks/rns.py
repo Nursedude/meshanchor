@@ -148,10 +148,11 @@ def check_rns_storage_permissions() -> CheckResult:
             duration_ms=(time.time() - start) * 1000
         )
 
-    # All subdirectories RNS Transport needs to write to
+    # All subdirectories RNS needs to write to
     required_dirs = [
         (etc_storage, "storage/"),
         (etc_storage / 'ratchets', "storage/ratchets/"),
+        (etc_storage / 'resources', "storage/resources/"),
         (etc_storage / 'cache', "storage/cache/"),
         (etc_storage / 'cache' / 'announces', "storage/cache/announces/"),
     ]
@@ -172,7 +173,7 @@ def check_rns_storage_permissions() -> CheckResult:
             status=CheckStatus.FAIL,
             message="; ".join(issues),
             fix_hint=(
-                "sudo mkdir -p /etc/reticulum/storage/{ratchets,cache/announces} && "
+                "sudo mkdir -p /etc/reticulum/storage/{ratchets,resources,cache/announces} && "
                 "sudo chown -R $(whoami) /etc/reticulum/storage/"
             ),
             duration_ms=duration
@@ -182,7 +183,7 @@ def check_rns_storage_permissions() -> CheckResult:
         name="RNS storage permissions",
         category=CheckCategory.RNS,
         status=CheckStatus.PASS,
-        message="storage/, ratchets/, cache/announces/ directories OK",
+        message="storage/, ratchets/, resources/, cache/announces/ directories OK",
         duration_ms=duration
     )
 

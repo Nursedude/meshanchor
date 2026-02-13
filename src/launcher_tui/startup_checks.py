@@ -266,9 +266,11 @@ class StartupChecker:
     def _heal_rns_storage_dirs(self):
         """Create missing RNS storage directories and restart rnsd if needed.
 
-        RNS Identity.persist_job() requires /etc/reticulum/storage/ratchets/.
-        If the directory is missing, we create it and restart rnsd so it
-        picks up the fix without requiring manual intervention.
+        RNS requires several subdirectories under /etc/reticulum/storage/:
+        - ratchets/ (Identity.persist_job key ratcheting)
+        - resources/ (Reticulum.__init__ resource storage)
+        - cache/announces/ (Transport announce caching)
+        If any are missing, we create them and restart rnsd.
         """
         try:
             from utils.paths import ReticulumPaths
@@ -276,11 +278,13 @@ class StartupChecker:
             return
 
         ratchets = ReticulumPaths.ETC_RATCHETS
+        resources = ReticulumPaths.ETC_RESOURCES
         announces = ReticulumPaths.ETC_ANNOUNCE_CACHE
         needs_restart = (
             ReticulumPaths.ETC_BASE.exists()
             and (
                 not ratchets.exists()
+                or not resources.exists()
                 or not announces.exists()
                 or self._has_permission_issues(announces)
             )
