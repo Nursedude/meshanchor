@@ -466,11 +466,27 @@ class RNSMenuMixin(RNSSnifferMixin):
         status = get_status()
         status_data = status.data or {}
         running = status_data.get('rnsd_running', False)
+        service_state = status_data.get('service_state', '')
         print(f"  rnsd: {'RUNNING' if running else 'NOT RUNNING'}")
         if status_data.get('rnsd_pid'):
             print(f"  PID: {status_data['rnsd_pid']}")
-        if status_data.get('service_state'):
-            print(f"  State: {status_data['service_state']}")
+        if service_state:
+            print(f"  State: {service_state}")
+
+        # Detect NomadNet conflict (common cause of rnsd crash-loops)
+        nomadnet_conflict = self._check_nomadnet_conflict()
+        if nomadnet_conflict:
+            print(f"  NomadNet: RUNNING (port conflict!)")
+        if service_state == 'failed' or (not running and nomadnet_conflict):
+            print("")
+            if nomadnet_conflict:
+                print("  WARNING: NomadNet is holding the RNS shared instance port.")
+                print("  rnsd cannot bind port 37428 while NomadNet is running.")
+                print("  Fix: stop NomadNet first, or disable rnsd and let NomadNet")
+                print("  serve as the shared instance.")
+            elif service_state == 'failed':
+                print("  WARNING: rnsd has crashed. Check logs:")
+                print("    sudo journalctl -u rnsd -n 30")
 
         # 2. Config check
         print("\n[2/4] Checking configuration...")
@@ -500,12 +516,45 @@ class RNSMenuMixin(RNSSnifferMixin):
 
         # Summary
         issues = conn_data.get('issues', [])
+        warnings = conn_data.get('warnings', [])
         if issues:
             print(f"\n--- Issues Found ({len(issues)}) ---")
             for issue in issues:
                 print(f"  ! {issue}")
-        else:
+        if warnings:
+            print(f"\n--- Warnings ({len(warnings)}) ---")
+            for warning in warnings:
+                print(f"  ~ {warning}")
+
+        if not issues and not warnings:
             print("\n--- All checks passed ---")
+        elif not issues:
+            print("\n--- Connectivity OK (with warnings) ---")
+
+        # Offer to create missing identities
+        if not identity_exists or not rns_identity.exists():
+            print("\n--- Identity Setup ---")
+            if self.dialog.yesno(
+                "Create Identities",
+                "One or more RNS identities are missing.\n\n"
+                "Create them now?\n\n"
+                "  • RNS identity: used by rnsd for network presence\n"
+                "  • Gateway identity: used by MeshForge bridge"
+            ):
+                try:
+                    from commands.rns import create_identities
+                    result = create_identities()
+                    if result.success:
+                        print(f"  ✓ {result.message}")
+                        created = (result.data or {}).get('created', [])
+                        if 'rns' in created:
+                            print(f"    RNS identity: {result.data['rns_identity']}")
+                        if 'gateway' in created:
+                            print(f"    Gateway identity: {result.data['gateway_identity']}")
+                    else:
+                        print(f"  ✗ {result.message}")
+                except Exception as e:
+                    print(f"  ✗ Identity creation failed: {e}")
 
         # RNS tool availability
         print("\n--- RNS Tool Availability ---")
@@ -1254,7 +1303,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("\nError: RNS port conflict (Address already in use)")
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
-            elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
+            elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "could not get" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
                 # RNS shared instance issue - AUTO-FIX
                 print(f"\nRNS connectivity issue detected.")
                 print("MeshForge will attempt to fix this automatically...\n")
@@ -1296,9 +1345,46 @@ class RNSMenuMixin(RNSSnifferMixin):
             print(f"\n{tool_name} timed out. RNS may be unresponsive.")
             print("Try restarting rnsd: sudo systemctl restart rnsd")
 
+    def _check_nomadnet_conflict(self) -> bool:
+        """Check if NomadNet is running and holding the shared instance port.
+
+        NomadNet creates its own Reticulum() instance and becomes the shared
+        instance on port 37428. If rnsd is also configured with
+        share_instance = Yes, they fight over the port causing crash loops.
+
+        Returns True if NomadNet conflict detected.
+        """
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'nomadnet'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
+
     def _diagnose_rns_port_conflict(self):
         """Print diagnostic info for RNS Address-in-use port conflicts."""
         try:
+            # Check NomadNet first — most common cause of port conflicts
+            if self._check_nomadnet_conflict():
+                print("CAUSE: NomadNet is running and owns the RNS shared instance.")
+                print("")
+                print("NomadNet creates its own Reticulum instance on port 37428.")
+                print("When rnsd also tries to bind that port, it crash-loops.")
+                print("")
+                print("Options:")
+                print("  1. Stop NomadNet before starting rnsd:")
+                print("     pkill -f nomadnet && sudo systemctl restart rnsd")
+                print("")
+                print("  2. Run rnsd as a client (no shared instance):")
+                print("     Set 'share_instance = No' in rnsd config,")
+                print("     then NomadNet acts as the shared instance for all RNS tools.")
+                print("")
+                print("  3. Stop rnsd and let NomadNet be the shared instance:")
+                print("     sudo systemctl stop rnsd && sudo systemctl disable rnsd")
+                return
+
             # Use centralized service check when available
             if _HAS_SERVICE_CHECK:
                 rnsd_running = check_process_running('rnsd')
