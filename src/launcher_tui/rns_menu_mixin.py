@@ -840,6 +840,20 @@ class RNSMenuMixin(RNSSnifferMixin):
         if files_cleared == 0:
             print("    No stale auth files found")
 
+        # Pre-flight: check for blocking interfaces BEFORE starting rnsd.
+        # If enabled interfaces have missing dependencies (e.g., meshtasticd
+        # not running), rnsd will hang during init and never bind port 37428.
+        blocking = self._find_blocking_interfaces()
+        if blocking:
+            print("\n  WARNING: Enabled interfaces have missing dependencies:")
+            for iface_name, reason, fix in blocking:
+                print(f"    [{iface_name}] {reason}")
+                print(f"    Fix: {fix}")
+            print()
+            print("  rnsd will hang if these interfaces can't connect.")
+            print("  Consider disabling them in /etc/reticulum/config")
+            print("  or starting the missing services first.\n")
+
         # Start rnsd with fresh state
         print("  Starting rnsd...")
         try:
@@ -1492,17 +1506,38 @@ class RNSMenuMixin(RNSSnifferMixin):
             pass
 
         # Check 3: rnsd started but not yet listening (slow init)
+        # Most common cause: an enabled interface is blocking because its
+        # dependency is unavailable (e.g., Meshtastic_Interface needs meshtasticd).
+        # rnsd initializes interfaces BEFORE binding the shared instance port,
+        # so a blocking interface prevents everything.
         try:
             r = subprocess.run(
                 ['ss', '-tlnp', 'sport', '=', ':37428'],
                 capture_output=True, text=True, timeout=5
             )
             if ':37428' not in r.stdout:
-                print("Cause: rnsd is active but not listening on port 37428 yet.")
-                print("       This can happen when rnsd is still initializing")
-                print("       (crypto key generation, slow storage, low entropy).\n")
-                print("Check: sudo journalctl -u rnsd -n 20 --no-pager")
-                print("Wait:  Give it 30-60 seconds, then retry.")
+                # Check if an enabled interface has a missing dependency
+                blocking = self._find_blocking_interfaces()
+                if blocking:
+                    print("Cause: rnsd is stuck initializing an interface whose")
+                    print("       dependency is unavailable.\n")
+                    for iface_name, reason, fix in blocking:
+                        print(f"  Interface: {iface_name}")
+                        print(f"  Problem:   {reason}")
+                        print(f"  Fix:       {fix}\n")
+                    print("Until the dependency is available, rnsd cannot bind")
+                    print("port 37428 and all RNS tools will fail.\n")
+                    print("Options:")
+                    print("  1. Start the missing dependency (see Fix above)")
+                    print("  2. Disable the interface in /etc/reticulum/config")
+                    print("     (change 'enabled = yes' to 'enabled = no')")
+                    print("  3. sudo systemctl restart rnsd (after fixing)")
+                else:
+                    print("Cause: rnsd is active but not listening on port 37428 yet.")
+                    print("       This can happen when rnsd is still initializing")
+                    print("       (crypto key generation, slow storage).\n")
+                    print("Check: sudo journalctl -u rnsd -n 20 --no-pager")
+                    print("Wait:  Give it 30-60 seconds, then retry.")
                 return
         except (subprocess.SubprocessError, OSError):
             pass
@@ -1516,6 +1551,104 @@ class RNSMenuMixin(RNSSnifferMixin):
         print("  sudo journalctl -u rnsd -n 30 --no-pager")
         print("  sudo systemctl restart rnsd")
         print("  ls -la /etc/reticulum/storage/")
+
+    def _find_blocking_interfaces(self) -> list:
+        """Check if enabled RNS interfaces have missing dependencies.
+
+        Parses /etc/reticulum/config for enabled interfaces and checks
+        whether their required services/hosts are available. Returns a
+        list of (interface_name, problem, fix) tuples for blocking interfaces.
+
+        This is the root cause of "rnsd active but not listening on 37428":
+        rnsd initializes interfaces BEFORE binding the shared instance port.
+        A blocking interface (e.g., TCP connect to dead host) prevents
+        the shared instance from ever becoming available.
+        """
+        blocking = []
+        config_file = ReticulumPaths.get_config_file()
+        if not config_file.exists():
+            return blocking
+
+        try:
+            content = config_file.read_text()
+        except (OSError, PermissionError):
+            return blocking
+
+        # Parse enabled interfaces from the config
+        # RNS config uses [[InterfaceName]] sections with type= and enabled=
+        import re
+        # Match interface sections: [[Name]] ... type = ... enabled = yes
+        iface_pattern = re.compile(
+            r'^\s*\[\[(.+?)\]\]\s*$'
+            r'(.*?)'
+            r'(?=^\s*\[\[|\Z)',
+            re.MULTILINE | re.DOTALL
+        )
+
+        for match in iface_pattern.finditer(content):
+            name = match.group(1).strip()
+            body = match.group(2)
+
+            # Check if enabled
+            enabled_match = re.search(r'^\s*enabled\s*=\s*(yes|true|1)', body,
+                                      re.IGNORECASE | re.MULTILINE)
+            if not enabled_match:
+                continue
+
+            # Check interface type
+            type_match = re.search(r'^\s*type\s*=\s*(\S+)', body,
+                                   re.IGNORECASE | re.MULTILINE)
+            if not type_match:
+                continue
+
+            iface_type = type_match.group(1)
+
+            # Check Meshtastic_Interface → needs meshtasticd
+            if iface_type == 'Meshtastic_Interface':
+                tcp_match = re.search(r'^\s*tcp_port\s*=\s*(\S+)', body,
+                                      re.IGNORECASE | re.MULTILINE)
+                if tcp_match:
+                    host_port = tcp_match.group(1)
+                    # Check if meshtasticd is running
+                    try:
+                        r = subprocess.run(
+                            ['systemctl', 'is-active', 'meshtasticd'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if r.stdout.strip() != 'active':
+                            blocking.append((
+                                name,
+                                f"Meshtastic_Interface needs meshtasticd ({host_port}) "
+                                f"but meshtasticd is not running",
+                                "sudo systemctl start meshtasticd"
+                            ))
+                    except (subprocess.SubprocessError, OSError):
+                        pass
+
+            # Check TCPClientInterface → needs reachable host
+            elif iface_type == 'TCPClientInterface':
+                host_match = re.search(r'^\s*target_host\s*=\s*(\S+)', body,
+                                       re.IGNORECASE | re.MULTILINE)
+                port_match = re.search(r'^\s*target_port\s*=\s*(\d+)', body,
+                                       re.IGNORECASE | re.MULTILINE)
+                if host_match and port_match:
+                    host = host_match.group(1)
+                    port = port_match.group(1)
+                    # Quick TCP connect test (1-second timeout)
+                    import socket
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(1)
+                        sock.connect((host, int(port)))
+                        sock.close()
+                    except (socket.timeout, ConnectionRefusedError, OSError):
+                        blocking.append((
+                            name,
+                            f"TCPClientInterface target {host}:{port} is unreachable",
+                            f"Check if {host}:{port} is online and reachable"
+                        ))
+
+        return blocking
 
     def _check_nomadnet_conflict(self) -> bool:
         """Check if NomadNet is running and holding the shared instance port.
