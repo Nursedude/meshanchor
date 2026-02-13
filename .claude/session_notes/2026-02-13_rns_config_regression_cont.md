@@ -7,80 +7,93 @@
 
 Continuation of RNS config auto-fix regression work. Prior session made 4 fixes
 but the underlying systemic issue persisted. This session traced the full
-progression from clean install to broken state and identified 4 design gaps
-that combine to create the recurring config/permission/auth failure.
+progression from clean install to broken state and identified 5 design gaps.
 
-## Root Cause Analysis
+## The Full Failure Progression (CRITICAL — read before next session)
 
-The recurring failure is caused by **4 gaps** that combine:
+This is the sequence that breaks RNS and NomadNet:
 
-### Gap 1: Auth token clearing is incomplete
-`_auto_fix_rns_shared_instance()` cleared tokens from `/etc/reticulum/storage`
-and `/root/.reticulum/storage` but NOT from `~/.reticulum/storage` (real user).
-After rnsd restart with new tokens, NomadNet (if it falls back to ~/.reticulum)
-has stale tokens → AuthenticationError.
+1. **Clean template deployed** — AutoInterface only, rnsd works
+2. **User configures interfaces** — adds Meshtastic Gateway (tcp_port=127.0.0.1:4403),
+   Regional TCP client (192.168.86.38:4242)
+3. **meshtasticd stops** (or isn't running, or host unreachable)
+4. **rnsd hangs** — interface init runs BEFORE binding port 37428.
+   Meshtastic_Interface blocks trying to connect to dead meshtasticd.
+   rnsd appears "active" to systemd but never binds shared instance port.
+5. **RNS tools fail** — "no shared instance" because 37428 isn't listening
+6. **Auto-fix triggers** — clears auth tokens, restarts rnsd → same hang
+7. **NomadNet fails** — can't connect to shared instance either
+8. **Cascading breakage** — repeated auto-fix cycles accumulate stale state
 
-### Gap 2: Config path is not explicit
-NomadNet relied on RNS's default resolution (returning None from
-`_get_rns_config_for_user()`). Different user contexts may resolve to different
-paths. When `~/.reticulum/config` exists, NomadNet (running as real user) may
-use it instead of `/etc/reticulum/config` → config drift → auth mismatch.
+## Root Cause: 5 Design Gaps
 
-### Gap 3: `chmod -R 755` destroys world-writable
-The "fix permissions" option in `_check_rns_for_nomadnet()` ran
-`chmod -R 755 /etc/reticulum/`, removing S_IWOTH from storage. Next NomadNet
-launch detects storage isn't writable → falls back to ~/.reticulum → drift.
+### Gap 1: Auth token clearing incomplete
+Fixed: now clears from all 4 locations (etc, root, user, user-XDG)
+
+### Gap 2: NomadNet config path not explicit
+Fixed: `_get_rns_config_for_user()` always returns explicit path, never None
+
+### Gap 3: `chmod -R 755` destroyed world-writable storage
+Fixed: targeted `chmod 777` on storage only, auto-fix instead of fallback
 
 ### Gap 4: Storage file permissions not fixed before NomadNet launch
-`_fix_storage_file_permissions()` only ran during gateway bridge startup and
-auto-fix, NOT before NomadNet launch. Files created by rnsd (root, 0o644)
-are read-only to the real user.
+Fixed: `_get_rns_config_for_user()` calls `_fix_storage_file_permissions()`
 
-## Issues Fixed This Session
+### Gap 5: Blocking interfaces prevent rnsd from starting (NEW)
+Fixed: `_find_blocking_interfaces()` detects:
+- Meshtastic_Interface with meshtasticd not running
+- TCPClientInterface with unreachable host
+Runs in diagnostics AND before auto-fix starts rnsd.
 
-### 1. Entropy Diagnostic Wrong Service Name
-**File:** `src/launcher_tui/rns_menu_mixin.py`
-- Suggested `rng-tools`/`rngd` instead of `rng-tools-debian` for Debian/Pi OS
-- **Fix:** Probes systemd for actual service name before suggesting commands
+## Current System State (User's Pi)
 
-### 2. Auth Token Clearing Now Covers All Locations
-**File:** `src/launcher_tui/rns_menu_mixin.py` — `_auto_fix_rns_shared_instance()`
-- Now clears `shared_instance_*` from ALL 4 locations:
-  - `/etc/reticulum/storage`
-  - `/root/.reticulum/storage`
-  - `~/.reticulum/storage` (real user)
-  - `~/.config/reticulum/storage` (real user XDG)
+Config at `/etc/reticulum/config` has 3 active interfaces:
+- `[[Default Interface]]` — AutoInterface (OK)
+- `[[Regional RNS]]` — TCPClientInterface to 192.168.86.38:4242 (may be unreachable)
+- `[[Meshtastic Gateway]]` — Meshtastic_Interface to 127.0.0.1:4403 (needs meshtasticd)
 
-### 3. NomadNet Always Uses Explicit Config Path
-**File:** `src/launcher_tui/nomadnet_client_mixin.py` — `_get_rns_config_for_user()`
-- Never returns None — always returns explicit path
-- When `/etc/reticulum/config` exists → always uses it (auto-fixes permissions)
-- No fallback to `~/.reticulum` which caused config drift
-- NomadNet launched with `--rnsconfig /etc/reticulum` (same as rnsd)
+Plugin exists: `/etc/reticulum/interfaces/Meshtastic_Interface.py` (18KB)
+Entropy: 256 (rng-tools-debian installed and running)
+rnsd: running but NOT listening on 37428 (stuck in interface init)
 
-### 4. Removed Destructive chmod -R 755
-**File:** `src/launcher_tui/nomadnet_client_mixin.py` — `_check_rns_for_nomadnet()`
-- Old code: `chmod -R 755 /etc/reticulum/` removed world-writable from storage
-- New code: `storage_dir.chmod(0o777)` + `_fix_storage_file_permissions()`
-- Never offers to fall back to `~/.reticulum` — always fixes system config
-- No more "continue with user config" option that created config drift
+## What User Needs to Do
 
-## Design Principle Established
+After pulling these fixes:
+```bash
+# First: start meshtasticd so the Meshtastic interface can connect
+sudo systemctl start meshtasticd
 
-**NomadNet and rnsd MUST always use the SAME config directory.**
-- System config at `/etc/reticulum/config` is the convergence point
-- When it exists, ALWAYS pass `--rnsconfig /etc/reticulum` to NomadNet
-- Fix permissions rather than falling back to a different config dir
-- Clear auth tokens from ALL known locations when restarting rnsd
+# Then restart rnsd (it will now detect blocking interfaces)
+sudo systemctl restart rnsd
 
-## Commits
+# Verify
+rnstatus
+```
+
+If meshtasticd isn't needed yet, disable the interface:
+```bash
+# Edit config: change enabled = yes → enabled = no under [[Meshtastic Gateway]]
+sudo nano /etc/reticulum/config
+sudo systemctl restart rnsd
+```
+
+## Commits (3 total this session)
 1. `fix: detect correct entropy service name for Debian/Pi OS`
 2. `fix: eliminate RNS config drift between rnsd and NomadNet`
+3. `fix: detect blocking RNS interfaces that prevent rnsd from starting`
 
 ## Tests
-- 4021 passed, 19 skipped (271s) — all clean
+- 4021 passed, 19 skipped — all clean after each commit
+
+## Next Session TODO
+- [ ] Verify fixes work on user's Pi after pull
+- [ ] Consider: auto-disable blocking interfaces when starting rnsd (with user consent)
+- [ ] Consider: add "Interface Dependencies" section to RNS Diagnostics menu
+- [ ] Consider: rnsd service file fix — `StartLimitIntervalSec` in wrong section
+      (should be in [Unit], not [Service] — systemd warns about this)
+- [ ] NomadNet may need its own pre-flight (check rnsd is listening before launch)
 
 ## Session Status
-- Clean — focused and systematic
-- Deep root cause analysis completed
-- 4 design gaps identified and fixed
+- Stopping due to session entropy (crossing live system debug + code fixes)
+- All code changes are committed, tested, and pushed
+- Session notes complete for handoff
