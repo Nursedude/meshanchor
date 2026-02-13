@@ -1014,19 +1014,19 @@ Common Issues:
 
     kb._add_guide(TroubleshootingGuide(
         problem="rnsd_ratchets_permission",
-        description="rnsd crashes with PermissionError on /etc/reticulum/storage/ratchets",
+        description="rnsd crashes with PermissionError on /etc/reticulum/storage/ subdirectories (ratchets, resources, cache)",
         prerequisites=["rnsd installed", "Using system-wide config at /etc/reticulum/"],
         steps=[
             TroubleshootingStep(
-                instruction="Check if ratchets directory exists",
-                command="ls -la /etc/reticulum/storage/ratchets",
-                expected_result="Directory exists with write permissions",
-                if_fail="Directory missing — RNS Identity.persist_job() needs it for key ratcheting",
+                instruction="Check if required storage subdirectories exist",
+                command="ls -la /etc/reticulum/storage/{ratchets,resources,cache/announces}",
+                expected_result="All directories exist with write permissions",
+                if_fail="One or more directories missing — RNS needs ratchets/ (key ratcheting), resources/ (resource storage), cache/announces/ (transport)",
             ),
             TroubleshootingStep(
-                instruction="Create the ratchets directory with correct permissions",
-                command="sudo mkdir -p /etc/reticulum/storage/ratchets && sudo chmod 755 /etc/reticulum/storage/ratchets",
-                expected_result="Directory created successfully",
+                instruction="Create all required directories with correct permissions",
+                command="sudo mkdir -p /etc/reticulum/storage/{ratchets,resources,cache/announces} && sudo chmod 755 /etc/reticulum/storage/{ratchets,resources,cache/announces}",
+                expected_result="Directories created successfully",
                 if_fail="Check filesystem is not mounted read-only",
             ),
             TroubleshootingStep(
