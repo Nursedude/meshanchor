@@ -456,3 +456,94 @@ class TestStatusBarEdgeCases:
                 for _ in range(100):
                     line = bar.get_status_line()
                     assert isinstance(line, str)
+
+
+class TestSubsystemStatusDisplay:
+    """Test bridge status with subsystem states (Phase 2)."""
+
+    def test_bridge_healthy_both_subsystems(self):
+        """Both subsystems healthy shows running symbol."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "healthy", "rns": "healthy"})
+        result = bar._format_bridge_status()
+        assert result == "bridge:*"
+
+    def test_bridge_degraded_rns_down(self):
+        """RNS subsystem down shows DEGRADED(rns)."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "healthy", "rns": "disconnected"})
+        result = bar._format_bridge_status()
+        assert result == "bridge:DEGRADED(rns)"
+
+    def test_bridge_degraded_mesh_down(self):
+        """Meshtastic subsystem down shows DEGRADED(mesh)."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "disconnected", "rns": "healthy"})
+        result = bar._format_bridge_status()
+        assert result == "bridge:DEGRADED(mesh)"
+
+    def test_bridge_offline_both_down(self):
+        """Both subsystems down shows OFFLINE."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "disconnected", "rns": "disconnected"})
+        result = bar._format_bridge_status()
+        assert result == "bridge:OFFLINE"
+
+    def test_bridge_not_running(self):
+        """Bridge not running shows stopped symbol."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = False
+        result = bar._format_bridge_status()
+        assert result == "bridge:-"
+
+    def test_bridge_running_no_subsystem_data(self):
+        """Bridge running but no subsystem data shows running symbol."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        result = bar._format_bridge_status()
+        assert result == "bridge:*"
+
+    def test_disabled_subsystem_treated_as_down(self):
+        """DISABLED subsystem treated as not healthy."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "healthy", "rns": "disabled"})
+        result = bar._format_bridge_status()
+        assert result == "bridge:DEGRADED(rns)"
+
+    def test_subsystem_states_in_status_line(self):
+        """Subsystem state appears in full status line."""
+        bar = StatusBar(version="1.0")
+        bar._bridge_running = True
+        bar.set_subsystem_states({"meshtastic": "healthy", "rns": "disconnected"})
+        with patch.object(bar, '_refresh_if_stale'):
+            line = bar.get_status_line()
+            assert "DEGRADED(rns)" in line
+
+    def test_event_updates_subsystem_state(self):
+        """ServiceEvent with bridge_ prefix updates subsystem state."""
+        bar = StatusBar(version="1.0")
+
+        class FakeEvent:
+            service_name = "bridge_rns"
+            available = False
+            message = "rns: disconnected"
+
+        bar._on_service_event(FakeEvent())
+        assert bar._subsystem_states.get("rns") == "disconnected"
+
+    def test_event_healthy_subsystem(self):
+        """ServiceEvent for healthy bridge subsystem."""
+        bar = StatusBar(version="1.0")
+
+        class FakeEvent:
+            service_name = "bridge_meshtastic"
+            available = True
+            message = "meshtastic: healthy"
+
+        bar._on_service_event(FakeEvent())
+        assert bar._subsystem_states.get("meshtastic") == "healthy"

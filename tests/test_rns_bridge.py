@@ -1188,53 +1188,53 @@ class TestRNSConnectionFlow:
 # ---------------------------------------------------------------------------
 
 class TestHeadlessHelpers:
-    """Tests for module-level helper functions."""
+    """Tests for module-level helper functions (extracted to gateway_cli.py)."""
 
     def test_is_gateway_running_no_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
-            mod._active_bridge = None
-            assert mod.is_gateway_running() is False
+            cli._active_bridge = None
+            assert cli.is_gateway_running() is False
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_is_gateway_running_with_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
             mock_bridge = MagicMock()
             mock_bridge._running = True
-            mod._active_bridge = mock_bridge
-            assert mod.is_gateway_running() is True
+            cli._active_bridge = mock_bridge
+            assert cli.is_gateway_running() is True
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_is_gateway_running_stopped_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
             mock_bridge = MagicMock()
             mock_bridge._running = False
-            mod._active_bridge = mock_bridge
-            assert mod.is_gateway_running() is False
+            cli._active_bridge = mock_bridge
+            assert cli.is_gateway_running() is False
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_get_gateway_stats_no_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
-            mod._active_bridge = None
-            stats = mod.get_gateway_stats()
+            cli._active_bridge = None
+            stats = cli.get_gateway_stats()
             assert stats['running'] is False
             assert stats['status'] == 'Not started'
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_get_gateway_stats_with_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
             mock_bridge = MagicMock()
             mock_bridge._running = True
@@ -1251,47 +1251,55 @@ class TestHeadlessHelpers:
             }
             mock_bridge.health.get_summary.return_value = {"status": "ok"}
             mock_bridge.delivery_tracker.get_stats.return_value = {"delivered": 2}
-            mod._active_bridge = mock_bridge
+            cli._active_bridge = mock_bridge
 
-            stats = mod.get_gateway_stats()
+            stats = cli.get_gateway_stats()
             assert stats['running'] is True
             assert stats['messages_mesh_to_rns'] == 3
             assert stats['health'] == {"status": "ok"}
             assert stats['delivery'] == {"delivered": 2}
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_stop_gateway_headless_no_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
-            mod._active_bridge = None
-            assert mod.stop_gateway_headless() is True
+            cli._active_bridge = None
+            assert cli.stop_gateway_headless() is True
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_stop_gateway_headless_with_bridge(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
             mock_bridge = MagicMock()
-            mod._active_bridge = mock_bridge
-            assert mod.stop_gateway_headless() is True
+            cli._active_bridge = mock_bridge
+            assert cli.stop_gateway_headless() is True
             mock_bridge.stop.assert_called_once()
-            assert mod._active_bridge is None
+            assert cli._active_bridge is None
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
 
     def test_stop_gateway_headless_error(self):
-        import gateway.rns_bridge as mod
-        original = mod._active_bridge
+        import gateway.gateway_cli as cli
+        original = cli._active_bridge
         try:
             mock_bridge = MagicMock()
             mock_bridge.stop.side_effect = RuntimeError("stop fail")
-            mod._active_bridge = mock_bridge
-            assert mod.stop_gateway_headless() is False
+            cli._active_bridge = mock_bridge
+            assert cli.stop_gateway_headless() is False
         finally:
-            mod._active_bridge = original
+            cli._active_bridge = original
+
+    def test_reexport_from_rns_bridge(self):
+        """Verify backward-compatible re-export from rns_bridge."""
+        import gateway.rns_bridge as mod
+        assert hasattr(mod, 'start_gateway_headless')
+        assert hasattr(mod, 'stop_gateway_headless')
+        assert hasattr(mod, 'get_gateway_stats')
+        assert hasattr(mod, 'is_gateway_running')
 
 
 # ---------------------------------------------------------------------------
