@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-3927%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-4017%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -100,7 +100,7 @@ Already running MeshForge? Pick your path:
 # Your radio, RNS identity, and MQTT broker are NOT touched
 sudo bash /opt/meshforge/scripts/reinstall.sh
 
-# Option 2: Quick update (minor code changes only)
+# Option 2: Quick update (code + service files)
 cd /opt/meshforge && sudo bash scripts/update.sh
 
 # Option 3: Manual git pull (developers)
@@ -150,8 +150,8 @@ Do you need to upgrade?
   ├── Import errors, stale .pyc, major version bump, or something "feels off"
   │   └── Clean Reinstall (recommended)
   │
-  ├── Small code change, no new dependencies
-  │   └── Quick Update (git pull)
+  ├── Small code change, update service files
+  │   └── Quick Update (update.sh)
   │
   └── Switching from alpha branch to main
       └── Branch Switch
@@ -192,15 +192,22 @@ sudo bash scripts/reinstall.sh --no-confirm    # Skip confirmation prompt
 sudo bash scripts/reinstall.sh --branch alpha   # Install specific branch
 ```
 
-### Quick Update (Git Pull)
+### Quick Update
 
-For developers tracking the repo, when the update is minor:
+For developers tracking the repo. Updates code, dependencies, and service files:
 
 ```bash
 cd /opt/meshforge && sudo bash scripts/update.sh
 ```
 
-Or manually:
+**What happens:**
+1. Pulls latest code from GitHub
+2. Updates Python dependencies if `requirements.txt` changed
+3. Updates desktop integration
+4. Deploys updated systemd service files (rnsd crash-loop protection, startup ordering)
+5. Runs `systemctl daemon-reload`
+
+Or manually (code only — does NOT update service files):
 ```bash
 cd /opt/meshforge && sudo git pull origin main
 ```
@@ -289,7 +296,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
-| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity management | Stable |
+| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity create/manage, pre-flight checks | Stable |
 | **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS — accessible from Emergency Mode | Beta |
 | **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device, filter by favorites | Beta |
 | **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Beta |
@@ -618,7 +625,7 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,465 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,494 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
@@ -797,7 +804,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**3,927 tests passing** across the gateway, monitoring, and utility layers:
+**4,017 tests passing** across the gateway, monitoring, and utility layers:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -838,8 +845,11 @@ print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanne
 | MF004 | All subprocess calls need `timeout` parameter | Active monitoring |
 
 **Reliability patterns** (inspired by [Raspberry Pi systemd best practices](https://www.thedigitalpictureframe.com/ultimate-guide-systemd-autostart-scripts-raspberry-pi/)):
-- Services use `Restart=always` with `RestartSec=3` for auto-recovery
+- Services use `Restart=on-failure` with `RestartSec=5` for auto-recovery
+- Crash-loop protection: `StartLimitBurst=5` / `StartLimitIntervalSec=60` on rnsd
+- Startup ordering: meshforge.service `After=rnsd.service` ensures identity exists
 - Pre-flight `check_service()` before connecting to meshtasticd/rnsd
+- RNS identity pre-flight: startup checks verify `~/.reticulum/storage/identities` exists
 - Shared connection manager prevents TCP:4403 client contention
 - Exponential backoff reconnection (1s → 2s → 4s → ... → 30s max)
 
