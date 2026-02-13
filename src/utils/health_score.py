@@ -673,6 +673,54 @@ class HealthScorer:
         self._history.clear()
 
 
+# =============================================================================
+# Module-level singleton and EventBus integration
+# =============================================================================
+
+_health_scorer: Optional[HealthScorer] = None
+
+
+def get_health_scorer() -> HealthScorer:
+    """Get the singleton HealthScorer instance.
+
+    Creates the scorer on first call and subscribes to the EventBus
+    so that service status updates from the ActiveHealthProbe are
+    automatically fed into the scoring engine.
+
+    Returns:
+        Shared HealthScorer instance.
+    """
+    global _health_scorer
+    if _health_scorer is not None:
+        return _health_scorer
+
+    _health_scorer = HealthScorer()
+
+    # Subscribe to EventBus service events for automatic scoring
+    try:
+        from utils.event_bus import event_bus
+        event_bus.subscribe('service', _on_service_event)
+    except ImportError:
+        pass  # EventBus not available — scorer works without it
+
+    return _health_scorer
+
+
+def _on_service_event(event) -> None:
+    """Feed EventBus ServiceEvents into the HealthScorer."""
+    scorer = _health_scorer
+    if scorer is None:
+        return
+    service_name = getattr(event, 'service_name', None)
+    available = getattr(event, 'available', None)
+    if service_name is not None and available is not None:
+        scorer.report_service_status(
+            name=service_name,
+            running=available,
+            critical=(service_name in ('meshtasticd', 'rnsd')),
+        )
+
+
 def format_health_display(snapshot: HealthSnapshot) -> str:
     """Format health snapshot for TUI display.
 

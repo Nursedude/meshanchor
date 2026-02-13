@@ -188,10 +188,10 @@ class PrometheusExporter:
         except Exception as e:
             logger.debug(f"Error collecting health metrics: {e}")
 
-        # Health scores from HealthScorer
+        # Health scores from HealthScorer (uses shared singleton)
         try:
-            from utils.health_score import HealthScorer
-            scorer = HealthScorer()
+            from utils.health_score import get_health_scorer
+            scorer = get_health_scorer()
             snapshot = scorer.get_snapshot()
 
             defn = METRICS["meshforge_health_score"]

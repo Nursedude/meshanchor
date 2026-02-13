@@ -494,21 +494,17 @@ def generate_and_save(path: Optional[str] = None,
 # Private helpers — lazy singleton access
 # =============================================================================
 
-_health_scorer = None
 _signal_manager = None
 _maintenance_predictor = None
 
 
 def _get_health_scorer():
-    """Get health scorer instance if available."""
-    global _health_scorer
-    if _health_scorer is None:
-        try:
-            from utils.health_score import HealthScorer
-            _health_scorer = HealthScorer()
-        except ImportError:
-            return None
-    return _health_scorer
+    """Get shared health scorer instance if available."""
+    try:
+        from utils.health_score import get_health_scorer
+        return get_health_scorer()
+    except ImportError:
+        return None
 
 
 def _get_signal_manager():
