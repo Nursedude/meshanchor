@@ -62,38 +62,58 @@ class NomadNetClientMixin:
         previous root/sudo run) but is not writable by the current user.
         In that case, returns the user's ~/.reticulum path.
 
+        IMPORTANT: MeshForge runs as root (sudo), but NomadNet launches as
+        the real user. We must check writability for the REAL USER, not root.
+        Root can always write — testing as root always passes, hiding the
+        problem from the user process.
+
         Returns:
             Path string to pass to --rnsconfig, or None if default is fine.
         """
+        import stat
+
         etc_rns = Path('/etc/reticulum')
         user_home = get_real_user_home()
         user_rns = user_home / '.reticulum'
 
-        # If /etc/reticulum exists, check if it's usable
+        # If /etc/reticulum exists, check if it's usable by the REAL user
         if etc_rns.exists():
-            # Check if storage subdir exists and is writable
             storage_dir = etc_rns / 'storage'
             try:
                 if storage_dir.exists():
-                    # Try to write a test file
-                    test_file = storage_dir / '.meshforge_write_test'
-                    try:
-                        test_file.touch()
-                        test_file.unlink()
-                        # Writable - system config is fine
-                        return None
-                    except (OSError, PermissionError):
-                        # Not writable - need to use user config
-                        logger.info(f"/etc/reticulum/storage not writable, using {user_rns}")
-                        return str(user_rns)
+                    # Check directory permissions instead of doing a write test.
+                    # A write test as root always succeeds, but NomadNet runs
+                    # as the real user who may not have write access.
+                    mode = storage_dir.stat().st_mode
+                    sudo_user = os.environ.get('SUDO_USER')
+
+                    if sudo_user and sudo_user != 'root':
+                        # Running via sudo — NomadNet will run as real user.
+                        # Check if storage is world-writable (others can write).
+                        if mode & stat.S_IWOTH:
+                            return None  # World-writable, real user can write
+                        else:
+                            logger.info(
+                                f"/etc/reticulum/storage not writable by {sudo_user} "
+                                f"(mode {oct(mode)}), using {user_rns}"
+                            )
+                            return str(user_rns)
+                    else:
+                        # Not running via sudo — direct write test is valid
+                        test_file = storage_dir / '.meshforge_write_test'
+                        try:
+                            test_file.touch()
+                            test_file.unlink()
+                            return None
+                        except (OSError, PermissionError):
+                            logger.info(f"/etc/reticulum/storage not writable, using {user_rns}")
+                            return str(user_rns)
                 else:
                     # storage dir doesn't exist - try to create it
                     try:
                         storage_dir.mkdir(parents=True, exist_ok=True)
-                        # Created successfully - system config is fine
                         return None
                     except (OSError, PermissionError):
-                        # Can't create - need to use user config
                         logger.info(f"Cannot create /etc/reticulum/storage, using {user_rns}")
                         return str(user_rns)
             except Exception as e:
@@ -1000,20 +1020,29 @@ class NomadNetClientMixin:
         """
         sudo_user = os.environ.get('SUDO_USER')
 
-        # Check for /etc/reticulum permission issues first
+        # Check for /etc/reticulum permission issues first.
+        # IMPORTANT: MeshForge runs as root (sudo) but NomadNet launches as
+        # the real user. Check permissions for the REAL USER, not root.
+        import stat
         etc_rns = Path('/etc/reticulum')
         if etc_rns.exists():
             storage_dir = etc_rns / 'storage'
             can_write = False
             try:
                 if storage_dir.exists():
-                    test_file = storage_dir / '.write_test'
-                    try:
-                        test_file.touch()
-                        test_file.unlink()
-                        can_write = True
-                    except (OSError, PermissionError):
-                        pass
+                    if sudo_user and sudo_user != 'root':
+                        # Running via sudo — check mode bits for real user
+                        mode = storage_dir.stat().st_mode
+                        can_write = bool(mode & stat.S_IWOTH)
+                    else:
+                        # Not running via sudo — direct write test is valid
+                        test_file = storage_dir / '.write_test'
+                        try:
+                            test_file.touch()
+                            test_file.unlink()
+                            can_write = True
+                        except (OSError, PermissionError):
+                            pass
                 else:
                     try:
                         storage_dir.mkdir(parents=True, exist_ok=True)
