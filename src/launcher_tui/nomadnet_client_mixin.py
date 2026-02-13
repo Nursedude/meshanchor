@@ -17,6 +17,7 @@ Requires:  pipx install nomadnet   (pulls in rns + lxmf automatically)
 
 import os
 import shutil
+import socket
 import subprocess
 import time
 import logging
@@ -1102,7 +1103,47 @@ class NomadNetClientMixin:
                 "Continue anyway?",
             )
 
-        # rnsd is running - check for user mismatches
+        # rnsd is running - verify it's actually listening on port 37428
+        # (rnsd can be "active" but stuck initializing a blocking interface)
+        port_listening = False
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result_conn = s.connect_ex(('127.0.0.1', 37428))
+                port_listening = (result_conn == 0)
+        except OSError:
+            pass
+
+        if not port_listening:
+            # rnsd running but not listening — check for blocking interfaces
+            blocking = []
+            try:
+                blocking = self._find_blocking_interfaces()
+            except Exception as e:
+                logger.debug("Blocking interface check failed: %s", e)
+
+            if blocking:
+                lines = ["rnsd is running but NOT listening on port 37428.\n"]
+                lines.append("Cause: an enabled interface is blocking startup:\n")
+                for iface_name, reason, fix in blocking:
+                    lines.append(f"  [{iface_name}] {reason}")
+                    lines.append(f"  Fix: {fix}\n")
+                lines.append("NomadNet will fail to connect until this is resolved.")
+                return self.dialog.yesno(
+                    "rnsd Not Ready",
+                    "\n".join(lines) + "\n\nContinue anyway?",
+                )
+            else:
+                # No blocking interfaces found — may still be initializing
+                return self.dialog.yesno(
+                    "rnsd Not Ready",
+                    "rnsd is running but not yet listening on port 37428.\n\n"
+                    "It may still be initializing (crypto, interfaces).\n"
+                    "NomadNet may fail to connect.\n\n"
+                    "Continue anyway?",
+                )
+
+        # rnsd is running and listening - check for user mismatches
         current_uid = os.getuid()
         we_are_root = current_uid == 0
 

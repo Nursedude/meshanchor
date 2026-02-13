@@ -519,7 +519,7 @@ class RNSMenuMixin(RNSSnifferMixin):
             return
 
         # 1. Service status
-        print("[1/4] Checking rnsd service...")
+        print("[1/5] Checking rnsd service...")
         status = get_status()
         status_data = status.data or {}
         running = status_data.get('rnsd_running', False)
@@ -546,7 +546,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("    sudo journalctl -u rnsd -n 30")
 
         # 2. Config check
-        print("\n[2/4] Checking configuration...")
+        print("\n[2/5] Checking configuration...")
         config_exists = status_data.get('config_exists', False)
         print(f"  Config: {'found' if config_exists else 'MISSING'}")
         if config_exists:
@@ -554,7 +554,7 @@ class RNSMenuMixin(RNSSnifferMixin):
             print(f"  Interfaces: {iface_count}")
 
         # 3. Identity check
-        print("\n[3/4] Checking identity...")
+        print("\n[3/5] Checking identity...")
         identity_exists = status_data.get('identity_exists', False)
         print(f"  Gateway identity: {'found' if identity_exists else 'not created'}")
         config_dir = ReticulumPaths.get_config_dir()
@@ -562,7 +562,7 @@ class RNSMenuMixin(RNSSnifferMixin):
         print(f"  RNS identity: {'found' if rns_identity.exists() else 'not created'}")
 
         # 4. Full connectivity check
-        print("\n[4/4] Running connectivity check...")
+        print("\n[4/5] Running connectivity check...")
         conn = check_connectivity()
         conn_data = conn.data or {}
         print(f"  RNS importable: {'yes' if conn_data.get('can_import_rns') else 'NO'}")
@@ -571,9 +571,40 @@ class RNSMenuMixin(RNSSnifferMixin):
         print(f"  Config valid: {'yes' if conn_data.get('config_valid') else 'NO'}")
         print(f"  Interfaces enabled: {conn_data.get('interfaces_enabled', 0)}")
 
+        # Collect issues and warnings from connectivity check
+        issues = list(conn_data.get('issues', []))
+        warnings = list(conn_data.get('warnings', []))
+
+        # 5. Interface dependencies
+        print("\n[5/5] Checking interface dependencies...")
+        try:
+            blocking = self._find_blocking_interfaces()
+            if blocking:
+                for iface_name, reason, fix in blocking:
+                    print(f"  ! [{iface_name}] {reason}")
+                    print(f"    Fix: {fix}")
+                    issues.append(f"Blocking interface: {iface_name}")
+            else:
+                print("  All enabled interfaces have their dependencies met")
+        except Exception as e:
+            logger.debug("Interface dependency check failed: %s", e)
+            print(f"  Could not check: {e}")
+
+        # Check if shared instance port is actually listening
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                port_ok = s.connect_ex(('127.0.0.1', 37428)) == 0
+            if running and not port_ok:
+                print("  ! rnsd running but port 37428 NOT listening")
+                warnings.append("rnsd active but shared instance port not bound")
+            elif running and port_ok:
+                print(f"  Shared instance port 37428: listening")
+        except OSError:
+            pass
+
         # Summary
-        issues = conn_data.get('issues', [])
-        warnings = conn_data.get('warnings', [])
         if issues:
             print(f"\n--- Issues Found ({len(issues)}) ---")
             for issue in issues:
@@ -851,8 +882,27 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print(f"    Fix: {fix}")
             print()
             print("  rnsd will hang if these interfaces can't connect.")
-            print("  Consider disabling them in /etc/reticulum/config")
-            print("  or starting the missing services first.\n")
+
+            # Offer to temporarily disable blocking interfaces
+            iface_names = [b[0] for b in blocking]
+            names_str = ", ".join(iface_names)
+            if self.dialog.yesno(
+                "Disable Blocking Interfaces?",
+                f"These interfaces will prevent rnsd from starting:\n"
+                f"  {names_str}\n\n"
+                f"Temporarily disable them in the RNS config?\n"
+                f"(You can re-enable them later from the RNS menu)\n\n"
+                f"If you choose No, rnsd may hang on startup.",
+            ):
+                disabled = self._disable_interfaces_in_config(iface_names)
+                if disabled:
+                    print(f"  Disabled {len(disabled)} blocking interface(s):")
+                    for name in disabled:
+                        print(f"    [{name}] set enabled = no")
+                else:
+                    print("  Could not disable interfaces — rnsd may hang")
+            else:
+                print("  Proceeding without disabling (rnsd may hang)...\n")
 
         # Start rnsd with fresh state
         print("  Starting rnsd...")
@@ -1649,6 +1699,54 @@ class RNSMenuMixin(RNSSnifferMixin):
                         ))
 
         return blocking
+
+    def _disable_interfaces_in_config(self, interface_names: list) -> list:
+        """Disable specific interfaces in the RNS config file.
+
+        Changes 'enabled = yes' to 'enabled = no' for the named interfaces.
+        Only modifies /etc/reticulum/config (the system config used by rnsd).
+
+        Args:
+            interface_names: List of interface names (matching [[Name]] sections)
+
+        Returns:
+            List of interface names that were successfully disabled.
+        """
+        config_file = ReticulumPaths.get_config_file()
+        if not config_file.exists():
+            return []
+
+        try:
+            content = config_file.read_text()
+        except (OSError, PermissionError) as e:
+            logger.error("Cannot read RNS config: %s", e)
+            return []
+
+        disabled = []
+        for name in interface_names:
+            # Find the [[Name]] section and change its enabled = yes to enabled = no
+            # Pattern: [[Name]] followed by enabled = yes/true/1 before the next [[ or EOF
+            pattern = re.compile(
+                r'(^\s*\[\[' + re.escape(name) + r'\]\]\s*$'
+                r'.*?)'
+                r'(^\s*enabled\s*=\s*)(yes|true|1)',
+                re.MULTILINE | re.DOTALL | re.IGNORECASE
+            )
+            new_content, count = pattern.subn(r'\1\g<2>no', content)
+            if count > 0:
+                content = new_content
+                disabled.append(name)
+
+        if disabled:
+            try:
+                config_file.write_text(content)
+                logger.info("Disabled %d blocking interface(s): %s",
+                            len(disabled), ", ".join(disabled))
+            except (OSError, PermissionError) as e:
+                logger.error("Cannot write RNS config: %s", e)
+                return []
+
+        return disabled
 
     def _check_nomadnet_conflict(self) -> bool:
         """Check if NomadNet is running and holding the shared instance port.
