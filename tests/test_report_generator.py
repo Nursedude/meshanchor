@@ -137,24 +137,23 @@ class TestReportWithData:
 
     def test_report_with_health_scorer(self):
         """Report should include health data when scorer has data."""
-        # Populate health scorer
-        from utils.health_score import HealthScorer
-        import utils.report_generator as rg
+        # Populate health scorer via the singleton
+        import utils.health_score as hs
 
-        scorer = HealthScorer()
+        scorer = hs.HealthScorer()
         scorer.report_node_metrics("!test1", snr=-5.0, rssi=-90)
         scorer.report_node_metrics("!test2", snr=-8.0, rssi=-100)
         scorer.report_service_status("meshtasticd", running=True)
 
-        # Inject into module
-        old_scorer = rg._health_scorer
-        rg._health_scorer = scorer
+        # Inject into health_score module singleton
+        old_scorer = hs._health_scorer
+        hs._health_scorer = scorer
         try:
             report = generate_report()
             assert "Overall Score" in report
             assert "/100" in report
         finally:
-            rg._health_scorer = old_scorer
+            hs._health_scorer = old_scorer
 
     def test_report_with_signal_data(self):
         """Report should include signal data when manager has data."""
@@ -299,11 +298,12 @@ class TestGracefulDegradation:
     def test_report_without_any_data(self):
         """Report should generate even with no data populated."""
         import utils.report_generator as rg
-        old_health = rg._health_scorer
+        import utils.health_score as hs
+        old_health = hs._health_scorer
         old_signal = rg._signal_manager
         old_maint = rg._maintenance_predictor
 
-        rg._health_scorer = None
+        hs._health_scorer = None
         rg._signal_manager = None
         rg._maintenance_predictor = None
         try:
@@ -313,7 +313,7 @@ class TestGracefulDegradation:
             # Should have placeholder text for empty sections
             assert "not initialized" in report or "not available" in report or "No" in report
         finally:
-            rg._health_scorer = old_health
+            hs._health_scorer = old_health
             rg._signal_manager = old_signal
             rg._maintenance_predictor = old_maint
 
