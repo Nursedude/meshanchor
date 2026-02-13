@@ -736,9 +736,9 @@ class RNSMenuMixin(RNSSnifferMixin):
         """Automatically fix RNS shared instance issues.
 
         Called when 'no shared instance' error is detected. This method:
-        1. Deploys proper config to /etc/reticulum/config (takes precedence)
-        2. Creates required subdirectories (storage, interfaces) with correct permissions
-        3. Restarts rnsd service
+        1. Ensures /etc/reticulum/ directories exist with correct permissions
+        2. Deploys template ONLY if no config exists anywhere (never overwrites)
+        3. Clears stale auth tokens and restarts rnsd
         4. Verifies shared instance is now available
 
         Returns True if fix was successful.
@@ -749,19 +749,11 @@ class RNSMenuMixin(RNSSnifferMixin):
         print("AUTO-FIX: RNS Shared Instance")
         print("=" * 50)
 
-        # Step 1: Deploy config to /etc/reticulum/config
-        template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+        # Step 1: Fix directories and deploy config ONLY if none exists
         target_dir = Path('/etc/reticulum')
         target = target_dir / 'config'
 
-        if not template.exists():
-            print("ERROR: MeshForge RNS template not found")
-            print(f"  Expected: {template}")
-            return False
-
-        print(f"\n[1/3] Deploying RNS config and directories...")
-        print(f"  Template: {template}")
-        print(f"  Target:   {target}")
+        print(f"\n[1/3] Checking RNS config and directories...")
 
         try:
             # Create /etc/reticulum/ directory structure
@@ -779,18 +771,23 @@ class RNSMenuMixin(RNSSnifferMixin):
             storage_dir.chmod(0o755)
             interfaces_dir.chmod(0o755)
 
-            print(f"  Created: {storage_dir}")
-            print(f"  Created: {interfaces_dir}")
+            print(f"  Ensured: {storage_dir}")
+            print(f"  Ensured: {interfaces_dir}")
 
-            # Backup existing config if present
-            if target.exists():
-                backup = target.with_suffix('.backup')
-                shutil.copy2(str(target), str(backup))
-                print(f"  Backed up existing config to: {backup}")
-
-            shutil.copy2(str(template), str(target))
-            target.chmod(0o644)
-            print("  Config deployed successfully")
+            # Only deploy template if NO config exists at ANY standard location.
+            # Never overwrite an existing config — that destroys user interfaces.
+            existing_config = ReticulumPaths.get_config_file()
+            if existing_config.exists():
+                print(f"  Existing config preserved: {existing_config}")
+            else:
+                template = Path(__file__).parent.parent.parent / 'templates' / 'reticulum.conf'
+                if template.exists():
+                    shutil.copy2(str(template), str(target))
+                    target.chmod(0o644)
+                    print(f"  No config found — deployed template to: {target}")
+                else:
+                    print("  WARNING: No config found and template missing")
+                    print("  Run: rnsd --exampleconfig > /etc/reticulum/config")
         except (OSError, PermissionError) as e:
             print(f"  ERROR: {e}")
             print("  (Run MeshForge with sudo)")
