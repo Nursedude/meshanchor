@@ -209,7 +209,7 @@ Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md
 - ✅ `rns_bridge.py` (1,485 lines) - MessageRouter + gateway_cli.py extracted
 - ⚠️ `knowledge_content.py` (1,824 lines) - Content file by design, acceptable
 - ✅ `map_data_collector.py` (1,509 lines) - Borderline, monitor
-- ✅ `launcher_tui/main.py` (1,488 lines) - 30 mixins, dead code removed
+- ⚠️ `launcher_tui/main.py` (1,521 lines) - 33 mixins, borderline — monitor
 - ✅ `traffic_inspector.py` (442 lines)
 - ✅ `node_tracker.py` (930 lines) - Data classes extracted
 - ✅ `rns_menu_mixin.py` (1,210 lines) - Sniffer methods extracted
