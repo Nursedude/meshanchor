@@ -109,10 +109,162 @@ class ServiceMenuMixin:
             logger.debug("Bridge process check failed: %s", e)
             return False
 
+    def _bridge_preflight(self) -> bool:
+        """Pre-flight checks before starting the gateway bridge.
+
+        Checks prerequisites and offers to fix issues from the TUI
+        so the user never needs to run manual commands.
+
+        Returns True if all checks pass and bridge can start.
+        """
+        import time
+        issues = []
+
+        # 1. Check rnsd is running
+        rnsd_running = False
+        if _HAS_SERVICE_CHECK:
+            status = check_service('rnsd')
+            rnsd_running = status.available
+        else:
+            try:
+                result = subprocess.run(
+                    ['pgrep', '-f', 'rnsd'],
+                    capture_output=True, text=True, timeout=5
+                )
+                rnsd_running = result.returncode == 0
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+        if not rnsd_running:
+            issues.append("rnsd is not running (required for RNS connectivity)")
+
+        # 2. Check for NomadNet port conflict
+        nomadnet_conflict = False
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'nomadnet'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and not rnsd_running:
+                nomadnet_conflict = True
+                issues.append("NomadNet is holding port 37428 (rnsd can't start)")
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # 3. Check gateway identity exists
+        try:
+            from commands.rns import get_identity_path
+            gw_id = get_identity_path()
+            if not gw_id.exists():
+                issues.append("Gateway identity not created yet")
+        except ImportError:
+            pass
+
+        if not issues:
+            return True
+
+        # Build fix menu
+        msg = "Pre-flight checks found issues:\n\n"
+        for i, issue in enumerate(issues, 1):
+            msg += f"  {i}. {issue}\n"
+        msg += "\nMeshForge can fix these automatically."
+
+        if not self.dialog.yesno("Bridge Pre-Flight", msg + "\n\nFix now?"):
+            return False
+
+        clear_screen()
+        print("=== Bridge Pre-Flight Fix ===\n")
+
+        # Fix NomadNet conflict first (must stop before rnsd can start)
+        if nomadnet_conflict:
+            print("[1] Stopping NomadNet (holds port 37428)...")
+            try:
+                subprocess.run(
+                    ['pkill', '-f', 'nomadnet'],
+                    capture_output=True, timeout=5
+                )
+                time.sleep(1)
+                print("  NomadNet stopped.")
+                print("  It will reconnect as a client after rnsd starts.\n")
+            except (subprocess.SubprocessError, OSError) as e:
+                print(f"  Warning: {e}")
+
+        # Start rnsd if not running
+        if not rnsd_running:
+            print("[2] Starting rnsd (shared instance)...")
+            try:
+                if _HAS_SERVICE_CHECK:
+                    from utils.service_check import apply_config_and_restart
+                    success, msg_text = apply_config_and_restart('rnsd')
+                    if success:
+                        print("  rnsd started via systemctl.")
+                    else:
+                        # Try direct start
+                        subprocess.run(
+                            ['systemctl', 'start', 'rnsd'],
+                            capture_output=True, text=True, timeout=15
+                        )
+                else:
+                    subprocess.run(
+                        ['systemctl', 'start', 'rnsd'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                time.sleep(2)
+                # Verify
+                if _HAS_SERVICE_CHECK:
+                    status = check_service('rnsd')
+                    if status.available:
+                        print("  rnsd is now running.\n")
+                    else:
+                        print(f"  Warning: {status.message}\n")
+                else:
+                    print("  rnsd start command sent.\n")
+            except (subprocess.SubprocessError, OSError) as e:
+                print(f"  Error starting rnsd: {e}")
+                print("  Bridge may fail to connect.\n")
+
+        # Create gateway identity if missing
+        try:
+            from commands.rns import create_identities, get_identity_path
+            gw_id = get_identity_path()
+            if not gw_id.exists():
+                print("[3] Creating gateway identity...")
+                result = create_identities()
+                if result.success:
+                    print(f"  {result.message}\n")
+                else:
+                    print(f"  Warning: {result.message}\n")
+        except ImportError:
+            pass
+
+        # Restart NomadNet as client (if we stopped it)
+        if nomadnet_conflict:
+            print("[4] Restarting NomadNet as rnsd client...")
+            try:
+                # Check if nomadnet is a systemd user service
+                result = subprocess.run(
+                    ['systemctl', '--user', 'start', 'nomadnet'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    print("  NomadNet restarted via systemctl --user.\n")
+                else:
+                    print("  NomadNet not managed by systemd.")
+                    print("  Start manually: nomadnet --daemon &\n")
+            except (subprocess.SubprocessError, OSError):
+                print("  Start NomadNet manually: nomadnet --daemon &\n")
+
+        print("Pre-flight complete. Starting bridge...\n")
+        time.sleep(1)
+        return True
+
     def _start_bridge_background(self):
         """Start gateway bridge as a background process."""
         if self._is_bridge_running():
             self.dialog.msgbox("Already Running", "Gateway bridge is already running.")
+            return
+
+        if not self._bridge_preflight():
             return
 
         self.dialog.infobox("Starting", "Starting gateway bridge in background...")
@@ -161,6 +313,9 @@ class ServiceMenuMixin:
             self.dialog.msgbox("Already Running",
                 "Gateway bridge is already running in background.\n\n"
                 "Stop it first to run in foreground.")
+            return
+
+        if not self._bridge_preflight():
             return
 
         clear_screen()
