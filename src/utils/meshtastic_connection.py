@@ -15,6 +15,7 @@ Features:
 """
 
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -140,6 +141,67 @@ def wait_for_cooldown():
         wait_time = CONNECTION_COOLDOWN - elapsed
         logger.debug(f"Waiting {wait_time:.2f}s for meshtasticd cooldown")
         time.sleep(wait_time)
+
+
+def clear_stale_connections(port: int = 4403) -> bool:
+    """
+    Detect and clear CLOSE-WAIT zombie connections on the meshtasticd port.
+
+    meshtasticd only allows ONE TCP client. If a previous connection wasn't
+    cleaned up properly, it lingers in CLOSE-WAIT state on meshtasticd's side,
+    blocking all new connections. This function detects that state and restarts
+    meshtasticd to clear it.
+
+    Args:
+        port: meshtasticd TCP port (default 4403)
+
+    Returns:
+        True if a stale connection was found and meshtasticd was restarted,
+        False if no action was needed or restart failed.
+    """
+    try:
+        # Use ss to check for CLOSE-WAIT connections on the meshtasticd port.
+        # CLOSE-WAIT means the remote side (our client) closed, but meshtasticd
+        # hasn't released the socket — it's stuck.
+        result = subprocess.run(
+            ['ss', '-tn', 'state', 'close-wait', f'sport = :{port}'],
+            capture_output=True, text=True, timeout=5
+        )
+        output = result.stdout.strip()
+
+        # ss output has a header line; actual connections appear on subsequent lines
+        lines = [l for l in output.split('\n') if l.strip() and not l.startswith('Recv-Q')]
+        if not lines:
+            return False
+
+        logger.warning(
+            f"Detected {len(lines)} CLOSE-WAIT zombie connection(s) on port {port}, "
+            f"restarting meshtasticd to clear"
+        )
+
+        # Restart meshtasticd to clear the zombie — requires root (MeshForge runs as sudo)
+        restart = subprocess.run(
+            ['systemctl', 'restart', 'meshtasticd'],
+            capture_output=True, text=True, timeout=30
+        )
+        if restart.returncode == 0:
+            logger.info("meshtasticd restarted successfully, zombie connections cleared")
+            # Give meshtasticd time to fully start and open its TCP port
+            time.sleep(3)
+            return True
+        else:
+            logger.error(f"Failed to restart meshtasticd: {restart.stderr.strip()}")
+            return False
+
+    except FileNotFoundError:
+        logger.debug("ss command not available, cannot check for stale connections")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.debug("Timed out checking for stale connections")
+        return False
+    except Exception as e:
+        logger.debug(f"Error checking for stale connections: {e}")
+        return False
 
 
 def safe_close_interface(interface) -> None:

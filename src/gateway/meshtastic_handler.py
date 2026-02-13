@@ -116,7 +116,21 @@ class MeshtasticHandler:
             try:
                 if not self._connected:
                     if not self._reconnect.should_retry():
-                        logger.warning("Meshtastic reconnection: max attempts reached, resetting")
+                        logger.warning("Meshtastic reconnection: max attempts reached, "
+                                       "checking for zombie connections")
+                        # After exhausting retries, check if a CLOSE-WAIT zombie
+                        # connection is blocking meshtasticd's single TCP slot.
+                        # If found, restart meshtasticd to clear it.
+                        try:
+                            from utils.meshtastic_connection import clear_stale_connections
+                            cleared = clear_stale_connections(self.config.meshtastic.port)
+                            if cleared:
+                                self.health.record_connection_event(
+                                    "meshtastic", "self_healed",
+                                    "Cleared zombie CLOSE-WAIT connection"
+                                )
+                        except ImportError:
+                            pass
                         self._reconnect.reset()
                         self._stop_event.wait(self._reconnect.config.max_delay)
                         continue
