@@ -145,8 +145,19 @@ class RNSMenuMixin(RNSSnifferMixin):
         print("=== RNS Identity Info ===\n")
 
         while True:
+            # Check identity status for menu hints
+            config_dir = ReticulumPaths.get_config_dir()
+            rnsd_exists = (config_dir / 'identity').exists()
+            try:
+                from commands.rns import get_identity_path
+                gw_exists = get_identity_path().exists()
+            except ImportError:
+                gw_exists = False
+
             choices = [
                 ("show", "Show local identity"),
+                ("create", "Create identities" + (
+                    "" if not rnsd_exists or not gw_exists else " (all exist)")),
                 ("path", "Show identity file paths"),
                 ("recall", "Recall identity by hash"),
                 ("back", "Back"),
@@ -162,13 +173,15 @@ class RNSMenuMixin(RNSSnifferMixin):
                 break
 
             try:
-                if choice == "show":
+                if choice == "create":
+                    self._create_rns_identities()
+
+                elif choice == "show":
                     clear_screen()
                     print("=== Local RNS Identity ===\n")
 
                     # Find the rnsd identity file
                     # RNS stores it at <configdir>/identity
-                    config_dir = ReticulumPaths.get_config_dir()
                     rnsd_identity = config_dir / 'identity'
                     if rnsd_identity.exists():
                         print(f"rnsd identity: {rnsd_identity}")
@@ -178,11 +191,9 @@ class RNSMenuMixin(RNSSnifferMixin):
                         )
                     else:
                         print(f"rnsd identity: {rnsd_identity}")
-                        print("  Not found — rnsd has not created one yet.")
-                        print("  Ensure rnsd can write to its config directory.\n")
+                        print("  Not found — use 'Create identities' to generate.\n")
 
                     try:
-                        from commands.rns import get_identity_path
                         gw_id = get_identity_path()
                         print(f"\nMeshForge gateway identity: {gw_id}")
                         if gw_id.exists():
@@ -191,7 +202,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                                 'rnid'
                             )
                         else:
-                            print("  Status: not created (starts on first bridge run)")
+                            print("  Not created — use 'Create identities' to generate.")
                     except ImportError:
                         pass
                     self._wait_for_enter()
@@ -247,6 +258,52 @@ class RNSMenuMixin(RNSSnifferMixin):
                     "Identity Error",
                     f"Operation failed:\n{type(e).__name__}: {e}"
                 )
+
+    def _create_rns_identities(self):
+        """Create RNS and gateway identities from the TUI.
+
+        Calls commands.rns.create_identities() which generates keypairs
+        for both the rnsd identity and the MeshForge gateway identity.
+        No manual commands needed.
+        """
+        clear_screen()
+        print("=== Create RNS Identities ===\n")
+
+        try:
+            from commands.rns import create_identities, get_identity_path
+            config_dir = ReticulumPaths.get_config_dir()
+
+            # Show current state
+            rns_id = config_dir / 'identity'
+            gw_id = get_identity_path()
+            print(f"RNS identity:     {rns_id}")
+            print(f"  Status: {'EXISTS' if rns_id.exists() else 'MISSING'}")
+            print(f"Gateway identity: {gw_id}")
+            print(f"  Status: {'EXISTS' if gw_id.exists() else 'MISSING'}\n")
+
+            if rns_id.exists() and gw_id.exists():
+                print("Both identities already exist. Nothing to create.")
+                self._wait_for_enter()
+                return
+
+            result = create_identities()
+            if result.success:
+                print(f"OK: {result.message}")
+                created = result.data.get('created', [])
+                if 'rns' in created:
+                    print(f"  Created: {result.data['rns_identity']}")
+                if 'gateway' in created:
+                    print(f"  Created: {result.data['gateway_identity']}")
+                if not created:
+                    print("  All identities already existed.")
+            else:
+                print(f"ERROR: {result.message}")
+        except ImportError:
+            print("ERROR: RNS module not installed.")
+            print("  Install: pip install rns")
+        except Exception as e:
+            print(f"ERROR: {type(e).__name__}: {e}")
+        self._wait_for_enter()
 
     def _rns_known_destinations(self):
         """Show known RNS destinations from the running rnsd instance."""
@@ -1364,25 +1421,43 @@ class RNSMenuMixin(RNSSnifferMixin):
             return False
 
     def _diagnose_rns_port_conflict(self):
-        """Print diagnostic info for RNS Address-in-use port conflicts."""
+        """Diagnose and offer to fix RNS port conflicts from the TUI."""
+        import time
         try:
             # Check NomadNet first — most common cause of port conflicts
             if self._check_nomadnet_conflict():
-                print("CAUSE: NomadNet is running and owns the RNS shared instance.")
-                print("")
-                print("NomadNet creates its own Reticulum instance on port 37428.")
-                print("When rnsd also tries to bind that port, it crash-loops.")
-                print("")
-                print("Options:")
-                print("  1. Stop NomadNet before starting rnsd:")
-                print("     pkill -f nomadnet && sudo systemctl restart rnsd")
-                print("")
-                print("  2. Run rnsd as a client (no shared instance):")
-                print("     Set 'share_instance = No' in rnsd config,")
-                print("     then NomadNet acts as the shared instance for all RNS tools.")
-                print("")
-                print("  3. Stop rnsd and let NomadNet be the shared instance:")
-                print("     sudo systemctl stop rnsd && sudo systemctl disable rnsd")
+                print("CAUSE: NomadNet is running and owns port 37428.")
+                print("rnsd can't start because NomadNet has the port.\n")
+
+                if self.dialog.yesno(
+                    "Fix Port Conflict",
+                    "NomadNet is holding port 37428.\n\n"
+                    "MeshForge can fix this:\n"
+                    "  1. Stop NomadNet\n"
+                    "  2. Start rnsd (becomes shared instance)\n"
+                    "  3. Restart NomadNet (connects as client)\n\n"
+                    "Fix now?"
+                ):
+                    print("Stopping NomadNet...")
+                    subprocess.run(
+                        ['pkill', '-f', 'nomadnet'],
+                        capture_output=True, timeout=5
+                    )
+                    time.sleep(1)
+
+                    print("Starting rnsd...")
+                    subprocess.run(
+                        ['systemctl', 'start', 'rnsd'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    time.sleep(2)
+
+                    print("Restarting NomadNet as client...")
+                    subprocess.run(
+                        ['systemctl', '--user', 'start', 'nomadnet'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    print("Done. Startup order: rnsd -> NomadNet -> MeshForge\n")
                 return
 
             # Use centralized service check when available
