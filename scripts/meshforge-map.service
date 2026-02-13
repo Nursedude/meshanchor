@@ -4,6 +4,10 @@ Documentation=https://github.com/Nursedude/meshforge
 After=network.target meshtasticd.service
 Wants=meshtasticd.service
 
+# Stop crash-looping after 3 failures in 60 seconds
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
 [Service]
 Type=simple
 User=root
@@ -25,8 +29,6 @@ TimeoutStopSec=10
 # Restart policy
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 # Environment
 Environment=PYTHONUNBUFFERED=1
