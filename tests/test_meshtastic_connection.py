@@ -58,6 +58,59 @@ class TestSafeCloseInterface:
         # Should not raise
         safe_close_interface(mock_interface)
 
+    def test_safe_close_force_closes_tcp_socket(self):
+        """safe_close_interface force-closes the underlying TCP socket to prevent CLOSE-WAIT"""
+        from utils.meshtastic_connection import safe_close_interface
+
+        mock_socket = MagicMock()
+        mock_interface = MagicMock()
+        mock_interface._socket = mock_socket
+
+        safe_close_interface(mock_interface)
+
+        # Underlying socket should be shut down and closed
+        mock_socket.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+        mock_socket.close.assert_called_once()
+
+    def test_safe_close_force_closes_socket_on_broken_pipe(self):
+        """Socket is force-closed even when interface.close() raises BrokenPipeError"""
+        from utils.meshtastic_connection import safe_close_interface
+
+        mock_socket = MagicMock()
+        mock_interface = MagicMock()
+        mock_interface._socket = mock_socket
+        mock_interface.close.side_effect = BrokenPipeError("Broken pipe")
+
+        safe_close_interface(mock_interface)
+
+        # Socket should still be force-closed even though interface.close() failed
+        mock_socket.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+        mock_socket.close.assert_called_once()
+
+    def test_safe_close_handles_no_socket_attr(self):
+        """safe_close_interface works when interface has no _socket attribute"""
+        from utils.meshtastic_connection import safe_close_interface
+
+        mock_interface = MagicMock(spec=[])  # No attributes
+        mock_interface.close = MagicMock()
+
+        # Should not raise
+        safe_close_interface(mock_interface)
+
+    def test_safe_close_handles_socket_already_closed(self):
+        """Force-close handles socket that's already closed"""
+        from utils.meshtastic_connection import safe_close_interface
+
+        mock_socket = MagicMock()
+        mock_socket.shutdown.side_effect = OSError("Transport endpoint is not connected")
+        mock_interface = MagicMock()
+        mock_interface._socket = mock_socket
+
+        # Should not raise - OSError from shutdown is expected
+        safe_close_interface(mock_interface)
+        # close() should still be called even if shutdown fails
+        mock_socket.close.assert_called_once()
+
 
 class TestMeshtasticConnectionManager:
     """Tests for the connection manager"""
