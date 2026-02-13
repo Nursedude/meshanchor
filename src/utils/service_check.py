@@ -4,10 +4,11 @@ Service Availability Utilities for MeshForge
 Provides standardized service checking before connecting to external services.
 Use these instead of assuming services are running.
 
-ARCHITECTURE (Issue #17 redesign):
+ARCHITECTURE (Issue #17 redesign, Issue #20 completion):
     - For systemd services: Trust systemctl ONLY (single source of truth)
     - Port/process checks kept for utilities but NOT used in check_service()
     - "Unknown" state is better than wrong state from conflicting methods
+    - Active services always trusted (no port fallback for transitional states)
 
 Usage:
     from utils.service_check import check_port, check_service, ServiceStatus
@@ -496,22 +497,14 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 )
 
             if is_active:
-                # Active but unknown sub-state, check port as fallback
-                if check_port_num and check_port(check_port_num, host):
-                    return ServiceStatus(
-                        name=name,
-                        available=True,
-                        state=ServiceState.AVAILABLE,
-                        message=f"{description} is running",
-                        port=check_port_num,
-                        detection_method="systemctl+port"
-                    )
+                # Active but sub-state not "running" or "exited"
+                # (e.g., "start", "auto-restart", "reload", or empty)
+                # Trust systemctl — port fallback here caused flakiness (Issue #20)
                 return ServiceStatus(
                     name=name,
-                    available=False,
-                    state=ServiceState.NOT_RUNNING,
-                    message=f"{description}: active but not listening",
-                    fix_hint=fix_hint,
+                    available=True,
+                    state=ServiceState.AVAILABLE,
+                    message=f"{description} is active ({sub_state or 'transitioning'})",
                     port=check_port_num,
                     detection_method="systemctl"
                 )

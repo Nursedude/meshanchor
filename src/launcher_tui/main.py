@@ -115,6 +115,9 @@ from amateur_radio_mixin import AmateurRadioMixin
 from analytics_mixin import AnalyticsMixin
 from webhooks_mixin import WebhooksMixin
 from messaging_mixin import MessagingMixin
+from classifier_mixin import ClassifierMixin
+from rnode_mixin import RNodeMixin
+from latency_mixin import LatencyMixin
 from dashboard_mixin import DashboardMixin
 
 
@@ -156,6 +159,9 @@ class MeshForgeLauncher(
     AnalyticsMixin,
     WebhooksMixin,
     MessagingMixin,
+    ClassifierMixin,
+    RNodeMixin,
+    LatencyMixin,
     DashboardMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
@@ -809,6 +815,7 @@ class MeshForgeLauncher(
                 ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
                 ("analytics", "Analytics           Coverage & link trends"),
+                ("latency", "Latency Monitor     Service response times"),
                 ("reports", "Reports             Generate status report"),
                 ("alerts", "View Alerts         Current warnings"),
                 ("back", "Back"),
@@ -832,6 +839,7 @@ class MeshForgeLauncher(
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
                 "metrics": ("Historical Trends", self._metrics_menu),
                 "analytics": ("Analytics", self._analytics_menu),
+                "latency": ("Latency Monitor", self._latency_menu),
                 "reports": ("Reports", self._reports_menu),
                 "alerts": ("View Alerts", self._show_alerts),
             }
@@ -850,6 +858,7 @@ class MeshForgeLauncher(
                 ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("messaging", "Messaging           Send/receive messages"),
+                ("traffic", "Traffic Classifier  Routing & notification stats"),
                 ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
                 ("favorites", "Favorites           Manage favorite nodes"),
                 ("ham", "Ham Radio           Callsign, Part 97, ARES"),
@@ -872,6 +881,7 @@ class MeshForgeLauncher(
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
                 "messaging": ("Messaging", self._messaging_menu),
+                "traffic": ("Traffic Classifier", self._classifier_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
                 "favorites": ("Favorites", self._favorites_menu),
                 "ham": ("Ham Radio Tools", self._amateur_radio_menu),
