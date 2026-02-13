@@ -1,4 +1,4 @@
-"""Tests for BridgeHealthMonitor and error classification."""
+"""Tests for BridgeHealthMonitor, error classification, and SubsystemState."""
 
 import sys
 import os
@@ -18,6 +18,8 @@ from gateway.bridge_health import (
     classify_error,
     ConnectionEvent,
     ErrorEvent,
+    SubsystemState,
+    BridgeStatus,
 )
 
 
@@ -426,3 +428,144 @@ class TestDeliveryTracker:
         # History should be capped
         with tracker._lock:
             assert len(tracker._history) <= tracker.MAX_HISTORY
+
+
+# ---------------------------------------------------------------------------
+# SubsystemState (Phase 2: Circuit Breakers)
+# ---------------------------------------------------------------------------
+
+class TestSubsystemState:
+    """Test SubsystemState enum and BridgeHealthMonitor subsystem tracking."""
+
+    def test_enum_values(self):
+        """SubsystemState has correct values."""
+        assert SubsystemState.HEALTHY.value == "healthy"
+        assert SubsystemState.DEGRADED.value == "degraded"
+        assert SubsystemState.DISCONNECTED.value == "disconnected"
+        assert SubsystemState.DISABLED.value == "disabled"
+
+    def test_initial_state_is_disconnected(self):
+        """Subsystems start in DISCONNECTED state."""
+        health = BridgeHealthMonitor()
+        assert health.get_subsystem_state("meshtastic") == SubsystemState.DISCONNECTED
+        assert health.get_subsystem_state("rns") == SubsystemState.DISCONNECTED
+
+    def test_set_subsystem_state(self):
+        """Setting state returns previous state."""
+        health = BridgeHealthMonitor()
+        old = health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+        assert old == SubsystemState.DISCONNECTED
+        assert health.get_subsystem_state("rns") == SubsystemState.HEALTHY
+
+    def test_set_subsystem_state_same_value(self):
+        """Setting same state is a no-op but returns same value."""
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+        old = health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+        assert old == SubsystemState.HEALTHY
+
+    def test_unknown_subsystem_returns_disconnected(self):
+        """Unknown subsystem defaults to DISCONNECTED."""
+        health = BridgeHealthMonitor()
+        assert health.get_subsystem_state("unknown") == SubsystemState.DISCONNECTED
+
+    def test_set_unknown_subsystem_returns_none(self):
+        """Setting unknown subsystem returns None."""
+        health = BridgeHealthMonitor()
+        result = health.set_subsystem_state("unknown", SubsystemState.HEALTHY)
+        assert result is None
+
+    def test_get_subsystem_states_dict(self):
+        """get_subsystem_states returns string-valued dict."""
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        health.set_subsystem_state("rns", SubsystemState.DISCONNECTED)
+        states = health.get_subsystem_states()
+        assert states == {"meshtastic": "healthy", "rns": "disconnected"}
+
+    def test_subsystem_states_in_summary(self):
+        """get_summary includes subsystem states."""
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        health.set_subsystem_state("rns", SubsystemState.DEGRADED)
+        summary = health.get_summary()
+        assert "subsystems" in summary
+        assert summary["subsystems"]["meshtastic"] == "healthy"
+        assert summary["subsystems"]["rns"] == "degraded"
+
+    def test_record_message_queued_degraded(self):
+        """Track messages queued during degraded state."""
+        health = BridgeHealthMonitor()
+        assert health.get_degraded_queue_count() == 0
+        health.record_message_queued_degraded()
+        health.record_message_queued_degraded()
+        assert health.get_degraded_queue_count() == 2
+
+    def test_messages_queued_degraded_in_summary(self):
+        """Summary includes queued-during-degraded count."""
+        health = BridgeHealthMonitor()
+        health.record_message_queued_degraded()
+        summary = health.get_summary()
+        assert summary["messages_queued_degraded"] == 1
+
+    def test_get_bridge_status_detailed(self):
+        """Detailed status includes subsystem states and degraded reason."""
+        health = BridgeHealthMonitor()
+        health.record_connection_event("meshtastic", "connected")
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        detailed = health.get_bridge_status_detailed()
+        assert "bridge_status" in detailed
+        assert "subsystems" in detailed
+        assert "degraded_reason" in detailed
+        assert detailed["subsystems"]["meshtastic"] == "healthy"
+
+    def test_independent_subsystem_lifecycle(self):
+        """Each subsystem transitions independently."""
+        health = BridgeHealthMonitor()
+        # Mesh comes up
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        # RNS still down
+        assert health.get_subsystem_state("rns") == SubsystemState.DISCONNECTED
+        # RNS comes up
+        health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+        assert health.get_subsystem_state("meshtastic") == SubsystemState.HEALTHY
+        assert health.get_subsystem_state("rns") == SubsystemState.HEALTHY
+        # Mesh goes down
+        health.set_subsystem_state("meshtastic", SubsystemState.DISCONNECTED)
+        assert health.get_subsystem_state("rns") == SubsystemState.HEALTHY
+        assert health.get_subsystem_state("meshtastic") == SubsystemState.DISCONNECTED
+
+    def test_disabled_state(self):
+        """DISABLED state for permanently failed subsystems."""
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("rns", SubsystemState.DISABLED)
+        assert health.get_subsystem_state("rns") == SubsystemState.DISABLED
+        states = health.get_subsystem_states()
+        assert states["rns"] == "disabled"
+
+    def test_thread_safety(self):
+        """Concurrent state updates don't corrupt data."""
+        health = BridgeHealthMonitor()
+        states = [SubsystemState.HEALTHY, SubsystemState.DISCONNECTED,
+                  SubsystemState.DEGRADED, SubsystemState.DISABLED]
+        errors = []
+
+        def toggle(subsystem, iterations):
+            try:
+                for i in range(iterations):
+                    health.set_subsystem_state(subsystem, states[i % len(states)])
+                    health.get_subsystem_state(subsystem)
+                    health.get_subsystem_states()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=toggle, args=("meshtastic", 100)),
+            threading.Thread(target=toggle, args=("rns", 100)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(errors) == 0

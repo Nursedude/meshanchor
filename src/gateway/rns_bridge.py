@@ -18,7 +18,7 @@ from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
 from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker, classify_error,
-    BridgeStatus, MessageOrigin
+    BridgeStatus, SubsystemState, MessageOrigin
 )
 # MQTT bridge handler (zero-interference, recommended)
 try:
@@ -286,6 +286,42 @@ class RNSMeshtasticBridge:
         """Get current bridge operational status."""
         return self.health.get_bridge_status()
 
+    # =========================================================================
+    # Subsystem State Management (Phase 2: Circuit Breakers)
+    # =========================================================================
+
+    def _update_subsystem_state(self, subsystem: str, state: SubsystemState) -> None:
+        """Update a subsystem's state and emit an event if it changed.
+
+        Args:
+            subsystem: "meshtastic" or "rns"
+            state: New SubsystemState value
+        """
+        old_state = self.health.set_subsystem_state(subsystem, state)
+        if old_state != state:
+            # Emit event for StatusBar and other listeners
+            if HAS_EVENT_BUS:
+                try:
+                    from utils.event_bus import emit_service_status
+                    emit_service_status(
+                        f"bridge_{subsystem}",
+                        available=(state == SubsystemState.HEALTHY),
+                        message=f"{subsystem}: {state.value}",
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to emit subsystem state event: {e}")
+
+    def get_subsystem_state(self, subsystem: str) -> SubsystemState:
+        """Get the current state of a bridge subsystem.
+
+        Args:
+            subsystem: "meshtastic" or "rns"
+
+        Returns:
+            Current SubsystemState.
+        """
+        return self.health.get_subsystem_state(subsystem)
+
     @property
     def is_fully_healthy(self) -> bool:
         """Check if bridge is fully operational (both networks up)."""
@@ -446,7 +482,7 @@ class RNSMeshtasticBridge:
         self._notify_status("stopped")
 
     def get_status(self) -> dict:
-        """Get current bridge status"""
+        """Get current bridge status including subsystem states."""
         uptime = None
         if self.stats['start_time']:
             uptime = (datetime.now() - self.stats['start_time']).total_seconds()
@@ -461,6 +497,8 @@ class RNSMeshtasticBridge:
             'uptime_seconds': uptime,
             'statistics': self.stats.copy(),
             'node_stats': self.node_tracker.get_stats(),
+            'subsystems': self.health.get_subsystem_states(),
+            'bridge_status': self.bridge_status.value,
         }
 
     def send_to_meshtastic(self, message: str, destination: str = None, channel: int = 0) -> bool:
@@ -703,12 +741,14 @@ class RNSMeshtasticBridge:
 
         Uses ReconnectStrategy for exponential backoff with jitter.
         Respects permanent failure flag for non-retriable errors.
+        Manages the RNS subsystem state independently of Meshtastic.
         """
         _logged_permanent_failure = False
         while self._running:
             try:
                 # Don't retry if RNS init failed permanently (e.g., library not installed)
                 if self._rns_init_failed_permanently:
+                    self._update_subsystem_state("rns", SubsystemState.DISABLED)
                     if not _logged_permanent_failure:
                         logger.warning("RNS initialization failed permanently - "
                                       "bridge will not attempt reconnection. "
@@ -718,6 +758,7 @@ class RNSMeshtasticBridge:
                     continue
 
                 if not self._connected_rns:
+                    self._update_subsystem_state("rns", SubsystemState.DISCONNECTED)
                     if not self._rns_reconnect.should_retry():
                         logger.warning("RNS reconnection: max attempts reached, resetting")
                         self._rns_reconnect.reset()
@@ -732,6 +773,7 @@ class RNSMeshtasticBridge:
                     if self._connected_rns:
                         self._rns_reconnect.record_success()
                         self.health.record_connection_event("rns", "connected")
+                        self._update_subsystem_state("rns", SubsystemState.HEALTHY)
                         logger.info("RNS connection established")
                     else:
                         self._rns_reconnect.record_failure()
@@ -751,26 +793,53 @@ class RNSMeshtasticBridge:
                 if category == "permanent":
                     logger.error("RNS permanent error detected, stopping retries")
                     self._rns_init_failed_permanently = True
+                    self._update_subsystem_state("rns", SubsystemState.DISABLED)
                 else:
+                    self._update_subsystem_state("rns", SubsystemState.DISCONNECTED)
                     self._rns_reconnect.record_failure()
                     self._rns_reconnect.wait(self._stop_event)
 
     def _bridge_loop(self):
-        """Main loop for message bridging"""
+        """Main loop for message bridging.
+
+        Phase 2 (Circuit Breakers): Each subsystem operates independently.
+        When a destination is down, messages are queued to the persistent
+        queue instead of being dropped. The bridge drains queued messages
+        when the destination comes back up.
+        """
         loop_count = 0
         while self._running:
             try:
+                # Sync subsystem states from connection status
+                self._sync_subsystem_states()
+
                 # Process Meshtastic → RNS queue
                 try:
                     msg = self._mesh_to_rns_queue.get(timeout=0.1)
-                    self._process_mesh_to_rns(msg)
+                    rns_state = self.health.get_subsystem_state("rns")
+                    if rns_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                        # RNS is down — queue for later delivery
+                        requeued = self._requeue_failed_message(msg, "rns")
+                        if requeued:
+                            self.health.record_message_queued_degraded()
+                            logger.debug("Mesh→RNS: RNS subsystem down, message queued")
+                    else:
+                        self._process_mesh_to_rns(msg)
                 except Empty:
                     pass
 
                 # Process RNS → Meshtastic queue
                 try:
                     msg = self._rns_to_mesh_queue.get(timeout=0.1)
-                    self._process_rns_to_mesh(msg)
+                    mesh_state = self.health.get_subsystem_state("meshtastic")
+                    if mesh_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                        # Meshtastic is down — queue for later delivery
+                        requeued = self._requeue_failed_message(msg, "meshtastic")
+                        if requeued:
+                            self.health.record_message_queued_degraded()
+                            logger.debug("RNS→Mesh: Meshtastic subsystem down, message queued")
+                    else:
+                        self._process_rns_to_mesh(msg)
                 except Empty:
                     pass
 
@@ -778,10 +847,49 @@ class RNSMeshtasticBridge:
                 loop_count += 1
                 if loop_count % 150 == 0:
                     self.delivery_tracker.check_timeouts()
+                    # Drain persistent queue when subsystems are back
+                    self._drain_persistent_queue()
 
             except Exception as e:
                 logger.error(f"Bridge loop error: {e}")
                 self._stop_event.wait(1)
+
+    def _sync_subsystem_states(self) -> None:
+        """Synchronize subsystem states from connection status.
+
+        Called each bridge loop iteration. Both handlers manage their own
+        reconnection, so we observe connection states and update accordingly.
+        The RNS subsystem state is also updated in _rns_loop, but we sync
+        here too so the bridge loop has accurate state even when _rns_loop
+        is not running (e.g., in tests).
+        """
+        # Meshtastic
+        if not self._mesh_handler:
+            self._update_subsystem_state("meshtastic", SubsystemState.DISABLED)
+        elif self._mesh_handler.is_connected:
+            self._update_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        else:
+            self._update_subsystem_state("meshtastic", SubsystemState.DISCONNECTED)
+
+        # RNS (also managed by _rns_loop, but kept in sync here)
+        if self._rns_init_failed_permanently:
+            self._update_subsystem_state("rns", SubsystemState.DISABLED)
+        elif self._connected_rns:
+            self._update_subsystem_state("rns", SubsystemState.HEALTHY)
+        # Note: don't overwrite DISCONNECTED here — _rns_loop handles transitions
+
+    def _drain_persistent_queue(self) -> None:
+        """Process pending messages from the persistent queue.
+
+        Called periodically from _bridge_loop when subsystems are healthy.
+        Only drains messages destined for currently-connected subsystems.
+        """
+        if not self._persistent_queue:
+            return
+        try:
+            self._persistent_queue.process_once(batch_size=5)
+        except Exception as e:
+            logger.debug(f"Persistent queue drain error: {e}")
 
     def _init_rns_main_thread(self):
         """Pre-initialize RNS from the main thread.
@@ -1378,121 +1486,10 @@ class RNSMeshtasticBridge:
 
 
 # === Module-level helper functions for CLI/headless operation ===
-
-_active_bridge: Optional[RNSMeshtasticBridge] = None
-
-
-def start_gateway_headless() -> bool:
-    """
-    Start the gateway bridge in headless mode (for CLI use).
-
-    Returns True if started successfully, False otherwise.
-    """
-    global _active_bridge
-
-    if _active_bridge is not None and _active_bridge._running:
-        logger.warning("Gateway bridge is already running")
-        print("Gateway bridge is already running")
-        return True
-
-    try:
-        _active_bridge = RNSMeshtasticBridge()
-        success = _active_bridge.start()
-
-        if success:
-            print("Gateway bridge started successfully")
-            mesh_ok = _active_bridge._mesh_handler.is_connected if _active_bridge._mesh_handler else False
-            print(f"  Meshtastic: {'Connected' if mesh_ok else 'Disconnected'}")
-            print(f"  RNS: {'Connected' if _active_bridge._connected_rns else 'Disconnected'}")
-        else:
-            print("Gateway bridge failed to start - check logs")
-
-        return success
-    except Exception as e:
-        logger.error(f"Failed to start gateway: {e}")
-        print(f"Failed to start gateway: {e}")
-        return False
-
-
-def stop_gateway_headless() -> bool:
-    """
-    Stop the gateway bridge (for CLI use).
-
-    Returns True if stopped successfully.
-    """
-    global _active_bridge
-
-    if _active_bridge is None:
-        print("No active gateway bridge to stop")
-        return True
-
-    try:
-        _active_bridge.stop()
-        _active_bridge = None
-        print("Gateway bridge stopped")
-        return True
-    except Exception as e:
-        logger.error(f"Error stopping gateway: {e}")
-        print(f"Error stopping gateway: {e}")
-        return False
-
-
-def get_gateway_stats() -> dict:
-    """
-    Get current gateway statistics (for CLI use).
-
-    Returns dict with bridge status and statistics.
-    """
-    global _active_bridge
-
-    if _active_bridge is None:
-        return {
-            'running': False,
-            'status': 'Not started',
-            'meshtastic_connected': False,
-            'rns_connected': False,
-            'messages_mesh_to_rns': 0,
-            'messages_rns_to_mesh': 0,
-            'errors': 0,
-            'bounced': 0,
-        }
-
-    try:
-        status = _active_bridge.get_status()
-        stats = status.get('statistics', {})
-        result = {
-            'running': _active_bridge._running,
-            'status': 'Running' if _active_bridge._running else 'Stopped',
-            'meshtastic_connected': _active_bridge._mesh_handler.is_connected if _active_bridge._mesh_handler else False,
-            'rns_connected': _active_bridge._connected_rns,
-            'messages_mesh_to_rns': stats.get('messages_mesh_to_rns', 0),
-            'messages_rns_to_mesh': stats.get('messages_rns_to_mesh', 0),
-            'errors': stats.get('errors', 0),
-            'bounced': stats.get('bounced', 0),
-            'uptime_seconds': status.get('uptime_seconds'),
-        }
-        # Include health metrics if available
-        if hasattr(_active_bridge, 'health'):
-            result['health'] = _active_bridge.health.get_summary()
-        # Include delivery confirmation stats
-        if hasattr(_active_bridge, 'delivery_tracker'):
-            result['delivery'] = _active_bridge.delivery_tracker.get_stats()
-        return result
-    except Exception as e:
-        logger.error(f"Error getting gateway stats: {e}")
-        return {
-            'running': False,
-            'status': f'Error: {e}',
-            'meshtastic_connected': False,
-            'rns_connected': False,
-            'messages_mesh_to_rns': 0,
-            'messages_rns_to_mesh': 0,
-            'errors': 0,
-            'bounced': 0,
-        }
-
-
-def is_gateway_running() -> bool:
-    """Check if gateway bridge is currently running."""
-    global _active_bridge
-    return _active_bridge is not None and _active_bridge._running
+# Extracted to gateway_cli.py; re-exported here for backward compatibility.
+from .gateway_cli import (  # noqa: F401, E402
+    start_gateway_headless,
+    stop_gateway_headless,
+    get_gateway_stats,
+    is_gateway_running,
+)

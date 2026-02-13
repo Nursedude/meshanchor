@@ -308,6 +308,8 @@ class TestRoundTrip:
     def test_roundtrip_with_bridge_loop_thread(self, bridge):
         """Test round trip using the bridge_loop thread for queue processing."""
         bridge._connected_rns = True
+        # Set handler as connected so subsystem state syncs to HEALTHY
+        bridge._mesh_handler._connected = True
 
         # Mock both send methods to succeed
         with patch.object(bridge, 'send_to_rns', return_value=True),              patch.object(bridge, 'send_to_meshtastic', return_value=True) as mock_mesh_send:
