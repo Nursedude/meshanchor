@@ -138,22 +138,34 @@ class HealthSnapshot:
     freshness_score: float
     status: str  # 'healthy', 'fair', 'degraded', 'critical'
     timestamp: float = 0.0
+    node_count: int = 0
+    service_count: int = 0
     details: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.timestamp == 0.0:
             self.timestamp = time.time()
 
+    @property
+    def category_scores(self) -> Dict[str, float]:
+        """Per-category score breakdown as a dict."""
+        return {
+            'connectivity': self.connectivity_score,
+            'performance': self.performance_score,
+            'reliability': self.reliability_score,
+            'freshness': self.freshness_score,
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'overall_score': round(self.overall_score, 1),
             'status': self.status,
             'categories': {
-                'connectivity': round(self.connectivity_score, 1),
-                'performance': round(self.performance_score, 1),
-                'reliability': round(self.reliability_score, 1),
-                'freshness': round(self.freshness_score, 1),
+                cat: round(score, 1)
+                for cat, score in self.category_scores.items()
             },
+            'node_count': self.node_count,
+            'service_count': self.service_count,
             'timestamp': self.timestamp,
             'details': self.details,
         }
@@ -550,6 +562,8 @@ class HealthScorer:
                 reliability_score=rel_score,
                 freshness_score=fresh_score,
                 status=score_to_status(overall),
+                node_count=len(self._nodes),
+                service_count=len(self._services),
                 details={
                     'connectivity': conn_details,
                     'performance': perf_details,
