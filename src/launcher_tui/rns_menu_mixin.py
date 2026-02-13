@@ -51,6 +51,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 ("nodes", "Known Destinations"),
                 ("positions", "Set Node Positions (for map)"),
                 ("diag", "RNS Diagnostics"),
+                ("repair", "Repair RNS (fix shared instance)"),
                 ("drift", "Config Drift Check"),
                 ("bridge", "Gateway Bridge (start/stop)"),
                 ("nomadnet", "NomadNet Client"),
@@ -79,6 +80,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                 "nodes": ("Known Destinations", self._rns_known_destinations),
                 "positions": ("Set Node Positions", self._rns_set_node_positions),
                 "diag": ("RNS Diagnostics", self._rns_diagnostics),
+                "repair": ("Repair RNS", self._rns_repair_menu),
                 "drift": ("Config Drift Check", self._rns_config_drift_check),
                 "bridge": ("Gateway Bridge", self._run_bridge),
                 "nomadnet": ("NomadNet Client", self._nomadnet_menu),
@@ -505,6 +507,32 @@ class RNSMenuMixin(RNSSnifferMixin):
         with open(cache_path, 'w') as f:
             json.dump(data, f, indent=2)
 
+    def _rns_repair_menu(self):
+        """RNS Repair Wizard — explicit user-initiated repair.
+
+        Shows what the repair will do and requires user consent before
+        making any changes. This replaces the old auto-fix behavior
+        that ran from error handlers and caused config regressions.
+        """
+        if not self.dialog.yesno(
+            "RNS Repair Wizard",
+            "This will attempt to fix RNS shared instance issues.\n\n"
+            "What it does:\n"
+            "  1. Ensures /etc/reticulum/ dirs exist with correct perms\n"
+            "  2. Deploys config template ONLY if no config exists\n"
+            "  3. Clears stale auth tokens (all locations)\n"
+            "  4. Checks for blocking interfaces\n"
+            "  5. Restarts rnsd and verifies port 37428\n\n"
+            "Your existing RNS config will NOT be overwritten.\n\n"
+            "Run diagnostics first? Use RNS > Diagnostics.\n\n"
+            "Proceed with repair?",
+        ):
+            return
+
+        clear_screen()
+        self._repair_rns_shared_instance()
+        self._wait_for_enter()
+
     def _rns_diagnostics(self):
         """Run comprehensive RNS diagnostics."""
         clear_screen()
@@ -763,10 +791,14 @@ class RNSMenuMixin(RNSSnifferMixin):
             self.dialog.msgbox("Error", f"Failed to deploy config:\n{e}")
             return None
 
-    def _auto_fix_rns_shared_instance(self) -> bool:
-        """Automatically fix RNS shared instance issues.
+    def _repair_rns_shared_instance(self) -> bool:
+        """Repair RNS shared instance — explicit user action only.
 
-        Called when 'no shared instance' error is detected. This method:
+        This is a repair wizard method, NOT an error handler auto-fix.
+        Must only be called from explicit user actions (RNS Diagnostics,
+        Repair menu, etc.) — never from error handlers in _run_rns_tool().
+
+        Steps:
         1. Ensures /etc/reticulum/ directories exist with correct permissions
         2. Deploys template ONLY if no config exists anywhere (never overwrites)
         3. Clears stale auth tokens and restarts rnsd
@@ -777,7 +809,7 @@ class RNSMenuMixin(RNSSnifferMixin):
         import time
 
         print("\n" + "=" * 50)
-        print("AUTO-FIX: RNS Shared Instance")
+        print("RNS REPAIR: Shared Instance")
         print("=" * 50)
 
         # Step 1: Fix directories and deploy config ONLY if none exists
@@ -1435,11 +1467,9 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
             elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "could not get" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
-                # RNS shared instance issue — diagnose before acting.
-                # The auto-fix (restart rnsd, deploy template) is destructive
-                # and only helps if rnsd is genuinely not running. If rnsd IS
-                # running, the problem is something else (entropy, auth, config
-                # mismatch) and blind restarts make things worse.
+                # RNS shared instance issue — DIAGNOSE, don't auto-fix.
+                # Auto-fix was the #1 source of regressions (see persistent_issues.md).
+                # Policy: show what's wrong, let the user decide what to do.
                 print(f"\nRNS connectivity issue detected.")
 
                 # Check if rnsd is actually running
@@ -1454,20 +1484,39 @@ class RNSMenuMixin(RNSSnifferMixin):
                     pass
 
                 if not rnsd_running:
-                    # rnsd is NOT running — auto-fix can help (start it)
-                    print("rnsd is not running. Attempting to start...\n")
-                    if self._auto_fix_rns_shared_instance():
-                        print(f"\nRetrying {tool_name}...\n")
-                        retry_result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=15
-                        )
-                        if retry_result.returncode == 0 and retry_result.stdout:
-                            print(retry_result.stdout, end='')
-                        elif retry_result.stdout:
-                            print(retry_result.stdout, end='')
+                    # rnsd is NOT running — offer to start it (with user consent)
+                    print("rnsd is not running.\n")
+                    if self.dialog.yesno(
+                        "rnsd Not Running",
+                        f"{tool_name} failed because rnsd is not running.\n\n"
+                        "Start rnsd now?\n\n"
+                        "If rnsd won't start, use RNS > Diagnostics to investigate.",
+                    ):
+                        try:
+                            subprocess.run(
+                                ['systemctl', 'start', 'rnsd'],
+                                capture_output=True, text=True, timeout=30
+                            )
+                            print("Starting rnsd...")
+                            if self._wait_for_rns_port(max_wait=10):
+                                print(f"rnsd started. Retrying {tool_name}...\n")
+                                retry_result = subprocess.run(
+                                    cmd, capture_output=True, text=True, timeout=15
+                                )
+                                if retry_result.returncode == 0 and retry_result.stdout:
+                                    print(retry_result.stdout, end='')
+                                else:
+                                    self._diagnose_rns_connectivity(
+                                        (retry_result.stdout or "") + (retry_result.stderr or "")
+                                    )
+                            else:
+                                print("rnsd started but port 37428 not listening.")
+                                print("Check: sudo journalctl -u rnsd -n 20")
+                                print("Or run: RNS > Diagnostics from the menu.")
+                        except (subprocess.SubprocessError, OSError) as e:
+                            print(f"Failed to start rnsd: {e}")
                     else:
-                        print("\nCould not start rnsd.")
-                        print("Check logs: sudo journalctl -u rnsd -n 30")
+                        print("To start rnsd manually: sudo systemctl start rnsd")
                 else:
                     # rnsd IS running but tools can't connect.
                     # Most common cause: rnsd still initializing (crypto, interfaces).
