@@ -763,12 +763,19 @@ class RNSMenuMixin(RNSSnifferMixin):
             storage_dir = target_dir / 'storage'
             interfaces_dir = target_dir / 'interfaces'
 
-            storage_dir.mkdir(exist_ok=True)
-            interfaces_dir.mkdir(exist_ok=True)
+            # Use 0o777 for storage dirs — rnsd may run as a different user
+            # than MeshForge, and NomadNet launches as the real user (not root).
+            # Must match ensure_system_dirs() in paths.py.
+            old_umask = os.umask(0)
+            try:
+                storage_dir.mkdir(mode=0o777, exist_ok=True)
+                interfaces_dir.mkdir(mode=0o755, exist_ok=True)
+            finally:
+                os.umask(old_umask)
 
-            # Set permissions: directories need to be writable by rnsd
+            # Fix existing permissions (may have been set to 0o755 by older code)
             target_dir.chmod(0o755)
-            storage_dir.chmod(0o755)
+            storage_dir.chmod(0o777)
             interfaces_dir.chmod(0o755)
 
             print(f"  Ensured: {storage_dir}")
