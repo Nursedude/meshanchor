@@ -1010,17 +1010,17 @@ Documentation=https://reticulum.network
 After=network-online.target
 Wants=network-online.target
 
+# Stop crash-looping after 5 failures in 60 seconds
+# (e.g., NomadNet holding port 37428)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=root
 ExecStart=${RNSD_BIN} --service
 Restart=on-failure
 RestartSec=5
-
-# Stop crash-looping after 5 failures in 60 seconds
-# (e.g., NomadNet holding port 37428)
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 StandardOutput=journal
 StandardError=journal
