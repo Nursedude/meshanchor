@@ -116,11 +116,16 @@ class MeshtasticHandler:
             try:
                 if not self._connected:
                     if not self._reconnect.should_retry():
-                        logger.warning("Meshtastic reconnection: max attempts reached, "
-                                       "checking for zombie connections")
-                        # After exhausting retries, check if a CLOSE-WAIT zombie
-                        # connection is blocking meshtasticd's single TCP slot.
-                        # If found, restart meshtasticd to clear it.
+                        logger.warning("Meshtastic reconnection: max attempts reached, resetting")
+                        self._reconnect.reset()
+                        self._stop_event.wait(self._reconnect.config.max_delay)
+                        continue
+
+                    # After 3 consecutive failures, check for CLOSE-WAIT zombies.
+                    # meshtasticd only allows ONE TCP client — a zombie connection
+                    # blocks all reconnection. Detect and clear it early (3 attempts
+                    # ≈ 7 seconds) instead of waiting for all 10 to exhaust.
+                    if self._reconnect.attempts == 3:
                         try:
                             from utils.meshtastic_connection import clear_stale_connections
                             cleared = clear_stale_connections(self.config.meshtastic.port)
@@ -129,11 +134,9 @@ class MeshtasticHandler:
                                     "meshtastic", "self_healed",
                                     "Cleared zombie CLOSE-WAIT connection"
                                 )
+                                self._reconnect.reset()
                         except ImportError:
                             pass
-                        self._reconnect.reset()
-                        self._stop_event.wait(self._reconnect.config.max_delay)
-                        continue
 
                     logger.info(f"Attempting Meshtastic connection "
                                f"(attempt {self._reconnect.attempts + 1})...")
