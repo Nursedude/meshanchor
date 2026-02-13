@@ -15,18 +15,19 @@
 
 ### P2: Feature Accessibility (modules exist, not wired to TUI)
 
-| # | Module | What It Does | Suggested Menu | Effort |
+| # | Module | What It Does | Suggested Menu | Status |
 |---|--------|-------------|----------------|--------|
-| 1 | `analytics.py` | Predictive alerts, network forecast | Dashboard > Analytics | LOW |
-| 2 | `webhooks.py` | Webhook endpoint management | Configuration > Webhooks | LOW |
-| 3 | `active_health_probe.py` | NGINX-style service health checks | Dashboard > Health Probes | LOW |
-| 4 | `messaging.py` | Message history viewer, search, export | Dashboard > Messages | LOW |
-| 5 | `device_backup.py` | Backup/restore device configs | Configuration > Backup | LOW |
-| 6 | `classifier.py` | Traffic classification | Mesh Networks > Traffic | LOW |
-| 7 | `rnode.py` | RNode device detection + config | Hardware > RNode Setup | MEDIUM |
-| 8 | `latency_monitor.py` | Background latency monitoring | Dashboard > Latency | MEDIUM |
+| 1 | `analytics.py` | Predictive alerts, network forecast | Dashboard > Analytics | **DONE** |
+| 2 | `webhooks.py` | Webhook endpoint management | Configuration > Webhooks | **DONE** |
+| 3 | `active_health_probe.py` | NGINX-style service health checks | Dashboard > Health Probes | **DONE** (Phase 1) |
+| 4 | `messaging.py` | Message history viewer, search, export | Mesh Networks > Messaging | **DONE** |
+| 5 | `device_backup.py` | Backup/restore device configs | Configuration > Backup | **DONE** (prior) |
+| 6 | `classifier.py` | Traffic classification | Mesh Networks > Traffic | Pending (LOW) |
+| 7 | `rnode.py` | RNode device detection + config | Hardware > RNode Setup | Pending (MEDIUM) |
+| 8 | `latency_monitor.py` | Background latency monitoring | Dashboard > Latency | Pending (MEDIUM) |
 
 **Pattern**: All modules have working APIs. Work = add menu entry + display wrapper in mixin.
+**Progress**: 5 of 8 wired (2026-02-13). Remaining: classifier, rnode, latency_monitor.
 
 ---
 
@@ -149,6 +150,16 @@
 
 ## Session Log
 
+### Session: Wire Analytics, Webhooks, Messaging to TUI (2026-02-13)
+
+**What**: Wired 3 existing modules to TUI menus as P2 quick wins. Created `analytics_mixin.py`, `webhooks_mixin.py`, `messaging_mixin.py` and added menu entries to Dashboard, Configuration, and Mesh Networks respectively. Cleaned up stale comments in main.py.
+
+**Tests**: 4045 passed, 19 skipped, 0 regressions. Lint clean.
+
+**Entropy watch**: None. Clean session, three focused tasks.
+
+---
+
 ### Session: Session Notes Documentation (2026-02-12)
 
 **What**: Consolidated all P2/P3 gaps from across project documentation into a single reference in `session_notes.md`. Cross-referenced `persistent_issues.md`, `missing_features.md`, `technical_debt_plan.md`, `roadmap.md`, and all prior session notes.
@@ -229,7 +240,7 @@
 
 ## Quick Reference: Next Session Pickup
 
-1. **P2 quick wins**: Wire `analytics.py`, `webhooks.py`, `messaging.py` to TUI (LOW effort each)
+1. **P2 quick wins**: Wire remaining `classifier.py`, `rnode.py`, `latency_monitor.py` to TUI
 2. **P2 reliability**: Fix service detection flakiness (Issue #20 — simplify to systemctl-only)
 3. **P2 architecture**: Event bus for RX message propagation
 4. **P3 debt**: Import boilerplate consolidation (`safe_import()` pattern)
