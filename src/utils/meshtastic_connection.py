@@ -148,6 +148,12 @@ def safe_close_interface(interface) -> None:
 
     The meshtastic library can raise BrokenPipeError or ConnectionResetError
     when trying to send the disconnect message if the connection is already gone.
+
+    CRITICAL: After interface.close(), we must also force-close the underlying
+    TCP socket. The meshtastic library's close() tries to send a disconnect
+    message — if the pipe is broken, it catches the error but may NOT close
+    the raw socket. This leaves meshtasticd with a CLOSE-WAIT zombie connection
+    that blocks all new TCP clients (meshtasticd only allows one).
     """
     global _last_global_close_time
 
@@ -164,8 +170,38 @@ def safe_close_interface(interface) -> None:
         # Log other errors but don't raise
         logger.warning(f"Unexpected error during interface cleanup: {e}")
     finally:
+        # Force-close the underlying TCP socket to prevent CLOSE-WAIT zombies.
+        # meshtasticd only allows ONE TCP client — a lingering CLOSE-WAIT socket
+        # blocks reconnection indefinitely until meshtasticd is restarted.
+        _force_close_socket(interface)
         # Always update global close time
         _last_global_close_time = time.time()
+
+
+def _force_close_socket(interface) -> None:
+    """
+    Force-close the underlying TCP socket on a meshtastic interface.
+
+    The meshtastic library's TCPInterface stores the socket as _socket
+    (inherited from StreamInterface). If interface.close() failed to
+    properly tear down the TCP connection, this sends RST to the peer
+    so meshtasticd immediately frees the client slot.
+    """
+    raw_socket = getattr(interface, '_socket', None)
+    if raw_socket is None:
+        return
+
+    try:
+        # shutdown() sends RST if there's pending data, ensuring
+        # meshtasticd sees the connection as fully closed
+        raw_socket.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass  # Already closed or not connected
+
+    try:
+        raw_socket.close()
+    except OSError:
+        pass  # Already closed
 
 
 class MeshtasticConnectionManager:
