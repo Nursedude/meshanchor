@@ -1365,28 +1365,42 @@ class RNSMenuMixin(RNSSnifferMixin):
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
             elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "could not get" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
-                # RNS shared instance issue - AUTO-FIX
+                # RNS shared instance issue — diagnose before acting.
+                # The auto-fix (restart rnsd, deploy template) is destructive
+                # and only helps if rnsd is genuinely not running. If rnsd IS
+                # running, the problem is something else (entropy, auth, config
+                # mismatch) and blind restarts make things worse.
                 print(f"\nRNS connectivity issue detected.")
-                print("MeshForge will attempt to fix this automatically...\n")
 
-                # Attempt automatic fix
-                if self._auto_fix_rns_shared_instance():
-                    # Success - retry the original command
-                    print(f"\nRetrying {tool_name}...\n")
-                    retry_result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=15
+                # Check if rnsd is actually running
+                rnsd_running = False
+                try:
+                    r = subprocess.run(
+                        ['systemctl', 'is-active', 'rnsd'],
+                        capture_output=True, text=True, timeout=5
                     )
-                    if retry_result.returncode == 0 and retry_result.stdout:
-                        print(retry_result.stdout, end='')
-                    elif retry_result.stdout:
-                        print(retry_result.stdout, end='')
+                    rnsd_running = r.stdout.strip() == 'active'
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+                if not rnsd_running:
+                    # rnsd is NOT running — auto-fix can help (start it)
+                    print("rnsd is not running. Attempting to start...\n")
+                    if self._auto_fix_rns_shared_instance():
+                        print(f"\nRetrying {tool_name}...\n")
+                        retry_result = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=15
+                        )
+                        if retry_result.returncode == 0 and retry_result.stdout:
+                            print(retry_result.stdout, end='')
+                        elif retry_result.stdout:
+                            print(retry_result.stdout, end='')
+                    else:
+                        print("\nCould not start rnsd.")
+                        print("Check logs: sudo journalctl -u rnsd -n 30")
                 else:
-                    # Auto-fix failed - show manual instructions
-                    print("\nAuto-fix was unable to resolve the issue.")
-                    print("Manual steps:")
-                    print("  1. Check if running with sudo: sudo python3 src/launcher_tui/main.py")
-                    print("  2. Check rnsd logs: sudo journalctl -u rnsd -n 30")
-                    print("  3. Restart rnsd: sudo systemctl restart rnsd")
+                    # rnsd IS running but tools can't connect — show diagnostics
+                    self._diagnose_rns_connectivity(combined)
             else:
                 # Other error - DON'T auto-fix, just show output
                 # RNS tools may return non-zero for benign reasons (empty table, no paths)
@@ -1405,6 +1419,69 @@ class RNSMenuMixin(RNSSnifferMixin):
         except subprocess.TimeoutExpired:
             print(f"\n{tool_name} timed out. RNS may be unresponsive.")
             print("Try restarting rnsd: sudo systemctl restart rnsd")
+
+    def _diagnose_rns_connectivity(self, error_output: str):
+        """Show targeted diagnostics when rnsd is running but tools can't connect.
+
+        Instead of blindly restarting rnsd (which loses entropy and makes the
+        problem worse), diagnose the actual issue.
+        """
+        lower = error_output.lower()
+        print("rnsd is running but RNS tools cannot connect.\n")
+
+        # Check 1: Authentication error (stale tokens after config change)
+        if "authenticationerror" in lower or "digest" in lower:
+            print("Cause: RPC authentication mismatch (stale auth tokens)")
+            print("Fix:   Clear auth tokens and restart rnsd:\n")
+            print("  sudo systemctl stop rnsd")
+            print("  sudo rm -f /etc/reticulum/storage/shared_instance_*")
+            print("  sudo rm -f /root/.reticulum/storage/shared_instance_*")
+            user_home = get_real_user_home()
+            print(f"  rm -f {user_home}/.reticulum/storage/shared_instance_*")
+            print("  sudo systemctl start rnsd")
+            return
+
+        # Check 2: Entropy starvation (rnsd hangs at crypto init)
+        try:
+            with open('/proc/sys/kernel/random/entropy_avail', 'r') as f:
+                entropy = int(f.read().strip())
+            if entropy < 256:
+                print(f"Cause: Low system entropy ({entropy} bits available)")
+                print("       rnsd is likely hanging on cryptographic initialization.\n")
+                print("Fix:   Install entropy daemon:\n")
+                print("  sudo apt install rng-tools    # preferred on Pi")
+                print("  sudo systemctl enable --now rngd")
+                print("\n  Then restart rnsd:")
+                print("  sudo systemctl restart rnsd")
+                return
+        except (OSError, ValueError):
+            pass
+
+        # Check 3: rnsd started but not yet listening (slow init)
+        try:
+            r = subprocess.run(
+                ['ss', '-tlnp', 'sport', '=', ':37428'],
+                capture_output=True, text=True, timeout=5
+            )
+            if ':37428' not in r.stdout:
+                print("Cause: rnsd is active but not listening on port 37428 yet.")
+                print("       This can happen when rnsd is still initializing")
+                print("       (crypto key generation, slow storage, low entropy).\n")
+                print("Check: sudo journalctl -u rnsd -n 20 --no-pager")
+                print("Wait:  Give it 30-60 seconds, then retry.")
+                return
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # Check 4: Config drift (rnsd using different config than expected)
+        print("Possible causes:")
+        print("  - Config drift: rnsd may be using a different config path")
+        print("  - Storage permissions: /etc/reticulum/storage/ may not be writable")
+        print("  - Stale state: shared instance tokens may be invalid\n")
+        print("Diagnostics:")
+        print("  sudo journalctl -u rnsd -n 30 --no-pager")
+        print("  sudo systemctl restart rnsd")
+        print("  ls -la /etc/reticulum/storage/")
 
     def _check_nomadnet_conflict(self) -> bool:
         """Check if NomadNet is running and holding the shared instance port.
