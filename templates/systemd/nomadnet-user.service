@@ -1,0 +1,49 @@
+# MeshForge - NomadNet User Service
+# ==================================
+#
+# NomadNet MUST start AFTER rnsd so it connects as a client to
+# rnsd's shared instance (port 37428) instead of fighting over it.
+#
+# Install:
+#   pip install --user nomadnet
+#   mkdir -p ~/.config/systemd/user
+#   cp nomadnet-user.service ~/.config/systemd/user/nomadnet.service
+#
+# Enable:
+#   systemctl --user daemon-reload
+#   systemctl --user enable nomadnet
+#   systemctl --user start nomadnet
+#
+# Persist after logout (required for headless/server):
+#   loginctl enable-linger $USER
+#
+# IMPORTANT: rnsd must be the shared instance owner.
+# Start order: rnsd -> nomadnet -> meshforge
+#
+# Status:
+#   systemctl --user status nomadnet
+
+[Unit]
+Description=NomadNet LXMF Client
+After=default.target network-online.target rnsd.service
+Wants=network-online.target
+Requires=rnsd.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+
+# nomadnet binary installed by pip --user
+ExecStart=%h/.local/bin/nomadnet --daemon
+
+# Use user's config directory
+Environment=HOME=%h
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nomadnet
+
+[Install]
+WantedBy=default.target

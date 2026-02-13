@@ -1,7 +1,13 @@
 # MeshForge - rnsd User Service
 # ==============================
 #
-# RNS should run as the user, not as root. This is the standard convention.
+# rnsd is the RNS shared instance — the hub that NomadNet, MeshForge,
+# rnstatus, and other RNS tools connect to on port 37428.
+#
+# IMPORTANT: rnsd must start BEFORE NomadNet and MeshForge.
+# If NomadNet starts first, it grabs port 37428 and rnsd crash-loops.
+#
+# Start order: rnsd -> nomadnet -> meshforge
 #
 # Install:
 #   pip install --user rns
@@ -16,7 +22,7 @@
 # Persist after logout (required for headless/server):
 #   loginctl enable-linger $USER
 #
-# Config: ~/.reticulum/config
+# Config: ~/.reticulum/config (or /etc/reticulum/config)
 # Generate example: rnsd --exampleconfig
 #
 # Status:
@@ -30,8 +36,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Restart=always
-RestartSec=3
+Restart=on-failure
+RestartSec=5
+
+# Stop crash-looping after 5 failures in 60 seconds
+# (e.g., NomadNet holding port 37428)
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 # rnsd binary installed by pip --user
 ExecStart=%h/.local/bin/rnsd --service
