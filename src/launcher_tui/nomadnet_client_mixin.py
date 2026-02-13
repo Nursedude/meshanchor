@@ -1105,14 +1105,31 @@ class NomadNetClientMixin:
 
         # rnsd is running - verify it's actually listening on port 37428
         # (rnsd can be "active" but stuck initializing a blocking interface)
+        #
+        # rnsd needs time after starting to initialize crypto and interfaces
+        # before binding the shared instance port. Poll with retries to avoid
+        # false "not yet listening" warnings during normal startup.
         port_listening = False
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                result_conn = s.connect_ex(('127.0.0.1', 37428))
-                port_listening = (result_conn == 0)
-        except OSError:
-            pass
+        max_attempts = 8
+        for attempt in range(max_attempts):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1)
+                    result_conn = s.connect_ex(('127.0.0.1', 37428))
+                    if result_conn == 0:
+                        port_listening = True
+                        break
+            except OSError:
+                pass
+
+            if attempt == 0:
+                # Show progress on first retry (don't flash if port is ready)
+                self.dialog.infobox(
+                    "Waiting for rnsd",
+                    "rnsd is running but port 37428 not ready yet.\n\n"
+                    "Waiting for initialization (crypto, interfaces)...",
+                )
+            time.sleep(1)
 
         if not port_listening:
             # rnsd running but not listening — check for blocking interfaces
