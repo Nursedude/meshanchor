@@ -1469,8 +1469,27 @@ class RNSMenuMixin(RNSSnifferMixin):
                         print("\nCould not start rnsd.")
                         print("Check logs: sudo journalctl -u rnsd -n 30")
                 else:
-                    # rnsd IS running but tools can't connect — show diagnostics
-                    self._diagnose_rns_connectivity(combined)
+                    # rnsd IS running but tools can't connect.
+                    # Most common cause: rnsd still initializing (crypto, interfaces).
+                    # Wait for port 37428 before showing diagnostics.
+                    print("rnsd is running — waiting for port 37428...")
+                    port_ready = self._wait_for_rns_port()
+                    if port_ready:
+                        # Port came up — retry the tool
+                        print(f"Port ready. Retrying {tool_name}...\n")
+                        retry_result = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=15
+                        )
+                        if retry_result.returncode == 0 and retry_result.stdout:
+                            print(retry_result.stdout, end='')
+                        else:
+                            # Port is up but tool still fails — auth or config issue
+                            self._diagnose_rns_connectivity(
+                                (retry_result.stdout or "") + (retry_result.stderr or "")
+                            )
+                    else:
+                        # Port never came up — show diagnostics
+                        self._diagnose_rns_connectivity(combined)
             else:
                 # Other error - DON'T auto-fix, just show output
                 # RNS tools may return non-zero for benign reasons (empty table, no paths)
@@ -1490,16 +1509,34 @@ class RNSMenuMixin(RNSSnifferMixin):
             print(f"\n{tool_name} timed out. RNS may be unresponsive.")
             print("Try restarting rnsd: sudo systemctl restart rnsd")
 
+    def _wait_for_rns_port(self, max_wait: int = 10) -> bool:
+        """Wait for rnsd to start listening on port 37428.
+
+        Polls the port with 1-second intervals. Returns True if port
+        becomes available, False if timeout expires.
+        """
+        import socket
+        for i in range(max_wait):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1)
+                    if s.connect_ex(('127.0.0.1', 37428)) == 0:
+                        return True
+            except OSError:
+                pass
+            time.sleep(1)
+        return False
+
     def _diagnose_rns_connectivity(self, error_output: str):
         """Show targeted diagnostics when rnsd is running but tools can't connect.
 
-        Instead of blindly restarting rnsd (which loses entropy and makes the
-        problem worse), diagnose the actual issue.
+        Instead of guessing, check for auth errors (actionable) then fall
+        through to showing the actual rnsd journal log.
         """
         lower = error_output.lower()
         print("rnsd is running but RNS tools cannot connect.\n")
 
-        # Check 1: Authentication error (stale tokens after config change)
+        # Auth errors are actionable — detect and show specific fix
         if "authenticationerror" in lower or "digest" in lower:
             print("Cause: RPC authentication mismatch (stale auth tokens)")
             print("Fix:   Clear auth tokens and restart rnsd:\n")
@@ -1511,96 +1548,35 @@ class RNSMenuMixin(RNSSnifferMixin):
             print("  sudo systemctl start rnsd")
             return
 
-        # Check 2: Entropy starvation (rnsd hangs at crypto init)
-        try:
-            with open('/proc/sys/kernel/random/entropy_avail', 'r') as f:
-                entropy = int(f.read().strip())
-            if entropy < 256:
-                print(f"Cause: Low system entropy ({entropy} bits available)")
-                print("       rnsd is likely hanging on cryptographic initialization.\n")
-                # Detect which entropy service/package is available
-                # Debian/Pi OS uses rng-tools-debian, others use rng-tools
-                rng_svc = None
-                rng_pkg = None
-                for svc in ['rng-tools-debian', 'rngd', 'rng-tools']:
-                    chk = subprocess.run(
-                        ['systemctl', 'list-unit-files', f'{svc}.service'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if svc in chk.stdout:
-                        rng_svc = svc
-                        break
-                if rng_svc:
-                    print(f"Fix:   Enable the entropy daemon ({rng_svc}):\n")
-                    print(f"  sudo systemctl enable --now {rng_svc}")
-                else:
-                    # Detect distro to suggest correct package
-                    rng_pkg = 'rng-tools-debian'
-                    try:
-                        chk = subprocess.run(
-                            ['dpkg', '--print-architecture'],
-                            capture_output=True, text=True, timeout=5
-                        )
-                        if chk.returncode == 0:
-                            rng_pkg = 'rng-tools-debian'  # Debian/Pi OS
-                        else:
-                            rng_pkg = 'rng-tools'
-                    except (subprocess.SubprocessError, OSError):
-                        rng_pkg = 'rng-tools'
-                    print("Fix:   Install entropy daemon:\n")
-                    print(f"  sudo apt install {rng_pkg}")
-                print("\n  Then restart rnsd:")
-                print("  sudo systemctl restart rnsd")
-                return
-        except (OSError, ValueError):
-            pass
+        # Check for blocking interfaces (most common root cause)
+        blocking = self._find_blocking_interfaces()
+        if blocking:
+            print("Cause: rnsd is stuck initializing a blocking interface.\n")
+            for iface_name, reason, fix in blocking:
+                print(f"  [{iface_name}] {reason}")
+                print(f"  Fix: {fix}\n")
+            print("Options:")
+            print("  1. Start the missing dependency (see Fix above)")
+            print("  2. Disable the interface in /etc/reticulum/config")
+            print("     (change 'enabled = yes' to 'enabled = no')")
+            print("  3. sudo systemctl restart rnsd (after fixing)")
+            return
 
-        # Check 3: rnsd started but not yet listening (slow init)
-        # Most common cause: an enabled interface is blocking because its
-        # dependency is unavailable (e.g., Meshtastic_Interface needs meshtasticd).
-        # rnsd initializes interfaces BEFORE binding the shared instance port,
-        # so a blocking interface prevents everything.
+        # No specific cause detected — show actual rnsd log
+        print("Showing recent rnsd log:\n")
         try:
             r = subprocess.run(
-                ['ss', '-tlnp', 'sport', '=', ':37428'],
-                capture_output=True, text=True, timeout=5
+                ['journalctl', '-u', 'rnsd', '-n', '15', '--no-pager'],
+                capture_output=True, text=True, timeout=10
             )
-            if ':37428' not in r.stdout:
-                # Check if an enabled interface has a missing dependency
-                blocking = self._find_blocking_interfaces()
-                if blocking:
-                    print("Cause: rnsd is stuck initializing an interface whose")
-                    print("       dependency is unavailable.\n")
-                    for iface_name, reason, fix in blocking:
-                        print(f"  Interface: {iface_name}")
-                        print(f"  Problem:   {reason}")
-                        print(f"  Fix:       {fix}\n")
-                    print("Until the dependency is available, rnsd cannot bind")
-                    print("port 37428 and all RNS tools will fail.\n")
-                    print("Options:")
-                    print("  1. Start the missing dependency (see Fix above)")
-                    print("  2. Disable the interface in /etc/reticulum/config")
-                    print("     (change 'enabled = yes' to 'enabled = no')")
-                    print("  3. sudo systemctl restart rnsd (after fixing)")
-                else:
-                    print("Cause: rnsd is active but not listening on port 37428 yet.")
-                    print("       This can happen when rnsd is still initializing")
-                    print("       (crypto key generation, slow storage).\n")
-                    print("Check: sudo journalctl -u rnsd -n 20 --no-pager")
-                    print("Wait:  Give it 30-60 seconds, then retry.")
-                return
+            if r.stdout and r.stdout.strip():
+                for line in r.stdout.strip().split('\n'):
+                    print(f"  {line}")
+            else:
+                print("  (no log output)")
         except (subprocess.SubprocessError, OSError):
-            pass
-
-        # Check 4: Config drift (rnsd using different config than expected)
-        print("Possible causes:")
-        print("  - Config drift: rnsd may be using a different config path")
-        print("  - Storage permissions: /etc/reticulum/storage/ may not be writable")
-        print("  - Stale state: shared instance tokens may be invalid\n")
-        print("Diagnostics:")
-        print("  sudo journalctl -u rnsd -n 30 --no-pager")
-        print("  sudo systemctl restart rnsd")
-        print("  ls -la /etc/reticulum/storage/")
+            print("  (could not read journal)")
+        print("\nTo restart: sudo systemctl restart rnsd")
 
     def _find_blocking_interfaces(self) -> list:
         """Check if enabled RNS interfaces have missing dependencies.
@@ -1611,8 +1587,8 @@ class RNSMenuMixin(RNSSnifferMixin):
 
         This is the root cause of "rnsd active but not listening on 37428":
         rnsd initializes interfaces BEFORE binding the shared instance port.
-        A blocking interface (e.g., TCP connect to dead host) prevents
-        the shared instance from ever becoming available.
+        A blocking interface (e.g., TCP connect to dead host, missing serial
+        device) prevents the shared instance from ever becoming available.
         """
         blocking = []
         config_file = ReticulumPaths.get_config_file()
@@ -1639,9 +1615,11 @@ class RNSMenuMixin(RNSSnifferMixin):
             name = match.group(1).strip()
             body = match.group(2)
 
-            # Check if enabled
-            enabled_match = re.search(r'^\s*enabled\s*=\s*(yes|true|1)', body,
-                                      re.IGNORECASE | re.MULTILINE)
+            # Check if enabled (RNS uses both 'enabled' and 'interface_enabled')
+            enabled_match = re.search(
+                r'^\s*(?:interface_)?enabled\s*=\s*(yes|true|1)',
+                body, re.IGNORECASE | re.MULTILINE
+            )
             if not enabled_match:
                 continue
 
@@ -1653,13 +1631,18 @@ class RNSMenuMixin(RNSSnifferMixin):
 
             iface_type = type_match.group(1)
 
-            # Check Meshtastic_Interface → needs meshtasticd
+            # Check Meshtastic_Interface — tcp_port, serial port, or BLE
             if iface_type == 'Meshtastic_Interface':
                 tcp_match = re.search(r'^\s*tcp_port\s*=\s*(\S+)', body,
                                       re.IGNORECASE | re.MULTILINE)
+                port_match = re.search(r'^\s*port\s*=\s*(\S+)', body,
+                                       re.IGNORECASE | re.MULTILINE)
+                ble_match = re.search(r'^\s*ble_port\s*=\s*(\S+)', body,
+                                      re.IGNORECASE | re.MULTILINE)
+
                 if tcp_match:
+                    # TCP mode → needs meshtasticd running
                     host_port = tcp_match.group(1)
-                    # Check if meshtasticd is running
                     try:
                         r = subprocess.run(
                             ['systemctl', 'is-active', 'meshtasticd'],
@@ -1668,12 +1651,28 @@ class RNSMenuMixin(RNSSnifferMixin):
                         if r.stdout.strip() != 'active':
                             blocking.append((
                                 name,
-                                f"Meshtastic_Interface needs meshtasticd ({host_port}) "
-                                f"but meshtasticd is not running",
+                                f"needs meshtasticd ({host_port}) but it is not running",
                                 "sudo systemctl start meshtasticd"
                             ))
                     except (subprocess.SubprocessError, OSError):
                         pass
+                elif port_match:
+                    # Serial mode → device must exist
+                    dev = port_match.group(1)
+                    if dev.startswith('/dev/') and not Path(dev).exists():
+                        blocking.append((
+                            name,
+                            f"serial device {dev} not found (disconnected?)",
+                            f"Connect the device or disable this interface"
+                        ))
+                elif ble_match:
+                    # BLE mode — can't easily verify, note it as possible blocker
+                    ble_target = ble_match.group(1)
+                    blocking.append((
+                        name,
+                        f"BLE connection to {ble_target} may block if device is off",
+                        "Ensure BLE device is powered on, or disable this interface"
+                    ))
 
             # Check TCPClientInterface → needs reachable host
             elif iface_type == 'TCPClientInterface':
@@ -1684,7 +1683,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                 if host_match and port_match:
                     host = host_match.group(1)
                     port = port_match.group(1)
-                    # Quick TCP connect test (1-second timeout)
                     import socket
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1694,8 +1692,21 @@ class RNSMenuMixin(RNSSnifferMixin):
                     except (socket.timeout, ConnectionRefusedError, OSError):
                         blocking.append((
                             name,
-                            f"TCPClientInterface target {host}:{port} is unreachable",
-                            f"Check if {host}:{port} is online and reachable"
+                            f"target {host}:{port} is unreachable",
+                            f"Check if {host}:{port} is online, or disable this interface"
+                        ))
+
+            # Check RNodeInterface / SerialInterface → serial device must exist
+            elif iface_type in ('RNodeInterface', 'SerialInterface', 'KISSInterface'):
+                port_match = re.search(r'^\s*port\s*=\s*(\S+)', body,
+                                       re.IGNORECASE | re.MULTILINE)
+                if port_match:
+                    dev = port_match.group(1)
+                    if dev.startswith('/dev/') and not Path(dev).exists():
+                        blocking.append((
+                            name,
+                            f"serial device {dev} not found (disconnected?)",
+                            f"Connect the device or disable this interface"
                         ))
 
         return blocking
