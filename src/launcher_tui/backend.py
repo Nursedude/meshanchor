@@ -17,12 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 def clear_screen() -> None:
-    """Clear the terminal using ANSI escape codes.
+    """Clear the terminal including scrollback buffer.
 
-    Much faster than subprocess.run(['clear']) — no subprocess spawn,
-    no visible flash between clear and redraw.
+    Uses three ANSI sequences:
+    - \\033[H     Move cursor to home position (top-left)
+    - \\033[2J    Clear the visible viewport
+    - \\033[3J    Clear the scrollback buffer
+
+    The scrollback clear (\\033[3J) prevents "screen roll" where old
+    print() output bleeds through when whiptail/dialog redraws.
     """
-    sys.stdout.write('\033[H\033[2J')
+    sys.stdout.write('\033[H\033[2J\033[3J')
     sys.stdout.flush()
 
 
