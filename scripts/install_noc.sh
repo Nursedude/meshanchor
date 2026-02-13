@@ -991,29 +991,56 @@ if $INSTALL_RNS; then
     chmod 755 /etc/reticulum/storage/ratchets
     chmod 755 /etc/reticulum/interfaces
 
-    # Create systemd service if not exists
-    if ! systemctl list-unit-files | grep -q rnsd.service; then
-        echo "  Creating rnsd systemd service..."
+    # Create systemd service (deploy from template or create inline)
+    echo "  Setting up rnsd systemd service..."
 
-        cat > /etc/systemd/system/rnsd.service << 'RNSD_SERVICE'
+    # Find rnsd binary
+    RNSD_BIN=$(command -v rnsd 2>/dev/null || echo "/usr/local/bin/rnsd")
+
+    # System-wide service (root) - based on templates/systemd/rnsd-user.service
+    # but adapted for system-level (User=root, absolute paths)
+    cat > /etc/systemd/system/rnsd.service << RNSD_SERVICE
 [Unit]
 Description=Reticulum Network Stack Daemon
 Documentation=https://reticulum.network
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/rnsd -v
+ExecStart=${RNSD_BIN} --service
 Restart=on-failure
 RestartSec=5
+
+# Stop crash-looping after 5 failures in 60 seconds
+# (e.g., NomadNet holding port 37428)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rnsd
 
 [Install]
 WantedBy=multi-user.target
 RNSD_SERVICE
 
-        systemctl daemon-reload
+    # Also deploy user-level service template for non-root setups
+    REAL_USER="${SUDO_USER:-$USER}"
+    REAL_HOME=$(eval echo "~${REAL_USER}")
+    USER_SYSTEMD_DIR="${REAL_HOME}/.config/systemd/user"
+    if [[ -d "$INSTALL_DIR/templates/systemd" ]]; then
+        mkdir -p "$USER_SYSTEMD_DIR"
+        cp "$INSTALL_DIR/templates/systemd/rnsd-user.service" "$USER_SYSTEMD_DIR/rnsd.service" 2>/dev/null || true
+        if [[ -f "$INSTALL_DIR/templates/systemd/nomadnet-user.service" ]]; then
+            cp "$INSTALL_DIR/templates/systemd/nomadnet-user.service" "$USER_SYSTEMD_DIR/nomadnet.service" 2>/dev/null || true
+        fi
+        chown -R "${REAL_USER}:" "$USER_SYSTEMD_DIR" 2>/dev/null || true
+        echo -e "  ${GREEN}✓ User service templates deployed to ${USER_SYSTEMD_DIR}${NC}"
     fi
+
+    systemctl daemon-reload
 
     # Check if Meshtastic_Interface.py plugin exists - if so, install meshtastic module
     # This is required for the RNS-over-Meshtastic bridge to work (Issue #24)
@@ -1288,11 +1315,13 @@ MAP_SERVICE
 fi
 
 # Update systemd service to use orchestrator
+# Start order: meshtasticd -> rnsd -> meshforge
 cat > /etc/systemd/system/meshforge.service << 'MESHFORGE_SERVICE'
 [Unit]
 Description=MeshForge Mesh Network Operations Center
 Documentation=https://github.com/Nursedude/meshforge
-After=network.target
+After=network.target meshtasticd.service rnsd.service
+Wants=meshtasticd.service rnsd.service
 
 [Service]
 Type=simple
