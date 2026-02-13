@@ -492,6 +492,59 @@ class ActiveHealthProbe:
                     pass
 
 
+def _emit_state_change(service_name: str, new_state: HealthState) -> None:
+    """Callback that bridges health probe state changes to the EventBus.
+
+    Emits a ServiceEvent whenever a service transitions between states,
+    enabling the status bar and other subscribers to react without polling.
+    """
+    try:
+        from utils.event_bus import emit_service_status
+        available = new_state == HealthState.HEALTHY
+        emit_service_status(
+            service_name=service_name,
+            available=available,
+            message=f"{service_name}: {new_state.value}",
+        )
+    except ImportError:
+        logger.debug("event_bus not available for health probe callback")
+
+
+# Module-level singleton so all callers share one probe instance
+_health_probe: Optional[ActiveHealthProbe] = None
+_probe_lock = threading.Lock()
+
+
+def get_health_probe(
+    interval: int = 30,
+    fails: int = 3,
+    passes: int = 2,
+) -> ActiveHealthProbe:
+    """
+    Get the singleton health probe, creating it on first call.
+
+    Returns the same instance to every caller so that all components
+    share one background monitoring thread. The probe is NOT started
+    automatically — call .start() when ready.
+
+    Args:
+        interval: Seconds between checks (only used on first call)
+        fails: Consecutive failures for unhealthy (only used on first call)
+        passes: Consecutive passes for healthy (only used on first call)
+
+    Returns:
+        Configured ActiveHealthProbe (call .start() to begin monitoring)
+    """
+    global _health_probe
+    with _probe_lock:
+        if _health_probe is not None:
+            return _health_probe
+        _health_probe = create_gateway_health_probe(
+            interval=interval, fails=fails, passes=passes,
+        )
+        return _health_probe
+
+
 def create_gateway_health_probe(
     interval: int = 30,
     fails: int = 3,
@@ -501,8 +554,12 @@ def create_gateway_health_probe(
     Create a pre-configured health probe for gateway services.
 
     Convenience factory that sets up standard checks for:
-    - meshtasticd (systemd)
-    - rnsd (UDP port)
+    - meshtasticd (systemd + TCP port 4403)
+    - rnsd (UDP port 37428)
+    - mosquitto (TCP port 1883)
+
+    Automatically wires state changes to the EventBus so that
+    status_bar and other subscribers get push updates.
 
     Args:
         interval: Seconds between checks
@@ -517,11 +574,18 @@ def create_gateway_health_probe(
     # Register standard gateway service checks
     probe.register_check(
         "meshtasticd",
-        lambda: probe.check_systemd_service("meshtasticd"),
+        lambda: probe.check_tcp_port(4403),
     )
     probe.register_check(
         "rnsd",
         lambda: probe.check_rns_port(37428),
     )
+    probe.register_check(
+        "mosquitto",
+        lambda: probe.check_tcp_port(1883),
+    )
+
+    # Wire state changes to EventBus for push-based status updates
+    probe.register_callback("on_state_change", _emit_state_change)
 
     return probe

@@ -404,10 +404,42 @@ class MeshForgeLauncher(
         # Auto-lock port 9443 so meshtasticd web is only via MeshForge proxy
         self._maybe_auto_lock_port()
 
+        # Start continuous health monitoring (Phase 1 — reliability)
+        # Background thread checks meshtasticd, rnsd, mosquitto every 30s.
+        # State changes push to EventBus → StatusBar updates automatically.
+        self._start_health_monitor()
+
         try:
             self._run_main_menu()
         finally:
+            self._stop_health_monitor()
             self._stop_config_api_server()
+
+    def _start_health_monitor(self) -> None:
+        """Start the background health monitoring loop.
+
+        Uses the singleton ActiveHealthProbe which checks meshtasticd,
+        rnsd, and mosquitto every 30 seconds. State changes are pushed
+        to the EventBus, which the StatusBar subscribes to.
+        """
+        try:
+            from utils.active_health_probe import get_health_probe
+            self._health_probe = get_health_probe(interval=30, fails=3, passes=2)
+            self._health_probe.start()
+            logger.info("Health monitor started (30s interval)")
+        except ImportError:
+            logger.debug("active_health_probe not available — health monitor disabled")
+            self._health_probe = None
+        except Exception as e:
+            logger.warning(f"Failed to start health monitor: {e}")
+            self._health_probe = None
+
+    def _stop_health_monitor(self) -> None:
+        """Stop the background health monitoring loop."""
+        probe = getattr(self, '_health_probe', None)
+        if probe:
+            probe.stop(timeout=3)
+            logger.info("Health monitor stopped")
 
     def _run_startup_checks(self) -> bool:
         """
