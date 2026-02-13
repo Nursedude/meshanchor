@@ -90,6 +90,12 @@ class DialogBackend:
             # Build command as list args (safe, no shell needed)
             cmd_parts = [self.backend] + [str(a) for a in full_args]
 
+            # Clear screen before launching dialog so whiptail saves a clean
+            # main buffer. Without this, whiptail saves whatever print() output
+            # was on the main buffer and restores it on exit — causing the
+            # "screen roll" where old text bleeds through between dialogs.
+            clear_screen()
+
             # Run with stderr redirected to file to capture selection
             # whiptail/dialog opens /dev/tty directly for ncurses display
             with open(tmp_path, 'w') as stderr_file:
