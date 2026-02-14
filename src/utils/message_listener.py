@@ -121,6 +121,28 @@ class MessageListener:
             if callback in self._callbacks:
                 self._callbacks.remove(callback)
 
+    def _emit_message_event(self, msg_data: dict) -> None:
+        """Emit a message event to the event bus for TUI live feed."""
+        try:
+            from utils.event_bus import emit_message
+            emit_message(
+                direction='rx',
+                content=msg_data.get('content', ''),
+                node_id=msg_data.get('from_id', ''),
+                channel=msg_data.get('channel', 0),
+                network='meshtastic',
+                raw_data={
+                    'to_id': msg_data.get('to_id'),
+                    'is_broadcast': msg_data.get('is_broadcast', False),
+                    'snr': msg_data.get('snr'),
+                    'rssi': msg_data.get('rssi'),
+                    'hops_away': msg_data.get('hops_away'),
+                    'via_mqtt': msg_data.get('via_mqtt', False),
+                }
+            )
+        except Exception as e:
+            logger.debug(f"Event bus emit failed: {e}")
+
     def get_status(self) -> ListenerStatus:
         """Get current listener status."""
         return self._status
@@ -462,6 +484,9 @@ class MessageListener:
                 except Exception as e:
                     logger.error(f"Callback error: {e}")
 
+        # Emit to event bus for TUI live feed (Issue #17 Phase 3)
+        self._emit_message_event(msg_data)
+
     def _handle_telemetry(self, packet, decoded, from_id):
         """Handle TELEMETRY_APP packets - sensor data."""
         try:
@@ -643,6 +668,9 @@ class MessageListener:
                         callback(msg_data)
                     except Exception as e:
                         logger.error(f"Callback error: {e}")
+
+            # Emit to event bus for TUI live feed (Issue #17 Phase 3)
+            self._emit_message_event(msg_data)
 
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}")
