@@ -754,3 +754,243 @@ class TestBackgroundProcessing:
 
         stats = queue.get_stats()
         assert stats["delivered"] >= 1
+
+
+# =============================================================================
+# CONNECTION STABILITY TESTS
+# Tests for failure patterns identified in session notes (Jan-Feb 2026)
+# =============================================================================
+
+class TestMeshtasticConnectionStability:
+    """Test meshtasticd connection via MQTT bridge handler."""
+
+    def test_mqtt_handler_instantiates_without_broker(self):
+        """Handler should create cleanly even when broker is unreachable."""
+        config = GatewayConfig()
+        config.enabled = True
+        config.bridge_mode = "mqtt_bridge"
+
+        from gateway.bridge_health import BridgeHealthMonitor
+        from gateway.node_tracker import UnifiedNodeTracker
+
+        health = BridgeHealthMonitor()
+        node_tracker = UnifiedNodeTracker()
+        stop_event = threading.Event()
+        stats = {'errors': 0}
+        stats_lock = threading.Lock()
+        queue = Queue(maxsize=100)
+
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        h = MQTTBridgeHandler(
+            config=config,
+            node_tracker=node_tracker,
+            health=health,
+            stop_event=stop_event,
+            stats=stats,
+            stats_lock=stats_lock,
+            message_queue=queue,
+        )
+        assert h.is_connected is False
+
+    def test_mqtt_connect_reports_failure_cleanly(self):
+        """When broker is unreachable, connect() returns False without crash."""
+        config = GatewayConfig()
+        config.mqtt_bridge.broker = "127.0.0.1"
+        config.mqtt_bridge.port = 19999  # Unreachable port
+
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        from gateway.bridge_health import BridgeHealthMonitor
+        from gateway.node_tracker import UnifiedNodeTracker
+
+        h = MQTTBridgeHandler(
+            config=config,
+            node_tracker=UnifiedNodeTracker(),
+            health=BridgeHealthMonitor(),
+            stop_event=threading.Event(),
+            stats={'errors': 0},
+            stats_lock=threading.Lock(),
+            message_queue=Queue(maxsize=100),
+        )
+
+        result = h._connect()
+        assert result is False
+        assert h.is_connected is False
+
+    def test_mqtt_test_connection_returns_false_when_unreachable(self):
+        """test_connection() should return False, not raise."""
+        config = GatewayConfig()
+        config.mqtt_bridge.broker = "127.0.0.1"
+        config.mqtt_bridge.port = 19999
+
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        from gateway.bridge_health import BridgeHealthMonitor
+        from gateway.node_tracker import UnifiedNodeTracker
+
+        h = MQTTBridgeHandler(
+            config=config,
+            node_tracker=UnifiedNodeTracker(),
+            health=BridgeHealthMonitor(),
+            stop_event=threading.Event(),
+            stats={'errors': 0},
+            stats_lock=threading.Lock(),
+            message_queue=Queue(maxsize=100),
+        )
+
+        assert h.test_connection() is False
+
+    def test_bridge_starts_in_degraded_mode(self):
+        """Bridge should start even when meshtasticd is unavailable."""
+        config = GatewayConfig()
+        config.enabled = True
+        config.bridge_mode = "mqtt_bridge"
+
+        from gateway.rns_bridge import RNSMeshtasticBridge
+        bridge = RNSMeshtasticBridge(config=config)
+
+        result = bridge.start()
+        assert result is True
+        assert bridge._running is True
+
+        # Give threads a moment to run
+        time.sleep(0.5)
+
+        status = bridge.get_status()
+        assert status['running'] is True
+        # Meshtastic should be disconnected (no broker)
+        assert status['meshtastic_connected'] is False
+
+        bridge.stop()
+        assert bridge._running is False
+
+
+class TestRNSConnectionStability:
+    """Test RNS connection path — the historically problematic side."""
+
+    def test_rns_not_installed_sets_permanent_failure(self):
+        """When RNS library isn't installed, bridge marks it permanently disabled."""
+        config = GatewayConfig()
+        config.enabled = True
+        config.bridge_mode = "mqtt_bridge"
+
+        from gateway.rns_bridge import RNSMeshtasticBridge
+
+        bridge = RNSMeshtasticBridge(config=config)
+
+        with patch('gateway.rns_bridge._HAS_RNS', False):
+            bridge._connect_rns()
+
+        assert bridge._connected_rns is False
+        assert bridge._rns_init_failed_permanently is True
+
+    def test_rns_already_initialized_proceeds(self):
+        """When RNS singleton exists, bridge should proceed to LXMF setup."""
+        config = GatewayConfig()
+        config.enabled = True
+
+        from gateway.rns_bridge import RNSMeshtasticBridge
+
+        bridge = RNSMeshtasticBridge(config=config)
+        bridge._rns_pre_initialized = True
+
+        mock_rns = MagicMock()
+        mock_lxmf = MagicMock()
+
+        with patch('gateway.rns_bridge._HAS_RNS', True), \
+             patch('gateway.rns_bridge._HAS_LXMF', True), \
+             patch('gateway.rns_bridge._RNS_mod', mock_rns), \
+             patch('gateway.rns_bridge._LXMF_mod', mock_lxmf):
+
+            bridge._connect_rns()
+
+        assert mock_lxmf.LXMRouter.called
+        assert bridge._connected_rns is True
+
+    def test_rns_init_does_not_restart_services(self):
+        """CRITICAL: _init_rns_main_thread must NEVER restart rnsd.
+
+        This was the root cause of the worst regressions (Session 7).
+        The apply_config_and_restart function must never be called.
+        """
+        config = GatewayConfig()
+        config.enabled = True
+
+        from gateway.rns_bridge import RNSMeshtasticBridge
+
+        bridge = RNSMeshtasticBridge(config=config)
+
+        mock_rns = MagicMock()
+        mock_rns.Reticulum.return_value = MagicMock()
+
+        with patch('gateway.rns_bridge._HAS_RNS', True), \
+             patch('gateway.rns_bridge._RNS_mod', mock_rns), \
+             patch('gateway.rns_bridge.ReticulumPaths') as mock_paths, \
+             patch('gateway.rns_bridge.detect_rnsd_config_drift') as mock_drift, \
+             patch('os.geteuid', return_value=0):
+
+            mock_paths.ensure_system_dirs.return_value = True
+            mock_drift.return_value = MagicMock(drifted=False)
+
+            with patch.dict('sys.modules', {
+                'utils.gateway_diagnostic': MagicMock(find_rns_processes=lambda: [])
+            }):
+                bridge._init_rns_main_thread()
+
+        assert bridge._rns_pre_initialized is True
+
+    def test_rns_loop_respects_permanent_failure(self):
+        """When RNS init fails permanently, the loop should not retry."""
+        config = GatewayConfig()
+        config.enabled = True
+
+        from gateway.rns_bridge import RNSMeshtasticBridge
+        from gateway.bridge_health import SubsystemState
+
+        bridge = RNSMeshtasticBridge(config=config)
+        bridge._rns_init_failed_permanently = True
+
+        # Run the loop in a background thread, let it iterate once
+        bridge._running = True
+
+        def stop_after_delay():
+            time.sleep(0.2)
+            bridge._running = False
+            bridge._stop_event.set()
+
+        stopper = threading.Thread(target=stop_after_delay, daemon=True)
+        stopper.start()
+
+        bridge._rns_loop()
+        stopper.join(timeout=2)
+
+        rns_state = bridge.health.get_subsystem_state("rns")
+        assert rns_state == SubsystemState.DISABLED
+
+
+class TestBridgeSubsystemIsolation:
+    """Test that Meshtastic and RNS failures are isolated."""
+
+    def test_meshtastic_down_does_not_affect_rns(self):
+        """Meshtastic going down should not disable RNS."""
+        from gateway.bridge_health import BridgeHealthMonitor, SubsystemState
+
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+
+        health.set_subsystem_state("meshtastic", SubsystemState.DISCONNECTED)
+
+        assert health.get_subsystem_state("rns") == SubsystemState.HEALTHY
+        assert health.get_subsystem_state("meshtastic") == SubsystemState.DISCONNECTED
+
+    def test_rns_down_does_not_affect_meshtastic(self):
+        """RNS going down should not disable Meshtastic."""
+        from gateway.bridge_health import BridgeHealthMonitor, SubsystemState
+
+        health = BridgeHealthMonitor()
+        health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
+        health.set_subsystem_state("rns", SubsystemState.HEALTHY)
+
+        health.set_subsystem_state("rns", SubsystemState.DISCONNECTED)
+
+        assert health.get_subsystem_state("meshtastic") == SubsystemState.HEALTHY
+        assert health.get_subsystem_state("rns") == SubsystemState.DISCONNECTED

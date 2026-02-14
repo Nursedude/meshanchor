@@ -60,12 +60,15 @@ HAS_SERVICE_CHECK = True
 from utils.event_bus import emit_message
 HAS_EVENT_BUS = True
 
-# Import RNS sniffer for Wireshark-grade packet capture
-from monitoring.rns_sniffer import (
-    get_rns_sniffer, RNSPacketInfo, RNSPacketType,
-    start_rns_capture, integrate_with_traffic_inspector
-)
-HAS_RNS_SNIFFER = True
+# RNS sniffer is optional monitoring — not required for message bridging
+try:
+    from monitoring.rns_sniffer import (
+        get_rns_sniffer, RNSPacketInfo, RNSPacketType,
+        start_rns_capture, integrate_with_traffic_inspector
+    )
+    HAS_RNS_SNIFFER = True
+except ImportError:
+    HAS_RNS_SNIFFER = False
 
 # Import RNS and LXMF modules (optional - for mesh bridge)
 _RNS_mod, _HAS_RNS = safe_import('RNS')
@@ -74,10 +77,14 @@ _LXMF_mod, _HAS_LXMF = safe_import('LXMF')
 # Import config drift detection
 from utils.config_drift import detect_rnsd_config_drift, get_rnsd_effective_config_dir
 
-# Import WebSocket server helpers
-from utils.websocket_server import (
-    start_websocket_server, is_websocket_available, stop_websocket_server
-)
+# WebSocket is optional — used for web UI push, not core bridging
+try:
+    from utils.websocket_server import (
+        start_websocket_server, is_websocket_available, stop_websocket_server
+    )
+    HAS_WEBSOCKET = True
+except ImportError:
+    HAS_WEBSOCKET = False
 
 
 @dataclass
@@ -885,9 +892,9 @@ class RNSMeshtasticBridge:
         initialization fails with 'signal only works in main thread'.
 
         When rnsd is running, we connect as a client to its shared instance.
-        RNS's own config resolution finds the config at:
-          /etc/reticulum/ -> ~/.config/reticulum/ -> ~/.reticulum/
-        When running as root (via sudo or systemd), ~ = /root/.
+
+        POLICY: Diagnose, don't fix. This method NEVER restarts services
+        or modifies configs. It logs issues and lets the user fix them.
         """
         import threading as _threading
         if _threading.current_thread() is not _threading.main_thread():
@@ -901,92 +908,51 @@ class RNSMeshtasticBridge:
         RNS = _RNS_mod
 
         # Ensure /etc/reticulum/storage subdirs exist before RNS init.
-        # RNS requires ratchets/ (Identity.persist_job), resources/
-        # (Reticulum.__init__), and cache/announces/ (Transport).
-        # Pre-creating them (when running as root/sudo) prevents crashes.
+        # RNS requires ratchets/, resources/, cache/announces/.
+        # Create dirs if missing but NEVER restart services.
         if os.geteuid() == 0:
-            dirs_missing = (
-                ReticulumPaths.ETC_BASE.exists()
-                and (
-                    not ReticulumPaths.ETC_RATCHETS.exists()
-                    or not ReticulumPaths.ETC_RESOURCES.exists()
-                )
-            )
             if not ReticulumPaths.ensure_system_dirs():
                 logger.warning("Could not create /etc/reticulum directories "
                              "(filesystem may be read-only)")
-            elif dirs_missing:
-                # Dirs were just created — restart rnsd so it stops crashing
-                logger.info("Created missing RNS storage dirs, restarting rnsd")
-                try:
-                    from utils.service_check import apply_config_and_restart
-                    success, msg = apply_config_and_restart('rnsd')
-                    if success:
-                        logger.info("rnsd restarted successfully")
-                    else:
-                        logger.warning("rnsd restart failed: %s", msg)
-                except (ImportError, Exception) as e:
-                    logger.debug("rnsd restart skipped: %s", e)
 
-        from utils.gateway_diagnostic import find_rns_processes
-        rns_pids = find_rns_processes()
+        # Detect rnsd process
+        try:
+            from utils.gateway_diagnostic import find_rns_processes
+            rns_pids = find_rns_processes()
+        except ImportError:
+            rns_pids = []
 
         # Determine config directory: explicit config > rnsd's actual path > default
         config_dir = self.config.rns.config_dir or None
         if config_dir:
             logger.info(f"Using explicit RNS config dir: {config_dir}")
         else:
-            # Active drift fix: prefer rnsd's actual config path over default
-            # resolution. This prevents the gateway from reading a different
-            # config than the running daemon (e.g. ~/.reticulum vs /etc/reticulum)
-            drift = detect_rnsd_config_drift()
-            if drift.drifted:
-                logger.warning(drift.message)
-                if drift.fix_hint:
-                    logger.info("Drift fix: %s", drift.fix_hint)
-                # Use rnsd's actual path as the active fix
-                config_dir = str(drift.rnsd_config_dir)
-                logger.info("Active fix: using rnsd's config dir %s "
-                           "instead of gateway's resolved %s",
-                           drift.rnsd_config_dir, drift.gateway_config_dir)
-            else:
-                rns_config = ReticulumPaths.get_config_file()
-                logger.info(f"RNS config path: {rns_config} "
-                           f"(exists: {rns_config.exists()}) "
-                           f"[{drift.detection_method}]")
+            # Check for config drift between gateway and rnsd
+            try:
+                drift = detect_rnsd_config_drift()
+                if drift.drifted:
+                    logger.warning("Config drift: %s", drift.message)
+                    config_dir = str(drift.rnsd_config_dir)
+                    logger.info("Using rnsd's config dir: %s", config_dir)
+            except Exception as e:
+                logger.debug("Config drift check skipped: %s", e)
 
         try:
             if rns_pids:
-                # rnsd running - RNS will auto-connect to shared instance
-                # as long as the config has share_instance = Yes
                 logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
-                           "initializing RNS as shared instance client")
+                           "connecting as shared instance client")
                 self._rns_via_rnsd = True
 
-            # Initialize RNS - let it use its own config resolution
-            # When rnsd is running with share_instance=Yes, RNS auto-connects
-            # to the shared instance via LocalInterface (domain socket/TCP 37428)
             self._reticulum = RNS.Reticulum(configdir=config_dir)
-
             self._rns_pre_initialized = True
             logger.info("RNS pre-initialized from main thread")
-        except OSError as e:
-            if hasattr(e, 'errno') and e.errno == 98:
-                logger.warning(f"RNS port conflict during pre-init: {e}")
-                # Will be retried in _connect_rns() background thread
-            elif "reinitialise" in str(e).lower() or "already running" in str(e).lower():
-                # RNS singleton already exists (node_tracker initialized it)
-                self._rns_pre_initialized = True
-                logger.info("RNS already initialized (node tracker), "
-                           "bridge will use existing instance")
-            else:
-                logger.warning(f"RNS pre-init failed: {e}")
         except Exception as e:
             err_msg = str(e).lower()
             if "reinitialise" in err_msg or "already running" in err_msg:
                 self._rns_pre_initialized = True
-                logger.info("RNS already initialized (node tracker), "
-                           "bridge will use existing instance")
+                logger.info("RNS already initialized, bridge will use existing instance")
+            elif hasattr(e, 'errno') and getattr(e, 'errno', None) == 98:
+                logger.warning(f"RNS port conflict: {e} (will retry in background)")
             else:
                 logger.warning(f"RNS pre-init failed: {e}")
 
@@ -995,81 +961,48 @@ class RNSMeshtasticBridge:
 
         If RNS was pre-initialized from the main thread (via _init_rns_main_thread),
         skips Reticulum initialization and proceeds directly to LXMF setup.
-        Otherwise falls back to initialization here. When rnsd is running,
-        connects as a shared instance client (no signal handlers needed).
+        Otherwise falls back to initialization here (background thread).
+
+        POLICY: Diagnose, don't fix. Never restart services or modify configs.
         """
         if not (_HAS_RNS and _HAS_LXMF):
             logger.warning("RNS/LXMF library not installed - bridge cannot connect")
             self._connected_rns = False
-            self._rns_init_failed_permanently = True  # Don't retry
+            self._rns_init_failed_permanently = True
             return
 
         RNS = _RNS_mod
         LXMF = _LXMF_mod
 
         try:
-            # If RNS was pre-initialized from main thread, skip to LXMF setup
             if self._rns_pre_initialized:
                 logger.info("RNS pre-initialized, proceeding to LXMF setup")
             else:
-                # RNS was NOT pre-initialized - try here (fallback path)
-                # When rnsd is running with share_instance=Yes, RNS.Reticulum()
-                # connects as a client via socket - no signal handlers needed.
-                from utils.gateway_diagnostic import find_rns_processes
-                rns_pids = find_rns_processes()
+                # Fallback: init RNS from background thread.
+                # Works when rnsd is running (client mode, no signal handlers).
                 config_dir = self.config.rns.config_dir or None
-
-                # Active drift fix: prefer rnsd's actual config path
                 if not config_dir:
-                    effective = get_rnsd_effective_config_dir()
-                    config_dir = str(effective)
-
-                if rns_pids:
-                    logger.info(f"rnsd detected (PID: {rns_pids[0]}), "
-                               "connecting as shared instance client")
-                    self._rns_via_rnsd = True
+                    try:
+                        effective = get_rnsd_effective_config_dir()
+                        config_dir = str(effective)
+                    except Exception:
+                        pass  # Use RNS default resolution
 
                 try:
                     self._reticulum = RNS.Reticulum(configdir=config_dir)
-                except OSError as e:
-                    if hasattr(e, 'errno') and e.errno == 98:
-                        from utils.gateway_diagnostic import handle_address_in_use_error
-                        diag = handle_address_in_use_error(e, logger)
-
-                        self._reticulum = None
-                        self._connected_rns = False
-
-                        if diag['rns_pids']:
-                            logger.info(f"rnsd now detected (PID: {diag['rns_pids'][0]}), "
-                                       "will retry connection as client")
-                            self._rns_via_rnsd = True
-                        else:
-                            logger.warning("RNS port in use by unknown process (stale socket?)")
-                            logger.info("Will retry after backoff - port may become available")
-                        return
-                    else:
-                        raise
-                except ValueError as e:
-                    if "signal only works in main thread" in str(e).lower():
-                        logger.warning("RNS signal handler failed (background thread) - "
-                                      "this is non-fatal when rnsd is running")
-                        if not rns_pids:
-                            # No rnsd and can't init RNS from here - permanent failure
-                            self._rns_init_failed_permanently = True
-                            self._connected_rns = False
-                            return
-                        # rnsd is running but RNS.Reticulum() failed with signal error.
-                        # This shouldn't happen in client mode, but if it does,
-                        # we can't proceed without a Reticulum instance.
-                        self._connected_rns = False
-                        return
-                    else:
-                        raise
                 except Exception as e:
-                    if "reinitialise" in str(e).lower() or "already running" in str(e).lower():
-                        logger.info("RNS already running in this process, "
-                                   "proceeding to LXMF setup")
-                        # RNS singleton is active - proceed to LXMF setup
+                    err_msg = str(e).lower()
+                    if "reinitialise" in err_msg or "already running" in err_msg:
+                        logger.info("RNS already initialized, proceeding to LXMF")
+                    elif "signal only works in main thread" in err_msg:
+                        logger.warning("RNS needs main thread init (no rnsd running?)")
+                        self._rns_init_failed_permanently = True
+                        self._connected_rns = False
+                        return
+                    elif hasattr(e, 'errno') and getattr(e, 'errno', None) == 98:
+                        logger.warning(f"RNS port conflict: {e} (will retry)")
+                        self._connected_rns = False
+                        return
                     else:
                         raise
 
@@ -1077,13 +1010,7 @@ class RNSMeshtasticBridge:
             self._setup_lxmf(RNS, LXMF)
 
         except Exception as e:
-            error_msg = str(e).lower()
-            if "signal only works in main thread" in error_msg:
-                logger.warning("RNS requires main thread for signal handlers")
-                if not self._rns_via_rnsd:
-                    self._rns_init_failed_permanently = True
-            else:
-                logger.error(f"Failed to connect to RNS: {e}")
+            logger.error(f"Failed to connect to RNS: {e}")
             self._connected_rns = False
 
     def _setup_lxmf(self, RNS, LXMF):
@@ -1421,6 +1348,8 @@ class RNSMeshtasticBridge:
 
     def _start_websocket_server(self):
         """Start WebSocket server for real-time message broadcast to web UI."""
+        if not HAS_WEBSOCKET:
+            return
         try:
             if is_websocket_available():
                 if start_websocket_server(port=5001):
