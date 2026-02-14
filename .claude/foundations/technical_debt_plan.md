@@ -14,7 +14,12 @@
 
 ### 1.1 Import Boilerplate Consolidation
 
-**Problem**: 86 try/except ImportError blocks repeated across panels.
+**Problem**: ~489 `except ImportError` blocks across src/ (previously estimated at 86).
+
+> **Audit 2026-02-14**: Actual count is **489 `except ImportError` handlers** across
+> ~133 files. Top offenders: prometheus_exporter.py (15), ai_tools_mixin.py (13),
+> rns_bridge.py (13), map_data_collector.py (12). The original estimate of 86 only
+> counted gtk_ui/panels — the problem is project-wide.
 
 **Solution**: Create `utils/safe_import.py`
 
@@ -33,8 +38,8 @@ def safe_import(module: str, class_name: str = None, default=None):
 check_service, HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
 ```
 
-**Files to Update**: All gtk_ui/panels/*.py with try/except ImportError
-**Estimated Savings**: 200-300 lines
+**Files to Update**: All src/**/*.py with try/except ImportError (~133 files)
+**Estimated Savings**: 500-800 lines (revised up from 200-300)
 **Risk**: LOW - Purely mechanical refactor
 
 ### 1.2 Configuration Centralization
@@ -215,11 +220,14 @@ Create factory methods for common UI patterns (labeled entries, status boxes, et
 
 | Metric | Before | After Phase 1 | After Phase 2 | After Phase 3 |
 |--------|--------|---------------|---------------|---------------|
-| Total gtk_ui lines | 27,799 | - | - | - |
-| Import boilerplate | 86 | - | - | - |
+| Total gtk_ui lines | 27,799 (removed) | - | - | - |
+| Import boilerplate (src-wide) | 489 | - | - | - |
 | Config definitions | 36 | - | - | - |
 | GLib.idle_add calls | 861 | - | - | - |
 | subprocess.run calls | 165 | - | - | - |
+
+> Note: gtk_ui was removed in v0.5.2 (TUI is now the only interface).
+> Import boilerplate count revised from 86 → 489 after full src/ audit (2026-02-14).
 
 ---
 
