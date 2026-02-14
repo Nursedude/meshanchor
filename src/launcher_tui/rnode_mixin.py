@@ -138,15 +138,13 @@ class RNodeMixin:
         clear_screen()
         print("=== RNode Recommended Configuration ===\n")
 
-        try:
-            from commands.rnode import detect_rnode_devices, get_recommended_config
-        except ImportError:
+        if not _HAS_RNODE:
             print("  RNode module not available.")
             self._wait_for_enter()
             return
 
         # First detect devices to let user pick one
-        detect_result = detect_rnode_devices(probe=False)
+        detect_result = _detect_rnode_devices(probe=False)
         devices = detect_result.data.get('devices', []) if detect_result.success else []
 
         if not devices:
@@ -190,7 +188,7 @@ class RNodeMixin:
         if not region:
             return
 
-        result = get_recommended_config(port, region)
+        result = _get_recommended_config(port, region)
 
         if not result.success:
             print(f"  {result.message}")

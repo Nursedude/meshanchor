@@ -21,7 +21,11 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+_check_service, _HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
 
 
 @dataclass
@@ -135,13 +139,9 @@ def get_available_modes() -> List[QuickStartMode]:
 
     Returns all modes but marks which ones are ready vs need setup.
     """
-    # Import service check
-    try:
-        from utils.service_check import check_service
-        has_service_check = True
-    except ImportError:
-        has_service_check = False
-        check_service = None
+    # Use centralized service check
+    has_service_check = _HAS_SERVICE_CHECK
+    check_service = _check_service
 
     available = []
 
@@ -269,16 +269,13 @@ def apply_mode(mode_id: str) -> Dict[str, Any]:
     services_to_start = mode.services_required.copy()
 
     # Check which optional services are available
-    try:
-        from utils.service_check import check_service
+    if _HAS_SERVICE_CHECK:
         for svc in mode.services_optional:
             # Check if service is installed (even if not running)
-            status = check_service(svc)
+            status = _check_service(svc)
             # Add if it's installed and would be useful
             if status.state.value != "not_installed":
                 services_to_start.append(svc)
-    except ImportError:
-        pass
 
     return {
         'success': True,

@@ -28,6 +28,11 @@ MQTTNodelessSubscriber, _HAS_MQTT = safe_import(
     'monitoring.mqtt_subscriber', 'MQTTNodelessSubscriber'
 )
 
+# Telemetry poller for silent node detection & batch polling
+_get_telemetry_poller, _TelemetryPoller, _HAS_TELEMETRY_POLLER = safe_import(
+    'utils.telemetry_poller', 'get_telemetry_poller', 'TelemetryPoller'
+)
+
 # Try to import the MQTT-WebSocket bridge
 MQTTWebSocketBridge, is_bridge_available, _HAS_WS_BRIDGE_MOD = safe_import(
     'utils.mqtt_websocket_bridge', 'MQTTWebSocketBridge', 'is_bridge_available'
@@ -1173,9 +1178,8 @@ class MQTTMixin:
 
         self.dialog.infobox("Requesting", f"Sending telemetry request to {node_id}...")
 
-        try:
-            from utils.telemetry_poller import get_telemetry_poller
-            poller = get_telemetry_poller()
+        if _HAS_TELEMETRY_POLLER:
+            poller = _get_telemetry_poller()
             success = poller.poll_node_now(node_id)
 
             if success:
@@ -1194,7 +1198,7 @@ class MQTTMixin:
                     "- Rate limited (max 4 requests/minute)\n"
                     "- meshtasticd not running"
                 )
-        except ImportError:
+        else:
             self._fallback_telemetry_request(node_id)
 
     def _fallback_telemetry_request(self, node_id: str):
@@ -1248,60 +1252,59 @@ class MQTTMixin:
             self.dialog.msgbox("No Nodes", "No nodes discovered yet.")
             return
 
-        try:
-            from utils.telemetry_poller import TelemetryPoller
-            poller = TelemetryPoller()
-
-            # Build node list for the poller
-            node_list = []
-            for node in nodes:
-                node_list.append({
-                    'id': node.node_id,
-                    'is_online': node.is_online(),
-                    'telemetry_timestamp': node.last_seen  # Use last_seen as proxy
-                })
-
-            silent = poller.identify_silent_nodes(node_list, telemetry_age_threshold=1800)  # 30 min
-
-            if not silent:
-                self.dialog.msgbox(
-                    "No Silent Nodes",
-                    "All online nodes have recent telemetry.\n\n"
-                    "Threshold: 30 minutes"
-                )
-                return
-
-            # Display silent nodes
-            lines = [
-                "SILENT NODES (>30 min without telemetry)",
-                "=" * 50,
-                "",
-            ]
-
-            for node_id in silent[:20]:
-                # Find the node to show more info
-                for node in nodes:
-                    if node.node_id == node_id:
-                        name = node.long_name or node.short_name or node_id
-                        age = node.get_age_string()
-                        lines.append(f"  {node_id}  {name[:15]:<15} ({age})")
-                        break
-                else:
-                    lines.append(f"  {node_id}")
-
-            if len(silent) > 20:
-                lines.append(f"\n  ... and {len(silent) - 20} more")
-
-            lines.append("")
-            lines.append("Use 'Poll Silent Nodes' to request telemetry from all.")
-
-            self.dialog.msgbox("Silent Nodes", "\n".join(lines))
-
-        except ImportError:
+        if not _HAS_TELEMETRY_POLLER:
             self.dialog.msgbox(
                 "Module Not Found",
                 "TelemetryPoller module not available."
             )
+            return
+
+        poller = _TelemetryPoller()
+
+        # Build node list for the poller
+        node_list = []
+        for node in nodes:
+            node_list.append({
+                'id': node.node_id,
+                'is_online': node.is_online(),
+                'telemetry_timestamp': node.last_seen  # Use last_seen as proxy
+            })
+
+        silent = poller.identify_silent_nodes(node_list, telemetry_age_threshold=1800)  # 30 min
+
+        if not silent:
+            self.dialog.msgbox(
+                "No Silent Nodes",
+                "All online nodes have recent telemetry.\n\n"
+                "Threshold: 30 minutes"
+            )
+            return
+
+        # Display silent nodes
+        lines = [
+            "SILENT NODES (>30 min without telemetry)",
+            "=" * 50,
+            "",
+        ]
+
+        for node_id in silent[:20]:
+            # Find the node to show more info
+            for node in nodes:
+                if node.node_id == node_id:
+                    name = node.long_name or node.short_name or node_id
+                    age = node.get_age_string()
+                    lines.append(f"  {node_id}  {name[:15]:<15} ({age})")
+                    break
+            else:
+                lines.append(f"  {node_id}")
+
+        if len(silent) > 20:
+            lines.append(f"\n  ... and {len(silent) - 20} more")
+
+        lines.append("")
+        lines.append("Use 'Poll Silent Nodes' to request telemetry from all.")
+
+        self.dialog.msgbox("Silent Nodes", "\n".join(lines))
 
     def _batch_telemetry_request(self):
         """Request telemetry from all silent nodes."""
@@ -1326,75 +1329,72 @@ class MQTTMixin:
             self.dialog.msgbox("No Nodes", "No nodes discovered yet.")
             return
 
-        try:
-            from utils.telemetry_poller import get_telemetry_poller, TelemetryPoller
-
-            poller = get_telemetry_poller()
-
-            # Identify silent nodes
-            node_list = []
-            for node in nodes:
-                node_list.append({
-                    'id': node.node_id,
-                    'is_online': node.is_online(),
-                    'telemetry_timestamp': node.last_seen
-                })
-
-            silent = poller.identify_silent_nodes(node_list, telemetry_age_threshold=1800)
-
-            if not silent:
-                self.dialog.msgbox("No Silent Nodes", "No silent nodes to poll.")
-                return
-
-            # Poll nodes (rate limited)
-            self.dialog.infobox("Polling", f"Sending requests to {min(5, len(silent))} nodes...")
-
-            success_count = 0
-            for node_id in silent[:5]:  # Max 5 per batch
-                if poller.poll_node_now(node_id):
-                    success_count += 1
-                time.sleep(0.5)  # Brief pause between attempts
-
-            self.dialog.msgbox(
-                "Batch Complete",
-                f"Telemetry requests sent: {success_count}/{min(5, len(silent))}\n\n"
-                f"Total silent nodes: {len(silent)}\n"
-                f"Rate limit: 4 requests/minute\n\n"
-                "Run again to poll more nodes."
-            )
-
-        except ImportError:
+        if not _HAS_TELEMETRY_POLLER:
             self.dialog.msgbox(
                 "Module Not Found",
                 "TelemetryPoller module not available."
             )
+            return
+
+        poller = _get_telemetry_poller()
+
+        # Identify silent nodes
+        node_list = []
+        for node in nodes:
+            node_list.append({
+                'id': node.node_id,
+                'is_online': node.is_online(),
+                'telemetry_timestamp': node.last_seen
+            })
+
+        silent = poller.identify_silent_nodes(node_list, telemetry_age_threshold=1800)
+
+        if not silent:
+            self.dialog.msgbox("No Silent Nodes", "No silent nodes to poll.")
+            return
+
+        # Poll nodes (rate limited)
+        self.dialog.infobox("Polling", f"Sending requests to {min(5, len(silent))} nodes...")
+
+        success_count = 0
+        for node_id in silent[:5]:  # Max 5 per batch
+            if poller.poll_node_now(node_id):
+                success_count += 1
+            time.sleep(0.5)  # Brief pause between attempts
+
+        self.dialog.msgbox(
+            "Batch Complete",
+            f"Telemetry requests sent: {success_count}/{min(5, len(silent))}\n\n"
+            f"Total silent nodes: {len(silent)}\n"
+            f"Rate limit: 4 requests/minute\n\n"
+            "Run again to poll more nodes."
+        )
 
     def _show_poller_stats(self):
         """Show telemetry poller statistics."""
-        try:
-            from utils.telemetry_poller import get_telemetry_poller
-            poller = get_telemetry_poller()
-            stats = poller.get_stats()
-
-            lines = [
-                "TELEMETRY POLLER STATISTICS",
-                "=" * 40,
-                "",
-                f"Total requests:      {stats.get('total_requests', 0)}",
-                f"Successful:          {stats.get('successful_requests', 0)}",
-                f"Failed:              {stats.get('failed_requests', 0)}",
-                f"Rate limited:        {stats.get('rate_limited', 0)}",
-                "",
-                f"Nodes polled:        {stats.get('nodes_polled', 0)}",
-            ]
-
-            if stats.get('last_poll_cycle'):
-                lines.append(f"Last poll cycle:     {stats['last_poll_cycle']}")
-
-            self.dialog.msgbox("Poller Statistics", "\n".join(lines))
-
-        except ImportError:
+        if not _HAS_TELEMETRY_POLLER:
             self.dialog.msgbox(
                 "Module Not Found",
                 "TelemetryPoller module not available."
             )
+            return
+
+        poller = _get_telemetry_poller()
+        stats = poller.get_stats()
+
+        lines = [
+            "TELEMETRY POLLER STATISTICS",
+            "=" * 40,
+            "",
+            f"Total requests:      {stats.get('total_requests', 0)}",
+            f"Successful:          {stats.get('successful_requests', 0)}",
+            f"Failed:              {stats.get('failed_requests', 0)}",
+            f"Rate limited:        {stats.get('rate_limited', 0)}",
+            "",
+            f"Nodes polled:        {stats.get('nodes_polled', 0)}",
+        ]
+
+        if stats.get('last_poll_cycle'):
+            lines.append(f"Last poll cycle:     {stats['last_poll_cycle']}")
+
+        self.dialog.msgbox("Poller Statistics", "\n".join(lines))

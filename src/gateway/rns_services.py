@@ -16,6 +16,13 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Dict, List, Optional, Callable, Any, Tuple
 
+from utils.safe_import import safe_import
+
+# Import msgpack for LXMF telemetry parsing (optional)
+_msgpack_mod, _HAS_MSGPACK = safe_import('msgpack')
+if _HAS_MSGPACK:
+    msgpack = _msgpack_mod
+
 logger = logging.getLogger(__name__)
 
 
@@ -167,8 +174,11 @@ class LXMFParser(ServiceParser):
     @staticmethod
     def _parse_msgpack_telemetry(data: bytes, info: ServiceInfo):
         """Extract telemetry from msgpack data into ServiceInfo"""
+        if not _HAS_MSGPACK:
+            logger.debug("msgpack not installed - skipping telemetry parsing")
+            return
+
         try:
-            import msgpack
             telemetry = msgpack.unpackb(data, raw=False, strict_map_key=False)
             if not isinstance(telemetry, dict):
                 return
@@ -204,8 +214,6 @@ class LXMFParser(ServiceParser):
                                                        'altitude', 'alt', 'speed', 'heading',
                                                        'accuracy', 'battery')}
 
-        except ImportError:
-            logger.debug("msgpack not installed - skipping telemetry parsing")
         except Exception as e:
             logger.debug(f"Failed to parse msgpack telemetry: {e}")
 

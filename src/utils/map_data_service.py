@@ -41,8 +41,23 @@ from typing import List, Optional
 # Re-export for backward compatibility
 from utils.map_data_collector import MapDataCollector
 from utils.map_http_handler import MapRequestHandler
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Optional dependencies for WebSocket, API proxy, and message listener
+_get_websocket_server, _is_websocket_available, _HAS_WEBSOCKET = safe_import(
+    'utils.websocket_server', 'get_websocket_server', 'is_websocket_available'
+)
+_MeshtasticApiProxy, _HAS_API_PROXY = safe_import(
+    'gateway.meshtastic_api_proxy', 'MeshtasticApiProxy'
+)
+_start_listener, _get_listener_status, _get_listener, _HAS_MSG_LISTENER = safe_import(
+    'utils.message_listener', 'start_listener', 'get_listener_status', 'get_listener'
+)
+_broadcast_message, _HAS_WS_BROADCAST = safe_import(
+    'utils.websocket_server', 'broadcast_message'
+)
 
 # Re-export for backward compatibility
 __all__ = [
@@ -195,17 +210,18 @@ class MapServer:
         if not self.enable_websocket:
             return
 
-        try:
-            from utils.websocket_server import (
-                get_websocket_server, is_websocket_available
-            )
+        if not _HAS_WEBSOCKET:
+            logger.debug("WebSocket server not available")
+            print("  WebSocket: Not available")
+            return
 
-            if not is_websocket_available():
+        try:
+            if not _is_websocket_available():
                 logger.info("WebSocket: Not available (install websockets library)")
                 print("  WebSocket: Not available (pip install websockets)")
                 return
 
-            ws_server = get_websocket_server(port=self.websocket_port)
+            ws_server = _get_websocket_server(port=self.websocket_port)
             if ws_server.start():
                 self._websocket_started = True
                 logger.info(f"WebSocket server started on port {self.websocket_port}")
@@ -214,9 +230,6 @@ class MapServer:
                 logger.warning("WebSocket server failed to start")
                 print("  WebSocket: Failed to start")
 
-        except ImportError as e:
-            logger.debug(f"WebSocket server not available: {e}")
-            print("  WebSocket: Not available")
         except Exception as e:
             logger.warning(f"Error starting WebSocket server: {e}")
 
@@ -254,10 +267,13 @@ class MapServer:
             )
             return
 
-        try:
-            from gateway.meshtastic_api_proxy import MeshtasticApiProxy
+        if not _HAS_API_PROXY:
+            logger.debug("API proxy not available")
+            print("  API Proxy: Not available")
+            return
 
-            proxy = MeshtasticApiProxy(
+        try:
+            proxy = _MeshtasticApiProxy(
                 host=self.meshtasticd_host,
                 port=self.meshtasticd_port,
                 tls=self.meshtasticd_tls,
@@ -286,9 +302,6 @@ class MapServer:
                 logger.warning("Meshtastic API proxy failed to start")
                 print("  API Proxy: Failed to start")
 
-        except ImportError as e:
-            logger.debug(f"API proxy not available: {e}")
-            print("  API Proxy: Not available")
         except Exception as e:
             logger.warning(f"Error starting API proxy: {e}")
             print(f"  API Proxy: Error - {e}")
@@ -313,11 +326,14 @@ class MapServer:
         if not self.enable_message_listener:
             return
 
-        try:
-            from utils.message_listener import start_listener, get_listener_status, get_listener
+        if not _HAS_MSG_LISTENER:
+            logger.debug("MessageListener not available")
+            print("  Message RX: Not available")
+            return
 
+        try:
             # Start the listener
-            success = start_listener(host="localhost")
+            success = _start_listener(host="localhost")
             if success:
                 self._message_listener_started = True
                 logger.info("MessageListener started - inbound messages enabled")
@@ -326,12 +342,9 @@ class MapServer:
                 # Register WebSocket broadcast callback
                 self._register_websocket_callback()
             else:
-                status = get_listener_status()
+                status = _get_listener_status()
                 logger.warning(f"MessageListener failed to start: {status.get('error', 'unknown')}")
                 print("  Message RX: Failed to start (check meshtasticd)")
-        except ImportError as e:
-            logger.debug(f"MessageListener not available: {e}")
-            print("  Message RX: Not available")
         except Exception as e:
             logger.warning(f"Error starting MessageListener: {e}")
 
@@ -340,21 +353,20 @@ class MapServer:
         if not self._websocket_started:
             return
 
-        try:
-            from utils.message_listener import get_listener
-            from utils.websocket_server import broadcast_message
+        if not _HAS_MSG_LISTENER or not _HAS_WS_BROADCAST:
+            logger.debug("Could not register WebSocket callback: dependencies not available")
+            return
 
-            listener = get_listener()
+        try:
+            listener = _get_listener()
 
             def on_message(msg_data):
                 """Callback to broadcast messages to WebSocket clients."""
-                broadcast_message(msg_data)
+                _broadcast_message(msg_data)
 
             listener.add_callback(on_message)
             logger.info("WebSocket broadcast callback registered")
 
-        except ImportError as e:
-            logger.debug(f"Could not register WebSocket callback: {e}")
         except Exception as e:
             logger.warning(f"Error registering WebSocket callback: {e}")
 
