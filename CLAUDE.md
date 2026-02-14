@@ -201,6 +201,31 @@ success, msg = daemon_reload()
 Legacy fallback patterns were removed in v0.5.2 (Issue #26). All code now imports
 directly from `utils.service_check` — no try/except compatibility shims needed.
 
+## safe_import Rules (utils/safe_import.py)
+
+`safe_import` wraps optional external dependencies. **Do NOT use it for first-party modules.**
+
+```python
+# CORRECT — external/optional dependency
+from utils.safe_import import safe_import
+RNS, _HAS_RNS = safe_import('RNS')
+
+# WRONG — first-party module, always exists
+_check_service, _HAS_SC = safe_import('utils.service_check', 'check_service')
+
+# CORRECT — first-party module, use direct import
+from utils.service_check import check_service
+```
+
+**When to use safe_import**: meshtastic, RNS, LXMF, pubsub, psutil, paho.mqtt,
+serial, gi.repository, yaml — genuinely optional external packages.
+
+**Test patching**: Patch `_HAS_*` flags directly, not `sys.modules`:
+```python
+@patch('gateway.rns_transport._HAS_MESHTASTIC', True)  # ✓
+@patch.dict('sys.modules', {'meshtastic': MagicMock()})  # ✗ flags already set
+```
+
 ## File Size Guidelines
 
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
