@@ -19,6 +19,31 @@ import webbrowser
 from pathlib import Path
 from typing import Optional
 
+from utils.safe_import import safe_import
+
+# --- Optional dependencies (safe_import returns (*attrs, available_bool)) ---
+diagnose, Category, Severity, _HAS_DIAGNOSTICS = safe_import(
+    'utils.diagnostic_engine', 'diagnose', 'Category', 'Severity'
+)
+get_knowledge_base, _HAS_KNOWLEDGE = safe_import(
+    'utils.knowledge_base', 'get_knowledge_base'
+)
+ClaudeAssistant, _HAS_ASSISTANT = safe_import(
+    'utils.claude_assistant', 'ClaudeAssistant'
+)
+CoverageMapGenerator, MapNode, _HAS_COVERAGE_MAP = safe_import(
+    'utils.coverage_map', 'CoverageMapGenerator', 'MapNode'
+)
+MapDataCollector, get_all_ips, _HAS_MAP_SERVICE = safe_import(
+    'utils.map_data_service', 'MapDataCollector', 'get_all_ips'
+)
+TileCache, HAWAII_BOUNDS, _HAS_TILE_CACHE = safe_import(
+    'utils.tile_cache', 'TileCache', 'HAWAII_BOUNDS'
+)
+ReviewOrchestrator, ReviewScope, _HAS_AUTO_REVIEW = safe_import(
+    'utils.auto_review', 'ReviewOrchestrator', 'ReviewScope'
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -531,42 +556,48 @@ class AIToolsMixin:
         """Run diagnosis on a symptom."""
         self.dialog.infobox("Analyzing", f"Analyzing: {symptom[:40]}...")
 
-        try:
-            from utils.diagnostic_engine import diagnose, Category, Severity
+        if not _HAS_DIAGNOSTICS:
+            self.dialog.msgbox(
+                "Error",
+                "Diagnostic engine not available.\n\n"
+                "Ensure you're running from the src/ directory."
+            )
+            return
 
+        try:
             # Run diagnosis
-            diagnosis = diagnose(
+            diagnosis_result = diagnose(
                 symptom,
                 category=Category.CONNECTIVITY,
                 severity=Severity.ERROR
             )
 
-            if diagnosis:
+            if diagnosis_result:
                 # Format diagnosis for display
                 result_lines = [
                     f"SYMPTOM: {symptom}",
                     "",
                     f"LIKELY CAUSE:",
-                    f"  {diagnosis.likely_cause}",
+                    f"  {diagnosis_result.likely_cause}",
                     "",
-                    f"CONFIDENCE: {diagnosis.confidence:.0%}",
+                    f"CONFIDENCE: {diagnosis_result.confidence:.0%}",
                     "",
                 ]
 
-                if diagnosis.evidence:
+                if diagnosis_result.evidence:
                     result_lines.append("EVIDENCE:")
-                    for ev in diagnosis.evidence[:3]:
+                    for ev in diagnosis_result.evidence[:3]:
                         result_lines.append(f"  - {ev}")
                     result_lines.append("")
 
-                if diagnosis.suggestions:
+                if diagnosis_result.suggestions:
                     result_lines.append("SUGGESTIONS:")
-                    for i, sug in enumerate(diagnosis.suggestions[:5], 1):
+                    for i, sug in enumerate(diagnosis_result.suggestions[:5], 1):
                         result_lines.append(f"  {i}. {sug}")
                     result_lines.append("")
 
-                if diagnosis.auto_recoverable:
-                    result_lines.append(f"AUTO-RECOVERY: {diagnosis.recovery_action}")
+                if diagnosis_result.auto_recoverable:
+                    result_lines.append(f"AUTO-RECOVERY: {diagnosis_result.recovery_action}")
 
                 self.dialog.msgbox(
                     "Diagnosis Result",
@@ -579,12 +610,6 @@ class AIToolsMixin:
                     "Try the Knowledge Base for general information,\n"
                     "or use Claude Assistant for detailed help."
                 )
-        except ImportError:
-            self.dialog.msgbox(
-                "Error",
-                "Diagnostic engine not available.\n\n"
-                "Ensure you're running from the src/ directory."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Diagnosis failed: {e}")
 
@@ -639,9 +664,15 @@ class AIToolsMixin:
         """Query the knowledge base."""
         self.dialog.infobox("Searching", f"Searching: {query[:40]}...")
 
-        try:
-            from utils.knowledge_base import get_knowledge_base
+        if not _HAS_KNOWLEDGE:
+            self.dialog.msgbox(
+                "Error",
+                "Knowledge base not available.\n\n"
+                "Ensure you're running from the src/ directory."
+            )
+            return
 
+        try:
             kb = get_knowledge_base()
             results = kb.query(query)
 
@@ -668,12 +699,6 @@ class AIToolsMixin:
                     f"No knowledge base entries found for:\n{query}\n\n"
                     "Try different keywords or use Claude Assistant."
                 )
-        except ImportError:
-            self.dialog.msgbox(
-                "Error",
-                "Knowledge base not available.\n\n"
-                "Ensure you're running from the src/ directory."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Query failed: {e}")
 
@@ -705,9 +730,15 @@ class AIToolsMixin:
         """Ask the Claude assistant."""
         self.dialog.infobox("Thinking", f"Processing: {question[:40]}...")
 
-        try:
-            from utils.claude_assistant import ClaudeAssistant
+        if not _HAS_ASSISTANT:
+            self.dialog.msgbox(
+                "Error",
+                "Claude assistant not available.\n\n"
+                "Ensure you're running from the src/ directory."
+            )
+            return
 
+        try:
             assistant = ClaudeAssistant()
             response = assistant.ask(question)
 
@@ -734,12 +765,6 @@ class AIToolsMixin:
                 "Claude Assistant",
                 "\n".join(result_lines)
             )
-        except ImportError:
-            self.dialog.msgbox(
-                "Error",
-                "Claude assistant not available.\n\n"
-                "Ensure you're running from the src/ directory."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Assistant failed: {e}")
 
@@ -765,8 +790,16 @@ class AIToolsMixin:
 
         self.dialog.infobox("Generating", "Creating coverage map...")
 
+        if not _HAS_COVERAGE_MAP:
+            self.dialog.msgbox(
+                "Error",
+                "Coverage map generator not available.\n\n"
+                "You may need to install folium:\n"
+                "pip3 install folium"
+            )
+            return
+
         try:
-            from utils.coverage_map import CoverageMapGenerator, MapNode
             from utils.paths import get_real_user_home
 
             generator = CoverageMapGenerator()
@@ -774,26 +807,24 @@ class AIToolsMixin:
             if choice == "all":
                 # Use MapDataCollector to get nodes from ALL sources
                 # (meshtasticd, MQTT, node_cache.json, RNS cache)
-                try:
-                    from utils.map_data_service import MapDataCollector
-                    collector = MapDataCollector()
-                    geojson = collector.collect()
-                    features = geojson.get('features', [])
-                    if features:
-                        generator.add_nodes_from_geojson(geojson)
-                        self.dialog.infobox(
-                            "Generating",
-                            f"Found {len(features)} nodes from all sources..."
-                        )
-                    else:
-                        self.dialog.msgbox(
-                            "No Nodes",
-                            "No nodes found from any source.\n\n"
-                            "Check meshtasticd, MQTT, or node cache."
-                        )
-                        return
-                except ImportError as e:
-                    self.dialog.msgbox("Error", f"MapDataCollector not available: {e}")
+                if not _HAS_MAP_SERVICE:
+                    self.dialog.msgbox("Error", "MapDataCollector not available.")
+                    return
+                collector = MapDataCollector()
+                geojson = collector.collect()
+                features = geojson.get('features', [])
+                if features:
+                    generator.add_nodes_from_geojson(geojson)
+                    self.dialog.infobox(
+                        "Generating",
+                        f"Found {len(features)} nodes from all sources..."
+                    )
+                else:
+                    self.dialog.msgbox(
+                        "No Nodes",
+                        "No nodes found from any source.\n\n"
+                        "Check meshtasticd, MQTT, or node cache."
+                    )
                     return
 
             elif choice == "live":
@@ -866,13 +897,6 @@ class AIToolsMixin:
             # Open browser in background
             self._open_in_browser(str(output_file))
 
-        except ImportError as e:
-            self.dialog.msgbox(
-                "Error",
-                f"Coverage map generator not available: {e}\n\n"
-                "You may need to install folium:\n"
-                "pip3 install folium"
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Map generation failed: {e}")
 
@@ -885,9 +909,10 @@ class AIToolsMixin:
         Returns:
             GeoJSON FeatureCollection filtered to the specified source.
         """
-        try:
-            from utils.map_data_service import MapDataCollector
+        if not _HAS_MAP_SERVICE:
+            return {"type": "FeatureCollection", "features": []}
 
+        try:
             collector = MapDataCollector()
             geojson = collector.collect()
 
@@ -905,8 +930,6 @@ class AIToolsMixin:
                     "count": len(filtered_features)
                 }
             }
-        except ImportError:
-            return {"type": "FeatureCollection", "features": []}
         except Exception as e:
             logger.debug("GeoJSON collection failed: %s", e)
             return {"type": "FeatureCollection", "features": []}
@@ -962,29 +985,36 @@ class AIToolsMixin:
         """Generate a node density heatmap and open in browser."""
         self.dialog.infobox("Generating", "Creating node density heatmap...")
 
+        if not _HAS_COVERAGE_MAP:
+            self.dialog.msgbox(
+                "Error",
+                "Coverage map generator not available.\n\n"
+                "You may need to install folium:\n"
+                "pip3 install folium"
+            )
+            return
+
+        if not _HAS_MAP_SERVICE:
+            self.dialog.msgbox("Error", "MapDataCollector not available.")
+            return
+
         try:
-            from utils.coverage_map import CoverageMapGenerator
             from utils.paths import get_real_user_home
 
             generator = CoverageMapGenerator()
 
             # Collect nodes from all sources
-            try:
-                from utils.map_data_service import MapDataCollector
-                collector = MapDataCollector()
-                geojson = collector.collect()
-                features = geojson.get('features', [])
-                if features:
-                    generator.add_nodes_from_geojson(geojson)
-                else:
-                    self.dialog.msgbox(
-                        "No Nodes",
-                        "No nodes found from any source.\n\n"
-                        "Check meshtasticd, MQTT, or node cache."
-                    )
-                    return
-            except ImportError as e:
-                self.dialog.msgbox("Error", f"MapDataCollector not available: {e}")
+            collector = MapDataCollector()
+            geojson = collector.collect()
+            features = geojson.get('features', [])
+            if features:
+                generator.add_nodes_from_geojson(geojson)
+            else:
+                self.dialog.msgbox(
+                    "No Nodes",
+                    "No nodes found from any source.\n\n"
+                    "Check meshtasticd, MQTT, or node cache."
+                )
                 return
 
             # Generate heatmap
@@ -1010,13 +1040,6 @@ class AIToolsMixin:
             )
             self._open_in_browser(result_path)
 
-        except ImportError as e:
-            self.dialog.msgbox(
-                "Error",
-                f"Coverage map generator not available: {e}\n\n"
-                "You may need to install folium:\n"
-                "pip3 install folium"
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Heatmap generation failed: {e}")
 
@@ -1056,8 +1079,11 @@ class AIToolsMixin:
 
     def _tile_cache_stats(self):
         """Display tile cache statistics."""
+        if not _HAS_TILE_CACHE:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+            return
+
         try:
-            from utils.tile_cache import TileCache
             cache = TileCache()
             stats = cache.get_stats()
 
@@ -1075,16 +1101,16 @@ class AIToolsMixin:
                 info.append("to cache tiles for offline map viewing.")
 
             self.dialog.msgbox("Tile Cache Stats", "\n".join(info))
-        except ImportError:
-            self.dialog.msgbox("Error", "Tile cache module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to get cache stats: {e}")
 
     def _tile_cache_download(self):
         """Download tiles for a geographic region."""
-        try:
-            from utils.tile_cache import TileCache, HAWAII_BOUNDS
+        if not _HAS_TILE_CACHE:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+            return
 
+        try:
             # Get bounds from user
             region_choices = [
                 ("hawaii", "Hawaii              (18.5-22.5N, 160.5-154.5W)"),
@@ -1154,16 +1180,16 @@ class AIToolsMixin:
                     f"Failed: {result['failed']}"
                 )
 
-        except ImportError:
-            self.dialog.msgbox("Error", "Tile cache module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Tile download failed: {e}")
 
     def _tile_cache_estimate(self):
         """Estimate download size for a region."""
-        try:
-            from utils.tile_cache import TileCache, HAWAII_BOUNDS
+        if not _HAS_TILE_CACHE:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+            return
 
+        try:
             coords = self.dialog.inputbox(
                 "Estimate Size",
                 "Enter bounds as: south,west,north,east\n"
@@ -1198,16 +1224,16 @@ class AIToolsMixin:
                     f"Within limit: {'Yes' if estimate['within_limit'] else 'No'}"
                 )
 
-        except ImportError:
-            self.dialog.msgbox("Error", "Tile cache module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Estimation failed: {e}")
 
     def _tile_cache_clear(self):
         """Clear expired tiles from cache."""
-        try:
-            from utils.tile_cache import TileCache
+        if not _HAS_TILE_CACHE:
+            self.dialog.msgbox("Error", "Tile cache module not available.")
+            return
 
+        try:
             confirm = self.dialog.yesno(
                 "Clear Expired Tiles",
                 "Remove tiles older than 30 days?\n\n"
@@ -1228,8 +1254,6 @@ class AIToolsMixin:
                 f"Space freed: {freed_mb:.1f} MB"
             )
 
-        except ImportError:
-            self.dialog.msgbox("Error", "Tile cache module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Cache clear failed: {e}")
 
@@ -1273,9 +1297,15 @@ class AIToolsMixin:
         """Execute an auto-review with the specified scope."""
         self.dialog.infobox("Reviewing", f"Running {scope_name.lower()} review...")
 
-        try:
-            from utils.auto_review import ReviewOrchestrator, ReviewScope
+        if not _HAS_AUTO_REVIEW:
+            self.dialog.msgbox(
+                "Error",
+                "Auto-review module not available.\n\n"
+                "Ensure you're running from the src/ directory."
+            )
+            return
 
+        try:
             scope_map = {
                 "ALL": ReviewScope.ALL,
                 "SECURITY": ReviewScope.SECURITY,
@@ -1322,11 +1352,5 @@ class AIToolsMixin:
 
             self.dialog.msgbox("Review Results", "\n".join(lines))
 
-        except ImportError:
-            self.dialog.msgbox(
-                "Error",
-                "Auto-review module not available.\n\n"
-                "Ensure you're running from the src/ directory."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Review failed: {e}")

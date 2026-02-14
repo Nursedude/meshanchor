@@ -7,8 +7,13 @@ Extracted as a mixin to keep main.py under 1,500 lines.
 
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+get_analytics_store, get_predictive_analyzer, get_coverage_analyzer, _HAS_ANALYTICS = safe_import(
+    'utils.analytics', 'get_analytics_store', 'get_predictive_analyzer', 'get_coverage_analyzer'
+)
 
 
 class AnalyticsMixin:
@@ -53,9 +58,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Link Budget Trends ===\n")
 
-        try:
-            from utils.analytics import get_analytics_store
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Analytics module not available.")
             print("  File: src/utils/analytics.py")
             self._wait_for_enter()
@@ -92,9 +95,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Network Health History ===\n")
 
-        try:
-            from utils.analytics import get_analytics_store
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Analytics module not available.")
             self._wait_for_enter()
             return
@@ -128,9 +129,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Network Forecast (24h) ===\n")
 
-        try:
-            from utils.analytics import get_predictive_analyzer
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Predictive analytics module not available.")
             self._wait_for_enter()
             return
@@ -184,9 +183,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Predictive Alerts ===\n")
 
-        try:
-            from utils.analytics import get_predictive_analyzer
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Predictive analytics module not available.")
             self._wait_for_enter()
             return
@@ -227,9 +224,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Coverage Statistics ===\n")
 
-        try:
-            from utils.analytics import get_coverage_analyzer
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Coverage analyzer module not available.")
             self._wait_for_enter()
             return
@@ -268,9 +263,7 @@ class AnalyticsMixin:
         clear_screen()
         print("=== Cleanup Analytics Data ===\n")
 
-        try:
-            from utils.analytics import get_analytics_store
-        except ImportError:
+        if not _HAS_ANALYTICS:
             print("  Analytics module not available.")
             self._wait_for_enter()
             return

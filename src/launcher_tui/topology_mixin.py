@@ -17,8 +17,20 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+_get_network_topology, _HAS_NETWORK_TOPOLOGY = safe_import(
+    'gateway.network_topology', 'get_network_topology'
+)
+_get_node_tracker_func, _HAS_NODE_TRACKER = safe_import(
+    'gateway.node_tracker', 'get_node_tracker'
+)
+_TopologyVisualizer, _HAS_TOPOLOGY_VISUALIZER = safe_import(
+    'utils.topology_visualizer', 'TopologyVisualizer'
+)
 
 
 class TopologyMixin:
@@ -64,19 +76,15 @@ class TopologyMixin:
 
     def _get_topology(self):
         """Get the network topology instance."""
-        try:
-            from gateway.network_topology import get_network_topology
-            return get_network_topology()
-        except ImportError:
+        if not _HAS_NETWORK_TOPOLOGY:
             return None
+        return _get_network_topology()
 
     def _get_node_tracker(self):
         """Get the node tracker instance if available."""
-        try:
-            from gateway.node_tracker import get_node_tracker
-            return get_node_tracker()
-        except ImportError:
+        if not _HAS_NODE_TRACKER:
             return None
+        return _get_node_tracker_func()
 
     def _show_topology_stats(self):
         """Display topology statistics."""
@@ -631,34 +639,39 @@ class TopologyMixin:
 
     def _show_ascii_topology(self):
         """Show ASCII representation of topology."""
-        try:
-            from utils.topology_visualizer import TopologyVisualizer
+        if not _HAS_TOPOLOGY_VISUALIZER:
+            self.dialog.msgbox(
+                "Module Not Found",
+                "Topology visualizer module not available."
+            )
+            return
 
+        try:
             topology = self._get_topology()
             if topology is None:
                 self.dialog.msgbox("Unavailable", "Topology module not loaded.")
                 return
 
-            visualizer = TopologyVisualizer.from_topology(topology)
+            visualizer = _TopologyVisualizer.from_topology(topology)
             ascii_output = visualizer.generate_ascii(max_width=70)
 
             self.dialog.msgbox("Network Topology (ASCII)", ascii_output)
 
-        except ImportError:
-            self.dialog.msgbox(
-                "Module Not Found",
-                "Topology visualizer module not available."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to generate ASCII view:\n{e}")
 
     def _open_topology_browser(self):
         """Generate and open topology visualization in browser."""
+        if not _HAS_TOPOLOGY_VISUALIZER:
+            self.dialog.msgbox(
+                "Module Not Found",
+                "Topology visualizer module not available."
+            )
+            return
+
         self.dialog.infobox("Generating...", "Creating topology visualization...")
 
         try:
-            from utils.topology_visualizer import TopologyVisualizer
-
             topology = self._get_topology()
             tracker = self._get_node_tracker()
 
@@ -668,9 +681,9 @@ class TopologyMixin:
 
             # Generate visualization - start with topology data
             if topology:
-                visualizer = TopologyVisualizer.from_topology(topology)
+                visualizer = _TopologyVisualizer.from_topology(topology)
             else:
-                visualizer = TopologyVisualizer()
+                visualizer = _TopologyVisualizer()
                 visualizer.add_node("local", name="Local Node", node_type="local", network="rns")
 
             # Enrich with node tracker data (has richer Meshtastic node info)
@@ -808,11 +821,6 @@ class TopologyMixin:
                 f"you can open this file manually."
             )
 
-        except ImportError:
-            self.dialog.msgbox(
-                "Module Not Found",
-                "Topology visualizer module not available."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to generate visualization:\n{e}")
 
@@ -843,11 +851,13 @@ class TopologyMixin:
         if not export_format or export_format == "back":
             return
 
-        try:
-            from utils.topology_visualizer import TopologyVisualizer
+        if not _HAS_TOPOLOGY_VISUALIZER:
+            self.dialog.msgbox("Error", "Topology visualizer module not available.")
+            return
 
+        try:
             # Create visualizer from topology
-            visualizer = TopologyVisualizer.from_topology(topology)
+            visualizer = _TopologyVisualizer.from_topology(topology)
 
             if export_format == "geojson":
                 output_path, count = visualizer.export_geojson()
@@ -902,7 +912,5 @@ class TopologyMixin:
                     f"File: {output_path}"
                 )
 
-        except ImportError:
-            self.dialog.msgbox("Error", "Topology visualizer module not available.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Export failed:\n{e}")

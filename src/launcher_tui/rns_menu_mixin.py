@@ -17,18 +17,29 @@ logger = logging.getLogger(__name__)
 
 from rns_sniffer_mixin import RNSSnifferMixin
 
-# Import centralized service checking
-try:
-    from utils.service_check import check_process_running
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
-
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
 from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
+
+# --- Optional dependency imports via safe_import ---
+from utils.safe_import import safe_import
+
+check_process_running, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running'
+)
+
+get_identity_path, create_identities, list_known_destinations, \
+    check_connectivity, get_status, _HAS_RNS_COMMANDS = safe_import(
+    'commands.rns',
+    'get_identity_path', 'create_identities', 'list_known_destinations',
+    'check_connectivity', 'get_status',
+)
+
+detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
+    'utils.config_drift', 'detect_rnsd_config_drift'
+)
 
 
 class RNSMenuMixin(RNSSnifferMixin):
@@ -150,10 +161,9 @@ class RNSMenuMixin(RNSSnifferMixin):
             # Check identity status for menu hints
             config_dir = ReticulumPaths.get_config_dir()
             rnsd_exists = (config_dir / 'identity').exists()
-            try:
-                from commands.rns import get_identity_path
+            if _HAS_RNS_COMMANDS:
                 gw_exists = get_identity_path().exists()
-            except ImportError:
+            else:
                 gw_exists = False
 
             choices = [
@@ -195,7 +205,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                         print(f"rnsd identity: {rnsd_identity}")
                         print("  Not found — use 'Create identities' to generate.\n")
 
-                    try:
+                    if _HAS_RNS_COMMANDS:
                         gw_id = get_identity_path()
                         print(f"\nMeshForge gateway identity: {gw_id}")
                         if gw_id.exists():
@@ -205,8 +215,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                             )
                         else:
                             print("  Not created — use 'Create identities' to generate.")
-                    except ImportError:
-                        pass
                     self._wait_for_enter()
 
                 elif choice == "path":
@@ -225,8 +233,7 @@ class RNSMenuMixin(RNSSnifferMixin):
                     else:
                         print("  Not found (created on first rnsd start)")
 
-                    try:
-                        from commands.rns import get_identity_path
+                    if _HAS_RNS_COMMANDS:
                         gw_id = get_identity_path()
                         print(f"\nMeshForge gateway:  {gw_id}")
                         if gw_id.exists():
@@ -234,8 +241,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                             print(f"  Size: {stat.st_size} bytes")
                         else:
                             print("  Not created yet")
-                    except ImportError:
-                        pass
                     self._wait_for_enter()
 
                 elif choice == "recall":
@@ -271,8 +276,13 @@ class RNSMenuMixin(RNSSnifferMixin):
         clear_screen()
         print("=== Create RNS Identities ===\n")
 
+        if not _HAS_RNS_COMMANDS:
+            print("ERROR: RNS module not installed.")
+            print("  Install: pip install rns")
+            self._wait_for_enter()
+            return
+
         try:
-            from commands.rns import create_identities, get_identity_path
             config_dir = ReticulumPaths.get_config_dir()
 
             # Show current state
@@ -300,9 +310,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                     print("  All identities already existed.")
             else:
                 print(f"ERROR: {result.message}")
-        except ImportError:
-            print("ERROR: RNS module not installed.")
-            print("  Install: pip install rns")
         except Exception as e:
             print(f"ERROR: {type(e).__name__}: {e}")
         self._wait_for_enter()
@@ -312,8 +319,11 @@ class RNSMenuMixin(RNSSnifferMixin):
         clear_screen()
         print("=== Known RNS Destinations ===\n")
 
-        try:
-            from commands.rns import list_known_destinations
+        if not _HAS_RNS_COMMANDS:
+            # Fallback: use rnstatus which also shows some destination info
+            print("Commands module not available, falling back to rnstatus...\n")
+            self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
+        else:
             result = list_known_destinations()
 
             if result.success:
@@ -340,10 +350,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                 fix_hint = (result.data or {}).get('fix_hint', '')
                 if fix_hint:
                     print(f"Fix: {fix_hint}")
-        except ImportError:
-            # Fallback: use rnstatus which also shows some destination info
-            print("Commands module not available, falling back to rnstatus...\n")
-            self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
 
         self._wait_for_enter()
 
@@ -538,9 +544,7 @@ class RNSMenuMixin(RNSSnifferMixin):
         clear_screen()
         print("=== RNS Diagnostics ===\n")
 
-        try:
-            from commands.rns import check_connectivity, get_status
-        except ImportError:
+        if not _HAS_RNS_COMMANDS:
             print("RNS commands module not available.")
             print("Run from MeshForge root: sudo python3 src/launcher_tui/main.py")
             self._wait_for_enter()
@@ -658,7 +662,6 @@ class RNSMenuMixin(RNSSnifferMixin):
                 "  • Gateway identity: used by MeshForge bridge"
             ):
                 try:
-                    from commands.rns import create_identities
                     result = create_identities()
                     if result.success:
                         print(f"  ✓ {result.message}")
@@ -689,9 +692,7 @@ class RNSMenuMixin(RNSSnifferMixin):
         print("=== RNS Config Drift Check ===\n")
         print("Comparing gateway config path vs rnsd actual path...\n")
 
-        try:
-            from utils.config_drift import detect_rnsd_config_drift
-        except ImportError:
+        if not _HAS_CONFIG_DRIFT:
             print("  Config drift module not available.")
             print("  File: src/utils/config_drift.py")
             self._wait_for_enter()

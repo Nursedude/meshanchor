@@ -34,9 +34,9 @@ MQTTWebSocketBridge, is_bridge_available, _HAS_WS_BRIDGE_MOD = safe_import(
 )
 _HAS_WS_BRIDGE = is_bridge_available() if _HAS_WS_BRIDGE_MOD and is_bridge_available else False
 
-# Try to import TelemetryPoller for auto-start
-get_telemetry_poller, _HAS_TELEMETRY_POLLER = safe_import(
-    'utils.telemetry_poller', 'get_telemetry_poller'
+# Try to import TelemetryPoller for auto-start and telemetry requests
+TelemetryPoller, get_telemetry_poller, _HAS_TELEMETRY_POLLER = safe_import(
+    'utils.telemetry_poller', 'TelemetryPoller', 'get_telemetry_poller'
 )
 
 
@@ -1121,19 +1121,13 @@ class MQTTMixin:
         mesh congestion. This menu allows requesting telemetry from specific
         nodes or identifying silent nodes that haven't reported recently.
         """
-        try:
-            from utils.telemetry_poller import TelemetryPoller, get_telemetry_poller
-            _HAS_POLLER = True
-        except ImportError:
-            _HAS_POLLER = False
-
         choices = [
             ("single", "Request from Node    Enter node ID manually"),
             ("silent", "Find Silent Nodes    Nodes with stale telemetry"),
             ("batch", "Poll Silent Nodes    Request from all silent"),
         ]
 
-        if _HAS_POLLER:
+        if _HAS_TELEMETRY_POLLER:
             poller = get_telemetry_poller()
             stats = poller.get_stats()
             choices.append(("stats", f"Poller Statistics    {stats.get('total_requests', 0)} requests"))
