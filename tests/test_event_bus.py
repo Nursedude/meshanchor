@@ -335,3 +335,150 @@ class TestGlobalEventBus:
             assert len(received) == 1
         finally:
             event_bus.unsubscribe('singleton_test', callback)
+
+
+class TestStatusBarMessageEvents:
+    """Tests for StatusBar event bus integration (Issue #17 Phase 3)."""
+
+    def test_status_bar_message_counter(self):
+        """Test that StatusBar counts unread RX messages."""
+        from src.launcher_tui.status_bar import StatusBar
+
+        bar = StatusBar(version="0.5.4")
+        bar._unread_messages = 0
+
+        # Simulate RX message event
+        rx_event = MessageEvent(
+            direction='rx',
+            content='Hello mesh',
+            node_id='!abc123',
+        )
+        bar._on_message_event(rx_event)
+        assert bar._unread_messages == 1
+
+        bar._on_message_event(rx_event)
+        assert bar._unread_messages == 2
+
+    def test_status_bar_ignores_tx(self):
+        """Test that StatusBar ignores TX messages for unread count."""
+        from src.launcher_tui.status_bar import StatusBar
+
+        bar = StatusBar(version="0.5.4")
+        bar._unread_messages = 0
+
+        tx_event = MessageEvent(
+            direction='tx',
+            content='Outgoing',
+            node_id='!abc123',
+        )
+        bar._on_message_event(tx_event)
+        assert bar._unread_messages == 0
+
+    def test_status_bar_clear_unread(self):
+        """Test clearing unread message counter."""
+        from src.launcher_tui.status_bar import StatusBar
+
+        bar = StatusBar(version="0.5.4")
+        bar._unread_messages = 5
+        bar.clear_unread()
+        assert bar._unread_messages == 0
+
+    def test_status_bar_shows_msg_count(self):
+        """Test that unread count appears in status line."""
+        from src.launcher_tui.status_bar import StatusBar
+
+        bar = StatusBar(version="0.5.4")
+        bar._unread_messages = 3
+        line = bar.get_status_line()
+        assert 'msg:3' in line
+
+    def test_status_bar_hides_zero_count(self):
+        """Test that zero unread count is not shown."""
+        from src.launcher_tui.status_bar import StatusBar
+
+        bar = StatusBar(version="0.5.4")
+        bar._unread_messages = 0
+        line = bar.get_status_line()
+        assert 'msg:' not in line
+
+
+class TestMessageListenerEventBus:
+    """Tests for MessageListener event bus integration (Issue #17 Phase 3)."""
+
+    def test_emit_message_event_helper(self):
+        """Test that _emit_message_event calls emit_message with correct args."""
+        from src.utils.message_listener import MessageListener
+
+        listener = MessageListener()
+
+        msg_data = {
+            'from_id': '!abc123',
+            'content': 'Test message',
+            'channel': 0,
+            'is_broadcast': False,
+            'snr': 10.5,
+            'rssi': -90,
+            'hops_away': 1,
+            'to_id': '!def456',
+            'via_mqtt': False,
+        }
+
+        with patch('utils.event_bus.emit_message') as mock_emit:
+            listener._emit_message_event(msg_data)
+            mock_emit.assert_called_once()
+            call_kwargs = mock_emit.call_args
+            # Check positional/keyword args
+            assert call_kwargs.kwargs.get('direction') == 'rx' or call_kwargs[1].get('direction') == 'rx'
+            assert call_kwargs.kwargs.get('content') == 'Test message' or call_kwargs[1].get('content') == 'Test message'
+            assert call_kwargs.kwargs.get('node_id') == '!abc123' or call_kwargs[1].get('node_id') == '!abc123'
+
+    def test_emit_message_event_includes_raw_data(self):
+        """Test that raw_data includes signal quality info."""
+        from src.utils.message_listener import MessageListener
+
+        listener = MessageListener()
+
+        msg_data = {
+            'from_id': '!abc123',
+            'content': 'Signal test',
+            'channel': 2,
+            'is_broadcast': True,
+            'snr': 8.0,
+            'rssi': -95,
+            'hops_away': 3,
+            'to_id': None,
+            'via_mqtt': True,
+        }
+
+        with patch('utils.event_bus.emit_message') as mock_emit:
+            listener._emit_message_event(msg_data)
+            mock_emit.assert_called_once()
+            call_kwargs = mock_emit.call_args
+            raw = call_kwargs.kwargs.get('raw_data') or call_kwargs[1].get('raw_data')
+            assert raw['snr'] == 8.0
+            assert raw['rssi'] == -95
+            assert raw['hops_away'] == 3
+            assert raw['via_mqtt'] is True
+            assert raw['is_broadcast'] is True
+
+    def test_emit_message_event_handles_import_error(self):
+        """Test that _emit_message_event fails silently if event bus unavailable."""
+        from src.utils.message_listener import MessageListener
+
+        listener = MessageListener()
+
+        msg_data = {
+            'from_id': '!abc123',
+            'content': 'Test',
+            'channel': 0,
+            'is_broadcast': False,
+            'snr': None,
+            'rssi': None,
+            'hops_away': None,
+            'to_id': None,
+            'via_mqtt': False,
+        }
+
+        # Should not raise even if import fails
+        with patch('builtins.__import__', side_effect=ImportError("no event bus")):
+            listener._emit_message_event(msg_data)  # Should not raise

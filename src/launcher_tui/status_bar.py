@@ -94,6 +94,8 @@ class StatusBar:
             self._startup_checker = StartupChecker()
         # Event-driven status updates from ActiveHealthProbe
         self._event_subscribed = False
+        # Unread message counter (Issue #17 Phase 3)
+        self._unread_messages = 0
         self._subscribe_to_events()
 
     def get_status_line(self) -> str:
@@ -125,6 +127,10 @@ class StatusBar:
         if self._bridge_running is not None:
             bridge_label = self._format_bridge_status()
             parts.append(bridge_label)
+
+        # Unread message count (Issue #17 Phase 3)
+        if self._unread_messages > 0:
+            parts.append(f"msg:{self._unread_messages}")
 
         # Space weather (compact format: SFI:125 K:2)
         if self._space_weather:
@@ -314,8 +320,9 @@ class StatusBar:
         try:
             from utils.event_bus import event_bus
             event_bus.subscribe('service', self._on_service_event)
+            event_bus.subscribe('message', self._on_message_event)
             self._event_subscribed = True
-            logger.debug("StatusBar subscribed to EventBus service events")
+            logger.debug("StatusBar subscribed to EventBus service+message events")
         except ImportError:
             logger.debug("EventBus not available — StatusBar will poll only")
 
@@ -349,6 +356,21 @@ class StatusBar:
                 f"StatusBar updated {service_name} via event: "
                 f"{'running' if available else 'stopped'}"
             )
+
+    def _on_message_event(self, event) -> None:
+        """Handle a MessageEvent from the EventBus.
+
+        Increments the unread message counter shown in the status bar.
+        Counter is reset when the user views messages.
+        """
+        direction = getattr(event, 'direction', '')
+        if direction == 'rx':
+            self._unread_messages += 1
+            logger.debug(f"StatusBar unread count: {self._unread_messages}")
+
+    def clear_unread(self) -> None:
+        """Reset unread message counter (called when user views messages)."""
+        self._unread_messages = 0
 
     # =========================================================================
     # Enhanced Status Methods (v0.4.8)
