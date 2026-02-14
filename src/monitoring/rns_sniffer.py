@@ -25,21 +25,16 @@ from pathlib import Path
 from queue import Queue, Empty, Full
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from monitoring.traffic_inspector import (
+    MeshPacket, PacketProtocol, PacketDirection, PacketTree,
+    PacketField, FieldType, get_traffic_inspector
+)
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
-# Module-level safe imports
+# RNS is an external dependency - keep safe_import
 RNS, _HAS_RNS = safe_import('RNS')
-(MeshPacket, PacketProtocol, PacketDirection, PacketTree,
- PacketField, FieldType, _HAS_TRAFFIC_INSPECTOR) = safe_import(
-    'monitoring.traffic_inspector',
-    'MeshPacket', 'PacketProtocol', 'PacketDirection', 'PacketTree',
-    'PacketField', 'FieldType'
-)
-_get_traffic_inspector, _HAS_GET_TRAFFIC_INSPECTOR = safe_import(
-    'monitoring.traffic_inspector', 'get_traffic_inspector'
-)
 
 
 # =============================================================================
@@ -777,10 +772,6 @@ def convert_to_mesh_packet(rns_packet: RNSPacketInfo):
     This allows RNS packets to be viewed alongside Meshtastic packets
     with consistent filtering and analysis.
     """
-    if not _HAS_TRAFFIC_INSPECTOR:
-        logger.debug("TrafficInspector not available for conversion")
-        return None
-
     # Map direction
     dir_map = {
         "inbound": PacketDirection.INBOUND,
@@ -935,11 +926,7 @@ def integrate_with_traffic_inspector() -> bool:
     Registers a callback that converts RNS packets to MeshPackets
     and feeds them into the unified traffic capture.
     """
-    if not _HAS_GET_TRAFFIC_INSPECTOR:
-        logger.debug("Could not integrate with TrafficInspector: module not available")
-        return False
-
-    inspector = _get_traffic_inspector()
+    inspector = get_traffic_inspector()
     sniffer = get_rns_sniffer()
 
     def on_rns_packet(rns_packet: RNSPacketInfo):

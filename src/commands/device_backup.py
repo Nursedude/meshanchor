@@ -17,34 +17,13 @@ from pathlib import Path
 from typing import Dict, Optional, List
 from dataclasses import dataclass, asdict
 
+from utils.paths import get_real_user_home
+from utils.cli import find_meshtastic_cli
 from utils.safe_import import safe_import
 
-# Module-level safe imports
-_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
 _yaml, _HAS_YAML = safe_import('yaml')
 
 logger = logging.getLogger(__name__)
-
-
-def _fallback_get_real_user_home():
-    """Fallback when utils.paths is not available."""
-    sudo_user = os.environ.get('SUDO_USER', '')
-    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-        candidate = Path(f'/home/{sudo_user}')
-        return candidate
-    logname = os.environ.get('LOGNAME', '')
-    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-        candidate = Path(f'/home/{logname}')
-        return candidate
-    return Path('/root')
-
-
-def get_real_user_home():
-    """Get real user home, using utils.paths if available."""
-    if _HAS_PATHS:
-        return _get_real_user_home()
-    return _fallback_get_real_user_home()
 
 
 @dataclass
@@ -154,11 +133,7 @@ def create_backup(
 
     try:
         # Find meshtastic CLI
-        if _HAS_CLI:
-            cli_path = _find_meshtastic_cli()
-        else:
-            import shutil
-            cli_path = shutil.which('meshtastic')
+        cli_path = find_meshtastic_cli()
 
         if not cli_path:
             result['error'] = "meshtastic CLI not found - install with: pipx install meshtastic[cli]"
@@ -344,11 +319,7 @@ def restore_backup(
             return result
 
         # Find meshtastic CLI
-        if _HAS_CLI:
-            cli_path = _find_meshtastic_cli()
-        else:
-            import shutil
-            cli_path = shutil.which('meshtastic')
+        cli_path = find_meshtastic_cli()
 
         if not cli_path:
             result['error'] = "meshtastic CLI not found - install with: pipx install meshtastic[cli]"

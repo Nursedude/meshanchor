@@ -19,11 +19,11 @@ from dataclasses import dataclass, field
 
 from .base import CommandResult
 from utils.safe_import import safe_import
+from utils.service_check import check_service
 
 logger = logging.getLogger(__name__)
 
-# Import centralized service checker (SINGLE SOURCE OF TRUTH)
-check_service, HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
+HAS_SERVICE_CHECK = True
 
 # RNS module (optional — not installed on all systems)
 RNS, _HAS_RNS = safe_import('RNS')

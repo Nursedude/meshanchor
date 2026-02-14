@@ -53,37 +53,30 @@ import os
 from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import service checker for pre-flight checks (Issue #3)
-check_service, ServiceState, HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'ServiceState'
-)
+from utils.service_check import check_service, ServiceState
+HAS_SERVICE_CHECK = True
 
 # Import event bus for RX message notifications (Issue #17 Phase 3)
-emit_message, HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_message')
+from utils.event_bus import emit_message
+HAS_EVENT_BUS = True
 
 # Import RNS sniffer for Wireshark-grade packet capture
-(get_rns_sniffer, RNSPacketInfo, RNSPacketType,
- start_rns_capture, integrate_with_traffic_inspector,
- HAS_RNS_SNIFFER) = safe_import(
-    'monitoring.rns_sniffer',
-    'get_rns_sniffer', 'RNSPacketInfo', 'RNSPacketType',
-    'start_rns_capture', 'integrate_with_traffic_inspector'
+from monitoring.rns_sniffer import (
+    get_rns_sniffer, RNSPacketInfo, RNSPacketType,
+    start_rns_capture, integrate_with_traffic_inspector
 )
+HAS_RNS_SNIFFER = True
 
 # Import RNS and LXMF modules (optional - for mesh bridge)
 _RNS_mod, _HAS_RNS = safe_import('RNS')
 _LXMF_mod, _HAS_LXMF = safe_import('LXMF')
 
-# Import config drift detection (optional)
-(_detect_rnsd_config_drift, _get_rnsd_effective_config_dir,
- _HAS_CONFIG_DRIFT) = safe_import(
-    'utils.config_drift', 'detect_rnsd_config_drift', 'get_rnsd_effective_config_dir'
-)
+# Import config drift detection
+from utils.config_drift import detect_rnsd_config_drift, get_rnsd_effective_config_dir
 
-# Import WebSocket server helpers (optional)
-(_start_ws_server, _is_ws_available, _stop_ws_server,
- _HAS_WS_SERVER) = safe_import(
-    'utils.websocket_server',
-    'start_websocket_server', 'is_websocket_available', 'stop_websocket_server'
+# Import WebSocket server helpers
+from utils.websocket_server import (
+    start_websocket_server, is_websocket_available, stop_websocket_server
 )
 
 
@@ -946,26 +939,21 @@ class RNSMeshtasticBridge:
             # Active drift fix: prefer rnsd's actual config path over default
             # resolution. This prevents the gateway from reading a different
             # config than the running daemon (e.g. ~/.reticulum vs /etc/reticulum)
-            if _HAS_CONFIG_DRIFT:
-                drift = _detect_rnsd_config_drift()
-                if drift.drifted:
-                    logger.warning(drift.message)
-                    if drift.fix_hint:
-                        logger.info("Drift fix: %s", drift.fix_hint)
-                    # Use rnsd's actual path as the active fix
-                    config_dir = str(drift.rnsd_config_dir)
-                    logger.info("Active fix: using rnsd's config dir %s "
-                               "instead of gateway's resolved %s",
-                               drift.rnsd_config_dir, drift.gateway_config_dir)
-                else:
-                    rns_config = ReticulumPaths.get_config_file()
-                    logger.info(f"RNS config path: {rns_config} "
-                               f"(exists: {rns_config.exists()}) "
-                               f"[{drift.detection_method}]")
+            drift = detect_rnsd_config_drift()
+            if drift.drifted:
+                logger.warning(drift.message)
+                if drift.fix_hint:
+                    logger.info("Drift fix: %s", drift.fix_hint)
+                # Use rnsd's actual path as the active fix
+                config_dir = str(drift.rnsd_config_dir)
+                logger.info("Active fix: using rnsd's config dir %s "
+                           "instead of gateway's resolved %s",
+                           drift.rnsd_config_dir, drift.gateway_config_dir)
             else:
                 rns_config = ReticulumPaths.get_config_file()
                 logger.info(f"RNS config path: {rns_config} "
-                           f"(exists: {rns_config.exists()})")
+                           f"(exists: {rns_config.exists()}) "
+                           f"[{drift.detection_method}]")
 
         try:
             if rns_pids:
@@ -1032,8 +1020,8 @@ class RNSMeshtasticBridge:
                 config_dir = self.config.rns.config_dir or None
 
                 # Active drift fix: prefer rnsd's actual config path
-                if not config_dir and _HAS_CONFIG_DRIFT:
-                    effective = _get_rnsd_effective_config_dir()
+                if not config_dir:
+                    effective = get_rnsd_effective_config_dir()
                     config_dir = str(effective)
 
                 if rns_pids:
@@ -1433,13 +1421,9 @@ class RNSMeshtasticBridge:
 
     def _start_websocket_server(self):
         """Start WebSocket server for real-time message broadcast to web UI."""
-        if not _HAS_WS_SERVER:
-            logger.debug("WebSocket server module not available")
-            return
-
         try:
-            if _is_ws_available():
-                if _start_ws_server(port=5001):
+            if is_websocket_available():
+                if start_websocket_server(port=5001):
                     logger.info("WebSocket server started on port 5001")
                     self._websocket_started = True
                 else:
@@ -1451,9 +1435,9 @@ class RNSMeshtasticBridge:
 
     def _stop_websocket_server(self):
         """Stop WebSocket server."""
-        if getattr(self, '_websocket_started', False) and _HAS_WS_SERVER:
+        if getattr(self, '_websocket_started', False):
             try:
-                _stop_ws_server()
+                stop_websocket_server()
                 logger.info("WebSocket server stopped")
             except Exception as e:
                 logger.debug(f"Error stopping WebSocket server: {e}")
