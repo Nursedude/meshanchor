@@ -16,16 +16,12 @@ from typing import Optional, List
 from pathlib import Path
 
 from .base import CommandResult
-
-logger = logging.getLogger(__name__)
+from utils.safe_import import safe_import
 
 # Import centralized service checker (SINGLE SOURCE OF TRUTH)
-try:
-    from utils.service_check import check_service as _check_service
-    HAS_SERVICE_CHECK = True
-except ImportError:
-    _check_service = None
-    HAS_SERVICE_CHECK = False
+_check_service, _HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
+
+logger = logging.getLogger(__name__)
 
 
 # Security: Regex for validating service names (alphanumeric, underscore, hyphen, @, .)
@@ -98,7 +94,7 @@ def check_status(name: str, port: Optional[int] = None) -> CommandResult:
 
     # Use centralized service checker for consistent detection (SINGLE SOURCE OF TRUTH)
     # This handles UDP/TCP port checks, pgrep, and systemd properly
-    if HAS_SERVICE_CHECK and name in ('rnsd', 'meshtasticd'):
+    if _HAS_SERVICE_CHECK and name in ('rnsd', 'meshtasticd'):
         service_status = _check_service(name)
         is_running = service_status.available
         status_detail = service_status.message or ("Running" if is_running else "Stopped")

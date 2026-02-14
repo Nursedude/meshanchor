@@ -35,6 +35,11 @@ import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+
 # Re-export all models for backwards compatibility
 from .traffic_models import (
     FieldType,
@@ -361,9 +366,12 @@ def start_packet_capture() -> bool:
     if _capture_subscribed:
         return False
 
-    try:
-        from pubsub import pub
+    if not _HAS_PUBSUB:
+        logger.warning("pubsub not available - cannot start packet capture")
+        return False
 
+    try:
+        pub = _pub
         inspector = get_traffic_inspector()
 
         def on_meshtastic_packet(packet, interface=None):
@@ -409,9 +417,6 @@ def start_packet_capture() -> bool:
         logger.info("Traffic capture started - subscribed to meshtastic.receive")
         return True
 
-    except ImportError:
-        logger.warning("pubsub not available - cannot start packet capture")
-        return False
     except Exception as e:
         logger.error(f"Failed to start packet capture: {e}")
         return False

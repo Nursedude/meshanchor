@@ -18,16 +18,14 @@ import socket
 import subprocess
 from pathlib import Path
 
-# Use centralized service checking
-try:
-    from utils.service_check import (
-        check_port as _check_port,
-        check_systemd_service,
-        check_process_running,
-    )
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_check_port, _check_systemd_service, _check_process_running, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_port', 'check_systemd_service', 'check_process_running'
+)
+
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
 
 
 # ANSI colors
@@ -68,7 +66,7 @@ def check_service(name):
     """
     try:
         if _HAS_SERVICE_CHECK:
-            is_running, is_enabled = check_systemd_service(name)
+            is_running, is_enabled = _check_systemd_service(name)
             status = 'active' if is_running else 'inactive'
         else:
             # Fallback to direct systemctl call
@@ -143,10 +141,9 @@ def get_local_ip():
 
 def _find_cli():
     """Find meshtastic CLI path using centralized resolver."""
-    try:
-        from utils.cli import find_meshtastic_cli
-        return find_meshtastic_cli()
-    except ImportError:
+    if _HAS_CLI:
+        return _find_meshtastic_cli()
+    else:
         import shutil
         return shutil.which('meshtastic')
 

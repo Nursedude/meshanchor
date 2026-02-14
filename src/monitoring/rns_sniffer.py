@@ -37,6 +37,9 @@ RNS, _HAS_RNS = safe_import('RNS')
     'MeshPacket', 'PacketProtocol', 'PacketDirection', 'PacketTree',
     'PacketField', 'FieldType'
 )
+_get_traffic_inspector, _HAS_GET_TRAFFIC_INSPECTOR = safe_import(
+    'monitoring.traffic_inspector', 'get_traffic_inspector'
+)
 
 
 # =============================================================================
@@ -397,13 +400,11 @@ class RNSSniffer:
         if not self._hooks_installed:
             return
 
-        try:
-            import RNS
+        if _HAS_RNS:
             # RNS doesn't have unregister_announce_handler, but handler
             # won't be called after we stop since we check _running
-            self._hooks_installed = False
-        except ImportError:
             pass
+        self._hooks_installed = False
 
     def _capture_inbound_packet(self, raw: bytes, interface) -> None:
         """Capture an inbound packet (called from RNS hook)."""
@@ -740,9 +741,11 @@ class RNSSniffer:
         Returns:
             True if path request was sent
         """
-        try:
-            import RNS
+        if not _HAS_RNS:
+            logger.warning("RNS not available for path probe")
+            return False
 
+        try:
             dest_hash = bytes.fromhex(dest_hash_hex)
 
             # Request path
@@ -758,9 +761,6 @@ class RNSSniffer:
 
             return True
 
-        except ImportError:
-            logger.warning("RNS not available for path probe")
-            return False
         except Exception as e:
             logger.error(f"Path probe failed: {e}")
             return False
@@ -777,122 +777,116 @@ def convert_to_mesh_packet(rns_packet: RNSPacketInfo):
     This allows RNS packets to be viewed alongside Meshtastic packets
     with consistent filtering and analysis.
     """
-    try:
-        from monitoring.traffic_inspector import (
-            MeshPacket, PacketProtocol, PacketDirection, PacketTree,
-            PacketField, FieldType
-        )
-
-        # Map direction
-        dir_map = {
-            "inbound": PacketDirection.INBOUND,
-            "outbound": PacketDirection.OUTBOUND,
-            "internal": PacketDirection.INTERNAL,
-        }
-        direction = dir_map.get(rns_packet.direction, PacketDirection.INBOUND)
-
-        # Create MeshPacket
-        packet = MeshPacket(
-            id=rns_packet.id,
-            timestamp=rns_packet.timestamp,
-            direction=direction,
-            protocol=PacketProtocol.RNS,
-            source=rns_packet.source_hash.hex() if rns_packet.source_hash else "",
-            destination=rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
-            hops_taken=rns_packet.hops,
-            payload=rns_packet.payload,
-            rns_dest_hash=rns_packet.destination_hash,
-            rns_interface=rns_packet.interface_name,
-            rns_service=rns_packet.announce_aspect,
-            size=len(rns_packet.raw_bytes) if rns_packet.raw_bytes else rns_packet.payload_size,
-            raw_bytes=rns_packet.raw_bytes,
-        )
-
-        # Build protocol tree
-        tree = PacketTree()
-
-        # Frame layer
-        frame = tree.add_layer("Frame", "frame")
-        tree.add_field(frame, "Timestamp", "frame.time",
-                      packet.timestamp, FieldType.TIMESTAMP)
-        tree.add_field(frame, "Direction", "frame.direction",
-                      direction.value, FieldType.ENUM)
-        tree.add_field(frame, "Size", "frame.size",
-                      packet.size, FieldType.INTEGER)
-        tree.add_field(frame, "Protocol", "frame.protocol",
-                      "rns", FieldType.STRING)
-
-        # RNS layer
-        rns_layer = tree.add_layer("Reticulum", "rns")
-
-        # Packet type
-        tree.add_field(rns_layer, "Packet Type", "rns.type",
-                      rns_packet.packet_type.name, FieldType.STRING,
-                      "RNS packet type")
-
-        # Destination hash
-        tree.add_field(rns_layer, "Destination Hash", "rns.dest_hash",
-                      rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
-                      FieldType.BYTES, "16-byte destination hash")
-
-        # Hops
-        tree.add_field(rns_layer, "Hops", "rns.hops",
-                      rns_packet.hops, FieldType.INTEGER,
-                      "Number of hops traversed")
-
-        # Interface
-        tree.add_field(rns_layer, "Interface", "rns.interface",
-                      rns_packet.interface_name, FieldType.STRING)
-        tree.add_field(rns_layer, "Interface Type", "rns.iface_type",
-                      rns_packet.interface_type.value, FieldType.STRING)
-
-        # Header fields
-        header = PacketField(name="Header", abbrev="rns.header",
-                            value=None, field_type=FieldType.NESTED)
-        rns_layer.children.append(header)
-        tree.add_field(header, "Flags", "rns.header.flags",
-                      rns_packet.header_flags, FieldType.INTEGER)
-        tree.add_field(header, "Hop Count", "rns.header.hops",
-                      rns_packet.header_hops, FieldType.INTEGER)
-        tree.add_field(header, "Context", "rns.context",
-                      rns_packet.context, FieldType.INTEGER)
-
-        # Announce-specific fields
-        if rns_packet.packet_type == RNSPacketType.ANNOUNCE:
-            announce = PacketField(name="Announce", abbrev="rns.announce",
-                                  value=None, field_type=FieldType.NESTED)
-            rns_layer.children.append(announce)
-
-            tree.add_field(announce, "Aspect", "rns.announce.aspect",
-                          rns_packet.announce_aspect, FieldType.STRING)
-            if rns_packet.source_hash:
-                tree.add_field(announce, "Identity", "rns.announce.identity",
-                              rns_packet.source_hash.hex(), FieldType.BYTES)
-            if rns_packet.announce_app_data:
-                tree.add_field(announce, "App Data Size", "rns.announce.app_size",
-                              len(rns_packet.announce_app_data), FieldType.INTEGER)
-
-        # Link-specific fields
-        if rns_packet.link_id:
-            link = PacketField(name="Link", abbrev="rns.link",
-                              value=None, field_type=FieldType.NESTED)
-            rns_layer.children.append(link)
-
-            tree.add_field(link, "Link ID", "rns.link.id",
-                          rns_packet.link_id.hex(), FieldType.BYTES)
-            tree.add_field(link, "State", "rns.link.state",
-                          rns_packet.link_state.value, FieldType.STRING)
-
-        # Payload
-        tree.add_field(rns_layer, "Payload Size", "rns.payload_size",
-                      rns_packet.payload_size, FieldType.INTEGER)
-
-        packet.tree = tree
-        return packet
-
-    except ImportError:
+    if not _HAS_TRAFFIC_INSPECTOR:
         logger.debug("TrafficInspector not available for conversion")
         return None
+
+    # Map direction
+    dir_map = {
+        "inbound": PacketDirection.INBOUND,
+        "outbound": PacketDirection.OUTBOUND,
+        "internal": PacketDirection.INTERNAL,
+    }
+    direction = dir_map.get(rns_packet.direction, PacketDirection.INBOUND)
+
+    # Create MeshPacket
+    packet = MeshPacket(
+        id=rns_packet.id,
+        timestamp=rns_packet.timestamp,
+        direction=direction,
+        protocol=PacketProtocol.RNS,
+        source=rns_packet.source_hash.hex() if rns_packet.source_hash else "",
+        destination=rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
+        hops_taken=rns_packet.hops,
+        payload=rns_packet.payload,
+        rns_dest_hash=rns_packet.destination_hash,
+        rns_interface=rns_packet.interface_name,
+        rns_service=rns_packet.announce_aspect,
+        size=len(rns_packet.raw_bytes) if rns_packet.raw_bytes else rns_packet.payload_size,
+        raw_bytes=rns_packet.raw_bytes,
+    )
+
+    # Build protocol tree
+    tree = PacketTree()
+
+    # Frame layer
+    frame = tree.add_layer("Frame", "frame")
+    tree.add_field(frame, "Timestamp", "frame.time",
+                  packet.timestamp, FieldType.TIMESTAMP)
+    tree.add_field(frame, "Direction", "frame.direction",
+                  direction.value, FieldType.ENUM)
+    tree.add_field(frame, "Size", "frame.size",
+                  packet.size, FieldType.INTEGER)
+    tree.add_field(frame, "Protocol", "frame.protocol",
+                  "rns", FieldType.STRING)
+
+    # RNS layer
+    rns_layer = tree.add_layer("Reticulum", "rns")
+
+    # Packet type
+    tree.add_field(rns_layer, "Packet Type", "rns.type",
+                  rns_packet.packet_type.name, FieldType.STRING,
+                  "RNS packet type")
+
+    # Destination hash
+    tree.add_field(rns_layer, "Destination Hash", "rns.dest_hash",
+                  rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
+                  FieldType.BYTES, "16-byte destination hash")
+
+    # Hops
+    tree.add_field(rns_layer, "Hops", "rns.hops",
+                  rns_packet.hops, FieldType.INTEGER,
+                  "Number of hops traversed")
+
+    # Interface
+    tree.add_field(rns_layer, "Interface", "rns.interface",
+                  rns_packet.interface_name, FieldType.STRING)
+    tree.add_field(rns_layer, "Interface Type", "rns.iface_type",
+                  rns_packet.interface_type.value, FieldType.STRING)
+
+    # Header fields
+    header = PacketField(name="Header", abbrev="rns.header",
+                        value=None, field_type=FieldType.NESTED)
+    rns_layer.children.append(header)
+    tree.add_field(header, "Flags", "rns.header.flags",
+                  rns_packet.header_flags, FieldType.INTEGER)
+    tree.add_field(header, "Hop Count", "rns.header.hops",
+                  rns_packet.header_hops, FieldType.INTEGER)
+    tree.add_field(header, "Context", "rns.context",
+                  rns_packet.context, FieldType.INTEGER)
+
+    # Announce-specific fields
+    if rns_packet.packet_type == RNSPacketType.ANNOUNCE:
+        announce = PacketField(name="Announce", abbrev="rns.announce",
+                              value=None, field_type=FieldType.NESTED)
+        rns_layer.children.append(announce)
+
+        tree.add_field(announce, "Aspect", "rns.announce.aspect",
+                      rns_packet.announce_aspect, FieldType.STRING)
+        if rns_packet.source_hash:
+            tree.add_field(announce, "Identity", "rns.announce.identity",
+                          rns_packet.source_hash.hex(), FieldType.BYTES)
+        if rns_packet.announce_app_data:
+            tree.add_field(announce, "App Data Size", "rns.announce.app_size",
+                          len(rns_packet.announce_app_data), FieldType.INTEGER)
+
+    # Link-specific fields
+    if rns_packet.link_id:
+        link = PacketField(name="Link", abbrev="rns.link",
+                          value=None, field_type=FieldType.NESTED)
+        rns_layer.children.append(link)
+
+        tree.add_field(link, "Link ID", "rns.link.id",
+                      rns_packet.link_id.hex(), FieldType.BYTES)
+        tree.add_field(link, "State", "rns.link.state",
+                      rns_packet.link_state.value, FieldType.STRING)
+
+    # Payload
+    tree.add_field(rns_layer, "Payload Size", "rns.payload_size",
+                  rns_packet.payload_size, FieldType.INTEGER)
+
+    packet.tree = tree
+    return packet
 
 
 # =============================================================================
@@ -941,30 +935,27 @@ def integrate_with_traffic_inspector() -> bool:
     Registers a callback that converts RNS packets to MeshPackets
     and feeds them into the unified traffic capture.
     """
-    try:
-        from monitoring.traffic_inspector import get_traffic_inspector
-
-        inspector = get_traffic_inspector()
-        sniffer = get_rns_sniffer()
-
-        def on_rns_packet(rns_packet: RNSPacketInfo):
-            """Forward RNS packets to TrafficInspector."""
-            mesh_packet = convert_to_mesh_packet(rns_packet)
-            if mesh_packet:
-                # Create metadata for the capture
-                metadata = {
-                    "protocol": "rns",
-                    "dest_hash": rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
-                    "hops": rns_packet.hops,
-                    "interface": rns_packet.interface_name,
-                    "packet_type": rns_packet.packet_type.name,
-                }
-                inspector.capture(rns_packet.raw_bytes, metadata)
-
-        sniffer.register_callback(on_rns_packet)
-        logger.info("RNS Sniffer integrated with TrafficInspector")
-        return True
-
-    except ImportError as e:
-        logger.debug(f"Could not integrate with TrafficInspector: {e}")
+    if not _HAS_GET_TRAFFIC_INSPECTOR:
+        logger.debug("Could not integrate with TrafficInspector: module not available")
         return False
+
+    inspector = _get_traffic_inspector()
+    sniffer = get_rns_sniffer()
+
+    def on_rns_packet(rns_packet: RNSPacketInfo):
+        """Forward RNS packets to TrafficInspector."""
+        mesh_packet = convert_to_mesh_packet(rns_packet)
+        if mesh_packet:
+            # Create metadata for the capture
+            metadata = {
+                "protocol": "rns",
+                "dest_hash": rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
+                "hops": rns_packet.hops,
+                "interface": rns_packet.interface_name,
+                "packet_type": rns_packet.packet_type.name,
+            }
+            inspector.capture(rns_packet.raw_bytes, metadata)
+
+    sniffer.register_callback(on_rns_packet)
+    logger.info("RNS Sniffer integrated with TrafficInspector")
+    return True

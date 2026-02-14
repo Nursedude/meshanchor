@@ -23,23 +23,18 @@ from enum import Enum
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# Import centralized service checker - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import (
-        check_service as _check_service_central,
-        check_port,
-        enable_service,
-        ServiceState as CentralServiceState
-    )
-    SERVICE_CHECK_AVAILABLE = True
-    _HAS_ENABLE_SERVICE = True
-except ImportError:
-    _check_service_central = None
-    check_port = None
-    enable_service = None
-    CentralServiceState = None
-    SERVICE_CHECK_AVAILABLE = False
-    _HAS_ENABLE_SERVICE = False
+from utils.safe_import import safe_import
+
+# Module-level safe imports - SINGLE SOURCE OF TRUTH
+_check_service_central, _check_port, _enable_service, _CentralServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_port', 'enable_service', 'ServiceState'
+)
+SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
+_HAS_ENABLE_SERVICE = _HAS_SERVICE_CHECK
+
+_get_real_user_home_mod, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+_ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')
 
 
 class WizardServiceState(Enum):
@@ -145,17 +140,15 @@ class SetupWizard:
 
     def _get_real_home(self) -> Path:
         """Get real user home even when running as sudo"""
-        try:
-            from utils.paths import get_real_user_home
-            return get_real_user_home()
-        except ImportError:
-            sudo_user = os.environ.get('SUDO_USER', '')
-            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-                return Path(f"/home/{sudo_user}")
-            logname = os.environ.get('LOGNAME', '')
-            if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-                return Path(f"/home/{logname}")
-            return Path('/root')
+        if _HAS_PATHS:
+            return _get_real_user_home_mod()
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            return Path(f"/home/{sudo_user}")
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            return Path(f"/home/{logname}")
+        return Path('/root')
 
     def _setup_logging(self):
         """Setup file logging for the wizard"""
@@ -311,13 +304,13 @@ class SetupWizard:
             status.systemd_unit = svc['systemd']
 
             # Use centralized service checker if available
-            if SERVICE_CHECK_AVAILABLE and _check_service_central is not None:
+            if SERVICE_CHECK_AVAILABLE:
                 try:
                     central_status = _check_service_central(svc['name'])
                     if central_status.available:
                         status.state = WizardServiceState.RUNNING
                         status.notes.append(f"Running ({central_status.detection_method})")
-                    elif central_status.state == CentralServiceState.NOT_INSTALLED:
+                    elif central_status.state == _CentralServiceState.NOT_INSTALLED:
                         # Keep NOT_INSTALLED state
                         pass
                     elif status.state == WizardServiceState.INSTALLED:

@@ -17,6 +17,11 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
+from utils.safe_import import safe_import
+
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+_GLib, _HAS_GLIB = safe_import('gi.repository', 'GLib')
+
 logger = logging.getLogger(__name__)
 
 # Type variable for generic settings
@@ -220,10 +225,9 @@ def run_cli_async(
         # Find CLI if not provided
         nonlocal cli_path
         if cli_path is None:
-            try:
-                from utils.cli import find_meshtastic_cli
-                cli_path = find_meshtastic_cli()
-            except ImportError:
+            if _HAS_CLI:
+                cli_path = _find_meshtastic_cli()
+            else:
                 import shutil
                 cli_path = shutil.which('meshtastic')
 
@@ -278,14 +282,12 @@ def run_cli_async_gtk(
     Returns:
         The started thread
     """
-    try:
-        from gi.repository import GLib
-
+    if _HAS_GLIB:
         def gtk_callback(success: bool, stdout: str, stderr: str):
-            GLib.idle_add(callback, success, stdout, stderr)
+            _GLib.idle_add(callback, success, stdout, stderr)
 
         return run_cli_async(args, gtk_callback, cli_path, host, timeout)
-    except ImportError:
+    else:
         # GTK not available, fall back to direct callback
         return run_cli_async(args, callback, cli_path, host, timeout)
 

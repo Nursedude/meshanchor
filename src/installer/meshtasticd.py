@@ -16,16 +16,13 @@ from utils.system import (
     enable_service
 )
 from utils.logger import log, log_command, log_exception
+from utils.safe_import import safe_import
 
-# Import centralized service checker - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import check_service, check_port, ServiceState
-    SERVICE_CHECK_AVAILABLE = True
-except ImportError:
-    check_service = None
-    check_port = None
-    ServiceState = None
-    SERVICE_CHECK_AVAILABLE = False
+# Module-level safe imports - SINGLE SOURCE OF TRUTH
+_check_service, _check_port, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_port', 'ServiceState'
+)
+SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
 
 console = Console()
 
@@ -351,8 +348,8 @@ class MeshtasticdInstaller:
 
         # Test 2: Check if service is running (use centralized checker)
         console.print("  [dim]Test 2: Checking service status...[/dim]")
-        if SERVICE_CHECK_AVAILABLE and check_service is not None:
-            status = check_service('meshtasticd')
+        if SERVICE_CHECK_AVAILABLE:
+            status = _check_service('meshtasticd')
             if status.available:
                 console.print("    [green]✓ meshtasticd service is running[/green]")
                 tests_passed += 1

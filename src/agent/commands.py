@@ -25,6 +25,11 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Type
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_version_mod, _HAS_VERSION = safe_import('__version__', '__version__')
+
 logger = logging.getLogger(__name__)
 
 
@@ -740,11 +745,7 @@ class CommandHandler:
         """Get system information."""
         try:
             # Get version
-            try:
-                from __version__ import __version__
-                version = __version__
-            except ImportError:
-                version = "unknown"
+            version = _version_mod if _HAS_VERSION else "unknown"
 
             return CommandResult.success({
                 "meshforge_version": version,

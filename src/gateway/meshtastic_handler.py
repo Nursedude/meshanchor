@@ -23,12 +23,27 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from .config import GatewayConfig
 from .node_tracker import UnifiedNode
 from .reconnect import ReconnectStrategy
+from utils.safe_import import safe_import
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
     from .node_tracker import UnifiedNodeTracker
 
 logger = logging.getLogger(__name__)
+
+# Import connection utilities (optional - graceful fallback)
+_clear_stale_connections, _HAS_STALE_CONN = safe_import(
+    'utils.meshtastic_connection', 'clear_stale_connections'
+)
+_get_connection_manager, _HAS_CONN_MANAGER = safe_import(
+    'utils.meshtastic_connection', 'get_connection_manager'
+)
+_wait_for_cooldown, _HAS_COOLDOWN = safe_import(
+    'utils.meshtastic_connection', 'wait_for_cooldown'
+)
+_broadcast_message, _HAS_WEBSOCKET = safe_import(
+    'utils.websocket_server', 'broadcast_message'
+)
 
 
 class MeshtasticHandler:
@@ -126,17 +141,14 @@ class MeshtasticHandler:
                     # blocks all reconnection. Detect and clear it early (3 attempts
                     # ≈ 7 seconds) instead of waiting for all 10 to exhaust.
                     if self._reconnect.attempts == 3:
-                        try:
-                            from utils.meshtastic_connection import clear_stale_connections
-                            cleared = clear_stale_connections(self.config.meshtastic.port)
+                        if _HAS_STALE_CONN:
+                            cleared = _clear_stale_connections(self.config.meshtastic.port)
                             if cleared:
                                 self.health.record_connection_event(
                                     "meshtastic", "self_healed",
                                     "Cleared zombie CLOSE-WAIT connection"
                                 )
                                 self._reconnect.reset()
-                        except ImportError:
-                            pass
 
                     logger.info(f"Attempting Meshtastic connection "
                                f"(attempt {self._reconnect.attempts + 1})...")

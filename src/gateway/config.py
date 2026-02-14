@@ -11,7 +11,17 @@ from dataclasses import dataclass, asdict, field
 from typing import Optional, List, Dict, Any, Tuple
 import logging
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Import centralized path utility for sudo compatibility
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+# Import config drift validation (optional)
+_validate_gateway_rns_config, _HAS_CONFIG_DRIFT = safe_import(
+    'utils.config_drift', 'validate_gateway_rns_config'
+)
 
 
 # =============================================================================
@@ -112,21 +122,20 @@ def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[Confi
         )
     return None
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not in Python path."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
+def get_real_user_home() -> Path:
+    """Get real user home directory with sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    # Fallback for when utils.paths is not in Python path
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        candidate = Path(f'/home/{sudo_user}')
+        return candidate
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        candidate = Path(f'/home/{logname}')
+        return candidate
+    return Path('/root')
 
 
 @dataclass
@@ -644,14 +653,12 @@ class GatewayConfig:
 
         # Config drift detection: check if gateway's RNS config path
         # matches what rnsd is actually using
-        try:
-            from utils.config_drift import validate_gateway_rns_config
-            drift_errors = validate_gateway_rns_config(self)
-            errors.extend(drift_errors)
-        except ImportError:
-            pass  # config_drift module not available
-        except Exception as e:
-            logger.debug("Config drift check failed: %s", e)
+        if _HAS_CONFIG_DRIFT:
+            try:
+                drift_errors = _validate_gateway_rns_config(self)
+                errors.extend(drift_errors)
+            except Exception as e:
+                logger.debug("Config drift check failed: %s", e)
 
         # Determine if valid (only errors count, not warnings/info)
         is_valid = not any(e.severity == "error" for e in errors)

@@ -79,19 +79,17 @@ logger = logging.getLogger(__name__)
 
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+from utils.safe_import import safe_import
 
 # Backward compatibility alias
 _get_real_user_home = get_real_user_home
 
-# Import notification classifier for prioritization
-try:
-    from utils.classifier import (
-        NotificationClassifier, NotificationCategory,
-        create_notification_system, ClassificationResult
-    )
-    CLASSIFIER_AVAILABLE = True
-except ImportError:
-    CLASSIFIER_AVAILABLE = False
+# Module-level safe imports — notification classifier for prioritization
+_NotificationClassifier, _NotificationCategory, _create_notification_system, _ClassificationResult, _HAS_CLASSIFIER = safe_import(
+    'utils.classifier',
+    'NotificationClassifier', 'NotificationCategory',
+    'create_notification_system', 'ClassificationResult'
+)
 
 
 class DiagnosticEngine:
@@ -154,9 +152,9 @@ class DiagnosticEngine:
         # Notification classifier for "tap on shoulder" pattern
         self._notification_classifier = None
         self._notification_callbacks: List[EventCallback] = []
-        if CLASSIFIER_AVAILABLE:
+        if _HAS_CLASSIFIER:
             fixes_path = self._diag_dir / 'notification_fixes.json'
-            self._notification_classifier = create_notification_system(
+            self._notification_classifier = _create_notification_system(
                 bounce_threshold=0.2,
                 fixes_path=fixes_path
             )
@@ -529,7 +527,7 @@ class DiagnosticEngine:
         if not self._notification_classifier or not self._notification_classifier.fix_registry:
             return False
 
-        result = ClassificationResult(
+        result = _ClassificationResult(
             input_id=event_id,
             category="unknown",
             confidence=0.5
