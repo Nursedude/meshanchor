@@ -6,6 +6,12 @@ from rich.table import Table
 
 from utils.logger import log, log_exception
 from config.hardware import HardwareDetector
+from utils.safe_import import safe_import
+
+# Meshtastic library (optional, needed for device configuration)
+_meshtastic, _HAS_MESHTASTIC = safe_import('meshtastic')
+_serial_interface, _HAS_SERIAL = safe_import('meshtastic.serial_interface')
+_tcp_interface, _HAS_TCP = safe_import('meshtastic.tcp_interface')
 
 console = Console()
 
@@ -63,11 +69,12 @@ class DeviceConfigurator:
         """Connect to Meshtastic device"""
         console.print("\n[cyan]Connecting to device...[/cyan]")
 
-        try:
-            import meshtastic
-            import meshtastic.serial_interface
-            import meshtastic.tcp_interface
+        if not _HAS_MESHTASTIC or not _HAS_SERIAL or not _HAS_TCP:
+            console.print("[bold red]Meshtastic Python library not installed[/bold red]")
+            console.print("Install with: [cyan]pip3 install meshtastic[/cyan]")
+            return False
 
+        try:
             # Get connection method
             hardware = self.hardware_detector.detected_hardware
 
@@ -76,7 +83,7 @@ class DeviceConfigurator:
             if hardware.get('usb_serial_ports'):
                 if Confirm.ask(f"\nUSB serial port detected at {hardware['usb_serial_ports'][0]}. Use this?", default=True):
                     port = hardware['usb_serial_ports'][0]
-                    self.interface = meshtastic.serial_interface.SerialInterface(port)
+                    self.interface = _serial_interface.SerialInterface(port)
                     console.print(f"[green]Connected via USB serial: {port}[/green]")
                     return True
 
@@ -97,7 +104,7 @@ class DeviceConfigurator:
                 port = Prompt.ask("Enter USB serial port (or 'b' to go back)", default="/dev/ttyUSB0")
                 if port.lower() in ('b', 'back', '0'):
                     return False
-                self.interface = meshtastic.serial_interface.SerialInterface(port)
+                self.interface = _serial_interface.SerialInterface(port)
                 console.print(f"[green]Connected via USB serial: {port}[/green]")
                 return True
 
@@ -105,23 +112,18 @@ class DeviceConfigurator:
                 host = Prompt.ask("Enter hostname or IP (or 'b' to go back)", default="meshtastic.local")
                 if host.lower() in ('b', 'back', '0'):
                     return False
-                self.interface = meshtastic.tcp_interface.TCPInterface(hostname=host)
+                self.interface = _tcp_interface.TCPInterface(hostname=host)
                 console.print(f"[green]Connected via TCP: {host}[/green]")
                 return True
 
             elif method == "3":
                 # Try auto-detect
-                self.interface = meshtastic.serial_interface.SerialInterface()
+                self.interface = _serial_interface.SerialInterface()
                 console.print("[green]Connected (auto-detected)[/green]")
                 return True
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Cancelled by user[/yellow]")
-            return False
-
-        except ImportError:
-            console.print("[bold red]Meshtastic Python library not installed[/bold red]")
-            console.print("Install with: [cyan]pip3 install meshtastic[/cyan]")
             return False
 
         except Exception as e:

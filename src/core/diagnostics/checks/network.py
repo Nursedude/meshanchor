@@ -9,16 +9,12 @@ import time
 import logging
 
 from ..models import CheckResult, CheckStatus, CheckCategory
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_check_port_util, _HAS_PORT_CHECK = safe_import('utils.service_check', 'check_port')
 
 logger = logging.getLogger(__name__)
-
-# Import centralized port checker if available
-try:
-    from utils.service_check import check_port as _check_port_util
-    PORT_CHECK_AVAILABLE = True
-except ImportError:
-    _check_port_util = None
-    PORT_CHECK_AVAILABLE = False
 
 
 def check_tcp_port(port: int, name: str, optional: bool = False) -> CheckResult:
@@ -26,7 +22,7 @@ def check_tcp_port(port: int, name: str, optional: bool = False) -> CheckResult:
     start = time.time()
 
     # Use centralized port checker if available
-    if PORT_CHECK_AVAILABLE and _check_port_util is not None:
+    if _HAS_PORT_CHECK and _check_port_util is not None:
         try:
             is_open = _check_port_util(port, '127.0.0.1', timeout=2.0)
             duration = (time.time() - start) * 1000

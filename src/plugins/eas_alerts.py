@@ -44,14 +44,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 
-# Import plugin base classes
-try:
-    from utils.plugins import (
-        IntegrationPlugin,
-        PluginMetadata,
-        PluginType,
-    )
-except ImportError:
+# Import plugin base classes via safe_import
+from utils.safe_import import safe_import
+
+_IntegrationPlugin, _PluginMetadata, _PluginType, _HAS_PLUGINS = safe_import(
+    'utils.plugins', 'IntegrationPlugin', 'PluginMetadata', 'PluginType'
+)
+
+if _HAS_PLUGINS:
+    IntegrationPlugin = _IntegrationPlugin
+    PluginMetadata = _PluginMetadata
+    PluginType = _PluginType
+else:
     # Fallback for standalone/test usage
     from abc import ABC, abstractmethod
 

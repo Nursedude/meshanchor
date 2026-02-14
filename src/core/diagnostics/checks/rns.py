@@ -11,8 +11,7 @@ import logging
 from pathlib import Path
 
 from ..models import CheckResult, CheckStatus, CheckCategory
-
-logger = logging.getLogger(__name__)
+from utils.safe_import import safe_import
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths)
@@ -20,14 +19,18 @@ logger = logging.getLogger(__name__)
 # and XDG paths entirely, going directly to ~/.reticulum (Issue #25+)
 from utils.paths import ReticulumPaths
 
+# Module-level safe imports
+_rns_mod, _HAS_RNS = safe_import('RNS')
+
+logger = logging.getLogger(__name__)
+
 
 def check_rns_installed() -> CheckResult:
     """Check if RNS is installed."""
     start = time.time()
-    try:
-        import importlib
-        importlib.import_module('RNS')
-        duration = (time.time() - start) * 1000
+    duration = (time.time() - start) * 1000
+
+    if _HAS_RNS:
         return CheckResult(
             name="RNS library",
             category=CheckCategory.RNS,
@@ -35,14 +38,14 @@ def check_rns_installed() -> CheckResult:
             message="Installed",
             duration_ms=duration
         )
-    except ImportError:
+    else:
         return CheckResult(
             name="RNS library",
             category=CheckCategory.RNS,
             status=CheckStatus.FAIL,
             message="Not installed",
             fix_hint="pipx install rns",
-            duration_ms=(time.time() - start) * 1000
+            duration_ms=duration
         )
 
 

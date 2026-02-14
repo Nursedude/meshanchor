@@ -10,17 +10,14 @@ import logging
 from typing import List
 
 from ..models import CheckResult, CheckStatus, CheckCategory
+from utils.safe_import import safe_import
+
+# Module-level safe imports — SINGLE SOURCE OF TRUTH
+_check_service_status, _SvcState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState'
+)
 
 logger = logging.getLogger(__name__)
-
-# Import centralized service checker - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import check_service as _check_service_status, ServiceState as SvcState
-    SERVICE_CHECK_AVAILABLE = True
-except ImportError:
-    _check_service_status = None
-    SvcState = None
-    SERVICE_CHECK_AVAILABLE = False
 
 
 def check_service(service: str, display_name: str) -> CheckResult:
@@ -28,7 +25,7 @@ def check_service(service: str, display_name: str) -> CheckResult:
     start = time.time()
 
     # Use centralized service checker if available (SINGLE SOURCE OF TRUTH)
-    if SERVICE_CHECK_AVAILABLE and _check_service_status is not None:
+    if _HAS_SERVICE_CHECK and _check_service_status is not None:
         try:
             status = _check_service_status(service)
             duration = (time.time() - start) * 1000
@@ -42,7 +39,7 @@ def check_service(service: str, display_name: str) -> CheckResult:
                     details={"detection_method": status.detection_method},
                     duration_ms=duration
                 )
-            elif status.state == SvcState.NOT_INSTALLED:
+            elif status.state == _SvcState.NOT_INSTALLED:
                 return CheckResult(
                     name=f"{display_name}",
                     category=CheckCategory.SERVICES,

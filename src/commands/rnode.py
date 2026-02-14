@@ -20,12 +20,19 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_CommandResultImported, _HAS_COMMAND_BASE = safe_import('commands.base', 'CommandResult')
+_serial_tools, _HAS_SERIAL_TOOLS = safe_import('serial.tools.list_ports')
+_serial_mod, _HAS_SERIAL = safe_import('serial')
+
 logger = logging.getLogger(__name__)
 
-# Try to import CommandResult
-try:
-    from commands.base import CommandResult
-except ImportError:
+# Use imported CommandResult or define fallback
+if _HAS_COMMAND_BASE:
+    CommandResult = _CommandResultImported
+else:
     from dataclasses import dataclass as _dataclass
 
     @_dataclass
@@ -178,13 +185,10 @@ def get_serial_ports() -> List[str]:
             ports.extend([str(p) for p in base_dir.glob(glob_pattern)])
 
     # Method 2: Use pyserial if available
-    try:
-        import serial.tools.list_ports
-        for port in serial.tools.list_ports.comports():
+    if _HAS_SERIAL_TOOLS:
+        for port in _serial_tools.comports():
             if port.device not in ports:
                 ports.append(port.device)
-    except ImportError:
-        pass
 
     # Filter out non-existent
     ports = [p for p in ports if Path(p).exists()]
@@ -248,19 +252,15 @@ def get_usb_info(port: str) -> Dict[str, str]:
         logger.debug(f"Could not read USB info for {port}: {e}")
 
     # Fallback: use pyserial
-    if not info['vid']:
-        try:
-            import serial.tools.list_ports
-            for p in serial.tools.list_ports.comports():
-                if p.device == port:
-                    info['vid'] = f'{p.vid:04x}' if p.vid else ''
-                    info['pid'] = f'{p.pid:04x}' if p.pid else ''
-                    info['serial'] = p.serial_number or ''
-                    info['manufacturer'] = p.manufacturer or ''
-                    info['product'] = p.product or ''
-                    break
-        except ImportError:
-            pass
+    if not info['vid'] and _HAS_SERIAL_TOOLS:
+        for p in _serial_tools.comports():
+            if p.device == port:
+                info['vid'] = f'{p.vid:04x}' if p.vid else ''
+                info['pid'] = f'{p.pid:04x}' if p.pid else ''
+                info['serial'] = p.serial_number or ''
+                info['manufacturer'] = p.manufacturer or ''
+                info['product'] = p.product or ''
+                break
 
     return info
 
@@ -354,9 +354,7 @@ def probe_rnode(port: str, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with firmware info or None if not an RNode
     """
-    try:
-        import serial
-    except ImportError:
+    if not _HAS_SERIAL:
         logger.debug("pyserial not installed, skipping probe")
         return None
 
@@ -364,7 +362,7 @@ def probe_rnode(port: str, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
 
     try:
         # Open port briefly
-        with serial.Serial(port, 115200, timeout=timeout) as ser:
+        with _serial_mod.Serial(port, 115200, timeout=timeout) as ser:
             # Send RNode identification command
             # RNode firmware responds to specific commands
             ser.write(b'\x00')  # Null byte often triggers response
