@@ -19,7 +19,12 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Dict, List, Optional, Set, Tuple, Callable, Any
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Optional RNS transport for path table monitoring
+_RNS, _HAS_RNS = safe_import('RNS')
 
 
 class TopologyEventType(Enum):
@@ -218,8 +223,11 @@ class PathTableMonitor:
 
     def _check_path_table(self):
         """Check path table for changes and emit events"""
+        if not _HAS_RNS:
+            return  # RNS not installed
+
         try:
-            import RNS
+            RNS = _RNS
 
             if not hasattr(RNS.Transport, 'path_table') or not RNS.Transport.path_table:
                 return
@@ -284,8 +292,6 @@ class PathTableMonitor:
                 # Update snapshot
                 self._last_snapshot = current_snapshot
 
-        except ImportError:
-            pass  # RNS not installed
         except Exception as e:
             logger.debug(f"Path table check failed: {e}")
 

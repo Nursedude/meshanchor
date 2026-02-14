@@ -192,10 +192,12 @@ class MeshtasticHandler:
         Returns:
             True if connection successful, False otherwise.
         """
-        try:
-            from pubsub import pub
-            from utils.meshtastic_connection import get_connection_manager
+        if not (_HAS_PUBSUB and _HAS_CONN_MANAGER):
+            logger.warning("Meshtastic/connection manager not available, using CLI fallback")
+            self._connected = self._test_cli()
+            return self._connected
 
+        try:
             host = self.config.meshtastic.host
             port = self.config.meshtastic.port
 
@@ -203,7 +205,7 @@ class MeshtasticHandler:
 
             # Use singleton connection manager to prevent connection conflicts
             # meshtasticd only allows ONE TCP client - this ensures we share
-            self._conn_manager = get_connection_manager(host, port)
+            self._conn_manager = _get_connection_manager(host, port)
 
             # Acquire persistent connection (stays open for message receiving)
             if not self._conn_manager.acquire_persistent(owner="gateway_bridge"):
@@ -224,7 +226,7 @@ class MeshtasticHandler:
                 self._on_receive(packet)
 
             self._pubsub_handler = on_receive
-            pub.subscribe(self._pubsub_handler, "meshtastic.receive")
+            _pub.subscribe(self._pubsub_handler, "meshtastic.receive")
 
             # Get initial node list
             self._update_nodes()
@@ -234,10 +236,6 @@ class MeshtasticHandler:
             self._notify_status("meshtastic_connected")
             return True
 
-        except ImportError as e:
-            logger.warning(f"Meshtastic/connection manager not available: {e}, using CLI fallback")
-            self._connected = self._test_cli()
-            return self._connected
         except Exception as e:
             logger.error(f"Failed to connect to Meshtastic: {e}")
             self._connected = False
@@ -433,22 +431,20 @@ class MeshtasticHandler:
             logger.debug(f"Could not store incoming message: {e}")
 
         # Broadcast to WebSocket for real-time web UI updates
-        try:
-            from utils.websocket_server import broadcast_message
-            broadcast_message({
-                'from_id': from_id,
-                'to_id': to_id,
-                'content': text,
-                'channel': packet.get('channel', 0),
-                'snr': packet.get('rxSnr'),
-                'rssi': packet.get('rxRssi'),
-                'timestamp': datetime.now().isoformat(),
-                'is_broadcast': to_id is None,
-            })
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"Could not broadcast to WebSocket: {e}")
+        if _HAS_WEBSOCKET:
+            try:
+                _broadcast_message({
+                    'from_id': from_id,
+                    'to_id': to_id,
+                    'content': text,
+                    'channel': packet.get('channel', 0),
+                    'snr': packet.get('rxSnr'),
+                    'rssi': packet.get('rxRssi'),
+                    'timestamp': datetime.now().isoformat(),
+                    'is_broadcast': to_id is None,
+                })
+            except Exception as e:
+                logger.debug(f"Could not broadcast to WebSocket: {e}")
 
         # Queue for bridging if routing rules allow it (non-blocking to prevent deadlock)
         if self._mesh_to_rns_queue is not None:
@@ -571,10 +567,9 @@ class MeshtasticHandler:
         self._notify_status("meshtastic_disconnected")
 
         # Wait for cooldown before reconnect attempt
-        try:
-            from utils.meshtastic_connection import wait_for_cooldown
-            wait_for_cooldown()
-        except ImportError:
+        if _HAS_COOLDOWN:
+            _wait_for_cooldown()
+        else:
             self._stop_event.wait(2)
 
     def _update_nodes(self) -> None:

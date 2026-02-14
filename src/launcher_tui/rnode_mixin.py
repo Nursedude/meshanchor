@@ -7,8 +7,14 @@ to TUI menus. Extracted as a mixin to keep main.py under 1,500 lines.
 
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Import RNode command functions
+_detect_rnode_devices, _get_recommended_config, _HAS_RNODE = safe_import(
+    'commands.rnode', 'detect_rnode_devices', 'get_recommended_config'
+)
 
 
 class RNodeMixin:
@@ -47,15 +53,13 @@ class RNodeMixin:
         clear_screen()
         print("=== RNode Device Detection ===\n")
 
-        try:
-            from commands.rnode import detect_rnode_devices
-        except ImportError:
+        if not _HAS_RNODE:
             print("  RNode module not available.")
             print("  File: src/commands/rnode.py")
             self._wait_for_enter()
             return
 
-        result = detect_rnode_devices(probe=False)
+        result = _detect_rnode_devices(probe=False)
 
         if not result.success:
             print(f"  {result.message}")
@@ -91,14 +95,12 @@ class RNodeMixin:
         print("=== RNode Deep Scan (Firmware Probe) ===\n")
         print("  Probing serial ports for RNode firmware...\n")
 
-        try:
-            from commands.rnode import detect_rnode_devices
-        except ImportError:
+        if not _HAS_RNODE:
             print("  RNode module not available.")
             self._wait_for_enter()
             return
 
-        result = detect_rnode_devices(probe=True)
+        result = _detect_rnode_devices(probe=True)
 
         if not result.success:
             print(f"  {result.message}")

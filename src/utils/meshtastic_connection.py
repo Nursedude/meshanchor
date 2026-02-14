@@ -24,7 +24,13 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Optional: meshtastic connection interfaces
+_meshtastic_tcp, _HAS_TCP = safe_import('meshtastic.tcp_interface')
+_meshtastic_serial, _HAS_SERIAL = safe_import('meshtastic.serial_interface')
 
 
 def _install_meshtastic_thread_guard():
@@ -485,28 +491,26 @@ class MeshtasticConnectionManager:
 
     def _create_tcp_interface(self):
         """Create TCP interface to meshtasticd."""
-        try:
-            import meshtastic.tcp_interface
-            logger.debug(f"Creating TCP interface to {self.host}:{self.port}")
-            return meshtastic.tcp_interface.TCPInterface(hostname=self.host)
-        except ImportError:
+        if not _HAS_TCP:
             raise ConnectionError("meshtastic library not installed")
+        try:
+            logger.debug(f"Creating TCP interface to {self.host}:{self.port}")
+            return _meshtastic_tcp.TCPInterface(hostname=self.host)
         except Exception as e:
             raise ConnectionError(f"TCP connection failed: {e}")
 
     def _create_serial_interface(self):
         """Create direct serial interface to USB radio."""
+        if not _HAS_SERIAL:
+            raise ConnectionError("meshtastic library not installed")
         try:
-            import meshtastic.serial_interface
             device = self.serial_port or self._detect_usb_device()
             if not device:
                 raise ConnectionError(
                     "No USB device found. Connect a Meshtastic radio or specify serial_port."
                 )
             logger.debug(f"Creating Serial interface to {device}")
-            return meshtastic.serial_interface.SerialInterface(devPath=device)
-        except ImportError:
-            raise ConnectionError("meshtastic library not installed")
+            return _meshtastic_serial.SerialInterface(devPath=device)
         except Exception as e:
             raise ConnectionError(f"Serial connection failed: {e}")
 

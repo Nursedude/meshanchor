@@ -51,6 +51,9 @@ from utils.paths import get_real_user_home
 # Import event bus for node update events
 emit_node_update, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_node_update')
 
+# Import RNS module (optional - for node discovery)
+_RNS_mod, _HAS_RNS = safe_import('RNS')
+
 
 class UnifiedNodeTracker:
     """
@@ -136,8 +139,16 @@ class UnifiedNodeTracker:
             self._rns_connected = False
             return
 
+        if not _HAS_RNS:
+            logger.info("RNS module not installed. To enable RNS node discovery:")
+            logger.info("  1. Install RNS: pipx install rns")
+            logger.info("  2. Start rnsd: sudo systemctl start rnsd")
+            logger.info("  3. Restart MeshForge")
+            return
+
+        RNS = _RNS_mod
+
         try:
-            import RNS
             logger.info("Checking for existing RNS service...")
 
             # Check if rnsd is already running
@@ -237,11 +248,6 @@ instance_control_port = 37429
                 logger.info("RNS nodes may not appear on map - ensure rnsd is running properly")
                 self._rns_connected = False
 
-        except ImportError:
-            logger.info("RNS module not installed. To enable RNS node discovery:")
-            logger.info("  1. Install RNS: pipx install rns")
-            logger.info("  2. Start rnsd: sudo systemctl start rnsd")
-            logger.info("  3. Restart MeshForge")
         except Exception as e:
             logger.warning(f"Failed to initialize RNS discovery: {e}")
             self._rns_connected = False
