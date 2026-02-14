@@ -18,43 +18,26 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
 # Import path utility - see persistent_issues.md Issue #1
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f'/home/{logname}')
-        return Path('/root')
+from utils.paths import get_real_user_home
 
 # Try to import the MQTT subscriber
-try:
-    from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
-    _HAS_MQTT = True
-except ImportError:
-    _HAS_MQTT = False
-    MQTTNodelessSubscriber = None
+MQTTNodelessSubscriber, _HAS_MQTT = safe_import(
+    'monitoring.mqtt_subscriber', 'MQTTNodelessSubscriber'
+)
 
-# Try to import the MQTT→WebSocket bridge
-try:
-    from utils.mqtt_websocket_bridge import MQTTWebSocketBridge, is_bridge_available
-    _HAS_WS_BRIDGE = is_bridge_available()
-except ImportError:
-    _HAS_WS_BRIDGE = False
-    MQTTWebSocketBridge = None
+# Try to import the MQTT-WebSocket bridge
+MQTTWebSocketBridge, is_bridge_available, _HAS_WS_BRIDGE_MOD = safe_import(
+    'utils.mqtt_websocket_bridge', 'MQTTWebSocketBridge', 'is_bridge_available'
+)
+_HAS_WS_BRIDGE = is_bridge_available() if _HAS_WS_BRIDGE_MOD and is_bridge_available else False
 
 # Try to import TelemetryPoller for auto-start
-try:
-    from utils.telemetry_poller import get_telemetry_poller
-    _HAS_TELEMETRY_POLLER = True
-except ImportError:
-    _HAS_TELEMETRY_POLLER = False
-    get_telemetry_poller = None
+get_telemetry_poller, _HAS_TELEMETRY_POLLER = safe_import(
+    'utils.telemetry_poller', 'get_telemetry_poller'
+)
 
 
 class MQTTMixin:

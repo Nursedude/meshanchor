@@ -148,6 +148,7 @@ class TestBridgeCheck:
     def test_bridge_displayed_when_running(self):
         bar = StatusBar(version="1.0")
         bar._bridge_running = True
+        bar._subsystem_states = {}  # Clear any cross-test EventBus pollution
         bar._cache_time = time.time()  # Prevent refresh
         bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
         line = bar.get_status_line()
@@ -547,3 +548,84 @@ class TestSubsystemStatusDisplay:
 
         bar._on_service_event(FakeEvent())
         assert bar._subsystem_states.get("meshtastic") == "healthy"
+
+
+class TestSeedNodeCount:
+    """Test initial node count seeding from node tracker."""
+
+    def test_seed_from_tracker(self):
+        """StatusBar should pull initial count from node tracker."""
+        bar = StatusBar(version="1.0")
+        bar._node_count = None  # Reset (constructor may have seeded)
+
+        # Simulate a tracker with 5 nodes
+        mock_tracker = MagicMock()
+        mock_tracker.get_all_nodes.return_value = [MagicMock()] * 5
+
+        with patch('gateway.node_tracker.get_node_tracker', return_value=mock_tracker):
+            bar._seed_node_count()
+
+        assert bar._node_count == 5
+
+    def test_seed_empty_tracker(self):
+        """Empty tracker should not set node count."""
+        bar = StatusBar(version="1.0")
+        bar._node_count = None
+
+        mock_tracker = MagicMock()
+        mock_tracker.get_all_nodes.return_value = []
+
+        with patch('gateway.node_tracker.get_node_tracker', return_value=mock_tracker):
+            bar._seed_node_count()
+
+        assert bar._node_count is None
+
+    def test_seed_import_failure(self):
+        """Missing node tracker should not crash."""
+        bar = StatusBar(version="1.0")
+        bar._node_count = None
+
+        with patch.dict('sys.modules', {'gateway.node_tracker': None}):
+            bar._seed_node_count()
+
+        assert bar._node_count is None
+
+
+class TestEventDrivenServiceSkip:
+    """Test that services updated by events skip polling."""
+
+    def test_event_updated_service_skips_poll(self):
+        """Service updated via EventBus should not be polled again."""
+        bar = StatusBar(version="1.0")
+
+        # Simulate event update for meshtasticd
+        class FakeEvent:
+            service_name = "meshtasticd"
+            available = True
+
+        bar._on_service_event(FakeEvent())
+        assert "meshtasticd" in bar._event_updated_services
+        assert bar._cache["meshtasticd"] == SYM_RUNNING
+
+        # Now check that _check_services skips the event-updated service
+        with patch.object(bar, '_check_systemd_active', return_value=SYM_STOPPED) as mock_check:
+            bar._check_services()
+
+            # meshtasticd should NOT have been polled (event is authoritative)
+            called_services = [call.args[0] for call in mock_check.call_args_list]
+            assert "meshtasticd" not in called_services
+
+            # But rnsd and mosquitto should still be polled
+            assert "rnsd" in called_services
+            assert "mosquitto" in called_services
+
+    def test_non_event_services_still_polled(self):
+        """Services without event updates should still be polled."""
+        bar = StatusBar(version="1.0")
+        bar._event_updated_services = set()  # No events received
+
+        with patch.object(bar, '_check_systemd_active', return_value=SYM_STOPPED) as mock_check:
+            bar._check_services()
+
+            called_services = [call.args[0] for call in mock_check.call_args_list]
+            assert len(called_services) == len(MONITORED_SERVICES)
