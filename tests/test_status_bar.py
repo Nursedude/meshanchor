@@ -151,7 +151,9 @@ class TestBridgeCheck:
         bar._subsystem_states = {}  # Clear any cross-test EventBus pollution
         bar._cache_time = time.time()  # Prevent refresh
         bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
-        line = bar.get_status_line()
+        # Prevent _refresh_if_stale from overwriting state via EventBus
+        with patch.object(bar, '_refresh_if_stale'):
+            line = bar.get_status_line()
         assert f"bridge:{SYM_RUNNING}" in line
 
     def test_bridge_displayed_when_stopped(self):
