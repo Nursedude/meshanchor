@@ -22,14 +22,14 @@ import time
 import logging
 from typing import List, Optional, Callable
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Import startup check types
-try:
-    from startup_checks import PortConflict, resolve_conflict
-except ImportError:
-    PortConflict = None
-    resolve_conflict = None
+# Module-level safe imports
+_PortConflict, _resolve_conflict, _HAS_STARTUP_CHECKS = safe_import(
+    'startup_checks', 'PortConflict', 'resolve_conflict'
+)
 
 
 class ConflictResolver:
@@ -43,7 +43,7 @@ class ConflictResolver:
         """
         self.dialog = dialog
 
-    def resolve_all(self, conflicts: List[PortConflict]) -> bool:
+    def resolve_all(self, conflicts: list) -> bool:
         """
         Attempt to resolve all conflicts interactively.
 
@@ -78,7 +78,7 @@ class ConflictResolver:
 
         return True
 
-    def _build_conflict_summary(self, conflicts: List[PortConflict]) -> str:
+    def _build_conflict_summary(self, conflicts: list) -> str:
         """Build a summary string of all conflicts."""
         lines = [f"Found {len(conflicts)} port conflict(s):\n"]
 
@@ -90,7 +90,7 @@ class ConflictResolver:
 
         return "\n".join(lines)
 
-    def _resolve_single(self, conflict: PortConflict) -> bool:
+    def _resolve_single(self, conflict) -> bool:
         """
         Resolve a single conflict interactively.
 
@@ -125,7 +125,7 @@ class ConflictResolver:
         # choice == "skip"
         return True
 
-    def _stop_process(self, conflict: PortConflict) -> bool:
+    def _stop_process(self, conflict) -> bool:
         """Attempt to stop the conflicting process."""
         # Confirm before killing
         confirm = self.dialog.yesno(

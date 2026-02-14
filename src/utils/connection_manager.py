@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Cooldown between connections (meshtasticd needs time to cleanup)
@@ -42,6 +44,11 @@ CONNECTION_COOLDOWN = 1.0  # seconds
 
 # Import centralized path utility for proper home directory resolution
 from utils.paths import get_real_user_home
+
+# Optional: HTTP client for meshtasticd
+_get_http_client, _HAS_MESHTASTIC_HTTP = safe_import(
+    'utils.meshtastic_http', 'get_http_client'
+)
 
 
 class ConnectionBusy(Exception):
@@ -297,26 +304,24 @@ class _ConnectionManager:
             List of node dicts
         """
         # Primary: HTTP API (no lock contention, no meshtastic lib needed)
-        try:
-            from utils.meshtastic_http import get_http_client
-            client = get_http_client()
-            if client.is_available:
-                http_nodes = client.get_nodes()
-                if http_nodes:
-                    nodes = [
-                        {
-                            'id': n.node_id,
-                            'name': n.long_name,
-                            'short': n.short_name,
-                        }
-                        for n in http_nodes
-                    ]
-                    self.save_to_cache(nodes=nodes)
-                    return nodes
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"HTTP API get_nodes failed: {e}")
+        if _HAS_MESHTASTIC_HTTP:
+            try:
+                client = _get_http_client()
+                if client.is_available:
+                    http_nodes = client.get_nodes()
+                    if http_nodes:
+                        nodes = [
+                            {
+                                'id': n.node_id,
+                                'name': n.long_name,
+                                'short': n.short_name,
+                            }
+                            for n in http_nodes
+                        ]
+                        self.save_to_cache(nodes=nodes)
+                        return nodes
+            except Exception as e:
+                logger.debug(f"HTTP API get_nodes failed: {e}")
 
         # Fallback: TCP connection (legacy, needs meshtastic Python lib)
         try:
