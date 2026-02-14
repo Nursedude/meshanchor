@@ -14,10 +14,7 @@ from pathlib import Path
 
 from .base import CommandResult
 from utils.paths import get_real_user_home
-from utils.safe_import import safe_import
-
-# Module-level safe imports
-_diagnose_pubsub, _HAS_MESSAGE_LISTENER = safe_import('utils.message_listener', 'diagnose_pubsub')
+from utils.message_listener import diagnose_pubsub
 
 logger = logging.getLogger(__name__)
 
@@ -843,10 +840,7 @@ def diagnose_messaging() -> CommandResult:
         )
 
     # Check pubsub (for RX)
-    if _HAS_MESSAGE_LISTENER:
-        diagnostics['pubsub'] = _diagnose_pubsub()
-    else:
-        diagnostics['pubsub']['error'] = 'message_listener not available'
+    diagnostics['pubsub'] = diagnose_pubsub()
 
     return CommandResult.ok(
         "Messaging diagnostics complete",

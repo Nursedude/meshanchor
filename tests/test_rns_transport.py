@@ -690,24 +690,22 @@ class TestGetStatus:
 class TestConnection:
     """Tests for connection management."""
 
-    @patch.dict('sys.modules', {
-        'meshtastic': MagicMock(),
-        'meshtastic.tcp_interface': MagicMock(),
-        'pubsub': MagicMock(),
-        'pubsub.pub': MagicMock(),
-    })
+    @patch('gateway.rns_transport._HAS_MESHTASTIC', True)
+    @patch('gateway.rns_transport._HAS_MESH_TCP', True)
+    @patch('gateway.rns_transport._HAS_PUBSUB', True)
+    @patch('gateway.rns_transport._meshtastic_tcp', MagicMock())
+    @patch('gateway.rns_transport._pub_mod', MagicMock())
     def test_connect_tcp_success(self, transport):
         """TCP connection succeeds."""
         result = transport._connect()
         assert result is True
         assert transport._connected is True
 
-    @patch.dict('sys.modules', {
-        'meshtastic': MagicMock(),
-        'meshtastic.serial_interface': MagicMock(),
-        'pubsub': MagicMock(),
-        'pubsub.pub': MagicMock(),
-    })
+    @patch('gateway.rns_transport._HAS_MESHTASTIC', True)
+    @patch('gateway.rns_transport._HAS_MESH_SERIAL', True)
+    @patch('gateway.rns_transport._HAS_PUBSUB', True)
+    @patch('gateway.rns_transport._meshtastic_serial', MagicMock())
+    @patch('gateway.rns_transport._pub_mod', MagicMock())
     def test_connect_serial(self):
         """Serial connection attempted."""
         config = RNSOverMeshtasticConfig(
@@ -718,12 +716,11 @@ class TestConnection:
         result = t._connect()
         assert result is True
 
-    @patch.dict('sys.modules', {
-        'meshtastic': MagicMock(),
-        'meshtastic.ble_interface': MagicMock(),
-        'pubsub': MagicMock(),
-        'pubsub.pub': MagicMock(),
-    })
+    @patch('gateway.rns_transport._HAS_MESHTASTIC', True)
+    @patch('gateway.rns_transport._HAS_MESH_BLE', True)
+    @patch('gateway.rns_transport._HAS_PUBSUB', True)
+    @patch('gateway.rns_transport._meshtastic_ble', MagicMock())
+    @patch('gateway.rns_transport._pub_mod', MagicMock())
     def test_connect_ble(self):
         """BLE connection attempted."""
         config = RNSOverMeshtasticConfig(
@@ -734,16 +731,12 @@ class TestConnection:
         result = t._connect()
         assert result is True
 
+    @patch('gateway.rns_transport._HAS_MESHTASTIC', True)
+    @patch('gateway.rns_transport._HAS_PUBSUB', True)
     def test_connect_unknown_type(self, transport):
         """Unknown connection type returns False."""
         transport.config.connection_type = "unknown"
-        # Mock meshtastic imports to get past ImportError
-        with patch.dict('sys.modules', {
-            'meshtastic': MagicMock(),
-            'pubsub': MagicMock(),
-            'pubsub.pub': MagicMock(),
-        }):
-            result = transport._connect()
+        result = transport._connect()
         assert result is False
 
     def test_connect_import_error(self, transport):

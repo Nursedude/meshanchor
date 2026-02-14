@@ -263,7 +263,7 @@ class TestDiagnosticEngineIntegration:
         assert hasattr(Category, 'PREDICTIVE')
         assert Category.PREDICTIVE.value == 'predictive'
 
-    @patch('utils.analytics.get_predictive_analyzer')
+    @patch('utils.diagnostic_engine._get_predictive_analyzer')
     def test_check_predictive_alerts_returns_list(self, mock_get_analyzer):
         """Test that check_predictive_alerts returns a list."""
         from utils.diagnostic_engine import DiagnosticEngine
@@ -277,7 +277,7 @@ class TestDiagnosticEngineIntegration:
 
         assert isinstance(result, list)
 
-    @patch('utils.analytics.get_predictive_analyzer')
+    @patch('utils.diagnostic_engine._get_predictive_analyzer')
     def test_check_predictive_alerts_converts_to_diagnosis(self, mock_get_analyzer):
         """Test that predictive alerts are converted to Diagnosis objects."""
         from utils.diagnostic_engine import DiagnosticEngine, Category, Severity
@@ -307,7 +307,7 @@ class TestDiagnosticEngineIntegration:
         assert 'Test link degradation' in diagnosis.symptom.message
         assert diagnosis.confidence == 0.8
 
-    @patch('utils.analytics.get_predictive_analyzer')
+    @patch('utils.diagnostic_engine._get_predictive_analyzer')
     def test_check_predictive_alerts_handles_import_error(self, mock_get_analyzer):
         """Test graceful handling when analytics module unavailable."""
         from utils.diagnostic_engine import DiagnosticEngine

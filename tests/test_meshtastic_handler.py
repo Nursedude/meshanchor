@@ -120,11 +120,11 @@ class TestHandlerInit:
 class TestConnect:
     """Tests for connection establishment."""
 
-    @patch('gateway.meshtastic_handler.get_connection_manager', create=True)
-    @patch('gateway.meshtastic_handler.pub', create=True)
+    @patch('gateway.meshtastic_handler._HAS_PUBSUB', True)
+    @patch('gateway.meshtastic_handler.get_connection_manager')
+    @patch('gateway.meshtastic_handler.pub', new_callable=MagicMock)
     def test_connect_success(self, mock_pub, mock_get_cm, handler):
         """Successful TCP connection via connection manager."""
-        # Mock connection manager
         mock_cm = MagicMock()
         mock_cm.acquire_persistent.return_value = True
         mock_iface = MagicMock()
@@ -133,35 +133,26 @@ class TestConnect:
         mock_cm.get_interface.return_value = mock_iface
         mock_get_cm.return_value = mock_cm
 
-        # Patch the imports inside connect()
-        with patch.dict('sys.modules', {
-            'pubsub': MagicMock(),
-            'pubsub.pub': mock_pub,
-            'utils.meshtastic_connection': MagicMock(get_connection_manager=mock_get_cm),
-        }):
-            result = handler.connect()
+        result = handler.connect()
 
         assert result is True
         assert handler.is_connected is True
 
-    @patch('gateway.meshtastic_handler.get_connection_manager', create=True)
+    @patch('gateway.meshtastic_handler._HAS_PUBSUB', True)
+    @patch('gateway.meshtastic_handler.get_connection_manager')
     def test_connect_acquire_fails(self, mock_get_cm, handler):
         """Connection fails when persistent acquire returns False."""
         mock_cm = MagicMock()
         mock_cm.acquire_persistent.return_value = False
         mock_get_cm.return_value = mock_cm
 
-        with patch.dict('sys.modules', {
-            'pubsub': MagicMock(),
-            'pubsub.pub': MagicMock(),
-            'utils.meshtastic_connection': MagicMock(get_connection_manager=mock_get_cm),
-        }):
-            result = handler.connect()
+        result = handler.connect()
 
         assert result is False
         assert handler.is_connected is False
 
-    @patch('gateway.meshtastic_handler.get_connection_manager', create=True)
+    @patch('gateway.meshtastic_handler._HAS_PUBSUB', True)
+    @patch('gateway.meshtastic_handler.get_connection_manager')
     def test_connect_interface_none(self, mock_get_cm, handler):
         """Connection fails when interface is None."""
         mock_cm = MagicMock()
@@ -169,32 +160,26 @@ class TestConnect:
         mock_cm.get_interface.return_value = None
         mock_get_cm.return_value = mock_cm
 
-        with patch.dict('sys.modules', {
-            'pubsub': MagicMock(),
-            'pubsub.pub': MagicMock(),
-            'utils.meshtastic_connection': MagicMock(get_connection_manager=mock_get_cm),
-        }):
-            result = handler.connect()
+        result = handler.connect()
 
         assert result is False
         assert handler.is_connected is False
 
+    @patch('gateway.meshtastic_handler._HAS_PUBSUB', False)
     def test_connect_import_error_cli_fallback(self, handler):
-        """Falls back to CLI when meshtastic library not available."""
+        """Falls back to CLI when pubsub not available."""
         with patch.object(handler, '_test_cli', return_value=True):
-            # Force ImportError on the first import
-            with patch.dict('sys.modules', {'pubsub': None}):
-                with patch('builtins.__import__', side_effect=ImportError("No pubsub")):
-                    result = handler.connect()
+            result = handler.connect()
 
         # Should fall back to CLI
         assert handler.is_connected is True
 
-    def test_connect_general_exception(self, handler):
+    @patch('gateway.meshtastic_handler._HAS_PUBSUB', True)
+    @patch('gateway.meshtastic_handler.get_connection_manager')
+    def test_connect_general_exception(self, mock_get_cm, handler):
         """General exception during connect returns False."""
-        with patch.dict('sys.modules', {'pubsub': None}):
-            with patch('builtins.__import__', side_effect=RuntimeError("boom")):
-                result = handler.connect()
+        mock_get_cm.side_effect = RuntimeError("boom")
+        result = handler.connect()
 
         assert result is False
         assert handler.is_connected is False

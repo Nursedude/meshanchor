@@ -376,39 +376,40 @@ class TestSpaceWeather:
         """Test successful space weather fetch."""
         bar = StatusBar(version="1.0")
 
-        # Mock the SpaceWeatherAPI
+        # Mock the SpaceWeatherAPI via status_bar module attribute
         mock_data = MagicMock()
         mock_data.solar_flux = 145.5
         mock_data.k_index = 3
 
-        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
-            mock_api = MockAPI.return_value
-            mock_api.get_current_conditions.return_value = mock_data
+        MockAPI = MagicMock()
+        MockAPI.return_value.get_current_conditions.return_value = mock_data
 
-            bar._check_space_weather()
+        with patch('status_bar._SpaceWeatherAPI', MockAPI):
+            with patch('status_bar._HAS_SPACE_WEATHER', True):
+                bar._check_space_weather()
 
-            assert bar._space_weather == "SFI:145 K:3"
+        assert bar._space_weather == "SFI:145 K:3"
 
     def test_space_weather_graceful_failure(self):
         """Space weather failure should not break status bar."""
         bar = StatusBar(version="1.0")
         bar._space_weather = "SFI:100 K:1"  # Previous value
 
-        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
-            mock_api = MockAPI.return_value
-            mock_api.get_current_conditions.side_effect = Exception("Network error")
+        MockAPI = MagicMock()
+        MockAPI.return_value.get_current_conditions.side_effect = Exception("Network error")
 
-            bar._check_space_weather()
+        with patch('status_bar._SpaceWeatherAPI', MockAPI):
+            with patch('status_bar._HAS_SPACE_WEATHER', True):
+                bar._check_space_weather()
 
-            # Should be cleared on failure
-            assert bar._space_weather is None
+        # Should be cleared on failure
+        assert bar._space_weather is None
 
     def test_space_weather_import_error(self):
         """Missing space_weather module should not crash."""
         bar = StatusBar(version="1.0")
 
-        with patch.dict('sys.modules', {'utils.space_weather': None}):
-            # This will trigger ImportError in _check_space_weather
+        with patch('status_bar._HAS_SPACE_WEATHER', False):
             bar._check_space_weather()
             assert bar._space_weather is None
 
@@ -420,14 +421,15 @@ class TestSpaceWeather:
         mock_data.solar_flux = 120.0
         mock_data.k_index = None  # Not available
 
-        with patch('utils.space_weather.SpaceWeatherAPI') as MockAPI:
-            mock_api = MockAPI.return_value
-            mock_api.get_current_conditions.return_value = mock_data
+        MockAPI = MagicMock()
+        MockAPI.return_value.get_current_conditions.return_value = mock_data
 
-            bar._check_space_weather()
+        with patch('status_bar._SpaceWeatherAPI', MockAPI):
+            with patch('status_bar._HAS_SPACE_WEATHER', True):
+                bar._check_space_weather()
 
-            assert bar._space_weather == "SFI:120"
-            assert "K:" not in bar._space_weather
+        assert bar._space_weather == "SFI:120"
+        assert "K:" not in bar._space_weather
 
 
 class TestStatusBarEdgeCases:
@@ -562,8 +564,9 @@ class TestSeedNodeCount:
         mock_tracker = MagicMock()
         mock_tracker.get_all_nodes.return_value = [MagicMock()] * 5
 
-        with patch('gateway.node_tracker.get_node_tracker', return_value=mock_tracker):
-            bar._seed_node_count()
+        with patch('status_bar._get_node_tracker', return_value=mock_tracker):
+            with patch('status_bar._HAS_NODE_TRACKER', True):
+                bar._seed_node_count()
 
         assert bar._node_count == 5
 
@@ -575,8 +578,9 @@ class TestSeedNodeCount:
         mock_tracker = MagicMock()
         mock_tracker.get_all_nodes.return_value = []
 
-        with patch('gateway.node_tracker.get_node_tracker', return_value=mock_tracker):
-            bar._seed_node_count()
+        with patch('status_bar._get_node_tracker', return_value=mock_tracker):
+            with patch('status_bar._HAS_NODE_TRACKER', True):
+                bar._seed_node_count()
 
         assert bar._node_count is None
 
@@ -585,7 +589,7 @@ class TestSeedNodeCount:
         bar = StatusBar(version="1.0")
         bar._node_count = None
 
-        with patch.dict('sys.modules', {'gateway.node_tracker': None}):
+        with patch('status_bar._HAS_NODE_TRACKER', False):
             bar._seed_node_count()
 
         assert bar._node_count is None
