@@ -208,7 +208,7 @@ class ConflictResolver:
             logger.error(f"Failed to kill process {pid}: {e}")
             return False
 
-    def _confirm_continue_with_conflicts(self, conflicts: List[PortConflict]) -> bool:
+    def _confirm_continue_with_conflicts(self, conflicts: list) -> bool:
         """Confirm user wants to continue despite conflicts."""
         warning = (
             "Continuing with port conflicts may cause errors:\n\n"
@@ -233,20 +233,18 @@ def check_and_resolve_conflicts(dialog, checker=None) -> bool:
     Returns:
         True if no conflicts or all resolved, False if user aborted
     """
-    try:
-        from startup_checks import StartupChecker
-
-        if checker is None:
-            checker = StartupChecker()
-
-        env = checker.check_all()
-
-        if not env.conflicts:
-            return True
-
-        resolver = ConflictResolver(dialog)
-        return resolver.resolve_all(env.conflicts)
-
-    except ImportError:
+    _StartupChecker, _has_checker = safe_import('startup_checks', 'StartupChecker')
+    if not _has_checker:
         logger.warning("StartupChecker not available, skipping conflict check")
         return True
+
+    if checker is None:
+        checker = _StartupChecker()
+
+    env = checker.check_all()
+
+    if not env.conflicts:
+        return True
+
+    resolver = ConflictResolver(dialog)
+    return resolver.resolve_all(env.conflicts)
