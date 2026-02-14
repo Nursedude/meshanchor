@@ -4,6 +4,7 @@ Meshtastic diagnostic checks.
 Checks for Meshtastic library, CLI, and device connection.
 """
 
+import os
 import shutil
 import socket
 import time
@@ -12,30 +13,32 @@ from pathlib import Path
 from typing import List
 
 from ..models import CheckResult, CheckStatus, CheckCategory
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+_meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
 
 logger = logging.getLogger(__name__)
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-    _get_real_user_home = get_real_user_home
-except ImportError:
-    import os
-    def _get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not in Python path."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+
+def _resolve_user_home() -> Path:
+    """Resolve user home directory with sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    # Fallback for when utils.paths is not in Python path
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        return Path(f'/home/{sudo_user}')
+    return Path.home()
 
 
 def check_meshtastic_installed() -> CheckResult:
     """Check if meshtastic library is installed."""
     start = time.time()
-    try:
-        import importlib
-        importlib.import_module('meshtastic')
-        duration = (time.time() - start) * 1000
+    duration = (time.time() - start) * 1000
+
+    if _HAS_MESHTASTIC:
         return CheckResult(
             name="Meshtastic library",
             category=CheckCategory.MESHTASTIC,
@@ -43,14 +46,14 @@ def check_meshtastic_installed() -> CheckResult:
             message="Installed",
             duration_ms=duration
         )
-    except ImportError:
+    else:
         return CheckResult(
             name="Meshtastic library",
             category=CheckCategory.MESHTASTIC,
             status=CheckStatus.FAIL,
             message="Not installed",
             fix_hint="pip3 install meshtastic",
-            duration_ms=(time.time() - start) * 1000
+            duration_ms=duration
         )
 
 
@@ -70,7 +73,7 @@ def check_meshtastic_cli() -> CheckResult:
         )
     else:
         # Check user local bin
-        local_bin = _get_real_user_home() / '.local' / 'bin' / 'meshtastic'
+        local_bin = _resolve_user_home() / '.local' / 'bin' / 'meshtastic'
         if local_bin.exists():
             return CheckResult(
                 name="Meshtastic CLI",

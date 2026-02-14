@@ -365,11 +365,11 @@ class AgentDaemon:
 
     def _init_health_probe(self) -> None:
         """Initialize active health probe."""
+        if not _HAS_HEALTH_PROBE or not _HAS_HEALTH_INTEGRATE:
+            logger.warning("Active health probe not available: module not found")
+            return
         try:
-            from utils.active_health_probe import create_gateway_health_probe
-            from utils.shared_health_state import integrate_with_active_probe
-
-            self._health_probe = create_gateway_health_probe(
+            self._health_probe = _create_gateway_health_probe(
                 interval=int(self.config.health_check_interval),
                 fails=3,
                 passes=2
@@ -377,26 +377,24 @@ class AgentDaemon:
 
             # Integrate with shared state if available
             if self._health_state:
-                integrate_with_active_probe(self._health_state, self._health_probe)
+                _integrate_with_active_probe(self._health_state, self._health_probe)
 
             # Start the probe
             self._health_probe.start()
             logger.info("Active health probe initialized and started")
 
-        except ImportError as e:
-            logger.warning(f"Active health probe not available: {e}")
         except Exception as e:
             logger.error(f"Failed to initialize health probe: {e}")
 
     def _init_metrics_exporter(self) -> None:
         """Initialize Prometheus metrics exporter."""
+        if not _HAS_METRICS:
+            logger.warning("Metrics exporter not available: module not found")
+            return
         try:
-            from utils.metrics_export import PrometheusExporter
-            self._metrics_exporter = PrometheusExporter()
+            self._metrics_exporter = _PrometheusExporter()
 
             logger.info("Prometheus metrics exporter initialized")
-        except ImportError as e:
-            logger.warning(f"Metrics exporter not available: {e}")
         except Exception as e:
             logger.error(f"Failed to initialize metrics exporter: {e}")
 
