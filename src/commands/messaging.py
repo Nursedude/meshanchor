@@ -36,6 +36,14 @@ from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 
+# Import event bus for TX event emission
+try:
+    from utils.event_bus import emit_message as _emit_message
+    _HAS_EVENT_BUS = True
+except ImportError:
+    _emit_message = None
+    _HAS_EVENT_BUS = False
+
 # Maximum message length before chunking
 MAX_MESSAGE_LENGTH = 160
 
@@ -314,6 +322,23 @@ def send_message(
         conn.close()
 
         if send_success:
+            # Emit TX event to EventBus for status bar and subscribers
+            if _HAS_EVENT_BUS and _emit_message is not None:
+                try:
+                    _emit_message(
+                        direction='tx',
+                        content=content[:100],  # Truncate for event
+                        node_id=destination or "broadcast",
+                        network=network,
+                        raw_data={
+                            'message_id': message_id,
+                            'chunks': len(chunks),
+                            'destination': destination,
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"TX event emission failed: {e}")
+
             return CommandResult.ok(
                 f"Message sent ({len(chunks)} chunk(s))",
                 data={
