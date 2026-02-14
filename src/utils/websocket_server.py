@@ -33,16 +33,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Try to import websockets - graceful fallback if not available
-try:
-    import websockets
-    from websockets.server import serve
-    from websockets.exceptions import ConnectionClosed
-    WEBSOCKETS_AVAILABLE = True
-except ImportError:
-    WEBSOCKETS_AVAILABLE = False
+# Import websockets - graceful fallback if not available
+_websockets, _HAS_WEBSOCKETS = safe_import('websockets')
+_serve, _HAS_WS_SERVER = safe_import('websockets.server', 'serve')
+_ConnectionClosed, _HAS_WS_EXCEPTIONS = safe_import('websockets.exceptions', 'ConnectionClosed')
+
+WEBSOCKETS_AVAILABLE = _HAS_WEBSOCKETS and _HAS_WS_SERVER and _HAS_WS_EXCEPTIONS
+if WEBSOCKETS_AVAILABLE:
+    websockets = _websockets
+    serve = _serve
+    ConnectionClosed = _ConnectionClosed
+else:
     logger.debug("websockets library not available - WebSocket server disabled")
 
 

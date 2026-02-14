@@ -24,14 +24,18 @@ from enum import Enum
 
 from utils.ports import MESHTASTICD_PORTS
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Try to use centralized service checker
-try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+# Use centralized service checker
+_check_service, _check_systemd_service, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState'
+)
+if _HAS_SERVICE_CHECK:
+    check_service = _check_service
+    check_systemd_service = _check_systemd_service
+    ServiceState = _ServiceState
 
 
 class MeshtasticPreset(Enum):

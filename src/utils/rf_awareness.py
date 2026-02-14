@@ -38,12 +38,10 @@ from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
 # NumPy is optional - fall back to basic Python if not available
-try:
-    import numpy as np
-    HAS_NUMPY = True
-except ImportError:
-    np = None
-    HAS_NUMPY = False
+from utils.safe_import import safe_import
+
+_np, HAS_NUMPY = safe_import('numpy')
+np = _np if HAS_NUMPY else None
 
 logger = logging.getLogger(__name__)
 

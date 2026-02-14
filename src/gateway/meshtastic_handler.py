@@ -44,6 +44,7 @@ _wait_for_cooldown, _HAS_COOLDOWN = safe_import(
 _broadcast_message, _HAS_WEBSOCKET = safe_import(
     'utils.websocket_server', 'broadcast_message'
 )
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 
 class MeshtasticHandler:
