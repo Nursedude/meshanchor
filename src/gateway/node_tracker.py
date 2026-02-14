@@ -27,44 +27,29 @@ from .node_models import (
     NODE_STATE_AVAILABLE, RNS_SERVICES_AVAILABLE
 )
 
+from utils.safe_import import safe_import
+
 # Import RNS service registry and topology (optional - graceful fallback)
-try:
-    from .rns_services import (
-        RNSServiceType, ServiceInfo, AnnounceEvent,
-        get_service_registry, RNSServiceRegistry
-    )
-    from .network_topology import (
-        NetworkTopology, get_network_topology, TopologyEvent
-    )
-except ImportError:
-    RNSServiceType = None  # type: ignore
-    ServiceInfo = None  # type: ignore
-    RNSServiceRegistry = None  # type: ignore
-    NetworkTopology = None  # type: ignore
-    get_network_topology = None  # type: ignore
-    TopologyEvent = None  # type: ignore
+(RNSServiceType, ServiceInfo, AnnounceEvent,
+ get_service_registry, RNSServiceRegistry,
+ _HAS_RNS_SERVICES) = safe_import(
+    '.rns_services',
+    'RNSServiceType', 'ServiceInfo', 'AnnounceEvent',
+    'get_service_registry', 'RNSServiceRegistry',
+    package=__package__
+)
+(NetworkTopology, get_network_topology, TopologyEvent,
+ _HAS_TOPOLOGY) = safe_import(
+    '.network_topology',
+    'NetworkTopology', 'get_network_topology', 'TopologyEvent',
+    package=__package__
+)
 
 # Import centralized path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not in Python path."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f'/home/{logname}')
-        return Path('/root')
+from utils.paths import get_real_user_home
 
 # Import event bus for node update events
-try:
-    from utils.event_bus import emit_node_update
-    _HAS_EVENT_BUS = True
-except ImportError:
-    emit_node_update = None
-    _HAS_EVENT_BUS = False
+emit_node_update, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_node_update')
 
 
 class UnifiedNodeTracker:
