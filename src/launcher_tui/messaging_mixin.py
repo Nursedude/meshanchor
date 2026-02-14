@@ -19,6 +19,7 @@ class MessagingMixin:
         while True:
             choices = [
                 ("send", "Send Message        Send to node or broadcast"),
+                ("live", "Live Feed           Real-time message stream"),
                 ("messages", "View Messages       Recent message history"),
                 ("convos", "Conversations       Message threads by node"),
                 ("stats", "Statistics          Message counts & rates"),
@@ -40,6 +41,7 @@ class MessagingMixin:
 
             dispatch = {
                 "send": ("Send Message", self._messaging_send),
+                "live": ("Live Feed", self._messaging_live_feed),
                 "messages": ("View Messages", self._messaging_view),
                 "convos": ("Conversations", self._messaging_conversations),
                 "stats": ("Statistics", self._messaging_stats),
@@ -51,6 +53,66 @@ class MessagingMixin:
             entry = dispatch.get(choice)
             if entry:
                 self._safe_call(*entry)
+
+    def _messaging_live_feed(self):
+        """Live message feed — event-bus-driven real-time RX display.
+
+        Subscribes to the event bus and displays messages as they arrive.
+        Press Enter to stop and return to menu.
+        """
+        import threading
+
+        try:
+            from utils.event_bus import event_bus
+        except ImportError:
+            self.dialog.msgbox("Unavailable", "Event bus module not available.\nFile: src/utils/event_bus.py")
+            return
+
+        clear_screen()
+        print("=== Live Message Feed ===")
+        print("  Listening for mesh messages via event bus...")
+        print("  Press Enter to stop.\n")
+        print(f"  {'Time':<10} {'Dir':<4} {'From':<14} {'Ch':<4} {'Net':<6} Message")
+        print(f"  {'-'*65}")
+
+        msg_count = [0]  # Mutable counter for closure
+
+        def _on_message(event):
+            """Print incoming message event to terminal."""
+            direction = getattr(event, 'direction', '?')
+            arrow = '<-' if direction == 'rx' else '->'
+            ts = getattr(event, 'timestamp', None)
+            time_str = ts.strftime("%H:%M:%S") if ts else "??:??:??"
+            node = getattr(event, 'node_name', '') or getattr(event, 'node_id', '') or '?'
+            if len(node) > 12:
+                node = node[:12]
+            channel = getattr(event, 'channel', 0)
+            network = getattr(event, 'network', '?')
+            content = getattr(event, 'content', '')
+            if len(content) > 35:
+                content = content[:32] + "..."
+
+            print(f"  {time_str:<10} {arrow:<4} {node:<14} {channel:<4} {network:<6} {content}")
+            msg_count[0] += 1
+
+        # Subscribe
+        event_bus.subscribe('message', _on_message)
+
+        # Clear unread count in status bar
+        if hasattr(self, 'status_bar'):
+            self.status_bar.clear_unread()
+
+        try:
+            # Block until user presses Enter
+            input()
+        except (EOFError, KeyboardInterrupt):
+            pass
+        finally:
+            event_bus.unsubscribe('message', _on_message)
+
+        print(f"\n  Stopped. {msg_count[0]} messages received during session.")
+        print()
+        self._wait_for_enter()
 
     def _messaging_send(self):
         """Send a message via mesh network."""
@@ -114,6 +176,10 @@ class MessagingMixin:
 
     def _messaging_view(self):
         """View recent messages."""
+        # Clear unread count when viewing
+        if hasattr(self, 'status_bar'):
+            self.status_bar.clear_unread()
+
         clear_screen()
         print("=== Recent Messages ===\n")
 
