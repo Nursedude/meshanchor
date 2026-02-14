@@ -22,6 +22,14 @@ from typing import Optional, Dict, List, Callable, Any
 from collections import defaultdict
 
 from .config import RNSOverMeshtasticConfig
+from utils.safe_import import safe_import
+
+# Import Meshtastic and pubsub (optional - for transport layer)
+_meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
+_meshtastic_tcp, _HAS_MESH_TCP = safe_import('meshtastic.tcp_interface')
+_meshtastic_serial, _HAS_MESH_SERIAL = safe_import('meshtastic.serial_interface')
+_meshtastic_ble, _HAS_MESH_BLE = safe_import('meshtastic.ble_interface')
+_pub_mod, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 logger = logging.getLogger(__name__)
 
@@ -341,17 +349,20 @@ class RNSMeshtasticTransport:
 
     def _connect(self) -> bool:
         """Connect to Meshtastic interface"""
-        try:
-            import meshtastic
-            from pubsub import pub
+        if not (_HAS_MESHTASTIC and _HAS_PUBSUB):
+            logger.error("Meshtastic library not available")
+            return False
 
+        try:
             conn_type = self.config.connection_type.lower()
             device = self.config.device_path
 
             logger.info(f"Connecting to Meshtastic ({conn_type}: {device})")
 
             if conn_type == "tcp":
-                import meshtastic.tcp_interface
+                if not _HAS_MESH_TCP:
+                    logger.error("meshtastic.tcp_interface not available")
+                    return False
                 # Parse host:port
                 if ':' in device:
                     host, port = device.rsplit(':', 1)
@@ -359,19 +370,23 @@ class RNSMeshtasticTransport:
                 else:
                     host = device
                     port = 4403
-                self._interface = meshtastic.tcp_interface.TCPInterface(
+                self._interface = _meshtastic_tcp.TCPInterface(
                     hostname=host
                 )
 
             elif conn_type == "serial":
-                import meshtastic.serial_interface
-                self._interface = meshtastic.serial_interface.SerialInterface(
+                if not _HAS_MESH_SERIAL:
+                    logger.error("meshtastic.serial_interface not available")
+                    return False
+                self._interface = _meshtastic_serial.SerialInterface(
                     devPath=device
                 )
 
             elif conn_type == "ble":
-                import meshtastic.ble_interface
-                self._interface = meshtastic.ble_interface.BLEInterface(
+                if not _HAS_MESH_BLE:
+                    logger.error("meshtastic.ble_interface not available")
+                    return False
+                self._interface = _meshtastic_ble.BLEInterface(
                     address=device
                 )
 
@@ -383,15 +398,12 @@ class RNSMeshtasticTransport:
             def on_receive(packet, interface):
                 self._on_meshtastic_receive(packet)
 
-            pub.subscribe(on_receive, "meshtastic.receive")
+            _pub_mod.subscribe(on_receive, "meshtastic.receive")
 
             self._connected = True
             logger.info("Connected to Meshtastic")
             return True
 
-        except ImportError as e:
-            logger.error(f"Meshtastic library not available: {e}")
-            return False
         except Exception as e:
             logger.error(f"Failed to connect to Meshtastic: {e}")
             return False

@@ -28,30 +28,24 @@ import logging
 from datetime import datetime
 from typing import Optional, Any, Dict
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Lazy imports to avoid circular dependencies and optional deps
-MQTTNodelessSubscriber = None
-MessageWebSocketServer = None
+# Optional dependencies
+_MQTTNodelessSubscriber, _HAS_MQTT_SUB = safe_import(
+    'monitoring.mqtt_subscriber', 'MQTTNodelessSubscriber'
+)
+MQTTNodelessSubscriber = _MQTTNodelessSubscriber
+if not _HAS_MQTT_SUB:
+    logger.warning("MQTT subscriber not available")
 
-
-def _import_dependencies():
-    """Lazy import of dependencies."""
-    global MQTTNodelessSubscriber, MessageWebSocketServer
-
-    if MQTTNodelessSubscriber is None:
-        try:
-            from monitoring.mqtt_subscriber import MQTTNodelessSubscriber as _Sub
-            MQTTNodelessSubscriber = _Sub
-        except ImportError:
-            logger.warning("MQTT subscriber not available")
-
-    if MessageWebSocketServer is None:
-        try:
-            from utils.websocket_server import MessageWebSocketServer as _WS
-            MessageWebSocketServer = _WS
-        except ImportError:
-            logger.warning("WebSocket server not available")
+_MessageWebSocketServer, _HAS_WS_SERVER = safe_import(
+    'utils.websocket_server', 'MessageWebSocketServer'
+)
+MessageWebSocketServer = _MessageWebSocketServer
+if not _HAS_WS_SERVER:
+    logger.warning("WebSocket server not available")
 
 
 class MQTTWebSocketBridge:
@@ -78,8 +72,6 @@ class MQTTWebSocketBridge:
             broadcast_messages: Whether to broadcast text messages
             broadcast_nodes: Whether to broadcast node updates
         """
-        _import_dependencies()
-
         self._subscriber = subscriber
         self._ws_port = websocket_port
         self._ws_server: Optional[Any] = None

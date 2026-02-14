@@ -13,8 +13,12 @@ import sys
 import subprocess
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Hoist commands.rns import to module level
+_rns_mod, _HAS_RNS_COMMANDS = safe_import('commands.rns')
 
 
 class RNSInterfacesMixin:
@@ -402,16 +406,11 @@ class RNSInterfacesMixin:
 
     def _import_rns_commands(self):
         """Import and return the commands.rns module, or None on failure."""
-        try:
-            src = str(self.src_dir)
-            if src not in sys.path:
-                sys.path.insert(0, src)
-            from commands import rns as rns_mod
-            return rns_mod
-        except ImportError as e:
-            self.dialog.msgbox(
-                "Import Error",
-                f"Could not import RNS commands module:\n{e}\n\n"
-                "Ensure src/commands/rns.py exists.",
-            )
-            return None
+        if _HAS_RNS_COMMANDS:
+            return _rns_mod
+        self.dialog.msgbox(
+            "Import Error",
+            "Could not import RNS commands module.\n\n"
+            "Ensure src/commands/rns.py exists.",
+        )
+        return None

@@ -25,6 +25,7 @@ Usage:
 
 import json
 import logging
+import os
 import socket
 import sqlite3
 import threading
@@ -35,7 +36,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
 
 class SyncCategory(Enum):
@@ -181,11 +186,9 @@ class OfflineSyncQueue:
 
     def _get_default_path(self) -> Path:
         """Get default database path."""
-        try:
-            from utils.paths import get_real_user_home
-            data_dir = get_real_user_home() / ".local" / "share" / "meshforge"
-        except ImportError:
-            import os
+        if _HAS_PATHS:
+            data_dir = _get_real_user_home() / ".local" / "share" / "meshforge"
+        else:
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':
                 data_dir = Path(f'/home/{sudo_user}/.local/share/meshforge')
