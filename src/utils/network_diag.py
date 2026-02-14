@@ -15,16 +15,21 @@ import socket
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 # Import canonical check_port from service_check
-try:
-    from utils.service_check import check_port
-except ImportError:
-    try:
-        from src.utils.service_check import check_port
-    except ImportError:
+_check_port, _HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_port')
+
+if _HAS_SERVICE_CHECK:
+    check_port = _check_port
+else:
+    # Fallback: try src-prefixed path
+    _check_port2, _HAS_SRC_CHECK = safe_import('src.utils.service_check', 'check_port')
+    if _HAS_SRC_CHECK:
+        check_port = _check_port2
+    else:
         # Fallback implementation
         def check_port(port: int, host: str = 'localhost') -> bool:
-            import socket
             sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
