@@ -14,6 +14,12 @@ from pathlib import Path
 from datetime import datetime
 
 from .base import CommandResult
+from utils.safe_import import safe_import
+
+# Module-level safe imports for dependency checks
+_meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
+_rns_mod, _HAS_RNS = safe_import('RNS')
+_lxmf_mod, _HAS_LXMF = safe_import('LXMF')
 
 logger = logging.getLogger(__name__)
 
@@ -282,21 +288,17 @@ def check_dependencies() -> CommandResult:
     """
     deps = {}
 
-    # Check Python packages
-    # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
-    # from RNS's cryptography library when cffi backend is missing
-    python_packages = ['meshtastic', 'RNS', 'LXMF']
-    for pkg in python_packages:
-        try:
-            __import__(pkg)
+    # Check Python packages using module-level safe_import results
+    _pkg_availability = {
+        'meshtastic': _HAS_MESHTASTIC,
+        'RNS': _HAS_RNS,
+        'LXMF': _HAS_LXMF,
+    }
+    for pkg, available in _pkg_availability.items():
+        if available:
             deps[pkg] = {'installed': True, 'type': 'python'}
-        except ImportError:
+        else:
             deps[pkg] = {'installed': False, 'type': 'python'}
-        except (SystemExit, KeyboardInterrupt, GeneratorExit):
-            raise
-        except BaseException as e:
-            # Catch pyo3 PanicException from cryptography errors
-            deps[pkg] = {'installed': False, 'type': 'python', 'error': str(e)}
 
     # Check system binaries
     binaries = ['meshtasticd', 'meshtastic', 'rnsd']

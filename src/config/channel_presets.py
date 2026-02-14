@@ -9,11 +9,14 @@ from rich.table import Table
 from rich.panel import Panel
 
 from utils.paths import get_real_user_home
+from utils.safe_import import safe_import
 
 # Import emoji helper for fallback support
-try:
-    from utils import emoji as em
-except ImportError:
+_em_mod, _HAS_EMOJI = safe_import('utils.emoji')
+
+if _HAS_EMOJI:
+    em = _em_mod
+else:
     # Fallback if emoji module not available
     class em:
         @staticmethod

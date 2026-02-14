@@ -12,6 +12,11 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from urllib.parse import urljoin
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports for optional dependencies
+_requests, _HAS_REQUESTS = safe_import('requests')
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,15 +143,13 @@ class MeshChatClient:
     def _get_session(self):
         """Get or create requests session (lazy import)."""
         if self._session is None:
-            try:
-                import requests
-                self._session = requests.Session()
-                self._session.headers.update({
-                    'User-Agent': 'MeshForge/1.0',
-                    'Accept': 'application/json'
-                })
-            except ImportError:
+            if not _HAS_REQUESTS:
                 raise MeshChatError("requests library not installed")
+            self._session = _requests.Session()
+            self._session.headers.update({
+                'User-Agent': 'MeshForge/1.0',
+                'Accept': 'application/json'
+            })
         return self._session
 
     def _request(
@@ -176,8 +179,6 @@ class MeshChatClient:
                 return response.json()
             return {}
 
-        except ImportError:
-            raise MeshChatError("requests library not installed")
         except Exception as e:
             if 'ConnectionError' in type(e).__name__ or 'ConnectTimeout' in type(e).__name__:
                 raise MeshChatConnectionError(

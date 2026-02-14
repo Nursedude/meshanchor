@@ -15,17 +15,18 @@ from rich.layout import Layout
 from rich.text import Text
 from rich import box
 
-# Try to use centralized service checker
-try:
-    from utils.service_check import (
-        check_service,
-        check_systemd_service,
-        ServiceState,
-        apply_config_and_restart,
-    )
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+from utils.safe_import import safe_import
+
+# Centralized service checker
+_check_service, _check_systemd_service, _ServiceState, _apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart'
+)
+
+# YAML support
+_yaml_mod, _HAS_YAML = safe_import('yaml')
+
+# Rich syntax highlighting
+_Syntax, _HAS_SYNTAX = safe_import('rich.syntax', 'Syntax')
 
 console = Console()
 
@@ -175,24 +176,24 @@ class ConfigFileManager:
         if status['config_exists']:
             content = self._get_config_content()
             if content:
-                try:
-                    import yaml
-                    data = yaml.safe_load(content)
-                    status['config_valid'] = True
+                if _HAS_YAML:
+                    try:
+                        data = _yaml_mod.safe_load(content)
+                        status['config_valid'] = True
 
-                    # Check required sections
-                    for section in self.REQUIRED_SECTIONS:
-                        if section not in data or data[section] is None:
-                            status['missing_required'].append(section)
+                        # Check required sections
+                        for section in self.REQUIRED_SECTIONS:
+                            if section not in data or data[section] is None:
+                                status['missing_required'].append(section)
 
-                    # Check recommended sections
-                    for section in self.RECOMMENDED_SECTIONS:
-                        if section not in data or data[section] is None:
-                            status['missing_recommended'].append(section)
+                        # Check recommended sections
+                        for section in self.RECOMMENDED_SECTIONS:
+                            if section not in data or data[section] is None:
+                                status['missing_recommended'].append(section)
 
-                except yaml.YAMLError as e:
-                    status['errors'].append(f"YAML syntax error: {str(e)[:50]}")
-                except ImportError:
+                    except _yaml_mod.YAMLError as e:
+                        status['errors'].append(f"YAML syntax error: {str(e)[:50]}")
+                else:
                     # YAML not available, do text-based check
                     for section in self.REQUIRED_SECTIONS:
                         if f"{section}:" not in content:
@@ -451,7 +452,7 @@ class ConfigFileManager:
 
             # Use centralized service checker if available
             if _HAS_SERVICE_CHECK:
-                status = check_service('meshtasticd')
+                status = _check_service('meshtasticd')
                 if status.available:
                     console.print("[bold green]Service is running![/bold green]")
                     console.print("\n[cyan]Check the web interface at:[/cyan]")
@@ -583,37 +584,37 @@ class ConfigFileManager:
             content = self._get_config_content()
             if content:
                 # YAML syntax check
-                try:
-                    import yaml
-                    data = yaml.safe_load(content)
-                    console.print("  [green]OK[/green] YAML syntax valid")
+                if _HAS_YAML:
+                    try:
+                        data = _yaml_mod.safe_load(content)
+                        console.print("  [green]OK[/green] YAML syntax valid")
 
-                    # Check required sections
-                    console.print("\n[bold]Checking required sections...[/bold]")
-                    for section, desc in self.REQUIRED_SECTIONS.items():
-                        if section in data and data[section]:
-                            console.print(f"  [green]OK[/green] {section}: present")
-                            # Show key settings
-                            if isinstance(data[section], dict):
-                                for key, value in list(data[section].items())[:3]:
-                                    console.print(f"      [dim]{key}: {value}[/dim]")
-                        else:
-                            issues.append(f"Missing required section: {section}")
-                            console.print(f"  [red]X[/red] {section}: MISSING ({desc})")
+                        # Check required sections
+                        console.print("\n[bold]Checking required sections...[/bold]")
+                        for section, desc in self.REQUIRED_SECTIONS.items():
+                            if section in data and data[section]:
+                                console.print(f"  [green]OK[/green] {section}: present")
+                                # Show key settings
+                                if isinstance(data[section], dict):
+                                    for key, value in list(data[section].items())[:3]:
+                                        console.print(f"      [dim]{key}: {value}[/dim]")
+                            else:
+                                issues.append(f"Missing required section: {section}")
+                                console.print(f"  [red]X[/red] {section}: MISSING ({desc})")
 
-                    # Check recommended sections
-                    console.print("\n[bold]Checking recommended sections...[/bold]")
-                    for section, desc in self.RECOMMENDED_SECTIONS.items():
-                        if section in data and data[section]:
-                            console.print(f"  [green]OK[/green] {section}: present")
-                        else:
-                            warnings.append(f"Missing recommended section: {section}")
-                            console.print(f"  [yellow]~[/yellow] {section}: not set ({desc})")
+                        # Check recommended sections
+                        console.print("\n[bold]Checking recommended sections...[/bold]")
+                        for section, desc in self.RECOMMENDED_SECTIONS.items():
+                            if section in data and data[section]:
+                                console.print(f"  [green]OK[/green] {section}: present")
+                            else:
+                                warnings.append(f"Missing recommended section: {section}")
+                                console.print(f"  [yellow]~[/yellow] {section}: not set ({desc})")
 
-                except yaml.YAMLError as e:
-                    issues.append(f"YAML syntax error: {e}")
-                    console.print(f"  [red]X[/red] YAML syntax error: {e}")
-                except ImportError:
+                    except _yaml_mod.YAMLError as e:
+                        issues.append(f"YAML syntax error: {e}")
+                        console.print(f"  [red]X[/red] YAML syntax error: {e}")
+                else:
                     console.print("  [yellow]~[/yellow] PyYAML not installed, skipping deep validation")
 
         # Check config.d
@@ -641,7 +642,7 @@ class ConfigFileManager:
         try:
             # Use centralized service checker if available
             if _HAS_SERVICE_CHECK:
-                status = check_service('meshtasticd')
+                status = _check_service('meshtasticd')
                 if status.available:
                     console.print("  [green]OK[/green] meshtasticd service is running")
                 else:
@@ -1037,7 +1038,7 @@ Logging:
 
                 # Check if running using centralized service checker
                 if _HAS_SERVICE_CHECK:
-                    status = check_service('meshtasticd')
+                    status = _check_service('meshtasticd')
                     if status.available:
                         console.print("\n[bold green]Service is running![/bold green]")
                     else:
@@ -1072,11 +1073,10 @@ Logging:
                 content = f.read()
 
             # Use syntax highlighting if available
-            try:
-                from rich.syntax import Syntax
-                syntax = Syntax(content, "yaml", theme="monokai", line_numbers=True)
+            if _HAS_SYNTAX:
+                syntax = _Syntax(content, "yaml", theme="monokai", line_numbers=True)
                 console.print(Panel(syntax, title=f"[cyan]{self.MAIN_CONFIG}[/cyan]", border_style="cyan"))
-            except ImportError:
+            else:
                 console.print(Panel(content, title=f"[cyan]{self.MAIN_CONFIG}[/cyan]", border_style="cyan"))
 
         except Exception as e:
