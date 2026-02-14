@@ -35,7 +35,6 @@ from .base import CommandResult
 from utils.paths import get_real_user_home
 
 from utils.event_bus import emit_message
-from gateway import RNSMeshtasticBridge
 from commands import gateway as cmd_gateway
 from commands import meshtastic as cmd_meshtastic
 from utils.message_listener import (
@@ -314,21 +313,20 @@ def send_message(
 
         if send_success:
             # Emit TX event to EventBus for status bar and subscribers
-            if emit_message is not None:
-                try:
-                    emit_message(
-                        direction='tx',
-                        content=content[:100],  # Truncate for event
-                        node_id=destination or "broadcast",
-                        network=network,
-                        raw_data={
-                            'message_id': message_id,
-                            'chunks': len(chunks),
-                            'destination': destination,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"TX event emission failed: {e}")
+            try:
+                emit_message(
+                    direction='tx',
+                    content=content[:100],  # Truncate for event
+                    node_id=destination or "broadcast",
+                    network=network,
+                    raw_data={
+                        'message_id': message_id,
+                        'chunks': len(chunks),
+                        'destination': destination,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"TX event emission failed: {e}")
 
             return CommandResult.ok(
                 f"Message sent ({len(chunks)} chunk(s))",

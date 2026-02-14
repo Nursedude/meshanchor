@@ -12,35 +12,29 @@
 
 ## Phase 1: Quick Wins (Low Risk)
 
-### 1.1 Import Boilerplate Consolidation
+### 1.1 Import Boilerplate Consolidation — COMPLETED (2026-02-14)
 
 **Problem**: ~489 `except ImportError` blocks across src/ (previously estimated at 86).
 
-> **Audit 2026-02-14**: Actual count is **489 `except ImportError` handlers** across
-> ~133 files. Top offenders: prometheus_exporter.py (15), ai_tools_mixin.py (13),
-> rns_bridge.py (13), map_data_collector.py (12). The original estimate of 86 only
-> counted gtk_ui/panels — the problem is project-wide.
+**Solution**: Created `utils/safe_import.py` — consolidates optional dependency imports.
 
-**Solution**: Create `utils/safe_import.py`
+**Status**: DONE in 3 phases:
+1. **Phase A** (batches 1-11): Converted ~490 try/except ImportError blocks to safe_import
+2. **Phase B** (review): Found 15 files where safe_import was over-applied to first-party
+   modules that always exist. Reverted those to direct imports. Net -199 lines.
+3. **Phase C** (cleanup): Code review caught `rich` being incorrectly wrapped as optional
+   in cli.py (it's a hard dependency in requirements.txt), and a dead `RNSMeshtasticBridge`
+   import in messaging.py. Both fixed.
 
-```python
-def safe_import(module: str, class_name: str = None, default=None):
-    """Import with automatic fallback."""
-    try:
-        module_obj = __import__(module, fromlist=[class_name] if class_name else [])
-        if class_name:
-            return (getattr(module_obj, class_name), True)
-        return (module_obj, True)
-    except ImportError:
-        return (default, False)
+**Key principle**: `safe_import` is ONLY for genuinely optional external libraries
+(meshtastic, RNS, LXMF, pubsub, psutil, paho.mqtt, serial, gi.repository, etc.).
+First-party modules (utils.*, gateway.*, commands.*, monitoring.*) get direct imports.
 
-# Usage:
-check_service, HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
-```
+**Test impact**: Tests that patched `sys.modules` to mock optional deps were broken
+because safe_import evaluates `_HAS_*` flags at module load time. Fixed by patching
+the `_HAS_*` flags directly: `@patch('gateway.rns_transport._HAS_MESHTASTIC', True)`.
 
-**Files to Update**: All src/**/*.py with try/except ImportError (~133 files)
-**Estimated Savings**: 500-800 lines (revised up from 200-300)
-**Risk**: LOW - Purely mechanical refactor
+**Risk**: LOW - Verified with 4071 passing tests
 
 ### 1.2 Configuration Centralization
 

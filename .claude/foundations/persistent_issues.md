@@ -191,6 +191,32 @@ from utils.logging_utils import get_logger
 
 # Service availability checks - use before service-dependent operations
 from utils.service_check import check_service, check_port, ServiceState
+
+# Optional external dependencies — use safe_import
+from utils.safe_import import safe_import
+RNS, _HAS_RNS = safe_import('RNS')                              # External
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')                 # External
+_yaml, _HAS_YAML = safe_import('yaml')                            # External
+
+# First-party modules — ALWAYS use direct imports (never safe_import)
+from utils.service_check import check_service    # ✓ Direct
+from utils.event_bus import emit_message         # ✓ Direct
+from gateway.rns_bridge import RNSMeshtasticBridge  # ✓ Direct
+```
+
+### Test Patching with safe_import
+
+When testing code that uses safe_import for external deps, patch the
+module-level `_HAS_*` flags directly — NOT `sys.modules`:
+
+```python
+# WRONG - flags already evaluated at import time
+@patch.dict('sys.modules', {'RNS': MagicMock()})
+def test_rns(self): ...  # _HAS_RNS is still False!
+
+# CORRECT - patch the flag directly
+@patch('gateway.rns_bridge._HAS_RNS', True)
+def test_rns(self): ...  # Now _HAS_RNS is True
 ```
 
 ---
