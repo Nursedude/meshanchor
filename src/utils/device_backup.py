@@ -12,23 +12,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Try to import path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+# Import path utility
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+# Import CLI utility
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+
+def get_real_user_home():
+    """Get real user home, with fallback for sudo-safe home directory."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
     import os
-    def get_real_user_home():
-        """Fallback for sudo-safe home directory."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f"/home/{sudo_user}")
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f"/home/{logname}")
-            return candidate
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        candidate = Path(f"/home/{sudo_user}")
+        return candidate
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        candidate = Path(f"/home/{logname}")
+        return candidate
         return Path('/root')
 
 
@@ -249,10 +255,9 @@ class DeviceBackupManager:
 
     def _run_meshtastic_cmd(self, args: List[str], host: str, port: int) -> str:
         """Run meshtastic CLI command and return output."""
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 

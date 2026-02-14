@@ -20,22 +20,20 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import service checker
-try:
-    from utils.service_check import check_service, ServiceState
-    HAS_SERVICE_CHECK = True
-except ImportError:
-    HAS_SERVICE_CHECK = False
-    check_service = None
-    ServiceState = None
+_check_service, _ServiceState, HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState'
+)
+check_service = _check_service
+ServiceState = _ServiceState
 
 # Import version
-try:
-    from __version__ import __version__
-except ImportError:
-    __version__ = "0.5.0-beta"
+_version_mod, _HAS_VERSION = safe_import('__version__')
+__version__ = getattr(_version_mod, '__version__', "0.5.0-beta") if _HAS_VERSION else "0.5.0-beta"
 
 
 @dataclass

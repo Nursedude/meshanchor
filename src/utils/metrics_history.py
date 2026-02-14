@@ -41,18 +41,20 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Iterator
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os as _os
-    from pathlib import Path as _Path
+from utils.safe_import import safe_import
 
-    def get_real_user_home() -> _Path:
-        sudo_user = _os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return _Path(f'/home/{sudo_user}')
-        return _Path.home()
+# Import centralized path utility for sudo compatibility
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+def get_real_user_home() -> Path:
+    """Get real user home, with fallback for sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    import os as _os
+    sudo_user = _os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        return Path(f'/home/{sudo_user}')
+    return Path.home()
 
 logger = logging.getLogger(__name__)
 
