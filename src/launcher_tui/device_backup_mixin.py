@@ -325,7 +325,7 @@ class DeviceBackupMixin:
             return
 
         # Delete the backup
-        result = delete_backup(selected)
+        result = _delete_backup(selected)
 
         if result['success']:
             self.dialog.msgbox("Deleted", "Backup deleted successfully.")

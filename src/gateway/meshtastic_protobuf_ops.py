@@ -17,7 +17,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Optional protobuf JSON formatting
+_jf, _HAS_PB_JSON = safe_import('google.protobuf.json_format')
 
 
 # ---------------------------------------------------------------------------
@@ -83,16 +88,15 @@ class DeviceConfigSnapshot:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict using protobuf JSON format."""
         result: Dict[str, Any] = {}
-        try:
-            import google.protobuf.json_format as jf
+        if _HAS_PB_JSON:
             for name in (
                 'device', 'position', 'power', 'network',
                 'display', 'lora', 'bluetooth', 'security',
             ):
                 val = getattr(self, name)
                 if val is not None:
-                    result[name] = jf.MessageToDict(val)
-        except ImportError:
+                    result[name] = _jf.MessageToDict(val)
+        else:
             for name in (
                 'device', 'position', 'power', 'network',
                 'display', 'lora', 'bluetooth', 'security',
@@ -122,8 +126,7 @@ class ModuleConfigSnapshot:
 
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
-        try:
-            import google.protobuf.json_format as jf
+        if _HAS_PB_JSON:
             for name in (
                 'mqtt', 'serial', 'external_notification', 'store_forward',
                 'range_test', 'telemetry', 'canned_message', 'audio',
@@ -132,9 +135,7 @@ class ModuleConfigSnapshot:
             ):
                 val = getattr(self, name)
                 if val is not None:
-                    result[name] = jf.MessageToDict(val)
-        except ImportError:
-            pass
+                    result[name] = _jf.MessageToDict(val)
         return result
 
 

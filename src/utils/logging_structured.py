@@ -41,6 +41,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from utils.safe_import import safe_import
+
+# Optional: centralized path utility
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
 
 class StructuredFormatter(logging.Formatter):
     """JSON formatter producing one JSON object per log line."""
@@ -88,10 +93,9 @@ def setup_structured_logging(
         The configured handler (for testing/removal)
     """
     if log_dir is None:
-        try:
-            from utils.paths import get_real_user_home
-            log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
-        except ImportError:
+        if _HAS_PATHS:
+            log_dir = _get_real_user_home() / ".config" / "meshforge" / "logs"
+        else:
             import os as _os
             sudo_user = _os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':

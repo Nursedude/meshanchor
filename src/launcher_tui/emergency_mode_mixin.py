@@ -17,8 +17,12 @@ import time
 import logging
 from typing import Optional
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+_EASAlertsPlugin, _HAS_EAS = safe_import('plugins.eas_alerts', 'EASAlertsPlugin')
 
 # Emergency broadcast prefix for EMCOMM messages
 EMCOMM_PREFIX = "[EMCOMM] "
@@ -340,47 +344,47 @@ class EmergencyModeMixin:
         clear_screen()
         print("=== WEATHER / EAS ALERTS ===\n")
 
-        try:
-            from plugins.eas_alerts import EASAlertsPlugin
-            plugin = EASAlertsPlugin()
-
-            print("Checking NOAA weather alerts...")
-            alerts = plugin.get_weather_alerts()
-
-            if not alerts:
-                print("\n  No active weather alerts for your area.")
-                print("  (Configure location in MeshForge Settings)")
-            else:
-                print(f"\n  {len(alerts)} active alert(s):\n")
-                for i, alert in enumerate(alerts[:10], 1):
-                    severity = getattr(alert, 'severity', 'Unknown')
-                    headline = getattr(alert, 'headline', str(alert))
-                    # Truncate long headlines for terminal display
-                    if len(headline) > 70:
-                        headline = headline[:67] + "..."
-                    print(f"  {i}. [{severity}] {headline}")
-
-            # Also check volcano alerts if available
-            print("\nChecking USGS volcano alerts...")
-            try:
-                volcano_alerts = plugin.get_volcano_alerts()
-                if volcano_alerts:
-                    print(f"\n  {len(volcano_alerts)} volcano alert(s):")
-                    for alert in volcano_alerts[:5]:
-                        name = getattr(alert, 'volcano_name', str(alert))
-                        level = getattr(alert, 'alert_level', 'Unknown')
-                        print(f"  - [{level}] {name}")
-                else:
-                    print("  No active volcano alerts.")
-            except Exception:
-                print("  Volcano alert check unavailable.")
-
-        except ImportError:
+        if not _HAS_EAS:
             print("  EAS Alerts plugin not available.")
             print("  Required: plugins/eas_alerts.py")
-        except Exception as e:
-            print(f"  Alert check failed: {e}")
-            print("  (Check network connectivity)")
+        else:
+            try:
+                plugin = _EASAlertsPlugin()
+
+                print("Checking NOAA weather alerts...")
+                alerts = plugin.get_weather_alerts()
+
+                if not alerts:
+                    print("\n  No active weather alerts for your area.")
+                    print("  (Configure location in MeshForge Settings)")
+                else:
+                    print(f"\n  {len(alerts)} active alert(s):\n")
+                    for i, alert in enumerate(alerts[:10], 1):
+                        severity = getattr(alert, 'severity', 'Unknown')
+                        headline = getattr(alert, 'headline', str(alert))
+                        # Truncate long headlines for terminal display
+                        if len(headline) > 70:
+                            headline = headline[:67] + "..."
+                        print(f"  {i}. [{severity}] {headline}")
+
+                # Also check volcano alerts if available
+                print("\nChecking USGS volcano alerts...")
+                try:
+                    volcano_alerts = plugin.get_volcano_alerts()
+                    if volcano_alerts:
+                        print(f"\n  {len(volcano_alerts)} volcano alert(s):")
+                        for alert in volcano_alerts[:5]:
+                            name = getattr(alert, 'volcano_name', str(alert))
+                            level = getattr(alert, 'alert_level', 'Unknown')
+                            print(f"  - [{level}] {name}")
+                    else:
+                        print("  No active volcano alerts.")
+                except Exception:
+                    print("  Volcano alert check unavailable.")
+
+            except Exception as e:
+                print(f"  Alert check failed: {e}")
+                print("  (Check network connectivity)")
 
         print()
         self._wait_for_enter("Press Enter to continue...")

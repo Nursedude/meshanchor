@@ -7,6 +7,14 @@ to reduce file size and improve maintainability.
 
 import math
 from backend import clear_screen
+from utils.safe_import import safe_import
+
+# Import antenna patterns module
+_ANTENNA_PRESETS, _get_antenna_preset, _format_antenna_comparison, _coverage_with_antenna, _HAS_ANTENNA = safe_import(
+    'utils.antenna_patterns',
+    'ANTENNA_PRESETS', 'get_antenna_preset',
+    'format_antenna_comparison', 'coverage_with_antenna',
+)
 
 
 class RFToolsMixin:
@@ -410,12 +418,7 @@ Note: Check local regulations."""
         """Compare antenna types for Meshtastic deployments."""
         import subprocess
 
-        try:
-            from utils.antenna_patterns import (
-                ANTENNA_PRESETS, get_antenna_preset,
-                format_antenna_comparison, coverage_with_antenna,
-            )
-        except ImportError:
+        if not _HAS_ANTENNA:
             self.dialog.msgbox(
                 "Not Available",
                 "Antenna patterns module not available.\n"
@@ -451,11 +454,6 @@ Note: Check local regulations."""
         """Show side-by-side antenna comparison table."""
         import subprocess
 
-        from utils.antenna_patterns import (
-            ANTENNA_PRESETS, get_antenna_preset,
-            format_antenna_comparison,
-        )
-
         # Get target azimuth
         az_str = self.dialog.inputbox(
             "Target Azimuth",
@@ -478,13 +476,13 @@ Note: Check local regulations."""
 
         # Build antenna list from all presets
         antennas = []
-        for name in ANTENNA_PRESETS:
-            antenna = get_antenna_preset(name, aim_azimuth=azimuth)
+        for name in _ANTENNA_PRESETS:
+            antenna = _get_antenna_preset(name, aim_azimuth=azimuth)
             antennas.append(antenna)
 
         # Generate comparison table
         clear_screen()
-        table = format_antenna_comparison(antennas, base_range, azimuth)
+        table = _format_antenna_comparison(antennas, base_range, azimuth)
         print(table)
         print(f"\n  Base range (stock whip): {base_range:.1f} km")
         print(f"  Target azimuth: {azimuth:.0f} degrees")
@@ -494,15 +492,10 @@ Note: Check local regulations."""
 
     def _antenna_coverage_estimate(self):
         """Estimate coverage with a specific antenna at all compass points."""
-        from utils.antenna_patterns import (
-            ANTENNA_PRESETS, get_antenna_preset,
-            coverage_with_antenna,
-        )
-
         # Select antenna preset
         preset_choices = []
-        for key in ANTENNA_PRESETS:
-            antenna = get_antenna_preset(key)
+        for key in _ANTENNA_PRESETS:
+            antenna = _get_antenna_preset(key)
             spec = antenna.spec()
             preset_choices.append((key, f"{spec.name:<20} {spec.peak_gain_dbi:>5.1f} dBi"))
         preset_choices.append(("back", "Back"))
@@ -535,7 +528,7 @@ Note: Check local regulations."""
             return
         base_range = float(range_str)
 
-        antenna = get_antenna_preset(preset, aim_azimuth=azimuth)
+        antenna = _get_antenna_preset(preset, aim_azimuth=azimuth)
         spec = antenna.spec()
 
         # Calculate coverage at 8 compass points
@@ -557,7 +550,7 @@ Note: Check local regulations."""
 
         for deg, label in directions:
             gain = antenna.gain_at(deg, 0.0)
-            rng = coverage_with_antenna(base_range, antenna, deg)
+            rng = _coverage_with_antenna(base_range, antenna, deg)
             factor = antenna.effective_range_factor(deg)
             lines.append(f"{label:>10} {gain:>6.1f}dBi {rng:>6.1f}km {factor:>6.2f}x")
 
@@ -567,15 +560,13 @@ Note: Check local regulations."""
         """Show detailed specs for all antenna presets."""
         import subprocess
 
-        from utils.antenna_patterns import ANTENNA_PRESETS, get_antenna_preset
-
         clear_screen()
         print("=== Antenna Specifications ===\n")
         print(f"  {'Name':<22} {'Type':<14} {'Gain':>6} {'H Beam':>7} {'V Beam':>7} {'F/B':>5}")
         print(f"  {'-'*65}")
 
-        for key in ANTENNA_PRESETS:
-            antenna = get_antenna_preset(key)
+        for key in _ANTENNA_PRESETS:
+            antenna = _get_antenna_preset(key)
             spec = antenna.spec()
             fb = f"{spec.front_to_back_db:.0f}dB" if spec.front_to_back_db > 0 else "---"
             print(f"  {spec.name:<22} {spec.type_name:<14} "

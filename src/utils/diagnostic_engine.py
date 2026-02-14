@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 _check_service, _check_systemd_service, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
     'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState'
 )
+
+_get_predictive_analyzer, _PredictiveAlert, _HAS_ANALYTICS = safe_import(
+    'utils.analytics', 'get_predictive_analyzer', 'PredictiveAlert'
+)
 # Re-export under original names for use throughout this module
 if _HAS_SERVICE_CHECK:
     check_service = _check_service
@@ -853,10 +857,12 @@ class DiagnosticEngine:
         """
         diagnoses: List[Diagnosis] = []
 
+        if not _HAS_ANALYTICS:
+            logger.debug("Predictive analytics not available")
+            return diagnoses
+
         try:
-            # Import here to avoid circular imports
-            from utils.analytics import get_predictive_analyzer, PredictiveAlert
-            analyzer = get_predictive_analyzer()
+            analyzer = _get_predictive_analyzer()
             alerts = analyzer.analyze_all()
 
             for alert in alerts:
@@ -919,8 +925,6 @@ class DiagnosticEngine:
                 # Log the predictive alert
                 logger.info(f"[PREDICTIVE] {diagnosis.to_log_format()}")
 
-        except ImportError:
-            logger.debug("Predictive analytics not available")
         except Exception as e:
             logger.warning(f"Failed to check predictive alerts: {e}")
 
@@ -936,12 +940,12 @@ class DiagnosticEngine:
         Returns:
             Dict with forecast data or error info
         """
-        try:
-            from utils.analytics import get_predictive_analyzer
-            analyzer = get_predictive_analyzer()
-            return analyzer.get_network_forecast(hours_ahead)
-        except ImportError:
+        if not _HAS_ANALYTICS:
             return {'has_forecast': False, 'reason': 'Analytics module not available'}
+
+        try:
+            analyzer = _get_predictive_analyzer()
+            return analyzer.get_network_forecast(hours_ahead)
         except Exception as e:
             return {'has_forecast': False, 'reason': str(e)}
 

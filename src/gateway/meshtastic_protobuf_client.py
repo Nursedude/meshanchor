@@ -31,6 +31,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 from .meshtastic_protobuf_ops import (
     CONFIG_TYPE_NAMES,
     MODULE_CONFIG_TYPE_NAMES,
@@ -50,18 +52,21 @@ from .meshtastic_protobuf_ops import (
 logger = logging.getLogger(__name__)
 
 # Protobuf imports are deferred to avoid hard dependency at module level
-_pb2_available = False
-try:
-    from meshtastic.protobuf import (
-        admin_pb2,
-        config_pb2,
-        mesh_pb2,
-        module_config_pb2,
-        portnums_pb2,
-    )
-    import google.protobuf.json_format
-    _pb2_available = True
-except ImportError:
+_admin_pb2, _config_pb2, _mesh_pb2, _module_config_pb2, _portnums_pb2, _HAS_PB2 = safe_import(
+    'meshtastic.protobuf',
+    'admin_pb2', 'config_pb2', 'mesh_pb2', 'module_config_pb2', 'portnums_pb2',
+    package=None,
+)
+_json_format_mod, _HAS_PB_JSON = safe_import('google.protobuf.json_format')
+_pb2_available = _HAS_PB2 and _HAS_PB_JSON
+
+if _HAS_PB2:
+    admin_pb2 = _admin_pb2
+    config_pb2 = _config_pb2
+    mesh_pb2 = _mesh_pb2
+    module_config_pb2 = _module_config_pb2
+    portnums_pb2 = _portnums_pb2
+else:
     logger.warning("meshtastic protobuf not available — protobuf client disabled")
 
 
