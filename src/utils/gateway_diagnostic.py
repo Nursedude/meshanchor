@@ -16,15 +16,24 @@ from typing import List, Dict, Optional
 
 # Import centralized path utility
 from utils.paths import get_real_user_home
+from utils.safe_import import safe_import
 
-# Try to use centralized service checker
-try:
-    from utils.service_check import (
-        check_service, check_systemd_service, check_process_with_pid, ServiceState
+# Optional dependencies — module-level safe imports
+check_service, check_systemd_service, check_process_with_pid, ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service',
+    'check_process_with_pid', 'ServiceState'
+)
+detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
+    'utils.config_drift', 'detect_rnsd_config_drift'
+)
+_meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
+MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
+    'plugins.meshchat', 'MeshChatService', 'ServiceState'
+)
+if not _HAS_MESHCHAT:
+    MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
+        'src.plugins.meshchat', 'MeshChatService', 'ServiceState'
     )
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
 
 
 class CheckStatus(Enum):
@@ -291,16 +300,13 @@ class GatewayDiagnostic:
             has_meshtastic = 'meshtastic' in content.lower()
 
             # Check for config drift between gateway and rnsd
-            try:
-                from utils.config_drift import detect_rnsd_config_drift
+            if _HAS_CONFIG_DRIFT:
                 drift = detect_rnsd_config_drift()
                 if drift.drifted:
                     issues.append(
                         f"Config drift: gateway uses {drift.gateway_config_dir} "
                         f"but rnsd uses {drift.rnsd_config_dir}"
                     )
-            except ImportError:
-                pass
 
             if issues:
                 return CheckResult(
@@ -368,17 +374,14 @@ class GatewayDiagnostic:
 
     def check_meshtastic_installed(self) -> CheckResult:
         """Check if meshtastic library is installed."""
-        # Try direct import first (same Python environment)
-        try:
-            import meshtastic
-            version = getattr(meshtastic, '__version__', 'unknown')
+        # Check module-level safe import result
+        if _HAS_MESHTASTIC:
+            version = getattr(_meshtastic_mod, '__version__', 'unknown')
             return CheckResult(
                 name="Meshtastic Library",
                 status=CheckStatus.PASS,
                 message=f"meshtastic {version} installed"
             )
-        except ImportError:
-            pass
 
         # Fallback: try subprocess with sys.executable
         try:
@@ -540,44 +543,7 @@ class GatewayDiagnostic:
 
     def check_meshchat(self) -> CheckResult:
         """Check if MeshChat service is available (optional)."""
-        try:
-            # Try relative import first, then absolute
-            try:
-                from plugins.meshchat import MeshChatService, ServiceState
-            except ImportError:
-                from src.plugins.meshchat import MeshChatService, ServiceState
-            service = MeshChatService()
-            status = service.check_status(blocking=True)
-
-            if status.available:
-                version_str = f" v{status.version}" if status.version else ""
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.PASS,
-                    message=f"Running{version_str} on port {service.port}",
-                    details=f"PID: {status.pid}" if status.pid else None
-                )
-            elif status.state == ServiceState.STOPPED:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.SKIP,
-                    message="Installed but not running",
-                    fix_hint=status.fix_hint
-                )
-            elif status.state == ServiceState.STARTING:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.WARN,
-                    message="Starting (port not ready yet)"
-                )
-            else:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.SKIP,
-                    message="Not installed (optional LXMF messaging)",
-                    fix_hint="Install from: https://github.com/liamcottle/reticulum-meshchat"
-                )
-        except ImportError:
+        if not _HAS_MESHCHAT:
             # MeshChat plugin not available - check port directly
             if self.check_tcp_port('localhost', 8000):
                 return CheckResult(
@@ -590,6 +556,39 @@ class GatewayDiagnostic:
                 status=CheckStatus.SKIP,
                 message="Not installed (optional)"
             )
+
+        try:
+            service = MeshChatService()
+            status = service.check_status(blocking=True)
+
+            if status.available:
+                version_str = f" v{status.version}" if status.version else ""
+                return CheckResult(
+                    name="MeshChat (Optional)",
+                    status=CheckStatus.PASS,
+                    message=f"Running{version_str} on port {service.port}",
+                    details=f"PID: {status.pid}" if status.pid else None
+                )
+            elif status.state == MeshChatServiceState.STOPPED:
+                return CheckResult(
+                    name="MeshChat (Optional)",
+                    status=CheckStatus.SKIP,
+                    message="Installed but not running",
+                    fix_hint=status.fix_hint
+                )
+            elif status.state == MeshChatServiceState.STARTING:
+                return CheckResult(
+                    name="MeshChat (Optional)",
+                    status=CheckStatus.WARN,
+                    message="Starting (port not ready yet)"
+                )
+            else:
+                return CheckResult(
+                    name="MeshChat (Optional)",
+                    status=CheckStatus.SKIP,
+                    message="Not installed (optional LXMF messaging)",
+                    fix_hint="Install from: https://github.com/liamcottle/reticulum-meshchat"
+                )
         except Exception as e:
             return CheckResult(
                 name="MeshChat (Optional)",

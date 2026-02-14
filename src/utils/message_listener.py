@@ -31,6 +31,21 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# --- Optional dependencies (safe_import) ---
+from utils.safe_import import safe_import
+
+create_local_subscriber, _HAS_MQTT_SUBSCRIBER = safe_import(
+    'monitoring.mqtt_subscriber', 'create_local_subscriber'
+)
+pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+get_connection_manager, _HAS_MESH_CONN = safe_import(
+    'utils.meshtastic_connection', 'get_connection_manager'
+)
+get_node_tracker, Telemetry, AirQualityMetrics, Position, _HAS_NODE_TRACKER = safe_import(
+    'gateway.node_tracker', 'get_node_tracker', 'Telemetry', 'AirQualityMetrics', 'Position'
+)
+meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
+
 # Connection states
 DISCONNECTED = "disconnected"
 CONNECTING = "connecting"
@@ -187,11 +202,11 @@ class MessageListener:
         else:
             # TCP mode cleanup
             # Unsubscribe from pubsub
-            try:
-                from pubsub import pub
-                pub.unsubscribe(self._on_receive, "meshtastic.receive")
-            except Exception as e:
-                logger.debug(f"Cleanup: pubsub unsubscribe: {e}")
+            if _HAS_PUBSUB:
+                try:
+                    pub.unsubscribe(self._on_receive, "meshtastic.receive")
+                except Exception as e:
+                    logger.debug(f"Cleanup: pubsub unsubscribe: {e}")
 
             # Only close interface if we own it (not borrowing from gateway)
             if self._interface and self._owns_connection:
@@ -219,12 +234,10 @@ class MessageListener:
 
     def _run_mqtt_mode(self):
         """Run listener in MQTT mode - subscribe to local MQTT broker."""
-        try:
-            from monitoring.mqtt_subscriber import create_local_subscriber
-        except ImportError as e:
+        if not _HAS_MQTT_SUBSCRIBER:
             self._status.state = ERROR
-            self._status.error = f"MQTT module not available: {e}"
-            logger.error(f"Cannot start MQTT listener: {e}")
+            self._status.error = "MQTT module not available: monitoring.mqtt_subscriber"
+            logger.error("Cannot start MQTT listener: monitoring.mqtt_subscriber not available")
             return
 
         try:
@@ -282,14 +295,17 @@ class MessageListener:
     def _run_tcp_mode(self):
         """Run listener in TCP mode - direct meshtasticd connection."""
         try:
-            # Import dependencies
-            try:
-                from pubsub import pub
-                from utils.meshtastic_connection import get_connection_manager
-            except ImportError as e:
+            # Check dependencies
+            if not _HAS_PUBSUB or not _HAS_MESH_CONN:
+                missing = []
+                if not _HAS_PUBSUB:
+                    missing.append('pubsub')
+                if not _HAS_MESH_CONN:
+                    missing.append('utils.meshtastic_connection')
+                dep_str = ', '.join(missing)
                 self._status.state = ERROR
-                self._status.error = f"Missing dependency: {e}"
-                logger.error(f"Cannot start listener: {e}")
+                self._status.error = f"Missing dependency: {dep_str}"
+                logger.error(f"Cannot start listener: {dep_str}")
                 return
 
             # Check if another component (like gateway) already has a connection
@@ -506,8 +522,7 @@ class MessageListener:
                     )
 
                     # Update node tracker if available
-                    try:
-                        from gateway.node_tracker import get_node_tracker, Telemetry
+                    if _HAS_NODE_TRACKER:
                         tracker = get_node_tracker()
                         node = tracker.get_node(from_id)
                         if node:
@@ -517,8 +532,6 @@ class MessageListener:
                             node.telemetry.humidity = humidity
                             node.telemetry.barometric_pressure = pressure
                             tracker.add_node(node)
-                    except ImportError:
-                        pass
 
             # Air quality metrics (PMSA003I, SCD4X, etc.)
             aq_metrics = telemetry.get('airQualityMetrics', {})
@@ -535,10 +548,7 @@ class MessageListener:
                     )
 
                     # Update node tracker
-                    try:
-                        from gateway.node_tracker import (
-                            get_node_tracker, AirQualityMetrics
-                        )
+                    if _HAS_NODE_TRACKER:
                         tracker = get_node_tracker()
                         node = tracker.get_node(from_id)
                         if node and node.telemetry:
@@ -549,8 +559,6 @@ class MessageListener:
                                 iaq=iaq,
                             )
                             tracker.add_node(node)
-                    except ImportError:
-                        pass
 
             # Device metrics (battery, voltage, channel utilization)
             device_metrics = telemetry.get('deviceMetrics', {})
@@ -566,8 +574,7 @@ class MessageListener:
                         f"Voltage={voltage}V, ChUtil={ch_util}%"
                     )
 
-                    try:
-                        from gateway.node_tracker import get_node_tracker, Telemetry
+                    if _HAS_NODE_TRACKER:
                         tracker = get_node_tracker()
                         node = tracker.get_node(from_id)
                         if node:
@@ -578,8 +585,6 @@ class MessageListener:
                             node.telemetry.channel_utilization = ch_util
                             node.telemetry.air_util_tx = air_util
                             tracker.add_node(node)
-                    except ImportError:
-                        pass
 
         except Exception as e:
             logger.debug(f"Error processing telemetry: {e}")
@@ -596,8 +601,7 @@ class MessageListener:
                 logger.debug(f"POSITION [{from_id}]: {lat:.4f}, {lon:.4f}, alt={alt}m")
 
                 # Update node tracker
-                try:
-                    from gateway.node_tracker import get_node_tracker, Position
+                if _HAS_NODE_TRACKER:
                     tracker = get_node_tracker()
                     node = tracker.get_node(from_id)
                     if node:
@@ -607,8 +611,6 @@ class MessageListener:
                             altitude=alt or 0,
                         )
                         tracker.add_node(node)
-                except ImportError:
-                    pass
 
         except Exception as e:
             logger.debug(f"Error processing position: {e}")
@@ -768,8 +770,7 @@ def diagnose_pubsub() -> dict:
     }
 
     # Check pubsub
-    try:
-        from pubsub import pub
+    if _HAS_PUBSUB:
         result['pubsub_available'] = True
 
         # Get current subscriptions for meshtastic topics
@@ -794,17 +795,15 @@ def diagnose_pubsub() -> dict:
                 })
         except Exception as e:
             result['errors'].append(f"Could not inspect topics: {e}")
-
-    except ImportError as e:
-        result['errors'].append(f"pubsub not available: {e}")
+    else:
+        result['errors'].append("pubsub not available: pubsub")
 
     # Check meshtastic
-    try:
-        import meshtastic
+    if _HAS_MESHTASTIC:
         result['meshtastic_available'] = True
-        result['meshtastic_version'] = getattr(meshtastic, '__version__', 'unknown')
-    except ImportError as e:
-        result['errors'].append(f"meshtastic not available: {e}")
+        result['meshtastic_version'] = getattr(meshtastic_mod, '__version__', 'unknown')
+    else:
+        result['errors'].append("meshtastic not available: meshtastic")
 
     # Check if meshtasticd is reachable
     try:

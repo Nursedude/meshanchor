@@ -18,16 +18,15 @@ from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 
 from .base import CommandResult
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
 # Import centralized service checker (SINGLE SOURCE OF TRUTH)
-try:
-    from utils.service_check import check_service
-    HAS_SERVICE_CHECK = True
-except ImportError:
-    check_service = None
-    HAS_SERVICE_CHECK = False
+check_service, HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_service')
+
+# RNS module (optional — not installed on all systems)
+RNS, _HAS_RNS = safe_import('RNS')
 
 
 # ============================================================================
@@ -78,21 +77,20 @@ def create_identities() -> CommandResult:
 
     if rns_identity_path.exists():
         results['rns_identity_status'] = 'exists'
+    elif not _HAS_RNS:
+        results['rns_identity_status'] = 'error'
+        return CommandResult.fail(
+            "RNS module not installed — cannot create identity",
+            data=results
+        )
     else:
         try:
-            import RNS
             identity = RNS.Identity()
             config_dir.mkdir(parents=True, exist_ok=True)
             identity.to_file(str(rns_identity_path))
             results['rns_identity_status'] = 'created'
             results['created'].append('rns')
             logger.info(f"Created RNS identity at {rns_identity_path}")
-        except ImportError:
-            results['rns_identity_status'] = 'error'
-            return CommandResult.fail(
-                "RNS module not installed — cannot create identity",
-                data=results
-            )
         except Exception as e:
             results['rns_identity_status'] = 'error'
             return CommandResult.fail(
@@ -108,7 +106,6 @@ def create_identities() -> CommandResult:
         results['gateway_identity_status'] = 'exists'
     else:
         try:
-            import RNS
             identity = RNS.Identity()
             gw_identity_path.parent.mkdir(parents=True, exist_ok=True)
             identity.to_file(str(gw_identity_path))
@@ -811,18 +808,11 @@ def check_connectivity() -> CommandResult:
             connectivity['issues'].append("rnsd daemon not running")
 
     # Check RNS import
-    # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
-    # from RNS's cryptography library when cffi backend is missing
-    try:
-        import RNS
+    if not _HAS_RNS:
+        connectivity['issues'].append("RNS Python module not installed")
+    else:
         connectivity['can_import_rns'] = True
         connectivity['rns_version'] = RNS.__version__ if hasattr(RNS, '__version__') else 'unknown'
-    except ImportError:
-        connectivity['issues'].append("RNS Python module not installed")
-    except (SystemExit, KeyboardInterrupt, GeneratorExit):
-        raise
-    except BaseException as e:
-        connectivity['issues'].append(f"RNS import error: {e}")
 
     # Check config
     config_result = read_config()
@@ -891,9 +881,13 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
             error="Hash must be 32 hex characters"
         )
 
-    try:
-        import RNS
+    if not _HAS_RNS:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pipx install rns"
+        )
 
+    try:
         dest_bytes = bytes.fromhex(destination_hash)
 
         # Check if path exists
@@ -935,11 +929,6 @@ def test_path(destination_hash: str, timeout: int = 10) -> CommandResult:
             }
         )
 
-    except ImportError:
-        return CommandResult.not_available(
-            "RNS not installed",
-            fix_hint="pipx install rns"
-        )
     except Exception as e:
         # Catch pyo3 PanicException and other RNS errors
         return CommandResult.fail(f"Path test failed: {e}")
@@ -964,9 +953,13 @@ def get_path_info(destination_hash: str) -> CommandResult:
             error="Hash must be 32 hex characters"
         )
 
-    try:
-        import RNS
+    if not _HAS_RNS:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pipx install rns"
+        )
 
+    try:
         dest_bytes = bytes.fromhex(destination_hash)
         has_path = RNS.Transport.has_path(dest_bytes)
 
@@ -1027,11 +1020,6 @@ def get_path_info(destination_hash: str) -> CommandResult:
             data=info
         )
 
-    except ImportError:
-        return CommandResult.not_available(
-            "RNS not installed",
-            fix_hint="pipx install rns"
-        )
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
@@ -1254,7 +1242,6 @@ def _init_rns_client():
     "Address already in use" errors when rnsd already owns the ports.
     See: .claude/foundations/persistent_issues.md Issue #12
     """
-    import RNS
     import tempfile
 
     client_config_dir = Path(tempfile.gettempdir()) / "meshforge_rns_client"
@@ -1315,9 +1302,13 @@ def list_known_destinations() -> CommandResult:
         except Exception:
             pass
 
-    try:
-        import RNS
+    if not _HAS_RNS:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pipx install rns"
+        )
 
+    try:
         # Connect as client to avoid "Address already in use" when rnsd owns ports
         reticulum = _init_rns_client()
 
@@ -1396,11 +1387,6 @@ def list_known_destinations() -> CommandResult:
                 }
             )
 
-    except ImportError:
-        return CommandResult.not_available(
-            "RNS not installed",
-            fix_hint="pipx install rns"
-        )
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
@@ -1423,8 +1409,13 @@ def discover_nodes(timeout: int = 30) -> CommandResult:
     Returns:
         CommandResult with discovered nodes
     """
+    if not _HAS_RNS:
+        return CommandResult.not_available(
+            "RNS not installed",
+            fix_hint="pipx install rns"
+        )
+
     try:
-        import RNS
         import time
 
         # Connect as client to avoid "Address already in use" when rnsd owns ports
@@ -1500,10 +1491,5 @@ def discover_nodes(timeout: int = 30) -> CommandResult:
                 }
             )
 
-    except ImportError:
-        return CommandResult.not_available(
-            "RNS not installed",
-            fix_hint="pipx install rns"
-        )
     except Exception as e:
         return CommandResult.fail(f"Discovery failed: {e}")

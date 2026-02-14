@@ -28,7 +28,29 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Optional dependency imports (consolidated via safe_import)
+# ---------------------------------------------------------------------------
+HealthScorer, format_health_display, get_health_scorer, _HAS_HEALTH_SCORE = safe_import(
+    'utils.health_score', 'HealthScorer', 'format_health_display', 'get_health_scorer'
+)
+SignalTrendingManager, _HAS_SIGNAL_TRENDING = safe_import(
+    'utils.signal_trending', 'SignalTrendingManager'
+)
+MaintenancePredictor, _HAS_PREDICTIVE_MAINTENANCE = safe_import(
+    'utils.predictive_maintenance', 'MaintenancePredictor'
+)
+get_diagnostic_engine, Category, _HAS_DIAGNOSTIC_ENGINE = safe_import(
+    'utils.diagnostic_engine', 'get_diagnostic_engine', 'Category'
+)
+PresetAnalyzer, _HAS_PRESET_IMPACT = safe_import(
+    'utils.preset_impact', 'PresetAnalyzer'
+)
+__version__, _HAS_VERSION = safe_import('__version__', '__version__')
 
 
 @dataclass
@@ -119,32 +141,32 @@ class ReportGenerator:
         """Add network health scoring section."""
         lines = []
 
-        try:
-            from utils.health_score import HealthScorer, format_health_display
-            scorer = _get_health_scorer()
-            if scorer is None:
-                lines.append("*Health scorer not initialized — no node data available.*")
-            else:
-                snapshot = scorer.get_snapshot()
-                lines.append(f"**Overall Score: {snapshot.overall_score:.0f}/100** "
-                             f"({snapshot.status})")
-                lines.append("")
-                lines.append("| Category | Score | Status |")
-                lines.append("|----------|-------|--------|")
-                for cat, score in snapshot.category_scores.items():
-                    status = _score_status(score)
-                    lines.append(f"| {cat.title()} | {score:.0f} | {status} |")
-                lines.append("")
-                lines.append(f"- Nodes reporting: {snapshot.node_count}")
-                lines.append(f"- Services tracked: {snapshot.service_count}")
+        if _HAS_HEALTH_SCORE:
+            try:
+                scorer = _get_health_scorer()
+                if scorer is None:
+                    lines.append("*Health scorer not initialized — no node data available.*")
+                else:
+                    snapshot = scorer.get_snapshot()
+                    lines.append(f"**Overall Score: {snapshot.overall_score:.0f}/100** "
+                                 f"({snapshot.status})")
+                    lines.append("")
+                    lines.append("| Category | Score | Status |")
+                    lines.append("|----------|-------|--------|")
+                    for cat, score in snapshot.category_scores.items():
+                        status = _score_status(score)
+                        lines.append(f"| {cat.title()} | {score:.0f} | {status} |")
+                    lines.append("")
+                    lines.append(f"- Nodes reporting: {snapshot.node_count}")
+                    lines.append(f"- Services tracked: {snapshot.service_count}")
 
-                trend = scorer.get_trend()
-                if trend != 'stable':
-                    lines.append(f"- Trend: **{trend}**")
-        except ImportError:
+                    trend = scorer.get_trend()
+                    if trend != 'stable':
+                        lines.append(f"- Trend: **{trend}**")
+            except Exception as e:
+                lines.append(f"*Error collecting health data: {e}*")
+        else:
             lines.append("*Health score module not available.*")
-        except Exception as e:
-            lines.append(f"*Error collecting health data: {e}*")
 
         self._sections.append(ReportSection(
             heading="Network Health",
@@ -157,37 +179,37 @@ class ReportGenerator:
         """Add signal trending section."""
         lines = []
 
-        try:
-            from utils.signal_trending import SignalTrendingManager
-            manager = _get_signal_manager()
-            if manager is None:
-                lines.append("*Signal trending not initialized — no signal data available.*")
-            else:
-                nodes = manager.get_tracked_nodes()
-                if not nodes:
-                    lines.append("*No nodes currently tracked.*")
+        if _HAS_SIGNAL_TRENDING:
+            try:
+                manager = _get_signal_manager()
+                if manager is None:
+                    lines.append("*Signal trending not initialized — no signal data available.*")
                 else:
-                    lines.append(f"Tracking {len(nodes)} node(s).\n")
-                    lines.append("| Node | Current SNR | Current RSSI | Trend | Samples |")
-                    lines.append("|------|-------------|--------------|-------|---------|")
+                    nodes = manager.get_tracked_nodes()
+                    if not nodes:
+                        lines.append("*No nodes currently tracked.*")
+                    else:
+                        lines.append(f"Tracking {len(nodes)} node(s).\n")
+                        lines.append("| Node | Current SNR | Current RSSI | Trend | Samples |")
+                        lines.append("|------|-------------|--------------|-------|---------|")
 
-                    for node_id in sorted(nodes)[:self.config.max_signal_nodes]:
-                        report = manager.get_report(node_id)
-                        if report:
-                            snr_str = f"{report.current_snr:.1f} dB" if report.current_snr else "N/A"
-                            rssi_str = f"{report.current_rssi:.0f} dBm" if report.current_rssi else "N/A"
-                            trend = report.trend if hasattr(report, 'trend') else "—"
-                            samples = report.sample_count if hasattr(report, 'sample_count') else "—"
-                            lines.append(f"| {node_id} | {snr_str} | {rssi_str} | {trend} | {samples} |")
+                        for node_id in sorted(nodes)[:self.config.max_signal_nodes]:
+                            report = manager.get_report(node_id)
+                            if report:
+                                snr_str = f"{report.current_snr:.1f} dB" if report.current_snr else "N/A"
+                                rssi_str = f"{report.current_rssi:.0f} dBm" if report.current_rssi else "N/A"
+                                trend = report.trend if hasattr(report, 'trend') else "—"
+                                samples = report.sample_count if hasattr(report, 'sample_count') else "—"
+                                lines.append(f"| {node_id} | {snr_str} | {rssi_str} | {trend} | {samples} |")
 
-                    # Check for degrading nodes
-                    degrading = manager.get_degrading_nodes()
-                    if degrading:
-                        lines.append(f"\n**Warning:** {len(degrading)} node(s) showing signal degradation.")
-        except ImportError:
+                        # Check for degrading nodes
+                        degrading = manager.get_degrading_nodes()
+                        if degrading:
+                            lines.append(f"\n**Warning:** {len(degrading)} node(s) showing signal degradation.")
+            except Exception as e:
+                lines.append(f"*Error collecting signal data: {e}*")
+        else:
             lines.append("*Signal trending module not available.*")
-        except Exception as e:
-            lines.append(f"*Error collecting signal data: {e}*")
 
         self._sections.append(ReportSection(
             heading="Signal Quality",
@@ -200,60 +222,60 @@ class ReportGenerator:
         """Add predictive maintenance section."""
         lines = []
 
-        try:
-            from utils.predictive_maintenance import MaintenancePredictor
-            predictor = _get_maintenance_predictor()
-            if predictor is None:
-                lines.append("*Maintenance predictor not initialized — no telemetry data.*")
-            else:
-                node_ids = predictor.get_node_ids()
-                if not node_ids:
-                    lines.append("*No nodes tracked for maintenance.*")
+        if _HAS_PREDICTIVE_MAINTENANCE:
+            try:
+                predictor = _get_maintenance_predictor()
+                if predictor is None:
+                    lines.append("*Maintenance predictor not initialized — no telemetry data.*")
                 else:
-                    # Battery forecasts
-                    forecasts = predictor.get_all_forecasts()
-                    battery_nodes = [f for f in forecasts.values()
-                                     if f.trend != 'insufficient_data']
-                    if battery_nodes:
-                        lines.append("### Battery Status\n")
-                        lines.append("| Node | Level | Drain Rate | Hours to Critical | Trend |")
-                        lines.append("|------|-------|------------|-------------------|-------|")
-                        for f in sorted(battery_nodes, key=lambda x: x.current_pct):
-                            rate = f"{f.drain_rate_pct_per_hour:.2f}%/h" if f.trend == 'draining' else "—"
-                            critical = f"{f.hours_to_critical:.0f}h" if f.hours_to_critical else "—"
-                            lines.append(f"| {f.node_id} | {f.current_pct:.0f}% | {rate} | "
-                                         f"{critical} | {f.trend} |")
+                    node_ids = predictor.get_node_ids()
+                    if not node_ids:
+                        lines.append("*No nodes tracked for maintenance.*")
+                    else:
+                        # Battery forecasts
+                        forecasts = predictor.get_all_forecasts()
+                        battery_nodes = [f for f in forecasts.values()
+                                         if f.trend != 'insufficient_data']
+                        if battery_nodes:
+                            lines.append("### Battery Status\n")
+                            lines.append("| Node | Level | Drain Rate | Hours to Critical | Trend |")
+                            lines.append("|------|-------|------------|-------------------|-------|")
+                            for f in sorted(battery_nodes, key=lambda x: x.current_pct):
+                                rate = f"{f.drain_rate_pct_per_hour:.2f}%/h" if f.trend == 'draining' else "—"
+                                critical = f"{f.hours_to_critical:.0f}h" if f.hours_to_critical else "—"
+                                lines.append(f"| {f.node_id} | {f.current_pct:.0f}% | {rate} | "
+                                             f"{critical} | {f.trend} |")
 
-                    # Dropout patterns
-                    patterns = predictor.get_all_patterns()
-                    problem_nodes = [p for p in patterns.values()
-                                     if p.prediction in ('intermittent', 'failing')]
-                    if problem_nodes:
-                        lines.append("\n### Node Reliability Issues\n")
-                        lines.append("| Node | Uptime | Dropouts/Day | Pattern | Reliability |")
-                        lines.append("|------|--------|--------------|---------|-------------|")
-                        for p in sorted(problem_nodes, key=lambda x: x.reliability_score):
-                            lines.append(f"| {p.node_id} | {p.uptime_pct:.0f}% | "
-                                         f"{p.dropouts_per_day:.1f} | {p.prediction} | "
-                                         f"{p.reliability_score:.0f}/100 |")
+                        # Dropout patterns
+                        patterns = predictor.get_all_patterns()
+                        problem_nodes = [p for p in patterns.values()
+                                         if p.prediction in ('intermittent', 'failing')]
+                        if problem_nodes:
+                            lines.append("\n### Node Reliability Issues\n")
+                            lines.append("| Node | Uptime | Dropouts/Day | Pattern | Reliability |")
+                            lines.append("|------|--------|--------------|---------|-------------|")
+                            for p in sorted(problem_nodes, key=lambda x: x.reliability_score):
+                                lines.append(f"| {p.node_id} | {p.uptime_pct:.0f}% | "
+                                             f"{p.dropouts_per_day:.1f} | {p.prediction} | "
+                                             f"{p.reliability_score:.0f}/100 |")
 
-                    # Recommendations
-                    recs = predictor.get_maintenance_recommendations()
-                    if recs:
-                        lines.append("\n### Maintenance Actions\n")
-                        for rec in recs[:10]:
-                            icon = {'urgent': '!!!', 'soon': '!!',
-                                    'scheduled': '!', 'monitor': '?'}.get(rec.priority, '')
-                            lines.append(f"- **[{rec.priority.upper()}]** {rec.node_id}: "
-                                         f"{rec.action}")
-                            lines.append(f"  - Reason: {rec.reason}")
+                        # Recommendations
+                        recs = predictor.get_maintenance_recommendations()
+                        if recs:
+                            lines.append("\n### Maintenance Actions\n")
+                            for rec in recs[:10]:
+                                icon = {'urgent': '!!!', 'soon': '!!',
+                                        'scheduled': '!', 'monitor': '?'}.get(rec.priority, '')
+                                lines.append(f"- **[{rec.priority.upper()}]** {rec.node_id}: "
+                                             f"{rec.action}")
+                                lines.append(f"  - Reason: {rec.reason}")
 
-                    if not battery_nodes and not problem_nodes and not recs:
-                        lines.append("All tracked nodes are healthy. No maintenance needed.")
-        except ImportError:
+                        if not battery_nodes and not problem_nodes and not recs:
+                            lines.append("All tracked nodes are healthy. No maintenance needed.")
+            except Exception as e:
+                lines.append(f"*Error collecting maintenance data: {e}*")
+        else:
             lines.append("*Predictive maintenance module not available.*")
-        except Exception as e:
-            lines.append(f"*Error collecting maintenance data: {e}*")
 
         self._sections.append(ReportSection(
             heading="Predictive Maintenance",
@@ -266,40 +288,40 @@ class ReportGenerator:
         """Add diagnostic history section."""
         lines = []
 
-        try:
-            from utils.diagnostic_engine import get_diagnostic_engine, Category
-            engine = get_diagnostic_engine()
+        if _HAS_DIAGNOSTIC_ENGINE:
+            try:
+                engine = get_diagnostic_engine()
 
-            # Health summary
-            summary = engine.get_health_summary()
-            lines.append(f"**System Health:** {summary.get('overall_health', 'unknown')}")
-            lines.append(f"- Symptoms last hour: {summary.get('symptoms_last_hour', 0)}")
-            lines.append(f"- Total diagnosed: {summary['stats'].get('diagnoses_made', 0)}")
-            lines.append(f"- Auto-recoveries: {summary['stats'].get('auto_recoveries', 0)}")
+                # Health summary
+                summary = engine.get_health_summary()
+                lines.append(f"**System Health:** {summary.get('overall_health', 'unknown')}")
+                lines.append(f"- Symptoms last hour: {summary.get('symptoms_last_hour', 0)}")
+                lines.append(f"- Total diagnosed: {summary['stats'].get('diagnoses_made', 0)}")
+                lines.append(f"- Auto-recoveries: {summary['stats'].get('auto_recoveries', 0)}")
 
-            # Recent diagnoses
-            recent = engine.get_recent_diagnoses(limit=self.config.max_diagnostic_entries)
-            if recent:
-                lines.append(f"\n### Recent Diagnoses ({len(recent)})\n")
-                lines.append("| Time | Category | Cause | Confidence |")
-                lines.append("|------|----------|-------|------------|")
-                for d in recent[-10:]:
-                    ts = d.symptom.timestamp.strftime('%H:%M:%S') if hasattr(d.symptom.timestamp, 'strftime') else '—'
-                    cat = d.symptom.category.value
-                    cause = d.likely_cause[:50]
-                    lines.append(f"| {ts} | {cat} | {cause} | {d.confidence:.0%} |")
+                # Recent diagnoses
+                recent = engine.get_recent_diagnoses(limit=self.config.max_diagnostic_entries)
+                if recent:
+                    lines.append(f"\n### Recent Diagnoses ({len(recent)})\n")
+                    lines.append("| Time | Category | Cause | Confidence |")
+                    lines.append("|------|----------|-------|------------|")
+                    for d in recent[-10:]:
+                        ts = d.symptom.timestamp.strftime('%H:%M:%S') if hasattr(d.symptom.timestamp, 'strftime') else '—'
+                        cat = d.symptom.category.value
+                        cause = d.likely_cause[:50]
+                        lines.append(f"| {ts} | {cat} | {cause} | {d.confidence:.0%} |")
 
-            # Recurring issues
-            recurring = engine.get_recurring_issues(threshold=2, hours=24)
-            if recurring:
-                lines.append("\n### Recurring Issues\n")
-                for issue in recurring[:5]:
-                    lines.append(f"- **{issue['likely_cause']}** "
-                                 f"({issue['count']}x in {issue['category']})")
-        except ImportError:
+                # Recurring issues
+                recurring = engine.get_recurring_issues(threshold=2, hours=24)
+                if recurring:
+                    lines.append("\n### Recurring Issues\n")
+                    for issue in recurring[:5]:
+                        lines.append(f"- **{issue['likely_cause']}** "
+                                     f"({issue['count']}x in {issue['category']})")
+            except Exception as e:
+                lines.append(f"*Error collecting diagnostic data: {e}*")
+        else:
             lines.append("*Diagnostic engine not available.*")
-        except Exception as e:
-            lines.append(f"*Error collecting diagnostic data: {e}*")
 
         self._sections.append(ReportSection(
             heading="Diagnostics",
@@ -312,29 +334,28 @@ class ReportGenerator:
         """Add RF analysis section."""
         lines = []
 
-        try:
-            from utils.preset_impact import PresetAnalyzer
-            analyzer = PresetAnalyzer()
+        if _HAS_PRESET_IMPACT:
+            try:
+                analyzer = PresetAnalyzer()
 
-            # Current preset analysis
-            lines.append("### LoRa Preset Summary\n")
-            lines.append("| Preset | Max Range (LOS) | Sensitivity | Throughput |")
-            lines.append("|--------|-----------------|-------------|------------|")
+                # Current preset analysis
+                lines.append("### LoRa Preset Summary\n")
+                lines.append("| Preset | Max Range (LOS) | Sensitivity | Throughput |")
+                lines.append("|--------|-----------------|-------------|------------|")
 
-            key_presets = ['SHORT_FAST', 'MEDIUM_FAST', 'LONG_FAST', 'LONG_SLOW']
-            for preset in key_presets:
-                try:
-                    impact = analyzer.analyze_preset(preset)
-                    lines.append(f"| {preset} | {impact.max_range_los_km:.1f} km | "
-                                 f"{impact.sensitivity_dbm:.1f} dBm | "
-                                 f"{impact.throughput_bps:.0f} bps |")
-                except Exception as e:
-                    logger.debug(f"Preset {preset} analysis failed: {e}")
-
-        except ImportError:
+                key_presets = ['SHORT_FAST', 'MEDIUM_FAST', 'LONG_FAST', 'LONG_SLOW']
+                for preset in key_presets:
+                    try:
+                        impact = analyzer.analyze_preset(preset)
+                        lines.append(f"| {preset} | {impact.max_range_los_km:.1f} km | "
+                                     f"{impact.sensitivity_dbm:.1f} dBm | "
+                                     f"{impact.throughput_bps:.0f} bps |")
+                    except Exception as e:
+                        logger.debug(f"Preset {preset} analysis failed: {e}")
+            except Exception as e:
+                lines.append(f"*Error in RF analysis: {e}*")
+        else:
             lines.append("*RF analysis module not available.*")
-        except Exception as e:
-            lines.append(f"*Error in RF analysis: {e}*")
 
         self._sections.append(ReportSection(
             heading="RF Analysis",
@@ -350,7 +371,6 @@ class ReportGenerator:
 
         # Gather recommendations from all subsystems
         try:
-            from utils.health_score import HealthScorer
             scorer = _get_health_scorer()
             if scorer:
                 snapshot = scorer.get_snapshot()
@@ -369,7 +389,6 @@ class ReportGenerator:
             logger.debug(f"Error collecting health recommendations: {e}")
 
         try:
-            from utils.predictive_maintenance import MaintenancePredictor
             predictor = _get_maintenance_predictor()
             if predictor:
                 for rec in predictor.get_maintenance_recommendations()[:5]:
@@ -400,10 +419,9 @@ class ReportGenerator:
         """Add report metadata."""
         lines = []
 
-        try:
-            from __version__ import __version__
+        if _HAS_VERSION:
             lines.append(f"- MeshForge Version: {__version__}")
-        except ImportError:
+        else:
             lines.append("- MeshForge Version: unknown")
 
         lines.append(f"- Report Generated: {datetime.now().isoformat()}")
@@ -500,34 +518,28 @@ _maintenance_predictor = None
 
 def _get_health_scorer():
     """Get shared health scorer instance if available."""
-    try:
-        from utils.health_score import get_health_scorer
-        return get_health_scorer()
-    except ImportError:
+    if not _HAS_HEALTH_SCORE:
         return None
+    return get_health_scorer()
 
 
 def _get_signal_manager():
     """Get signal trending manager if available."""
     global _signal_manager
+    if not _HAS_SIGNAL_TRENDING:
+        return None
     if _signal_manager is None:
-        try:
-            from utils.signal_trending import SignalTrendingManager
-            _signal_manager = SignalTrendingManager()
-        except ImportError:
-            return None
+        _signal_manager = SignalTrendingManager()
     return _signal_manager
 
 
 def _get_maintenance_predictor():
     """Get maintenance predictor if available."""
     global _maintenance_predictor
+    if not _HAS_PREDICTIVE_MAINTENANCE:
+        return None
     if _maintenance_predictor is None:
-        try:
-            from utils.predictive_maintenance import MaintenancePredictor
-            _maintenance_predictor = MaintenancePredictor()
-        except ImportError:
-            return None
+        _maintenance_predictor = MaintenancePredictor()
     return _maintenance_predictor
 
 

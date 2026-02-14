@@ -503,7 +503,7 @@ class TestMeshtasticdCollection:
         mock_manager.acquire_lock.return_value = True
         mock_manager._create_interface.return_value = mock_interface
 
-        with patch('utils.meshtastic_connection.get_connection_manager', return_value=mock_manager):
+        with patch('utils.map_data_collector._get_connection_manager', return_value=mock_manager):
             features = collector._collect_via_tcp_interface()
 
         # Should get 2 nodes (one has no position)
@@ -519,7 +519,7 @@ class TestMeshtasticdCollection:
         mock_manager = MagicMock()
         mock_manager.acquire_lock.return_value = False  # Lock held by someone else
 
-        with patch('utils.meshtastic_connection.get_connection_manager', return_value=mock_manager):
+        with patch('utils.map_data_collector._get_connection_manager', return_value=mock_manager):
             features = collector._collect_via_tcp_interface()
 
         assert features == []

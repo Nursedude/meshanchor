@@ -15,8 +15,14 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# RF Awareness module — optional dependency (requires numpy, optionally SoapySDR)
+RFAwareness, LoRaBand, _HAS_RF_AWARENESS = safe_import(
+    'utils.rf_awareness', 'RFAwareness', 'LoRaBand'
+)
 
 
 class RFAwarenessMixin:
@@ -60,13 +66,11 @@ class RFAwarenessMixin:
 
     def _get_rf_awareness(self):
         """Get or create RFAwareness instance."""
-        try:
-            from utils.rf_awareness import RFAwareness
-            if not hasattr(self, '_rf_awareness') or self._rf_awareness is None:
-                self._rf_awareness = RFAwareness()
-            return self._rf_awareness
-        except ImportError:
+        if not _HAS_RF_AWARENESS:
             return None
+        if not hasattr(self, '_rf_awareness') or self._rf_awareness is None:
+            self._rf_awareness = RFAwareness()
+        return self._rf_awareness
 
     def _rf_status(self):
         """Show SDR status and manage connection."""
@@ -165,8 +169,7 @@ class RFAwarenessMixin:
                 return
 
         # Select band
-        try:
-            from utils.rf_awareness import LoRaBand
+        if _HAS_RF_AWARENESS:
             band_choices = [
                 ("US_915", "US 915 MHz (902-928 MHz)"),
                 ("EU_868", "EU 868 MHz (863-870 MHz)"),
@@ -175,7 +178,7 @@ class RFAwarenessMixin:
                 ("custom", "Custom Frequency"),
                 ("back", "Back"),
             ]
-        except ImportError:
+        else:
             band_choices = [("custom", "Custom Frequency"), ("back", "Back")]
 
         band_choice = self.dialog.menu(
@@ -240,12 +243,11 @@ class RFAwarenessMixin:
                 self.dialog.msgbox("Error", "Failed to connect to SDR")
                 return
 
-        try:
-            from utils.rf_awareness import LoRaBand
-            band = LoRaBand.US_915
-        except ImportError:
+        if not _HAS_RF_AWARENESS:
             self.dialog.msgbox("Error", "LoRaBand not available")
             return
+
+        band = LoRaBand.US_915
 
         # Show waterfall in terminal (exit TUI temporarily)
         clear_screen()
@@ -318,11 +320,7 @@ class RFAwarenessMixin:
             self.dialog.msgbox("Error", "Invalid duration (1-300 seconds)")
             return
 
-        try:
-            from utils.rf_awareness import LoRaBand
-            band = LoRaBand.US_915
-        except ImportError:
-            band = None
+        band = LoRaBand.US_915 if _HAS_RF_AWARENESS else None
 
         self.dialog.infobox(
             "Measuring...",
@@ -386,9 +384,7 @@ class RFAwarenessMixin:
                 self.dialog.msgbox("Error", "Failed to connect to SDR")
                 return
 
-        try:
-            from utils.rf_awareness import LoRaBand
-        except ImportError:
+        if not _HAS_RF_AWARENESS:
             self.dialog.msgbox("Error", "Module not available")
             return
 
@@ -471,12 +467,11 @@ class RFAwarenessMixin:
                 self.dialog.msgbox("Error", "Failed to connect to SDR")
                 return
 
-        try:
-            from utils.rf_awareness import LoRaBand
-            band = LoRaBand.US_915
-        except ImportError:
+        if not _HAS_RF_AWARENESS:
             self.dialog.msgbox("Error", "Module not available")
             return
+
+        band = LoRaBand.US_915
 
         self.dialog.infobox(
             "Scanning...",

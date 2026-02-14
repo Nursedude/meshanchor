@@ -7,8 +7,22 @@ Extracted as a mixin to keep main.py under 1,500 lines.
 
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# --- Optional dependencies (module-level) ---
+event_bus, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'event_bus')
+
+(send_message, get_messages, get_conversations, get_stats,
+ start_receiving, stop_receiving, get_rx_status,
+ diagnose, get_routing_info, clear_messages,
+ _HAS_MESSAGING) = safe_import(
+    'commands.messaging',
+    'send_message', 'get_messages', 'get_conversations', 'get_stats',
+    'start_receiving', 'stop_receiving', 'get_rx_status',
+    'diagnose', 'get_routing_info', 'clear_messages',
+)
 
 
 class MessagingMixin:
@@ -62,9 +76,7 @@ class MessagingMixin:
         """
         import threading
 
-        try:
-            from utils.event_bus import event_bus
-        except ImportError:
+        if not _HAS_EVENT_BUS:
             self.dialog.msgbox("Unavailable", "Event bus module not available.\nFile: src/utils/event_bus.py")
             return
 
@@ -116,9 +128,7 @@ class MessagingMixin:
 
     def _messaging_send(self):
         """Send a message via mesh network."""
-        try:
-            from commands.messaging import send_message
-        except ImportError:
+        if not _HAS_MESSAGING:
             self.dialog.msgbox("Unavailable", "Messaging module not available.\nFile: src/commands/messaging.py")
             return
 
@@ -183,9 +193,7 @@ class MessagingMixin:
         clear_screen()
         print("=== Recent Messages ===\n")
 
-        try:
-            from commands.messaging import get_messages
-        except ImportError:
+        if not _HAS_MESSAGING:
             print("  Messaging module not available.")
             self._wait_for_enter()
             return
@@ -226,9 +234,7 @@ class MessagingMixin:
         clear_screen()
         print("=== Conversations ===\n")
 
-        try:
-            from commands.messaging import get_conversations
-        except ImportError:
+        if not _HAS_MESSAGING:
             print("  Messaging module not available.")
             self._wait_for_enter()
             return
@@ -264,9 +270,7 @@ class MessagingMixin:
         clear_screen()
         print("=== Messaging Statistics ===\n")
 
-        try:
-            from commands.messaging import get_stats
-        except ImportError:
+        if not _HAS_MESSAGING:
             print("  Messaging module not available.")
             self._wait_for_enter()
             return
@@ -296,9 +300,7 @@ class MessagingMixin:
 
     def _messaging_rx_control(self):
         """Start or stop the message RX listener."""
-        try:
-            from commands.messaging import start_receiving, stop_receiving, get_rx_status
-        except ImportError:
+        if not _HAS_MESSAGING:
             self.dialog.msgbox("Unavailable", "Messaging module not available.")
             return
 
@@ -331,9 +333,7 @@ class MessagingMixin:
         clear_screen()
         print("=== Messaging Diagnostics ===\n")
 
-        try:
-            from commands.messaging import diagnose
-        except ImportError:
+        if not _HAS_MESSAGING:
             print("  Messaging module not available.")
             self._wait_for_enter()
             return
@@ -364,9 +364,7 @@ class MessagingMixin:
         clear_screen()
         print("=== Messaging Routing Info ===\n")
 
-        try:
-            from commands.messaging import get_routing_info
-        except ImportError:
+        if not _HAS_MESSAGING:
             print("  Messaging module not available.")
             self._wait_for_enter()
             return
@@ -388,9 +386,7 @@ class MessagingMixin:
 
     def _messaging_cleanup(self):
         """Purge old messages."""
-        try:
-            from commands.messaging import clear_messages
-        except ImportError:
+        if not _HAS_MESSAGING:
             self.dialog.msgbox("Unavailable", "Messaging module not available.")
             return
 

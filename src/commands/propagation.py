@@ -32,12 +32,19 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 
 from .base import CommandResult
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
+# Module-level safe imports
+SettingsManager, _HAS_SETTINGS = safe_import('utils.common', 'SettingsManager')
+SpaceWeatherAPI, _HAS_SPACE_WEATHER = safe_import('utils.space_weather', 'SpaceWeatherAPI')
+get_pskreporter_subscriber, _HAS_PSKREPORTER = safe_import(
+    'monitoring.pskreporter_subscriber', 'get_pskreporter_subscriber'
+)
+
 # Settings persistence for source configuration
-try:
-    from utils.common import SettingsManager
+if _HAS_SETTINGS:
     _settings = SettingsManager("propagation", defaults={
         "sources": {
             "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
@@ -45,10 +52,8 @@ try:
             "pskreporter": {"enabled": False, "callsign": "", "bands": [], "modes": []},
         }
     })
-    _HAS_SETTINGS = True
-except ImportError:
+else:
     _settings = None
-    _HAS_SETTINGS = False
 
 
 class DataSource(Enum):
@@ -279,9 +284,7 @@ def get_space_weather() -> CommandResult:
         - band_conditions: Per-band HF condition assessment
         - source: Data source used
     """
-    try:
-        from utils.space_weather import SpaceWeatherAPI
-    except ImportError:
+    if not _HAS_SPACE_WEATHER:
         return CommandResult.fail(
             "Space weather module not available",
             error="utils.space_weather not found"
@@ -329,9 +332,7 @@ def get_band_conditions() -> CommandResult:
     Returns:
         CommandResult with per-band condition assessments
     """
-    try:
-        from utils.space_weather import SpaceWeatherAPI
-    except ImportError:
+    if not _HAS_SPACE_WEATHER:
         return CommandResult.fail(
             "Space weather module not available",
             error="utils.space_weather not found"
@@ -408,9 +409,7 @@ def get_propagation_summary() -> CommandResult:
     Returns:
         CommandResult with summary string and overall assessment
     """
-    try:
-        from utils.space_weather import SpaceWeatherAPI
-    except ImportError:
+    if not _HAS_SPACE_WEATHER:
         return CommandResult.fail("Space weather module not available")
 
     api = SpaceWeatherAPI(timeout=10)
@@ -553,8 +552,13 @@ def _test_pskreporter() -> CommandResult:
             data={'hint': 'Configure with: propagation.configure_source(DataSource.PSKREPORTER, enabled=True)'}
         )
 
+    if not _HAS_PSKREPORTER:
+        return CommandResult.fail(
+            "PSKReporter module not available",
+            data={'hint': 'pip install paho-mqtt'}
+        )
+
     try:
-        from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
         sub = get_pskreporter_subscriber()
         if sub.is_connected():
             stats = sub.get_stats()
@@ -572,11 +576,6 @@ def _test_pskreporter() -> CommandResult:
                 "PSKReporter MQTT not connected",
                 data={'hint': 'Check network connectivity to mqtt.pskreporter.info'}
             )
-    except ImportError:
-        return CommandResult.fail(
-            "PSKReporter module not available",
-            data={'hint': 'pip install paho-mqtt'}
-        )
     except Exception as e:
         return CommandResult.fail(
             f"PSKReporter check failed: {e}",
@@ -690,13 +689,14 @@ def _fetch_pskreporter_data() -> Optional[Dict[str, Any]]:
     Returns:
         Dict with PSKReporter propagation data or None on failure
     """
+    if not _HAS_PSKREPORTER:
+        logger.debug("PSKReporter module not available")
+        return None
+
     try:
-        from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
         sub = get_pskreporter_subscriber()
         if sub.is_connected():
             return sub.get_propagation_data()
-    except ImportError:
-        logger.debug("PSKReporter module not available")
     except Exception as e:
         logger.debug(f"PSKReporter data fetch failed: {e}")
     return None

@@ -34,15 +34,28 @@ from dataclasses import dataclass, field
 from .base import CommandResult
 from utils.paths import get_real_user_home
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Import event bus for TX event emission
-try:
-    from utils.event_bus import emit_message as _emit_message
-    _HAS_EVENT_BUS = True
-except ImportError:
-    _emit_message = None
-    _HAS_EVENT_BUS = False
+# Optional dependencies — module-level safe imports
+_emit_message, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_message')
+
+_RNSMeshtasticBridge, _HAS_GATEWAY_MODULE = safe_import(
+    'gateway', 'RNSMeshtasticBridge'
+)
+
+_cmd_gateway, _HAS_CMD_GATEWAY = safe_import('commands.gateway')
+
+_cmd_meshtastic, _HAS_CMD_MESHTASTIC = safe_import('commands.meshtastic')
+
+(_start_listener, _get_listener, _stop_listener,
+ _get_listener_status, _diagnose_pubsub,
+ _HAS_MSG_LISTENER) = safe_import(
+    'utils.message_listener',
+    'start_listener', 'get_listener', 'stop_listener',
+    'get_listener_status', 'diagnose_pubsub',
+)
 
 # Maximum message length before chunking
 MAX_MESSAGE_LENGTH = 160
@@ -203,13 +216,9 @@ def send_message(
     chunks = _chunk_message(content)
 
     try:
-        # Get bridge instance
-        try:
-            from gateway import RNSMeshtasticBridge
-            # Would get active bridge here
-            # bridge = get_active_bridge()
-        except ImportError:
-            pass
+        # Get bridge instance (if available)
+        # _HAS_GATEWAY_MODULE / _RNSMeshtasticBridge checked at module level
+        # bridge = get_active_bridge()  # Would get active bridge here
 
         # Store message
         conn = _init_db()
@@ -232,19 +241,19 @@ def send_message(
         if network == "meshtastic":
             # Try gateway first, then fall back to direct CLI
             gateway_available = False
-            try:
-                from commands import gateway
-                status = gateway.get_status()
-                if status.success and status.data.get('running') and status.data.get('meshtastic_connected'):
-                    gateway_available = True
-            except Exception:
-                pass
+            if _HAS_CMD_GATEWAY:
+                try:
+                    status = _cmd_gateway.get_status()
+                    if status.success and status.data.get('running') and status.data.get('meshtastic_connected'):
+                        gateway_available = True
+                except Exception:
+                    pass
 
             if gateway_available:
                 # Use gateway bridge
                 try:
                     for chunk in chunks:
-                        result = gateway.send_to_meshtastic(chunk, destination, channel)
+                        result = _cmd_gateway.send_to_meshtastic(chunk, destination, channel)
                         if not result.success:
                             send_error = result.message
                             break
@@ -258,60 +267,62 @@ def send_message(
 
             # Fallback to direct meshtastic CLI if gateway failed
             if not send_success:
-                try:
-                    from commands import meshtastic as mesh_cmd
-
-                    for chunk in chunks:
-                        # Use send_dm for direct messages, send_broadcast for channels
-                        if destination and destination != '!ffffffff':
-                            result = mesh_cmd.send_dm(
-                                text=chunk,
-                                dest=destination,
-                                ack=False,
-                                high_reliability=high_reliability
-                            )
+                if not _HAS_CMD_MESHTASTIC:
+                    if not send_error:
+                        send_error = "meshtastic module not available"
+                else:
+                    try:
+                        for chunk in chunks:
+                            # Use send_dm for direct messages, send_broadcast for channels
+                            if destination and destination != '!ffffffff':
+                                result = _cmd_meshtastic.send_dm(
+                                    text=chunk,
+                                    dest=destination,
+                                    ack=False,
+                                    high_reliability=high_reliability
+                                )
+                            else:
+                                result = _cmd_meshtastic.send_broadcast(
+                                    text=chunk,
+                                    channel_index=channel if channel > 0 else 1,
+                                    hop_limit=7 if high_reliability else 3
+                                )
+                            if not result.success:
+                                send_error = result.message
+                                break
                         else:
-                            result = mesh_cmd.send_broadcast(
-                                text=chunk,
-                                channel_index=channel if channel > 0 else 1,
-                                hop_limit=7 if high_reliability else 3
+                            send_success = True
+                            send_error = None  # Clear any previous error
+                    except Exception as e:
+                        if not send_error:  # Don't overwrite gateway error
+                            send_error = f"Direct send failed: {e}"
+                        logger.error(f"Failed to send via direct meshtastic: {e}")
+
+        elif network == "rns":
+            # RNS messages go through gateway only
+            if not _HAS_CMD_GATEWAY:
+                send_error = "Gateway module not available"
+            else:
+                try:
+                    # Validate destination is valid hex before attempting conversion
+                    if destination:
+                        clean_dest = destination.lstrip('!')
+                        if not all(c in '0123456789abcdefABCDEF' for c in clean_dest):
+                            return CommandResult.fail(
+                                f"Invalid RNS destination: {destination}\n"
+                                "Must be a hex hash (e.g. a1b2c3d4e5f6...)"
                             )
+                    for chunk in chunks:
+                        dest_bytes = bytes.fromhex(destination.lstrip('!')) if destination else None
+                        result = _cmd_gateway.send_to_rns(chunk, dest_bytes)
                         if not result.success:
                             send_error = result.message
                             break
                     else:
                         send_success = True
-                        send_error = None  # Clear any previous error
                 except Exception as e:
-                    if not send_error:  # Don't overwrite gateway error
-                        send_error = f"Direct send failed: {e}"
-                    logger.error(f"Failed to send via direct meshtastic: {e}")
-
-        elif network == "rns":
-            # RNS messages go through gateway only
-            try:
-                from commands import gateway
-                # Validate destination is valid hex before attempting conversion
-                if destination:
-                    clean_dest = destination.lstrip('!')
-                    if not all(c in '0123456789abcdefABCDEF' for c in clean_dest):
-                        return CommandResult.fail(
-                            f"Invalid RNS destination: {destination}\n"
-                            "Must be a hex hash (e.g. a1b2c3d4e5f6...)"
-                        )
-                for chunk in chunks:
-                    dest_bytes = bytes.fromhex(destination.lstrip('!')) if destination else None
-                    result = gateway.send_to_rns(chunk, dest_bytes)
-                    if not result.success:
-                        send_error = result.message
-                        break
-                else:
-                    send_success = True
-            except ImportError as e:
-                send_error = f"Gateway module not available: {e}"
-            except Exception as e:
-                send_error = f"RNS send failed: {e}"
-                logger.error(f"Failed to send via RNS: {e}")
+                    send_error = f"RNS send failed: {e}"
+                    logger.error(f"Failed to send via RNS: {e}")
 
         # Update delivery status
         if send_success:
@@ -657,13 +668,17 @@ def start_receiving(
             print(f"New message from {msg['from_id']}: {msg['content']}")
         result = messaging.start_receiving(callback=on_message)
     """
-    try:
-        from utils.message_listener import start_listener, get_listener
+    if not _HAS_MSG_LISTENER:
+        return CommandResult.fail(
+            "Message listener not available",
+            fix_hint="Ensure utils/message_listener.py exists"
+        )
 
-        success = start_listener(host=host)
+    try:
+        success = _start_listener(host=host)
 
         if callback:
-            listener = get_listener()
+            listener = _get_listener()
             listener.add_callback(callback)
 
         if success:
@@ -681,11 +696,6 @@ def start_receiving(
                 error="Could not connect to meshtastic"
             )
 
-    except ImportError as e:
-        return CommandResult.fail(
-            f"Message listener not available: {e}",
-            fix_hint="Ensure utils/message_listener.py exists"
-        )
     except Exception as e:
         logger.error(f"Failed to start receiving: {e}")
         return CommandResult.fail(f"Failed to start listener: {e}")
@@ -698,9 +708,11 @@ def stop_receiving() -> CommandResult:
     Returns:
         CommandResult with status
     """
+    if not _HAS_MSG_LISTENER:
+        return CommandResult.fail("Error stopping listener: module not available")
+
     try:
-        from utils.message_listener import stop_listener
-        stop_listener()
+        _stop_listener()
         return CommandResult.ok("Message listener stopped")
     except Exception as e:
         return CommandResult.fail(f"Error stopping listener: {e}")
@@ -713,18 +725,17 @@ def get_rx_status() -> CommandResult:
     Returns:
         CommandResult with listener state, message count, etc.
     """
-    try:
-        from utils.message_listener import get_listener_status
-        status = get_listener_status()
-        return CommandResult.ok(
-            f"RX status: {status['state']}",
-            data=status
-        )
-    except ImportError:
+    if not _HAS_MSG_LISTENER:
         return CommandResult.ok(
             "RX status: not initialized",
             data={'state': 'disconnected', 'error': 'Listener not available'}
         )
+
+    status = _get_listener_status()
+    return CommandResult.ok(
+        f"RX status: {status['state']}",
+        data=status
+    )
 
 
 # ============================================================================
@@ -745,24 +756,20 @@ def diagnose() -> CommandResult:
     Returns:
         CommandResult with diagnostic data and recommendations
     """
-    try:
-        from commands import meshtastic as mesh_cmd
-        return mesh_cmd.diagnose_messaging()
-    except ImportError:
-        # Fallback minimal diagnostics
-        diagnostics = {
-            'error': 'meshtastic module not available',
-            'rx_status': {},
-        }
+    if _HAS_CMD_MESHTASTIC:
+        return _cmd_meshtastic.diagnose_messaging()
 
-        try:
-            from utils.message_listener import get_listener_status, diagnose_pubsub
-            diagnostics['rx_status'] = get_listener_status()
-            diagnostics['pubsub'] = diagnose_pubsub()
-        except ImportError:
-            pass
+    # Fallback minimal diagnostics
+    diagnostics = {
+        'error': 'meshtastic module not available',
+        'rx_status': {},
+    }
 
-        return CommandResult.ok("Limited diagnostics", data=diagnostics)
+    if _HAS_MSG_LISTENER:
+        diagnostics['rx_status'] = _get_listener_status()
+        diagnostics['pubsub'] = _diagnose_pubsub()
+
+    return CommandResult.ok("Limited diagnostics", data=diagnostics)
 
 
 def get_routing_info() -> CommandResult:
@@ -772,54 +779,51 @@ def get_routing_info() -> CommandResult:
     Returns:
         CommandResult with hop_limit, device_role, and routing notes
     """
-    try:
-        from commands import meshtastic as mesh_cmd
-
-        info = {
-            'hop_limit': None,
-            'device_role': None,
-            'routing_behavior': None,
-            'recommendations': [],
-        }
-
-        # Get hop limit
-        hop_result = mesh_cmd.get_hop_limit()
-        if hop_result.success and hop_result.data:
-            info['hop_limit'] = hop_result.data.get('hop_limit')
-
-        # Get device role
-        role_result = mesh_cmd.get_device_role()
-        if role_result.success and role_result.data:
-            info['device_role'] = role_result.data.get('role')
-            info['role_description'] = role_result.data.get('description')
-
-        # Determine routing behavior
-        role = info['device_role']
-        hop = info['hop_limit']
-
-        if role == 'CLIENT_MUTE':
-            info['routing_behavior'] = 'Receive only - no rebroadcast'
-            info['recommendations'].append(
-                "Messages won't be relayed. Good for monitoring, bad for mesh health."
-            )
-        elif role in ('ROUTER', 'ROUTER_CLIENT'):
-            info['routing_behavior'] = 'Full router - always rebroadcasts with max hops'
-        elif role == 'REPEATER':
-            info['routing_behavior'] = 'Dedicated repeater - minimal processing'
-        else:
-            info['routing_behavior'] = f'Standard client with hop_limit={hop}'
-
-            if hop and hop < 3:
-                info['recommendations'].append(
-                    f"Low hop limit ({hop}) may cause messages to not reach distant nodes"
-                )
-
-        return CommandResult.ok(
-            f"Routing: {info['routing_behavior']}",
-            data=info
-        )
-
-    except ImportError:
+    if not _HAS_CMD_MESHTASTIC:
         return CommandResult.fail(
             "Cannot get routing info - meshtastic module not available"
         )
+
+    info = {
+        'hop_limit': None,
+        'device_role': None,
+        'routing_behavior': None,
+        'recommendations': [],
+    }
+
+    # Get hop limit
+    hop_result = _cmd_meshtastic.get_hop_limit()
+    if hop_result.success and hop_result.data:
+        info['hop_limit'] = hop_result.data.get('hop_limit')
+
+    # Get device role
+    role_result = _cmd_meshtastic.get_device_role()
+    if role_result.success and role_result.data:
+        info['device_role'] = role_result.data.get('role')
+        info['role_description'] = role_result.data.get('description')
+
+    # Determine routing behavior
+    role = info['device_role']
+    hop = info['hop_limit']
+
+    if role == 'CLIENT_MUTE':
+        info['routing_behavior'] = 'Receive only - no rebroadcast'
+        info['recommendations'].append(
+            "Messages won't be relayed. Good for monitoring, bad for mesh health."
+        )
+    elif role in ('ROUTER', 'ROUTER_CLIENT'):
+        info['routing_behavior'] = 'Full router - always rebroadcasts with max hops'
+    elif role == 'REPEATER':
+        info['routing_behavior'] = 'Dedicated repeater - minimal processing'
+    else:
+        info['routing_behavior'] = f'Standard client with hop_limit={hop}'
+
+        if hop and hop < 3:
+            info['recommendations'].append(
+                f"Low hop limit ({hop}) may cause messages to not reach distant nodes"
+            )
+
+    return CommandResult.ok(
+        f"Routing: {info['routing_behavior']}",
+        data=info
+    )

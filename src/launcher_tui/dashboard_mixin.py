@@ -8,8 +8,22 @@ Provides the display methods used by the Dashboard submenu.
 import logging
 import subprocess
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# --- Module-level safe imports (replaces try/except ImportError blocks) ---
+ServiceRunState, _HAS_STARTUP_CHECKS = safe_import('startup_checks', 'ServiceRunState')
+get_http_client, reset_http_client, _HAS_MESHTASTIC_HTTP = safe_import(
+    'utils.meshtastic_http', 'get_http_client', 'reset_http_client'
+)
+MapDataCollector, _HAS_MAP_COLLECTOR = safe_import('utils.map_data_collector', 'MapDataCollector')
+generate_report, generate_and_save, _HAS_REPORT_GEN = safe_import(
+    'utils.report_generator', 'generate_report', 'generate_and_save'
+)
+get_health_scorer, _HAS_HEALTH_SCORE = safe_import('utils.health_score', 'get_health_scorer')
+EASAlertsPlugin, _HAS_EAS = safe_import('plugins.eas_alerts', 'EASAlertsPlugin')
+pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 
 class DashboardMixin:
@@ -44,13 +58,7 @@ class DashboardMixin:
         clear_screen()
         print("=== Service Status ===\n")
 
-        # Import here to avoid circular imports at module level
-        try:
-            from startup_checks import ServiceRunState
-        except ImportError:
-            ServiceRunState = None
-
-        if self._env_state and ServiceRunState:
+        if self._env_state and _HAS_STARTUP_CHECKS:
             for name, info in self._env_state.services.items():
                 if info.state == ServiceRunState.RUNNING:
                     print(f"  \033[0;32m●\033[0m {name:<18} running")
@@ -83,18 +91,18 @@ class DashboardMixin:
         print("=== Node Counts ===\n")
 
         # Meshtastic nodes via HTTP API
-        try:
-            from utils.meshtastic_http import get_http_client
-            client = get_http_client()
-            if client.is_available:
-                nodes = client.get_nodes()
-                print(f"  Meshtastic nodes: {len(nodes)}")
-            else:
-                print("  Meshtastic: HTTP API unavailable")
-        except ImportError:
+        if not _HAS_MESHTASTIC_HTTP:
             print("  Meshtastic: meshtastic_http module not available")
-        except Exception as e:
-            print(f"  Meshtastic: unavailable ({e})")
+        else:
+            try:
+                client = get_http_client()
+                if client.is_available:
+                    nodes = client.get_nodes()
+                    print(f"  Meshtastic nodes: {len(nodes)}")
+                else:
+                    print("  Meshtastic: HTTP API unavailable")
+            except Exception as e:
+                print(f"  Meshtastic: unavailable ({e})")
 
         # RNS destinations
         try:
@@ -166,73 +174,73 @@ class DashboardMixin:
 
         # Test 3: meshtasticd HTTP API
         print("[3/6] Testing meshtasticd HTTP API...")
-        try:
-            from utils.meshtastic_http import get_http_client, reset_http_client
-            # Reset singleton so we get a fresh probe (not stale cached state)
-            reset_http_client()
-            client = get_http_client()
-            if client.is_available:
-                nodes = client.get_nodes()
-                results.append(("meshtasticd HTTP", "OK",
-                               f"{len(nodes)} nodes via {client._base_url}"))
-                print(f"      \033[0;32mOK\033[0m - {len(nodes)} nodes at {client._base_url}")
-            else:
-                # Provide actionable fix guidance
-                hint = self._check_webserver_config()
-                detail = f"Not reachable (tried ports 9443,443,80,4403). {hint}"
-                results.append(("meshtasticd HTTP", "FAIL", detail))
-                print(f"      \033[0;31mFAIL\033[0m - HTTP API not reachable")
-                print(f"      \033[2m{hint}\033[0m")
-        except ImportError:
+        if not _HAS_MESHTASTIC_HTTP:
             results.append(("meshtasticd HTTP", "SKIP", "meshtastic_http module not available"))
             print("      \033[0;33mSKIP\033[0m - Module not available")
-        except Exception as e:
-            err_msg = str(e)[:50]
-            results.append(("meshtasticd HTTP", "FAIL", err_msg))
-            print(f"      \033[0;31mFAIL\033[0m - {err_msg}")
+        else:
+            try:
+                # Reset singleton so we get a fresh probe (not stale cached state)
+                reset_http_client()
+                client = get_http_client()
+                if client.is_available:
+                    nodes = client.get_nodes()
+                    results.append(("meshtasticd HTTP", "OK",
+                                   f"{len(nodes)} nodes via {client._base_url}"))
+                    print(f"      \033[0;32mOK\033[0m - {len(nodes)} nodes at {client._base_url}")
+                else:
+                    # Provide actionable fix guidance
+                    hint = self._check_webserver_config()
+                    detail = f"Not reachable (tried ports 9443,443,80,4403). {hint}"
+                    results.append(("meshtasticd HTTP", "FAIL", detail))
+                    print(f"      \033[0;31mFAIL\033[0m - HTTP API not reachable")
+                    print(f"      \033[2m{hint}\033[0m")
+            except Exception as e:
+                err_msg = str(e)[:50]
+                results.append(("meshtasticd HTTP", "FAIL", err_msg))
+                print(f"      \033[0;31mFAIL\033[0m - {err_msg}")
 
         # Test 4: pubsub availability
         print("[4/6] Testing pubsub (for live capture)...")
-        try:
-            from pubsub import pub
-            listeners = pub.getDefaultTopicMgr().getTopic('meshtastic.receive', okIfNone=True)
-            if listeners:
-                count = len(list(listeners.getListeners()))
-                results.append(("pubsub", "OK", f"{count} listener(s) on meshtastic.receive"))
-                print(f"      \033[0;32mOK\033[0m - {count} listener(s) registered")
-            else:
-                results.append(("pubsub", "WARN", "Topic exists but no listeners"))
-                print("      \033[0;33mWARN\033[0m - No listeners registered")
-        except ImportError:
+        if not _HAS_PUBSUB:
             results.append(("pubsub", "SKIP", "pubsub module not installed"))
             print("      \033[0;33mSKIP\033[0m - Module not installed")
-        except Exception as e:
-            results.append(("pubsub", "WARN", str(e)[:50]))
-            print(f"      \033[0;33mWARN\033[0m - {e}")
+        else:
+            try:
+                listeners = pub.getDefaultTopicMgr().getTopic('meshtastic.receive', okIfNone=True)
+                if listeners:
+                    count = len(list(listeners.getListeners()))
+                    results.append(("pubsub", "OK", f"{count} listener(s) on meshtastic.receive"))
+                    print(f"      \033[0;32mOK\033[0m - {count} listener(s) registered")
+                else:
+                    results.append(("pubsub", "WARN", "Topic exists but no listeners"))
+                    print("      \033[0;33mWARN\033[0m - No listeners registered")
+            except Exception as e:
+                results.append(("pubsub", "WARN", str(e)[:50]))
+                print(f"      \033[0;33mWARN\033[0m - {e}")
 
         # Test 5: MapDataCollector
         print("[5/6] Testing MapDataCollector...")
-        try:
-            from utils.map_data_collector import MapDataCollector
-            collector = MapDataCollector(enable_history=False)
-            geojson = collector.collect(max_age_seconds=30)
-            props = geojson.get('properties', {})
-            total = props.get('total_nodes', 0)
-            with_gps = props.get('nodes_with_position', 0)
-            sources = props.get('sources', {})
-            active_sources = [k for k, v in sources.items() if isinstance(v, (int, float)) and v > 0]
-            if total > 0:
-                results.append(("MapDataCollector", "OK", f"{total} nodes ({with_gps} with GPS)"))
-                print(f"      \033[0;32mOK\033[0m - {total} nodes, sources: {active_sources}")
-            else:
-                results.append(("MapDataCollector", "WARN", "0 nodes returned"))
-                print("      \033[0;33mWARN\033[0m - 0 nodes (check meshtasticd connection)")
-        except ImportError:
+        if not _HAS_MAP_COLLECTOR:
             results.append(("MapDataCollector", "SKIP", "Module not available"))
             print("      \033[0;33mSKIP\033[0m - Module not available")
-        except Exception as e:
-            results.append(("MapDataCollector", "FAIL", str(e)[:50]))
-            print(f"      \033[0;31mFAIL\033[0m - {e}")
+        else:
+            try:
+                collector = MapDataCollector(enable_history=False)
+                geojson = collector.collect(max_age_seconds=30)
+                props = geojson.get('properties', {})
+                total = props.get('total_nodes', 0)
+                with_gps = props.get('nodes_with_position', 0)
+                sources = props.get('sources', {})
+                active_sources = [k for k, v in sources.items() if isinstance(v, (int, float)) and v > 0]
+                if total > 0:
+                    results.append(("MapDataCollector", "OK", f"{total} nodes ({with_gps} with GPS)"))
+                    print(f"      \033[0;32mOK\033[0m - {total} nodes, sources: {active_sources}")
+                else:
+                    results.append(("MapDataCollector", "WARN", "0 nodes returned"))
+                    print("      \033[0;33mWARN\033[0m - 0 nodes (check meshtasticd connection)")
+            except Exception as e:
+                results.append(("MapDataCollector", "FAIL", str(e)[:50]))
+                print(f"      \033[0;31mFAIL\033[0m - {e}")
 
         # Test 6: RNS path table
         print("[6/6] Testing RNS path table...")
@@ -315,9 +323,7 @@ class DashboardMixin:
         print("=== Generating Network Status Report ===\n")
         print("Collecting data from all subsystems...\n")
 
-        try:
-            from utils.report_generator import generate_report
-        except ImportError:
+        if not _HAS_REPORT_GEN:
             print("  Report generator module not available.")
             print("  File: src/utils/report_generator.py")
             self._wait_for_enter()
@@ -335,9 +341,7 @@ class DashboardMixin:
         _sp.run(['clear'], check=False, timeout=5)
         print("=== Generating & Saving Report ===\n")
 
-        try:
-            from utils.report_generator import generate_and_save
-        except ImportError:
+        if not _HAS_REPORT_GEN:
             print("  Report generator module not available.")
             print("  File: src/utils/report_generator.py")
             self._wait_for_enter()
@@ -353,9 +357,7 @@ class DashboardMixin:
         _sp.run(['clear'], check=False, timeout=5)
         print("=== Network Health Score ===\n")
 
-        try:
-            from utils.health_score import get_health_scorer
-        except ImportError:
+        if not _HAS_HEALTH_SCORE:
             print("  Health score module not available.")
             print("  File: src/utils/health_score.py")
             self._wait_for_enter()
@@ -435,24 +437,22 @@ class DashboardMixin:
 
         # EAS / Weather alerts
         print()
-        try:
-            from plugins.eas_alerts import EASAlertsPlugin
-            plugin = EASAlertsPlugin()
-            eas_alerts = plugin.get_weather_alerts()
-            if eas_alerts:
-                print(f"WEATHER ALERTS ({len(eas_alerts)}):")
-                for alert in eas_alerts[:5]:
-                    severity = getattr(alert, 'severity', 'Unknown')
-                    headline = getattr(alert, 'headline', str(alert))
-                    if len(headline) > 65:
-                        headline = headline[:62] + "..."
-                    print(f"  \033[0;31m!\033[0m [{severity}] {headline}")
-            else:
-                print("  Weather: No active alerts")
-        except ImportError:
-            pass  # EAS plugin not installed, skip silently
-        except Exception as e:
-            logger.debug("EAS alert check failed: %s", e)
+        if _HAS_EAS:
+            try:
+                plugin = EASAlertsPlugin()
+                eas_alerts = plugin.get_weather_alerts()
+                if eas_alerts:
+                    print(f"WEATHER ALERTS ({len(eas_alerts)}):")
+                    for alert in eas_alerts[:5]:
+                        severity = getattr(alert, 'severity', 'Unknown')
+                        headline = getattr(alert, 'headline', str(alert))
+                        if len(headline) > 65:
+                            headline = headline[:62] + "..."
+                        print(f"  \033[0;31m!\033[0m [{severity}] {headline}")
+                else:
+                    print("  Weather: No active alerts")
+            except Exception as e:
+                logger.debug("EAS alert check failed: %s", e)
 
         print()
         self._wait_for_enter()

@@ -13,8 +13,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+get_metrics_history, MetricType, _HAS_METRICS_HISTORY = safe_import(
+    'utils.metrics_history', 'get_metrics_history', 'MetricType'
+)
+get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+start_metrics_server, _HAS_METRICS_EXPORT = safe_import(
+    'utils.metrics_export', 'start_metrics_server'
+)
 
 
 class MetricsMixin:
@@ -62,11 +72,9 @@ class MetricsMixin:
 
     def _get_metrics_history(self):
         """Get the MetricsHistory instance."""
-        try:
-            from utils.metrics_history import get_metrics_history
-            return get_metrics_history()
-        except ImportError:
+        if not _HAS_METRICS_HISTORY:
             return None
+        return get_metrics_history()
 
     def _metrics_stats(self):
         """Show metrics storage statistics."""
@@ -113,9 +121,7 @@ class MetricsMixin:
             self.dialog.msgbox("Unavailable", "Metrics history module not loaded.")
             return
 
-        try:
-            from utils.metrics_history import MetricType
-        except ImportError:
+        if not _HAS_METRICS_HISTORY:
             self.dialog.msgbox("Error", "MetricType not available")
             return
 
@@ -283,9 +289,7 @@ class MetricsMixin:
             self.dialog.msgbox("Unavailable", "Metrics history module not loaded.")
             return
 
-        try:
-            from utils.metrics_history import MetricType
-        except ImportError:
+        if not _HAS_METRICS_HISTORY:
             return
 
         # Get edge info from user
@@ -423,11 +427,9 @@ class MetricsMixin:
             return
 
         # Default export path
-        try:
-            from utils.paths import get_real_user_home
+        if _HAS_PATHS:
             export_dir = get_real_user_home() / ".cache" / "meshforge"
-        except ImportError:
-            from pathlib import Path
+        else:
             import os
             sudo_user = os.environ.get('SUDO_USER', '')
             if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
@@ -510,9 +512,7 @@ class MetricsMixin:
 
     def _prometheus_start(self):
         """Start Prometheus server in background thread."""
-        try:
-            from utils.metrics_export import start_metrics_server
-        except ImportError:
+        if not _HAS_METRICS_EXPORT:
             self.dialog.msgbox("Error", "Prometheus exporter module not available.")
             return
 

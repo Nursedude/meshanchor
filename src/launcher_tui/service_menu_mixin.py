@@ -12,29 +12,23 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
 # Import centralized service checking
-try:
-    from utils.service_check import (
-        check_systemd_service,
-        check_process_running,
-        check_service,
-        apply_config_and_restart,
-        enable_service,
-        ServiceState,
-    )
-    _HAS_SERVICE_CHECK = True
-    _HAS_APPLY_RESTART = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
-    _HAS_APPLY_RESTART = False
+(check_systemd_service, check_process_running, check_service,
+ apply_config_and_restart, enable_service, ServiceState,
+ _HAS_SERVICE_CHECK) = safe_import(
+    'utils.service_check',
+    'check_systemd_service', 'check_process_running', 'check_service',
+    'apply_config_and_restart', 'enable_service', 'ServiceState',
+)
+_HAS_APPLY_RESTART = _HAS_SERVICE_CHECK
 
 # Import centralized path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+if not _HAS_PATHS:
     def get_real_user_home() -> Path:
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
@@ -43,6 +37,22 @@ except ImportError:
         if logname and logname != 'root' and '/' not in logname and '..' not in logname:
             return Path(f'/home/{logname}')
         return Path('/root')
+
+# Import port lockdown helpers
+(lock_port_external, unlock_port_external,
+ check_port_locked, persist_iptables,
+ _HAS_PORT_LOCKDOWN) = safe_import(
+    'utils.service_check',
+    'lock_port_external', 'unlock_port_external',
+    'check_port_locked', 'persist_iptables',
+)
+
+# Import RNS identity helpers
+get_identity_path, _HAS_RNS_IDENTITY = safe_import('commands.rns', 'get_identity_path')
+create_identities, _HAS_RNS_CREATE = safe_import('commands.rns', 'create_identities')
+
+# Import propagation module
+propagation_mod, _HAS_PROPAGATION = safe_import('commands.propagation')
 
 
 class ServiceMenuMixin:
@@ -152,13 +162,10 @@ class ServiceMenuMixin:
             pass
 
         # 3. Check gateway identity exists
-        try:
-            from commands.rns import get_identity_path
+        if _HAS_RNS_IDENTITY:
             gw_id = get_identity_path()
             if not gw_id.exists():
                 issues.append("Gateway identity not created yet")
-        except ImportError:
-            pass
 
         if not issues:
             return True
@@ -224,8 +231,7 @@ class ServiceMenuMixin:
                 print("  Bridge may fail to connect.\n")
 
         # Create gateway identity if missing
-        try:
-            from commands.rns import create_identities, get_identity_path
+        if _HAS_RNS_IDENTITY and _HAS_RNS_CREATE:
             gw_id = get_identity_path()
             if not gw_id.exists():
                 print("[3] Creating gateway identity...")
@@ -234,8 +240,6 @@ class ServiceMenuMixin:
                     print(f"  {result.message}\n")
                 else:
                     print(f"  Warning: {result.message}\n")
-        except ImportError:
-            pass
 
         # Restart NomadNet as client (if we stopped it)
         if nomadnet_conflict:
@@ -568,12 +572,7 @@ class ServiceMenuMixin:
 
     def _manage_port_lockdown(self):
         """Lock/unlock external access to meshtasticd port 9443."""
-        try:
-            from utils.service_check import (
-                lock_port_external, unlock_port_external,
-                check_port_locked, persist_iptables,
-            )
-        except ImportError:
+        if not _HAS_PORT_LOCKDOWN:
             self.dialog.msgbox(
                 "Unavailable",
                 "Port lockdown requires utils.service_check module."
@@ -1281,16 +1280,13 @@ WantedBy=multi-user.target
                 )
                 if result.returncode == 0:
                     print("\033[0;32m✓\033[0m OpenHamClock started on port 3000")
-                    print("\nAuto-configuring MeshForge...")
-                    try:
-                        from commands import propagation
-                        propagation.configure_source(
-                            propagation.DataSource.OPENHAMCLOCK,
+                    if _HAS_PROPAGATION:
+                        print("\nAuto-configuring MeshForge...")
+                        propagation_mod.configure_source(
+                            propagation_mod.DataSource.OPENHAMCLOCK,
                             host="localhost", port=3000
                         )
                         print("\033[0;32m✓\033[0m MeshForge configured for OpenHamClock")
-                    except ImportError:
-                        pass
                 else:
                     print(f"\033[0;31mError:\033[0m {result.stderr}")
 

@@ -33,35 +33,29 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    # Fallback for when running tests from project root
-    try:
-        from src.utils.paths import get_real_user_home
-    except ImportError:
-        # Ultimate fallback - handle sudo case
-        def get_real_user_home():
-            sudo_user = os.environ.get('SUDO_USER', '')
-            if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-                return Path(f'/home/{sudo_user}')
-            logname = os.environ.get('LOGNAME', '')
-            if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-                return Path(f'/home/{logname}')
-            return Path('/root')
+# Safe import utility for consolidated ImportError handling
+from utils.safe_import import safe_import
 
+# Import centralized path utility for sudo compatibility
+get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+if not _HAS_PATHS:
+    # Ultimate fallback - handle sudo case
+    def get_real_user_home():
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+            return Path(f'/home/{sudo_user}')
+        logname = os.environ.get('LOGNAME', '')
+        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+            return Path(f'/home/{logname}')
+        return Path('/root')
 
 # Import centralized service checking
-try:
-    from utils.service_check import check_process_running
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    try:
-        from src.utils.service_check import check_process_running
-        _HAS_SERVICE_CHECK = True
-    except ImportError:
-        _HAS_SERVICE_CHECK = False
+check_process_running, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running'
+)
+
+# Import RNS module for health checks
+_RNS, _HAS_RNS = safe_import('RNS')
 
 # Diagnostic data directory
 DIAG_DIR = get_real_user_home() / ".config" / "meshforge" / "diagnostics"
@@ -465,11 +459,7 @@ class NetworkDiagnostics:
                 rnsd_running = result.returncode == 0
 
             # Check if RNS module is available
-            try:
-                import RNS
-                rns_installed = True
-            except ImportError:
-                rns_installed = False
+            rns_installed = _HAS_RNS
 
             if rnsd_running:
                 self.update_health(
