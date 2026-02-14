@@ -824,7 +824,7 @@ class TestEnvironmentCollector:
         mock_subscriber.get_nodes_with_air_quality.return_value = [mock_node]
         mock_subscriber.get_nodes.return_value = [mock_node]
 
-        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+        with patch('utils.prometheus_exporter.get_local_subscriber', return_value=mock_subscriber):
             exporter = PrometheusExporter()
             lines = exporter._collect_environment_metrics()
 
@@ -846,7 +846,7 @@ class TestEnvironmentCollector:
         mock_subscriber = MagicMock()
         mock_subscriber.is_connected.return_value = False
 
-        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+        with patch('utils.prometheus_exporter.get_local_subscriber', return_value=mock_subscriber):
             exporter = PrometheusExporter()
             lines = exporter._collect_environment_metrics()
             assert lines == []
@@ -873,7 +873,7 @@ class TestMQTTCollector:
             "mesh_size_24h": 45,
         }
 
-        with patch('monitoring.mqtt_subscriber.get_local_subscriber', return_value=mock_subscriber):
+        with patch('utils.prometheus_exporter.get_local_subscriber', return_value=mock_subscriber):
             exporter = PrometheusExporter()
             lines = exporter._collect_mqtt_metrics()
 
@@ -900,7 +900,7 @@ class TestTopologyCollector:
         mock_store = MagicMock()
         mock_store.get_snapshots.return_value = [mock_snapshot]
 
-        with patch('utils.topology_snapshot.get_topology_snapshot_store', return_value=mock_store):
+        with patch('utils.prometheus_exporter.get_topology_snapshot_store', return_value=mock_store):
             exporter = PrometheusExporter()
             lines = exporter._collect_topology_metrics()
 
@@ -914,7 +914,7 @@ class TestTopologyCollector:
         mock_store = MagicMock()
         mock_store.get_snapshots.return_value = []
 
-        with patch('utils.topology_snapshot.get_topology_snapshot_store', return_value=mock_store):
+        with patch('utils.prometheus_exporter.get_topology_snapshot_store', return_value=mock_store):
             exporter = PrometheusExporter()
             lines = exporter._collect_topology_metrics()
 

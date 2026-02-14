@@ -7,8 +7,13 @@ Extracted as a mixin to keep main.py under 1,500 lines.
 
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+create_routing_system, create_notification_system, _HAS_CLASSIFIER = safe_import(
+    'utils.classifier', 'create_routing_system', 'create_notification_system'
+)
 
 
 class ClassifierMixin:
@@ -49,9 +54,7 @@ class ClassifierMixin:
         clear_screen()
         print("=== Routing Classification Stats ===\n")
 
-        try:
-            from utils.classifier import create_routing_system
-        except ImportError:
+        if not _HAS_CLASSIFIER:
             print("  Classifier module not available.")
             print("  File: src/utils/classifier.py")
             self._wait_for_enter()
@@ -87,9 +90,7 @@ class ClassifierMixin:
         clear_screen()
         print("=== Notification Classification Stats ===\n")
 
-        try:
-            from utils.classifier import create_notification_system
-        except ImportError:
+        if not _HAS_CLASSIFIER:
             print("  Classifier module not available.")
             self._wait_for_enter()
             return
@@ -131,9 +132,7 @@ class ClassifierMixin:
         clear_screen()
         print("=== Recent Classification Decisions ===\n")
 
-        try:
-            from utils.classifier import create_routing_system
-        except ImportError:
+        if not _HAS_CLASSIFIER:
             print("  Classifier module not available.")
             self._wait_for_enter()
             return
@@ -168,9 +167,7 @@ class ClassifierMixin:
         clear_screen()
         print("=== Bounced Items (Low Confidence) ===\n")
 
-        try:
-            from utils.classifier import create_routing_system
-        except ImportError:
+        if not _HAS_CLASSIFIER:
             print("  Classifier module not available.")
             self._wait_for_enter()
             return

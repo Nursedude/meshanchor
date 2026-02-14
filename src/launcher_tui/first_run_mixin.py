@@ -23,10 +23,11 @@ from typing import Optional, List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
 # Import path utilities
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+if not _HAS_PATHS:
     def get_real_user_home() -> Path:
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
@@ -39,24 +40,15 @@ except ImportError:
         return Path('/root')
 
 # Import service check
-try:
-    from utils.service_check import check_service, apply_config_and_restart
-    _HAS_APPLY_RESTART = True
-except ImportError:
-    check_service = None
-    _HAS_APPLY_RESTART = False
+check_service, apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'apply_config_and_restart'
+)
 
 # Import device scanner
-try:
-    from utils.device_scanner import DeviceScanner
-except ImportError:
-    DeviceScanner = None
+DeviceScanner, _HAS_DEVICE_SCANNER = safe_import('utils.device_scanner', 'DeviceScanner')
 
 # Import startup checker for hardware detection
-try:
-    from startup_checks import StartupChecker
-except ImportError:
-    StartupChecker = None
+StartupChecker, _HAS_STARTUP_CHECKER = safe_import('startup_checks', 'StartupChecker')
 
 
 # =========================================================================

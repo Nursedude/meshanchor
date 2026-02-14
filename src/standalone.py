@@ -29,11 +29,29 @@ SRC_DIR = Path(__file__).parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-# Version
-try:
-    from __version__ import __version__
-except ImportError:
-    __version__ = "0.5.0-beta"
+from utils.safe_import import safe_import
+
+# ── Module-level safe imports ─────────────────────────────────────────────────
+_version_mod, _HAS_VERSION = safe_import('__version__', '__version__')
+__version__ = _version_mod if _HAS_VERSION else "0.5.0-beta"
+
+_rich_mod, _HAS_RICH = safe_import('rich')
+_meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
+_serial_list_ports, _HAS_SERIAL = safe_import('serial.tools.list_ports')
+
+(
+    haversine_distance, fresnel_radius,
+    free_space_path_loss, earth_bulge,
+    link_budget, detailed_link_budget,
+    is_fast_available, CABLE_LOSS_DB_PER_M,
+    _HAS_RF_UTILS,
+) = safe_import(
+    'utils.rf',
+    'haversine_distance', 'fresnel_radius',
+    'free_space_path_loss', 'earth_bulge',
+    'link_budget', 'detailed_link_budget',
+    'is_fast_available', 'CABLE_LOSS_DB_PER_M',
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -55,22 +73,14 @@ class DependencyStatus:
         self.messages['python'] = f"Python {sys.version_info.major}.{sys.version_info.minor}"
 
         # Rich - for pretty output
-        try:
-            import rich
-            self.available['rich'] = True
-            self.messages['rich'] = "Rich console available"
-        except ImportError:
-            self.available['rich'] = False
-            self.messages['rich'] = "pip install rich"
+        self.available['rich'] = _HAS_RICH
+        self.messages['rich'] = "Rich console available" if _HAS_RICH else "pip install rich"
 
         # Meshtastic - for device communication
-        try:
-            import meshtastic
-            self.available['meshtastic'] = True
-            self.messages['meshtastic'] = "Meshtastic library available"
-        except ImportError:
-            self.available['meshtastic'] = False
-            self.messages['meshtastic'] = "pip install meshtastic"
+        self.available['meshtastic'] = _HAS_MESHTASTIC
+        self.messages['meshtastic'] = (
+            "Meshtastic library available" if _HAS_MESHTASTIC else "pip install meshtastic"
+        )
 
         # Check root
         self.available['root'] = os.geteuid() == 0
@@ -100,21 +110,19 @@ class StandaloneTools:
         """RF Calculator - Pure Python, no dependencies"""
         print("\n═══ RF Calculator ═══\n")
 
-        try:
-            from utils.rf import (
-                haversine_distance, fresnel_radius,
-                free_space_path_loss, earth_bulge,
-                link_budget, detailed_link_budget,
-                is_fast_available, CABLE_LOSS_DB_PER_M
-            )
+        if _HAS_RF_UTILS:
             _has_detailed = True
+            _haversine = haversine_distance
+            _fspl_fn = free_space_path_loss
+            _fresnel = fresnel_radius
+            _bulge = earth_bulge
             fast_mode = " (Cython optimized)" if is_fast_available() else ""
             print(f"RF calculations ready{fast_mode}\n")
-        except ImportError:
+        else:
             # Inline implementation if utils not available
             import math
 
-            def haversine_distance(lat1, lon1, lat2, lon2):
+            def _haversine(lat1, lon1, lat2, lon2):
                 R = 6371000
                 lat1_rad, lat2_rad = math.radians(lat1), math.radians(lat2)
                 delta_lat = math.radians(lat2 - lat1)
@@ -123,13 +131,13 @@ class StandaloneTools:
                      math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
                 return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-            def free_space_path_loss(distance_m, freq_mhz):
+            def _fspl_fn(distance_m, freq_mhz):
                 return 20 * math.log10(distance_m) + 20 * math.log10(freq_mhz) - 27.55
 
-            def fresnel_radius(distance_km, freq_ghz):
+            def _fresnel(distance_km, freq_ghz):
                 return 17.3 * math.sqrt(distance_km / (4 * freq_ghz))
 
-            def earth_bulge(distance_m):
+            def _bulge(distance_m):
                 return (distance_m ** 2) / (8 * 6371000 * (4/3))
 
             _has_detailed = False
@@ -158,7 +166,7 @@ class StandaloneTools:
                     lon1 = float(input("  Lon1: "))
                     lat2 = float(input("  Lat2: "))
                     lon2 = float(input("  Lon2: "))
-                    dist = haversine_distance(lat1, lon1, lat2, lon2)
+                    dist = _haversine(lat1, lon1, lat2, lon2)
                     print(f"\n  Distance: {dist/1000:.2f} km ({dist:.0f} m)\n")
                 except ValueError:
                     print("Invalid input\n")
@@ -168,7 +176,7 @@ class StandaloneTools:
                     print("\nEnter distance and frequency:")
                     dist = float(input("  Distance (km): ")) * 1000
                     freq = float(input("  Frequency (MHz): "))
-                    fspl = free_space_path_loss(dist, freq)
+                    fspl = _fspl_fn(dist, freq)
                     print(f"\n  FSPL: {fspl:.2f} dB\n")
                 except ValueError:
                     print("Invalid input\n")
@@ -178,7 +186,7 @@ class StandaloneTools:
                     print("\nEnter distance and frequency:")
                     dist = float(input("  Distance (km): "))
                     freq = float(input("  Frequency (GHz): "))
-                    radius = fresnel_radius(dist, freq)
+                    radius = _fresnel(dist, freq)
                     print(f"\n  Fresnel radius: {radius:.2f} m\n")
                 except ValueError:
                     print("Invalid input\n")
@@ -186,7 +194,7 @@ class StandaloneTools:
             elif choice == "4":
                 try:
                     dist = float(input("\n  Distance (km): ")) * 1000
-                    bulge = earth_bulge(dist)
+                    bulge = _bulge(dist)
                     print(f"\n  Earth bulge: {bulge:.2f} m\n")
                 except ValueError:
                     print("Invalid input\n")
@@ -231,7 +239,7 @@ class StandaloneTools:
                         rx_gain = float(input("  RX Antenna Gain (dBi): "))
                         dist = float(input("  Distance (km): ")) * 1000
                         freq = float(input("  Frequency (MHz): "))
-                        fspl = free_space_path_loss(dist, freq)
+                        fspl = _fspl_fn(dist, freq)
                         rx_power = tx_power + tx_gain + rx_gain - fspl
                         print(f"\n  FSPL: {fspl:.2f} dB")
                         print(f"  RX Power: {rx_power:.2f} dBm\n")
@@ -440,15 +448,14 @@ class StandaloneTools:
                 print(f"  {dev}")
 
             # Try to get more info if pyserial available
-            try:
-                import serial.tools.list_ports
+            if _HAS_SERIAL:
                 print("\nDetailed port info:")
-                for port in serial.tools.list_ports.comports():
+                for port in _serial_list_ports.comports():
                     print(f"  {port.device}")
                     print(f"    Description: {port.description}")
                     print(f"    VID:PID: {port.vid}:{port.pid}" if port.vid else "")
                     print()
-            except ImportError:
+            else:
                 print("\n  (Install pyserial for detailed info)")
         else:
             print("No serial devices found")

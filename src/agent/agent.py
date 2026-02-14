@@ -48,7 +48,27 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports for optional dependencies
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+_create_gateway_config_api, _HAS_CONFIG_API = safe_import(
+    'utils.config_api', 'create_gateway_config_api'
+)
+_SharedHealthState, _HAS_HEALTH_STATE = safe_import(
+    'utils.shared_health_state', 'SharedHealthState'
+)
+_create_gateway_health_probe, _HAS_HEALTH_PROBE = safe_import(
+    'utils.active_health_probe', 'create_gateway_health_probe'
+)
+_integrate_with_active_probe, _HAS_HEALTH_INTEGRATE = safe_import(
+    'utils.shared_health_state', 'integrate_with_active_probe'
+)
+_PrometheusExporter, _HAS_METRICS = safe_import(
+    'utils.metrics_export', 'PrometheusExporter'
+)
 
 
 # =============================================================================
@@ -108,10 +128,9 @@ class AgentConfig:
         # Set default data directory
         if not self.data_dir:
             # Use real user's home for sudo compatibility
-            try:
-                from utils.paths import get_real_user_home
-                home = get_real_user_home()
-            except ImportError:
+            if _HAS_PATHS:
+                home = _get_real_user_home()
+            else:
                 import os as _os
                 _sudo_user = _os.environ.get('SUDO_USER', '')
                 if _sudo_user and _sudo_user != 'root' and '/' not in _sudo_user and '..' not in _sudo_user:
@@ -324,23 +343,23 @@ class AgentDaemon:
 
     def _init_config_api(self) -> None:
         """Initialize Configuration API."""
+        if not _HAS_CONFIG_API:
+            logger.warning("Configuration API not available: module not found")
+            return
         try:
-            from utils.config_api import create_gateway_config_api
-            self._config_api = create_gateway_config_api()
+            self._config_api = _create_gateway_config_api()
             logger.info("Configuration API initialized")
-        except ImportError as e:
-            logger.warning(f"Configuration API not available: {e}")
         except Exception as e:
             logger.error(f"Failed to initialize Configuration API: {e}")
 
     def _init_health_state(self) -> None:
         """Initialize shared health state."""
+        if not _HAS_HEALTH_STATE:
+            logger.warning("Shared health state not available: module not found")
+            return
         try:
-            from utils.shared_health_state import SharedHealthState
-            self._health_state = SharedHealthState()
+            self._health_state = _SharedHealthState()
             logger.info("Shared health state initialized")
-        except ImportError as e:
-            logger.warning(f"Shared health state not available: {e}")
         except Exception as e:
             logger.error(f"Failed to initialize shared health state: {e}")
 

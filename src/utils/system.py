@@ -14,20 +14,18 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple, Dict, Any
 
-try:
-    import distro
-except ImportError:
-    distro = None  # Handle Windows where distro isn't available
-
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+from utils.safe_import import safe_import
 
-# Try to use centralized service checker
-try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+# Module-level safe imports
+distro, _HAS_DISTRO = safe_import('distro')
+check_service, check_systemd_service, ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState'
+)
+_psutil, _HAS_PSUTIL = safe_import('psutil')
+_serial_list_ports, _HAS_SERIAL = safe_import('serial.tools.list_ports')
+GLib, _HAS_GLIB = safe_import('gi.repository', 'GLib')
 
 
 def check_root() -> bool:
@@ -253,10 +251,9 @@ def run_admin_command_async(
     def do_run():
         success, stdout, stderr = run_admin_command(cmd, use_gui, timeout)
         # Use GLib.idle_add if available (GTK apps)
-        try:
-            from gi.repository import GLib
+        if _HAS_GLIB:
             GLib.idle_add(callback, success, stdout, stderr)
-        except ImportError:
+        else:
             callback(success, stdout, stderr)
 
     thread = threading.Thread(target=do_run, daemon=True)
@@ -297,7 +294,7 @@ def get_system_info():
     info = {}
 
     # OS information (handle Windows where distro isn't available)
-    if distro:
+    if _HAS_DISTRO:
         info['os'] = distro.name() or 'Unknown Linux'
         info['os_version'] = distro.version() or 'Unknown'
         info['os_codename'] = distro.codename() or ''
@@ -594,19 +591,17 @@ def check_package_installed(package_name: str) -> bool:
 
 def get_available_memory():
     """Get available system memory in MB"""
-    try:
-        import psutil
-        mem = psutil.virtual_memory()
+    if _HAS_PSUTIL:
+        mem = _psutil.virtual_memory()
         return mem.available // (1024 * 1024)
-    except ImportError:
-        # Fallback to reading /proc/meminfo
-        try:
-            with open('/proc/meminfo', 'r') as f:
-                for line in f:
-                    if 'MemAvailable' in line:
-                        return int(line.split()[1]) // 1024
-        except Exception:
-            return 0
+    # Fallback to reading /proc/meminfo
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if 'MemAvailable' in line:
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        return 0
 
 
 def get_disk_space(path: str = '/') -> int:
@@ -615,20 +610,18 @@ def get_disk_space(path: str = '/') -> int:
     Args:
         path: Filesystem path to check (validated, no shell chars)
     """
-    try:
-        import psutil
-        disk = psutil.disk_usage(path)
+    if _HAS_PSUTIL:
+        disk = _psutil.disk_usage(path)
         return disk.free // (1024 * 1024)
-    except ImportError:
-        # Fallback to df command - use list form for security
-        result = run_command(['df', '-m', path])
-        if result['success']:
-            lines = result['stdout'].strip().split('\n')
-            if len(lines) > 1:
-                parts = lines[1].split()
-                if len(parts) >= 4:
-                    return int(parts[3])
-        return 0
+    # Fallback to df command - use list form for security
+    result = run_command(['df', '-m', path])
+    if result['success']:
+        lines = result['stdout'].strip().split('\n')
+        if len(lines) > 1:
+            parts = lines[1].split()
+            if len(parts) >= 4:
+                return int(parts[3])
+    return 0
 
 
 # =============================================================================
@@ -649,12 +642,9 @@ def get_serial_ports() -> List[str]:
     ports = []
 
     # Try pyserial first (most reliable, cross-platform)
-    try:
-        import serial.tools.list_ports
-        ports = [p.device for p in serial.tools.list_ports.comports()]
+    if _HAS_SERIAL:
+        ports = [p.device for p in _serial_list_ports.comports()]
         return sorted(ports)
-    except ImportError:
-        pass
 
     # Fallback for Linux/macOS without pyserial
     if platform.system() == 'Linux':

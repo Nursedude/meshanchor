@@ -44,6 +44,40 @@ from utils.metrics_common import (
     format_metric_line,
     _format_metric_line,
 )
+from utils.safe_import import safe_import
+
+# --- Optional dependency imports (consolidated via safe_import) ---
+_meshforge_version, _HAS_VERSION = safe_import('__version__', '__version__')
+SharedHealthState, _HAS_HEALTH_STATE = safe_import(
+    'utils.shared_health_state', 'SharedHealthState'
+)
+get_health_scorer, _HAS_HEALTH_SCORER = safe_import(
+    'utils.health_score', 'get_health_scorer'
+)
+PersistentMessageQueue, _HAS_MESSAGE_QUEUE = safe_import(
+    'gateway.message_queue', 'PersistentMessageQueue'
+)
+MapDataCollector, _HAS_MAP_COLLECTOR = safe_import(
+    'utils.map_data_collector', 'MapDataCollector'
+)
+get_metrics_history, MetricType, _HAS_METRICS_HISTORY = safe_import(
+    'utils.metrics_history', 'get_metrics_history', 'MetricType'
+)
+check_service, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service'
+)
+TCPMonitor, TCPState, _HAS_TCP_MONITOR = safe_import(
+    'monitoring.tcp_monitor', 'TCPMonitor', 'TCPState'
+)
+get_rns_sniffer, _HAS_RNS_SNIFFER = safe_import(
+    'monitoring.rns_sniffer', 'get_rns_sniffer'
+)
+get_local_subscriber, _HAS_MQTT_SUBSCRIBER = safe_import(
+    'monitoring.mqtt_subscriber', 'get_local_subscriber'
+)
+get_topology_snapshot_store, _HAS_TOPOLOGY_SNAPSHOT = safe_import(
+    'utils.topology_snapshot', 'get_topology_snapshot_store'
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +150,12 @@ class PrometheusExporter:
         lines = []
 
         # Version info
-        try:
-            from __version__ import __version__
-        except ImportError:
-            __version__ = "unknown"
+        version = _meshforge_version if _HAS_VERSION else "unknown"
 
         defn = METRICS["meshforge_info"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-        lines.append(_format_metric_line(defn.name, 1, {"version": __version__}))
+        lines.append(_format_metric_line(defn.name, 1, {"version": version}))
 
         # Uptime
         defn = METRICS["meshforge_uptime_seconds"]
@@ -145,68 +176,64 @@ class PrometheusExporter:
         """Collect service health metrics from SharedHealthState."""
         lines = []
 
-        try:
-            from utils.shared_health_state import SharedHealthState
-            state = SharedHealthState()
-            services = state.get_all_services()
-            state.close()
+        if _HAS_HEALTH_STATE:
+            try:
+                state = SharedHealthState()
+                services = state.get_all_services()
+                state.close()
 
-            if not services:
-                return lines
+                if not services:
+                    return lines
 
-            # Service healthy gauge
-            defn = METRICS["meshforge_service_healthy"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            for svc in services:
-                healthy = 1 if svc.state.value == "healthy" else 0
-                lines.append(_format_metric_line(defn.name, healthy, {"service": svc.service}))
+                # Service healthy gauge
+                defn = METRICS["meshforge_service_healthy"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for svc in services:
+                    healthy = 1 if svc.state.value == "healthy" else 0
+                    lines.append(_format_metric_line(defn.name, healthy, {"service": svc.service}))
 
-            # Uptime percentage
-            defn = METRICS["meshforge_service_uptime_percent"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            for svc in services:
-                lines.append(_format_metric_line(defn.name, svc.uptime_pct, {"service": svc.service}))
+                # Uptime percentage
+                defn = METRICS["meshforge_service_uptime_percent"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for svc in services:
+                    lines.append(_format_metric_line(defn.name, svc.uptime_pct, {"service": svc.service}))
 
-            # Latency
-            defn = METRICS["meshforge_service_latency_ms"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            for svc in services:
-                lines.append(_format_metric_line(defn.name, svc.latency_ms, {"service": svc.service}))
+                # Latency
+                defn = METRICS["meshforge_service_latency_ms"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for svc in services:
+                    lines.append(_format_metric_line(defn.name, svc.latency_ms, {"service": svc.service}))
 
-            # Consecutive failures
-            defn = METRICS["meshforge_service_consecutive_fails"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            for svc in services:
-                lines.append(_format_metric_line(defn.name, svc.consecutive_fails, {"service": svc.service}))
+                # Consecutive failures
+                defn = METRICS["meshforge_service_consecutive_fails"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                for svc in services:
+                    lines.append(_format_metric_line(defn.name, svc.consecutive_fails, {"service": svc.service}))
 
-        except ImportError:
-            logger.debug("SharedHealthState not available")
-        except Exception as e:
-            logger.debug(f"Error collecting health metrics: {e}")
+            except Exception as e:
+                logger.debug(f"Error collecting health metrics: {e}")
 
         # Health scores from HealthScorer (uses shared singleton)
-        try:
-            from utils.health_score import get_health_scorer
-            scorer = get_health_scorer()
-            snapshot = scorer.get_snapshot()
+        if _HAS_HEALTH_SCORER:
+            try:
+                scorer = get_health_scorer()
+                snapshot = scorer.get_snapshot()
 
-            defn = METRICS["meshforge_health_score"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            lines.append(_format_metric_line(defn.name, snapshot.overall_score, {"category": "overall"}))
-            lines.append(_format_metric_line(defn.name, snapshot.connectivity_score, {"category": "connectivity"}))
-            lines.append(_format_metric_line(defn.name, snapshot.performance_score, {"category": "performance"}))
-            lines.append(_format_metric_line(defn.name, snapshot.reliability_score, {"category": "reliability"}))
-            lines.append(_format_metric_line(defn.name, snapshot.freshness_score, {"category": "freshness"}))
+                defn = METRICS["meshforge_health_score"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, snapshot.overall_score, {"category": "overall"}))
+                lines.append(_format_metric_line(defn.name, snapshot.connectivity_score, {"category": "connectivity"}))
+                lines.append(_format_metric_line(defn.name, snapshot.performance_score, {"category": "performance"}))
+                lines.append(_format_metric_line(defn.name, snapshot.reliability_score, {"category": "reliability"}))
+                lines.append(_format_metric_line(defn.name, snapshot.freshness_score, {"category": "freshness"}))
 
-        except ImportError:
-            logger.debug("HealthScorer not available")
-        except Exception as e:
-            logger.debug(f"Error collecting health scores: {e}")
+            except Exception as e:
+                logger.debug(f"Error collecting health scores: {e}")
 
         return lines
 
@@ -214,51 +241,49 @@ class PrometheusExporter:
         """Collect message queue metrics from PersistentMessageQueue."""
         lines = []
 
-        try:
-            from gateway.message_queue import PersistentMessageQueue
-            queue = PersistentMessageQueue()
-            stats = queue.get_stats()
+        if _HAS_MESSAGE_QUEUE:
+            try:
+                queue = PersistentMessageQueue()
+                stats = queue.get_stats()
 
-            # Queue depth by status
-            defn = METRICS["meshforge_message_queue_depth"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            lines.append(_format_metric_line(defn.name, stats.get("pending", 0), {"status": "pending"}))
-            lines.append(_format_metric_line(defn.name, stats.get("in_progress", 0), {"status": "in_progress"}))
+                # Queue depth by status
+                defn = METRICS["meshforge_message_queue_depth"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, stats.get("pending", 0), {"status": "pending"}))
+                lines.append(_format_metric_line(defn.name, stats.get("in_progress", 0), {"status": "in_progress"}))
 
-            # Total messages
-            defn = METRICS["meshforge_messages_total"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            lines.append(_format_metric_line(
-                defn.name, stats.get("enqueued", 0),
-                {"direction": "incoming", "status": "enqueued"}
-            ))
-            lines.append(_format_metric_line(
-                defn.name, stats.get("delivered", 0),
-                {"direction": "outgoing", "status": "delivered"}
-            ))
-            lines.append(_format_metric_line(
-                defn.name, stats.get("failed", 0),
-                {"direction": "outgoing", "status": "failed"}
-            ))
+                # Total messages
+                defn = METRICS["meshforge_messages_total"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(
+                    defn.name, stats.get("enqueued", 0),
+                    {"direction": "incoming", "status": "enqueued"}
+                ))
+                lines.append(_format_metric_line(
+                    defn.name, stats.get("delivered", 0),
+                    {"direction": "outgoing", "status": "delivered"}
+                ))
+                lines.append(_format_metric_line(
+                    defn.name, stats.get("failed", 0),
+                    {"direction": "outgoing", "status": "failed"}
+                ))
 
-            # Retries
-            defn = METRICS["meshforge_message_retries_total"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            lines.append(_format_metric_line(defn.name, stats.get("retried", 0)))
+                # Retries
+                defn = METRICS["meshforge_message_retries_total"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, stats.get("retried", 0)))
 
-            # Dead letters
-            defn = METRICS["meshforge_dead_letter_count"]
-            lines.append(f"# HELP {defn.name} {defn.help_text}")
-            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-            lines.append(_format_metric_line(defn.name, stats.get("dead_letter", 0)))
+                # Dead letters
+                defn = METRICS["meshforge_dead_letter_count"]
+                lines.append(f"# HELP {defn.name} {defn.help_text}")
+                lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                lines.append(_format_metric_line(defn.name, stats.get("dead_letter", 0)))
 
-        except ImportError:
-            logger.debug("PersistentMessageQueue not available")
-        except Exception as e:
-            logger.debug(f"Error collecting message metrics: {e}")
+            except Exception as e:
+                logger.debug(f"Error collecting message metrics: {e}")
 
         return lines
 
@@ -269,28 +294,23 @@ class PrometheusExporter:
         nodes_with_gps = 0
 
         # Primary source: MapDataCollector (has actual node data)
-        try:
-            from utils.map_data_collector import MapDataCollector
-            collector = MapDataCollector(enable_history=False)
-            geojson = collector.collect(max_age_seconds=60)
-            props = geojson.get("properties", {})
-            node_count = props.get("total_nodes", 0)
-            nodes_with_gps = props.get("nodes_with_position", 0)
-            logger.debug(f"MapDataCollector: {node_count} total, {nodes_with_gps} with GPS")
-        except ImportError:
-            logger.debug("MapDataCollector not available")
-        except Exception as e:
-            logger.debug(f"Error collecting from MapDataCollector: {e}")
+        if _HAS_MAP_COLLECTOR:
+            try:
+                collector = MapDataCollector(enable_history=False)
+                geojson = collector.collect(max_age_seconds=60)
+                props = geojson.get("properties", {})
+                node_count = props.get("total_nodes", 0)
+                nodes_with_gps = props.get("nodes_with_position", 0)
+                logger.debug(f"MapDataCollector: {node_count} total, {nodes_with_gps} with GPS")
+            except Exception as e:
+                logger.debug(f"Error collecting from MapDataCollector: {e}")
 
         # Fallback to MetricsHistory if MapDataCollector returned 0
-        if node_count == 0:
+        if node_count == 0 and _HAS_METRICS_HISTORY:
             try:
-                from utils.metrics_history import get_metrics_history, MetricType
                 history = get_metrics_history()
                 stats = history.get_statistics()
                 node_count = stats.get("unique_nodes", 0)
-            except ImportError:
-                logger.debug("MetricsHistory not available")
             except Exception as e:
                 logger.debug(f"Error collecting from MetricsHistory: {e}")
 
@@ -303,47 +323,45 @@ class PrometheusExporter:
             lines.append(_format_metric_line(defn.name, nodes_with_gps, {"state": "with_gps"}))
 
         # Per-node SNR/RSSI metrics from MetricsHistory
-        try:
-            from utils.metrics_history import get_metrics_history, MetricType
-            history = get_metrics_history()
+        if _HAS_METRICS_HISTORY:
+            try:
+                history = get_metrics_history()
 
-            # SNR metrics
-            snr_added = False
-            for point in history.get_recent(metric_type=MetricType.SNR, hours=1, limit=100):
-                if point.node_id:
-                    if not snr_added:
-                        defn = METRICS["meshforge_node_snr"]
-                        lines.append(f"# HELP {defn.name} {defn.help_text}")
-                        lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-                        snr_added = True
-                    lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
+                # SNR metrics
+                snr_added = False
+                for point in history.get_recent(metric_type=MetricType.SNR, hours=1, limit=100):
+                    if point.node_id:
+                        if not snr_added:
+                            defn = METRICS["meshforge_node_snr"]
+                            lines.append(f"# HELP {defn.name} {defn.help_text}")
+                            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                            snr_added = True
+                        lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
 
-            # RSSI metrics
-            rssi_added = False
-            for point in history.get_recent(metric_type=MetricType.RSSI, hours=1, limit=100):
-                if point.node_id:
-                    if not rssi_added:
-                        defn = METRICS["meshforge_node_rssi"]
-                        lines.append(f"# HELP {defn.name} {defn.help_text}")
-                        lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-                        rssi_added = True
-                    lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
+                # RSSI metrics
+                rssi_added = False
+                for point in history.get_recent(metric_type=MetricType.RSSI, hours=1, limit=100):
+                    if point.node_id:
+                        if not rssi_added:
+                            defn = METRICS["meshforge_node_rssi"]
+                            lines.append(f"# HELP {defn.name} {defn.help_text}")
+                            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                            rssi_added = True
+                        lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
 
-            # Battery metrics
-            battery_added = False
-            for point in history.get_recent(metric_type=MetricType.BATTERY, hours=1, limit=100):
-                if point.node_id:
-                    if not battery_added:
-                        defn = METRICS["meshforge_node_battery_percent"]
-                        lines.append(f"# HELP {defn.name} {defn.help_text}")
-                        lines.append(f"# TYPE {defn.name} {defn.metric_type}")
-                        battery_added = True
-                    lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
+                # Battery metrics
+                battery_added = False
+                for point in history.get_recent(metric_type=MetricType.BATTERY, hours=1, limit=100):
+                    if point.node_id:
+                        if not battery_added:
+                            defn = METRICS["meshforge_node_battery_percent"]
+                            lines.append(f"# HELP {defn.name} {defn.help_text}")
+                            lines.append(f"# TYPE {defn.name} {defn.metric_type}")
+                            battery_added = True
+                        lines.append(_format_metric_line(defn.name, point.value, {"node_id": point.node_id}))
 
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"Error collecting SNR/RSSI/battery metrics: {e}")
+            except Exception as e:
+                logger.debug(f"Error collecting SNR/RSSI/battery metrics: {e}")
 
         return lines
 
@@ -355,12 +373,14 @@ class PrometheusExporter:
         rns_connected = 0
 
         # Check meshtasticd service status
-        try:
-            from utils.service_check import check_service
-            mesh_status = check_service("meshtasticd")
-            if mesh_status.available:
-                meshtastic_connected = 1
-        except ImportError:
+        if _HAS_SERVICE_CHECK:
+            try:
+                mesh_status = check_service("meshtasticd")
+                if mesh_status.available:
+                    meshtastic_connected = 1
+            except Exception as e:
+                logger.debug(f"Error checking meshtasticd: {e}")
+        else:
             # Fallback: check if port 4403 is listening
             try:
                 import socket
@@ -372,16 +392,16 @@ class PrometheusExporter:
                     meshtastic_connected = 1
             except Exception:
                 pass
-        except Exception as e:
-            logger.debug(f"Error checking meshtasticd: {e}")
 
         # Check rnsd service status
-        try:
-            from utils.service_check import check_service
-            rns_status = check_service("rnsd")
-            if rns_status.available:
-                rns_connected = 1
-        except ImportError:
+        if _HAS_SERVICE_CHECK:
+            try:
+                rns_status = check_service("rnsd")
+                if rns_status.available:
+                    rns_connected = 1
+            except Exception as e:
+                logger.debug(f"Error checking rnsd: {e}")
+        else:
             # Fallback: check if UDP port 37428 is in use (rnsd default)
             try:
                 import subprocess
@@ -395,8 +415,6 @@ class PrometheusExporter:
                     rns_connected = 1
             except Exception:
                 pass
-        except Exception as e:
-            logger.debug(f"Error checking rnsd: {e}")
 
         defn = METRICS["meshforge_gateway_connections"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
@@ -410,9 +428,7 @@ class PrometheusExporter:
         """Collect TCP connection metrics."""
         lines = []
 
-        try:
-            from monitoring.tcp_monitor import TCPMonitor, TCPState
-        except ImportError:
+        if not _HAS_TCP_MONITOR:
             logger.debug("TCP monitor not available for metrics collection")
             return lines
 
@@ -474,9 +490,7 @@ class PrometheusExporter:
         """Collect RNS sniffer metrics for Wireshark-grade visibility."""
         lines = []
 
-        try:
-            from monitoring.rns_sniffer import get_rns_sniffer
-        except ImportError:
+        if not _HAS_RNS_SNIFFER:
             logger.debug("RNS sniffer not available for metrics collection")
             return lines
 
@@ -556,9 +570,7 @@ class PrometheusExporter:
         """
         lines = []
 
-        try:
-            from monitoring.mqtt_subscriber import get_local_subscriber
-        except ImportError:
+        if not _HAS_MQTT_SUBSCRIBER:
             logger.debug("MQTT subscriber not available for environment metrics")
             return lines
 
@@ -692,9 +704,7 @@ class PrometheusExporter:
         """
         lines = []
 
-        try:
-            from monitoring.mqtt_subscriber import get_local_subscriber
-        except ImportError:
+        if not _HAS_MQTT_SUBSCRIBER:
             logger.debug("MQTT subscriber not available for metrics")
             return lines
 
@@ -746,9 +756,7 @@ class PrometheusExporter:
         """
         lines = []
 
-        try:
-            from utils.topology_snapshot import get_topology_snapshot_store
-        except ImportError:
+        if not _HAS_TOPOLOGY_SNAPSHOT:
             logger.debug("Topology snapshot store not available")
             return lines
 
@@ -1202,43 +1210,51 @@ Grafana Setup (Option 2 - Infinity plugin):
             metrics = {}
 
             # Get node counts from MapDataCollector
-            try:
-                from utils.map_data_collector import MapDataCollector
-                collector = MapDataCollector(enable_history=False)
-                geojson = collector.collect(max_age_seconds=60)
-                props = geojson.get('properties', {})
-                metrics['nodes_total'] = props.get('total_nodes', 0)
-                metrics['nodes_with_gps'] = props.get('nodes_with_position', 0)
-                metrics['sources'] = props.get('sources', {})
-            except Exception as e:
-                logger.debug(f"MapDataCollector error: {e}")
+            if _HAS_MAP_COLLECTOR:
+                try:
+                    collector = MapDataCollector(enable_history=False)
+                    geojson = collector.collect(max_age_seconds=60)
+                    props = geojson.get('properties', {})
+                    metrics['nodes_total'] = props.get('total_nodes', 0)
+                    metrics['nodes_with_gps'] = props.get('nodes_with_position', 0)
+                    metrics['sources'] = props.get('sources', {})
+                except Exception as e:
+                    logger.debug(f"MapDataCollector error: {e}")
+                    metrics['nodes_total'] = 0
+                    metrics['nodes_with_gps'] = 0
+            else:
                 metrics['nodes_total'] = 0
                 metrics['nodes_with_gps'] = 0
 
             # Get service status
-            try:
-                from utils.service_check import check_service
-                mesh_status = check_service("meshtasticd")
-                rns_status = check_service("rnsd")
-                metrics['meshtasticd_running'] = 1 if mesh_status.available else 0
-                metrics['rnsd_running'] = 1 if rns_status.available else 0
-            except Exception:
+            if _HAS_SERVICE_CHECK:
+                try:
+                    mesh_status = check_service("meshtasticd")
+                    rns_status = check_service("rnsd")
+                    metrics['meshtasticd_running'] = 1 if mesh_status.available else 0
+                    metrics['rnsd_running'] = 1 if rns_status.available else 0
+                except Exception:
+                    metrics['meshtasticd_running'] = 0
+                    metrics['rnsd_running'] = 0
+            else:
                 metrics['meshtasticd_running'] = 0
                 metrics['rnsd_running'] = 0
 
             # MQTT stats
-            try:
-                from monitoring.mqtt_subscriber import get_local_subscriber
-                subscriber = get_local_subscriber()
-                mqtt_stats = subscriber.get_stats()
-                metrics['mqtt_connected'] = 1 if subscriber.is_connected() else 0
-                metrics['mqtt_nodes'] = mqtt_stats.get('node_count', 0)
-                metrics['mqtt_online'] = mqtt_stats.get('online_count', 0)
-                metrics['mqtt_mesh_size_24h'] = mqtt_stats.get('mesh_size_24h', 0)
-                metrics['mqtt_nodes_with_env'] = mqtt_stats.get('nodes_with_env_metrics', 0)
-                metrics['mqtt_nodes_with_aq'] = mqtt_stats.get('nodes_with_aq_metrics', 0)
-                metrics['mesh_health_status'] = mqtt_stats.get('mesh_health_status', 'unknown')
-            except Exception:
+            if _HAS_MQTT_SUBSCRIBER:
+                try:
+                    subscriber = get_local_subscriber()
+                    mqtt_stats = subscriber.get_stats()
+                    metrics['mqtt_connected'] = 1 if subscriber.is_connected() else 0
+                    metrics['mqtt_nodes'] = mqtt_stats.get('node_count', 0)
+                    metrics['mqtt_online'] = mqtt_stats.get('online_count', 0)
+                    metrics['mqtt_mesh_size_24h'] = mqtt_stats.get('mesh_size_24h', 0)
+                    metrics['mqtt_nodes_with_env'] = mqtt_stats.get('nodes_with_env_metrics', 0)
+                    metrics['mqtt_nodes_with_aq'] = mqtt_stats.get('nodes_with_aq_metrics', 0)
+                    metrics['mesh_health_status'] = mqtt_stats.get('mesh_health_status', 'unknown')
+                except Exception:
+                    metrics['mqtt_connected'] = 0
+            else:
                 metrics['mqtt_connected'] = 0
 
             # Uptime
@@ -1267,38 +1283,38 @@ Grafana Setup (Option 2 - Infinity plugin):
         try:
             nodes = []
 
-            try:
-                from utils.map_data_collector import MapDataCollector
-                collector = MapDataCollector(enable_history=False)
-                geojson = collector.collect(max_age_seconds=60)
+            if _HAS_MAP_COLLECTOR:
+                try:
+                    collector = MapDataCollector(enable_history=False)
+                    geojson = collector.collect(max_age_seconds=60)
 
-                for feature in geojson.get('features', []):
-                    props = feature.get('properties', {})
-                    coords = feature.get('geometry', {}).get('coordinates', [0, 0])
-                    node_data = {
-                        'id': props.get('id', ''),
-                        'name': props.get('name', ''),
-                        'lat': coords[1] if len(coords) > 1 else 0,
-                        'lon': coords[0] if len(coords) > 0 else 0,
-                        'snr': props.get('snr'),
-                        'rssi': props.get('rssi'),
-                        'battery': props.get('battery'),
-                        'last_heard': props.get('last_heard'),
-                        'online': props.get('online', False),
-                        'hardware': props.get('hardware', ''),
-                        'role': props.get('role', ''),
-                        # Environment sensors
-                        'temperature': props.get('temperature'),
-                        'humidity': props.get('humidity'),
-                        'pressure': props.get('pressure'),
-                        # Air quality
-                        'pm25': props.get('pm25'),
-                        'co2': props.get('co2'),
-                        'iaq': props.get('iaq'),
-                    }
-                    nodes.append(node_data)
-            except Exception as e:
-                logger.debug(f"Node collection error: {e}")
+                    for feature in geojson.get('features', []):
+                        props = feature.get('properties', {})
+                        coords = feature.get('geometry', {}).get('coordinates', [0, 0])
+                        node_data = {
+                            'id': props.get('id', ''),
+                            'name': props.get('name', ''),
+                            'lat': coords[1] if len(coords) > 1 else 0,
+                            'lon': coords[0] if len(coords) > 0 else 0,
+                            'snr': props.get('snr'),
+                            'rssi': props.get('rssi'),
+                            'battery': props.get('battery'),
+                            'last_heard': props.get('last_heard'),
+                            'online': props.get('online', False),
+                            'hardware': props.get('hardware', ''),
+                            'role': props.get('role', ''),
+                            # Environment sensors
+                            'temperature': props.get('temperature'),
+                            'humidity': props.get('humidity'),
+                            'pressure': props.get('pressure'),
+                            # Air quality
+                            'pm25': props.get('pm25'),
+                            'co2': props.get('co2'),
+                            'iaq': props.get('iaq'),
+                        }
+                        nodes.append(node_data)
+                except Exception as e:
+                    logger.debug(f"Node collection error: {e}")
 
             result = {
                 'timestamp': datetime.now().isoformat(),
@@ -1323,13 +1339,10 @@ Grafana Setup (Option 2 - Infinity plugin):
         """Serve system status as JSON."""
         import json
 
-        try:
-            from __version__ import __version__
-        except ImportError:
-            __version__ = "unknown"
+        version = _meshforge_version if _HAS_VERSION else "unknown"
 
         status = {
-            'version': __version__,
+            'version': version,
             'timestamp': datetime.now().isoformat(),
             'services': {},
         }

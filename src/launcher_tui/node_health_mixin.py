@@ -13,8 +13,24 @@ import logging
 import subprocess
 import time
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# --- Optional dependencies (module-level safe_import) ---
+probe_tcp, DEFAULT_SERVICES, _HAS_LATENCY = safe_import(
+    'utils.latency_monitor', 'probe_tcp', 'DEFAULT_SERVICES'
+)
+MaintenancePredictor, _HAS_PREDICTOR = safe_import(
+    'utils.predictive_maintenance', 'MaintenancePredictor'
+)
+SignalTrend, SignalTrendingManager, _HAS_SIGNAL = safe_import(
+    'utils.signal_trending', 'SignalTrend', 'SignalTrendingManager'
+)
+get_http_client, _HAS_HTTP = safe_import(
+    'utils.meshtastic_http', 'get_http_client'
+)
+meshtastic_tcp, _HAS_MESHTASTIC_TCP = safe_import('meshtastic.tcp_interface')
 
 
 class NodeHealthMixin:
@@ -54,9 +70,7 @@ class NodeHealthMixin:
         print("=== Service Latency Probe ===\n")
         print("Probing services (2s timeout each)...\n")
 
-        try:
-            from utils.latency_monitor import probe_tcp, DEFAULT_SERVICES
-        except ImportError:
+        if not _HAS_LATENCY:
             print("  Latency monitor module not available.")
             print("  File: src/utils/latency_monitor.py")
             self._wait_for_enter()
@@ -109,9 +123,7 @@ class NodeHealthMixin:
         clear_screen()
         print("=== Battery Forecast & Maintenance ===\n")
 
-        try:
-            from utils.predictive_maintenance import MaintenancePredictor
-        except ImportError:
+        if not _HAS_PREDICTOR:
             print("  Predictive maintenance module not available.")
             print("  File: src/utils/predictive_maintenance.py")
             self._wait_for_enter()
@@ -215,62 +227,62 @@ class NodeHealthMixin:
         nodes = {}
 
         # Primary: meshtasticd HTTP API (no TCP lock, no Python lib needed)
-        try:
-            from utils.meshtastic_http import get_http_client
-            client = get_http_client()
-            if client.is_available:
-                report = client.get_report()
-                http_nodes = client.get_nodes()
-                # Device report has battery for the local node
-                if report and report.has_battery:
-                    nodes['local'] = {
-                        'battery_level': report.battery_percent,
-                        'voltage': report.battery_voltage_mv / 1000.0 if report.battery_voltage_mv else None,
-                        'short_name': 'Local',
-                        'long_name': 'Local Device',
-                    }
-                # Node list has per-node data
-                for node in http_nodes:
-                    # HTTP API doesn't expose per-node battery yet,
-                    # but we get the node list for signal/position data
-                    nodes[node.node_id] = {
-                        'battery_level': None,
-                        'voltage': None,
-                        'short_name': node.short_name or node.node_id[:8],
-                        'long_name': node.long_name or '',
-                        'snr': node.snr,
-                    }
-                if nodes:
-                    return nodes
-        except ImportError:
+        if _HAS_HTTP:
+            try:
+                client = get_http_client()
+                if client.is_available:
+                    report = client.get_report()
+                    http_nodes = client.get_nodes()
+                    # Device report has battery for the local node
+                    if report and report.has_battery:
+                        nodes['local'] = {
+                            'battery_level': report.battery_percent,
+                            'voltage': report.battery_voltage_mv / 1000.0 if report.battery_voltage_mv else None,
+                            'short_name': 'Local',
+                            'long_name': 'Local Device',
+                        }
+                    # Node list has per-node data
+                    for node in http_nodes:
+                        # HTTP API doesn't expose per-node battery yet,
+                        # but we get the node list for signal/position data
+                        nodes[node.node_id] = {
+                            'battery_level': None,
+                            'voltage': None,
+                            'short_name': node.short_name or node.node_id[:8],
+                            'long_name': node.long_name or '',
+                            'snr': node.snr,
+                        }
+                    if nodes:
+                        return nodes
+            except Exception as e:
+                logger.debug(f"HTTP API telemetry query failed: {e}")
+        else:
             logger.debug("meshtastic_http module not available")
-        except Exception as e:
-            logger.debug(f"HTTP API telemetry query failed: {e}")
 
         # Fallback: meshtastic TCP API (legacy, needs meshtastic Python lib)
-        try:
-            import meshtastic.tcp_interface
-            iface = meshtastic.tcp_interface.TCPInterface(
-                hostname='localhost', connectNow=True
-            )
-            if iface.nodes:
-                for node_id, node in iface.nodes.items():
-                    device_metrics = node.get('deviceMetrics', {})
-                    user = node.get('user', {})
-                    if device_metrics:
-                        nodes[node_id] = {
-                            'battery_level': device_metrics.get('batteryLevel'),
-                            'voltage': device_metrics.get('voltage'),
-                            'short_name': user.get('shortName', node_id[:8]),
-                            'long_name': user.get('longName', ''),
-                        }
-            iface.close()
-        except ImportError:
+        if _HAS_MESHTASTIC_TCP:
+            try:
+                iface = meshtastic_tcp.TCPInterface(
+                    hostname='localhost', connectNow=True
+                )
+                if iface.nodes:
+                    for node_id, node in iface.nodes.items():
+                        device_metrics = node.get('deviceMetrics', {})
+                        user = node.get('user', {})
+                        if device_metrics:
+                            nodes[node_id] = {
+                                'battery_level': device_metrics.get('batteryLevel'),
+                                'voltage': device_metrics.get('voltage'),
+                                'short_name': user.get('shortName', node_id[:8]),
+                                'long_name': user.get('longName', ''),
+                            }
+                iface.close()
+            except (ConnectionRefusedError, OSError, TimeoutError) as e:
+                logger.debug(f"meshtasticd not reachable for telemetry: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error querying meshtastic telemetry: {e}")
+        else:
             logger.debug("meshtastic module not installed, skipping TCP telemetry")
-        except (ConnectionRefusedError, OSError, TimeoutError) as e:
-            logger.debug(f"meshtasticd not reachable for telemetry: {e}")
-        except Exception as e:
-            logger.warning(f"Unexpected error querying meshtastic telemetry: {e}")
 
         return nodes
 
@@ -279,9 +291,7 @@ class NodeHealthMixin:
         clear_screen()
         print("=== Signal Trending Analysis ===\n")
 
-        try:
-            from utils.signal_trending import SignalTrend, SignalTrendingManager
-        except ImportError:
+        if not _HAS_SIGNAL:
             print("  Signal trending module not available.")
             print("  File: src/utils/signal_trending.py")
             self._wait_for_enter()
@@ -377,50 +387,50 @@ class NodeHealthMixin:
         nodes = {}
 
         # Primary: meshtasticd HTTP API
-        try:
-            from utils.meshtastic_http import get_http_client
-            client = get_http_client()
-            if client.is_available:
-                for node in client.get_nodes():
-                    if node.snr:
-                        nodes[node.node_id] = {
-                            'snr': node.snr,
-                            'rssi': None,  # HTTP /json/nodes doesn't expose RSSI
-                            'short_name': node.short_name or node.node_id[:8],
-                            'hops_away': None,
-                        }
-                if nodes:
-                    return nodes
-        except ImportError:
+        if _HAS_HTTP:
+            try:
+                client = get_http_client()
+                if client.is_available:
+                    for node in client.get_nodes():
+                        if node.snr:
+                            nodes[node.node_id] = {
+                                'snr': node.snr,
+                                'rssi': None,  # HTTP /json/nodes doesn't expose RSSI
+                                'short_name': node.short_name or node.node_id[:8],
+                                'hops_away': None,
+                            }
+                    if nodes:
+                        return nodes
+            except Exception as e:
+                logger.debug(f"HTTP API signal query failed: {e}")
+        else:
             logger.debug("meshtastic_http module not available")
-        except Exception as e:
-            logger.debug(f"HTTP API signal query failed: {e}")
 
         # Fallback: meshtastic TCP API (legacy)
-        try:
-            import meshtastic.tcp_interface
-            iface = meshtastic.tcp_interface.TCPInterface(
-                hostname='localhost', connectNow=True
-            )
-            if iface.nodes:
-                for node_id, node in iface.nodes.items():
-                    user = node.get('user', {})
-                    snr = node.get('snr')
-                    rssi = node.get('rssi')
-                    hops = node.get('hopsAway')
-                    if snr is not None or rssi is not None:
-                        nodes[node_id] = {
-                            'snr': snr,
-                            'rssi': rssi,
-                            'short_name': user.get('shortName', node_id[:8]),
-                            'hops_away': hops,
-                        }
-            iface.close()
-        except ImportError:
+        if _HAS_MESHTASTIC_TCP:
+            try:
+                iface = meshtastic_tcp.TCPInterface(
+                    hostname='localhost', connectNow=True
+                )
+                if iface.nodes:
+                    for node_id, node in iface.nodes.items():
+                        user = node.get('user', {})
+                        snr = node.get('snr')
+                        rssi = node.get('rssi')
+                        hops = node.get('hopsAway')
+                        if snr is not None or rssi is not None:
+                            nodes[node_id] = {
+                                'snr': snr,
+                                'rssi': rssi,
+                                'short_name': user.get('shortName', node_id[:8]),
+                                'hops_away': hops,
+                            }
+                iface.close()
+            except (ConnectionRefusedError, OSError, TimeoutError) as e:
+                logger.debug(f"meshtasticd not reachable for signal data: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error querying meshtastic signal data: {e}")
+        else:
             logger.debug("meshtastic module not installed, skipping signal data")
-        except (ConnectionRefusedError, OSError, TimeoutError) as e:
-            logger.debug(f"meshtasticd not reachable for signal data: {e}")
-        except Exception as e:
-            logger.warning(f"Unexpected error querying meshtastic signal data: {e}")
 
         return nodes

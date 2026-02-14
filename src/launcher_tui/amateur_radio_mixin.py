@@ -12,6 +12,16 @@ Emergency Mode for EMCOMM operations.
 
 import subprocess
 from backend import clear_screen
+from utils.safe_import import safe_import
+
+# Module-level safe imports — replaces scattered try/except ImportError blocks
+CallsignManager, _HAS_CALLSIGN = safe_import('amateur.callsign', 'CallsignManager')
+Part97Reference, ComplianceChecker, _HAS_COMPLIANCE = safe_import(
+    'amateur.compliance', 'Part97Reference', 'ComplianceChecker'
+)
+ARESRACESTools, MessagePriority, _HAS_ARES = safe_import(
+    'amateur.ares_races', 'ARESRACESTools', 'MessagePriority'
+)
 
 
 class AmateurRadioMixin:
@@ -66,9 +76,7 @@ class AmateurRadioMixin:
         clear_screen()
         print(f"=== Callsign Lookup: {callsign} ===\n")
 
-        try:
-            from amateur.callsign import CallsignManager
-        except ImportError:
+        if not _HAS_CALLSIGN:
             print("  Callsign module not available.")
             print("  File: src/amateur/callsign.py")
             self._wait_for_enter()
@@ -113,9 +121,7 @@ class AmateurRadioMixin:
         clear_screen()
         print("=== Part 97 Band Plan (ISM/LoRa Relevant) ===\n")
 
-        try:
-            from amateur.compliance import Part97Reference
-        except ImportError:
+        if not _HAS_COMPLIANCE:
             # Show a basic reference even without the module
             print("  ISM Bands Used by Meshtastic:\n")
             print("  Band        Frequency       Power    Notes")
@@ -159,9 +165,7 @@ class AmateurRadioMixin:
         clear_screen()
         print("=== Compliance Check ===\n")
 
-        try:
-            from amateur.compliance import ComplianceChecker
-        except ImportError:
+        if not _HAS_COMPLIANCE:
             print("  Compliance module not available.")
             print("  File: src/amateur/compliance.py")
             self._wait_for_enter()
@@ -255,9 +259,7 @@ class AmateurRadioMixin:
         clear_screen()
         print("=== ICS-213 General Message Form ===\n")
 
-        try:
-            from amateur.ares_races import ARESRACESTools, MessagePriority
-        except ImportError:
+        if not _HAS_ARES:
             print("  ARES/RACES module not available.")
             print("  File: src/amateur/ares_races.py")
             self._wait_for_enter()
@@ -324,8 +326,7 @@ class AmateurRadioMixin:
         clear_screen()
         print("=== Net Control Operator Checklist ===\n")
 
-        try:
-            from amateur.ares_races import ARESRACESTools
+        if _HAS_ARES:
             tools = ARESRACESTools()
             checklist = tools.get_net_checklist()
 
@@ -334,7 +335,7 @@ class AmateurRadioMixin:
                 print(f"  {status} {i:2d}. {item.task}")
                 print(f"       {item.description}")
             print()
-        except ImportError:
+        else:
             # Fallback: show standard NCS checklist
             checklist = [
                 ("Pre-Net", "Verify radio/antenna, check propagation"),
@@ -357,25 +358,25 @@ class AmateurRadioMixin:
         clear_screen()
         print("=== ARES/RACES Net Status ===\n")
 
-        try:
-            from amateur.ares_races import ARESRACESTools
-            tools = ARESRACESTools()
-            status = tools.get_net_status()
-
-            if status:
-                print(f"  Net Active: {'Yes' if status.get('active') else 'No'}")
-                print(f"  NCS:        {status.get('ncs', 'Not set')}")
-                print(f"  Frequency:  {status.get('frequency', 'Not set')}")
-                print(f"  Check-ins:  {status.get('checkin_count', 0)}")
-                print(f"  Traffic:    {status.get('traffic_count', 0)} messages")
-            else:
-                print("  No active net session.")
-                print("  Use 'Net Checklist' to start operations.")
-        except ImportError:
+        if not _HAS_ARES:
             print("  ARES/RACES module not available.")
             print("  File: src/amateur/ares_races.py")
-        except Exception as e:
-            print(f"  Status unavailable: {e}")
+        else:
+            try:
+                tools = ARESRACESTools()
+                status = tools.get_net_status()
+
+                if status:
+                    print(f"  Net Active: {'Yes' if status.get('active') else 'No'}")
+                    print(f"  NCS:        {status.get('ncs', 'Not set')}")
+                    print(f"  Frequency:  {status.get('frequency', 'Not set')}")
+                    print(f"  Check-ins:  {status.get('checkin_count', 0)}")
+                    print(f"  Traffic:    {status.get('traffic_count', 0)} messages")
+                else:
+                    print("  No active net session.")
+                    print("  Use 'Net Checklist' to start operations.")
+            except Exception as e:
+                print(f"  Status unavailable: {e}")
 
         print()
         self._wait_for_enter()
