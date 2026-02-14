@@ -25,36 +25,16 @@ logger = logging.getLogger(__name__)
 if not logger.handlers:
     logger.setLevel(logging.WARNING)
 
+from utils.meshtastic_connection import (
+    MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown, safe_close_interface
+)
 from utils.safe_import import safe_import
 
-# Module-level safe imports
-(_MESHTASTIC_CONNECTION_LOCK, _wait_for_cooldown, _safe_close_interface,
- _HAS_MESHTASTIC_CONNECTION) = safe_import(
-    'utils.meshtastic_connection',
-    'MESHTASTIC_CONNECTION_LOCK', 'wait_for_cooldown', 'safe_close_interface'
-)
-
+# Module-level safe imports for external dependencies
 _TCPInterface, _HAS_TCP_INTERFACE = safe_import(
     'meshtastic.tcp_interface', 'TCPInterface'
 )
 _pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
-
-# Import global connection lock - meshtasticd only supports one TCP connection
-if _HAS_MESHTASTIC_CONNECTION:
-    MESHTASTIC_CONNECTION_LOCK = _MESHTASTIC_CONNECTION_LOCK
-    wait_for_cooldown = _wait_for_cooldown
-    safe_close_interface = _safe_close_interface
-else:
-    # Fallback if utils not available
-    MESHTASTIC_CONNECTION_LOCK = threading.Lock()
-    def wait_for_cooldown():
-        time.sleep(1.0)
-    def safe_close_interface(iface):
-        if iface:
-            try:
-                iface.close()
-            except Exception:
-                pass
 
 
 class ConnectionState(Enum):

@@ -32,28 +32,25 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 
 from .base import CommandResult
-from utils.safe_import import safe_import
+from utils.common import SettingsManager
+from utils.space_weather import SpaceWeatherAPI
+from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
 
 logger = logging.getLogger(__name__)
 
-# Module-level safe imports
-SettingsManager, _HAS_SETTINGS = safe_import('utils.common', 'SettingsManager')
-SpaceWeatherAPI, _HAS_SPACE_WEATHER = safe_import('utils.space_weather', 'SpaceWeatherAPI')
-get_pskreporter_subscriber, _HAS_PSKREPORTER = safe_import(
-    'monitoring.pskreporter_subscriber', 'get_pskreporter_subscriber'
-)
+# Backward-compatible constants (modules are always available)
+_HAS_SETTINGS = True
+_HAS_SPACE_WEATHER = True
+_HAS_PSKREPORTER = True
 
 # Settings persistence for source configuration
-if _HAS_SETTINGS:
-    _settings = SettingsManager("propagation", defaults={
-        "sources": {
-            "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
-            "hamclock": {"host": "localhost", "port": 8080, "enabled": False, "timeout": 10},
-            "pskreporter": {"enabled": False, "callsign": "", "bands": [], "modes": []},
-        }
-    })
-else:
-    _settings = None
+_settings = SettingsManager("propagation", defaults={
+    "sources": {
+        "openhamclock": {"host": "localhost", "port": 3000, "enabled": False, "timeout": 10},
+        "hamclock": {"host": "localhost", "port": 8080, "enabled": False, "timeout": 10},
+        "pskreporter": {"enabled": False, "callsign": "", "bands": [], "modes": []},
+    }
+})
 
 
 class DataSource(Enum):

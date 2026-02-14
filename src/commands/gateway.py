@@ -13,19 +13,15 @@ from typing import Optional, Dict, Any
 
 from .base import CommandResult
 from utils.safe_import import safe_import
+from gateway.rns_bridge import RNSMeshtasticBridge
+from gateway.config import RNSOverMeshtasticConfig
+from gateway.rns_transport import create_rns_transport, RNSMeshtasticTransport
 
 logger = logging.getLogger(__name__)
 
-# Optional dependencies — safe_import returns (*attrs, available_bool)
-RNSMeshtasticBridge, _HAS_BRIDGE = safe_import(
-    'gateway.rns_bridge', 'RNSMeshtasticBridge'
-)
-RNSOverMeshtasticConfig, _HAS_TRANSPORT_CONFIG = safe_import(
-    'gateway.config', 'RNSOverMeshtasticConfig'
-)
-create_rns_transport, RNSMeshtasticTransport, _HAS_TRANSPORT = safe_import(
-    'gateway.rns_transport', 'create_rns_transport', 'RNSMeshtasticTransport'
-)
+_HAS_BRIDGE = True
+_HAS_TRANSPORT_CONFIG = True
+_HAS_TRANSPORT = True
 
 # Module-level bridge instance (singleton pattern)
 _bridge_instance = None

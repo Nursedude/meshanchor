@@ -1441,26 +1441,13 @@ class TestBridgeLoop:
 class TestTestRNS:
     """Tests for _test_rns method."""
 
+    @patch('gateway.rns_bridge._HAS_RNS', True)
     def test_returns_true_when_importable(self, bridge):
-        with patch.dict('sys.modules', {'RNS': MagicMock()}):
-            assert bridge._test_rns() is True
+        assert bridge._test_rns() is True
 
+    @patch('gateway.rns_bridge._HAS_RNS', False)
     def test_returns_false_when_not_importable(self, bridge):
-        import builtins
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == 'RNS':
-                raise ImportError("No module named 'RNS'")
-            return original_import(name, *args, **kwargs)
-
-        with patch('builtins.__import__', side_effect=mock_import):
-            saved = sys.modules.pop('RNS', None)
-            try:
-                assert bridge._test_rns() is False
-            finally:
-                if saved is not None:
-                    sys.modules['RNS'] = saved
+        assert bridge._test_rns() is False
 
 
 # ---------------------------------------------------------------------------
