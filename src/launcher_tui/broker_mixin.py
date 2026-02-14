@@ -20,33 +20,26 @@ import logging
 import os
 from typing import Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import broker profiles
-try:
-    from utils.broker_profiles import (
-        BrokerProfile,
-        BrokerType,
-        create_private_profile,
-        create_public_profile,
-        create_custom_profile,
-        load_profiles,
-        save_profiles,
-        set_active_profile,
-        get_active_profile,
-        ensure_default_profiles,
-        generate_mosquitto_conf,
-        generate_mosquitto_acl,
-        install_mosquitto_config,
-        check_mosquitto_installed,
-        check_mosquitto_running,
-        restart_mosquitto,
-        enable_mosquitto_at_boot,
-        get_meshtastic_mqtt_setup_commands,
-    )
-    _HAS_BROKER_PROFILES = True
-except ImportError:
-    _HAS_BROKER_PROFILES = False
+(BrokerProfile, BrokerType, create_private_profile, create_public_profile,
+ create_custom_profile, load_profiles, save_profiles, set_active_profile,
+ get_active_profile, ensure_default_profiles, generate_mosquitto_conf,
+ generate_mosquitto_acl, install_mosquitto_config, check_mosquitto_installed,
+ check_mosquitto_running, restart_mosquitto, enable_mosquitto_at_boot,
+ get_meshtastic_mqtt_setup_commands,
+ _HAS_BROKER_PROFILES) = safe_import(
+    'utils.broker_profiles',
+    'BrokerProfile', 'BrokerType', 'create_private_profile', 'create_public_profile',
+    'create_custom_profile', 'load_profiles', 'save_profiles', 'set_active_profile',
+    'get_active_profile', 'ensure_default_profiles', 'generate_mosquitto_conf',
+    'generate_mosquitto_acl', 'install_mosquitto_config', 'check_mosquitto_installed',
+    'check_mosquitto_running', 'restart_mosquitto', 'enable_mosquitto_at_boot',
+    'get_meshtastic_mqtt_setup_commands',
+)
 
 
 class BrokerMixin:

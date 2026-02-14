@@ -33,10 +33,11 @@ _launcher_dir = Path(__file__).parent
 if str(_launcher_dir) not in sys.path:
     sys.path.insert(0, str(_launcher_dir))
 
+from utils.safe_import import safe_import
+
 # Import version
-try:
-    from __version__ import __version__
-except ImportError:
+__version__, _HAS_VERSION = safe_import('__version__', '__version__')
+if not _HAS_VERSION:
     __version__ = "0.5.0-beta"
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
@@ -46,35 +47,22 @@ from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-try:
-    from utils.service_check import (
-        check_service,
-        check_port,
-        apply_config_and_restart,
-        ServiceState
-    )
-    _HAS_APPLY_RESTART = True
-except ImportError:
-    # Fallback if running standalone - will use direct systemctl
-    check_service = None
-    check_port = None
-    apply_config_and_restart = None
-    ServiceState = None
-    _HAS_APPLY_RESTART = False
+check_service, check_port, apply_config_and_restart, ServiceState, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'check_port', 'apply_config_and_restart', 'ServiceState'
+)
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend, clear_screen
 
 # Import startup checks and conflict resolution (v0.4.8)
-try:
-    from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
-    from conflict_resolver import check_and_resolve_conflicts
-    HAS_STARTUP_CHECKS = True
-except ImportError:
-    HAS_STARTUP_CHECKS = False
-    StartupChecker = None
-    EnvironmentState = None
-    ServiceRunState = None
+StartupChecker, EnvironmentState, ServiceRunState, HAS_STARTUP_CHECKS = safe_import(
+    'startup_checks', 'StartupChecker', 'EnvironmentState', 'ServiceRunState'
+)
+if HAS_STARTUP_CHECKS:
+    check_and_resolve_conflicts, _ = safe_import(
+        'conflict_resolver', 'check_and_resolve_conflicts'
+    )
+else:
     check_and_resolve_conflicts = None
 
 # Import mixins to reduce file size

@@ -14,20 +14,12 @@ from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import (
-        check_service,
-        check_systemd_service,
-        ServiceState,
-        apply_config_and_restart,
-    )
-    _HAS_APPLY_RESTART = True
-except ImportError:
-    check_service = None
-    check_systemd_service = None
-    ServiceState = None
-    _HAS_APPLY_RESTART = False
+check_service, check_systemd_service, ServiceState, apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart'
+)
 
 
 class MeshtasticdConfigMixin:
