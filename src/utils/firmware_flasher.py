@@ -13,20 +13,28 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Import components
-try:
-    from utils.firmware_downloader import FirmwareDownloader, FirmwareAsset
-    from utils.esptool_wrapper import EsptoolWrapper, FlashResult, FlashProgress, FlashStage
-    from utils.device_scanner import DeviceScanner
-    from utils.device_backup import DeviceBackupManager
-except ImportError as e:
-    logger.warning(f"[Flasher] Import error: {e}")
-    FirmwareDownloader = None
-    EsptoolWrapper = None
-    DeviceScanner = None
-    DeviceBackupManager = None
+# Import components via safe_import
+FirmwareDownloader, FirmwareAsset, _HAS_DOWNLOADER = safe_import(
+    'utils.firmware_downloader', 'FirmwareDownloader', 'FirmwareAsset'
+)
+EsptoolWrapper, FlashResult, FlashProgress, FlashStage, _HAS_ESPTOOL = safe_import(
+    'utils.esptool_wrapper', 'EsptoolWrapper', 'FlashResult', 'FlashProgress', 'FlashStage'
+)
+DeviceScanner, _HAS_SCANNER = safe_import('utils.device_scanner', 'DeviceScanner')
+DeviceBackupManager, _HAS_BACKUP = safe_import('utils.device_backup', 'DeviceBackupManager')
+_check_esptool_available, _HAS_ESPTOOL_CHECK = safe_import(
+    'utils.esptool_wrapper', 'check_esptool_available'
+)
+
+# Log any missing components
+if not _HAS_DOWNLOADER or not _HAS_ESPTOOL or not _HAS_SCANNER or not _HAS_BACKUP:
+    logger.warning("[Flasher] Some components not available: "
+                   f"downloader={_HAS_DOWNLOADER}, esptool={_HAS_ESPTOOL}, "
+                   f"scanner={_HAS_SCANNER}, backup={_HAS_BACKUP}")
 
 
 class FlasherState(Enum):
@@ -377,26 +385,23 @@ def check_flash_capability() -> dict:
         "errors": [],
     }
 
-    try:
-        from utils.esptool_wrapper import check_esptool_available
-        result["esptool"] = check_esptool_available()
+    if _HAS_ESPTOOL_CHECK:
+        result["esptool"] = _check_esptool_available()
         if not result["esptool"]:
             result["errors"].append("esptool not installed (pip install esptool)")
-    except ImportError:
+    else:
         result["errors"].append("esptool wrapper not available")
 
-    try:
-        from utils.device_scanner import DeviceScanner
-        scanner = DeviceScanner()
+    if _HAS_SCANNER and DeviceScanner:
+        DeviceScanner()
         result["device_scanner"] = True
-    except ImportError:
+    else:
         result["errors"].append("Device scanner not available")
 
-    try:
-        from utils.device_backup import DeviceBackupManager
-        backup = DeviceBackupManager()
+    if _HAS_BACKUP and DeviceBackupManager:
+        DeviceBackupManager()
         result["backup_manager"] = True
-    except ImportError:
+    else:
         result["errors"].append("Backup manager not available")
 
     result["available"] = result["esptool"] and result["device_scanner"]

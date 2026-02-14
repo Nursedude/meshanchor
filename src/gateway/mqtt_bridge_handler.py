@@ -37,7 +37,20 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Optional MQTT client
+_mqtt_mod, _HAS_PAHO_MQTT = safe_import('paho.mqtt.client')
+
+# Optional protobuf client
+_get_protobuf_client, _HAS_PROTOBUF_CLIENT = safe_import(
+    '.meshtastic_protobuf_client', 'get_protobuf_client', package='gateway',
+)
+
+# Optional paths utility
+_get_real_user_home_fn, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -146,12 +159,11 @@ class MQTTBridgeHandler:
 
     def _connect(self) -> bool:
         """Connect to MQTT broker and subscribe to meshtasticd topics."""
-        try:
-            import paho.mqtt.client as mqtt
-        except ImportError:
+        if not _HAS_PAHO_MQTT:
             logger.error("paho-mqtt not installed. Install with: pip install paho-mqtt")
             return False
 
+        mqtt = _mqtt_mod
         mqtt_cfg = self.config.mqtt_bridge
 
         try:
@@ -523,10 +535,10 @@ class MQTTBridgeHandler:
         ToRadio protobuf to /api/v1/toradio. Same endpoint the web client
         uses — zero TCP contention, no subprocess overhead.
         """
-        try:
-            from .meshtastic_protobuf_client import get_protobuf_client
-        except ImportError:
+        if not _HAS_PROTOBUF_CLIENT:
             return False
+
+        get_protobuf_client = _get_protobuf_client
 
         try:
             client = get_protobuf_client()
@@ -687,10 +699,9 @@ class MQTTBridgeHandler:
 
     def _get_user_bin(self):
         """Get user's local bin directory."""
-        try:
-            from utils.paths import get_real_user_home
-            return get_real_user_home() / '.local' / 'bin'
-        except ImportError:
+        if _HAS_PATHS:
+            return _get_real_user_home_fn() / '.local' / 'bin'
+        else:
             from pathlib import Path
             return Path.home() / '.local' / 'bin'
 

@@ -8,15 +8,14 @@ RNS/Reticulum and Meshtastic networks.
 import logging
 from typing import Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Import gateway config
-try:
-    from gateway.config import GatewayConfig, RoutingRule
-    _HAS_GATEWAY_CONFIG = True
-except ImportError:
-    _HAS_GATEWAY_CONFIG = False
-    GatewayConfig = None
+# Module-level safe imports
+_GatewayConfig, _RoutingRule, _HAS_GATEWAY_CONFIG = safe_import(
+    'gateway.config', 'GatewayConfig', 'RoutingRule'
+)
 
 
 class GatewayConfigMixin:
@@ -34,7 +33,7 @@ class GatewayConfigMixin:
 
         # Load current config
         try:
-            config = GatewayConfig.load()
+            config = _GatewayConfig.load()
         except Exception as e:
             self.dialog.msgbox(
                 "Config Load Error",
@@ -43,7 +42,7 @@ class GatewayConfigMixin:
                 f"Starting with default configuration."
             )
             try:
-                config = GatewayConfig()
+                config = _GatewayConfig()
             except Exception as e:
                 logger.debug("Default GatewayConfig creation failed: %s", e)
                 self.dialog.msgbox(
@@ -488,7 +487,7 @@ class GatewayConfigMixin:
             self.dialog.msgbox("Error", f"Rule '{name}' already exists.")
             return
 
-        rule = RoutingRule(name=name.strip())
+        rule = _RoutingRule(name=name.strip())
         config.routing_rules.append(rule)
         self.dialog.msgbox("Rule Added", f"Rule '{name}' added.\n\nEdit it to configure.")
 
@@ -624,7 +623,7 @@ class GatewayConfigMixin:
 
     def _load_template(self, config):
         """Load a configuration template."""
-        templates = GatewayConfig.get_available_templates()
+        templates = _GatewayConfig.get_available_templates()
 
         choices = []
         for name, desc in templates.items():
@@ -647,7 +646,7 @@ class GatewayConfigMixin:
                 f"{templates[choice]}\n\n"
                 "This will replace current configuration."
             ):
-                new_config = GatewayConfig.from_template(choice)
+                new_config = _GatewayConfig.from_template(choice)
                 if new_config:
                     # Copy all fields from new config
                     config.enabled = new_config.enabled

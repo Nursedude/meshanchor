@@ -46,6 +46,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.safe_import import safe_import
+
+# Optional: EventBus for automatic service status updates
+_event_bus, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'event_bus')
+
 
 # Score thresholds
 THRESHOLD_HEALTHY = 75
@@ -697,11 +702,8 @@ def get_health_scorer() -> HealthScorer:
     _health_scorer = HealthScorer()
 
     # Subscribe to EventBus service events for automatic scoring
-    try:
-        from utils.event_bus import event_bus
-        event_bus.subscribe('service', _on_service_event)
-    except ImportError:
-        pass  # EventBus not available — scorer works without it
+    if _HAS_EVENT_BUS:
+        _event_bus.subscribe('service', _on_service_event)
 
     return _health_scorer
 

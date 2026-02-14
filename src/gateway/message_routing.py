@@ -10,17 +10,23 @@ import re
 import logging
 from typing import Optional, Dict, Any
 
+from utils.safe_import import safe_import
+
 from .bridge_health import MessageOrigin
 
 # Import routing classifier with confidence scoring
-try:
-    from utils.classifier import (
-        RoutingClassifier, RoutingCategory,
-        create_routing_system, ClassificationResult
-    )
-    CLASSIFIER_AVAILABLE = True
-except ImportError:
-    CLASSIFIER_AVAILABLE = False
+(_RoutingClassifier, _RoutingCategory, _create_routing_system,
+ _ClassificationResult, CLASSIFIER_AVAILABLE) = safe_import(
+    'utils.classifier',
+    'RoutingClassifier', 'RoutingCategory',
+    'create_routing_system', 'ClassificationResult',
+)
+
+if CLASSIFIER_AVAILABLE:
+    RoutingClassifier = _RoutingClassifier
+    RoutingCategory = _RoutingCategory
+    create_routing_system = _create_routing_system
+    ClassificationResult = _ClassificationResult
 
 # Import centralized path utility
 from utils.paths import get_real_user_home
