@@ -37,6 +37,15 @@ StartupChecker, EnvironmentState, ServiceRunState, HAS_STARTUP_CHECKER = safe_im
     'startup_checks', 'StartupChecker', 'EnvironmentState', 'ServiceRunState'
 )
 
+# Space weather API
+_SpaceWeatherAPI, _HAS_SPACE_WEATHER = safe_import('utils.space_weather', 'SpaceWeatherAPI')
+
+# EventBus for push-based updates
+_event_bus, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'event_bus')
+
+# Node tracker for initial node count seeding
+_get_node_tracker, _HAS_NODE_TRACKER = safe_import('gateway.node_tracker', 'get_node_tracker')
+
 # Cache TTL in seconds — how often to re-check service status
 STATUS_CACHE_TTL = 10.0
 
@@ -213,10 +222,13 @@ class StatusBar:
         is already called infrequently (5-min TTL). Falls back gracefully
         if network is unavailable.
         """
-        try:
-            from utils.space_weather import SpaceWeatherAPI
+        if not _HAS_SPACE_WEATHER:
+            logger.debug("Space weather module not available")
+            self._space_weather = None
+            return
 
-            api = SpaceWeatherAPI(timeout=5)  # Short timeout for TUI
+        try:
+            api = _SpaceWeatherAPI(timeout=5)  # Short timeout for TUI
             data = api.get_current_conditions()
 
             # Build compact status: "SFI:125 K:2"
@@ -231,10 +243,6 @@ class StatusBar:
             else:
                 self._space_weather = None
 
-        except ImportError:
-            # space_weather module not available
-            logger.debug("Space weather module not available")
-            self._space_weather = None
         except Exception as e:
             # Network error or API failure - don't break status bar
             logger.debug(f"Space weather fetch failed: {e}")
@@ -324,14 +332,13 @@ class StatusBar:
         """
         if self._event_subscribed:
             return
-        try:
-            from utils.event_bus import event_bus
-            event_bus.subscribe('service', self._on_service_event)
-            event_bus.subscribe('message', self._on_message_event)
-            event_bus.subscribe('node', self._on_node_event)
+        if _HAS_EVENT_BUS:
+            _event_bus.subscribe('service', self._on_service_event)
+            _event_bus.subscribe('message', self._on_message_event)
+            _event_bus.subscribe('node', self._on_node_event)
             self._event_subscribed = True
             logger.debug("StatusBar subscribed to EventBus service+message+node events")
-        except ImportError:
+        else:
             logger.debug("EventBus not available — StatusBar will poll only")
 
     def _seed_node_count(self) -> None:
@@ -340,15 +347,15 @@ class StatusBar:
         Without this, the status bar shows no node count until a new
         'discovered' event arrives from the EventBus.
         """
+        if not _HAS_NODE_TRACKER:
+            logger.debug("Node tracker not available for initial count")
+            return
         try:
-            from gateway.node_tracker import get_node_tracker
-            tracker = get_node_tracker()
+            tracker = _get_node_tracker()
             nodes = tracker.get_all_nodes()
             if nodes:
                 self._node_count = len(nodes)
                 logger.debug(f"StatusBar seeded node count: {self._node_count}")
-        except ImportError:
-            logger.debug("Node tracker not available for initial count")
         except Exception as e:
             logger.debug(f"Failed to seed node count: {e}")
 
