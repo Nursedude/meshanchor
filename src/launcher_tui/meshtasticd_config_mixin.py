@@ -116,16 +116,20 @@ class MeshtasticdConfigMixin:
             )
 
     def _meshtasticd_status(self):
-        """Show meshtasticd service status."""
+        """Show meshtasticd service status.
+
+        Issue #20 Phase 2: Separates service state from CLI/preset detection.
+        Service state comes from systemctl (single source of truth).
+        Preset detection is shown separately and never conflated with service state.
+        """
         self.dialog.infobox("Status", "Checking meshtasticd status...")
 
         try:
-            # Use centralized service checker (SINGLE SOURCE OF TRUTH)
+            # ---- Service state (SINGLE SOURCE OF TRUTH: systemctl) ----
             if check_service is not None and check_systemd_service is not None:
                 status = check_service('meshtasticd')
                 is_running = status.available
                 _, is_enabled = check_systemd_service('meshtasticd')
-                output = status.message
             else:
                 # Fallback if service_check not available
                 result = subprocess.run(
@@ -134,30 +138,47 @@ class MeshtasticdConfigMixin:
                     text=True,
                     timeout=10
                 )
-                output = result.stdout
-                is_running = "active (running)" in output
+                is_running = "active (running)" in result.stdout
                 is_enabled = subprocess.run(
                     ['systemctl', 'is-enabled', 'meshtasticd'],
                     capture_output=True, text=True, timeout=5
                 ).returncode == 0
 
-            # Get config file info
+            # ---- Preset detection (separate from service state) ----
+            preset_display = "Unknown (select via Radio Presets)"
+            region_display = ""
+            detection_method = ""
+            if is_running:
+                try:
+                    from utils.lora_presets import detect_meshtastic_settings
+                    detection = detect_meshtastic_settings()
+                    if detection and detection.get('preset'):
+                        preset_display = detection['preset']
+                        detection_method = detection.get('detection_method', '')
+                        if detection.get('region'):
+                            region_display = detection['region']
+                except Exception as e:
+                    logger.debug("Preset detection failed (service still running): %s", e)
+
+            # ---- Config file info ----
             config_path = Path('/etc/meshtasticd/config.yaml')
             config_exists = config_path.exists()
 
-            # Check active configs
             config_d = Path('/etc/meshtasticd/config.d')
             active_configs = list(config_d.glob('*.yaml')) if config_d.exists() else []
 
-            text = f"""Meshtasticd Service Status:
-
-Service: {'running' if is_running else 'stopped'}
-Boot:    {'enabled' if is_enabled else 'not enabled (will not start on reboot)'}
-
-Config File: {config_path}
-Config Exists: {'Yes' if config_exists else 'No'}
-
-Active Hardware Configs: {len(active_configs)}"""
+            # ---- Build display (service state and preset shown separately) ----
+            text = "Meshtasticd Service Status:\n"
+            text += f"\nService: {'running' if is_running else 'stopped'}"
+            text += f"\nBoot:    {'enabled' if is_enabled else 'not enabled (will not start on reboot)'}"
+            text += f"\n\nPreset:  {preset_display}"
+            if region_display:
+                text += f"\nRegion:  {region_display}"
+            if detection_method:
+                text += f"\n  (detected via {detection_method})"
+            text += f"\n\nConfig File: {config_path}"
+            text += f"\nConfig Exists: {'Yes' if config_exists else 'No'}"
+            text += f"\n\nActive Hardware Configs: {len(active_configs)}"
 
             for cfg in active_configs[:5]:
                 text += f"\n  - {cfg.name}"
@@ -265,7 +286,21 @@ Press Cancel to keep current values."""
             self.dialog.msgbox("Error", f"Failed to set owner name:\n{e}")
 
     def _radio_presets_menu(self):
-        """Radio/LoRa preset selection via meshtastic CLI."""
+        """Radio/LoRa preset selection via meshtastic CLI.
+
+        Issue #20 Phase 2: Shows current detected preset separately from
+        service state. Detection failure does not imply service failure.
+        """
+        # Detect current preset (best-effort, won't block menu)
+        current_preset = None
+        try:
+            from utils.lora_presets import detect_meshtastic_settings
+            detection = detect_meshtastic_settings()
+            if detection and detection.get('preset'):
+                current_preset = detection['preset']
+        except Exception:
+            pass
+
         # Define modem presets with descriptions
         presets = [
             ("SHORT_TURBO", "500kHz SF7  - Max speed, <1km"),
@@ -279,9 +314,18 @@ Press Cancel to keep current values."""
             ("back", "Back"),
         ]
 
+        # Mark current preset in the list
+        if current_preset:
+            presets = [
+                (tag, f"{desc} [ACTIVE]" if tag == current_preset else desc)
+                for tag, desc in presets
+            ]
+
+        current_info = f"\nCurrent: {current_preset}" if current_preset else "\nCurrent: Unknown"
+
         choice = self.dialog.menu(
             "Radio Presets",
-            "Select LoRa modem preset:\n\n"
+            f"Select LoRa modem preset:{current_info}\n\n"
             "Higher speed = shorter range\n"
             "Lower speed = longer range",
             presets

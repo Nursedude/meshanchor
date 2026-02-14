@@ -58,6 +58,14 @@ except ImportError:
             return Path(f'/home/{logname}')
         return Path('/root')
 
+# Import event bus for node update events
+try:
+    from utils.event_bus import emit_node_update
+    _HAS_EVENT_BUS = True
+except ImportError:
+    emit_node_update = None
+    _HAS_EVENT_BUS = False
+
 
 class UnifiedNodeTracker:
     """
@@ -507,12 +515,36 @@ instance_control_port = 37429
         existing.update_seen()
 
     def _notify_callbacks(self, event: str, node: UnifiedNode):
-        """Notify registered callbacks"""
+        """Notify registered callbacks and emit to EventBus."""
         for callback in self._callbacks:
             try:
                 callback(event, node)
             except Exception as e:
                 logger.error(f"Callback error: {e}")
+
+        # Emit to EventBus for decoupled subscribers (status bar, UI, etc.)
+        if _HAS_EVENT_BUS and emit_node_update is not None:
+            try:
+                # Map internal event names to EventBus event_type
+                event_type_map = {
+                    "update": "updated",
+                    "remove": "lost",
+                }
+                event_type = event_type_map.get(event, event)
+
+                lat = node.position.latitude if node.position else None
+                lon = node.position.longitude if node.position else None
+
+                emit_node_update(
+                    event_type=event_type,
+                    node_id=node.id,
+                    node_name=node.name or "",
+                    latitude=lat,
+                    longitude=lon,
+                    raw_data=node.to_dict() if hasattr(node, 'to_dict') else None,
+                )
+            except Exception as e:
+                logger.debug(f"EventBus node emit failed: {e}")
 
     def _cleanup_loop(self):
         """Periodically check node timeouts and save cache"""

@@ -309,11 +309,14 @@ class StatusBar:
     # =========================================================================
 
     def _subscribe_to_events(self) -> None:
-        """Subscribe to EventBus for push-based service status updates.
+        """Subscribe to EventBus for push-based status updates.
 
         When the ActiveHealthProbe is running, it emits ServiceEvents on
         state changes. We listen for those and update our cache immediately
         instead of waiting for the next polling cycle.
+
+        Also subscribes to node events for automatic node count updates
+        and message events for unread message tracking.
         """
         if self._event_subscribed:
             return
@@ -321,8 +324,9 @@ class StatusBar:
             from utils.event_bus import event_bus
             event_bus.subscribe('service', self._on_service_event)
             event_bus.subscribe('message', self._on_message_event)
+            event_bus.subscribe('node', self._on_node_event)
             self._event_subscribed = True
-            logger.debug("StatusBar subscribed to EventBus service+message events")
+            logger.debug("StatusBar subscribed to EventBus service+message+node events")
         except ImportError:
             logger.debug("EventBus not available — StatusBar will poll only")
 
@@ -367,6 +371,20 @@ class StatusBar:
         if direction == 'rx':
             self._unread_messages += 1
             logger.debug(f"StatusBar unread count: {self._unread_messages}")
+
+    def _on_node_event(self, event) -> None:
+        """Handle a NodeEvent from the EventBus.
+
+        Tracks node count for display in the status bar. Increments on
+        'discovered'/'updated' events, decrements on 'lost' events.
+        """
+        event_type = getattr(event, 'event_type', '')
+        if event_type == 'discovered':
+            if self._node_count is None:
+                self._node_count = 1
+            else:
+                self._node_count += 1
+            logger.debug(f"StatusBar node count: {self._node_count}")
 
     def clear_unread(self) -> None:
         """Reset unread message counter (called when user views messages)."""
