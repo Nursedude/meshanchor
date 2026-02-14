@@ -11,22 +11,19 @@ import subprocess
 import logging
 from typing import Dict, Any, Optional, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import version checker
-try:
-    from updates.version_checker import check_all_versions, VersionInfo
-    _HAS_VERSION_CHECKER = True
-except ImportError:
-    _HAS_VERSION_CHECKER = False
-    VersionInfo = None
+_check_all_versions, _VersionInfo, _HAS_VERSION_CHECKER = safe_import(
+    'updates.version_checker', 'check_all_versions', 'VersionInfo'
+)
 
 # Import service check for restart after updates
-try:
-    from utils.service_check import apply_config_and_restart
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+_apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'apply_config_and_restart'
+)
 
 
 class UpdatesMixin:
@@ -79,7 +76,7 @@ class UpdatesMixin:
         self.dialog.infobox("Checking for Updates", "Querying version information...")
 
         try:
-            versions = check_all_versions()
+            versions = _check_all_versions()
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to check versions:\n{e}")
             return None
@@ -126,7 +123,7 @@ class UpdatesMixin:
         self.dialog.infobox("Checking Updates", "Checking which components need updates...")
 
         try:
-            versions = check_all_versions()
+            versions = _check_all_versions()
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to check versions:\n{e}")
             return
@@ -180,7 +177,7 @@ class UpdatesMixin:
     def _update_meshtasticd(self):
         """Update meshtasticd package."""
         try:
-            versions = check_all_versions()
+            versions = _check_all_versions()
             info = versions.get('meshtasticd')
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to check version:\n{e}")
@@ -215,7 +212,7 @@ class UpdatesMixin:
             # Restart the service
             if _HAS_SERVICE_CHECK:
                 self.dialog.infobox("Restarting", "Restarting meshtasticd service...")
-                apply_config_and_restart('meshtasticd')
+                _apply_config_and_restart('meshtasticd')
 
             self.dialog.msgbox(
                 "Update Complete",
@@ -231,7 +228,7 @@ class UpdatesMixin:
     def _update_cli(self):
         """Update Meshtastic CLI."""
         try:
-            versions = check_all_versions()
+            versions = _check_all_versions()
             info = versions.get('cli')
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to check version:\n{e}")
@@ -284,7 +281,7 @@ class UpdatesMixin:
     def _firmware_info(self):
         """Show firmware update information."""
         try:
-            versions = check_all_versions()
+            versions = _check_all_versions()
             info = versions.get('firmware')
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to check version:\n{e}")

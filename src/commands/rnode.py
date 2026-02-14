@@ -389,7 +389,7 @@ def probe_rnode(port: str, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
 
             result['details']['raw_response'] = response[:64].hex() if response else ''
 
-    except serial.SerialException as e:
+    except _serial_mod.SerialException as e:
         logger.debug(f"Could not probe {port}: {e}")
         result['details']['error'] = str(e)
     except Exception as e:

@@ -11,6 +11,10 @@ from rich.table import Table
 from rich.panel import Panel
 import time
 
+from utils.safe_import import safe_import
+
+_run_cli_async_gtk, _HAS_COMMON_GTK = safe_import('utils.common', 'run_cli_async_gtk')
+
 console = Console()
 
 
@@ -200,11 +204,10 @@ def run_meshtastic_async(args, callback, host='localhost', timeout=30):
     Returns:
         The started thread
     """
-    try:
-        from utils.common import run_cli_async_gtk
+    if _HAS_COMMON_GTK:
         cli_path = find_meshtastic_cli()
-        return run_cli_async_gtk(args, callback, cli_path=cli_path, host=host, timeout=timeout)
-    except ImportError:
+        return _run_cli_async_gtk(args, callback, cli_path=cli_path, host=host, timeout=timeout)
+    else:
         # Fallback implementation
         import threading
 

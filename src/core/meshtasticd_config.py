@@ -35,6 +35,11 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_find_meshtastic_cli, _HAS_CLI_UTIL = safe_import('utils.cli', 'find_meshtastic_cli')
+
 logger = logging.getLogger(__name__)
 
 
@@ -393,11 +398,9 @@ General:
 
     def is_python_cli_installed(self) -> bool:
         """Check if Python meshtastic CLI is installed."""
-        try:
-            from utils.cli import find_meshtastic_cli
-            return find_meshtastic_cli() is not None
-        except ImportError:
-            return shutil.which("meshtastic") is not None
+        if _HAS_CLI_UTIL:
+            return _find_meshtastic_cli() is not None
+        return shutil.which("meshtastic") is not None
 
     def get_native_deb_url(self, arch: str = "arm64") -> str:
         """

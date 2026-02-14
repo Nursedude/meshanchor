@@ -21,8 +21,14 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Set, Callable, Any
 
 from .config import GatewayConfig, MeshtasticBridgeConfig, MeshtasticConfig
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Import meshtastic library (optional - graceful fallback)
+_meshtastic, _HAS_MESHTASTIC = safe_import('meshtastic')
+_meshtastic_tcp, _HAS_MESHTASTIC_TCP = safe_import('meshtastic.tcp_interface')
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 
 @dataclass
@@ -306,14 +312,14 @@ class MeshtasticPresetBridge:
 
     def _connect_meshtastic(self, config: MeshtasticConfig, name: str, callback) -> tuple:
         """Connect to a Meshtastic interface"""
-        try:
-            import meshtastic
-            import meshtastic.tcp_interface
-            from pubsub import pub
+        if not _HAS_MESHTASTIC or not _HAS_MESHTASTIC_TCP or not _HAS_PUBSUB:
+            logger.error("Meshtastic library not installed")
+            return None, False
 
+        try:
             logger.info(f"Connecting to {name} Meshtastic at {config.host}:{config.port}")
 
-            interface = meshtastic.tcp_interface.TCPInterface(hostname=config.host)
+            interface = _meshtastic_tcp.TCPInterface(hostname=config.host)
 
             # Subscribe with unique topic name to avoid conflicts
             topic_name = f"meshtastic.receive.{name}"
@@ -322,16 +328,13 @@ class MeshtasticPresetBridge:
                 callback(packet)
 
             # Use a unique subscription key
-            pub.subscribe(on_receive, "meshtastic.receive")
+            _pub.subscribe(on_receive, "meshtastic.receive")
 
             logger.info(f"Connected to {name} ({config.preset})")
             self._notify_status(f"{name}_connected")
 
             return interface, True
 
-        except ImportError:
-            logger.error("Meshtastic library not installed")
-            return None, False
         except Exception as e:
             logger.error(f"Failed to connect to {name}: {e}")
             return None, False

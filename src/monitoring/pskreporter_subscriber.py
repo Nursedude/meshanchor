@@ -53,6 +53,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_mqtt, _HAS_PAHO_MQTT = safe_import('paho.mqtt.client')
 
 logger = logging.getLogger(__name__)
 
@@ -218,11 +222,11 @@ class PSKReporterSubscriber:
 
     def _connect(self) -> bool:
         """Connect to PSKReporter MQTT broker."""
-        try:
-            import paho.mqtt.client as mqtt
-        except ImportError:
+        if not _HAS_PAHO_MQTT:
             logger.error("paho-mqtt not installed. Run: pip install paho-mqtt")
             return False
+
+        mqtt = _mqtt
 
         try:
             client_id = f"meshforge_pskr_{int(time.time())}"

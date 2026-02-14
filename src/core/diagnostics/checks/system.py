@@ -10,6 +10,7 @@ import time
 import logging
 
 from ..models import CheckResult, CheckStatus, CheckCategory
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,11 @@ def check_pip_packages() -> CheckResult:
     installed = []
     missing = []
 
-    import importlib
     for display_name, module_name in required.items():
-        try:
-            importlib.import_module(module_name)
+        _mod, _available = safe_import(module_name)
+        if _available:
             installed.append(display_name)
-        except ImportError:
+        else:
             missing.append(display_name)
 
     duration = (time.time() - start) * 1000
