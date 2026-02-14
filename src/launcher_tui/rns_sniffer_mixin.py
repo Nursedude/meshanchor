@@ -7,6 +7,14 @@ Extracted from rns_menu_mixin.py to reduce file size per CLAUDE.md guidelines.
 import re
 import subprocess
 from backend import clear_screen
+from utils.safe_import import safe_import
+
+# Hoist RNS sniffer imports to module level
+_get_rns_sniffer, _start_rns_capture, _stop_rns_capture, _RNSPacketType, _integrate_with_traffic_inspector, _HAS_RNS_SNIFFER = safe_import(
+    'monitoring.rns_sniffer',
+    'get_rns_sniffer', 'start_rns_capture', 'stop_rns_capture',
+    'RNSPacketType', 'integrate_with_traffic_inspector'
+)
 
 
 class RNSSnifferMixin:
@@ -14,17 +22,7 @@ class RNSSnifferMixin:
 
     def _rns_traffic_sniffer(self):
         """RNS Traffic Sniffer - Wireshark-grade packet capture for RNS."""
-        # Import RNS sniffer components
-        try:
-            from monitoring.rns_sniffer import (
-                get_rns_sniffer, start_rns_capture, stop_rns_capture,
-                RNSPacketType, integrate_with_traffic_inspector
-            )
-            HAS_RNS_SNIFFER = True
-        except ImportError:
-            HAS_RNS_SNIFFER = False
-
-        if not HAS_RNS_SNIFFER:
+        if not _HAS_RNS_SNIFFER:
             self.dialog.msgbox(
                 "RNS Sniffer Not Available",
                 "The RNS traffic sniffer module is not installed.\n\n"
@@ -34,7 +32,7 @@ class RNSSnifferMixin:
             return
 
         while True:
-            sniffer = get_rns_sniffer()
+            sniffer = _get_rns_sniffer()
             capturing = sniffer._running if sniffer else False
             stats = sniffer.get_stats() if sniffer else {}
 
@@ -87,10 +85,8 @@ class RNSSnifferMixin:
 
     def _rns_sniffer_toggle_capture(self, sniffer, capturing):
         """Toggle RNS packet capture."""
-        from monitoring.rns_sniffer import start_rns_capture, stop_rns_capture
-
         if capturing:
-            stop_rns_capture()
+            _stop_rns_capture()
             self.dialog.msgbox(
                 "Capture Stopped",
                 "RNS packet capture has been stopped.\n\n"
@@ -98,7 +94,7 @@ class RNSSnifferMixin:
                 height=8, width=45
             )
         else:
-            if start_rns_capture():
+            if _start_rns_capture():
                 self.dialog.msgbox(
                     "Capture Started",
                     "RNS packet capture is now active.\n\n"
