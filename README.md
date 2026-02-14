@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-4017%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1424%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -150,11 +150,8 @@ Do you need to upgrade?
   ├── Import errors, stale .pyc, major version bump, or something "feels off"
   │   └── Clean Reinstall (recommended)
   │
-  ├── Small code change, update service files
-  │   └── Quick Update (update.sh)
-  │
-  └── Switching from alpha branch to main
-      └── Branch Switch
+  └── Small code change, update service files
+      └── Quick Update (update.sh)
 ```
 
 ### Clean Reinstall (Recommended)
@@ -189,7 +186,6 @@ No need to re-image your Pi. Your radio stays configured.
 **Reinstall flags:**
 ```bash
 sudo bash scripts/reinstall.sh --no-confirm    # Skip confirmation prompt
-sudo bash scripts/reinstall.sh --branch alpha   # Install specific branch
 ```
 
 ### Quick Update
@@ -210,17 +206,6 @@ cd /opt/meshforge && sudo bash scripts/update.sh
 Or manually (code only — does NOT update service files):
 ```bash
 cd /opt/meshforge && sudo git pull origin main
-```
-
-### Switch Branches
-
-All active development is on `main`. The `alpha` branch has firmware/NanoVNA
-research and is not synchronized with main.
-
-```bash
-cd /opt/meshforge
-git checkout main
-sudo bash scripts/update.sh
 ```
 
 ### Post-Upgrade Verification
@@ -625,11 +610,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,494 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,512 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 36 feature modules (RF, channels, AI, system, etc.)
+│   └── *_mixin.py         # 42 feature modules (RF, channels, AI, system, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -804,17 +789,18 @@ connection (port 4403):
 
 ### Test Coverage
 
-**4,017 tests passing** across the gateway, monitoring, and utility layers:
+**1,424 tests passing** across 42 gateway-essential test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
 | `test_rns_bridge.py` | 136 | Core bridge: routing, circuit breaker, message processing, callbacks, lifecycle |
 | `test_rns_transport.py` | 97 | Packet fragmentation, reassembly, transport stats, connection management |
-| `test_message_queue.py` | 72 | Persistent SQLite queue, retry policy, dead letter, overflow shedding |
-| `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 | `test_meshtastic_handler.py` | 147 | Meshtastic connection, message handling, node tracking |
 | `test_packet_dissectors.py` | 130 | Protocol analysis, packet tree, display filters |
-| `test_rf.py` | 200+ | RF calculations, link budget, Fresnel zone, path loss |
+| `test_message_queue.py` | 72 | Persistent SQLite queue, retry policy, dead letter, overflow shedding |
+| `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
+
+*Note: Test suite trimmed from 4,017 to 1,424 in v0.5.4 to focus on gateway-essential coverage. Non-gateway tests (RF tools, TUI mixins, monitoring, analytics, plugins) removed.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -871,7 +857,6 @@ See [CLAUDE.md](CLAUDE.md) for details.
 ## Development
 
 Active development on `main`. Feature branches via `claude/` prefix, merged by PR.
-`alpha` branch preserved for firmware/NanoVNA research.
 
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
