@@ -26,7 +26,11 @@ from .reconnect import ReconnectStrategy
 from utils.meshtastic_connection import (
     clear_stale_connections, get_connection_manager, wait_for_cooldown
 )
-from utils.websocket_server import broadcast_message
+try:
+    from utils.websocket_server import broadcast_message
+except ImportError:
+    def broadcast_message(*args, **kwargs):
+        pass
 from utils.safe_import import safe_import
 
 if TYPE_CHECKING:

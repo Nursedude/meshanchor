@@ -131,26 +131,53 @@
 
 ---
 
-## Project Health Snapshot (2026-02-13)
+## Project Health Snapshot (2026-02-14)
 
 | Metric | Value | Status |
 |--------|-------|--------|
 | Version | v0.5.4-beta | MQTT bridge release |
-| Python files | 261 | Well-modularized |
-| Total lines | 291K+ | Healthy |
-| Test count | 4,046+ | Comprehensive |
-| Tests passing | 4,046 pass, 19 skip, 0 fail | Clean |
-| Lint | Clean | MF001-MF004 all passing |
-| Files >1,500 loc | 2 (knowledge_content.py by design, main.py 1521 borderline) | Monitor |
-| TUI mixin files | 33 | All wired |
-| P2 feature accessibility | 8/8 complete | **DONE** |
-| Documentation | 51+ MD files | Extensive |
-| Session notes | 44+ entries | Good tracking |
-| Persistent issues | Issue #20 fixed, #21 upstream, #27 open | Active |
+| Python files | 261 (source) | Well-modularized |
+| Test files | 42 (gateway-focused) | Trimmed from 108 |
+| Test count | 1,411 | Gateway-essential |
+| Tests passing | 1,411 pass, 14 skip, 0 fail | **Clean** |
+| Gateway code | ~15K LOC (23 files) | Core functionality |
+| Priority | P1: Make gateway work | **IN PROGRESS** |
+| meshtasticd path | MQTT bridge handler (clean) | Ready for hardware test |
+| rnsd path | Simplified, no auto-fix | Ready for hardware test |
+| Auto-fix removed | rnsd restart removed from init | Diagnose-don't-fix enforced |
 
 ---
 
 ## Session Log
+
+### Session: Gateway Focus — Trim & Stabilize (2026-02-14)
+
+**Priority**: Make the gateway work. Non-negotiable.
+
+**Test Trim**:
+- Removed 66 non-gateway test files (34,389 lines) — RF tools, TUI mixins, monitoring, analytics, plugins, amateur radio, maps, diagnostics, etc.
+- Kept 42 gateway-essential test files (20,313 lines) — bridge, handlers, config, queue, routing, transport, connections
+- Test count: 4,070 → 1,411 (all passing, 0 failures)
+
+**Gateway Code Cleanup**:
+- `rns_bridge.py`: Removed auto-restart of rnsd from `_init_rns_main_thread()` — this was the root cause of worst regressions (Session 7)
+- `rns_bridge.py`: Simplified `_connect_rns()` — removed 4 redundant error handling branches
+- `rns_bridge.py`: Made websocket server and RNS sniffer imports optional (not core bridging)
+- `meshtastic_handler.py`: Made websocket broadcast import optional
+- Applied "diagnose, don't fix" policy: gateway NEVER restarts services or modifies configs during init
+
+**Connection Stability Tests Added (10 new)**:
+- `TestMeshtasticConnectionStability`: MQTT handler instantiation, connect failure, test_connection, degraded mode start
+- `TestRNSConnectionStability`: RNS not installed, already initialized, no service restart, permanent failure loop
+- `TestBridgeSubsystemIsolation`: meshtastic/rns failure independence, message queueing when down
+
+**Status Bar Fix**: Fixed pre-existing `test_bridge_displayed_when_running` failure (EventBus cross-test pollution)
+
+**Verified**: Gateway instantiates, starts, runs in degraded mode, stops cleanly. Both MQTT and RNS connection paths handle service unavailability gracefully.
+
+**Tests**: 1,411 passed, 14 skipped, 0 failures.
+
+---
 
 ### Session: Final TUI Wiring + Issue #20 Fix (2026-02-13)
 
@@ -262,10 +289,15 @@
 
 ## Quick Reference: Next Session Pickup
 
-1. ~~**P2 quick wins**: Wire remaining modules to TUI~~ **DONE** (8/8 complete)
-2. ~~**P2 reliability**: Issue #20 service detection~~ **DONE** (systemctl-only, port fallback removed)
-3. **P2 architecture**: Event bus for RX message propagation (Issue #20 Phase 3)
-4. **P2 display**: Status display separation — service state vs CLI detection (Issue #20 Phase 2)
-5. **P3 debt**: Import boilerplate consolidation (`safe_import()` pattern, 86 try/except blocks)
-6. **P3 debt**: main.py at 1521 lines — borderline, consider extracting another menu method
-7. **Hardware**: Test all backlog items on MOC1/MOC2
+**P1 — GATEWAY (non-negotiable)**:
+1. ~~**Trim non-gateway code/tests**~~ **DONE** (66 test files removed, gateway code simplified)
+2. ~~**meshtasticd connection stable**~~ **DONE** (MQTT handler clean, degraded mode works)
+3. ~~**rnsd connection stable**~~ **DONE** (auto-fix removed, diagnose-don't-fix policy enforced)
+4. **Hardware test**: Deploy on MOC1/MOC2 with actual meshtasticd + rnsd + mosquitto
+5. **Verify end-to-end**: Send message Meshtastic → gateway → RNS and back
+
+**P2 — After gateway works**:
+1. Event bus for RX message propagation (Issue #20 Phase 3)
+2. Status display separation (Issue #20 Phase 2)
+3. Import boilerplate consolidation
+4. Hardware testing backlog
