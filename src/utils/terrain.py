@@ -30,35 +30,47 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+def get_real_user_home() -> Path:
+    """Get real user home, with fallback for sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
     import os
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        candidate = Path(f'/home/{sudo_user}')
+        return candidate
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        candidate = Path(f'/home/{logname}')
+        return candidate
+    return Path('/root')
 
 # Import existing RF calculations
-try:
-    from utils.rf import (
-        haversine_distance,
-        earth_bulge,
-        fresnel_radius,
-        knife_edge_diffraction,
-        multi_obstacle_loss,
-        free_space_path_loss,
-    )
-except ImportError:
+(
+    _haversine_distance, _earth_bulge, _fresnel_radius,
+    _knife_edge_diffraction, _multi_obstacle_loss, _free_space_path_loss,
+    _HAS_RF,
+) = safe_import(
+    'utils.rf',
+    'haversine_distance', 'earth_bulge', 'fresnel_radius',
+    'knife_edge_diffraction', 'multi_obstacle_loss', 'free_space_path_loss',
+)
+
+if _HAS_RF:
+    haversine_distance = _haversine_distance
+    earth_bulge = _earth_bulge
+    fresnel_radius = _fresnel_radius
+    knife_edge_diffraction = _knife_edge_diffraction
+    multi_obstacle_loss = _multi_obstacle_loss
+    free_space_path_loss = _free_space_path_loss
+else:
     # Fallback implementations for standalone use
     def haversine_distance(lat1, lon1, lat2, lon2):
         R = 6371000

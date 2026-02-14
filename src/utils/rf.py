@@ -16,21 +16,18 @@ from enum import Enum
 from typing import Dict, List, Tuple, Optional, NamedTuple
 
 # Try to import Cython-optimized versions
-_USE_FAST = False
-try:
-    from utils.rf_fast import (
-        haversine_distance as _haversine_fast,
-        fresnel_radius as _fresnel_fast,
-        free_space_path_loss as _fspl_fast,
-        earth_bulge as _bulge_fast,
-        link_budget as _link_budget_fast,
-        snr_estimate as _snr_fast,
-        batch_haversine as _batch_haversine_fast,
-        batch_link_quality as _batch_link_quality_fast,
-    )
-    _USE_FAST = True
-except ImportError:
-    pass  # Fall back to pure Python
+from utils.safe_import import safe_import
+
+(
+    _haversine_fast, _fresnel_fast, _fspl_fast, _bulge_fast,
+    _link_budget_fast, _snr_fast, _batch_haversine_fast,
+    _batch_link_quality_fast, _USE_FAST,
+) = safe_import(
+    'utils.rf_fast',
+    'haversine_distance', 'fresnel_radius', 'free_space_path_loss',
+    'earth_bulge', 'link_budget', 'snr_estimate',
+    'batch_haversine', 'batch_link_quality',
+)
 
 
 # ============================================================================

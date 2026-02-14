@@ -197,15 +197,10 @@ CRITICAL = logging.CRITICAL
 # Journald Integration (for RPi/systemd deployments)
 # ============================================================================
 
-_journald_available = False
-_JournaldLogHandler = None
+from utils.safe_import import safe_import
 
-try:
-    from systemd.journal import JournalHandler
-    _journald_available = True
-    _JournaldLogHandler = JournalHandler
-except ImportError:
-    pass
+_JournalHandler, _journald_available = safe_import('systemd.journal', 'JournalHandler')
+_JournaldLogHandler = _JournalHandler
 
 
 def is_journald_available() -> bool:

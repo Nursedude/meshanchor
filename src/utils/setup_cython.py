@@ -20,12 +20,17 @@ import os
 import sys
 from pathlib import Path
 
-try:
-    from setuptools import setup, Extension
-    from Cython.Build import cythonize
-    HAS_CYTHON = True
-except ImportError:
-    HAS_CYTHON = False
+from utils.safe_import import safe_import
+
+_setup, _Extension, _HAS_SETUPTOOLS = safe_import('setuptools', 'setup', 'Extension')
+_cythonize, _HAS_CYTHON_BUILD = safe_import('Cython.Build', 'cythonize')
+HAS_CYTHON = _HAS_SETUPTOOLS and _HAS_CYTHON_BUILD
+
+if HAS_CYTHON:
+    setup = _setup
+    Extension = _Extension
+    cythonize = _cythonize
+else:
     print("Cython not installed. Install with: pip install cython")
     print("Falling back to pure Python implementations.")
     sys.exit(0)

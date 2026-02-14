@@ -42,14 +42,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import SettingsManager for persistence
-try:
-    from utils.common import SettingsManager
-except ImportError:
-    # Fallback for testing
-    SettingsManager = None  # type: ignore
+_SettingsManager, _HAS_COMMON = safe_import('utils.common', 'SettingsManager')
+SettingsManager = _SettingsManager  # None if not available (fallback for testing)
 
 
 @dataclass

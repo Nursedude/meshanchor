@@ -40,6 +40,13 @@ __version__, _HAS_VERSION = safe_import('__version__', '__version__')
 if not _HAS_VERSION:
     __version__ = "0.5.0-beta"
 
+# Import optional modules at module level
+_find_meshtastic_cli, _HAS_CLI_UTIL = safe_import('utils.cli', 'find_meshtastic_cli')
+_get_health_probe, _HAS_HEALTH_PROBE = safe_import('utils.active_health_probe', 'get_health_probe')
+_config_api_mod, _HAS_CONFIG_API = safe_import('utils.config_api')
+_lock_port_external, _HAS_PORT_LOCK = safe_import('utils.service_check', 'lock_port_external')
+_TopologyVisualizer, _HAS_TOPO_VIZ = safe_import('utils.topology_visualizer', 'TopologyVisualizer')
+
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
@@ -185,10 +192,9 @@ class MeshForgeLauncher(
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
         if self._meshtastic_path is None:
-            try:
-                from utils.cli import find_meshtastic_cli
-                self._meshtastic_path = find_meshtastic_cli() or 'meshtastic'
-            except ImportError:
+            if _HAS_CLI_UTIL:
+                self._meshtastic_path = _find_meshtastic_cli() or 'meshtastic'
+            else:
                 self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
         return self._meshtastic_path
 
@@ -422,14 +428,14 @@ class MeshForgeLauncher(
         rnsd, and mosquitto every 30 seconds. State changes are pushed
         to the EventBus, which the StatusBar subscribes to.
         """
-        try:
-            from utils.active_health_probe import get_health_probe
-            self._health_probe = get_health_probe(interval=30, fails=3, passes=2)
-            self._health_probe.start()
-            logger.info("Health monitor started (30s interval)")
-        except ImportError:
+        if not _HAS_HEALTH_PROBE:
             logger.debug("active_health_probe not available — health monitor disabled")
             self._health_probe = None
+            return
+        try:
+            self._health_probe = _get_health_probe(interval=30, fails=3, passes=2)
+            self._health_probe.start()
+            logger.info("Health monitor started (30s interval)")
         except Exception as e:
             logger.warning(f"Failed to start health monitor: {e}")
             self._health_probe = None
@@ -615,13 +621,13 @@ class MeshForgeLauncher(
         Provides RESTful configuration API on localhost:8081.
         Silent operation - no dialogs on failure.
         """
-        try:
-            from utils.config_api import create_gateway_config_api, ConfigAPIServer
-        except ImportError:
+        if not _HAS_CONFIG_API:
             logger.debug("Config API module not available")
             return
 
         try:
+            create_gateway_config_api = _config_api_mod.create_gateway_config_api
+            ConfigAPIServer = _config_api_mod.ConfigAPIServer
             api = create_gateway_config_api()
             self._config_api_server = ConfigAPIServer(api, host="127.0.0.1", port=8081)
             if self._config_api_server.start():
@@ -648,14 +654,12 @@ class MeshForgeLauncher(
 
         Silent operation - logs result but no dialogs on failure.
         """
-        try:
-            from utils.service_check import lock_port_external
-        except ImportError:
+        if not _HAS_PORT_LOCK:
             logger.debug("Port lockdown not available (missing service_check)")
             return
 
         try:
-            success, msg = lock_port_external(9443)
+            success, msg = _lock_port_external(9443)
             if success:
                 logger.info("Startup port lock: %s", msg)
             else:
@@ -987,9 +991,11 @@ class MeshForgeLauncher(
 
     def _export_topology_data(self, format_type: str):
         """Export topology data in specified format."""
-        try:
-            from utils.topology_visualizer import TopologyVisualizer
+        if not _HAS_TOPO_VIZ:
+            self.dialog.msgbox("Export Failed", "Topology visualizer module not available.")
+            return
 
+        try:
             # Get topology from TopologyMixin (properly populated)
             topology = self._get_topology()
             if topology is None:
@@ -1001,7 +1007,7 @@ class MeshForgeLauncher(
                 return
 
             # Create visualizer from actual topology data
-            viz = TopologyVisualizer.from_topology(topology)
+            viz = _TopologyVisualizer.from_topology(topology)
 
             if format_type == "geojson":
                 path, count = viz.export_geojson()
@@ -1027,9 +1033,6 @@ class MeshForgeLauncher(
                     "D3.js Export",
                     f"Exported {count} nodes + links.\n\nFile: {path}"
                 )
-
-        except ImportError:
-            self.dialog.msgbox("Export Failed", "Topology visualizer module not available.")
         except Exception as e:
             self.dialog.msgbox("Export Failed", f"Error: {e}")
 
