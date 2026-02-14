@@ -25,14 +25,26 @@ logger = logging.getLogger(__name__)
 if not logger.handlers:
     logger.setLevel(logging.WARNING)
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+(_MESHTASTIC_CONNECTION_LOCK, _wait_for_cooldown, _safe_close_interface,
+ _HAS_MESHTASTIC_CONNECTION) = safe_import(
+    'utils.meshtastic_connection',
+    'MESHTASTIC_CONNECTION_LOCK', 'wait_for_cooldown', 'safe_close_interface'
+)
+
+_TCPInterface, _HAS_TCP_INTERFACE = safe_import(
+    'meshtastic.tcp_interface', 'TCPInterface'
+)
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+
 # Import global connection lock - meshtasticd only supports one TCP connection
-try:
-    from utils.meshtastic_connection import (
-        MESHTASTIC_CONNECTION_LOCK,
-        wait_for_cooldown,
-        safe_close_interface
-    )
-except ImportError:
+if _HAS_MESHTASTIC_CONNECTION:
+    MESHTASTIC_CONNECTION_LOCK = _MESHTASTIC_CONNECTION_LOCK
+    wait_for_cooldown = _wait_for_cooldown
+    safe_close_interface = _safe_close_interface
+else:
     # Fallback if utils not available
     MESHTASTIC_CONNECTION_LOCK = threading.Lock()
     def wait_for_cooldown():
@@ -212,12 +224,21 @@ class NodeMonitor:
         self.state = ConnectionState.CONNECTING
         self._running = True
 
+        if not _HAS_TCP_INTERFACE or not _HAS_PUBSUB:
+            e = ImportError("meshtastic package not installed")
+            logger.error(f"meshtastic package not installed")
+            self.state = ConnectionState.ERROR
+            self._release_global_lock()
+            if self.on_error:
+                self.on_error(e)
+            return False
+
         try:
             # Wait for cooldown from previous connection
             wait_for_cooldown()
 
-            from meshtastic.tcp_interface import TCPInterface
-            from pubsub import pub
+            TCPInterface = _TCPInterface
+            pub = _pub
 
             # Subscribe to meshtastic events
             pub.subscribe(self._on_receive, "meshtastic.receive")
@@ -262,14 +283,6 @@ class NodeMonitor:
                 return True
             else:
                 raise TimeoutError("Connection timeout")
-
-        except ImportError as e:
-            logger.error(f"meshtastic package not installed: {e}")
-            self.state = ConnectionState.ERROR
-            self._release_global_lock()
-            if self.on_error:
-                self.on_error(e)
-            return False
 
         except Exception as e:
             logger.error(f"Connection failed: {e}")

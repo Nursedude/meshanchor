@@ -10,29 +10,41 @@ Useful for:
 
 import json
 import logging
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List
 from dataclasses import dataclass, asdict
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+_yaml, _HAS_YAML = safe_import('yaml')
+
 logger = logging.getLogger(__name__)
 
-# Import path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os
-    def get_real_user_home():
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
+
+def _fallback_get_real_user_home():
+    """Fallback when utils.paths is not available."""
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        candidate = Path(f'/home/{sudo_user}')
+        return candidate
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        candidate = Path(f'/home/{logname}')
+        return candidate
+    return Path('/root')
+
+
+def get_real_user_home():
+    """Get real user home, using utils.paths if available."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    return _fallback_get_real_user_home()
 
 
 @dataclass
@@ -142,10 +154,9 @@ def create_backup(
 
     try:
         # Find meshtastic CLI
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 
@@ -207,14 +218,14 @@ def create_backup(
         channels_data = []
         owner_data = {}
 
-        try:
-            import yaml
-            config_data = yaml.safe_load(export_result.stdout) or {}
-        except ImportError:
+        if _HAS_YAML:
+            try:
+                config_data = _yaml.safe_load(export_result.stdout) or {}
+            except Exception as e:
+                config_data = {'raw': export_result.stdout, 'parse_error': str(e)}
+        else:
             # Simple parsing if yaml not available
             config_data = {'raw': export_result.stdout}
-        except Exception as e:
-            config_data = {'raw': export_result.stdout, 'parse_error': str(e)}
 
         # Extract channels if available
         if 'channel_url' in config_data:
@@ -333,10 +344,9 @@ def restore_backup(
             return result
 
         # Find meshtastic CLI
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 

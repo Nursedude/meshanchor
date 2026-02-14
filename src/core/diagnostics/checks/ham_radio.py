@@ -10,20 +10,23 @@ import logging
 from pathlib import Path
 
 from ..models import CheckResult, CheckStatus, CheckCategory
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
 logger = logging.getLogger(__name__)
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-    _get_real_user_home = get_real_user_home
-except ImportError:
-    def _get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not in Python path."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        return Path.home()
+
+def _resolve_user_home() -> Path:
+    """Resolve user home directory with sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    # Fallback for when utils.paths is not in Python path
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        return Path(f'/home/{sudo_user}')
+    return Path.home()
 
 
 def check_callsign() -> CheckResult:
@@ -43,7 +46,7 @@ def check_callsign() -> CheckResult:
         )
     else:
         # Check NomadNet config
-        nomadnet_config = _get_real_user_home() / '.nomadnetwork' / 'config'
+        nomadnet_config = _resolve_user_home() / '.nomadnetwork' / 'config'
         if nomadnet_config.exists():
             try:
                 content = nomadnet_config.read_text()
