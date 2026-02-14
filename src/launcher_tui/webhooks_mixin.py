@@ -7,8 +7,14 @@ Extracted as a mixin to keep main.py under 1,500 lines.
 
 import logging
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+get_webhook_manager, WebhookEndpoint, EventType, _HAS_WEBHOOKS = safe_import(
+    'utils.webhooks', 'get_webhook_manager', 'WebhookEndpoint', 'EventType'
+)
 
 
 class WebhooksMixin:
@@ -53,9 +59,7 @@ class WebhooksMixin:
         clear_screen()
         print("=== Webhook Endpoints ===\n")
 
-        try:
-            from utils.webhooks import get_webhook_manager
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             print("  Webhooks module not available.")
             print("  File: src/utils/webhooks.py")
             self._wait_for_enter()
@@ -89,9 +93,7 @@ class WebhooksMixin:
 
     def _webhooks_add(self):
         """Add a new webhook endpoint via dialog."""
-        try:
-            from utils.webhooks import get_webhook_manager, WebhookEndpoint
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             self.dialog.msgbox("Unavailable", "Webhooks module not available.")
             return
 
@@ -119,9 +121,7 @@ class WebhooksMixin:
 
     def _webhooks_remove(self):
         """Remove a webhook endpoint."""
-        try:
-            from utils.webhooks import get_webhook_manager
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             self.dialog.msgbox("Unavailable", "Webhooks module not available.")
             return
 
@@ -158,9 +158,7 @@ class WebhooksMixin:
 
     def _webhooks_toggle(self):
         """Toggle a webhook endpoint on/off."""
-        try:
-            from utils.webhooks import get_webhook_manager
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             self.dialog.msgbox("Unavailable", "Webhooks module not available.")
             return
 
@@ -198,9 +196,7 @@ class WebhooksMixin:
         clear_screen()
         print("=== Test Webhook Delivery ===\n")
 
-        try:
-            from utils.webhooks import get_webhook_manager, EventType
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             print("  Webhooks module not available.")
             self._wait_for_enter()
             return
@@ -236,9 +232,7 @@ class WebhooksMixin:
         clear_screen()
         print("=== Supported Webhook Event Types ===\n")
 
-        try:
-            from utils.webhooks import EventType
-        except ImportError:
+        if not _HAS_WEBHOOKS:
             print("  Webhooks module not available.")
             self._wait_for_enter()
             return

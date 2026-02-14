@@ -25,7 +25,18 @@ from pathlib import Path
 from queue import Queue, Empty, Full
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+RNS, _HAS_RNS = safe_import('RNS')
+(MeshPacket, PacketProtocol, PacketDirection, PacketTree,
+ PacketField, FieldType, _HAS_TRAFFIC_INSPECTOR) = safe_import(
+    'monitoring.traffic_inspector',
+    'MeshPacket', 'PacketProtocol', 'PacketDirection', 'PacketTree',
+    'PacketField', 'FieldType'
+)
 
 
 # =============================================================================
@@ -335,9 +346,11 @@ class RNSSniffer:
         if self._hooks_installed:
             return True
 
-        try:
-            import RNS
+        if not _HAS_RNS:
+            logger.debug("RNS not available for hooking")
+            return False
 
+        try:
             # Hook into Transport's packet handling
             # RNS.Transport processes all incoming/outgoing packets
 
@@ -375,9 +388,6 @@ class RNSSniffer:
             logger.debug("RNS hooks installed for packet capture")
             return True
 
-        except ImportError:
-            logger.debug("RNS not available for hooking")
-            return False
         except Exception as e:
             logger.debug(f"Failed to install RNS hooks: {e}")
             return False

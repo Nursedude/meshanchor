@@ -7,8 +7,14 @@ Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 import logging
 import subprocess
 from backend import clear_screen
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# AREDN utilities - optional dependency
+get_aredn_node, AREDNClient, AREDNScanner, _HAS_AREDN = safe_import(
+    'utils.aredn', 'get_aredn_node', 'AREDNClient', 'AREDNScanner'
+)
 
 
 class AREDNMixin:
@@ -72,9 +78,13 @@ class AREDNMixin:
         clear_screen()
         print("=== AREDN Node Status ===\n")
 
-        try:
-            from utils.aredn import get_aredn_node
+        if not _HAS_AREDN:
+            print("AREDN utilities not available.")
+            print("Check: src/utils/aredn.py")
+            self._wait_for_enter()
+            return
 
+        try:
             node_ip = self._aredn_get_node_ip()
             if not node_ip:
                 print("No AREDN node found on local network.")
@@ -103,9 +113,6 @@ class AREDNMixin:
                 print(f"Connected to {node_ip} but couldn't parse node info.")
                 print(f"Check: http://{node_ip}:8080/cgi-bin/sysinfo.json")
 
-        except ImportError:
-            print("AREDN utilities not available.")
-            print("Check: src/utils/aredn.py")
         except Exception as e:
             print(f"Error: {e}")
 
@@ -116,9 +123,12 @@ class AREDNMixin:
         clear_screen()
         print("=== AREDN Neighbors ===\n")
 
-        try:
-            from utils.aredn import AREDNClient
+        if not _HAS_AREDN:
+            print("AREDN utilities not available.")
+            self._wait_for_enter()
+            return
 
+        try:
             node_ip = self._aredn_get_node_ip()
             if not node_ip:
                 print("No AREDN node found. Is it connected?")
@@ -139,8 +149,6 @@ class AREDNMixin:
                 print("No neighbors found.")
                 print("Check that your AREDN node has active RF links.")
 
-        except ImportError:
-            print("AREDN utilities not available.")
         except Exception as e:
             print(f"Error: {e}")
 
@@ -151,9 +159,12 @@ class AREDNMixin:
         clear_screen()
         print("=== AREDN Services ===\n")
 
-        try:
-            from utils.aredn import AREDNClient
+        if not _HAS_AREDN:
+            print("AREDN utilities not available.")
+            self._wait_for_enter()
+            return
 
+        try:
             node_ip = self._aredn_get_node_ip()
             if not node_ip:
                 print("No AREDN node found.")
@@ -179,8 +190,6 @@ class AREDNMixin:
             else:
                 print("Could not retrieve services.")
 
-        except ImportError:
-            print("AREDN utilities not available.")
         except Exception as e:
             print(f"Error: {e}")
 
@@ -212,9 +221,12 @@ class AREDNMixin:
         print("=== AREDN Network Scan ===\n")
         print("Scanning 10.0.0.0/24 for AREDN nodes...\n")
 
-        try:
-            from utils.aredn import AREDNScanner
+        if not _HAS_AREDN:
+            print("AREDN utilities not available.")
+            self._wait_for_enter()
+            return
 
+        try:
             scanner = AREDNScanner()
             nodes = scanner.scan_subnet("10.0.0.0/24")
 
@@ -227,8 +239,6 @@ class AREDNMixin:
                 print("\nYour network may use a different subnet.")
                 print("Check your AREDN node's IP configuration.")
 
-        except ImportError:
-            print("AREDN utilities not available.")
         except Exception as e:
             print(f"Error: {e}")
 
@@ -254,9 +264,12 @@ class AREDNMixin:
 
         print(f"Connecting to AREDN node at {node_ip}...\n")
 
-        try:
-            from utils.aredn import get_aredn_node
+        if not _HAS_AREDN:
+            print("AREDN utilities not available.")
+            self._wait_for_enter()
+            return
 
+        try:
             node = get_aredn_node(node_ip)
             if not node:
                 print("Could not retrieve node information.")
@@ -286,8 +299,7 @@ class AREDNMixin:
             for link in node.links[:5]:  # Check first 5 to avoid long waits
                 if link.ip:
                     try:
-                        from utils.aredn import get_aredn_node as get_neighbor
-                        neighbor = get_neighbor(link.ip)
+                        neighbor = get_aredn_node(link.ip)
                         if neighbor and neighbor.has_location():
                             neighbors_with_loc += 1
                             print(f"    ✓ {neighbor.hostname} has location")
@@ -318,8 +330,6 @@ class AREDNMixin:
             except OSError as e:
                 logger.debug("AREDN map server check failed: %s", e)
 
-        except ImportError as e:
-            print(f"AREDN utilities not available: {e}")
         except Exception as e:
             print(f"Error: {e}")
 

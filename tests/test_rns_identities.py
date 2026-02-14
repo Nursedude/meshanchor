@@ -36,6 +36,8 @@ class TestCreateIdentities:
         mock_rns.Identity.return_value = mock_identity
 
         with patch.dict(sys.modules, {'RNS': mock_rns}), \
+             patch('commands.rns.RNS', mock_rns), \
+             patch('commands.rns._HAS_RNS', True), \
              patch('commands.rns.ReticulumPaths.get_config_dir', return_value=rns_config_dir), \
              patch('commands.rns.get_identity_path', return_value=gw_path):
             from commands.rns import create_identities
@@ -83,6 +85,8 @@ class TestCreateIdentities:
         mock_rns.Identity.return_value = mock_identity
 
         with patch.dict(sys.modules, {'RNS': mock_rns}), \
+             patch('commands.rns.RNS', mock_rns), \
+             patch('commands.rns._HAS_RNS', True), \
              patch('commands.rns.ReticulumPaths.get_config_dir', return_value=rns_config_dir), \
              patch('commands.rns.get_identity_path', return_value=gw_path):
             from commands.rns import create_identities
@@ -140,6 +144,8 @@ class TestConnectivityWarnings:
         mock_rns.__version__ = '1.1.3'
 
         with patch.dict(sys.modules, {'RNS': mock_rns}), \
+             patch('commands.rns.RNS', mock_rns), \
+             patch('commands.rns._HAS_RNS', True), \
              patch('commands.rns.get_status', return_value=mock_status), \
              patch('commands.rns.read_config', return_value=mock_config), \
              patch('commands.rns.validate_config', return_value=(True, [])), \
@@ -182,6 +188,8 @@ class TestConnectivityWarnings:
         mock_rns.__version__ = '1.1.3'
 
         with patch.dict(sys.modules, {'RNS': mock_rns}), \
+             patch('commands.rns.RNS', mock_rns), \
+             patch('commands.rns._HAS_RNS', True), \
              patch('commands.rns.get_status', return_value=mock_status), \
              patch('commands.rns.read_config', return_value=mock_config), \
              patch('commands.rns.validate_config', return_value=(True, [])), \

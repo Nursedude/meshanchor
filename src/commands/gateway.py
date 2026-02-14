@@ -12,8 +12,20 @@ import logging
 from typing import Optional, Dict, Any
 
 from .base import CommandResult
+from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
+
+# Optional dependencies — safe_import returns (*attrs, available_bool)
+RNSMeshtasticBridge, _HAS_BRIDGE = safe_import(
+    'gateway.rns_bridge', 'RNSMeshtasticBridge'
+)
+RNSOverMeshtasticConfig, _HAS_TRANSPORT_CONFIG = safe_import(
+    'gateway.config', 'RNSOverMeshtasticConfig'
+)
+create_rns_transport, RNSMeshtasticTransport, _HAS_TRANSPORT = safe_import(
+    'gateway.rns_transport', 'create_rns_transport', 'RNSMeshtasticTransport'
+)
 
 # Module-level bridge instance (singleton pattern)
 _bridge_instance = None
@@ -33,13 +45,12 @@ def _get_bridge():
     if _bridge_instance is not None:
         return _bridge_instance
 
-    try:
-        from gateway.rns_bridge import RNSMeshtasticBridge
-        _bridge_instance = RNSMeshtasticBridge()
-        return _bridge_instance
-    except ImportError as e:
-        logger.warning(f"Gateway bridge not available: {e}")
+    if not _HAS_BRIDGE:
+        logger.warning("Gateway bridge not available: gateway.rns_bridge not installed")
         return None
+
+    _bridge_instance = RNSMeshtasticBridge()
+    return _bridge_instance
 
 
 def get_status() -> CommandResult:
@@ -576,30 +587,33 @@ def check_prerequisites() -> CommandResult:
     # Note: Use BaseException to catch pyo3 PanicException (not an Exception subclass)
     # from RNS's cryptography library when cffi backend is missing
     try:
-        import RNS
-        checks['rns_package'] = True
-    except ImportError:
-        issues.append("RNS package not installed (pipx install rns)")
+        _, _HAS_RNS = safe_import('RNS')
+        if _HAS_RNS:
+            checks['rns_package'] = True
+        else:
+            issues.append("RNS package not installed (pipx install rns)")
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
         issues.append(f"RNS package error: {e}")
 
     try:
-        import LXMF
-        checks['lxmf_package'] = True
-    except ImportError:
-        issues.append("LXMF package not installed (pip install lxmf)")
+        _, _HAS_LXMF = safe_import('LXMF')
+        if _HAS_LXMF:
+            checks['lxmf_package'] = True
+        else:
+            issues.append("LXMF package not installed (pip install lxmf)")
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
         issues.append(f"LXMF package error: {e}")
 
     try:
-        import meshtastic
-        checks['meshtastic_package'] = True
-    except ImportError:
-        issues.append("meshtastic package not installed (pip install meshtastic)")
+        _, _HAS_MESHTASTIC = safe_import('meshtastic')
+        if _HAS_MESHTASTIC:
+            checks['meshtastic_package'] = True
+        else:
+            issues.append("meshtastic package not installed (pip install meshtastic)")
     except (SystemExit, KeyboardInterrupt, GeneratorExit):
         raise
     except BaseException as e:
@@ -621,11 +635,7 @@ def check_prerequisites() -> CommandResult:
 
 def is_available() -> bool:
     """Check if gateway functionality is available."""
-    try:
-        from gateway.rns_bridge import RNSMeshtasticBridge
-        return True
-    except ImportError:
-        return False
+    return _HAS_BRIDGE
 
 
 # ============================================================================
@@ -693,10 +703,13 @@ def start_transport(
             data=_transport_instance.get_status()
         )
 
-    try:
-        from gateway.config import RNSOverMeshtasticConfig
-        from gateway.rns_transport import create_rns_transport
+    if not _HAS_TRANSPORT_CONFIG or not _HAS_TRANSPORT:
+        return CommandResult.not_available(
+            "Transport module not available: gateway.rns_transport not installed",
+            fix_hint="Ensure gateway module is installed"
+        )
 
+    try:
         # Create configuration
         config = RNSOverMeshtasticConfig(
             enabled=True,
@@ -720,11 +733,6 @@ def start_transport(
             _transport_instance = None
             return CommandResult.fail("Failed to start transport")
 
-    except ImportError as e:
-        return CommandResult.not_available(
-            f"Transport module not available: {e}",
-            fix_hint="Ensure gateway module is installed"
-        )
     except Exception as e:
         return CommandResult.fail(f"Error starting transport: {e}")
 
@@ -927,8 +935,4 @@ def get_transport_presets() -> CommandResult:
 
 def is_transport_available() -> bool:
     """Check if transport functionality is available."""
-    try:
-        from gateway.rns_transport import RNSMeshtasticTransport
-        return True
-    except ImportError:
-        return False
+    return _HAS_TRANSPORT

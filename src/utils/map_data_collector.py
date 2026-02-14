@@ -26,6 +26,24 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# --- Optional dependency imports via safe_import ---
+from utils.safe_import import safe_import
+
+get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+SettingsManager, _HAS_SETTINGS = safe_import('utils.common', 'SettingsManager')
+_get_node_tracker, _HAS_NODE_TRACKER = safe_import('gateway.node_tracker', 'get_node_tracker')
+_get_http_client, _HAS_MESHTASTIC_HTTP = safe_import('utils.meshtastic_http', 'get_http_client')
+(_get_connection_manager, _safe_close_interface, _ConnectionMode,
+ _reset_connection_manager, _HAS_MESHTASTIC_CONN) = safe_import(
+    'utils.meshtastic_connection',
+    'get_connection_manager', 'safe_close_interface',
+    'ConnectionMode', 'reset_connection_manager',
+)
+_get_local_subscriber, _HAS_MQTT = safe_import('monitoring.mqtt_subscriber', 'get_local_subscriber')
+_AREDNScanner, _AREDNClient, _HAS_AREDN = safe_import('utils.aredn', 'AREDNScanner', 'AREDNClient')
+_RNS, _HAS_RNS = safe_import('RNS')
+_msgpack, _HAS_MSGPACK = safe_import('msgpack')
+
 
 class MapDataCollector:
     """Collects node data from all available sources into unified GeoJSON.
@@ -53,12 +71,10 @@ class MapDataCollector:
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
         if cache_dir:
             self._cache_dir = cache_dir
+        elif _HAS_PATHS:
+            self._cache_dir = get_real_user_home() / ".local" / "share" / "meshforge"
         else:
-            try:
-                from utils.paths import get_real_user_home
-                self._cache_dir = get_real_user_home() / ".local" / "share" / "meshforge"
-            except ImportError:
-                self._cache_dir = Path("/tmp/meshforge")
+            self._cache_dir = Path("/tmp/meshforge")
 
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache_file = self._cache_dir / "map_nodes.geojson"
@@ -66,8 +82,7 @@ class MapDataCollector:
         self._cached_geojson: Optional[Dict] = None
 
         # User-configurable cache age settings
-        try:
-            from utils.common import SettingsManager
+        if _HAS_SETTINGS:
             self._settings = SettingsManager(
                 "map_settings",
                 defaults={
@@ -79,7 +94,7 @@ class MapDataCollector:
                     "aredn_node_ips": [],  # e.g. ["10.54.25.1", "10.1.0.1"]
                 }
             )
-        except ImportError:
+        else:
             self._settings = None
 
         # Track nodes without GPS for reporting
@@ -349,14 +364,12 @@ class MapDataCollector:
         Returns:
             List of GeoJSON features for nodes with valid positions.
         """
-        try:
-            from gateway.node_tracker import get_node_tracker
-        except ImportError:
+        if not _HAS_NODE_TRACKER:
             logger.debug("UnifiedNodeTracker not available")
             return []
 
         try:
-            tracker = get_node_tracker()
+            tracker = _get_node_tracker()
             geojson = tracker.to_geojson()
             features = geojson.get("features", [])
 
@@ -434,13 +447,11 @@ class MapDataCollector:
         needing the TCP connection lock. This is the preferred collection
         method because it doesn't conflict with the gateway bridge.
         """
-        try:
-            from utils.meshtastic_http import get_http_client
-        except ImportError:
+        if not _HAS_MESHTASTIC_HTTP:
             return []
 
         try:
-            client = get_http_client(host=host)
+            client = _get_http_client(host=host)
             if not client.is_available:
                 logger.debug("meshtasticd HTTP API not available")
                 return []
@@ -513,9 +524,7 @@ class MapDataCollector:
         Returns list of GeoJSON features for nodes with valid positions.
         Also populates self._nodes_without_position for nodes lacking GPS.
         """
-        try:
-            from utils.meshtastic_connection import get_connection_manager
-        except ImportError:
+        if not _HAS_MESHTASTIC_CONN:
             logger.debug("meshtastic_connection module not available")
             return []
 
@@ -523,7 +532,7 @@ class MapDataCollector:
         no_position_nodes = []
         host = self.get_meshtasticd_host()
         port = self.get_meshtasticd_port()
-        manager = get_connection_manager(host=host, port=port)
+        manager = _get_connection_manager(host=host, port=port)
 
         # Don't block if someone else holds the connection
         if not manager.acquire_lock(timeout=5.0):
@@ -561,8 +570,7 @@ class MapDataCollector:
                         f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
                     )
             finally:
-                from utils.meshtastic_connection import safe_close_interface
-                safe_close_interface(interface)
+                _safe_close_interface(interface)
 
         except Exception as e:
             logger.debug(f"TCP interface collection error: {e}")
@@ -579,12 +587,7 @@ class MapDataCollector:
 
         Returns list of GeoJSON features for nodes with valid positions.
         """
-        try:
-            from utils.meshtastic_connection import (
-                get_connection_manager, safe_close_interface, ConnectionMode,
-                reset_connection_manager
-            )
-        except ImportError:
+        if not _HAS_MESHTASTIC_CONN:
             logger.debug("meshtastic_connection module not available")
             return []
 
@@ -600,8 +603,8 @@ class MapDataCollector:
 
         # Reset manager to ensure we get SERIAL mode
         # (in case a previous TCP connection left it in TCP mode)
-        reset_connection_manager()
-        manager = get_connection_manager(mode=ConnectionMode.SERIAL)
+        _reset_connection_manager()
+        manager = _get_connection_manager(mode=_ConnectionMode.SERIAL)
 
         # Don't block if someone else holds the connection
         if not manager.acquire_lock(timeout=5.0):
@@ -642,7 +645,7 @@ class MapDataCollector:
                         f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
                     )
             finally:
-                safe_close_interface(interface)
+                _safe_close_interface(interface)
 
         except Exception as e:
             logger.debug(f"Direct radio collection error: {e}")
@@ -875,19 +878,17 @@ class MapDataCollector:
         then falls back to cached GeoJSON file.
         """
         # Try live subscriber first (has real-time sensor data)
-        try:
-            from monitoring.mqtt_subscriber import get_local_subscriber
-            subscriber = get_local_subscriber()
-            if subscriber.is_connected():
-                geojson = subscriber.get_geojson()
-                features = geojson.get("features", [])
-                if features:
-                    logger.debug(f"MQTT live: {len(features)} nodes with position")
-                    return features
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug(f"MQTT live collection error: {e}")
+        if _HAS_MQTT:
+            try:
+                subscriber = _get_local_subscriber()
+                if subscriber.is_connected():
+                    geojson = subscriber.get_geojson()
+                    features = geojson.get("features", [])
+                    if features:
+                        logger.debug(f"MQTT live: {len(features)} nodes with position")
+                        return features
+            except Exception as e:
+                logger.debug(f"MQTT live collection error: {e}")
 
         # Fallback: cached MQTT node file
         try:
@@ -909,12 +910,10 @@ class MapDataCollector:
         features = []
 
         # Check node_cache.json
-        try:
-            from utils.paths import get_real_user_home
+        if _HAS_PATHS:
             cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
-        except ImportError:
-            import os as _os
-            sudo_user = _os.environ.get('SUDO_USER', '')
+        else:
+            sudo_user = os.environ.get('SUDO_USER', '')
             # Path traversal protection (security)
             if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
                 cache_path = Path(f'/home/{sudo_user}/.config/meshforge/node_cache.json')
@@ -1007,9 +1006,7 @@ class MapDataCollector:
         """
         features = []
 
-        try:
-            from utils.aredn import AREDNScanner, AREDNClient
-        except ImportError:
+        if not _HAS_AREDN:
             logger.debug("AREDN module not available")
             return []
 
@@ -1021,7 +1018,7 @@ class MapDataCollector:
 
         try:
             # Get the local node info (may have location)
-            client = AREDNClient(local_node_ip, timeout=5)
+            client = _AREDNClient(local_node_ip, timeout=5)
             local_node = client.get_node_info()
 
             if local_node:
@@ -1033,7 +1030,7 @@ class MapDataCollector:
                 for link in local_node.links:
                     if link.ip:
                         try:
-                            neighbor_client = AREDNClient(link.ip, timeout=3)
+                            neighbor_client = _AREDNClient(link.ip, timeout=3)
                             neighbor_node = neighbor_client.get_node_info()
                             if neighbor_node:
                                 neighbor_feature = self._aredn_node_to_feature(neighbor_node)
@@ -1166,9 +1163,7 @@ class MapDataCollector:
         except OSError:
             return []
 
-        try:
-            import RNS
-        except ImportError:
+        if not _HAS_RNS:
             logger.debug("RNS module not available for direct query")
             return []
 
@@ -1190,11 +1185,11 @@ class MapDataCollector:
                 "  shared_instance_port = 37428\n"
                 "  instance_control_port = 37429\n"
             )
-            reticulum = RNS.Reticulum(configdir=str(client_config_dir))
+            reticulum = _RNS.Reticulum(configdir=str(client_config_dir))
 
             # Check for known destinations in path table
-            if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
-                for dest_hash, path_data in RNS.Transport.path_table.items():
+            if hasattr(_RNS.Transport, 'path_table') and _RNS.Transport.path_table:
+                for dest_hash, path_data in _RNS.Transport.path_table.items():
                     try:
                         if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
                             hash_hex = dest_hash.hex()
@@ -1235,7 +1230,7 @@ class MapDataCollector:
                 logger.debug(f"RNS direct: {len(features)} nodes with position")
             else:
                 # Log how many RNS destinations we found (even without position)
-                path_count = len(RNS.Transport.path_table) if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table else 0
+                path_count = len(_RNS.Transport.path_table) if hasattr(_RNS.Transport, 'path_table') and _RNS.Transport.path_table else 0
                 if path_count:
                     logger.debug(
                         f"RNS: {path_count} destinations in path table, "
@@ -1277,10 +1272,9 @@ class MapDataCollector:
                 logger.debug(f"RNS position cache load error: {e}")
 
         # Source 2: Node tracker cache (RNS entries)
-        try:
-            from utils.paths import get_real_user_home
+        if _HAS_PATHS:
             cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
-        except ImportError:
+        else:
             cache_path = Path("/tmp/meshforge/node_cache.json")
 
         if cache_path.exists():
@@ -1308,14 +1302,16 @@ class MapDataCollector:
     def _load_nomadnet_peers(self) -> List[Dict]:
         """Load known peers from NomadNet cache if available."""
         peers = []
+        if not _HAS_PATHS or not _HAS_MSGPACK:
+            if not _HAS_MSGPACK:
+                logger.debug("msgpack not available for NomadNet peer reading")
+            return peers
         try:
-            from utils.paths import get_real_user_home
             nomadnet_dir = get_real_user_home() / '.nomadnetwork'
             peer_file = nomadnet_dir / 'storage' / 'peers'
             if peer_file.exists():
                 with open(peer_file, 'rb') as f:
-                    import msgpack
-                    data = msgpack.unpack(f, raw=False)
+                    data = _msgpack.unpack(f, raw=False)
                     if isinstance(data, dict):
                         for peer_hash, peer_data in data.items():
                             if isinstance(peer_data, dict):
@@ -1325,8 +1321,6 @@ class MapDataCollector:
                                     'lat': peer_data.get('latitude'),
                                     'lon': peer_data.get('longitude'),
                                 })
-        except ImportError:
-            logger.debug("msgpack not available for NomadNet peer reading")
         except FileNotFoundError:
             pass
         except Exception as e:

@@ -50,6 +50,26 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# ── Optional dependency imports via safe_import ──────────────────────
+from utils.safe_import import safe_import
+
+_get_connection_manager, _ConnectionMode, _HAS_MESHTASTIC_CONN = safe_import(
+    'utils.meshtastic_connection', 'get_connection_manager', 'ConnectionMode'
+)
+_SRTMProvider, _LOSAnalyzer, _HAS_TERRAIN = safe_import(
+    'utils.terrain', 'SRTMProvider', 'LOSAnalyzer'
+)
+_MessageQueue, _HAS_MSG_QUEUE = safe_import(
+    'gateway.message_queue', 'MessageQueue'
+)
+_messaging_mod, _HAS_MESSAGING = safe_import('commands.messaging')
+_get_listener_status, _HAS_MSG_LISTENER = safe_import(
+    'utils.message_listener', 'get_listener_status'
+)
+_get_websocket_server, _is_websocket_available, _HAS_WS_SERVER = safe_import(
+    'utils.websocket_server', 'get_websocket_server', 'is_websocket_available'
+)
+
 # Default path where meshtasticd installs its web client files.
 # MeshForge serves these directly from disk instead of proxying HTML.
 MESHTASTICD_WEB_DIR = '/usr/share/meshtasticd/web'
@@ -354,9 +374,7 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
     def _get_radio_status_summary(self) -> Dict[str, Any]:
         """Get a summary of radio connection status for the status endpoint."""
-        try:
-            from utils.meshtastic_connection import get_connection_manager, ConnectionMode
-        except ImportError:
+        if not _HAS_MESHTASTIC_CONN:
             return {"available": False, "error": "meshtastic library not installed"}
 
         # Check TCP port (meshtasticd)
@@ -459,19 +477,18 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             radius_km = min(radius_km, 50)
 
             # Get coverage prediction from terrain analyzer
+            if not _HAS_TERRAIN:
+                self._serve_json({"error": "terrain module not available"})
+                return
             try:
-                from utils.terrain import SRTMProvider, LOSAnalyzer
-                provider = SRTMProvider()
-                analyzer = LOSAnalyzer(provider)
+                provider = _SRTMProvider()
+                analyzer = _LOSAnalyzer(provider)
                 coverage = analyzer.coverage_grid(
                     lat, lon, alt,
                     radius_km=radius_km,
                     freq_mhz=freq_mhz,
                     resolution=resolution
                 )
-            except ImportError:
-                self._serve_json({"error": "terrain module not available"})
-                return
             except Exception as e:
                 logger.error(f"Coverage calculation failed: {e}")
                 self._serve_json({"error": f"calculation failed: {str(e)}"})
@@ -599,14 +616,13 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             freq_mhz = float(params.get('freq_mhz', ['906'])[0])
 
             # Calculate LOS
-            try:
-                from utils.terrain import SRTMProvider, LOSAnalyzer
-                provider = SRTMProvider()
-                analyzer = LOSAnalyzer(provider)
-                result = analyzer.analyze(lat1, lon1, alt1, lat2, lon2, alt2, freq_mhz)
-            except ImportError:
+            if not _HAS_TERRAIN:
                 self._serve_json({"error": "terrain module not available"})
                 return
+            try:
+                provider = _SRTMProvider()
+                analyzer = _LOSAnalyzer(provider)
+                result = analyzer.analyze(lat1, lon1, alt1, lat2, lon2, alt2, freq_mhz)
             except Exception as e:
                 logger.error(f"LOS calculation failed: {e}")
                 self._serve_json({"error": f"calculation failed: {str(e)}"})
@@ -650,26 +666,26 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
         messages = []
 
         # Try to load from SQLite message queue
-        try:
-            from gateway.message_queue import MessageQueue
-            queue = MessageQueue()
-            pending = queue.get_pending_messages(limit=50)
-            for msg in pending:
-                messages.append({
-                    "id": msg.get("id"),
-                    "source": msg.get("source_id"),
-                    "source_name": msg.get("source_name", ""),
-                    "target": msg.get("target_id"),
-                    "target_name": msg.get("target_name", ""),
-                    "network": msg.get("target_network", "meshtastic"),
-                    "status": msg.get("status", "pending"),
-                    "created_at": msg.get("created_at", ""),
-                    "message_type": msg.get("message_type", "text")
-                })
-        except ImportError:
+        if not _HAS_MSG_QUEUE:
             logger.debug("MessageQueue not available")
-        except Exception as e:
-            logger.debug(f"Message queue error: {e}")
+        else:
+            try:
+                queue = _MessageQueue()
+                pending = queue.get_pending_messages(limit=50)
+                for msg in pending:
+                    messages.append({
+                        "id": msg.get("id"),
+                        "source": msg.get("source_id"),
+                        "source_name": msg.get("source_name", ""),
+                        "target": msg.get("target_id"),
+                        "target_name": msg.get("target_name", ""),
+                        "network": msg.get("target_network", "meshtastic"),
+                        "status": msg.get("status", "pending"),
+                        "created_at": msg.get("created_at", ""),
+                        "message_type": msg.get("message_type", "text")
+                    })
+            except Exception as e:
+                logger.debug(f"Message queue error: {e}")
 
         # Also check for cached queue file
         if not messages:
@@ -710,32 +726,32 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
         messages = []
 
-        try:
-            from commands import messaging
-            result = messaging.get_messages(limit=limit, network=network)
-
-            if result.success and result.data:
-                all_messages = result.data.get('messages', [])
-
-                # Filter by timestamp if 'since' is provided
-                if since:
-                    try:
-                        since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
-                        all_messages = [
-                            m for m in all_messages
-                            if m.get('timestamp') and
-                            datetime.fromisoformat(m['timestamp']) > since_dt
-                        ]
-                    except (ValueError, TypeError):
-                        pass  # Invalid timestamp, skip filtering
-
-                # Filter to show only received messages (from_id != 'local')
-                messages = [m for m in all_messages if m.get('from_id') != 'local']
-
-        except ImportError:
+        if not _HAS_MESSAGING:
             logger.debug("Messaging module not available")
-        except Exception as e:
-            logger.debug(f"Error getting received messages: {e}")
+        else:
+            try:
+                result = _messaging_mod.get_messages(limit=limit, network=network)
+
+                if result.success and result.data:
+                    all_messages = result.data.get('messages', [])
+
+                    # Filter by timestamp if 'since' is provided
+                    if since:
+                        try:
+                            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                            all_messages = [
+                                m for m in all_messages
+                                if m.get('timestamp') and
+                                datetime.fromisoformat(m['timestamp']) > since_dt
+                            ]
+                        except (ValueError, TypeError):
+                            pass  # Invalid timestamp, skip filtering
+
+                    # Filter to show only received messages (from_id != 'local')
+                    messages = [m for m in all_messages if m.get('from_id') != 'local']
+
+            except Exception as e:
+                logger.debug(f"Error getting received messages: {e}")
 
         self._serve_json({
             "messages": messages,
@@ -757,13 +773,13 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "error": None,
         }
 
-        try:
-            from utils.message_listener import get_listener_status
-            status = get_listener_status()
-        except ImportError:
+        if not _HAS_MSG_LISTENER:
             status["error"] = "MessageListener not available"
-        except Exception as e:
-            status["error"] = str(e)
+        else:
+            try:
+                status = _get_listener_status()
+            except Exception as e:
+                status["error"] = str(e)
 
         self._serve_json(status)
 
@@ -780,35 +796,32 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
             "messages_broadcast": 0,
         }
 
-        try:
-            from utils.websocket_server import (
-                get_websocket_server, is_websocket_available
-            )
-
-            if not is_websocket_available():
-                status["error"] = "websockets library not installed"
-                self._serve_json(status)
-                return
-
-            ws_server = get_websocket_server()
-            if ws_server._running:
-                stats = ws_server.stats
-                status["available"] = True
-                status["port"] = ws_server.port
-                # Build WebSocket URL based on request host
-                host = self.headers.get('Host', 'localhost:5000')
-                hostname = host.split(':')[0]
-                status["url"] = f"ws://{hostname}:{ws_server.port}/"
-                status["connected_clients"] = stats.connected_clients
-                status["messages_broadcast"] = stats.messages_broadcast
-                status["total_connections"] = stats.total_connections
-                if stats.started_at:
-                    status["started_at"] = stats.started_at.isoformat()
-
-        except ImportError:
+        if not _HAS_WS_SERVER:
             status["error"] = "WebSocket server not available"
-        except Exception as e:
-            status["error"] = str(e)
+        else:
+            try:
+                if not _is_websocket_available():
+                    status["error"] = "websockets library not installed"
+                    self._serve_json(status)
+                    return
+
+                ws_server = _get_websocket_server()
+                if ws_server._running:
+                    stats = ws_server.stats
+                    status["available"] = True
+                    status["port"] = ws_server.port
+                    # Build WebSocket URL based on request host
+                    host = self.headers.get('Host', 'localhost:5000')
+                    hostname = host.split(':')[0]
+                    status["url"] = f"ws://{hostname}:{ws_server.port}/"
+                    status["connected_clients"] = stats.connected_clients
+                    status["messages_broadcast"] = stats.messages_broadcast
+                    status["total_connections"] = stats.total_connections
+                    if stats.started_at:
+                        status["started_at"] = stats.started_at.isoformat()
+
+            except Exception as e:
+                status["error"] = str(e)
 
         self._serve_json(status)
 
@@ -1346,13 +1359,9 @@ Webserver:
 
     def _get_radio_connection(self):
         """Get or create radio connection manager."""
-        try:
-            from utils.meshtastic_connection import (
-                get_connection_manager, ConnectionMode
-            )
-            return get_connection_manager(mode=ConnectionMode.AUTO)
-        except ImportError:
+        if not _HAS_MESHTASTIC_CONN:
             return None
+        return _get_connection_manager(mode=_ConnectionMode.AUTO)
 
     def _serve_radio_info(self):
         """Serve radio device information."""

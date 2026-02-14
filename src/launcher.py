@@ -14,17 +14,19 @@ import subprocess
 import json
 from pathlib import Path
 
-# Import version
-try:
-    from __version__ import __version__
-except ImportError:
-    __version__ = "0.5.0-beta"
+from utils.safe_import import safe_import
 
-# Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+# Module-level safe imports
+_version_val, _HAS_VERSION = safe_import('__version__', '__version__')
+__version__ = _version_val if _HAS_VERSION else "0.5.0-beta"
+
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+if _HAS_PATHS:
+    get_real_user_home = _get_real_user_home
+else:
     def get_real_user_home() -> Path:
+        """Fallback: resolve real user home under sudo."""
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
             candidate = Path(f'/home/{sudo_user}')
@@ -35,21 +37,31 @@ except ImportError:
             return candidate
         return Path('/root')
 
-# Import NOC orchestrator for service management
-try:
-    from core.orchestrator import ServiceOrchestrator, ServiceState
-    HAS_ORCHESTRATOR = True
-except ImportError:
-    HAS_ORCHESTRATOR = False
+# NOC orchestrator for service management
+ServiceOrchestrator, ServiceState, _HAS_ORCHESTRATOR = safe_import(
+    'core.orchestrator', 'ServiceOrchestrator', 'ServiceState'
+)
 
-# Import startup health check
-try:
-    from utils.startup_health import run_health_check, print_health_summary
-    HAS_HEALTH_CHECK = True
-except ImportError:
-    HAS_HEALTH_CHECK = False
-    run_health_check = None
-    print_health_summary = None
+# Startup health check
+run_health_check, print_health_summary, _HAS_HEALTH_CHECK = safe_import(
+    'utils.startup_health', 'run_health_check', 'print_health_summary'
+)
+
+# Setup wizard
+SetupWizard, _HAS_SETUP_WIZARD = safe_import('setup_wizard', 'SetupWizard')
+
+# Gateway bridge modules
+RNSMeshtasticBridge, _HAS_BRIDGE = safe_import(
+    'gateway.rns_bridge', 'RNSMeshtasticBridge'
+)
+GatewayConfig, _HAS_GATEWAY_CONFIG = safe_import(
+    'gateway.config', 'GatewayConfig'
+)
+
+# Startup checker for --verify-install
+StartupChecker, _HAS_STARTUP_CHECKER = safe_import(
+    'launcher_tui.startup_checks', 'StartupChecker'
+)
 
 # Config file location
 CONFIG_DIR = get_real_user_home() / '.config' / 'meshforge'
@@ -110,12 +122,11 @@ def run_setup_wizard():
         response = 'n'
 
     if response != 'n':
-        try:
-            from setup_wizard import SetupWizard
+        if _HAS_SETUP_WIZARD:
             wizard = SetupWizard(interactive=True)
             wizard.run_interactive_setup()
             wizard.mark_setup_complete()
-        except ImportError:
+        else:
             try:
                 import importlib.util
                 spec = importlib.util.spec_from_file_location(
@@ -150,7 +161,7 @@ def print_banner():
 
 def show_startup_health():
     """Show startup health summary."""
-    if not HAS_HEALTH_CHECK:
+    if not _HAS_HEALTH_CHECK:
         return
 
     print(f"{Colors.CYAN}{'─' * 50}{Colors.NC}")
@@ -279,11 +290,11 @@ def launch_interface(choice):
 
 def launch_gateway_bridge(src_dir):
     """Launch the gateway bridge in headless mode"""
-    try:
-        sys.path.insert(0, str(src_dir))
-        from gateway.rns_bridge import RNSMeshtasticBridge
-        from gateway.config import GatewayConfig
+    if not _HAS_BRIDGE or not _HAS_GATEWAY_CONFIG:
+        print(f"{Colors.RED}Gateway module not available{Colors.NC}")
+        return
 
+    try:
         config = GatewayConfig.load()
         if not config.enabled:
             print(f"{Colors.YELLOW}Gateway bridge is disabled in config.{Colors.NC}")
@@ -320,15 +331,13 @@ def launch_gateway_bridge(src_dir):
         else:
             print(f"{Colors.RED}Failed to start bridge. Check logs for details.{Colors.NC}")
 
-    except ImportError as e:
-        print(f"{Colors.RED}Gateway module not available: {e}{Colors.NC}")
     except Exception as e:
         print(f"{Colors.RED}Error starting bridge: {e}{Colors.NC}")
 
 
 def start_noc_services():
     """Start NOC managed services (meshtasticd, rnsd) if in local mode."""
-    if not HAS_ORCHESTRATOR:
+    if not _HAS_ORCHESTRATOR:
         return True
 
     noc_config_path = Path('/etc/meshforge/noc.yaml')
@@ -390,43 +399,42 @@ def main():
         else:
             # Fallback: run Python-based verification using StartupChecker
             print(f"{Colors.CYAN}Running installation verification...{Colors.NC}\n")
-            try:
-                from launcher_tui.startup_checks import StartupChecker
-                checker = StartupChecker()
-                env = checker.check_all()
-
-                # Print results
-                print(f"{Colors.BOLD}Service Status:{Colors.NC}")
-                for name, info in env.services.items():
-                    if info.state.value == 'running':
-                        print(f"  {Colors.GREEN}[PASS]{Colors.NC} {name}")
-                    else:
-                        print(f"  {Colors.RED}[FAIL]{Colors.NC} {name}: {info.state.value}")
-
-                print(f"\n{Colors.BOLD}Hardware:{Colors.NC}")
-                if env.hardware.spi_devices:
-                    print(f"  {Colors.GREEN}[PASS]{Colors.NC} SPI: {', '.join(env.hardware.spi_devices)}")
-                if env.hardware.usb_serial_devices:
-                    for dev in env.hardware.usb_serial_devices:
-                        print(f"  {Colors.GREEN}[PASS]{Colors.NC} USB: {dev['path']} ({dev.get('name', 'Unknown')})")
-                if not env.hardware.spi_devices and not env.hardware.usb_serial_devices:
-                    print(f"  {Colors.YELLOW}[WARN]{Colors.NC} No radio hardware detected")
-
-                if env.conflicts:
-                    print(f"\n{Colors.BOLD}Conflicts:{Colors.NC}")
-                    for conflict in env.conflicts:
-                        print(f"  {Colors.RED}[FAIL]{Colors.NC} Port {conflict.port}: {conflict.actual_process} (PID {conflict.actual_pid})")
-
-                # Exit code based on state
-                if env.all_services_running and not env.conflicts:
-                    print(f"\n{Colors.GREEN}Verification passed.{Colors.NC}")
-                    sys.exit(0)
-                else:
-                    print(f"\n{Colors.YELLOW}Verification completed with issues.{Colors.NC}")
-                    sys.exit(2)
-            except ImportError as e:
-                print(f"{Colors.RED}Error: Could not load verification module: {e}{Colors.NC}")
+            if not _HAS_STARTUP_CHECKER:
+                print(f"{Colors.RED}Error: Could not load verification module{Colors.NC}")
                 sys.exit(1)
+
+            checker = StartupChecker()
+            env = checker.check_all()
+
+            # Print results
+            print(f"{Colors.BOLD}Service Status:{Colors.NC}")
+            for name, info in env.services.items():
+                if info.state.value == 'running':
+                    print(f"  {Colors.GREEN}[PASS]{Colors.NC} {name}")
+                else:
+                    print(f"  {Colors.RED}[FAIL]{Colors.NC} {name}: {info.state.value}")
+
+            print(f"\n{Colors.BOLD}Hardware:{Colors.NC}")
+            if env.hardware.spi_devices:
+                print(f"  {Colors.GREEN}[PASS]{Colors.NC} SPI: {', '.join(env.hardware.spi_devices)}")
+            if env.hardware.usb_serial_devices:
+                for dev in env.hardware.usb_serial_devices:
+                    print(f"  {Colors.GREEN}[PASS]{Colors.NC} USB: {dev['path']} ({dev.get('name', 'Unknown')})")
+            if not env.hardware.spi_devices and not env.hardware.usb_serial_devices:
+                print(f"  {Colors.YELLOW}[WARN]{Colors.NC} No radio hardware detected")
+
+            if env.conflicts:
+                print(f"\n{Colors.BOLD}Conflicts:{Colors.NC}")
+                for conflict in env.conflicts:
+                    print(f"  {Colors.RED}[FAIL]{Colors.NC} Port {conflict.port}: {conflict.actual_process} (PID {conflict.actual_pid})")
+
+            # Exit code based on state
+            if env.all_services_running and not env.conflicts:
+                print(f"\n{Colors.GREEN}Verification passed.{Colors.NC}")
+                sys.exit(0)
+            else:
+                print(f"\n{Colors.YELLOW}Verification completed with issues.{Colors.NC}")
+                sys.exit(2)
 
     # Check root
     if os.geteuid() != 0:
