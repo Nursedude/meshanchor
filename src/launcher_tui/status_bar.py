@@ -25,22 +25,17 @@ from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
 # Import centralized service checking
-try:
-    from utils.service_check import check_systemd_service, check_process_running
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+check_systemd_service, check_process_running, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service', 'check_process_running'
+)
 
 # Import startup checker for enhanced status
-try:
-    from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
-    HAS_STARTUP_CHECKER = True
-except ImportError:
-    HAS_STARTUP_CHECKER = False
-    StartupChecker = None
-    EnvironmentState = None
-    ServiceRunState = None
+StartupChecker, EnvironmentState, ServiceRunState, HAS_STARTUP_CHECKER = safe_import(
+    'startup_checks', 'StartupChecker', 'EnvironmentState', 'ServiceRunState'
+)
 
 # Cache TTL in seconds — how often to re-check service status
 STATUS_CACHE_TTL = 10.0
@@ -94,9 +89,12 @@ class StatusBar:
             self._startup_checker = StartupChecker()
         # Event-driven status updates from ActiveHealthProbe
         self._event_subscribed = False
+        # Track which services have received at least one event push
+        self._event_updated_services: set = set()
         # Unread message counter (Issue #17 Phase 3)
         self._unread_messages = 0
         self._subscribe_to_events()
+        self._seed_node_count()
 
     def get_status_line(self) -> str:
         """Get the formatted status line for --backtitle.
@@ -152,8 +150,14 @@ class StatusBar:
             self._check_space_weather()
 
     def _check_services(self) -> None:
-        """Check status of all monitored services."""
+        """Check status of all monitored services.
+
+        Skips systemctl polling for services already receiving push
+        updates via the EventBus (from ActiveHealthProbe).
+        """
         for service_name, _ in MONITORED_SERVICES:
+            if service_name in self._event_updated_services:
+                continue  # Event bus is authoritative for this service
             self._cache[service_name] = self._check_systemd_active(service_name)
 
     def _check_systemd_active(self, service: str) -> str:
@@ -330,6 +334,24 @@ class StatusBar:
         except ImportError:
             logger.debug("EventBus not available — StatusBar will poll only")
 
+    def _seed_node_count(self) -> None:
+        """Pull initial node count from the node tracker singleton.
+
+        Without this, the status bar shows no node count until a new
+        'discovered' event arrives from the EventBus.
+        """
+        try:
+            from gateway.node_tracker import get_node_tracker
+            tracker = get_node_tracker()
+            nodes = tracker.get_all_nodes()
+            if nodes:
+                self._node_count = len(nodes)
+                logger.debug(f"StatusBar seeded node count: {self._node_count}")
+        except ImportError:
+            logger.debug("Node tracker not available for initial count")
+        except Exception as e:
+            logger.debug(f"Failed to seed node count: {e}")
+
     def _on_service_event(self, event) -> None:
         """Handle a ServiceEvent from the EventBus.
 
@@ -356,6 +378,7 @@ class StatusBar:
         available = getattr(event, 'available', None)
         if available is not None:
             self._cache[service_name] = SYM_RUNNING if available else SYM_STOPPED
+            self._event_updated_services.add(service_name)
             logger.debug(
                 f"StatusBar updated {service_name} via event: "
                 f"{'running' if available else 'stopped'}"

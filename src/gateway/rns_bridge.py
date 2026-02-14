@@ -20,38 +20,27 @@ from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker, classify_error,
     BridgeStatus, SubsystemState, MessageOrigin
 )
+from utils.safe_import import safe_import
+
 # MQTT bridge handler (zero-interference, recommended)
-try:
-    from .mqtt_bridge_handler import MQTTBridgeHandler
-    HAS_MQTT_BRIDGE = True
-except ImportError:
-    HAS_MQTT_BRIDGE = False
-    MQTTBridgeHandler = None
+MQTTBridgeHandler, HAS_MQTT_BRIDGE = safe_import(
+    '.mqtt_bridge_handler', 'MQTTBridgeHandler', package=__package__
+)
 
 # TCP-based handler (legacy, requires meshtastic Python library)
-try:
-    from .meshtastic_handler import MeshtasticHandler
-    HAS_MESHTASTIC_LIB = True
-except ImportError:
-    HAS_MESHTASTIC_LIB = False
-    MeshtasticHandler = None
+MeshtasticHandler, HAS_MESHTASTIC_LIB = safe_import(
+    '.meshtastic_handler', 'MeshtasticHandler', package=__package__
+)
 
 # Import circuit breaker for destination-level failure handling
-try:
-    from .circuit_breaker import CircuitBreakerRegistry
-    HAS_CIRCUIT_BREAKER = True
-except ImportError:
-    HAS_CIRCUIT_BREAKER = False
-    CircuitBreakerRegistry = None
+CircuitBreakerRegistry, HAS_CIRCUIT_BREAKER = safe_import(
+    '.circuit_breaker', 'CircuitBreakerRegistry', package=__package__
+)
 
 # Import persistent message queue for reliable delivery
-try:
-    from .message_queue import PersistentMessageQueue, MessagePriority
-    HAS_PERSISTENT_QUEUE = True
-except ImportError:
-    HAS_PERSISTENT_QUEUE = False
-    PersistentMessageQueue = None
-    MessagePriority = None
+PersistentMessageQueue, MessagePriority, HAS_PERSISTENT_QUEUE = safe_import(
+    '.message_queue', 'PersistentMessageQueue', 'MessagePriority', package=__package__
+)
 
 from .message_routing import MessageRouter, CLASSIFIER_AVAILABLE
 
@@ -64,34 +53,21 @@ import os
 from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import service checker for pre-flight checks (Issue #3)
-try:
-    from utils.service_check import check_service, ServiceState
-    HAS_SERVICE_CHECK = True
-except ImportError:
-    HAS_SERVICE_CHECK = False
-    check_service = None
-    ServiceState = None
+check_service, ServiceState, HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState'
+)
 
 # Import event bus for RX message notifications (Issue #17 Phase 3)
-try:
-    from utils.event_bus import emit_message
-    HAS_EVENT_BUS = True
-except ImportError:
-    HAS_EVENT_BUS = False
-    emit_message = None
+emit_message, HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_message')
 
 # Import RNS sniffer for Wireshark-grade packet capture
-try:
-    from monitoring.rns_sniffer import (
-        get_rns_sniffer, RNSPacketInfo, RNSPacketType,
-        start_rns_capture, integrate_with_traffic_inspector
-    )
-    HAS_RNS_SNIFFER = True
-except ImportError:
-    HAS_RNS_SNIFFER = False
-    get_rns_sniffer = None
-    RNSPacketInfo = None
-    RNSPacketType = None
+(get_rns_sniffer, RNSPacketInfo, RNSPacketType,
+ start_rns_capture, integrate_with_traffic_inspector,
+ HAS_RNS_SNIFFER) = safe_import(
+    'monitoring.rns_sniffer',
+    'get_rns_sniffer', 'RNSPacketInfo', 'RNSPacketType',
+    'start_rns_capture', 'integrate_with_traffic_inspector'
+)
 
 
 @dataclass
