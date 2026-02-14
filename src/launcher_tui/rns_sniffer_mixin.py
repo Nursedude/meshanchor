@@ -190,11 +190,9 @@ class RNSSnifferMixin:
         if not sniffer:
             return
 
-        from monitoring.rns_sniffer import RNSPacketType
-
         packets = sniffer.get_packets(
             limit=50,
-            packet_type=RNSPacketType.ANNOUNCE
+            packet_type=_RNSPacketType.ANNOUNCE
         )
 
         lines = [
@@ -299,8 +297,7 @@ class RNSSnifferMixin:
 
         # Start capture if not running
         if not sniffer._running:
-            from monitoring.rns_sniffer import start_rns_capture
-            start_rns_capture()
+            _start_rns_capture()
 
         # Probe
         success = sniffer.probe_destination(dest)
@@ -418,8 +415,7 @@ class RNSSnifferMixin:
 
         # Start capture if not running
         if not sniffer._running:
-            from monitoring.rns_sniffer import start_rns_capture
-            start_rns_capture()
+            _start_rns_capture()
 
         if choice == "1":
             success = sniffer.probe_destination(identity_hash)

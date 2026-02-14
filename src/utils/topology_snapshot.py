@@ -45,6 +45,14 @@ logger = logging.getLogger(__name__)
 # Import centralized path utility for sudo compatibility
 _get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
+# Optional dependencies for topology capture
+_get_global_node_tracker, _HAS_GLOBAL_TRACKER = safe_import(
+    'gateway.node_tracker', 'get_global_node_tracker'
+)
+_MapDataCollector, _HAS_MAP_COLLECTOR = safe_import(
+    'utils.map_data_collector', 'MapDataCollector'
+)
+
 def get_real_user_home() -> Path:
     """Get real user home, with fallback for sudo compatibility."""
     if _HAS_PATHS:
@@ -307,79 +315,79 @@ class TopologySnapshotStore:
             stats = {}
 
             # Try to get topology from UnifiedNodeTracker
-            try:
-                from gateway.node_tracker import get_global_node_tracker
-                tracker = get_global_node_tracker()
+            if _HAS_GLOBAL_TRACKER:
+                try:
+                    tracker = _get_global_node_tracker()
 
-                # Get all nodes
-                for node in tracker.get_all_nodes():
-                    node_dict = node.to_dict()
-                    nodes.append({
-                        'id': node.id,
-                        'name': node.name,
-                        'network': node.network,
-                        'online': node.online,
-                        'last_heard': node.last_heard.isoformat() if node.last_heard else None,
-                        'position': {
-                            'lat': node.position.latitude if node.position else None,
-                            'lon': node.position.longitude if node.position else None,
-                        } if node.position else None,
-                        'snr': node_dict.get('snr'),
-                        'rssi': node_dict.get('rssi'),
-                        'battery': node_dict.get('battery'),
-                        'state': node.state_name if hasattr(node, 'state_name') else None,
-                    })
-
-                # Get topology edges
-                topology = tracker.get_topology()
-                if topology:
-                    for edge_key, edge in topology._edges.items():
-                        edges.append({
-                            'source': edge.source,
-                            'dest': edge.dest,
-                            'hops': edge.hops,
-                            'snr': edge.snr,
-                            'rssi': edge.rssi,
-                            'first_seen': edge.first_seen.isoformat() if edge.first_seen else None,
-                            'last_seen': edge.last_seen.isoformat() if edge.last_seen else None,
-                            'announce_count': edge.announce_count,
+                    # Get all nodes
+                    for node in tracker.get_all_nodes():
+                        node_dict = node.to_dict()
+                        nodes.append({
+                            'id': node.id,
+                            'name': node.name,
+                            'network': node.network,
+                            'online': node.online,
+                            'last_heard': node.last_heard.isoformat() if node.last_heard else None,
+                            'position': {
+                                'lat': node.position.latitude if node.position else None,
+                                'lon': node.position.longitude if node.position else None,
+                            } if node.position else None,
+                            'snr': node_dict.get('snr'),
+                            'rssi': node_dict.get('rssi'),
+                            'battery': node_dict.get('battery'),
+                            'state': node.state_name if hasattr(node, 'state_name') else None,
                         })
 
-                    stats = topology.get_topology_stats()
+                    # Get topology edges
+                    topology = tracker.get_topology()
+                    if topology:
+                        for edge_key, edge in topology._edges.items():
+                            edges.append({
+                                'source': edge.source,
+                                'dest': edge.dest,
+                                'hops': edge.hops,
+                                'snr': edge.snr,
+                                'rssi': edge.rssi,
+                                'first_seen': edge.first_seen.isoformat() if edge.first_seen else None,
+                                'last_seen': edge.last_seen.isoformat() if edge.last_seen else None,
+                                'announce_count': edge.announce_count,
+                            })
 
-            except ImportError:
+                        stats = topology.get_topology_stats()
+
+                except Exception as e:
+                    logger.debug(f"Error getting topology from tracker: {e}")
+            else:
                 logger.debug("UnifiedNodeTracker not available")
-            except Exception as e:
-                logger.debug(f"Error getting topology from tracker: {e}")
 
             # Also try MapDataCollector as fallback
             if not nodes:
-                try:
-                    from utils.map_data_collector import MapDataCollector
-                    collector = MapDataCollector(enable_history=False)
-                    geojson = collector.collect(max_age_seconds=300)
+                if _HAS_MAP_COLLECTOR:
+                    try:
+                        collector = _MapDataCollector(enable_history=False)
+                        geojson = collector.collect(max_age_seconds=300)
 
-                    for feature in geojson.get('features', []):
-                        props = feature.get('properties', {})
-                        coords = feature.get('geometry', {}).get('coordinates', [0, 0])
-                        nodes.append({
-                            'id': props.get('id', ''),
-                            'name': props.get('name', ''),
-                            'network': props.get('network', 'unknown'),
-                            'online': props.get('online', False),
-                            'position': {
-                                'lat': coords[1] if len(coords) > 1 else None,
-                                'lon': coords[0] if len(coords) > 0 else None,
-                            },
-                            'snr': props.get('snr'),
-                            'rssi': props.get('rssi'),
-                            'battery': props.get('battery'),
-                        })
+                        for feature in geojson.get('features', []):
+                            props = feature.get('properties', {})
+                            coords = feature.get('geometry', {}).get('coordinates', [0, 0])
+                            nodes.append({
+                                'id': props.get('id', ''),
+                                'name': props.get('name', ''),
+                                'network': props.get('network', 'unknown'),
+                                'online': props.get('online', False),
+                                'position': {
+                                    'lat': coords[1] if len(coords) > 1 else None,
+                                    'lon': coords[0] if len(coords) > 0 else None,
+                                },
+                                'snr': props.get('snr'),
+                                'rssi': props.get('rssi'),
+                                'battery': props.get('battery'),
+                            })
 
-                except ImportError:
+                    except Exception as e:
+                        logger.debug(f"Error getting nodes from MapDataCollector: {e}")
+                else:
                     logger.debug("MapDataCollector not available")
-                except Exception as e:
-                    logger.debug(f"Error getting nodes from MapDataCollector: {e}")
 
             # Create snapshot
             snapshot_id = f"snap_{int(time.time() * 1000)}"
