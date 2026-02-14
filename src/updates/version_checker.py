@@ -20,6 +20,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_version_mod, _HAS_VERSION = safe_import('__version__', '__version__')
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+
 # Cache for version checks to avoid hitting APIs too frequently
 _version_cache: Dict[str, Any] = {}
 _cache_ttl = timedelta(hours=1)
@@ -68,11 +74,8 @@ def get_meshforge_version() -> Optional[str]:
     """Get installed MeshForge version from __version__.py"""
     try:
         # Import from the package
-        try:
-            from __version__ import __version__
-            return __version__
-        except ImportError:
-            pass
+        if _HAS_VERSION:
+            return _version_mod
 
         # Fallback: read the file directly
         version_file = Path(__file__).parent.parent / '__version__.py'
@@ -164,10 +167,9 @@ def get_meshtastic_cli_version() -> Optional[str]:
     """Get installed meshtastic CLI version"""
     try:
         # Find meshtastic CLI using centralized function
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 
@@ -211,10 +213,9 @@ def get_node_firmware_version() -> Optional[str]:
                     pass
 
         # Find CLI using centralized function
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 
