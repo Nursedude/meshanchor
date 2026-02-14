@@ -69,6 +69,23 @@ emit_message, HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_message')
     'start_rns_capture', 'integrate_with_traffic_inspector'
 )
 
+# Import RNS and LXMF modules (optional - for mesh bridge)
+_RNS_mod, _HAS_RNS = safe_import('RNS')
+_LXMF_mod, _HAS_LXMF = safe_import('LXMF')
+
+# Import config drift detection (optional)
+(_detect_rnsd_config_drift, _get_rnsd_effective_config_dir,
+ _HAS_CONFIG_DRIFT) = safe_import(
+    'utils.config_drift', 'detect_rnsd_config_drift', 'get_rnsd_effective_config_dir'
+)
+
+# Import WebSocket server helpers (optional)
+(_start_ws_server, _is_ws_available, _stop_ws_server,
+ _HAS_WS_SERVER) = safe_import(
+    'utils.websocket_server',
+    'start_websocket_server', 'is_websocket_available', 'stop_websocket_server'
+)
+
 
 @dataclass
 class BridgedMessage:
@@ -884,11 +901,11 @@ class RNSMeshtasticBridge:
             logger.warning("RNS pre-init skipped (not main thread)")
             return
 
-        try:
-            import RNS
-        except ImportError:
+        if not _HAS_RNS:
             logger.info("RNS not installed, will be handled in _connect_rns")
             return
+
+        RNS = _RNS_mod
 
         # Ensure /etc/reticulum/storage subdirs exist before RNS init.
         # RNS requires ratchets/ (Identity.persist_job), resources/
@@ -929,11 +946,8 @@ class RNSMeshtasticBridge:
             # Active drift fix: prefer rnsd's actual config path over default
             # resolution. This prevents the gateway from reading a different
             # config than the running daemon (e.g. ~/.reticulum vs /etc/reticulum)
-            try:
-                from utils.config_drift import (
-                    detect_rnsd_config_drift, get_rnsd_effective_config_dir
-                )
-                drift = detect_rnsd_config_drift()
+            if _HAS_CONFIG_DRIFT:
+                drift = _detect_rnsd_config_drift()
                 if drift.drifted:
                     logger.warning(drift.message)
                     if drift.fix_hint:
@@ -948,7 +962,7 @@ class RNSMeshtasticBridge:
                     logger.info(f"RNS config path: {rns_config} "
                                f"(exists: {rns_config.exists()}) "
                                f"[{drift.detection_method}]")
-            except ImportError:
+            else:
                 rns_config = ReticulumPaths.get_config_file()
                 logger.info(f"RNS config path: {rns_config} "
                            f"(exists: {rns_config.exists()})")
@@ -1012,13 +1026,9 @@ class RNSMeshtasticBridge:
                 config_dir = self.config.rns.config_dir or None
 
                 # Active drift fix: prefer rnsd's actual config path
-                if not config_dir:
-                    try:
-                        from utils.config_drift import get_rnsd_effective_config_dir
-                        effective = get_rnsd_effective_config_dir()
-                        config_dir = str(effective)
-                    except ImportError:
-                        pass
+                if not config_dir and _HAS_CONFIG_DRIFT:
+                    effective = _get_rnsd_effective_config_dir()
+                    config_dir = str(effective)
 
                 if rns_pids:
                     logger.info(f"rnsd detected (PID: {rns_pids[0]}), "

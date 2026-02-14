@@ -21,6 +21,11 @@ check_service, check_systemd_service, ServiceState, apply_config_and_restart, _H
     'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart'
 )
 
+# Hoist function-level imports to module level
+_get_cli, _HAS_MESHTASTIC_CLI = safe_import('core.meshtastic_cli', 'get_cli')
+_get_http_client, _HAS_HTTP_CLIENT = safe_import('utils.meshtastic_http', 'get_http_client')
+_get_active_profile, _HAS_BROKER_PROFILES = safe_import('utils.broker_profiles', 'get_active_profile')
+
 
 class MeshtasticdConfigMixin:
     """Mixin providing meshtasticd configuration methods for the launcher."""
@@ -385,34 +390,35 @@ Press Cancel to keep current values."""
 
         self.dialog.infobox("Applying", f"Applying {preset} preset...")
 
-        try:
-            from core.meshtastic_cli import get_cli
-            cli = get_cli()
+        if _HAS_MESHTASTIC_CLI:
+            try:
+                cli = _get_cli()
 
-            # Apply modem preset
-            result = cli.set_lora_preset(preset)
-            if not result.success:
-                self.dialog.msgbox("Error",
-                    f"Failed to set modem preset:\n{result.error}\n\n"
-                    "Ensure meshtastic CLI is installed and\n"
-                    "meshtasticd is running with region set.")
-                return
+                # Apply modem preset
+                result = cli.set_lora_preset(preset)
+                if not result.success:
+                    self.dialog.msgbox("Error",
+                        f"Failed to set modem preset:\n{result.error}\n\n"
+                        "Ensure meshtastic CLI is installed and\n"
+                        "meshtasticd is running with region set.")
+                    return
 
-            # Apply frequency slot
-            slot_result = cli.set_channel_num(freq_slot)
-            slot_msg = ""
-            if not slot_result.success:
-                slot_msg = f"\nFrequency slot: FAILED ({slot_result.error})"
-            else:
-                slot_msg = f"\nFrequency slot: {freq_slot}"
+                # Apply frequency slot
+                slot_result = cli.set_channel_num(freq_slot)
+                slot_msg = ""
+                if not slot_result.success:
+                    slot_msg = f"\nFrequency slot: FAILED ({slot_result.error})"
+                else:
+                    slot_msg = f"\nFrequency slot: {freq_slot}"
 
-            self.dialog.msgbox("Success",
-                f"{preset} preset applied!\n\n"
-                f"Modem preset: {preset}{slot_msg}\n\n"
-                "Settings applied via meshtastic CLI.\n"
-                "Device will reboot to apply changes.")
-
-        except ImportError:
+                self.dialog.msgbox("Success",
+                    f"{preset} preset applied!\n\n"
+                    f"Modem preset: {preset}{slot_msg}\n\n"
+                    "Settings applied via meshtastic CLI.\n"
+                    "Device will reboot to apply changes.")
+            except Exception as e:
+                self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
+        else:
             # Fallback: direct subprocess call
             try:
                 cli_path = self._get_meshtastic_cli()
@@ -438,9 +444,6 @@ Press Cancel to keep current values."""
 
             except Exception as e:
                 self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
 
     def _hardware_config_menu(self):
         """Hardware configuration selection."""
@@ -599,9 +602,16 @@ Press Cancel to keep current values."""
         """Scan for phantom/incomplete nodes via HTTP API."""
         self.dialog.infobox("Scanning", "Fetching node list from meshtasticd...")
 
+        if not _HAS_HTTP_CLIENT:
+            self.dialog.msgbox(
+                "Module Not Available",
+                "HTTP client module not found.\n\n"
+                "Ensure src/utils/meshtastic_http.py exists."
+            )
+            return
+
         try:
-            from utils.meshtastic_http import get_http_client
-            client = get_http_client()
+            client = _get_http_client()
 
             if not client.is_available:
                 self.dialog.msgbox(
@@ -685,12 +695,6 @@ Press Cancel to keep current values."""
             ):
                 self._remove_phantom_nodes(phantom)
 
-        except ImportError:
-            self.dialog.msgbox(
-                "Module Not Available",
-                "HTTP client module not found.\n\n"
-                "Ensure src/utils/meshtastic_http.py exists."
-            )
         except Exception as e:
             self.dialog.msgbox("Error", f"Scan failed:\n{e}")
 
@@ -1141,13 +1145,10 @@ Press Cancel to keep current values."""
         """Set MQTT broker address."""
         # Default to active broker profile's host if available
         default_broker = "mqtt.meshtastic.org"
-        try:
-            from utils.broker_profiles import get_active_profile
-            active = get_active_profile()
+        if _HAS_BROKER_PROFILES:
+            active = _get_active_profile()
             if active:
                 default_broker = active.host
-        except ImportError:
-            pass
 
         broker = self.dialog.inputbox(
             "MQTT Broker",
