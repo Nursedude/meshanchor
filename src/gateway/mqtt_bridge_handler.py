@@ -386,6 +386,26 @@ class MQTTBridgeHandler:
             except Exception as e:
                 logger.error(f"Message callback error: {e}")
 
+        # Emit to event bus for TUI live feed (Issue #17 Phase 3)
+        try:
+            from utils.event_bus import emit_message
+            emit_message(
+                direction='rx',
+                content=text,
+                node_id=sender,
+                channel=channel,
+                network='meshtastic',
+                raw_data={
+                    'to_id': to_id,
+                    'is_broadcast': is_broadcast,
+                    'mqtt_topic': topic,
+                    'msg_id': data.get('id'),
+                    'timestamp': data.get('timestamp'),
+                }
+            )
+        except Exception as e:
+            logger.debug(f"Event bus emit failed: {e}")
+
     def _update_node_from_mqtt(self, data: dict) -> None:
         """Update node tracker from MQTT message data."""
         try:
