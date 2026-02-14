@@ -20,34 +20,13 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 
+from commands.base import CommandResult
 from utils.safe_import import safe_import
 
-# Module-level safe imports
-_CommandResultImported, _HAS_COMMAND_BASE = safe_import('commands.base', 'CommandResult')
 _serial_tools, _HAS_SERIAL_TOOLS = safe_import('serial.tools.list_ports')
 _serial_mod, _HAS_SERIAL = safe_import('serial')
 
 logger = logging.getLogger(__name__)
-
-# Use imported CommandResult or define fallback
-if _HAS_COMMAND_BASE:
-    CommandResult = _CommandResultImported
-else:
-    from dataclasses import dataclass as _dataclass
-
-    @_dataclass
-    class CommandResult:
-        success: bool
-        message: str
-        data: Any = None
-
-        @classmethod
-        def ok(cls, message: str, data: Any = None):
-            return cls(success=True, message=message, data=data)
-
-        @classmethod
-        def fail(cls, message: str, data: Any = None):
-            return cls(success=False, message=message, data=data)
 
 
 # ============================================================================

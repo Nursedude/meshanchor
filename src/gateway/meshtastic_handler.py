@@ -23,6 +23,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from .config import GatewayConfig
 from .node_tracker import UnifiedNode
 from .reconnect import ReconnectStrategy
+from utils.meshtastic_connection import (
+    clear_stale_connections, get_connection_manager, wait_for_cooldown
+)
+from utils.websocket_server import broadcast_message
 from utils.safe_import import safe_import
 
 if TYPE_CHECKING:
@@ -31,20 +35,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Import connection utilities (optional - graceful fallback)
-_clear_stale_connections, _HAS_STALE_CONN = safe_import(
-    'utils.meshtastic_connection', 'clear_stale_connections'
-)
-_get_connection_manager, _HAS_CONN_MANAGER = safe_import(
-    'utils.meshtastic_connection', 'get_connection_manager'
-)
-_wait_for_cooldown, _HAS_COOLDOWN = safe_import(
-    'utils.meshtastic_connection', 'wait_for_cooldown'
-)
-_broadcast_message, _HAS_WEBSOCKET = safe_import(
-    'utils.websocket_server', 'broadcast_message'
-)
-_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+# pubsub is an external dependency (pypubsub) - keep safe_import
+pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 
 class MeshtasticHandler:
@@ -142,14 +134,13 @@ class MeshtasticHandler:
                     # blocks all reconnection. Detect and clear it early (3 attempts
                     # ≈ 7 seconds) instead of waiting for all 10 to exhaust.
                     if self._reconnect.attempts == 3:
-                        if _HAS_STALE_CONN:
-                            cleared = _clear_stale_connections(self.config.meshtastic.port)
-                            if cleared:
-                                self.health.record_connection_event(
-                                    "meshtastic", "self_healed",
-                                    "Cleared zombie CLOSE-WAIT connection"
-                                )
-                                self._reconnect.reset()
+                        cleared = clear_stale_connections(self.config.meshtastic.port)
+                        if cleared:
+                            self.health.record_connection_event(
+                                "meshtastic", "self_healed",
+                                "Cleared zombie CLOSE-WAIT connection"
+                            )
+                            self._reconnect.reset()
 
                     logger.info(f"Attempting Meshtastic connection "
                                f"(attempt {self._reconnect.attempts + 1})...")
@@ -192,8 +183,8 @@ class MeshtasticHandler:
         Returns:
             True if connection successful, False otherwise.
         """
-        if not (_HAS_PUBSUB and _HAS_CONN_MANAGER):
-            logger.warning("Meshtastic/connection manager not available, using CLI fallback")
+        if not _HAS_PUBSUB:
+            logger.warning("pubsub not available, using CLI fallback")
             self._connected = self._test_cli()
             return self._connected
 
@@ -205,7 +196,7 @@ class MeshtasticHandler:
 
             # Use singleton connection manager to prevent connection conflicts
             # meshtasticd only allows ONE TCP client - this ensures we share
-            self._conn_manager = _get_connection_manager(host, port)
+            self._conn_manager = get_connection_manager(host, port)
 
             # Acquire persistent connection (stays open for message receiving)
             if not self._conn_manager.acquire_persistent(owner="gateway_bridge"):
@@ -226,7 +217,7 @@ class MeshtasticHandler:
                 self._on_receive(packet)
 
             self._pubsub_handler = on_receive
-            _pub.subscribe(self._pubsub_handler, "meshtastic.receive")
+            pub.subscribe(self._pubsub_handler, "meshtastic.receive")
 
             # Get initial node list
             self._update_nodes()
@@ -431,20 +422,19 @@ class MeshtasticHandler:
             logger.debug(f"Could not store incoming message: {e}")
 
         # Broadcast to WebSocket for real-time web UI updates
-        if _HAS_WEBSOCKET:
-            try:
-                _broadcast_message({
-                    'from_id': from_id,
-                    'to_id': to_id,
-                    'content': text,
-                    'channel': packet.get('channel', 0),
-                    'snr': packet.get('rxSnr'),
-                    'rssi': packet.get('rxRssi'),
-                    'timestamp': datetime.now().isoformat(),
-                    'is_broadcast': to_id is None,
-                })
-            except Exception as e:
-                logger.debug(f"Could not broadcast to WebSocket: {e}")
+        try:
+            broadcast_message({
+                'from_id': from_id,
+                'to_id': to_id,
+                'content': text,
+                'channel': packet.get('channel', 0),
+                'snr': packet.get('rxSnr'),
+                'rssi': packet.get('rxRssi'),
+                'timestamp': datetime.now().isoformat(),
+                'is_broadcast': to_id is None,
+            })
+        except Exception as e:
+            logger.debug(f"Could not broadcast to WebSocket: {e}")
 
         # Queue for bridging if routing rules allow it (non-blocking to prevent deadlock)
         if self._mesh_to_rns_queue is not None:
@@ -567,10 +557,7 @@ class MeshtasticHandler:
         self._notify_status("meshtastic_disconnected")
 
         # Wait for cooldown before reconnect attempt
-        if _HAS_COOLDOWN:
-            _wait_for_cooldown()
-        else:
-            self._stop_event.wait(2)
+        wait_for_cooldown()
 
     def _update_nodes(self) -> None:
         """Update node tracker with Meshtastic nodes."""

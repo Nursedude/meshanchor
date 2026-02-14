@@ -3,19 +3,32 @@
 import os
 import shutil
 import subprocess
-from pathlib import Path
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.prompt import Prompt, Confirm
-from rich.table import Table
-from rich.panel import Panel
 import time
+from pathlib import Path
 
 from utils.safe_import import safe_import
 
-_run_cli_async_gtk, _HAS_COMMON_GTK = safe_import('utils.common', 'run_cli_async_gtk')
+# rich is optional — TUI/headless environments may not have it
+_, _HAS_RICH = safe_import('rich')
+if _HAS_RICH:
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+    from rich.prompt import Prompt, Confirm
+    from rich.table import Table
+    from rich.panel import Panel
+    console = Console()
+else:
+    # Minimal fallback so find_meshtastic_cli() always works
+    Console = Progress = SpinnerColumn = TextColumn = BarColumn = None
+    Prompt = Confirm = Table = Panel = None
 
-console = Console()
+    class _FallbackConsole:
+        """Stub console for when rich is not installed."""
+        def print(self, *args, **kwargs):
+            pass
+    console = _FallbackConsole()
+
+_run_cli_async_gtk, _HAS_COMMON_GTK = safe_import('utils.common', 'run_cli_async_gtk')
 
 
 def find_meshtastic_cli():

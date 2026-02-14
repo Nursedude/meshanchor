@@ -17,9 +17,10 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
+from utils.cli import find_meshtastic_cli
 from utils.safe_import import safe_import
 
-_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+# gi.repository is an external dependency (PyGObject/GTK) - keep safe_import
 _GLib, _HAS_GLIB = safe_import('gi.repository', 'GLib')
 
 logger = logging.getLogger(__name__)
@@ -225,11 +226,7 @@ def run_cli_async(
         # Find CLI if not provided
         nonlocal cli_path
         if cli_path is None:
-            if _HAS_CLI:
-                cli_path = _find_meshtastic_cli()
-            else:
-                import shutil
-                cli_path = shutil.which('meshtastic')
+            cli_path = find_meshtastic_cli()
 
         if not cli_path:
             callback(False, "", "Meshtastic CLI not found. Install with: pipx install meshtastic[cli]")
