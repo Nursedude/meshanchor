@@ -26,17 +26,19 @@ from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
+from utils.safe_import import safe_import
+
 # Import centralized service checking
-try:
-    from utils.service_check import check_process_running
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+check_process_running, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running'
+)
 
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+_get_real_user_home_mod, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+if _HAS_PATHS:
+    get_real_user_home = _get_real_user_home_mod
+else:
     def get_real_user_home():
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
