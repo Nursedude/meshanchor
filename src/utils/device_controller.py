@@ -41,12 +41,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Import device persistence (optional - graceful fallback)
-try:
-    from utils.device_persistence import get_device_persistence, DevicePersistence
-    PERSISTENCE_AVAILABLE = True
-except ImportError:
-    PERSISTENCE_AVAILABLE = False
-    get_device_persistence = None  # type: ignore
+from utils.safe_import import safe_import
+_get_device_persistence, _DevicePersistence, PERSISTENCE_AVAILABLE = safe_import(
+    'utils.device_persistence', 'get_device_persistence', 'DevicePersistence'
+)
+get_device_persistence = _get_device_persistence
+DevicePersistence = _DevicePersistence
 
 
 class ConnectionType(Enum):

@@ -38,18 +38,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    def get_real_user_home() -> Path:
-        """Fallback for when utils.paths is not in Python path."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        return Path('/root')
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+def get_real_user_home() -> Path:
+    """Get real user home, with fallback for sudo compatibility."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        return Path(f'/home/{sudo_user}')
+    return Path('/root')
 
 
 @dataclass
