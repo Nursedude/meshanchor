@@ -35,9 +35,14 @@ from .packet_dissectors import (
 )
 
 # Import centralized path utility for sudo compatibility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+from utils.safe_import import safe_import
+
+# Module-level safe imports
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+
+if _HAS_PATHS:
+    get_real_user_home = _get_real_user_home
+else:
     def get_real_user_home() -> Path:
         """Fallback for when utils.paths is not in Python path."""
         sudo_user = os.environ.get('SUDO_USER', '')

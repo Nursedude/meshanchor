@@ -21,10 +21,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-try:
+from utils.safe_import import safe_import
+
+_urllib_mod, _HAS_URLLIB = safe_import('urllib.request')
+if _HAS_URLLIB:
     import urllib.request
     import urllib.error
-except ImportError:
+else:
     urllib = None
 
 logger = logging.getLogger(__name__)

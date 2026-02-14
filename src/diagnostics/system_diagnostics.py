@@ -22,13 +22,12 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from utils import emoji as em
+from utils.safe_import import safe_import
 
-# Try to use centralized service checker
-try:
-    from utils.service_check import check_service, check_systemd_service, ServiceState
-    _HAS_SERVICE_CHECK = True
-except ImportError:
-    _HAS_SERVICE_CHECK = False
+# Module-level safe imports
+_check_service, _check_systemd_service, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState'
+)
 
 console = Console()
 
@@ -782,7 +781,7 @@ class SystemDiagnostics:
         try:
             # Use centralized service checker if available
             if _HAS_SERVICE_CHECK:
-                status = check_service('meshtasticd')
+                status = _check_service('meshtasticd')
                 return status.available
             else:
                 # Fallback to direct systemctl call
@@ -799,7 +798,7 @@ class SystemDiagnostics:
         try:
             # Use centralized service checker if available
             if _HAS_SERVICE_CHECK:
-                is_running, is_enabled = check_systemd_service('meshtasticd')
+                is_running, is_enabled = _check_systemd_service('meshtasticd')
                 return is_enabled
             else:
                 # Fallback to direct systemctl call

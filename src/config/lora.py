@@ -4,6 +4,11 @@ from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
 
+from utils.safe_import import safe_import
+
+# Meshtastic CLI finder (optional)
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+
 console = Console()
 
 
@@ -755,10 +760,9 @@ class LoRaConfigurator:
         """Find the meshtastic CLI executable - uses centralized utils.cli"""
         import os
 
-        try:
-            from utils.cli import find_meshtastic_cli
-            cli_path = find_meshtastic_cli()
-        except ImportError:
+        if _HAS_CLI:
+            cli_path = _find_meshtastic_cli()
+        else:
             import shutil
             cli_path = shutil.which('meshtastic')
 

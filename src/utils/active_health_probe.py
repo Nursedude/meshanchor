@@ -38,6 +38,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, List
 from enum import Enum
 
+from utils.safe_import import safe_import
+
+_emit_service_status, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_service_status')
+
 logger = logging.getLogger(__name__)
 
 
@@ -498,15 +502,14 @@ def _emit_state_change(service_name: str, new_state: HealthState) -> None:
     Emits a ServiceEvent whenever a service transitions between states,
     enabling the status bar and other subscribers to react without polling.
     """
-    try:
-        from utils.event_bus import emit_service_status
+    if _HAS_EVENT_BUS:
         available = new_state == HealthState.HEALTHY
-        emit_service_status(
+        _emit_service_status(
             service_name=service_name,
             available=available,
             message=f"{service_name}: {new_state.value}",
         )
-    except ImportError:
+    else:
         logger.debug("event_bus not available for health probe callback")
 
 

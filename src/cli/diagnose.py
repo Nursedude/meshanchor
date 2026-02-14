@@ -21,13 +21,19 @@ if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 from utils.paths import get_real_user_home, ReticulumPaths
+from utils.safe_import import safe_import
 
-# Import centralized service checker
-try:
-    from utils.service_check import check_service, check_port, ServiceState
-    SERVICE_CHECK_AVAILABLE = True
-except ImportError:
-    SERVICE_CHECK_AVAILABLE = False
+# Module-level safe imports
+_check_service, _check_port, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_port', 'ServiceState'
+)
+SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
+
+_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+
+_GatewayDiagnostic, _HAS_GATEWAY_DIAG = safe_import(
+    'utils.gateway_diagnostic', 'GatewayDiagnostic'
+)
 
 
 def print_header(title: str):
@@ -61,7 +67,7 @@ def check_services():
     for svc in services:
         if SERVICE_CHECK_AVAILABLE:
             # Use centralized service checker
-            status = check_service(svc)
+            status = _check_service(svc)
             is_active = status.available
             detail = status.state.value
             if not is_active and status.fix_hint:
@@ -177,11 +183,8 @@ def check_cli():
     """Check meshtastic CLI availability."""
     print_header("MESHTASTIC CLI")
 
-    try:
-        # Use centralized CLI finder
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from utils.cli import find_meshtastic_cli
-        cli_path = find_meshtastic_cli()
+    if _HAS_CLI:
+        cli_path = _find_meshtastic_cli()
 
         if cli_path:
             print_status("meshtastic CLI", True, cli_path)
@@ -200,8 +203,7 @@ def check_cli():
         else:
             print_status("meshtastic CLI", False, "not found")
             print("    Install with: pipx install meshtastic")
-
-    except ImportError:
+    else:
         # Fallback
         cli_path = shutil.which('meshtastic')
         if cli_path:
@@ -464,7 +466,7 @@ def check_sdr():
     if openwebrx:
         try:
             if SERVICE_CHECK_AVAILABLE:
-                svc_status = check_service('openwebrx')
+                svc_status = _check_service('openwebrx')
                 print_status("OpenWebRX", svc_status.available, svc_status.state.value)
             else:
                 result = subprocess.run(['systemctl', 'is-active', 'openwebrx'],
@@ -533,17 +535,17 @@ def check_ham_callsign():
 
 def run_gateway_wizard():
     """Run the AI-like gateway diagnostic wizard."""
-    try:
-        # Add parent directory to path for imports
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from utils.gateway_diagnostic import GatewayDiagnostic
+    if not _HAS_GATEWAY_DIAG:
+        print("\nError: Could not load gateway diagnostic module")
+        print("Make sure you're running from the MeshForge directory")
+        return False
 
-        diag = GatewayDiagnostic()
+    try:
+        diag = _GatewayDiagnostic()
         print(diag.run_wizard())
         return True
-    except ImportError as e:
-        print(f"\nError: Could not load gateway diagnostic module: {e}")
-        print("Make sure you're running from the MeshForge directory")
+    except Exception as e:
+        print(f"\nError running gateway diagnostic: {e}")
         return False
 
 
