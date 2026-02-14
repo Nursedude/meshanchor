@@ -251,5 +251,4 @@ def stop_mqtt_websocket_bridge():
 
 def is_bridge_available() -> bool:
     """Check if MQTT→WebSocket bridge can be started."""
-    _import_dependencies()
     return MQTTNodelessSubscriber is not None and MessageWebSocketServer is not None

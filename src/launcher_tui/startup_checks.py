@@ -32,31 +32,35 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import service check utilities
-try:
-    from utils.service_check import check_service, ServiceState, ServiceStatus
-    from utils.ports import (
-        MESHTASTICD_PORT, MESHTASTICD_WEB_PORT,
-        RNS_SHARED_INSTANCE_PORT, RNS_TCP_SERVER_PORT,
-        MQTT_PORT
-    )
-except ImportError:
+check_service, ServiceState, ServiceStatus, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus'
+)
+
+_ports_mod, _HAS_PORTS = safe_import('utils.ports')
+if _HAS_PORTS:
+    MESHTASTICD_PORT = _ports_mod.MESHTASTICD_PORT
+    MESHTASTICD_WEB_PORT = _ports_mod.MESHTASTICD_WEB_PORT
+    RNS_SHARED_INSTANCE_PORT = _ports_mod.RNS_SHARED_INSTANCE_PORT
+    RNS_TCP_SERVER_PORT = _ports_mod.RNS_TCP_SERVER_PORT
+    MQTT_PORT = _ports_mod.MQTT_PORT
+else:
     # Fallback constants if utils not available
     MESHTASTICD_PORT = 4403
     MESHTASTICD_WEB_PORT = 9443
     RNS_SHARED_INSTANCE_PORT = 37428
     RNS_TCP_SERVER_PORT = 4242
     MQTT_PORT = 1883
-    check_service = None
-    ServiceState = None
-    ServiceStatus = None
 
 # Import path utilities
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+if _HAS_PATHS:
+    get_real_user_home = _get_real_user_home
+else:
     def get_real_user_home() -> Path:
         sudo_user = os.environ.get('SUDO_USER', '')
         if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
@@ -66,6 +70,12 @@ except ImportError:
         if logname and logname != 'root' and '/' not in logname and '..' not in logname:
             return Path(f'/home/{logname}')
         return Path('/root')
+
+# Import ReticulumPaths and apply_config_and_restart for _heal_rns_storage_dirs
+_ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')
+_apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'apply_config_and_restart'
+)
 
 
 class ServiceRunState(Enum):
@@ -272,16 +282,14 @@ class StartupChecker:
         - cache/announces/ (Transport announce caching)
         If any are missing, we create them and restart rnsd.
         """
-        try:
-            from utils.paths import ReticulumPaths
-        except ImportError:
+        if not _HAS_RETICULUM_PATHS:
             return
 
-        ratchets = ReticulumPaths.ETC_RATCHETS
-        resources = ReticulumPaths.ETC_RESOURCES
-        announces = ReticulumPaths.ETC_ANNOUNCE_CACHE
+        ratchets = _ReticulumPaths.ETC_RATCHETS
+        resources = _ReticulumPaths.ETC_RESOURCES
+        announces = _ReticulumPaths.ETC_ANNOUNCE_CACHE
         needs_restart = (
-            ReticulumPaths.ETC_BASE.exists()
+            _ReticulumPaths.ETC_BASE.exists()
             and (
                 not ratchets.exists()
                 or not resources.exists()
@@ -290,21 +298,20 @@ class StartupChecker:
             )
         )
 
-        if not ReticulumPaths.ensure_system_dirs():
+        if not _ReticulumPaths.ensure_system_dirs():
             logger.debug("Could not create /etc/reticulum directories")
             return
 
         if needs_restart:
             # Directories were just created — restart rnsd so it stops crashing
             logger.info("Created missing RNS storage/ratchets dir, restarting rnsd")
-            try:
-                from utils.service_check import apply_config_and_restart
-                success, msg = apply_config_and_restart('rnsd')
+            if _HAS_APPLY_RESTART:
+                success, msg = _apply_config_and_restart('rnsd')
                 if success:
                     logger.info("rnsd restarted after storage dir fix")
                 else:
                     logger.warning("rnsd restart failed: %s", msg)
-            except ImportError:
+            else:
                 # Fallback if service_check not available
                 try:
                     subprocess.run(

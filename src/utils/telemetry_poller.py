@@ -27,7 +27,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+_UnifiedNodeTracker, _HAS_NODE_TRACKER = safe_import(
+    'gateway.node_tracker', 'UnifiedNodeTracker'
+)
+_get_node_tracker, _HAS_GET_TRACKER = safe_import(
+    'gateway.node_tracker', 'get_node_tracker'
+)
 
 # Rate limiting to avoid mesh congestion
 MIN_POLL_INTERVAL_SECONDS = 10  # Minimum time between requests
@@ -270,17 +279,18 @@ class TelemetryPoller:
 
     def _get_silent_nodes_from_tracker(self) -> List[str]:
         """Get silent nodes from the node tracker if available."""
-        try:
-            # Try to import and use the node tracker
-            from gateway.node_tracker import UnifiedNodeTracker
+        if not _HAS_NODE_TRACKER:
+            logger.debug("Node tracker not available")
+            return []
 
+        try:
             # Try to get singleton instance if available
             tracker = None
-            try:
-                from gateway.node_tracker import get_node_tracker
-                tracker = get_node_tracker()
-            except (ImportError, AttributeError):
-                pass
+            if _HAS_GET_TRACKER:
+                try:
+                    tracker = _get_node_tracker()
+                except AttributeError:
+                    pass
 
             if tracker is None:
                 return []
@@ -296,9 +306,6 @@ class TelemetryPoller:
 
             return self.identify_silent_nodes(nodes)
 
-        except ImportError:
-            logger.debug("Node tracker not available")
-            return []
         except Exception as e:
             logger.error(f"Error getting silent nodes: {e}")
             return []

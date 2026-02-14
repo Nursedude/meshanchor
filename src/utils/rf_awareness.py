@@ -43,6 +43,8 @@ from utils.safe_import import safe_import
 _np, HAS_NUMPY = safe_import('numpy')
 np = _np if HAS_NUMPY else None
 
+_SoapySDR_mod, _HAS_SOAPY = safe_import('SoapySDR')
+
 logger = logging.getLogger(__name__)
 
 
@@ -269,8 +271,12 @@ class RFAwareness:
         """
         devices = []
 
+        if not _HAS_SOAPY:
+            logger.debug("SoapySDR not available")
+            return devices
+
         try:
-            import SoapySDR
+            SoapySDR = _SoapySDR_mod
 
             results = SoapySDR.Device.enumerate()
             for result in results:
@@ -298,8 +304,6 @@ class RFAwareness:
                         serial=serial,
                     ))
 
-        except ImportError:
-            logger.debug("SoapySDR not available")
         except Exception as e:
             logger.warning(f"Error enumerating devices: {e}")
 
@@ -337,8 +341,12 @@ class RFAwareness:
 
     def _connect_soapy(self, device_filter: str = None) -> bool:
         """Connect via SoapySDR."""
+        if not _HAS_SOAPY:
+            logger.debug("SoapySDR not installed")
+            return False
+
         try:
-            import SoapySDR
+            SoapySDR = _SoapySDR_mod
 
             # Enumerate devices
             results = SoapySDR.Device.enumerate()
@@ -408,9 +416,6 @@ class RFAwareness:
             logger.info(f"Connected to {self._device_info.label} via SoapySDR")
             return True
 
-        except ImportError:
-            logger.debug("SoapySDR not installed")
-            return False
         except Exception as e:
             logger.error(f"SoapySDR connection failed: {e}")
             return False

@@ -15,20 +15,24 @@ import subprocess
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import service check for consistent status detection
-try:
-    from utils.service_check import check_service, check_port
-except ImportError:
-    check_service = None
-    check_port = None
+check_service, check_port, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_port'
+)
 
 # Import device scanner
-try:
-    from utils.device_scanner import DeviceScanner
-except ImportError:
-    DeviceScanner = None
+DeviceScanner, _HAS_DEVICE_SCANNER = safe_import(
+    'utils.device_scanner', 'DeviceScanner'
+)
+
+# Import systemd service checker
+_check_systemd_service, _HAS_SYSTEMD_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service'
+)
 
 
 @dataclass
@@ -278,17 +282,13 @@ class ServiceDiscoveryMixin:
             lines.append(f"  Status: {state}")
 
             # Check boot persistence for running services
-            if status.available:
-                try:
-                    from utils.service_check import check_systemd_service
-                    _, is_enabled = check_systemd_service(svc_id)
-                    if not is_enabled:
-                        lines.append(f"  Boot: not enabled (won't start on reboot)")
-                        warnings.append(svc_id)
-                    else:
-                        lines.append(f"  Boot: enabled")
-                except ImportError:
-                    pass
+            if status.available and _HAS_SYSTEMD_CHECK:
+                _, is_enabled = _check_systemd_service(svc_id)
+                if not is_enabled:
+                    lines.append(f"  Boot: not enabled (won't start on reboot)")
+                    warnings.append(svc_id)
+                else:
+                    lines.append(f"  Boot: enabled")
 
             if status.message:
                 lines.append(f"  Info: {status.message}")
