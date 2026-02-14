@@ -33,8 +33,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from utils.safe_import import safe_import
+
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+
+# Optional: Folium map library
+_folium, _HAS_FOLIUM = safe_import('folium')
+_folium_plugins, _HAS_FOLIUM_PLUGINS = safe_import('folium.plugins')
 
 logger = logging.getLogger(__name__)
 
@@ -783,13 +789,14 @@ class CoverageMapGenerator:
         Returns:
             Path to generated HTML file
         """
-        try:
-            import folium
-            from folium.plugins import MarkerCluster, HeatMap
-        except ImportError:
+        if not _HAS_FOLIUM or not _HAS_FOLIUM_PLUGINS:
             # Folium not installed - use Leaflet.js fallback instead
             logger.debug("Folium not installed, using Leaflet fallback")
             return self._generate_fallback(output_path)
+
+        folium = _folium
+        MarkerCluster = getattr(_folium_plugins, 'MarkerCluster', None)
+        HeatMap = getattr(_folium_plugins, 'HeatMap', None)
 
         # Determine output path
         if output_path is None:
@@ -1159,13 +1166,13 @@ class CoverageMapGenerator:
         Returns:
             Path to generated HTML file
         """
-        try:
-            import folium
-            from folium.plugins import HeatMap
-        except ImportError:
+        if not _HAS_FOLIUM or not _HAS_FOLIUM_PLUGINS:
             # Heatmap requires Folium - no fallback available
             logger.warning("Folium not installed, heatmap unavailable")
             return ""
+
+        folium = _folium
+        HeatMap = getattr(_folium_plugins, 'HeatMap', None)
 
         if output_path is None:
             cache_dir = get_real_user_home() / ".cache" / "meshforge"

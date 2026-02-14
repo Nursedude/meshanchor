@@ -12,31 +12,52 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Any, TYPE_CHECKING
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
 # Import node state machine (optional - graceful fallback)
-try:
-    from .node_state import (
-        NodeState, NodeStateMachine, NodeStateConfig,
-        StateTransition, get_default_state_config
-    )
-    NODE_STATE_AVAILABLE = True
-except ImportError:
-    NODE_STATE_AVAILABLE = False
+(_NodeState, _NodeStateMachine, _NodeStateConfig,
+ _StateTransition, _get_default_state_config,
+ NODE_STATE_AVAILABLE) = safe_import(
+    '.node_state',
+    'NodeState', 'NodeStateMachine', 'NodeStateConfig',
+    'StateTransition', 'get_default_state_config',
+    package='gateway',
+)
+
+if NODE_STATE_AVAILABLE:
+    NodeState = _NodeState
+    NodeStateMachine = _NodeStateMachine
+    NodeStateConfig = _NodeStateConfig
+    StateTransition = _StateTransition
+    get_default_state_config = _get_default_state_config
+else:
     NodeState = None  # type: ignore
     NodeStateMachine = None  # type: ignore
 
 # Import RNS service registry (optional - graceful fallback)
-try:
-    from .rns_services import (
-        RNSServiceType, ServiceInfo, AnnounceEvent,
-        get_service_registry, RNSServiceRegistry
-    )
-    RNS_SERVICES_AVAILABLE = True
-except ImportError:
-    RNS_SERVICES_AVAILABLE = False
+(_RNSServiceType, _ServiceInfo, _AnnounceEvent,
+ _get_service_registry, _RNSServiceRegistry,
+ RNS_SERVICES_AVAILABLE) = safe_import(
+    '.rns_services',
+    'RNSServiceType', 'ServiceInfo', 'AnnounceEvent',
+    'get_service_registry', 'RNSServiceRegistry',
+    package='gateway',
+)
+
+if RNS_SERVICES_AVAILABLE:
+    RNSServiceType = _RNSServiceType
+    ServiceInfo = _ServiceInfo
+    AnnounceEvent = _AnnounceEvent
+    get_service_registry = _get_service_registry
+    RNSServiceRegistry = _RNSServiceRegistry
+else:
     RNSServiceType = None  # type: ignore
     ServiceInfo = None  # type: ignore
+
+# Optional msgpack for telemetry parsing
+_msgpack, _HAS_MSGPACK = safe_import('msgpack')
 
 
 @dataclass
@@ -874,15 +895,11 @@ class UnifiedNode:
                     pass
 
             # Parse msgpack telemetry if found
-            if msgpack_start >= 0:
+            if msgpack_start >= 0 and _HAS_MSGPACK:
                 try:
-                    import msgpack
-                    telemetry = msgpack.unpackb(app_data[msgpack_start:], raw=False, strict_map_key=False)
+                    telemetry = _msgpack.unpackb(app_data[msgpack_start:], raw=False, strict_map_key=False)
                     if isinstance(telemetry, dict):
                         cls._extract_telemetry(telemetry, result)
-                except ImportError:
-                    # msgpack not installed - skip telemetry parsing
-                    pass
                 except Exception:
                     # Invalid msgpack data - ignore
                     pass

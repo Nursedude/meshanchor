@@ -11,7 +11,12 @@ Provides Meshtastic favorites management (BaseUI 2.7+):
 import logging
 from typing import Optional, List, Tuple
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
+
+# Module-level safe imports
+_TCPInterface, _HAS_TCP_INTERFACE = safe_import('meshtastic.tcp_interface', 'TCPInterface')
 
 
 class FavoritesMixin:
@@ -397,10 +402,18 @@ class FavoritesMixin:
         """
         self.dialog.infobox("Syncing...", "Reading favorites from device...")
 
-        try:
-            from meshtastic.tcp_interface import TCPInterface
+        if not _HAS_TCP_INTERFACE:
+            self.dialog.msgbox(
+                "Favorites Sync Unavailable",
+                "The isFavorite flag requires the meshtastic Python library\n"
+                "(TCP/protobuf API). The HTTP API does not expose it.\n\n"
+                "Install with: pip install meshtastic\n\n"
+                "You can still set favorites via the meshtastic CLI."
+            )
+            return
 
-            interface = TCPInterface(hostname='localhost')
+        try:
+            interface = _TCPInterface(hostname='localhost')
 
             try:
                 favorites = []
@@ -452,14 +465,6 @@ class FavoritesMixin:
             finally:
                 interface.close()
 
-        except ImportError:
-            self.dialog.msgbox(
-                "Favorites Sync Unavailable",
-                "The isFavorite flag requires the meshtastic Python library\n"
-                "(TCP/protobuf API). The HTTP API does not expose it.\n\n"
-                "Install with: pip install meshtastic\n\n"
-                "You can still set favorites via the meshtastic CLI."
-            )
         except ConnectionRefusedError:
             self.dialog.msgbox(
                 "Connection Failed",

@@ -375,7 +375,7 @@ Always prioritize safety - never suggest actions that could damage hardware
                     if degraded:
                         parts.append(f"DEGRADED: {', '.join(degraded)}")
             except Exception as e:
-            logger.debug(f"Failed to get latency context: {e}")
+                logger.debug(f"Failed to get latency context: {e}")
 
         # Recent diagnostics
         if _HAS_DIAG_ENGINE:
@@ -389,7 +389,7 @@ Always prioritize safety - never suggest actions that could damage hardware
                     ]
                     parts.append(f"recent_diag=[{'; '.join(diag_parts)}]")
             except Exception as e:
-            logger.debug(f"Failed to get diagnostic context: {e}")
+                logger.debug(f"Failed to get diagnostic context: {e}")
 
         return ", ".join(parts)
 

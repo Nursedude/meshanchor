@@ -4,24 +4,32 @@ Logs Menu Mixin - Log viewing functionality.
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
 
+import os
 import subprocess
 from pathlib import Path
 from backend import clear_screen
+from utils.safe_import import safe_import
 
-# Import centralized path utility
-try:
-    from utils.paths import get_real_user_home
-except ImportError:
-    import os
+# Module-level safe imports
+_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f'/home/{logname}')
-        return Path('/root')
+
+def _fallback_get_real_user_home() -> Path:
+    """Fallback if utils.paths is unavailable."""
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
+        return Path(f'/home/{sudo_user}')
+    logname = os.environ.get('LOGNAME', '')
+    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
+        return Path(f'/home/{logname}')
+    return Path('/root')
+
+
+def get_real_user_home() -> Path:
+    """Get real user home, using utils.paths if available."""
+    if _HAS_PATHS:
+        return _get_real_user_home()
+    return _fallback_get_real_user_home()
 
 
 class LogsMenuMixin:
