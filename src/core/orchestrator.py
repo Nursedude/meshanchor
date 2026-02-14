@@ -31,20 +31,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Callable, Any
 
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
+from utils.safe_import import safe_import
 
+# Module-level safe imports
+_yaml, _HAS_YAML = safe_import('yaml')
 # Import centralized port checker for consistency across MeshForge
 # See: utils/service_check.py - SINGLE SOURCE OF TRUTH
-try:
-    from utils.service_check import check_port as _centralized_check_port
-    HAS_SERVICE_CHECK = True
-except ImportError:
-    _centralized_check_port = None
-    HAS_SERVICE_CHECK = False
+_centralized_check_port, _HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_port')
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -177,10 +170,10 @@ class ServiceOrchestrator:
 
         # Load from config file
         if self._config_path and self._config_path.exists():
-            if HAS_YAML:
+            if _HAS_YAML:
                 try:
                     with open(self._config_path) as f:
-                        file_config = yaml.safe_load(f)
+                        file_config = _yaml.safe_load(f)
                         if file_config and 'noc' in file_config:
                             noc_config = file_config['noc']
                             # Merge configs
@@ -377,7 +370,7 @@ class ServiceOrchestrator:
 
         Uses centralized port checker from utils/service_check.py for consistency.
         """
-        if HAS_SERVICE_CHECK and _centralized_check_port is not None:
+        if _HAS_SERVICE_CHECK and _centralized_check_port is not None:
             return _centralized_check_port(port, host, timeout)
 
         # Fallback if service_check not available

@@ -10,13 +10,10 @@ from rich.panel import Panel
 
 from config.hardware import HardwareDetector
 from utils.logger import log
+from utils.safe_import import safe_import
 
-# Try to import enable_service helper, fall back to direct subprocess
-try:
-    from utils.service_check import enable_service
-    _HAS_ENABLE_SERVICE = True
-except ImportError:
-    _HAS_ENABLE_SERVICE = False
+# Service management helper (optional)
+_enable_service, _HAS_ENABLE_SERVICE = safe_import('utils.service_check', 'enable_service')
 
 console = Console()
 
@@ -521,7 +518,7 @@ WantedBy=multi-user.target
 
             # Enable the service for next boot
             if _HAS_ENABLE_SERVICE:
-                success, msg = enable_service('meshtasticd-installer-resume.service')
+                success, msg = _enable_service('meshtasticd-installer-resume.service')
                 if not success:
                     log(f"Warning: {msg}", 'warning')
             else:

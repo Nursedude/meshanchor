@@ -22,6 +22,11 @@ from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from utils.safe_import import safe_import
+
+# YAML support (optional, for config validation)
+_yaml_mod, _HAS_YAML = safe_import('yaml')
+
 console = Console()
 
 # Paths
@@ -675,16 +680,16 @@ class HardwareConfigurator:
 
         # Validate YAML
         console.print("\n[cyan]Validating YAML syntax...[/cyan]")
-        try:
-            import yaml
-            with open(cfg_path) as f:
-                yaml.safe_load(f)
-            console.print("[green]YAML syntax is valid[/green]")
-        except ImportError:
+        if _HAS_YAML:
+            try:
+                with open(cfg_path) as f:
+                    _yaml_mod.safe_load(f)
+                console.print("[green]YAML syntax is valid[/green]")
+            except _yaml_mod.YAMLError as e:
+                console.print(f"[red]YAML Error: {e}[/red]")
+                console.print("[yellow]Please fix the syntax before applying[/yellow]")
+        else:
             console.print("[dim]PyYAML not installed, skipping validation[/dim]")
-        except yaml.YAMLError as e:
-            console.print(f"[red]YAML Error: {e}[/red]")
-            console.print("[yellow]Please fix the syntax before applying[/yellow]")
 
         if Confirm.ask("Restart meshtasticd to apply changes?", default=False):
             subprocess.run(['sudo', 'systemctl', 'restart', 'meshtasticd'], timeout=30)

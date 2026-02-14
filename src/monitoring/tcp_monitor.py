@@ -36,14 +36,15 @@ import ipaddress
 import struct
 import os
 
+from utils.safe_import import safe_import
+
 logger = logging.getLogger(__name__)
 
-# Try to import psutil for cross-platform socket monitoring
-try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
+# Module-level safe imports
+_psutil, HAS_PSUTIL = safe_import('psutil')
+if HAS_PSUTIL:
+    psutil = _psutil
+else:
     logger.warning("psutil not available - falling back to /proc/net/tcp parsing")
 
 
