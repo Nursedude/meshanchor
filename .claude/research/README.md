@@ -8,6 +8,8 @@
 
 | Document | Description |
 |----------|-------------|
+| `dual_protocol_meshcore.md` | **Dual-Protocol Mesh: Meshtastic <> MeshCore bridge research & implementation plan (Alpha)** |
+| `meshcore_proxy_analysis.md` | MeshCore-Meshtastic-Proxy firmware analysis for reliability patterns |
 | `rns_comprehensive.md` | Complete Reticulum/RNS protocol documentation |
 | `rns_complete.md` | RNS configuration and setup guide |
 | `rns_integration.md` | RNS integration patterns for MeshForge |
