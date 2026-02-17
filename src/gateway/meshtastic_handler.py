@@ -554,8 +554,8 @@ class MeshtasticHandler:
             if self._pubsub_handler:
                 pub.unsubscribe(self._pubsub_handler, "meshtastic.receive")
                 self._pubsub_handler = None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Pubsub unsubscribe error: {e}")
 
         self._interface = None
         self._notify_status("meshtastic_disconnected")

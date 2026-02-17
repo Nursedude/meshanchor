@@ -24,6 +24,12 @@ _detect_meshcore_devices, _HAS_DETECT = safe_import(
 _GatewayConfig, _MeshCoreConfig, _HAS_GW_CONFIG = safe_import(
     'gateway.config', 'GatewayConfig', 'MeshCoreConfig'
 )
+_get_node_tracker, _HAS_NODE_TRACKER = safe_import(
+    'gateway.node_tracker', 'get_node_tracker'
+)
+_is_gateway_running, _get_gateway_stats, _HAS_GW_CLI = safe_import(
+    'gateway.gateway_cli', 'is_gateway_running', 'get_gateway_stats'
+)
 
 
 class MeshCoreMixin:
@@ -344,48 +350,118 @@ class MeshCoreMixin:
             self.dialog.msgbox("Save Error", f"Could not save config:\n\n{e}")
 
     def _meshcore_nodes(self):
-        """Show MeshCore nodes (if bridge is running)."""
+        """Show MeshCore nodes from the live node tracker."""
         clear_screen()
         print("=== MeshCore Nodes ===\n")
-        print("  MeshCore nodes are tracked in the unified node tracker")
-        print("  when the gateway bridge is running with MeshCore enabled.\n")
-        print("  To view nodes:")
-        print("  1. Enable MeshCore in gateway config")
-        print("  2. Start the gateway bridge")
-        print("  3. Use Dashboard > Node Count to see all nodes")
-        print("\n  MeshCore nodes are prefixed with 'meshcore:' in the tracker.")
-        self._wait_for_enter()
 
-    def _meshcore_stats(self):
-        """Show MeshCore statistics."""
-        clear_screen()
-        print("=== MeshCore Statistics ===\n")
-
-        if not _HAS_GW_CONFIG:
-            print("  Gateway config not available.")
+        if not _HAS_NODE_TRACKER:
+            print("  Node tracker module not available.")
             self._wait_for_enter()
             return
 
         try:
-            config = _GatewayConfig.load()
-        except Exception:
-            print("  Could not load gateway config.")
+            tracker = _get_node_tracker()
+            nodes = tracker.get_meshcore_nodes()
+        except Exception as e:
+            print(f"  Error reading node tracker: {e}")
             self._wait_for_enter()
             return
 
-        mc = getattr(config, 'meshcore', None)
-        if not mc or not mc.enabled:
-            print("  MeshCore is not enabled in gateway config.")
-            print("  Enable it via 'Enable/Disable' option.")
+        if not nodes:
+            print("  No MeshCore nodes discovered yet.\n")
+            print("  Nodes appear when the gateway bridge is running")
+            print("  with MeshCore enabled and a radio connected.")
             self._wait_for_enter()
             return
 
-        print("  MeshCore statistics are available when the")
-        print("  gateway bridge is running.\n")
-        print("  Stats tracked:")
-        print("  - meshcore_rx:  Messages received from MeshCore")
-        print("  - meshcore_tx:  Messages sent to MeshCore")
-        print("  - meshcore_acks: Delivery acknowledgments")
-        print("  - Connection events (connect/disconnect/retry)")
-        print("\n  Use Dashboard > Service Status to see live stats.")
+        print(f"  {len(nodes)} node(s) discovered:\n")
+        for node in sorted(nodes, key=lambda n: n.name or n.id):
+            name = node.name or node.short_name or "(unnamed)"
+            status = "ONLINE" if node.is_online else "offline"
+            role = node.meshcore_role or ""
+            hops = f"hops:{node.meshcore_hops}" if node.meshcore_hops is not None else ""
+
+            # Signal info
+            signal = ""
+            if node.rssi is not None:
+                signal = f"RSSI:{node.rssi}"
+            if node.snr is not None:
+                signal += f" SNR:{node.snr:.1f}"
+
+            # Last seen
+            last = ""
+            if node.last_seen:
+                delta = (__import__('datetime').datetime.now() - node.last_seen).total_seconds()
+                if delta < 60:
+                    last = f"{int(delta)}s ago"
+                elif delta < 3600:
+                    last = f"{int(delta / 60)}m ago"
+                else:
+                    last = f"{delta / 3600:.1f}h ago"
+
+            detail = "  ".join(filter(None, [role, hops, signal, last]))
+            print(f"  {name:<20s} [{status}]  {detail}")
+            if node.meshcore_pubkey:
+                print(f"    pubkey: {node.meshcore_pubkey}")
+
+        self._wait_for_enter()
+
+    def _meshcore_stats(self):
+        """Show MeshCore statistics from the live bridge."""
+        clear_screen()
+        print("=== MeshCore Statistics ===\n")
+
+        if not _HAS_GW_CLI:
+            print("  Gateway CLI module not available.")
+            self._wait_for_enter()
+            return
+
+        if not _is_gateway_running():
+            print("  Gateway bridge is not running.\n")
+            print("  Start the bridge to collect MeshCore statistics.")
+            self._wait_for_enter()
+            return
+
+        try:
+            gw_stats = _get_gateway_stats()
+        except Exception as e:
+            print(f"  Error reading gateway stats: {e}")
+            self._wait_for_enter()
+            return
+
+        stats = gw_stats.get('statistics', gw_stats)
+        connected = gw_stats.get('meshcore_connected', False)
+
+        print(f"  Connection:  {'CONNECTED' if connected else 'DISCONNECTED'}")
+        print(f"  Bridge:      {gw_stats.get('status', 'unknown')}\n")
+
+        print(f"  Messages RX:    {stats.get('meshcore_rx', 0)}")
+        print(f"  Messages TX:    {stats.get('meshcore_tx', 0)}")
+        print(f"  Delivery ACKs:  {stats.get('meshcore_acks', 0)}")
+
+        # Cross-bridge stats
+        mc_to_mesh = stats.get('messages_meshcore_to_mesh', 0)
+        mc_to_rns = stats.get('messages_meshcore_to_rns', 0)
+        mesh_to_mc = stats.get('messages_mesh_to_meshcore', 0)
+        rns_to_mc = stats.get('messages_rns_to_meshcore', 0)
+        if any([mc_to_mesh, mc_to_rns, mesh_to_mc, rns_to_mc]):
+            print(f"\n  Bridged:")
+            print(f"    MeshCore -> Meshtastic:  {mc_to_mesh}")
+            print(f"    MeshCore -> RNS:         {mc_to_rns}")
+            print(f"    Meshtastic -> MeshCore:  {mesh_to_mc}")
+            print(f"    RNS -> MeshCore:         {rns_to_mc}")
+
+        errors = stats.get('errors', 0)
+        bounced = stats.get('bounced', 0)
+        if errors or bounced:
+            print(f"\n  Errors:   {errors}")
+            print(f"  Bounced:  {bounced}")
+
+        # Uptime
+        uptime = gw_stats.get('uptime_seconds')
+        if uptime:
+            h, rem = divmod(int(uptime), 3600)
+            m, s = divmod(rem, 60)
+            print(f"\n  Uptime: {h}h {m}m {s}s")
+
         self._wait_for_enter()
