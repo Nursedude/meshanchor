@@ -99,6 +99,7 @@ print(f'Issues: {report.total_issues}')
 ## Research Documents
 
 Deep documentation in `.claude/`:
+- `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical — satellites link here)
 - `dude_ai_university.md` - Complete project knowledge base
 - `foundations/domain_architecture.md` - **ARCHITECTURE: Core vs Plugin model**
 - `foundations/ai_principles.md` - Human-centered design philosophy
