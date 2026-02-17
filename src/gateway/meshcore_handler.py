@@ -223,8 +223,8 @@ class MeshCoreHandler:
         finally:
             try:
                 self._loop.run_until_complete(self._loop.shutdown_asyncgens())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Async cleanup error: {e}")
             self._loop.close()
             self._loop = None
 
@@ -728,8 +728,8 @@ class MeshCoreHandler:
 
         try:
             await self._async_disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Disconnect cleanup error: {e}")
 
         self.health.record_connection_event("meshcore", "disconnected", reason)
         self._notify_status("meshcore_disconnected")
