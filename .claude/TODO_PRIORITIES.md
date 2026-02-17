@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-12
+> **Last Updated:** 2026-02-17
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -56,6 +56,12 @@
 - [x] **Install pytest** - Available in environment
 - [x] **Add tests for gateway transport** - 39 tests for transport layer
 - [x] **Add tests for network diagnostics** - 28 tests (2026-01-15)
+
+### TUI-Bridge API Wiring
+- [ ] **MeshCore node listing** - Wire `_meshcore_nodes()` to live node tracker (filter `meshcore:` prefix) — currently placeholder text
+- [ ] **MeshCore stats** - Wire `_meshcore_stats()` to bridge stats API (`meshcore_rx/tx/acks`) — currently static help text
+- [ ] **Classifier MeshCore 3-way routing** - Verify `BRIDGE_MESHCORE` end-to-end with MeshCore source network (enum exists in `classifier.py`)
+- [ ] **Auto-review reliability triage** - Review 64 reliability issues: real vs false positive classification
 
 ---
 
@@ -189,12 +195,13 @@
 
 | File | Lines | Status |
 |------|-------|--------|
-| knowledge_content.py | 1,824 | Over - static content data, acceptable by design |
-| rns_bridge.py | 1,694 | **Over - needs extraction** |
-| map_data_collector.py | 1,509 | Borderline, monitor |
-| launcher_tui/main.py | 1,488 | Under threshold |
+| knowledge_content.py | 1,824 | Over — content file by design, acceptable |
+| service_menu_mixin.py | 1,611 | Over — monitor; OpenHamClock/MQTT candidates for extraction |
+| rns_bridge.py | 1,525 | Over — MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
+| map_data_collector.py | 1,516 | Borderline, monitor |
+| launcher_tui/main.py | 1,516 | Borderline — 33 mixins, monitor |
 
-*Last updated: 2026-02-12*
+*Last updated: 2026-02-17*
 
 ---
 
