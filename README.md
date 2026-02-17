@@ -78,6 +78,27 @@ sudo bash scripts/install_noc.sh --force-native        # Force SPI mode
 sudo bash scripts/install_noc.sh --force-python        # Force USB mode
 ```
 
+### Alpha Install (MeshCore Integration)
+
+To install the alpha version with MeshCore support (3-way routing between
+Meshtastic, Reticulum, and MeshCore networks):
+
+```bash
+git clone https://github.com/Nursedude/meshforge.git
+cd meshforge
+git checkout alpha/meshcore-bridge
+sudo bash scripts/install_noc.sh
+```
+
+The alpha branch (`0.6.0-alpha`) includes:
+- **MeshCore handler** — companion radio detection and management
+- **3-way message routing** — Meshtastic ↔ RNS ↔ MeshCore bridge
+- **Canonical message format** — unified multi-protocol message representation
+- **MeshCore TUI menu** — device management from the terminal interface
+
+> **Note:** The alpha branch is experimental and periodically rebased from `main`.
+> Report issues on the [alpha/meshcore-bridge](https://github.com/Nursedude/meshforge/issues) tracker.
+
 ### Already Have meshtasticd?
 
 ```bash
