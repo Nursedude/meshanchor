@@ -369,6 +369,7 @@ class RoutingCategory(Enum):
     """Message routing categories - small bucket"""
     BRIDGE_RNS = "bridge_to_rns"
     BRIDGE_MESH = "bridge_to_mesh"
+    BRIDGE_MESHCORE = "bridge_to_meshcore"
     DROP = "drop"
     QUEUE = "queue_for_review"
 
@@ -408,10 +409,12 @@ class RoutingClassifier(Classifier):
         reasons = []
         metadata = {'matched_rules': []}
 
-        # Determine direction
+        # Determine direction based on source network
         if source_network == 'meshtastic':
             default_category = RoutingCategory.BRIDGE_RNS.value
         elif source_network == 'rns':
+            default_category = RoutingCategory.BRIDGE_MESH.value
+        elif source_network == 'meshcore':
             default_category = RoutingCategory.BRIDGE_MESH.value
         else:
             return (RoutingCategory.DROP.value, 0.1, "Unknown source network", {})
@@ -462,6 +465,14 @@ class RoutingClassifier(Classifier):
         if direction == 'mesh_to_rns' and source_network != 'meshtastic':
             return False
         if direction == 'rns_to_mesh' and source_network != 'rns':
+            return False
+        if direction == 'mesh_to_meshcore' and source_network != 'meshtastic':
+            return False
+        if direction == 'meshcore_to_mesh' and source_network != 'meshcore':
+            return False
+        if direction == 'rns_to_meshcore' and source_network != 'rns':
+            return False
+        if direction == 'meshcore_to_rns' and source_network != 'meshcore':
             return False
 
         # Source filter (regex pattern)

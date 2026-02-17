@@ -16,6 +16,10 @@ pyopenssl>=25.3.0
 # The meshtastic Python library is only needed for legacy TCP bridge mode
 # meshtastic>=2.3.0  # Optional: only for bridge_mode="message_bridge"
 
+# MeshCore companion radio support (optional, Python 3.10+)
+# Required for MeshCore bridge mode (meshcore_bridge / tri_bridge)
+# meshcore  # Optional: pip install meshcore
+
 # Terminal formatting (used by TUI config menus)
 rich>=13.0.0
 

@@ -426,6 +426,19 @@ instance_control_port = 37429
                     return node
             return None
 
+    def get_node_by_meshcore_pubkey(self, pubkey: str) -> Optional[UnifiedNode]:
+        """Get a node by its MeshCore public key prefix."""
+        with self._lock:
+            for node in self._nodes.values():
+                if node.meshcore_pubkey and node.meshcore_pubkey == pubkey:
+                    return node
+            return None
+
+    def get_meshcore_nodes(self) -> list:
+        """Get all MeshCore nodes."""
+        with self._lock:
+            return [n for n in self._nodes.values() if n.network == "meshcore"]
+
     def get_nodes_with_position(self) -> List[UnifiedNode]:
         """Get nodes that have valid positions"""
         with self._lock:
