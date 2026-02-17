@@ -1299,8 +1299,8 @@ def list_known_destinations() -> CommandResult:
                         "rnsd not running",
                         fix_hint="Start with: rnsd or sudo systemctl start rnsd"
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"RNS availability check error: {e}")
 
     if not _HAS_RNS:
         return CommandResult.not_available(
