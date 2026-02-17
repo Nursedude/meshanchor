@@ -126,12 +126,15 @@ class MessageRouter:
 
     def _classify_message(self, msg) -> bool:
         """Classify message using confidence-scored routing."""
-        msg_id = f"{msg.source_network}:{msg.source_id}:{msg.timestamp.isoformat()}"
+        # Support both CanonicalMessage (source_address) and BridgedMessage (source_id)
+        source_id = getattr(msg, 'source_address', '') or getattr(msg, 'source_id', '')
+        dest_id = getattr(msg, 'destination_address', '') or getattr(msg, 'destination_id', '')
+        msg_id = f"{msg.source_network}:{source_id}:{msg.timestamp.isoformat()}"
 
         result = self._classifier.classify(msg_id, {
             'source_network': msg.source_network,
-            'source_id': msg.source_id,
-            'destination_id': msg.destination_id,
+            'source_id': source_id,
+            'destination_id': dest_id,
             'content': msg.content,
             'is_broadcast': msg.is_broadcast,
             'metadata': msg.metadata
@@ -145,7 +148,7 @@ class MessageRouter:
                 self.stats['bounced'] += 1
             logger.info(
                 f"Message bounced (confidence {result.confidence:.2f}): "
-                f"{msg.source_id[:8]}... -> {result.bounce_reason}"
+                f"{source_id[:8]}... -> {result.bounce_reason}"
             )
             # Bounced messages go to queue category, don't bridge immediately
             return result.category == RoutingCategory.QUEUE.value
@@ -160,7 +163,11 @@ class MessageRouter:
         # Determine if we should bridge based on category
         if result.category == RoutingCategory.DROP.value:
             return False
-        elif result.category in (RoutingCategory.BRIDGE_RNS.value, RoutingCategory.BRIDGE_MESH.value):
+        elif result.category in (
+            RoutingCategory.BRIDGE_RNS.value,
+            RoutingCategory.BRIDGE_MESH.value,
+            RoutingCategory.BRIDGE_MESHCORE.value,
+        ):
             return True
         elif result.category == RoutingCategory.QUEUE.value:
             # Queued items need manual review
