@@ -7,11 +7,21 @@
 
 ## Branch Strategy
 
-**Single-branch model** since v0.5.1 (alpha branch deprecated per DOCS changelog).
+**Dual-branch model** as of v0.5.4 (alpha restored for MeshCore development).
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | All development — stable releases, features, fixes |
+| Branch | Version | Purpose |
+|--------|---------|---------|
+| `main` | `0.5.4-beta` | Stable beta — gateway bridge, TUI, monitoring, RF tools |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore integration — 3-way routing, companion radio mgmt |
+
+**Alpha branch contents** (16 commits ahead of main, PRs #847-#851):
+- `meshcore_handler.py` — MeshCore protocol handler (796 lines)
+- `canonical_message.py` — Multi-protocol canonical message format (437 lines)
+- `meshcore_bridge_mixin.py` — Bridge integration mixin (169 lines)
+- `meshcore_mixin.py` — TUI menu for MeshCore operations (391 lines)
+- `rns_config_mixin.py` + `rns_diagnostics_mixin.py` — Extracted from rns_menu_mixin
+- `message_routing.py` — Enhanced with 3-way routing (MeshCore source)
+- 1,839 lines of new tests (canonical_message, meshcore_handler, tribridge)
 
 ---
 
