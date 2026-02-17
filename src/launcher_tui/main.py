@@ -114,6 +114,7 @@ from classifier_mixin import ClassifierMixin
 from rnode_mixin import RNodeMixin
 from latency_mixin import LatencyMixin
 from dashboard_mixin import DashboardMixin
+from meshcore_mixin import MeshCoreMixin
 
 
 class MeshForgeLauncher(
@@ -158,6 +159,7 @@ class MeshForgeLauncher(
     RNodeMixin,
     LatencyMixin,
     DashboardMixin,
+    MeshCoreMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -846,8 +848,9 @@ class MeshForgeLauncher(
         while True:
             choices = [
                 ("meshtastic", "Meshtastic          Radio, channels, CLI"),
+                ("meshcore", "MeshCore            Companion radio, config"),
                 ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
-                ("gateway", "Gateway Bridge      RNS-Meshtastic config"),
+                ("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("messaging", "Messaging           Send/receive messages"),
                 ("traffic", "Traffic Classifier  Routing & notification stats"),
@@ -869,6 +872,7 @@ class MeshForgeLauncher(
 
             dispatch = {
                 "meshtastic": ("Meshtastic Radio", self._radio_menu),
+                "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
