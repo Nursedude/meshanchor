@@ -120,10 +120,9 @@ def _make_msg(source_network, content="Hello mesh", source_id="node123",
               origin=None):
     """Helper to create a message object for routing tests.
 
-    Uses SimpleNamespace because MessageRouter._classify_message accesses
-    msg.source_id and msg.destination_id directly (not via getattr),
-    while CanonicalMessage uses source_address/destination_address.
-    SimpleNamespace provides all attributes the router expects.
+    Uses SimpleNamespace to provide both CanonicalMessage-style attributes
+    (source_address/destination_address) and BridgedMessage-style attributes
+    (source_id/destination_id) so tests work with both message types.
     """
     msg = SimpleNamespace(
         content=content,
@@ -223,14 +222,18 @@ class TestInternetOriginFiltering:
 class TestDirectionalRouting:
     """Test specific directional routing rules for 3-way bridging.
 
-    Tests the legacy routing path (no classifier) to verify direction
-    matching logic, since the classifier currently only knows meshtastic
-    and rns sources (meshcore support is pending classifier update).
+    Tests both classifier and legacy routing paths for all three networks
+    (meshtastic, meshcore, rns) including meshcore-specific directions.
     """
 
     def test_mesh_to_meshcore_rule_matches(self, directional_router):
         """mesh_to_meshcore rule allows Meshtastic->MeshCore."""
         msg = _make_msg("meshtastic", "To MeshCore")
+        assert directional_router.should_bridge(msg) is True
+
+    def test_meshcore_to_mesh_rule_matches(self, directional_router):
+        """meshcore_to_mesh rule allows MeshCore->Meshtastic via classifier."""
+        msg = _make_msg("meshcore", "To Meshtastic")
         assert directional_router.should_bridge(msg) is True
 
     @patch('gateway.message_routing.CLASSIFIER_AVAILABLE', False)
@@ -245,6 +248,11 @@ class TestDirectionalRouting:
     def test_rns_to_meshcore_rule_matches(self, directional_router):
         """rns_to_meshcore rule allows RNS->MeshCore."""
         msg = _make_msg("rns", "To MeshCore")
+        assert directional_router.should_bridge(msg) is True
+
+    def test_meshcore_to_rns_rule_matches(self, directional_router):
+        """meshcore_to_rns rule allows MeshCore->RNS via classifier."""
+        msg = _make_msg("meshcore", "To RNS")
         assert directional_router.should_bridge(msg) is True
 
     @patch('gateway.message_routing.CLASSIFIER_AVAILABLE', False)
