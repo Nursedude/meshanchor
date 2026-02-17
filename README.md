@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1424%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1411%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -296,6 +296,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
 | **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs, channels, traceroute, neighbor info) | Beta |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
+| **MeshCore** | Companion radio management, device detection, 3-way bridge classifier, TUI menu | Alpha |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 **Status key:** Stable = tested in the field | Beta = works but needs soak time | Alpha = architecture solid, needs testing | Code Ready = implemented, no hardware to validate
@@ -610,11 +611,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,512 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,516 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 42 feature modules (RF, channels, AI, system, etc.)
+│   └── *_mixin.py         # 45 feature modules (RF, channels, AI, MeshCore, system, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -789,7 +790,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**1,424 tests passing** across 42 gateway-essential test files:
+**1,411 tests passing** across 45 gateway-essential test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -800,7 +801,7 @@ connection (port 4403):
 | `test_message_queue.py` | 72 | Persistent SQLite queue, retry policy, dead letter, overflow shedding |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 
-*Note: Test suite trimmed from 4,017 to 1,424 in v0.5.4 to focus on gateway-essential coverage. Non-gateway tests (RF tools, TUI mixins, monitoring, analytics, plugins) removed.*
+*Note: Test suite trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Non-gateway tests (RF tools, TUI mixins, monitoring, analytics, plugins) removed.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests

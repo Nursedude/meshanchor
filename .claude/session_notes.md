@@ -1,8 +1,8 @@
 # MeshForge Session Notes
 
-**Last Updated**: 2026-02-13
+**Last Updated**: 2026-02-17
 **Version**: v0.5.4-beta
-**Codebase**: 261 Python files, 291K+ lines, 4,046+ tests
+**Codebase**: 261 Python files, 291K+ lines, 1,411+ tests (gateway-essential)
 
 ---
 
@@ -131,7 +131,7 @@
 
 ---
 
-## Project Health Snapshot (2026-02-14)
+## Project Health Snapshot (2026-02-17)
 
 | Metric | Value | Status |
 |--------|-------|--------|
@@ -149,6 +149,24 @@
 ---
 
 ## Session Log
+
+### Session: Session Notes, README & Task List Update (2026-02-17)
+
+**What**: Updated session notes, TODO_PRIORITIES.md, and README.md with current backlog items from TUI-bridge API wiring work.
+
+**New backlog items added**:
+1. **MeshCore node listing** — `meshcore_mixin.py:_meshcore_nodes()` placeholder → wire to node_tracker
+2. **MeshCore stats** — `meshcore_mixin.py:_meshcore_stats()` static text → wire to bridge stats API
+3. **Classifier MeshCore categories** — `BRIDGE_MESHCORE` already in enum (`classifier.py:372`), needs end-to-end verification
+4. **Auto-review reliability triage** — 64 issues need real vs false positive classification
+
+**Findings**: `BRIDGE_MESHCORE` was already added to `RoutingCategory` enum with `meshcore` source network handling in the classifier. The TUI mixin (`meshcore_mixin.py`) has the menu structure wired but `_meshcore_nodes()` and `_meshcore_stats()` display placeholder guidance instead of live data.
+
+**Files modified**: `.claude/session_notes.md`, `.claude/TODO_PRIORITIES.md`, `README.md`
+
+**Entropy watch**: Documentation-only session. No code changes. Clean.
+
+---
 
 ### Session: Gateway Focus — Trim & Stabilize (2026-02-14)
 
@@ -295,6 +313,12 @@
 3. ~~**rnsd connection stable**~~ **DONE** (auto-fix removed, diagnose-don't-fix policy enforced)
 4. **Hardware test**: Deploy on MOC1/MOC2 with actual meshtasticd + rnsd + mosquitto
 5. **Verify end-to-end**: Send message Meshtastic → gateway → RNS and back
+
+**P1 — TUI-Bridge API Wiring**:
+1. **MeshCore node listing**: `meshcore_mixin.py:_meshcore_nodes()` shows placeholder text — wire to live `node_tracker` when bridge is running (filter by `meshcore:` prefix)
+2. **MeshCore stats**: `meshcore_mixin.py:_meshcore_stats()` shows static help text — wire to bridge stats API (`meshcore_rx`, `meshcore_tx`, `meshcore_acks`) when available
+3. **Classifier MeshCore categories**: `BRIDGE_MESHCORE` already exists in `RoutingCategory` enum (`classifier.py:372`) — verify 3-way classifier routing works end-to-end with MeshCore source network
+4. **Auto-review reliability triage**: 64 reliability issues from auto-review need manual review to separate real issues from false positives
 
 **P2 — After gateway works**:
 1. Event bus for RX message propagation (Issue #20 Phase 3)
