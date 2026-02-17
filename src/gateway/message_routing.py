@@ -1,6 +1,7 @@
 """
-Message routing and classification for the RNS-Meshtastic bridge.
+Message routing and classification for the gateway bridge.
 
+Supports 3-way routing between Meshtastic, MeshCore, and RNS networks.
 Extracted from rns_bridge.py to keep file sizes manageable.
 Handles routing rule compilation, confidence-scored classification,
 and legacy regex-based routing logic.
@@ -8,7 +9,7 @@ and legacy regex-based routing logic.
 
 import re
 import logging
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 
 from utils.safe_import import safe_import
 
@@ -36,12 +37,31 @@ logger = logging.getLogger(__name__)
 
 class MessageRouter:
     """
-    Routes messages between RNS and Meshtastic based on rules and classification.
+    Routes messages between Meshtastic, MeshCore, and RNS based on rules.
 
-    Supports two modes:
+    Supports three protocols with configurable routing directions:
+    - bidirectional: Route between any two networks
+    - mesh_to_rns, rns_to_mesh: Meshtastic ↔ RNS
+    - mesh_to_meshcore, meshcore_to_mesh: Meshtastic ↔ MeshCore
+    - rns_to_meshcore, meshcore_to_rns: RNS ↔ MeshCore
+    - all_to_all: Route to all other networks
+
+    Two classification modes:
     1. Confidence-scored classifier (when utils.classifier is available)
     2. Legacy regex-based routing rules (fallback)
     """
+
+    # Direction mapping: source_network → allowed destination networks
+    _DIRECTION_MAP = {
+        'bidirectional': None,  # Any direction
+        'mesh_to_rns': ('meshtastic', 'rns'),
+        'rns_to_mesh': ('rns', 'meshtastic'),
+        'mesh_to_meshcore': ('meshtastic', 'meshcore'),
+        'meshcore_to_mesh': ('meshcore', 'meshtastic'),
+        'rns_to_meshcore': ('rns', 'meshcore'),
+        'meshcore_to_rns': ('meshcore', 'rns'),
+        'all_to_all': None,  # Any direction
+    }
 
     # Maximum input length for regex matching to bound execution time
     _REGEX_INPUT_LIMIT = 512
@@ -178,14 +198,15 @@ class MessageRouter:
         if current_names != set(self._compiled_rules.keys()):
             self._compiled_rules = self._compile_routing_rules()
 
+        # Determine source network (handle both BridgedMessage and CanonicalMessage)
+        source = getattr(msg, 'source_network', '')
+
         for rule in self.config.routing_rules:
             if not rule.enabled:
                 continue
 
-            # Check direction
-            if msg.source_network == "meshtastic" and rule.direction == "rns_to_mesh":
-                continue
-            if msg.source_network == "rns" and rule.direction == "mesh_to_rns":
+            # Check direction against source network
+            if not self._direction_allows(rule.direction, source):
                 continue
 
             # Get pre-compiled filters for this rule
@@ -197,11 +218,12 @@ class MessageRouter:
 
             # Apply pre-compiled regex filters with bounded input
             # Source filter
+            source_id = getattr(msg, 'source_id', '') or getattr(msg, 'source_address', '')
             if rule.source_filter:
                 compiled = filters.get('source_filter')
-                if not compiled or not msg.source_id:
+                if not compiled or not source_id:
                     continue
-                if not compiled.search(msg.source_id[:self._REGEX_INPUT_LIMIT]):
+                if not compiled.search(source_id[:self._REGEX_INPUT_LIMIT]):
                     continue
 
             # Destination filter
@@ -209,7 +231,8 @@ class MessageRouter:
                 compiled = filters.get('dest_filter')
                 if not compiled:
                     continue
-                dest = (msg.destination_id or "")[:self._REGEX_INPUT_LIMIT]
+                dest_id = getattr(msg, 'destination_id', '') or getattr(msg, 'destination_address', '')
+                dest = (dest_id or "")[:self._REGEX_INPUT_LIMIT]
                 if not compiled.search(dest):
                     continue
 
@@ -224,7 +247,86 @@ class MessageRouter:
             # All filters passed - this rule matches
             return True
 
-        return self.config.default_route in ("bidirectional", f"{msg.source_network}_to_*")
+        return self.config.default_route in ("bidirectional", "all_to_all")
+
+    def _direction_allows(self, direction: str, source_network: str) -> bool:
+        """
+        Check if a routing direction allows messages from the given source.
+
+        Args:
+            direction: Routing rule direction string
+            source_network: Source network of the message
+
+        Returns:
+            True if the direction allows this source network.
+        """
+        if direction in ('bidirectional', 'all_to_all'):
+            return True
+
+        mapping = self._DIRECTION_MAP.get(direction)
+        if mapping is None:
+            return True  # Unknown direction = allow
+
+        required_source, _ = mapping
+        return source_network == required_source
+
+    def get_destination_networks(self, msg) -> List[str]:
+        """
+        Determine which destination networks a message should be routed to.
+
+        For broadcast messages, returns all networks except the source.
+        For directed messages, returns based on routing rules and direction.
+
+        Filters out MeshCore when message originated via internet (MQTT).
+
+        Args:
+            msg: BridgedMessage or CanonicalMessage
+
+        Returns:
+            List of destination network names.
+        """
+        source = getattr(msg, 'source_network', '')
+        all_networks = ['meshtastic', 'meshcore', 'rns']
+        destinations = []
+
+        # Check internet origin filtering for MeshCore
+        via_internet = getattr(msg, 'via_internet', False)
+        origin = getattr(msg, 'origin', None)
+        internet_origin = via_internet or (origin == MessageOrigin.MQTT)
+
+        for dest in all_networks:
+            if dest == source:
+                continue
+
+            # MeshCore is pure radio — don't bridge internet traffic to it
+            if dest == 'meshcore' and internet_origin:
+                continue
+
+            # Check if any routing rule allows this direction
+            direction_key = f"{source}_to_{dest}"
+            if self._has_matching_rule(source, dest):
+                destinations.append(dest)
+            elif self.config.default_route in ('bidirectional', 'all_to_all'):
+                destinations.append(dest)
+
+        return destinations
+
+    def _has_matching_rule(self, source: str, dest: str) -> bool:
+        """Check if any enabled routing rule matches source→dest direction."""
+        # Map network names to direction components
+        name_map = {'meshtastic': 'mesh', 'meshcore': 'meshcore', 'rns': 'rns'}
+        source_key = name_map.get(source, source)
+        dest_key = name_map.get(dest, dest)
+
+        for rule in self.config.routing_rules:
+            if not rule.enabled:
+                continue
+            if rule.direction in ('bidirectional', 'all_to_all'):
+                return True
+            direction = f"{source_key}_to_{dest_key}"
+            if rule.direction == direction:
+                return True
+        return False
 
     def get_routing_stats(self) -> Dict[str, Any]:
         """Get routing classifier statistics."""
