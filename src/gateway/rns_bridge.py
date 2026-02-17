@@ -32,6 +32,11 @@ MeshtasticHandler, HAS_MESHTASTIC_LIB = safe_import(
     '.meshtastic_handler', 'MeshtasticHandler', package=__package__
 )
 
+# MeshCore handler (companion radio via meshcore_py)
+MeshCoreHandler, HAS_MESHCORE = safe_import(
+    '.meshcore_handler', 'MeshCoreHandler', package=__package__
+)
+
 # Import circuit breaker for destination-level failure handling
 CircuitBreakerRegistry, HAS_CIRCUIT_BREAKER = safe_import(
     '.circuit_breaker', 'CircuitBreakerRegistry', package=__package__
@@ -127,11 +132,13 @@ class BridgedMessage:
 
 class RNSMeshtasticBridge:
     """
-    Main gateway bridge between RNS and Meshtastic networks.
+    Main gateway bridge between RNS, Meshtastic, and MeshCore networks.
 
-    Supports two modes:
+    Supports multiple modes:
     1. RNS Over Meshtastic - Uses Meshtastic as RNS transport layer
     2. Message Bridge - Translates messages between separate networks
+    3. MeshCore Bridge - Bridges MeshCore companion radio with other protocols
+    4. Tri-Bridge - All three protocols (Meshtastic + MeshCore + RNS)
     """
 
     def __init__(self, config: Optional[GatewayConfig] = None):
@@ -159,11 +166,15 @@ class RNSMeshtasticBridge:
         # Message queues (bounded to prevent memory exhaustion)
         self._mesh_to_rns_queue = Queue(maxsize=1000)
         self._rns_to_mesh_queue = Queue(maxsize=1000)
+        # MeshCore queues for 3-way routing
+        self._meshcore_to_bridge_queue = Queue(maxsize=1000)
+        self._bridge_to_meshcore_queue = Queue(maxsize=1000)
 
         # Threads
         self._mesh_thread = None
         self._rns_thread = None
         self._bridge_thread = None
+        self._meshcore_thread = None
 
         # Callbacks (protected by _callbacks_lock for thread-safe registration)
         self._message_callbacks = []
@@ -181,6 +192,9 @@ class RNSMeshtasticBridge:
 
         # Meshtastic handler (encapsulates connection and message handling)
         self._mesh_handler: Optional[MeshtasticHandler] = None
+
+        # MeshCore handler (companion radio integration)
+        self._meshcore_handler = None
 
         # Statistics
         self.stats = {
@@ -266,6 +280,35 @@ class RNSMeshtasticBridge:
                 "meshtastic", self._mesh_handler.queue_send
             )
 
+        # Initialize MeshCore handler if configured and available
+        meshcore_config = getattr(self.config, 'meshcore', None)
+        if HAS_MESHCORE and meshcore_config and meshcore_config.enabled:
+            logger.info("Initializing MeshCore handler")
+            self._meshcore_handler = MeshCoreHandler(
+                config=self.config,
+                node_tracker=self.node_tracker,
+                health=self.health,
+                stop_event=self._stop_event,
+                stats=self.stats,
+                stats_lock=self._stats_lock,
+                message_queue=self._meshcore_to_bridge_queue,
+                message_callback=self._notify_message,
+                status_callback=lambda status: self._notify_status(status),
+                should_bridge=self._router.should_bridge,
+            )
+            # Register MeshCore sender with persistent queue
+            if self._persistent_queue:
+                self._persistent_queue.register_sender(
+                    "meshcore", self._meshcore_handler.queue_send
+                )
+            # Tell health monitor that MeshCore is enabled
+            self.health.set_subsystem_enabled("meshcore", True)
+            logger.info("MeshCore handler initialized")
+        else:
+            if meshcore_config and meshcore_config.enabled and not HAS_MESHCORE:
+                logger.warning("MeshCore enabled in config but meshcore_handler not available")
+            self.health.set_subsystem_enabled("meshcore", False)
+
     @property
     def is_running(self) -> bool:
         return self._running
@@ -308,7 +351,7 @@ class RNSMeshtasticBridge:
         """Get the current state of a bridge subsystem.
 
         Args:
-            subsystem: "meshtastic" or "rns"
+            subsystem: "meshtastic", "rns", or "meshcore"
 
         Returns:
             Current SubsystemState.
@@ -416,6 +459,16 @@ class RNSMeshtasticBridge:
             )
             self._bridge_thread.start()
 
+        # Start MeshCore handler thread if initialized
+        if self._meshcore_handler:
+            self._meshcore_thread = threading.Thread(
+                target=self._meshcore_loop,
+                daemon=True,
+                name="MeshCoreBridge"
+            )
+            self._meshcore_thread.start()
+            logger.info("MeshCore handler thread started")
+
         # Start persistent queue processing
         if self._persistent_queue:
             self._persistent_queue.start_processing(interval=2.0)
@@ -453,10 +506,13 @@ class RNSMeshtasticBridge:
         # Close connections
         if self._mesh_handler:
             self._mesh_handler.disconnect()
+        if self._meshcore_handler:
+            self._meshcore_handler.disconnect()
         self._disconnect_rns()
 
         # Wait for threads
-        for thread in [self._mesh_thread, self._rns_thread, self._bridge_thread]:
+        for thread in [self._mesh_thread, self._rns_thread,
+                        self._bridge_thread, self._meshcore_thread]:
             if thread and thread.is_alive():
                 thread.join(timeout=5)
 
@@ -481,12 +537,18 @@ class RNSMeshtasticBridge:
             uptime = (datetime.now() - self.stats['start_time']).total_seconds()
 
         mesh_connected = self._mesh_handler.is_connected if self._mesh_handler else False
+        meshcore_connected = (
+            self._meshcore_handler.is_connected if self._meshcore_handler else False
+        )
+        meshcore_config = getattr(self.config, 'meshcore', None)
         return {
             'running': self._running,
             'enabled': self.config.enabled,
             'meshtastic_connected': mesh_connected,
             'rns_connected': self._connected_rns,
             'rns_via_rnsd': self._rns_via_rnsd,
+            'meshcore_connected': meshcore_connected,
+            'meshcore_enabled': bool(meshcore_config and meshcore_config.enabled),
             'uptime_seconds': uptime,
             'statistics': self.stats.copy(),
             'node_stats': self.node_tracker.get_stats(),
@@ -582,6 +644,23 @@ class RNSMeshtasticBridge:
             with self._stats_lock:
                 self.stats['errors'] += 1
             return False
+
+    def send_to_meshcore(self, message: str, destination: str = None,
+                         channel: int = 0) -> bool:
+        """Send a message to MeshCore network.
+
+        Args:
+            message: Text content to send
+            destination: Destination address (None for broadcast)
+            channel: Channel index
+
+        Returns:
+            True if queued successfully, False otherwise.
+        """
+        if not self._meshcore_handler:
+            logger.warning("MeshCore handler not initialized")
+            return False
+        return self._meshcore_handler.send_text(message, destination, channel)
 
     def _queue_send_rns(self, payload: Dict) -> bool:
         """Send handler for persistent queue - RNS destination."""
@@ -698,7 +777,7 @@ class RNSMeshtasticBridge:
             self._status_callbacks.append(callback)
 
     def test_connection(self) -> dict:
-        """Test connectivity to both networks"""
+        """Test connectivity to all configured networks"""
         results = {
             'meshtastic': {'connected': False, 'error': None},
             'rns': {'connected': False, 'error': None},
@@ -718,6 +797,15 @@ class RNSMeshtasticBridge:
         except Exception as e:
             results['rns']['error'] = str(e)
 
+        # Test MeshCore (if enabled)
+        if self._meshcore_handler:
+            results['meshcore'] = {'connected': False, 'error': None}
+            try:
+                if self._meshcore_handler.is_connected:
+                    results['meshcore']['connected'] = True
+            except Exception as e:
+                results['meshcore']['error'] = str(e)
+
         return results
 
     # ========================================
@@ -728,6 +816,11 @@ class RNSMeshtasticBridge:
         """Main loop for Meshtastic connection - delegates to handler."""
         if self._mesh_handler:
             self._mesh_handler.run_loop()
+
+    def _meshcore_loop(self):
+        """Main loop for MeshCore connection - delegates to handler."""
+        if self._meshcore_handler:
+            self._meshcore_handler.run_loop()
 
     def _rns_loop(self):
         """Main loop for RNS connection with auto-reconnect.
@@ -818,6 +911,12 @@ class RNSMeshtasticBridge:
                             logger.debug("Mesh→RNS: RNS subsystem down, message queued")
                     else:
                         self._process_mesh_to_rns(msg)
+                    # Also route Meshtastic → MeshCore if handler active
+                    if self._meshcore_handler:
+                        try:
+                            self._bridge_to_meshcore_queue.put_nowait(msg)
+                        except Full:
+                            logger.debug("→MeshCore queue full, dropping Mesh→MC message")
                 except Empty:
                     pass
 
@@ -833,6 +932,33 @@ class RNSMeshtasticBridge:
                             logger.debug("RNS→Mesh: Meshtastic subsystem down, message queued")
                     else:
                         self._process_rns_to_mesh(msg)
+                    # Also route RNS → MeshCore if handler active
+                    if self._meshcore_handler:
+                        try:
+                            self._bridge_to_meshcore_queue.put_nowait(msg)
+                        except Full:
+                            logger.debug("→MeshCore queue full, dropping RNS→MC message")
+                except Empty:
+                    pass
+
+                # Process MeshCore → Bridge queue (route to Meshtastic and/or RNS)
+                try:
+                    msg = self._meshcore_to_bridge_queue.get_nowait()
+                    self._process_meshcore_to_bridge(msg)
+                except Empty:
+                    pass
+
+                # Process Bridge → MeshCore queue (messages from other networks)
+                try:
+                    msg = self._bridge_to_meshcore_queue.get_nowait()
+                    mc_state = self.health.get_subsystem_state("meshcore")
+                    if mc_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                        requeued = self._requeue_failed_message(msg, "meshcore")
+                        if requeued:
+                            self.health.record_message_queued_degraded()
+                            logger.debug("→MeshCore: subsystem down, message queued")
+                    else:
+                        self._process_bridge_to_meshcore(msg)
                 except Empty:
                     pass
 
@@ -870,6 +996,14 @@ class RNSMeshtasticBridge:
         elif self._connected_rns:
             self._update_subsystem_state("rns", SubsystemState.HEALTHY)
         # Note: don't overwrite DISCONNECTED here — _rns_loop handles transitions
+
+        # MeshCore
+        if not self._meshcore_handler:
+            self._update_subsystem_state("meshcore", SubsystemState.DISABLED)
+        elif self._meshcore_handler.is_connected:
+            self._update_subsystem_state("meshcore", SubsystemState.HEALTHY)
+        else:
+            self._update_subsystem_state("meshcore", SubsystemState.DISCONNECTED)
 
     def _drain_persistent_queue(self) -> None:
         """Process pending messages from the persistent queue.
@@ -1248,12 +1382,12 @@ class RNSMeshtasticBridge:
                 return node.rns_hash
         return None
 
-    def _requeue_failed_message(self, msg: BridgedMessage, destination: str) -> bool:
+    def _requeue_failed_message(self, msg, destination: str) -> bool:
         """Persist a failed message to the persistent queue for later retry.
 
         Args:
-            msg: The message that failed to send.
-            destination: Target network ("meshtastic" or "rns").
+            msg: The message that failed to send (BridgedMessage or CanonicalMessage).
+            destination: Target network ("meshtastic", "rns", or "meshcore").
 
         Returns:
             True if message was successfully persisted, False otherwise.
@@ -1262,11 +1396,14 @@ class RNSMeshtasticBridge:
             return False
 
         try:
+            # Handle both BridgedMessage (source_id) and CanonicalMessage (source_address)
+            source_id = getattr(msg, 'source_id', None) or getattr(msg, 'source_address', '')
+            dest_id = getattr(msg, 'destination_id', None) or getattr(msg, 'destination_address', '')
             self._persistent_queue.enqueue(
                 payload={
                     'message': msg.content,
-                    'source_id': msg.source_id,
-                    'destination_id': msg.destination_id or "",
+                    'source_id': source_id,
+                    'destination_id': dest_id or "",
                     'metadata': msg.metadata or {},
                 },
                 destination=destination,
@@ -1307,12 +1444,131 @@ class RNSMeshtasticBridge:
             self._requeue_failed_message(msg, "meshtastic")
             self.health.record_message_failed("rns_to_mesh", requeued=True)
 
+    def _process_meshcore_to_bridge(self, msg) -> None:
+        """Process message from MeshCore → other networks (Meshtastic, RNS).
+
+        MeshCore messages arrive as CanonicalMessage or BridgedMessage.
+        Routes to Meshtastic and/or RNS based on routing rules.
+        """
+        try:
+            # Extract content — handle both CanonicalMessage and BridgedMessage
+            if hasattr(msg, 'source_address'):
+                # CanonicalMessage
+                src_label = msg.source_address[:8] if msg.source_address else 'unknown'
+                content = msg.content
+                is_broadcast = msg.is_broadcast
+                via_internet = getattr(msg, 'via_internet', False)
+            else:
+                # BridgedMessage
+                src_label = msg.source_id[:8] if msg.source_id else 'unknown'
+                content = msg.content
+                is_broadcast = msg.is_broadcast
+                via_internet = getattr(msg, 'via_internet', False)
+
+            prefix = f"[MC:{src_label}] "
+            bridged_content = prefix + content
+
+            # Route to Meshtastic
+            mesh_state = self.health.get_subsystem_state("meshtastic")
+            if mesh_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                if self.send_to_meshtastic(bridged_content,
+                                           channel=self.config.meshtastic.channel):
+                    logger.info(f"Bridge MC→Mesh: {bridged_content[:50]}...")
+                    with self._stats_lock:
+                        self.stats.setdefault('messages_meshcore_to_mesh', 0)
+                        self.stats['messages_meshcore_to_mesh'] += 1
+                    self.health.record_message_sent("meshcore_to_mesh")
+                else:
+                    logger.warning("Failed to bridge MC→Mesh")
+                    with self._stats_lock:
+                        self.stats['errors'] += 1
+                    self.health.record_message_failed("meshcore_to_mesh", requeued=False)
+
+            # Route to RNS (only if not via internet — MeshCore is pure radio)
+            rns_state = self.health.get_subsystem_state("rns")
+            if rns_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                # RNS broadcast requires propagation node, send if available
+                if self.send_to_rns(bridged_content):
+                    logger.info(f"Bridge MC→RNS: {bridged_content[:50]}...")
+                    with self._stats_lock:
+                        self.stats.setdefault('messages_meshcore_to_rns', 0)
+                        self.stats['messages_meshcore_to_rns'] += 1
+                    self.health.record_message_sent("meshcore_to_rns")
+                else:
+                    logger.debug("MC→RNS: not sent (no RNS propagation)")
+
+        except Exception as e:
+            logger.error(f"Error bridging MeshCore→Bridge: {e}")
+            with self._stats_lock:
+                self.stats['errors'] += 1
+
+    def _process_bridge_to_meshcore(self, msg) -> None:
+        """Process message from other networks → MeshCore.
+
+        Handles text truncation to MeshCore's ~160 byte limit.
+        Filters internet-originated messages (MeshCore is pure radio).
+        """
+        try:
+            # Check internet origin filter — MeshCore is pure radio
+            if hasattr(msg, 'via_internet') and msg.via_internet:
+                logger.debug("Dropping internet-origin message destined for MeshCore")
+                return
+            if hasattr(msg, 'origin') and msg.origin == MessageOrigin.MQTT:
+                logger.debug("Dropping MQTT-origin message destined for MeshCore")
+                return
+
+            # Extract content
+            if hasattr(msg, 'source_address'):
+                src_net = msg.source_network
+                src_label = msg.source_address[:8] if msg.source_address else 'unknown'
+                content = msg.content
+            else:
+                src_net = msg.source_network
+                src_label = msg.source_id[:8] if msg.source_id else 'unknown'
+                content = msg.content
+
+            net_prefix = "Mesh" if src_net == "meshtastic" else "RNS"
+            prefix = f"[{net_prefix}:{src_label}] "
+            bridged_content = prefix + content
+
+            # MeshCore has ~160 byte text limit — truncate if needed
+            if len(bridged_content.encode('utf-8')) > 160:
+                from .canonical_message import _truncate_utf8
+                bridged_content = _truncate_utf8(bridged_content, 160)
+
+            if self.send_to_meshcore(bridged_content):
+                direction = f"{src_net[:4]}_to_meshcore"
+                logger.info(f"Bridge {net_prefix}→MC: {bridged_content[:50]}...")
+                with self._stats_lock:
+                    key = f'messages_{src_net}_to_meshcore'
+                    self.stats.setdefault(key, 0)
+                    self.stats[key] += 1
+                self.health.record_message_sent(f"mesh_to_meshcore"
+                                                if src_net == "meshtastic"
+                                                else "rns_to_meshcore")
+            else:
+                logger.warning(f"Failed to bridge {net_prefix}→MC")
+                with self._stats_lock:
+                    self.stats['errors'] += 1
+                requeued = self._requeue_failed_message(msg, "meshcore")
+                self.health.record_message_failed(
+                    f"mesh_to_meshcore" if src_net == "meshtastic" else "rns_to_meshcore",
+                    requeued=requeued,
+                )
+
+        except Exception as e:
+            logger.error(f"Error bridging →MeshCore: {e}")
+            with self._stats_lock:
+                self.stats['errors'] += 1
+
     def _test_rns(self) -> bool:
         """Test RNS availability"""
         return _HAS_RNS
 
-    def _notify_message(self, msg: BridgedMessage):
+    def _notify_message(self, msg):
         """Notify message callbacks and emit to event bus (thread-safe snapshot).
+
+        Handles both BridgedMessage and CanonicalMessage objects.
 
         Issue #17 Phase 3: Emit messages to event bus so UI panels can subscribe
         and display RX messages without being directly coupled to the bridge.
@@ -1328,17 +1584,21 @@ class RNSMeshtasticBridge:
         # Emit to event bus for UI panels (Issue #17 Phase 3)
         if HAS_EVENT_BUS and emit_message:
             try:
+                # Handle both BridgedMessage (source_id) and CanonicalMessage (source_address)
+                node_id = getattr(msg, 'source_id', None) or getattr(msg, 'source_address', '') or ''
+                dest_id = getattr(msg, 'destination_id', None) or getattr(msg, 'destination_address', None)
+                title = getattr(msg, 'title', None) or (msg.metadata.get('title') if msg.metadata else None)
                 emit_message(
                     direction='rx',
                     content=msg.content,
-                    node_id=msg.source_id or "",
+                    node_id=node_id,
                     node_name="",  # Could be enhanced with node lookup
                     channel=msg.metadata.get('channel', 0) if msg.metadata else 0,
                     network=msg.source_network,
                     raw_data={
-                        'destination_id': msg.destination_id,
+                        'destination_id': dest_id,
                         'is_broadcast': msg.is_broadcast,
-                        'title': msg.title,
+                        'title': title,
                         'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
                         'metadata': msg.metadata
                     }

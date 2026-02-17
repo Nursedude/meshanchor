@@ -378,6 +378,11 @@ class UnifiedNode:
     # PKI status (Meshtastic 2.5+)
     pki_status: PKIStatus = field(default_factory=PKIStatus)
 
+    # MeshCore-specific identifiers
+    meshcore_pubkey: Optional[str] = None   # Public key prefix (hex, 12 chars)
+    meshcore_role: Optional[str] = None     # client, repeater, room_server
+    meshcore_hops: Optional[int] = None     # Hop count from advertisement
+
     # Favorites (BaseUI 2.7+)
     is_favorite: bool = False  # Marked as favorite in BaseUI
     favorite_updated: Optional[datetime] = None  # When favorite status last changed
@@ -774,6 +779,98 @@ class UnifiedNode:
         if mesh_node.get('isFavorite', False):
             node.is_favorite = True
             node.favorite_updated = datetime.now()
+
+        return node
+
+    @classmethod
+    def from_meshcore(cls, advertisement: Any, **kwargs) -> 'UnifiedNode':
+        """
+        Create from MeshCore advertisement or contact data.
+
+        MeshCore nodes are identified by their Ed25519 public key prefix.
+        Advertisements include node name, role, and optionally position.
+
+        Args:
+            advertisement: MeshCore advertisement event payload (dict or object).
+                          Expected fields: adv_name/name, public_key/pubkey_prefix,
+                          role, lat, lon, hops, rssi, snr, battery.
+            **kwargs: Override fields (e.g., is_local=True).
+        """
+        # Extract fields from dict or object
+        if isinstance(advertisement, dict):
+            adv_name = advertisement.get('adv_name', '') or advertisement.get('name', '')
+            raw_key = advertisement.get('public_key', b'') or advertisement.get('pubkey_prefix', '')
+            role = advertisement.get('role', 'client')
+            lat = advertisement.get('lat', 0) or advertisement.get('latitude', 0)
+            lon = advertisement.get('lon', 0) or advertisement.get('longitude', 0)
+            hops = advertisement.get('hops', 0)
+            rssi_val = advertisement.get('rssi')
+            snr_val = advertisement.get('snr')
+            battery = advertisement.get('battery')
+        else:
+            adv_name = getattr(advertisement, 'adv_name', '') or getattr(advertisement, 'name', '')
+            raw_key = getattr(advertisement, 'public_key', b'') or getattr(advertisement, 'pubkey_prefix', '')
+            role = getattr(advertisement, 'role', 'client')
+            lat = getattr(advertisement, 'lat', 0) or getattr(advertisement, 'latitude', 0)
+            lon = getattr(advertisement, 'lon', 0) or getattr(advertisement, 'longitude', 0)
+            hops = getattr(advertisement, 'hops', 0)
+            rssi_val = getattr(advertisement, 'rssi', None)
+            snr_val = getattr(advertisement, 'snr', None)
+            battery = getattr(advertisement, 'battery', None)
+
+        # Normalize public key to hex prefix
+        if isinstance(raw_key, bytes):
+            pubkey_hex = raw_key.hex()[:12]
+        else:
+            pubkey_hex = str(raw_key)[:12] if raw_key else ''
+
+        if not pubkey_hex:
+            pubkey_hex = 'unknown'
+
+        node_id = f"meshcore:{pubkey_hex}"
+        display_name = adv_name or f"MC-{pubkey_hex[:6]}"
+
+        node = cls(
+            id=node_id,
+            network="meshcore",
+            name=display_name,
+            short_name=display_name[:4],
+            meshcore_pubkey=pubkey_hex,
+            meshcore_role=str(role) if role else 'client',
+            meshcore_hops=int(hops) if hops else None,
+            role=str(role) if role else None,
+            **kwargs,
+        )
+
+        # Position
+        if lat and lon:
+            node.position = Position(
+                latitude=float(lat),
+                longitude=float(lon),
+                timestamp=datetime.now(),
+            )
+
+        # Radio metrics
+        if snr_val is not None:
+            node.snr = float(snr_val)
+        if rssi_val is not None:
+            node.rssi = int(rssi_val)
+        if hops:
+            node.hops = int(hops)
+
+        # Telemetry (battery if available)
+        if battery is not None:
+            node.telemetry = Telemetry(
+                battery_level=int(battery),
+                timestamp=datetime.now(),
+            )
+
+        node.last_seen = datetime.now()
+        node.is_online = True
+
+        # Update state machine
+        if node._state_machine is not None:
+            node._state_machine.record_response(snr=node.snr)
 
         return node
 
