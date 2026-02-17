@@ -7,6 +7,17 @@
 
 MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Reticulum (RNS) mesh networks. First open-source tool to unify these incompatible mesh ecosystems.
 
+## Branch Strategy
+
+| Branch | Version | Purpose |
+|--------|---------|---------|
+| `main` | `0.5.4-beta` | Stable beta — gateway bridge, TUI, monitoring, RF tools |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore integration — 3-way routing, MeshCore handler, companion radio management |
+
+- **main** is the production-ready line. All PRs targeting stable features merge here.
+- **alpha/meshcore-bridge** tracks experimental MeshCore work (16 commits ahead of main as of 2026-02-17). Periodically rebased/merged from main.
+- Feature branches use `claude/` prefix and merge via PR to the appropriate target branch.
+
 ## Development Principles
 
 ```
@@ -29,7 +40,8 @@ python3 src/standalone.py               # Zero-dependency RF tools
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
-# Version is in src/__version__.py (currently 0.5.4-beta)
+# Version is in src/__version__.py
+# main: 0.5.4-beta | alpha/meshcore-bridge: 0.6.0-alpha
 ```
 
 ## Architecture Overview
@@ -37,7 +49,10 @@ python3 -c "from src.__version__ import __version__; print(__version__)"
 ```
 src/
 ├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
-│   └── main.py        # NOC dispatcher (whiptail/dialog)
+│   ├── main.py        # NOC dispatcher (whiptail/dialog)
+│   ├── meshcore_mixin.py    # MeshCore TUI menu (alpha branch)
+│   ├── rns_config_mixin.py  # RNS config editor (extracted)
+│   └── rns_diagnostics_mixin.py  # RNS diagnostics (extracted)
 ├── commands/          # Command modules
 │   ├── propagation.py # Space weather & HF propagation (NOAA primary)
 │   ├── hamclock.py    # HamClock client (optional/legacy)
@@ -45,9 +60,15 @@ src/
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway bridge
 │   ├── gateway_cli.py # Headless CLI helpers (extracted)
+│   ├── meshcore_handler.py    # MeshCore protocol handler (alpha branch)
+│   ├── canonical_message.py   # Multi-protocol message format (alpha branch)
+│   ├── meshcore_bridge_mixin.py # MeshCore bridge mixin (alpha branch)
+│   ├── message_routing.py     # 3-way routing classifier (alpha branch)
 │   └── message_queue.py # Persistent message queue (SQLite)
 ├── monitoring/        # Network monitoring
 │   └── mqtt_subscriber.py # Nodeless MQTT monitoring
+├── plugins/           # Protocol plugins
+│   └── meshcore.py    # MeshCore plugin (alpha branch)
 ├── utils/             # RF tools, common utilities
 │   ├── rf.py          # RF calculations (tested)
 │   ├── rf_fast.pyx    # Cython optimization
@@ -56,6 +77,7 @@ src/
 │   ├── auto_review.py # Self-audit system
 │   ├── diagnostic_engine.py # Intelligent diagnostics
 │   ├── knowledge_base.py    # Mesh networking knowledge
+│   ├── classifier.py  # Traffic routing classifier
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
 │   └── coverage_map.py      # Folium map generator
 ├── launcher.py        # Auto-detect (falls through to TUI)
