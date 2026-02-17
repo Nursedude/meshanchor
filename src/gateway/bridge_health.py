@@ -102,6 +102,9 @@ PERMANENT_ERROR_PATTERNS = [
     "no such device",
     "module not found",
     "import error",
+    # MeshCore-specific permanent errors
+    "meshcore firmware mismatch",
+    "unsupported protocol version",
 ]
 
 # Error patterns that indicate transient (retriable) failures
@@ -115,6 +118,11 @@ TRANSIENT_ERROR_PATTERNS = [
     "network unreachable",
     "no route to host",
     "address already in use",
+    # MeshCore-specific transient errors
+    "serial port busy",
+    "device disconnected",
+    "usb disconnect",
+    "resource temporarily unavailable",
 ]
 
 
@@ -161,26 +169,44 @@ class BridgeHealthMonitor:
         self._lock = threading.RLock()  # Reentrant: get_summary calls get_uptime_percent
         self._window_size = window_size
 
-        # Connection state
+        # Connection state (supports 3 protocols)
         self._connected: Dict[str, bool] = {
             "meshtastic": False,
             "rns": False,
+            "meshcore": False,
         }
         self._last_connected: Dict[str, float] = {}
         self._last_disconnected: Dict[str, float] = {}
         self._connection_count: Dict[str, int] = {
             "meshtastic": 0,
             "rns": 0,
+            "meshcore": 0,
         }
 
-        # Message counters
+        # Track which subsystems are enabled (disabled don't affect health)
+        self._enabled: Dict[str, bool] = {
+            "meshtastic": True,
+            "rns": True,
+            "meshcore": False,
+        }
+
+        # Message counters (expanded for 3-way routing)
         self._messages_sent: Dict[str, int] = {
             "mesh_to_rns": 0,
             "rns_to_mesh": 0,
+            "mesh_to_meshcore": 0,
+            "meshcore_to_mesh": 0,
+            "rns_to_meshcore": 0,
+            "meshcore_to_rns": 0,
+            "to_meshcore": 0,
         }
         self._messages_failed: Dict[str, int] = {
             "mesh_to_rns": 0,
             "rns_to_mesh": 0,
+            "mesh_to_meshcore": 0,
+            "meshcore_to_mesh": 0,
+            "rns_to_meshcore": 0,
+            "meshcore_to_rns": 0,
         }
         self._messages_requeued: int = 0
 
@@ -455,44 +481,57 @@ class BridgeHealthMonitor:
         error_count = sum(errors.values())
         return any_connected and error_count < 10
 
+    def set_subsystem_enabled(self, subsystem: str, enabled: bool) -> None:
+        """Mark a subsystem as enabled or disabled.
+
+        Disabled subsystems don't affect bridge health status.
+        """
+        with self._lock:
+            self._enabled[subsystem] = enabled
+
     def get_bridge_status(self) -> BridgeStatus:
         """
         Get detailed bridge operational status.
 
-        Cross-network health check that distinguishes between:
-        - HEALTHY: Both Meshtastic and RNS connected, error rate < 10/min
-        - DEGRADED: Only one network connected, or error rate >= 10/min
-        - OFFLINE: No networks connected
+        Cross-network health check for all enabled protocols:
+        - HEALTHY: All enabled protocols connected, error rate < 10/min
+        - DEGRADED: Some enabled protocols disconnected, or high error rate
+        - OFFLINE: No enabled protocols connected
 
         Returns:
             BridgeStatus enum value
         """
         with self._lock:
-            mesh_connected = self._connected.get("meshtastic", False)
-            rns_connected = self._connected.get("rns", False)
+            enabled_protocols = {
+                k: v for k, v in self._enabled.items() if v
+            }
+            connected_count = sum(
+                1 for proto in enabled_protocols
+                if self._connected.get(proto, False)
+            )
+            total_enabled = len(enabled_protocols)
+
+        if total_enabled == 0:
+            return BridgeStatus.OFFLINE
 
         errors = self.get_error_rate(window_seconds=60)
         error_count = sum(errors.values())
         high_error_rate = error_count >= 10
 
-        if not mesh_connected and not rns_connected:
+        if connected_count == 0:
             return BridgeStatus.OFFLINE
 
-        if mesh_connected and rns_connected and not high_error_rate:
+        if connected_count == total_enabled and not high_error_rate:
             return BridgeStatus.HEALTHY
 
-        # One network down or high error rate
         return BridgeStatus.DEGRADED
 
     def is_bridge_fully_healthy(self) -> bool:
         """
-        Check if bridge is fully operational (both networks up).
-
-        Stricter than is_healthy() - requires BOTH networks connected.
-        Use this when you need reliable bidirectional bridging.
+        Check if bridge is fully operational (all enabled networks up).
 
         Returns:
-            True only if both Meshtastic and RNS are connected
+            True only if all enabled protocols are connected
             and error rate is acceptable.
         """
         return self.get_bridge_status() == BridgeStatus.HEALTHY
@@ -507,6 +546,8 @@ class BridgeHealthMonitor:
         with self._lock:
             mesh_connected = self._connected.get("meshtastic", False)
             rns_connected = self._connected.get("rns", False)
+            meshcore_connected = self._connected.get("meshcore", False)
+            meshcore_enabled = self._enabled.get("meshcore", False)
 
         errors = self.get_error_rate(window_seconds=60)
         error_count = sum(errors.values())
@@ -517,6 +558,8 @@ class BridgeHealthMonitor:
             reasons.append("Meshtastic disconnected")
         if not rns_connected:
             reasons.append("RNS disconnected")
+        if meshcore_enabled and not meshcore_connected:
+            reasons.append("MeshCore disconnected")
         if error_count >= 10:
             reasons.append(f"High error rate ({error_count}/min)")
 
