@@ -296,6 +296,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
 | **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs, channels, traceroute, neighbor info) | Beta |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
+| **MeshCore** | Companion radio management, device detection, 3-way bridge routing, TUI menu | Alpha (`alpha/meshcore-bridge` branch) |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
 **Status key:** Stable = tested in the field | Beta = works but needs soak time | Alpha = architecture solid, needs testing | Code Ready = implemented, no hardware to validate
@@ -856,7 +857,13 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ## Development
 
-Active development on `main`. Feature branches via `claude/` prefix, merged by PR.
+Active development on `main` (stable beta). MeshCore work on `alpha/meshcore-bridge` (experimental).
+Feature branches via `claude/` prefix, merged by PR.
+
+| Branch | Version | Purpose |
+|--------|---------|---------|
+| `main` | `0.5.4-beta` | Stable — gateway, TUI, monitoring, RF tools |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing, companion radio support |
 
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
@@ -889,7 +896,7 @@ Templates for multi-node setups:
 | AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) | Monitoring integration |
 | RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) | Spectrum analysis (planned) |
 | uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) | Field hardware (Q2 2026) |
-| MeshCore | [meshcore.co](https://meshcore.co/) | Future research |
+| MeshCore | [meshcore.co](https://meshcore.co/) | Active integration (`alpha/meshcore-bridge`) |
 
 ---
 
