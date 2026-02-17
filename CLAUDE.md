@@ -230,23 +230,24 @@ serial, gi.repository, yaml — genuinely optional external packages.
 
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
 
-**File size audit (2026-02-13):**
-- ✅ `rns_bridge.py` (1,485 lines) - MessageRouter + gateway_cli.py extracted
+**File size audit (2026-02-17):**
+- ✅ `rns_bridge.py` (1,525 lines) - MeshCoreBridgeMixin + MessageRouter + gateway_cli.py extracted
 - ⚠️ `knowledge_content.py` (1,824 lines) - Content file by design, acceptable
-- ✅ `map_data_collector.py` (1,509 lines) - Borderline, monitor
-- ⚠️ `launcher_tui/main.py` (1,521 lines) - 33 mixins, borderline — monitor
-- ✅ `traffic_inspector.py` (442 lines)
-- ✅ `node_tracker.py` (930 lines) - Data classes extracted
-- ✅ `rns_menu_mixin.py` (1,210 lines) - Sniffer methods extracted
+- ✅ `map_data_collector.py` (1,516 lines) - Borderline, monitor
+- ⚠️ `launcher_tui/main.py` (1,516 lines) - 33 mixins, borderline — monitor
+- ✅ `node_tracker.py` (975 lines) - Data classes extracted
+- ✅ `rns_menu_mixin.py` (1,041 lines) - Sniffer + config + diagnostics extracted
 - ✅ `metrics_export.py` (96 lines) - Split to 3 modules
+- ⚠️ `service_menu_mixin.py` (1,611 lines) - Monitor; OpenHamClock/MQTT candidates for extraction
+- ✅ `hamclock.py` (1,025 lines)
 
 **Refactoring history:**
-- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488)
-- `rns_bridge.py` (was 1,991 → 1,614 → 1,694 → 1,495 → 1,485, MeshtasticHandler + MessageRouter + gateway_cli extracted)
+- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488 → 1,516)
+- `rns_bridge.py` (was 1,991 → 1,614 → 1,694 → 1,495 → 1,485 → 1,652 → 1,525, MeshtasticHandler + MessageRouter + gateway_cli + MeshCoreBridgeMixin extracted)
 - `node_tracker.py` (was 1,808 → 930, node_models.py extracted)
-- `rns_menu_mixin.py` (was 1,524 → 1,210, rns_sniffer_mixin.py extracted)
+- `rns_menu_mixin.py` (was 1,524 → 1,210 → 1,904 → 1,041, rns_sniffer_mixin + rns_config_mixin + rns_diagnostics_mixin extracted)
 - `metrics_export.py` (was 1,762 → 96, split to common/prometheus/influxdb)
-- `hamclock.py` (2,625 → 1,525)
+- `hamclock.py` (2,625 → 1,525 → 1,025)
 - GTK4 panels removed (TUI is now only interface)
 
 *Note: Always check if a mixin exists before adding to main.py.*
