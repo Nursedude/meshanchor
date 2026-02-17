@@ -73,15 +73,32 @@ def validate_data_speed(speed: int, field_name: str) -> Optional[ConfigValidatio
 
 def validate_bridge_mode(mode: str, field_name: str) -> Optional[ConfigValidationError]:
     """Validate bridge mode."""
-    valid_modes = ["mqtt_bridge", "message_bridge", "rns_transport", "mesh_bridge"]
+    valid_modes = [
+        "mqtt_bridge", "message_bridge", "rns_transport", "mesh_bridge",
+        "meshcore_bridge", "tri_bridge",
+    ]
     if mode not in valid_modes:
         return ConfigValidationError(field_name, f"Invalid bridge mode '{mode}'. Valid: {valid_modes}")
     return None
 
 
+def validate_meshcore_connection(conn_type: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate MeshCore connection type."""
+    valid = ["serial", "tcp", "ble"]
+    if conn_type not in valid:
+        return ConfigValidationError(field_name, f"Invalid connection type '{conn_type}'. Valid: {valid}")
+    return None
+
+
 def validate_direction(direction: str, field_name: str) -> Optional[ConfigValidationError]:
     """Validate routing direction."""
-    valid = ["bidirectional", "mesh_to_rns", "rns_to_mesh", "primary_to_secondary", "secondary_to_primary"]
+    valid = [
+        "bidirectional", "mesh_to_rns", "rns_to_mesh",
+        "primary_to_secondary", "secondary_to_primary",
+        "mesh_to_meshcore", "meshcore_to_mesh",
+        "rns_to_meshcore", "meshcore_to_rns",
+        "all_to_all",
+    ]
     if direction not in valid:
         return ConfigValidationError(field_name, f"Invalid direction '{direction}'. Valid: {valid}")
     return None
@@ -233,6 +250,44 @@ class MQTTBridgeConfig:
 
 
 @dataclass
+class MeshCoreConfig:
+    """
+    MeshCore companion radio configuration.
+
+    Unlike Meshtastic (which uses meshtasticd as a daemon), MeshForge connects
+    directly to the MeshCore companion radio via meshcore_py. Three connection
+    methods are supported:
+
+      serial  — USB cable to companion radio (most common for gateway setups)
+      tcp     — Network connection to a companion radio running WiFi firmware,
+                or to a serial-to-TCP bridge (e.g. ser2net)
+      ble     — Bluetooth LE (config ready; pending meshcore_py BLE transport)
+
+    Requires: pip install meshcore (Python 3.10+)
+    Hardware: MeshCore companion radio (RAK4631, Heltec V3, T-Deck, etc.)
+    """
+    enabled: bool = False
+
+    # Connection settings — choose one of: serial | tcp | ble
+    device_path: str = "/dev/ttyUSB1"    # Serial: USB device path
+    baud_rate: int = 115200              # Serial: baud rate
+    connection_type: str = "serial"       # serial | tcp | ble
+    tcp_host: str = ""                   # TCP: hostname or IP
+    tcp_port: int = 4000                 # TCP: port (meshcore-cli default 5000)
+
+    # Message handling
+    auto_fetch_messages: bool = True      # Start auto message fetching on connect
+    bridge_channels: bool = True          # Bridge channel (broadcast) messages
+    bridge_dms: bool = True               # Bridge direct messages
+
+    # Testing
+    simulation_mode: bool = False         # Run without hardware (fake events)
+
+    # Polling fallback for CHANNEL_MSG_RECV event bug (meshcore_py #1232)
+    channel_poll_interval_sec: int = 5
+
+
+@dataclass
 class RNSConfig:
     """Reticulum Network Stack configuration"""
     config_dir: str = ""  # Empty = default ~/.reticulum
@@ -330,11 +385,14 @@ class GatewayConfig:
     enabled: bool = False
     auto_start: bool = False
 
-    # Bridge mode: "mqtt_bridge", "message_bridge", "rns_transport", or "mesh_bridge"
+    # Bridge mode: "mqtt_bridge", "message_bridge", "rns_transport",
+    #              "mesh_bridge", "meshcore_bridge", or "tri_bridge"
     # - mqtt_bridge: MQTT-based bridge (recommended - zero interference with web client)
     # - message_bridge: TCP-based message bridge (legacy - blocks web client)
     # - rns_transport: RNS uses Meshtastic as network transport layer
     # - mesh_bridge: Bridges two Meshtastic networks with different presets
+    # - meshcore_bridge: MeshCore ↔ Meshtastic/RNS bridge via companion radio
+    # - tri_bridge: All three protocols (Meshtastic + MeshCore + RNS)
     bridge_mode: str = "mqtt_bridge"
 
     # Network configurations
@@ -350,6 +408,9 @@ class GatewayConfig:
     # Meshtastic-to-Meshtastic bridge (used when bridge_mode="mesh_bridge")
     # Bridges different LoRa presets (e.g., LONG_FAST <> SHORT_TURBO)
     mesh_bridge: MeshtasticBridgeConfig = field(default_factory=MeshtasticBridgeConfig)
+
+    # MeshCore companion radio (used when bridge_mode="meshcore_bridge" or "tri_bridge")
+    meshcore: MeshCoreConfig = field(default_factory=MeshCoreConfig)
 
     # Routing (used when bridge_mode="message_bridge")
     routing_rules: List[RoutingRule] = field(default_factory=list)
@@ -421,6 +482,10 @@ class GatewayConfig:
             mqtt_bridge_data = data.get('mqtt_bridge', {})
             mqtt_bridge = MQTTBridgeConfig(**mqtt_bridge_data) if mqtt_bridge_data else MQTTBridgeConfig()
 
+            # Handle MeshCoreConfig
+            meshcore_data = data.get('meshcore', {})
+            meshcore = MeshCoreConfig(**meshcore_data) if meshcore_data else MeshCoreConfig()
+
             # Reconstruct nested dataclasses
             config = cls(
                 enabled=data.get('enabled', False),
@@ -431,6 +496,7 @@ class GatewayConfig:
                 mqtt_bridge=mqtt_bridge,
                 rns_transport=rns_transport,
                 mesh_bridge=mesh_bridge,
+                meshcore=meshcore,
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
                 default_route=data.get('default_route', 'bidirectional'),
                 telemetry=TelemetryConfig(**data.get('telemetry', {})),
@@ -491,6 +557,7 @@ class GatewayConfig:
                 'mqtt_bridge': asdict(self.mqtt_bridge),
                 'rns_transport': rns_transport_data,
                 'mesh_bridge': mesh_bridge_data,
+                'meshcore': asdict(self.meshcore),
                 'routing_rules': [asdict(r) for r in self.routing_rules],
                 'default_route': self.default_route,
                 'telemetry': asdict(self.telemetry),
