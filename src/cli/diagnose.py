@@ -116,14 +116,30 @@ def check_rns_port():
         except Exception:
             pass
 
-    # Check shared instance port
+    # Check shared instance port (RNS uses UDP, not TCP)
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex(('127.0.0.1', 37428))
-        sock.close()
-        if result == 0:
-            print_status("RNS shared instance", True, "listening on 37428")
+        from utils.service_check import check_udp_port
+        port_bound = check_udp_port(37428)
+    except ImportError:
+        # Fallback: inline UDP bind test
+        port_bound = False
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2)
+            sock.bind(('127.0.0.1', 37428))
+            sock.close()
+            # Bind succeeded = port NOT in use
+        except OSError as e:
+            if e.errno in (98, 48, 10048):  # EADDRINUSE
+                port_bound = True
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    try:
+        if port_bound:
+            print_status("RNS shared instance", True, "listening on UDP 37428")
         else:
             print_status("RNS shared instance", False, "not running")
     except Exception as e:
