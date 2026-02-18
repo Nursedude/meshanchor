@@ -37,8 +37,8 @@ from utils.safe_import import safe_import
 logger = logging.getLogger(__name__)
 
 # Import service check utilities
-check_service, ServiceState, ServiceStatus, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus'
+check_service, ServiceState, ServiceStatus, _check_udp_port_fn, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus', 'check_udp_port'
 )
 
 _ports_mod, _HAS_PORTS = safe_import('utils.ports')
@@ -463,8 +463,16 @@ class StartupChecker:
         return state, pid
 
     def _check_port(self, port: int, port_type: str = 'tcp') -> bool:
-        """Check if a port is open."""
+        """Check if a port is open.
+
+        For UDP ports, uses centralized check_udp_port() which queries
+        kernel socket state via ss(8) — reliable even when the service
+        sets SO_REUSEADDR.
+        """
         try:
+            if port_type == 'udp' and _HAS_SERVICE_CHECK:
+                return _check_udp_port_fn(port)
+
             sock_type = socket.SOCK_STREAM if port_type == 'tcp' else socket.SOCK_DGRAM
             with socket.socket(socket.AF_INET, sock_type) as sock:
                 sock.settimeout(1)
@@ -472,12 +480,12 @@ class StartupChecker:
                     result = sock.connect_ex(('127.0.0.1', port))
                     return result == 0
                 else:
-                    # For UDP, try to bind - if it fails, port is in use
+                    # Fallback UDP bind test (unreliable with SO_REUSEADDR)
                     try:
                         sock.bind(('127.0.0.1', port))
-                        return False  # We could bind, so port is not in use
+                        return False
                     except OSError:
-                        return True  # Port is in use
+                        return True
         except OSError as e:
             logger.debug("Port check for %d failed: %s", port, e)
             return False
