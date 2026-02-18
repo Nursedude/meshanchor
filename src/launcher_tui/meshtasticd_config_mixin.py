@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
-check_service, check_systemd_service, ServiceState, apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart'
+check_service, check_systemd_service, ServiceState, apply_config_and_restart, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart', '_sudo_cmd'
 )
 
 # Hoist function-level imports to module level
@@ -529,9 +529,9 @@ Press Cancel to keep current values."""
             if _HAS_APPLY_RESTART:
                 success, msg = apply_config_and_restart('meshtasticd')
             else:
-                subprocess.run(['systemctl', 'daemon-reload'],
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']),
                                capture_output=True, timeout=10)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'],
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
                                capture_output=True, timeout=30)
 
             self.dialog.msgbox("Success",
@@ -1028,11 +1028,11 @@ Press Cancel to keep current values."""
                 else:
                     self.dialog.msgbox("Error", f"Restart failed:\n{msg}")
             else:
-                subprocess.run(['systemctl', 'daemon-reload'],
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']),
                                capture_output=True, timeout=10)
 
                 result = subprocess.run(
-                    ['systemctl', 'restart', 'meshtasticd'],
+                    _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
                     capture_output=True,
                     text=True,
                     timeout=30

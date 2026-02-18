@@ -54,8 +54,8 @@ from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-check_service, check_port, apply_config_and_restart, ServiceState, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'check_port', 'apply_config_and_restart', 'ServiceState'
+check_service, check_port, apply_config_and_restart, ServiceState, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'check_port', 'apply_config_and_restart', 'ServiceState', '_sudo_cmd'
 )
 
 # Import dialog backend directly (not through package namespace)
@@ -375,11 +375,6 @@ class MeshForgeLauncher(
 
     def run(self):
         """Run the launcher."""
-        if not self.env['is_root']:
-            print("\nError: MeshForge requires root/sudo privileges")
-            print("Please run: sudo python3 src/launcher_tui/main.py")
-            sys.exit(1)
-
         if not self.dialog.available:
             # Fallback to basic launcher
             print("whiptail/dialog not available, using basic launcher...")
@@ -579,8 +574,8 @@ class MeshForgeLauncher(
                     if _HAS_APPLY_RESTART:
                         success, msg = apply_config_and_restart('meshtasticd')
                     else:
-                        subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                        subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                        subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                        subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
                     self.dialog.msgbox(
                         "Fixed",
                         "Removed usb-serial.yaml\n"
@@ -1150,10 +1145,10 @@ class MeshForgeLauncher(
 
             if choice == "reboot":
                 if self.dialog.yesno("Confirm Reboot", "Reboot the system now?"):
-                    subprocess.run(['systemctl', 'reboot'], timeout=30)
+                    subprocess.run(_sudo_cmd(['systemctl', 'reboot']), timeout=30)
             elif choice == "shutdown":
                 if self.dialog.yesno("Confirm Shutdown", "Shutdown the system now?"):
-                    subprocess.run(['systemctl', 'poweroff'], timeout=30)
+                    subprocess.run(_sudo_cmd(['systemctl', 'poweroff']), timeout=30)
 
     # --- NEW Submenu: About (a) ---
 

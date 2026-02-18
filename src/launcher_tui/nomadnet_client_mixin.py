@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checking
-check_process_running, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running'
+check_process_running, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', '_sudo_cmd'
 )
 
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
@@ -1168,7 +1168,7 @@ class NomadNetClientMixin:
                 # Just stop rnsd
                 self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
                 try:
-                    subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+                    subprocess.run(_sudo_cmd(['systemctl', 'stop', 'rnsd']), capture_output=True, timeout=10)
                     subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
                     time.sleep(1)
                     self.dialog.msgbox(
@@ -1212,7 +1212,7 @@ class NomadNetClientMixin:
             elif choice == "stop":
                 self.dialog.infobox("Stopping rnsd", "Stopping rnsd service...")
                 try:
-                    subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+                    subprocess.run(_sudo_cmd(['systemctl', 'stop', 'rnsd']), capture_output=True, timeout=10)
                     subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
                     time.sleep(1)
                     self.dialog.msgbox(
@@ -1253,11 +1253,11 @@ Group={target_user}
             override_file.write_text(override_content)
 
             # Reload systemd and restart rnsd
-            subprocess.run(['systemctl', 'daemon-reload'], capture_output=True, timeout=10)
-            subprocess.run(['systemctl', 'stop', 'rnsd'], capture_output=True, timeout=10)
+            subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), capture_output=True, timeout=10)
+            subprocess.run(_sudo_cmd(['systemctl', 'stop', 'rnsd']), capture_output=True, timeout=10)
             subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
             time.sleep(1)
-            subprocess.run(['systemctl', 'start', 'rnsd'], capture_output=True, timeout=10)
+            subprocess.run(_sudo_cmd(['systemctl', 'start', 'rnsd']), capture_output=True, timeout=10)
             time.sleep(2)
 
             # Verify it's running as the right user now
