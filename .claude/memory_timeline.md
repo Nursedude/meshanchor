@@ -1,8 +1,8 @@
 # MeshForge Domain Memory & Timeline
 
-**Date:** 2026-01-19
+**Date:** 2026-02-17
 **Purpose:** Complete institutional memory and timeline verification
-**Scope:** Full project history v1.0.0 → v0.4.7-beta
+**Scope:** Full project history v1.0.0 → v0.5.4-beta
 
 ---
 
@@ -75,9 +75,25 @@
 | 0.4.7 | 2026-01-17 | Status consistency, Predictive analytics, Message lifecycle |
 
 **Key Decisions:**
-- PanelBase class for GTK lifecycle management
-- Lazy panel loading for startup performance
+- Mixin pattern for TUI menu organization
 - Single source of truth for service status (check_service)
+
+### Phase 5: TUI-Only & MQTT Bridge (v0.4.8 - v0.5.4) [Jan-Feb 2026]
+
+| Version | Date | Milestone |
+|---------|------|-----------|
+| 0.4.8 | 2026-01-30 | RF Calculator Hawaii presets, map improvements |
+| 0.5.0 | 2026-02-01 | Beta milestone — TUI stable, NomadNet fixes |
+| 0.5.1 | 2026-02-06 | Telemetry pipeline, RNS sniffer, MQTT bridge, security audit |
+| 0.5.2 | 2026-02-08 | EAS alerts, _safe_call() reliability for all menus |
+| 0.5.3 | 2026-02-08 | 350 unit tests for core gateway modules |
+| 0.5.4 | 2026-02-11 | MQTT bridge architecture — zero web client interference |
+
+**Key Decisions:**
+- GTK4 desktop removed — TUI is the only interface
+- _safe_call() dispatch wrapper for error isolation in all menus
+- Gateway rewritten to use MQTT transport (no persistent TCP:4403 hold)
+- alpha/meshcore-bridge branch for MeshCore 3-way routing experiment
 
 ---
 
@@ -107,11 +123,11 @@
 **Rationale:** Stability and simplicity - infrastructure already exists
 **Implementation:** `MessageListener.add_callback()` for UI subscription
 
-### 5. Panel Lifecycle Management
+### 5. TUI Mixin Architecture (supersedes GTK PanelBase)
 
-**Decision:** PanelBase class with auto-cleanup
-**Rationale:** 15 of 24 panels had no cleanup, causing timer/signal leaks
-**Implementation:** `_schedule_timer()`, `_connect_signal()` with auto-cleanup on unrealize
+**Decision:** Feature mixins composed into single MeshForgeLauncher class
+**Rationale:** GTK4 removed in v0.5.x; TUI uses whiptail/dialog which is blocking (no lifecycle leaks)
+**Implementation:** 36 mixins in `launcher_tui/`, `_safe_call()` for error isolation
 
 ---
 
@@ -174,7 +190,7 @@ Regional RNS (192.168.86.38:4242)
 | Message Listener | `src/utils/message_listener.py` |
 | Gateway Bridge | `src/gateway/rns_bridge.py` |
 | Orchestrator | `src/core/orchestrator.py` |
-| Panel Base | `src/gtk_ui/panel_base.py` |
+| TUI Main | `src/launcher_tui/main.py` |
 | Knowledge Base | `src/utils/knowledge_base.py` |
 | Persistent Issues | `.claude/foundations/persistent_issues.md` |
 
@@ -195,6 +211,6 @@ Regional RNS (192.168.86.38:4242)
 
 ---
 
-*Memory verified: 2026-01-19*
-*Timeline continuous: v1.0.0 → v0.4.7-beta*
+*Memory verified: 2026-02-17*
+*Timeline continuous: v1.0.0 → v0.5.4-beta*
 *No gaps detected*
