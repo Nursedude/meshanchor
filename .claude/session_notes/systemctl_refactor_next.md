@@ -2,7 +2,7 @@
 
 **Created**: 2026-01-31
 **Related Branch**: `claude/systemctl-refactor-tracking-UWPkt`
-**Status**: ~~Phase 2 complete~~ **Phase 3 complete — all config modules and setup wizard refactored**
+**Status**: ~~Phase 2 complete~~ ~~Phase 3 complete~~ **DONE — all systemctl service-control calls centralized**
 
 ## Session 1 Completed (Previous)
 
@@ -78,47 +78,73 @@
 2. [x] Docstring examples in service_check.py (already done)
 3. [x] ~~Version notes for 0.4.8 if merging~~ Obsolete (now on 0.5.4-beta)
 
-## Remaining Items (Leave As-Is)
+## Session 5 Completed (Final Sweep — Commands, Plugins, TUI Mixins)
+
+**Branch**: `claude/refactor-systemctl-calls-jactg`
+
+### New Helpers Added to service_check.py
+- [x] `restart_service(name)` — simple restart without daemon-reload
+- [x] `disable_service(name)` — disable a service at boot
+
+### Files Refactored (16 files, -312/+217 lines)
+- [x] **commands/rns.py** — 2 calls: `['sudo', 'systemctl']` → `start_service()`/`stop_service()`
+- [x] **commands/service.py** — 5 calls: all operations → helpers (start/stop/restart/enable/disable)
+- [x] **plugins/meshchat/service.py** — 2 calls: start/stop → helpers
+- [x] **system_tools_mixin.py** — 1 interactive restart → `apply_config_and_restart()`
+- [x] **service_menu_mixin.py** — 13 calls: dead `_HAS_*` fallback branches removed
+- [x] **meshtasticd_config_mixin.py** — 2 fallback restart patterns simplified
+- [x] **first_run_mixin.py** — 3 identical restart fallbacks collapsed
+- [x] **rns_menu_mixin.py** — 2 calls: stop/start rnsd → helpers
+- [x] **main.py** — 1 config-conflict restart fallback removed
+- [x] **web_client_mixin.py** — 1 ImportError fallback removed
+- [x] **rns_diagnostics_mixin.py** — 2 start rnsd calls
+- [x] **ai_tools_mixin.py** — 2 start meshforge-map calls
+- [x] **nomadnet_client_mixin.py** — 4 rnsd lifecycle calls
+- [x] **quick_actions_mixin.py** — 2 quick restart calls
+- [x] **updates_mixin.py** — 1 daemon-reload → `daemon_reload()`
+
+### Verification
+- [x] All 16 modified files pass `py_compile`
+- [x] 1526 tests pass, 0 failures
+- [x] Zero `['sudo', 'systemctl', ...]` calls outside service_check.py
+- [x] Zero `_sudo_cmd(['systemctl', 'start|stop|restart|enable|disable|daemon-reload'])` outside service_check.py
+
+## Remaining Items (Intentionally Left As-Is)
 
 ### Display/Diagnostic Commands
-- `system_tools_mixin.py`: `list-units`, `--failed`, `list-timers`
-  - These are raw output for user display, not service control
+- `system_tools_mixin.py`: `list-units`, `--failed`, `list-timers`, `status`
+  - Raw terminal output for user display, not service control
 
 ### System Power Operations
-- `main.py`: `reboot`, `poweroff`
-  - Not service management - different use case
+- `main.py`: `systemctl reboot`, `systemctl poweroff`
+  - Not service management — different use case
 
-### Interactive Service Control (TUI Mixins)
-- `service_menu_mixin.py`, `quick_actions_mixin.py`, `rns_menu_mixin.py`, etc.
-  - Already use `_sudo_cmd()` wrapper or centralized helpers
-  - Some use raw subprocess for direct user output (intentional)
+### Read-Only systemctl Queries
+- `commands/service.py`: `systemctl is-active`, `systemctl is-enabled`, `systemctl cat`, `systemctl status`
+- `plugins/meshchat/service.py`: `systemctl is-active`, `systemctl is-enabled`, `systemctl show`
+- `cli/diagnose.py`: `systemctl is-active`
+  - Status queries only — no privilege elevation needed
 
 ### Shell Scripts
 - `scripts/install_noc.sh`, `scripts/update.sh`, etc.
   - Shell scripts run with sudo by design — not Python code
 
-## Files Modified (Session 4)
+## Complete Helper API (service_check.py)
 
-1. `src/utils/service_check.py` - Added start_service(), stop_service(), _sudo_write()
-2. `src/config/hardware_config.py` - Replaced 14 hardcoded sudo/systemctl calls
-3. `src/config/config_file_manager.py` - Direct import, service_check helpers, _sudo_write()
-4. `src/config/spi_hats.py` - Direct import, _sudo_cmd(), _sudo_write()
-5. `src/setup_wizard.py` - Direct import, start_service(), _sudo_write()
-6. `templates/sudoers.d/meshforge-nopasswd` - New NOPASSWD sudoers template
-7. `CLAUDE.md` - Service management documentation expanded
-8. `.claude/foundations/domain_architecture.md` - Privilege helpers + Phase 2 checklist
+| Helper | Added | Session |
+|--------|-------|---------|
+| `check_service()` | Pre-existing | — |
+| `daemon_reload()` | Session 2 | S2 |
+| `enable_service()` | Session 2 | S2 |
+| `disable_service()` | Session 5 | S5 |
+| `apply_config_and_restart()` | Session 1 | S1 |
+| `start_service()` | Session 4 | S4 |
+| `stop_service()` | Session 4 | S4 |
+| `restart_service()` | Session 5 | S5 |
+| `_sudo_cmd()` | Pre-existing | — |
+| `_sudo_write()` | Session 4 | S4 |
 
-## Branch Strategy Note
+## Status: COMPLETE
 
-- Alpha is **89 commits ahead** of main
-- Main should stay frozen until release
-- All development on alpha (via feature branches)
-- This branch merges to alpha
-
-## Next Steps
-
-1. [x] Commit and push changes (Session 4)
-2. PR for review
-3. Consider extending to `commands/rns.py` and `commands/service.py` (lower priority — these
-   have hardcoded `['sudo', 'systemctl']` but work correctly since always run with sudo)
-4. Consider extending to `plugins/meshchat/service.py` (same pattern)
+All systemctl service-control calls in the Python codebase now go through
+`utils/service_check.py` as the SINGLE SOURCE OF TRUTH. No further refactoring needed.
