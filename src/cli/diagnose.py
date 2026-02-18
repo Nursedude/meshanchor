@@ -141,7 +141,19 @@ def check_rns_port():
         if port_bound:
             print_status("RNS shared instance", True, "listening on UDP 37428")
         else:
-            print_status("RNS shared instance", False, "not running")
+            # Check if share_instance is disabled in config
+            hint = "not running"
+            try:
+                from commands.rns import read_config, _parse_share_instance
+                cfg = read_config()
+                if cfg.success:
+                    content = cfg.data.get('content', '')
+                    if not _parse_share_instance(content):
+                        hint = ("not enabled — add 'share_instance = Yes' "
+                                "to [reticulum] config, then restart rnsd")
+            except ImportError:
+                pass
+            print_status("RNS shared instance", False, hint)
     except Exception as e:
         print_status("RNS shared instance", False, str(e))
 
