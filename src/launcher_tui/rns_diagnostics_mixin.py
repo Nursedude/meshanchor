@@ -142,7 +142,15 @@ class RNSDiagnosticsMixin:
                         pass
             if running and not port_ok:
                 print("  ! rnsd running but port 37428 NOT listening")
-                warnings.append("rnsd active but shared instance port not bound")
+                # Check if share_instance is enabled in config
+                share_ok = conn_data.get('share_instance', None)
+                if share_ok is False:
+                    print("    Cause: share_instance is not enabled in [reticulum] config")
+                    print("    Fix: Add 'share_instance = Yes' to [reticulum] section,")
+                    print("         then restart: sudo systemctl restart rnsd")
+                    issues.append("share_instance not enabled — gateway cannot connect to rnsd")
+                else:
+                    warnings.append("rnsd active but shared instance port not bound")
             elif running and port_ok:
                 print(f"  Shared instance port 37428: listening")
         except Exception:

@@ -284,6 +284,30 @@ def validate_config(content: str) -> Tuple[bool, List[str]]:
     return len(errors) == 0, errors
 
 
+def _parse_share_instance(content: str) -> bool:
+    """Check if share_instance is enabled in the [reticulum] section.
+
+    The shared instance allows multiple RNS programs (rnsd, gateway, nomadnet)
+    to share a single Reticulum transport instance via UDP port 37428.
+
+    Returns True if share_instance = Yes (or True), False otherwise.
+    """
+    in_reticulum = False
+    for line in content.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            continue
+        if stripped == '[reticulum]':
+            in_reticulum = True
+            continue
+        if stripped.startswith('[') and in_reticulum:
+            break  # Left the [reticulum] section
+        if in_reticulum and 'share_instance' in stripped and '=' in stripped:
+            _, value = stripped.split('=', 1)
+            return value.strip().lower() in ('yes', 'true', '1')
+    return False
+
+
 def _parse_interfaces(content: str) -> List[Dict[str, Any]]:
     """Parse interface definitions from config."""
     interfaces = []
@@ -830,6 +854,15 @@ def check_connectivity() -> CommandResult:
 
         if connectivity['interfaces_enabled'] == 0:
             connectivity['issues'].append("No interfaces enabled")
+
+        # Check share_instance setting (required for gateway to connect)
+        share_instance = _parse_share_instance(content)
+        connectivity['share_instance'] = share_instance
+        if not share_instance:
+            connectivity['warnings'].append(
+                "share_instance not enabled in [reticulum] config — "
+                "gateway and other RNS clients cannot connect to rnsd"
+            )
     else:
         connectivity['issues'].append(f"Config error: {config_result.message}")
 

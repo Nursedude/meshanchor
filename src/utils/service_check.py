@@ -211,11 +211,13 @@ def check_port(port: int, host: str = 'localhost', timeout: float = 2.0) -> bool
 
 def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> bool:
     """
-    Check if a UDP port is in use by trying to bind to it.
+    Check if a UDP port is in use.
 
-    For services like rnsd that use UDP, we can check if the port is already
-    bound by attempting to bind ourselves - if it fails with EADDRINUSE, the
-    service is running.
+    Primary method: parse `ss -uln` output (kernel socket state).
+    This is reliable even when the service sets SO_REUSEADDR/SO_REUSEPORT,
+    which causes bind-test false negatives.
+
+    Fallback: bind test (only if ss is unavailable).
 
     Args:
         port: UDP port number
@@ -225,6 +227,32 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
     Returns:
         True if port appears to be in use (service running), False otherwise
     """
+    # Primary: use ss to read kernel socket table directly.
+    # The bind-test approach gives false negatives when the service
+    # sets SO_REUSEADDR (e.g., rnsd), allowing our test bind to succeed
+    # even though the port IS in use.
+    try:
+        result = subprocess.run(
+            ['ss', '-uln'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            port_str = str(port)
+            for line in result.stdout.split('\n'):
+                # ss output format:
+                #   UNCONN 0 0  127.0.0.1:37428  0.0.0.0:*
+                #   UNCONN 0 0      [::1]:37428     [::]:*
+                # Split on whitespace to get Local Address:Port column
+                parts = line.split()
+                if len(parts) >= 5:
+                    local_addr = parts[4]  # e.g., "127.0.0.1:37428" or "[::1]:37428"
+                    if local_addr.endswith(':' + port_str):
+                        return True
+            return False
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass  # ss not available, fall through to bind test
+
+    # Fallback: bind test (unreliable with SO_REUSEADDR, but better than nothing)
     # Try multiple addresses since service might bind to different interfaces
     hosts_to_check = [host]
     if host == '127.0.0.1':
