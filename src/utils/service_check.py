@@ -68,14 +68,17 @@ __all__ = [
     # Service management
     'daemon_reload',             # Reload systemd daemon
     'enable_service',            # Enable service at boot
+    'start_service',             # Start a systemd service
+    'stop_service',              # Stop a systemd service
     'apply_config_and_restart',  # Reload daemon + restart service
     # Port lockdown (MeshForge owns the browser)
     'lock_port_external',        # Block external access to a port
     'unlock_port_external',      # Restore external access to a port
     'check_port_locked',         # Check if port is locked to localhost
     'persist_iptables',          # Save iptables rules to survive reboot
-    # Privilege elevation
+    # Privilege elevation & file I/O
     '_sudo_cmd',            # Prefix command with sudo when not root
+    '_sudo_write',          # Write file content with privilege elevation
     # Data classes
     'ServiceStatus',        # Return type from check_service
     'ServiceState',         # Status enum (AVAILABLE, DEGRADED, FAILED, etc.)
@@ -917,6 +920,162 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
         return False, "systemctl not found - is this a systemd system?"
     except Exception as e:
         logger.error(f"Error enabling {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
+def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Start a systemd service.
+
+    Args:
+        service_name: Name of the systemd service to start
+        timeout: Timeout in seconds (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import start_service
+
+        success, msg = start_service('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        result = subprocess.run(
+            _sudo_cmd(['systemctl', 'start', service_name]),
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"start {service_name} failed"
+            logger.error(f"start {service_name} failed: {error_msg}")
+            return False, f"start {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully started {service_name}")
+        return True, f"{service_name} started"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while starting {service_name}")
+        return False, f"Timeout while starting {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error starting {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
+def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Stop a systemd service.
+
+    Args:
+        service_name: Name of the systemd service to stop
+        timeout: Timeout in seconds (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import stop_service
+
+        success, msg = stop_service('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        result = subprocess.run(
+            _sudo_cmd(['systemctl', 'stop', service_name]),
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"stop {service_name} failed"
+            logger.error(f"stop {service_name} failed: {error_msg}")
+            return False, f"stop {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully stopped {service_name}")
+        return True, f"{service_name} stopped"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while stopping {service_name}")
+        return False, f"Timeout while stopping {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error stopping {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
+def _sudo_write(file_path: str, content: str, timeout: int = 10) -> Tuple[bool, str]:
+    """
+    Write content to a file, using sudo tee for privilege elevation when needed.
+
+    Use this for writing to system paths (/etc/, /boot/, /etc/systemd/system/)
+    where the current user may not have write access.
+
+    When already running as root, writes directly. When running as a normal user,
+    uses 'sudo tee' to elevate privileges for the write.
+
+    Args:
+        file_path: Absolute path to the file to write
+        content: String content to write
+        timeout: Timeout in seconds for the sudo tee command (default: 10)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import _sudo_write
+
+        service_content = '''[Unit]
+        Description=My Service
+        ...
+        '''
+        success, msg = _sudo_write('/etc/systemd/system/my.service', service_content)
+        if not success:
+            show_error(msg)
+    """
+    try:
+        if os.geteuid() == 0:
+            # Already root — write directly
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'w') as f:
+                f.write(content)
+            logger.debug(f"Wrote {file_path} (as root)")
+            return True, f"Wrote {file_path}"
+
+        # Not root — use sudo tee to write with elevation
+        result = subprocess.run(
+            ['sudo', 'tee', file_path],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"Failed to write {file_path}"
+            logger.error(f"sudo tee failed for {file_path}: {error_msg}")
+            return False, f"Failed to write {file_path}: {error_msg}"
+
+        logger.debug(f"Wrote {file_path} (via sudo tee)")
+        return True, f"Wrote {file_path}"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout writing {file_path}")
+        return False, f"Timeout writing {file_path}"
+    except PermissionError:
+        logger.error(f"Permission denied writing {file_path}")
+        return False, f"Permission denied: {file_path}"
+    except OSError as e:
+        logger.error(f"OS error writing {file_path}: {e}")
+        return False, f"OS error: {e}"
+    except Exception as e:
+        logger.error(f"Error writing {file_path}: {e}")
         return False, f"Error: {e}"
 
 
