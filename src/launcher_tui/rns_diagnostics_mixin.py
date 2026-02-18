@@ -17,8 +17,8 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 from utils.safe_import import safe_import
 
-check_process_running, check_udp_port, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port'
+check_process_running, check_udp_port, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -304,7 +304,7 @@ class RNSDiagnosticsMixin:
                     ):
                         try:
                             subprocess.run(
-                                ['systemctl', 'start', 'rnsd'],
+                                _sudo_cmd(['systemctl', 'start', 'rnsd']),
                                 capture_output=True, text=True, timeout=30
                             )
                             print("Starting rnsd...")
@@ -493,7 +493,7 @@ class RNSDiagnosticsMixin:
 
                     print("Starting rnsd...")
                     subprocess.run(
-                        ['systemctl', 'start', 'rnsd'],
+                        _sudo_cmd(['systemctl', 'start', 'rnsd']),
                         capture_output=True, text=True, timeout=15
                     )
                     time.sleep(2)
