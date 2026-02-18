@@ -5,9 +5,9 @@
 **Dude AI** is the collaborative AI development partner for MeshForge, providing expertise in:
 - Network Engineering (mesh protocols, RF propagation, routing)
 - Physics (electromagnetic theory, antenna design, signal analysis)
-- Programming (Python, GTK4, web technologies, system integration)
+- Programming (Python, TUI design, web technologies, system integration)
 - Project Management (roadmaps, version control, documentation)
-- GUI Design (libadwaita, responsive layouts, accessibility)
+- UI Design (terminal interfaces, responsive layouts, accessibility)
 - Code Review (security, performance, maintainability)
 
 **The Architect**: WH6GXZ (Nursedude) - HAM General class, infrastructure engineering background (BNN, GTE, Verizon), RN BSN. Provides vision, requirements, and real-world operational experience.
@@ -52,7 +52,7 @@ MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RN
 1. **Professional-grade** - Quality suitable for Anthropic review
 2. **Portable** - Runs on Pi, uConsole, HackerGadgets devices
 3. **Manageable** - Don't let it become unwieldy
-4. **Multi-interface** - GTK, CLI, Web UI with consistent experience
+4. **Multi-interface** - TUI, CLI, Web UI with consistent experience
 5. **Interoperable** - Bridge different mesh technologies
 
 ---
@@ -64,7 +64,7 @@ MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RN
 meshforge/
 ├── src/
 │   ├── gateway/          # RNS-Meshtastic bridge (self-contained)
-│   ├── gtk_ui/           # GTK4 interface (panels + dialogs)
+│   ├── launcher_tui/     # Terminal UI (whiptail/dialog)
 │   ├── config/           # Configuration management
 │   ├── monitoring/       # Node tracking
 │   ├── services/         # System service management
@@ -81,7 +81,7 @@ meshforge/
 - Gateway can run standalone or integrated
 
 ### Interface Parity
-All three interfaces (GTK, CLI, Web) should provide:
+All interfaces (TUI, CLI, Web) should provide:
 - Same core functionality
 - Consistent terminology
 - Similar navigation structure
@@ -89,7 +89,7 @@ All three interfaces (GTK, CLI, Web) should provide:
 
 ### Portability Checklist
 - [ ] No hardcoded paths (use `~/.config/meshforge/`)
-- [ ] Graceful degradation (WebKit optional, fall back to browser)
+- [ ] Graceful degradation (external browser for web content)
 - [ ] Minimal dependencies for core functionality
 - [ ] ARM64 and x86_64 compatible
 - [ ] Works on small screens (uConsole: 1280x720)
@@ -483,37 +483,30 @@ slot = djb2_hash(channel_name) % num_channels
 ## UI/UX Guidelines
 
 ### Design Philosophy
-Following Raspberry Pi OS / GNOME HIG principles:
+Terminal-first design principles:
 - Clean, uncluttered interfaces
-- Consistent iconography (symbolic icons)
-- Responsive to different screen sizes
-- Keyboard accessible
-- Dark mode support
+- Consistent menu structure (whiptail/dialog)
+- Works on any terminal size
+- Keyboard accessible (TUI is keyboard-native)
+- Works over SSH sessions
 
-### GTK4 / libadwaita Patterns
-```python
-# Use Adw widgets for modern look
-Adw.Window          # Main windows
-Adw.HeaderBar       # Title bars
-Adw.MessageDialog   # Confirmations
-Adw.PreferencesGroup # Settings sections
+### TUI Patterns
+```
+# MeshForge uses whiptail/dialog for TUI menus
+- Menu dialogs for navigation
+- Input boxes for user entry
+- Message boxes for status/errors
+- Checklist/radiolist for selections
+- Gauge widgets for progress
 ```
 
-### Screen Size Adaptations
-| Screen | Resolution | Mode |
-|--------|------------|------|
-| Desktop | 1920x1080+ | Full |
-| Laptop | 1366x768 | Standard |
-| uConsole | 1280x720 | Compact |
-| Pi Touch | 800x480 | Minimal |
-
-### Color Scheme
-- **Primary**: #4fc3f7 (cyan)
-- **Success**: #4caf50 (green)
-- **Warning**: #ff9800 (orange)
-- **Error**: #f44336 (red)
-- **Background (dark)**: #1a1a2e
-- **Surface (dark)**: #16213e
+### Terminal Size Adaptations
+| Terminal | Columns | Mode |
+|----------|---------|------|
+| Desktop terminal | 120+ | Full menus with descriptions |
+| Laptop | 80+ | Standard layout |
+| uConsole | 80x24 | Compact menus |
+| SSH session | Variable | Adaptive to terminal size |
 
 ---
 
@@ -674,11 +667,11 @@ Comprehensive security review performed. Issues found and fixed:
 
 ### v4.3 - UI Polish
 - [ ] Compact mode for small screens
-- [ ] Responsive layouts
-- [ ] Touch-friendly controls
+- [ ] Responsive TUI layouts
+- [ ] Terminal size detection
 
 ### v4.4 - Site Planner Integration
-- [ ] Embed WebKitGTK view
+- [ ] Browser-based coverage viewer
 - [ ] Auto-populate from mesh
 - [ ] Save coverage analysis
 
@@ -778,7 +771,7 @@ The in-app Dude AI assistant should be:
 ```
 ┌────────────────────────────────────────────────────────────┐
 │                      USER INTERFACE                        │
-│   GTK Panel  │  CLI Command  │  Web Widget  │  TUI Panel   │
+│   TUI Panel  │  CLI Command  │  Web Widget                  │
 └──────────────┼───────────────┼──────────────┼──────────────┘
                │               │              │
                ▼               ▼              ▼
@@ -832,7 +825,7 @@ Dude AI should help solve:
 
 MeshForge will **always** be open source under a permissive license.
 The community version includes all core functionality:
-- Full GTK, CLI, Web, and TUI interfaces
+- Full TUI, CLI, and Web interfaces
 - RNS-Meshtastic gateway
 - Node monitoring and management
 - Configuration editing
@@ -936,7 +929,7 @@ Compilation (PyInstaller, Nuitka, Cython, Rust) is a future consideration, not a
 - Performance-critical paths (gateway throughput, RF calculations)
 
 **What stays in Python:**
-- GUI layer (GTK bindings work well)
+- TUI layer (whiptail/dialog works well)
 - Config management (flexibility needed)
 - Anthropic/Dude AI integration (SDK is Python)
 
@@ -981,7 +974,7 @@ When resuming development:
 
 ### Testing Approach
 - Manual testing on target hardware
-- Check all three interfaces (GTK, CLI, Web)
+- Check all interfaces (TUI, CLI, Web)
 - Verify on small screens
 - Test with real Meshtastic/RNS networks
 
@@ -993,8 +986,6 @@ When resuming development:
 - Meshtastic: https://meshtastic.org/docs/
 - Reticulum: https://reticulum.network/manual/
 - Raspberry Pi: https://www.raspberrypi.com/documentation/
-- GTK4: https://docs.gtk.org/gtk4/
-- libadwaita: https://gnome.pages.gitlab.gnome.org/libadwaita/
 
 ### Community
 - Meshtastic Discord
@@ -1086,7 +1077,7 @@ Plugins are loaded from:
 |----------|-------------------|-------------------|
 | **RF Calculations** | Haversine, Fresnel, FSPL, Earth bulge | Elevation APIs, coverage maps |
 | **Gateway** | Meshtastic TCP, RNS bridge | MeshCore, meshing-around |
-| **UI** | GTK, Web, TUI panels | Custom dashboards |
+| **UI** | TUI, Web panels | Custom dashboards |
 | **Why Core** | Works offline, no external deps, tested | Needs network or external libs |
 
 **Safety guarantee:** If a plugin fails (missing dependency, network down), core MeshForge continues working. Gateway, RF tools, and UI are never broken by plugin issues.
@@ -1200,7 +1191,7 @@ python3 -m py_compile src/**/*.py
 
 ---
 
-*Last updated: 2026-01-05*
-*Version: 0.4.3-beta (knowledge base rev 3)*
+*Last updated: 2026-02-18*
+*Version: 0.5.4-beta (knowledge base rev 4 - GTK references removed, TUI-only)*
 *Dude AI - Network Engineer, Physicist, Programmer, Project Manager*
 *Made with aloha 🤙 - nurse dude (wh6gxz)*
