@@ -526,13 +526,7 @@ Press Cancel to keep current values."""
             shutil.copy(src, dst)
 
             # Restart service
-            if _HAS_APPLY_RESTART:
-                success, msg = apply_config_and_restart('meshtasticd')
-            else:
-                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']),
-                               capture_output=True, timeout=10)
-                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
-                               capture_output=True, timeout=30)
+            apply_config_and_restart('meshtasticd')
 
             self.dialog.msgbox("Success",
                 f"Hardware config activated!\n\n"
@@ -1021,28 +1015,11 @@ Press Cancel to keep current values."""
         try:
             self.dialog.infobox("Restarting", "Restarting meshtasticd...")
 
-            if _HAS_APPLY_RESTART:
-                success, msg = apply_config_and_restart('meshtasticd')
-                if success:
-                    self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
-                else:
-                    self.dialog.msgbox("Error", f"Restart failed:\n{msg}")
+            success, msg = apply_config_and_restart('meshtasticd')
+            if success:
+                self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
             else:
-                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']),
-                               capture_output=True, timeout=10)
-
-                result = subprocess.run(
-                    _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-
-                if result.returncode == 0:
-                    self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
-                else:
-                    self.dialog.msgbox("Error",
-                        f"Restart failed:\n{result.stderr or result.stdout}")
+                self.dialog.msgbox("Error", f"Restart failed:\n{msg}")
 
         except subprocess.TimeoutExpired:
             self.dialog.msgbox("Error", "Restart timed out")

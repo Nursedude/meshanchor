@@ -68,8 +68,10 @@ __all__ = [
     # Service management
     'daemon_reload',             # Reload systemd daemon
     'enable_service',            # Enable service at boot
+    'disable_service',           # Disable service at boot
     'start_service',             # Start a systemd service
     'stop_service',              # Stop a systemd service
+    'restart_service',           # Restart a systemd service
     'apply_config_and_restart',  # Reload daemon + restart service
     # Port lockdown (MeshForge owns the browser)
     'lock_port_external',        # Block external access to a port
@@ -923,6 +925,50 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
         return False, f"Error: {e}"
 
 
+def disable_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Disable a systemd service from starting at boot.
+
+    Args:
+        service_name: Name of the systemd service to disable
+        timeout: Timeout in seconds (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import disable_service
+
+        success, msg = disable_service('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        result = subprocess.run(
+            _sudo_cmd(['systemctl', 'disable', service_name]),
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"disable {service_name} failed"
+            logger.error(f"disable {service_name} failed: {error_msg}")
+            return False, f"disable {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully disabled {service_name}")
+        return True, f"{service_name} disabled"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while disabling {service_name}")
+        return False, f"Timeout while disabling {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error disabling {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
 def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
     """
     Start a systemd service.
@@ -1008,6 +1054,54 @@ def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
         return False, "systemctl not found - is this a systemd system?"
     except Exception as e:
         logger.error(f"Error stopping {service_name}: {e}")
+        return False, f"Error: {e}"
+
+
+def restart_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+    """
+    Restart a systemd service.
+
+    For a simple restart without daemon-reload. If you've modified service
+    unit files or config that requires a reload, use apply_config_and_restart()
+    instead.
+
+    Args:
+        service_name: Name of the systemd service to restart
+        timeout: Timeout in seconds (default: 30)
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        from utils.service_check import restart_service
+
+        success, msg = restart_service('meshtasticd')
+        if not success:
+            show_error(msg)
+    """
+    try:
+        result = subprocess.run(
+            _sudo_cmd(['systemctl', 'restart', service_name]),
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"restart {service_name} failed"
+            logger.error(f"restart {service_name} failed: {error_msg}")
+            return False, f"restart {service_name} failed: {error_msg}"
+
+        logger.info(f"Successfully restarted {service_name}")
+        return True, f"{service_name} restarted"
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout while restarting {service_name}")
+        return False, f"Timeout while restarting {service_name}"
+    except FileNotFoundError:
+        logger.error("systemctl not found")
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:
+        logger.error(f"Error restarting {service_name}: {e}")
         return False, f"Error: {e}"
 
 

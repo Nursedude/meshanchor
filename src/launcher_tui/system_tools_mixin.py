@@ -21,11 +21,12 @@ logger = logging.getLogger(__name__)
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH
 try:
-    from utils.service_check import check_service, check_port, ServiceState
+    from utils.service_check import check_service, check_port, ServiceState, apply_config_and_restart
 except ImportError:
     check_service = None
     check_port = None
     ServiceState = None
+    apply_config_and_restart = None
 
 # Import for sudo-safe home directory - see persistent_issues.md Issue #1
 try:
@@ -1181,7 +1182,8 @@ class SystemToolsMixin:
                 )
                 if confirm:
                     print(f"\n=== Restarting {unit} ===\n")
-                    subprocess.run(['sudo', 'systemctl', 'restart', unit], timeout=30)
+                    success, msg = apply_config_and_restart(unit)
+                    print(msg)
                     subprocess.run(['systemctl', 'status', unit, '--no-pager'], timeout=10)
 
         print("\n" + "=" * 60)

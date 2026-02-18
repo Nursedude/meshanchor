@@ -44,8 +44,8 @@ ReviewOrchestrator, ReviewScope, _HAS_AUTO_REVIEW = safe_import(
     'utils.auto_review', 'ReviewOrchestrator', 'ReviewScope'
 )
 
-# Import _sudo_cmd for privileged systemctl calls
-_sudo_cmd, _HAS_SUDO_CMD = safe_import('utils.service_check', '_sudo_cmd')
+# Import service helpers for privileged systemctl calls
+_sudo_cmd, start_service, _HAS_SUDO_CMD = safe_import('utils.service_check', '_sudo_cmd', 'start_service')
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +164,7 @@ class AIToolsMixin:
                 return False  # Service not installed
 
             # Start the service
-            subprocess.run(
-                _sudo_cmd(['systemctl', 'start', 'meshforge-map']),
-                capture_output=True, timeout=10
-            )
+            start_service('meshforge-map')
 
             # Wait briefly for service to start
             for _ in range(5):
@@ -424,10 +421,7 @@ class AIToolsMixin:
                 return False  # Service not installed
 
             # Start the service
-            subprocess.run(
-                _sudo_cmd(['systemctl', 'start', 'meshforge-map']),
-                capture_output=True, timeout=10
-            )
+            start_service('meshforge-map')
 
             # Wait for service to start (up to 3 seconds)
             for _ in range(6):

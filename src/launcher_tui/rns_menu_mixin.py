@@ -30,8 +30,8 @@ from backend import clear_screen
 # --- Optional dependency imports via safe_import ---
 from utils.safe_import import safe_import
 
-check_process_running, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', '_sudo_cmd'
+check_process_running, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'start_service', 'stop_service', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -622,14 +622,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
 
         # Stop rnsd first (must stop before clearing auth files)
         print("  Stopping rnsd...")
-        try:
-            subprocess.run(
-                _sudo_cmd(['systemctl', 'stop', 'rnsd']),
-                capture_output=True, text=True, timeout=10
-            )
-            time.sleep(1)  # Give it time to fully stop
-        except Exception as e:
-            print(f"  Warning stopping rnsd: {e}")
+        success, msg = stop_service('rnsd')
+        if not success:
+            print(f"  Warning stopping rnsd: {msg}")
+        time.sleep(1)  # Give it time to fully stop
 
         # Clear stale shared_instance_* files that cause AuthenticationError.
         # These files contain auth tokens that become invalid after config changes.
@@ -693,18 +689,11 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         # Start rnsd with fresh state
         print("  Starting rnsd...")
         try:
-            result = subprocess.run(
-                _sudo_cmd(['systemctl', 'start', 'rnsd']),
-                capture_output=True, text=True, timeout=30
-            )
-            if result.returncode == 0:
+            success, msg = start_service('rnsd')
+            if success:
                 print("  rnsd started successfully")
             else:
-                print(f"  Warning: systemctl returned {result.returncode}")
-                if result.stderr:
-                    print(f"  {result.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            print("  Warning: start timed out")
+                print(f"  Warning: {msg}")
         except Exception as e:
             print(f"  Warning: {e}")
 
