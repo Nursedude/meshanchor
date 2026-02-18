@@ -40,8 +40,8 @@ if not _HAS_PATHS:
         return Path('/root')
 
 # Import service check
-check_service, apply_config_and_restart, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'apply_config_and_restart', '_sudo_cmd'
+check_service, apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'apply_config_and_restart'
 )
 
 # Import device scanner
@@ -358,11 +358,7 @@ class FirstRunMixin:
             shutil.copy2(src, dst)
 
             # Restart meshtasticd
-            if _HAS_APPLY_RESTART:
-                success, msg = apply_config_and_restart('meshtasticd')
-            else:
-                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
-                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
+            apply_config_and_restart('meshtasticd')
 
             self.dialog.msgbox(
                 "Configuration Applied",
@@ -554,11 +550,7 @@ class FirstRunMixin:
             shutil.copy2(source, dest)
 
             # Restart meshtasticd
-            if _HAS_APPLY_RESTART:
-                success, msg = apply_config_and_restart('meshtasticd')
-            else:
-                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
-                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
+            apply_config_and_restart('meshtasticd')
 
             self.dialog.msgbox(
                 "Configuration Applied",
@@ -595,11 +587,7 @@ Serial:
             config_file.write_text(config_content)
 
             # Restart meshtasticd
-            if _HAS_APPLY_RESTART:
-                success, msg = apply_config_and_restart('meshtasticd')
-            else:
-                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
-                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
+            apply_config_and_restart('meshtasticd')
 
             self.dialog.msgbox(
                 "USB Configured",

@@ -17,8 +17,8 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 from utils.safe_import import safe_import
 
-check_process_running, check_udp_port, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port', '_sudo_cmd'
+check_process_running, check_udp_port, start_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -303,10 +303,7 @@ class RNSDiagnosticsMixin:
                         "If rnsd won't start, use RNS > Diagnostics to investigate.",
                     ):
                         try:
-                            subprocess.run(
-                                _sudo_cmd(['systemctl', 'start', 'rnsd']),
-                                capture_output=True, text=True, timeout=30
-                            )
+                            start_service('rnsd')
                             print("Starting rnsd...")
                             if self._wait_for_rns_port(max_wait=10):
                                 print(f"rnsd started. Retrying {tool_name}...\n")
@@ -492,10 +489,7 @@ class RNSDiagnosticsMixin:
                     time.sleep(1)
 
                     print("Starting rnsd...")
-                    subprocess.run(
-                        _sudo_cmd(['systemctl', 'start', 'rnsd']),
-                        capture_output=True, text=True, timeout=15
-                    )
+                    start_service('rnsd')
                     time.sleep(2)
 
                     print("Restarting NomadNet as client...")

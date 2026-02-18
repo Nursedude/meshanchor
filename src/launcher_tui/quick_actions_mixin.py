@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checking
-check_systemd_service, check_process_running, _check_port, _check_udp_port, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port', '_sudo_cmd'
+check_systemd_service, check_process_running, _check_port, _check_udp_port, apply_config_and_restart, restart_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port', 'apply_config_and_restart', 'restart_service', '_sudo_cmd'
 )
 
 # Optional modules for quick actions
@@ -218,10 +218,8 @@ class QuickActionsMixin:
         clear_screen()
         print("Restarting meshtasticd...\n")
         try:
-            subprocess.run(
-                _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
-                timeout=30
-            )
+            success, msg = apply_config_and_restart('meshtasticd')
+            print(msg)
             subprocess.run(
                 ['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'],
                 timeout=10
@@ -241,10 +239,8 @@ class QuickActionsMixin:
         clear_screen()
         print("Restarting rnsd...\n")
         try:
-            subprocess.run(
-                _sudo_cmd(['systemctl', 'restart', 'rnsd']),
-                timeout=30
-            )
+            success, msg = restart_service('rnsd')
+            print(msg)
             subprocess.run(
                 ['systemctl', 'status', 'rnsd', '--no-pager', '-l'],
                 timeout=10
