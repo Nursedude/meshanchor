@@ -386,12 +386,15 @@ class MeshForgeLauncher(
             self._run_basic_launcher()
             return
 
+        # Check for root without SUDO_USER (causes RNS auth issues)
+        # MUST run BEFORE startup checks — _heal_rns_storage_dirs() restarts
+        # rnsd, and restarting under root with a user mismatch corrupts
+        # shared_instance auth tokens, breaking RNS connectivity.
+        self._check_root_without_sudo_user()
+
         # Run startup environment checks (v0.4.8)
         if not self._run_startup_checks():
             return  # User aborted due to conflicts
-
-        # Check for root without SUDO_USER (causes RNS auth issues)
-        self._check_root_without_sudo_user()
 
         # Check for first run and offer setup wizard
         if self._check_first_run():
