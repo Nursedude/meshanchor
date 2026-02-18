@@ -5,10 +5,12 @@ Bridges Reticulum Network Stack and Meshtastic networks
 MeshCore bridge processing extracted to meshcore_bridge_mixin.py.
 """
 
+import signal as _signal_mod
 import threading
 import time
 import logging
 import subprocess
+from contextlib import contextmanager
 from queue import Queue, Empty, Full
 from datetime import datetime
 from typing import Optional, Callable, Dict, Any
@@ -1005,6 +1007,36 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
         except Exception as e:
             logger.debug(f"Persistent queue drain error: {e}")
 
+    @staticmethod
+    @contextmanager
+    def _suppress_signal_in_thread():
+        """Suppress signal.signal() calls when not in the main thread.
+
+        LXMF.LXMRouter() and RNS.Reticulum() internally register signal
+        handlers for graceful shutdown. When called from a background
+        thread, signal.signal() raises ValueError. This context manager
+        temporarily replaces signal.signal with a safe wrapper that
+        returns SIG_DFL instead of raising.
+
+        On the main thread, this is a no-op passthrough.
+        """
+        if threading.current_thread() is threading.main_thread():
+            yield
+            return
+
+        original = _signal_mod.signal
+
+        def _safe_signal(signalnum, handler):
+            # Cannot register signal handlers from non-main thread.
+            # Return default disposition; bridge has its own shutdown logic.
+            return _signal_mod.SIG_DFL
+
+        _signal_mod.signal = _safe_signal
+        try:
+            yield
+        finally:
+            _signal_mod.signal = original
+
     def _init_rns_main_thread(self):
         """Pre-initialize RNS from the main thread.
 
@@ -1095,44 +1127,49 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
         RNS = _RNS_mod
         LXMF = _LXMF_mod
 
-        try:
-            if self._rns_pre_initialized:
-                logger.info("RNS pre-initialized, proceeding to LXMF setup")
-            else:
-                # Fallback: init RNS from background thread.
-                # Works when rnsd is running (client mode, no signal handlers).
-                config_dir = self.config.rns.config_dir or None
-                if not config_dir:
+        # Both RNS.Reticulum() and LXMF.LXMRouter() register signal
+        # handlers internally. When _connect_rns is called from the
+        # background _rns_loop thread, signal.signal() raises ValueError.
+        # Suppress signal registration for the entire init sequence.
+        with self._suppress_signal_in_thread():
+            try:
+                if self._rns_pre_initialized:
+                    logger.info("RNS pre-initialized, proceeding to LXMF setup")
+                else:
+                    # Fallback: init RNS from background thread.
+                    # Works when rnsd is running (client mode, no signal handlers).
+                    config_dir = self.config.rns.config_dir or None
+                    if not config_dir:
+                        try:
+                            effective = get_rnsd_effective_config_dir()
+                            config_dir = str(effective)
+                        except Exception:
+                            pass  # Use RNS default resolution
+
                     try:
-                        effective = get_rnsd_effective_config_dir()
-                        config_dir = str(effective)
-                    except Exception:
-                        pass  # Use RNS default resolution
+                        self._reticulum = RNS.Reticulum(configdir=config_dir)
+                    except Exception as e:
+                        err_msg = str(e).lower()
+                        if "reinitialise" in err_msg or "already running" in err_msg:
+                            logger.info("RNS already initialized, proceeding to LXMF")
+                        elif "signal only works in main thread" in err_msg:
+                            logger.warning("RNS needs main thread init (no rnsd running?)")
+                            self._rns_init_failed_permanently = True
+                            self._connected_rns = False
+                            return
+                        elif hasattr(e, 'errno') and getattr(e, 'errno', None) == 98:
+                            logger.warning(f"RNS port conflict: {e} (will retry)")
+                            self._connected_rns = False
+                            return
+                        else:
+                            raise
 
-                try:
-                    self._reticulum = RNS.Reticulum(configdir=config_dir)
-                except Exception as e:
-                    err_msg = str(e).lower()
-                    if "reinitialise" in err_msg or "already running" in err_msg:
-                        logger.info("RNS already initialized, proceeding to LXMF")
-                    elif "signal only works in main thread" in err_msg:
-                        logger.warning("RNS needs main thread init (no rnsd running?)")
-                        self._rns_init_failed_permanently = True
-                        self._connected_rns = False
-                        return
-                    elif hasattr(e, 'errno') and getattr(e, 'errno', None) == 98:
-                        logger.warning(f"RNS port conflict: {e} (will retry)")
-                        self._connected_rns = False
-                        return
-                    else:
-                        raise
+                # Set up LXMF messaging on top of the RNS instance
+                self._setup_lxmf(RNS, LXMF)
 
-            # Set up LXMF messaging on top of the RNS instance
-            self._setup_lxmf(RNS, LXMF)
-
-        except Exception as e:
-            logger.error(f"Failed to connect to RNS: {e}")
-            self._connected_rns = False
+            except Exception as e:
+                logger.error(f"Failed to connect to RNS: {e}")
+                self._connected_rns = False
 
     def _setup_lxmf(self, RNS, LXMF):
         """Set up LXMF identity, router, and announce handler.
