@@ -382,16 +382,8 @@ class WebClientMixin:
             height=10, width=50
         )
         if choice:
-            try:
-                from utils.service_check import apply_config_and_restart
-                ok, restart_msg = apply_config_and_restart('meshtasticd')
-            except ImportError:
-                result = subprocess.run(
-                    _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
-                    capture_output=True, text=True, timeout=30
-                )
-                ok = result.returncode == 0
-                restart_msg = result.stderr if not ok else "Restarted"
+            from utils.service_check import apply_config_and_restart
+            ok, restart_msg = apply_config_and_restart('meshtasticd')
 
             if ok:
                 self.dialog.msgbox(

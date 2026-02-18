@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from .base import CommandResult
 from utils.safe_import import safe_import
-from utils.service_check import check_service
+from utils.service_check import check_service, start_service, stop_service
 
 logger = logging.getLogger(__name__)
 
@@ -710,19 +710,13 @@ def start_rnsd() -> CommandResult:
             data={'pid': status.data.get('rnsd_pid')}
         )
 
+    # Try systemctl first via centralized helper
+    success, msg = start_service('rnsd')
+    if success:
+        return CommandResult.ok("rnsd started via systemd")
+
+    # Fallback to direct start (non-systemd systems)
     try:
-        # Try systemctl first
-        result = subprocess.run(
-            ['sudo', 'systemctl', 'start', 'rnsd'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode == 0:
-            return CommandResult.ok("rnsd started via systemd")
-
-        # Fallback to direct start
         result = subprocess.run(
             ['rnsd', '--service'],
             capture_output=True,
@@ -754,19 +748,13 @@ def stop_rnsd() -> CommandResult:
     Returns:
         CommandResult indicating success
     """
+    # Try systemctl first via centralized helper
+    success, msg = stop_service('rnsd')
+    if success:
+        return CommandResult.ok("rnsd stopped via systemd")
+
+    # Fallback to pkill (non-systemd systems)
     try:
-        # Try systemctl first
-        result = subprocess.run(
-            ['sudo', 'systemctl', 'stop', 'rnsd'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode == 0:
-            return CommandResult.ok("rnsd stopped via systemd")
-
-        # Fallback to pkill
         result = subprocess.run(
             ['pkill', '-f', 'rnsd'],
             capture_output=True,

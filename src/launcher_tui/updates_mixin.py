@@ -21,8 +21,8 @@ _check_all_versions, _VersionInfo, _HAS_VERSION_CHECKER = safe_import(
 )
 
 # Import service check for restart after updates
-_apply_config_and_restart, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'apply_config_and_restart', '_sudo_cmd'
+_apply_config_and_restart, daemon_reload, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'apply_config_and_restart', 'daemon_reload', '_sudo_cmd'
 )
 
 
@@ -440,10 +440,7 @@ class UpdatesMixin:
 
             # Reload systemd
             if svc_msgs:
-                subprocess.run(
-                    _sudo_cmd(['systemctl', 'daemon-reload']),
-                    capture_output=True, timeout=10
-                )
+                daemon_reload()
         except (OSError, PermissionError) as e:
             svc_msgs.append(f"(warning: {e})")
         except Exception:

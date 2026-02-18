@@ -571,11 +571,7 @@ class MeshForgeLauncher(
             if self.dialog.yesno("Config Conflict", msg):
                 try:
                     usb_config.unlink()
-                    if _HAS_APPLY_RESTART:
-                        success, msg = apply_config_and_restart('meshtasticd')
-                    else:
-                        subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
-                        subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
+                    apply_config_and_restart('meshtasticd')
                     self.dialog.msgbox(
                         "Fixed",
                         "Removed usb-serial.yaml\n"
