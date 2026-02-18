@@ -213,11 +213,11 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
     """
     Check if a UDP port is in use.
 
-    Primary method: parse `ss -uln` output (kernel socket state).
+    Primary method: read /proc/net/udp + /proc/net/udp6 (kernel socket table).
     This is reliable even when the service sets SO_REUSEADDR/SO_REUSEPORT,
     which causes bind-test false negatives.
 
-    Fallback: bind test (only if ss is unavailable).
+    Fallback chain: ss → lsof → bind test.
 
     Args:
         port: UDP port number
@@ -227,10 +227,24 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
     Returns:
         True if port appears to be in use (service running), False otherwise
     """
-    # Primary: use ss to read kernel socket table directly.
-    # The bind-test approach gives false negatives when the service
-    # sets SO_REUSEADDR (e.g., rnsd), allowing our test bind to succeed
-    # even though the port IS in use.
+    # Primary: read /proc/net/udp directly (always available on Linux,
+    # no external tool required). Port is stored as hex in column 1
+    # (local_address) in the format ADDR:PORT_HEX.
+    hex_port = f'{port:04X}'
+    for proc_path in ('/proc/net/udp', '/proc/net/udp6'):
+        try:
+            with open(proc_path, 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        # local_address is "ADDR:PORT_HEX"
+                        local = parts[1]
+                        if local.endswith(':' + hex_port):
+                            return True
+        except (OSError, IOError):
+            continue
+
+    # Fallback 1: ss (not always installed — e.g., minimal containers)
     try:
         result = subprocess.run(
             ['ss', '-uln'],
@@ -239,39 +253,44 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
         if result.returncode == 0 and result.stdout.strip():
             port_str = str(port)
             for line in result.stdout.split('\n'):
-                # ss output format:
-                #   UNCONN 0 0  127.0.0.1:37428  0.0.0.0:*
-                #   UNCONN 0 0      [::1]:37428     [::]:*
-                # Split on whitespace to get Local Address:Port column
                 parts = line.split()
                 if len(parts) >= 5:
-                    local_addr = parts[4]  # e.g., "127.0.0.1:37428" or "[::1]:37428"
+                    local_addr = parts[4]
                     if local_addr.endswith(':' + port_str):
                         return True
             return False
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
-        pass  # ss not available, fall through to bind test
+        pass
 
-    # Fallback: bind test (unreliable with SO_REUSEADDR, but better than nothing)
-    # Try multiple addresses since service might bind to different interfaces
+    # Fallback 2: lsof (commonly available)
+    try:
+        result = subprocess.run(
+            ['lsof', '-i', f'UDP:{port}', '-nP'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Any output means something has the port open
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:  # Header + at least one entry
+                return True
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
+    # Fallback 3: bind test (unreliable with SO_REUSEADDR, last resort)
     hosts_to_check = [host]
     if host == '127.0.0.1':
-        hosts_to_check.append('0.0.0.0')  # Also check wildcard
+        hosts_to_check.append('0.0.0.0')
 
     for check_host in hosts_to_check:
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(timeout)
-            # Try to bind to the port - if it fails, port is in use
             sock.bind((check_host, port))
-            # If we successfully bound, port was NOT in use on this address
             sock.close()
-            continue  # Try next address
+            continue
         except OSError as e:
-            # EADDRINUSE (98 on Linux) means the port is already bound
-            # This indicates the service IS running
-            if e.errno in (98, 48, 10048):  # Linux, macOS, Windows EADDRINUSE
+            if e.errno in (98, 48, 10048):  # EADDRINUSE
                 return True
             logger.debug(f"UDP port check error for {check_host}:{port}: {e}")
         finally:
@@ -279,7 +298,7 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
                 try:
                     sock.close()
                 except Exception:
-                    pass  # Socket close errors are non-critical
+                    pass
 
     return False
 
