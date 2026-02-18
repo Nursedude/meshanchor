@@ -23,6 +23,9 @@ from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from utils.safe_import import safe_import
+from utils.service_check import (
+    _sudo_cmd, apply_config_and_restart, start_service, stop_service
+)
 
 # YAML support (optional, for config validation)
 _yaml_mod, _HAS_YAML = safe_import('yaml')
@@ -222,17 +225,17 @@ class HardwareConfigurator:
         try:
             if action == "enable":
                 console.print("\n[cyan]Enabling SPI...[/cyan]")
-                subprocess.run([
-                    'sudo', 'raspi-config', 'nonint', 'set_config_var',
+                subprocess.run(_sudo_cmd([
+                    'raspi-config', 'nonint', 'set_config_var',
                     'dtparam=spi', 'on', str(self._boot_config_path)
-                ], check=True, timeout=30)
+                ]), check=True, timeout=30)
                 console.print("[green]SPI enabled in config.txt[/green]")
             else:
                 console.print("\n[cyan]Disabling SPI...[/cyan]")
-                subprocess.run([
-                    'sudo', 'raspi-config', 'nonint', 'set_config_var',
+                subprocess.run(_sudo_cmd([
+                    'raspi-config', 'nonint', 'set_config_var',
                     'dtparam=spi', 'off', str(self._boot_config_path)
-                ], check=True, timeout=30)
+                ]), check=True, timeout=30)
                 console.print("[yellow]SPI disabled in config.txt[/yellow]")
 
             console.print("\n[yellow]A reboot is required for changes to take effect.[/yellow]")
@@ -260,15 +263,15 @@ class HardwareConfigurator:
         try:
             if action == "enable":
                 console.print("\n[cyan]Enabling I2C...[/cyan]")
-                subprocess.run([
-                    'sudo', 'raspi-config', 'nonint', 'do_i2c', '0'
-                ], check=True, timeout=30)
+                subprocess.run(_sudo_cmd([
+                    'raspi-config', 'nonint', 'do_i2c', '0'
+                ]), check=True, timeout=30)
                 console.print("[green]I2C enabled[/green]")
             else:
                 console.print("\n[cyan]Disabling I2C...[/cyan]")
-                subprocess.run([
-                    'sudo', 'raspi-config', 'nonint', 'do_i2c', '1'
-                ], check=True, timeout=30)
+                subprocess.run(_sudo_cmd([
+                    'raspi-config', 'nonint', 'do_i2c', '1'
+                ]), check=True, timeout=30)
                 console.print("[yellow]I2C disabled[/yellow]")
 
             console.print("\n[yellow]A reboot is required for changes to take effect.[/yellow]")
@@ -294,15 +297,15 @@ class HardwareConfigurator:
 
         try:
             console.print("\n[cyan]Enabling Serial Port hardware...[/cyan]")
-            subprocess.run([
-                'sudo', 'raspi-config', 'nonint', 'do_serial_hw', '0'
-            ], check=True, timeout=30)
+            subprocess.run(_sudo_cmd([
+                'raspi-config', 'nonint', 'do_serial_hw', '0'
+            ]), check=True, timeout=30)
             console.print("[green]Serial hardware enabled (enable_uart=1)[/green]")
 
             console.print("\n[cyan]Disabling Serial Console...[/cyan]")
-            subprocess.run([
-                'sudo', 'raspi-config', 'nonint', 'do_serial_cons', '1'
-            ], check=True, timeout=30)
+            subprocess.run(_sudo_cmd([
+                'raspi-config', 'nonint', 'do_serial_cons', '1'
+            ]), check=True, timeout=30)
             console.print("[green]Serial console disabled (port freed for hardware)[/green]")
 
             console.print("\n[yellow]A reboot is required for changes to take effect.[/yellow]")
@@ -340,18 +343,18 @@ class HardwareConfigurator:
         try:
             # First ensure SPI is enabled
             console.print("[cyan]Ensuring SPI is enabled...[/cyan]")
-            subprocess.run([
-                'sudo', 'raspi-config', 'nonint', 'set_config_var',
+            subprocess.run(_sudo_cmd([
+                'raspi-config', 'nonint', 'set_config_var',
                 'dtparam=spi', 'on', str(self._boot_config_path)
-            ], check=True, timeout=30)
+            ]), check=True, timeout=30)
 
             # Add the overlay after dtparam=spi=on
             console.print("[cyan]Adding spi0-0cs overlay...[/cyan]")
-            subprocess.run([
-                'sudo', 'sed', '-i',
+            subprocess.run(_sudo_cmd([
+                'sed', '-i',
                 '/^\\s*dtparam=spi=on/a dtoverlay=spi0-0cs',
                 str(self._boot_config_path)
-            ], check=True, timeout=10)
+            ]), check=True, timeout=10)
 
             console.print("[green]SPI overlay added successfully![/green]")
             console.print("\n[yellow]A reboot is required for changes to take effect.[/yellow]")
@@ -485,10 +488,10 @@ class HardwareConfigurator:
             if not spi_enabled:
                 console.print("\n[yellow]SPI is required but not enabled[/yellow]")
                 if Confirm.ask("Enable SPI now?", default=True):
-                    subprocess.run([
-                        'sudo', 'raspi-config', 'nonint', 'set_config_var',
+                    subprocess.run(_sudo_cmd([
+                        'raspi-config', 'nonint', 'set_config_var',
                         'dtparam=spi', 'on', str(self._boot_config_path)
-                    ], check=False, timeout=30)
+                    ]), check=False, timeout=30)
                     needs_reboot = True
 
             if device.spi_overlay:
@@ -499,26 +502,26 @@ class HardwareConfigurator:
                     capture_output=True, timeout=10
                 )
                 if result.returncode != 0:
-                    subprocess.run([
-                        'sudo', 'sed', '-i',
+                    subprocess.run(_sudo_cmd([
+                        'sed', '-i',
                         f'/^\\s*dtparam=spi=on/a dtoverlay={device.spi_overlay}',
                         str(self._boot_config_path)
-                    ], check=False, timeout=10)
+                    ]), check=False, timeout=10)
                     needs_reboot = True
 
         if device.requires_serial:
             if not Path('/dev/serial0').exists():
                 console.print("\n[yellow]Serial port is required[/yellow]")
                 if Confirm.ask("Configure serial for hardware use?", default=True):
-                    subprocess.run(['sudo', 'raspi-config', 'nonint', 'do_serial_hw', '0'], check=False, timeout=30)
-                    subprocess.run(['sudo', 'raspi-config', 'nonint', 'do_serial_cons', '1'], check=False, timeout=30)
+                    subprocess.run(_sudo_cmd(['raspi-config', 'nonint', 'do_serial_hw', '0']), check=False, timeout=30)
+                    subprocess.run(_sudo_cmd(['raspi-config', 'nonint', 'do_serial_cons', '1']), check=False, timeout=30)
                     needs_reboot = True
 
         if device.requires_i2c:
             if not Path('/dev/i2c-1').exists():
                 console.print("\n[yellow]I2C is required but not enabled[/yellow]")
                 if Confirm.ask("Enable I2C now?", default=True):
-                    subprocess.run(['sudo', 'raspi-config', 'nonint', 'do_i2c', '0'], check=False, timeout=30)
+                    subprocess.run(_sudo_cmd(['raspi-config', 'nonint', 'do_i2c', '0']), check=False, timeout=30)
                     needs_reboot = True
 
         # Copy config file
@@ -620,11 +623,14 @@ class HardwareConfigurator:
             console.print(f"\n[green]Copied: {src.name} -> config.d/[/green]")
 
             if Confirm.ask("Edit the config file now?", default=False):
-                subprocess.run(['sudo', 'nano', str(dst)])  # Interactive, no timeout
+                subprocess.run(_sudo_cmd(['nano', str(dst)]))  # Interactive, no timeout
 
             if Confirm.ask("Restart meshtasticd to apply?", default=False):
-                subprocess.run(['sudo', 'systemctl', 'restart', 'meshtasticd'], timeout=30)
-                console.print("[green]Service restarted[/green]")
+                success, msg = apply_config_and_restart('meshtasticd')
+                if success:
+                    console.print("[green]Service restarted[/green]")
+                else:
+                    console.print(f"[red]{msg}[/red]")
 
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
@@ -676,7 +682,7 @@ class HardwareConfigurator:
             console.print("[red]Invalid input[/red]")
             return
 
-        subprocess.run(['sudo', 'nano', str(cfg_path)])  # Interactive editor, no timeout
+        subprocess.run(_sudo_cmd(['nano', str(cfg_path)]))  # Interactive editor, no timeout
 
         # Validate YAML
         console.print("\n[cyan]Validating YAML syntax...[/cyan]")
@@ -692,8 +698,11 @@ class HardwareConfigurator:
             console.print("[dim]PyYAML not installed, skipping validation[/dim]")
 
         if Confirm.ask("Restart meshtasticd to apply changes?", default=False):
-            subprocess.run(['sudo', 'systemctl', 'restart', 'meshtasticd'], timeout=30)
-            console.print("[green]Service restarted[/green]")
+            success, msg = apply_config_and_restart('meshtasticd')
+            if success:
+                console.print("[green]Service restarted[/green]")
+            else:
+                console.print(f"[red]{msg}[/red]")
 
         input("\nPress Enter to continue...")
 
@@ -782,7 +791,7 @@ class HardwareConfigurator:
 
         # Stop meshtasticd gracefully
         console.print("\n[cyan]Stopping meshtasticd service...[/cyan]")
-        subprocess.run(['sudo', 'systemctl', 'stop', 'meshtasticd'], check=False, timeout=30)
+        stop_service('meshtasticd')
 
         console.print("[yellow]Rebooting in 5 seconds... Press Ctrl+C to cancel[/yellow]")
         try:
@@ -790,10 +799,10 @@ class HardwareConfigurator:
             for i in range(5, 0, -1):
                 console.print(f"  {i}...")
                 time.sleep(1)
-            subprocess.run(['sudo', 'reboot'], timeout=10)
+            subprocess.run(_sudo_cmd(['reboot']), timeout=10)
         except KeyboardInterrupt:
             console.print("\n[green]Reboot cancelled.[/green]")
-            subprocess.run(['sudo', 'systemctl', 'start', 'meshtasticd'], check=False, timeout=30)
+            start_service('meshtasticd')
 
         input("\nPress Enter to continue...")
 
