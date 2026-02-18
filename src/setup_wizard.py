@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 
 from utils.safe_import import safe_import
 
-# Module-level safe imports - SINGLE SOURCE OF TRUTH
-_check_service_central, _check_port, _enable_service, _CentralServiceState, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'check_port', 'enable_service', 'ServiceState'
+# Service management — first-party, direct import per CLAUDE.md
+from utils.service_check import (
+    check_service as _check_service_central,
+    check_port as _check_port,
+    enable_service as _enable_service,
+    start_service as _start_service_fn,
+    ServiceState as _CentralServiceState,
+    _sudo_cmd,
+    _sudo_write,
 )
-SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
-_HAS_ENABLE_SERVICE = _HAS_SERVICE_CHECK
 
 _get_real_user_home_mod, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
@@ -303,37 +307,20 @@ class SetupWizard:
         if svc.get('systemd'):
             status.systemd_unit = svc['systemd']
 
-            # Use centralized service checker if available
-            if SERVICE_CHECK_AVAILABLE:
-                try:
-                    central_status = _check_service_central(svc['name'])
-                    if central_status.available:
-                        status.state = WizardServiceState.RUNNING
-                        status.notes.append(f"Running ({central_status.detection_method})")
-                    elif central_status.state == _CentralServiceState.NOT_INSTALLED:
-                        # Keep NOT_INSTALLED state
-                        pass
-                    elif status.state == WizardServiceState.INSTALLED:
-                        status.state = WizardServiceState.STOPPED
-                        if central_status.fix_hint:
-                            status.notes.append(f"Fix: {central_status.fix_hint}")
-                except Exception as e:
-                    logger.debug(f"Centralized check failed for {svc['name']}: {e}")
-                    # Fall through to direct systemctl check
-            else:
-                # Fallback: direct systemctl check
-                try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', svc['systemd']],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if result.stdout.strip() == 'active':
-                        status.state = WizardServiceState.RUNNING
-                        status.notes.append("Running as systemd service")
-                    elif status.state == WizardServiceState.INSTALLED:
-                        status.state = WizardServiceState.STOPPED
-                except Exception:
+            try:
+                central_status = _check_service_central(svc['name'])
+                if central_status.available:
+                    status.state = WizardServiceState.RUNNING
+                    status.notes.append(f"Running ({central_status.detection_method})")
+                elif central_status.state == _CentralServiceState.NOT_INSTALLED:
+                    # Keep NOT_INSTALLED state
                     pass
+                elif status.state == WizardServiceState.INSTALLED:
+                    status.state = WizardServiceState.STOPPED
+                    if central_status.fix_hint:
+                        status.notes.append(f"Fix: {central_status.fix_hint}")
+            except Exception as e:
+                logger.debug(f"Centralized check failed for {svc['name']}: {e}")
 
         # Check if running as process (fallback for non-systemd services)
         if status.state != WizardServiceState.RUNNING:
@@ -539,20 +526,15 @@ class SetupWizard:
     def _start_service(self, name: str):
         """Start a service"""
         self._print(f"Starting {name}...", "dim")
-        try:
-            # Try systemd first
-            result = subprocess.run(
-                ['systemctl', 'start', name],
-                capture_output=True, timeout=30
-            )
-            if result.returncode == 0:
-                self._print(f"  {name} started successfully", "success")
-                self._record_decision(name, "Start service", "attempted", "success")
-                return True
-        except Exception:
-            pass
 
-        # Try direct start
+        # Try systemd via centralized service management
+        success, msg = _start_service_fn(name)
+        if success:
+            self._print(f"  {name} started successfully", "success")
+            self._record_decision(name, "Start service", "attempted", "success")
+            return True
+
+        # Try direct start as fallback (for non-systemd services)
         try:
             subprocess.Popen(
                 [name],
@@ -611,16 +593,13 @@ RestartSec=5
 WantedBy=multi-user.target
 '''
             service_path = '/etc/systemd/system/rnsd.service'
-            with open(service_path, 'w') as f:
-                f.write(service_content)
+            write_ok, write_msg = _sudo_write(service_path, service_content)
+            if not write_ok:
+                raise PermissionError(write_msg)
 
-            if _HAS_ENABLE_SERVICE:
-                success, msg = enable_service('rnsd')
-                if not success:
-                    raise RuntimeError(msg)
-            else:
-                subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
-                subprocess.run(['systemctl', 'enable', 'rnsd'], check=True, timeout=30)
+            success, msg = _enable_service('rnsd')
+            if not success:
+                raise RuntimeError(msg)
 
             self._print("  rnsd service created and enabled", "success")
             self._record_decision("rnsd", "Create systemd service", "created", "success")
