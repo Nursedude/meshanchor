@@ -17,6 +17,11 @@ import socket
 import subprocess
 import threading
 
+from utils.safe_import import safe_import
+
+# Import _sudo_cmd for privileged systemctl calls
+_sudo_cmd, _HAS_SERVICE_CHECK = safe_import('utils.service_check', '_sudo_cmd')
+
 logger = logging.getLogger(__name__)
 
 
@@ -382,7 +387,7 @@ class WebClientMixin:
                 ok, restart_msg = apply_config_and_restart('meshtasticd')
             except ImportError:
                 result = subprocess.run(
-                    ['systemctl', 'restart', 'meshtasticd'],
+                    _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
                     capture_output=True, text=True, timeout=30
                 )
                 ok = result.returncode == 0

@@ -436,12 +436,6 @@ def main():
                 print(f"\n{Colors.YELLOW}Verification completed with issues.{Colors.NC}")
                 sys.exit(2)
 
-    # Check root
-    if os.geteuid() != 0:
-        print(f"\n{Colors.RED}Error: This application requires root/sudo privileges{Colors.NC}")
-        print(f"Please run with: {Colors.CYAN}sudo python3 src/launcher.py{Colors.NC}")
-        sys.exit(1)
-
     # Direct interface flag (skip menu)
     if '--tui' in sys.argv:
         launch_interface('1')

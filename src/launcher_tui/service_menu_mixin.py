@@ -18,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 # Import centralized service checking
 (check_systemd_service, check_process_running, check_service,
- apply_config_and_restart, enable_service, ServiceState,
+ apply_config_and_restart, enable_service, ServiceState, _sudo_cmd,
  _HAS_SERVICE_CHECK) = safe_import(
     'utils.service_check',
     'check_systemd_service', 'check_process_running', 'check_service',
-    'apply_config_and_restart', 'enable_service', 'ServiceState',
+    'apply_config_and_restart', 'enable_service', 'ServiceState', '_sudo_cmd',
 )
 _HAS_APPLY_RESTART = _HAS_SERVICE_CHECK
 
@@ -208,12 +208,12 @@ class ServiceMenuMixin:
                     else:
                         # Try direct start
                         subprocess.run(
-                            ['systemctl', 'start', 'rnsd'],
+                            _sudo_cmd(['systemctl', 'start', 'rnsd']),
                             capture_output=True, text=True, timeout=15
                         )
                 else:
                     subprocess.run(
-                        ['systemctl', 'start', 'rnsd'],
+                        _sudo_cmd(['systemctl', 'start', 'rnsd']),
                         capture_output=True, text=True, timeout=15
                     )
                 time.sleep(2)
@@ -648,7 +648,7 @@ class ServiceMenuMixin:
         """Restart the meshtasticd service."""
         clear_screen()
         print("Restarting meshtasticd...\n")
-        subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30)
+        subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30)
         subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
         self._wait_for_enter()
 
@@ -659,7 +659,7 @@ class ServiceMenuMixin:
         if not self._has_systemd_unit('rnsd'):
             self._start_rnsd_direct()
         else:
-            subprocess.run(['systemctl', 'start', 'rnsd'], timeout=30)
+            subprocess.run(_sudo_cmd(['systemctl', 'start', 'rnsd']), timeout=30)
             subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
         self._wait_for_enter()
 
@@ -673,7 +673,7 @@ class ServiceMenuMixin:
             time.sleep(0.5)
             self._start_rnsd_direct()
         else:
-            subprocess.run(['systemctl', 'restart', 'rnsd'], timeout=30)
+            subprocess.run(_sudo_cmd(['systemctl', 'restart', 'rnsd']), timeout=30)
             subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
         self._wait_for_enter()
 
@@ -752,8 +752,8 @@ General:
                 if _HAS_APPLY_RESTART:
                     success, msg = apply_config_and_restart('meshtasticd')
                 else:
-                    subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                    subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                    subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                    subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
 
                 self.dialog.msgbox(
                     "Config Fixed",
@@ -898,9 +898,9 @@ WantedBy=multi-user.target
                 if not success:
                     self.dialog.msgbox("Warning", f"Service setup issue: {msg}")
             else:
-                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'enable', 'meshtasticd'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'enable', 'meshtasticd']), timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
 
             self.dialog.msgbox(
                 "Success",
@@ -1099,7 +1099,7 @@ WantedBy=multi-user.target
             if use_direct_rnsd:
                 self._start_rnsd_direct()
             else:
-                subprocess.run(['systemctl', 'start', service_name], timeout=30)
+                subprocess.run(_sudo_cmd(['systemctl', 'start', service_name]), timeout=30)
                 subprocess.run(
                     ['systemctl', 'status', service_name, '--no-pager', '-l'],
                     timeout=10
@@ -1113,7 +1113,7 @@ WantedBy=multi-user.target
                 if use_direct_rnsd:
                     self._stop_rnsd_direct()
                 else:
-                    subprocess.run(['systemctl', 'stop', service_name], timeout=30)
+                    subprocess.run(_sudo_cmd(['systemctl', 'stop', service_name]), timeout=30)
                     print(f"{service_name} stopped.")
                 self._wait_for_enter()
 
@@ -1125,7 +1125,7 @@ WantedBy=multi-user.target
                 time.sleep(0.5)
                 self._start_rnsd_direct()
             else:
-                subprocess.run(['systemctl', 'restart', service_name], timeout=30)
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', service_name]), timeout=30)
                 subprocess.run(
                     ['systemctl', 'status', service_name, '--no-pager', '-l'],
                     timeout=10
@@ -1492,11 +1492,11 @@ WantedBy=multi-user.target
             else:
                 # Fallback to direct systemctl calls
                 subprocess.run(
-                    ['systemctl', 'enable', 'mosquitto'],
+                    _sudo_cmd(['systemctl', 'enable', 'mosquitto']),
                     timeout=30, check=False
                 )
                 subprocess.run(
-                    ['systemctl', 'start', 'mosquitto'],
+                    _sudo_cmd(['systemctl', 'start', 'mosquitto']),
                     timeout=30, check=False
                 )
 
