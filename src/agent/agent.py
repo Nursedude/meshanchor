@@ -136,7 +136,7 @@ class AgentConfig:
                 if _sudo_user and _sudo_user != 'root' and '/' not in _sudo_user and '..' not in _sudo_user:
                     home = Path(f'/home/{_sudo_user}')
                 else:
-                    home = Path.home()
+                    home = Path("/tmp")  # MF001: safe fallback for sudo
             self.data_dir = str(home / ".config" / "meshforge" / "agent")
 
         # Set default PID file
