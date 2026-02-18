@@ -249,8 +249,10 @@ subprocess.run(_sudo_cmd(['reboot']), timeout=10)
 | `check_service(name)` | Pre-flight check before connecting |
 | `apply_config_and_restart(name)` | After config file changes |
 | `enable_service(name, start=False)` | After creating service files |
+| `disable_service(name)` | Disable a service from boot |
 | `start_service(name)` | Start a stopped service |
 | `stop_service(name)` | Stop a running service |
+| `restart_service(name)` | Simple restart (no daemon-reload) |
 | `daemon_reload()` | After modifying .service units |
 | `_sudo_cmd(cmd_list)` | Prefix command with sudo when not root |
 | `_sudo_write(path, content)` | Write to /etc/ with privilege elevation |
