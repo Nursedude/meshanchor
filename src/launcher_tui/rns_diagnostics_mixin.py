@@ -17,8 +17,8 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 from utils.safe_import import safe_import
 
-check_process_running, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running'
+check_process_running, check_udp_port, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -120,17 +120,32 @@ class RNSDiagnosticsMixin:
             print(f"  Could not check: {e}")
 
         # Check if shared instance port is actually listening
-        import socket
+        # RNS uses UDP port 37428, NOT TCP — must use UDP bind test
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                port_ok = s.connect_ex(('127.0.0.1', 37428)) == 0
+            if _HAS_SERVICE_CHECK:
+                port_ok = check_udp_port(37428)
+            else:
+                # Fallback: try UDP bind test inline
+                import socket
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.settimeout(1)
+                    sock.bind(('127.0.0.1', 37428))
+                    sock.close()
+                    port_ok = False  # Bind succeeded = port NOT in use
+                except OSError as e:
+                    port_ok = e.errno in (98, 48, 10048)  # EADDRINUSE = port in use
+                finally:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
             if running and not port_ok:
                 print("  ! rnsd running but port 37428 NOT listening")
                 warnings.append("rnsd active but shared instance port not bound")
             elif running and port_ok:
                 print(f"  Shared instance port 37428: listening")
-        except OSError:
+        except Exception:
             pass
 
         # Summary
@@ -346,20 +361,32 @@ class RNSDiagnosticsMixin:
             print("Try restarting rnsd: sudo systemctl restart rnsd")
 
     def _wait_for_rns_port(self, max_wait: int = 10) -> bool:
-        """Wait for rnsd to start listening on port 37428.
+        """Wait for rnsd to start listening on UDP port 37428.
 
-        Polls the port with 1-second intervals. Returns True if port
-        becomes available, False if timeout expires.
+        Polls the port with 1-second intervals using UDP bind test.
+        Returns True if port becomes available, False if timeout expires.
         """
-        import socket
         for i in range(max_wait):
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(1)
-                    if s.connect_ex(('127.0.0.1', 37428)) == 0:
+            if _HAS_SERVICE_CHECK:
+                if check_udp_port(37428):
+                    return True
+            else:
+                # Fallback: inline UDP bind test
+                import socket
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    sock.settimeout(1)
+                    sock.bind(('127.0.0.1', 37428))
+                    sock.close()
+                    # Bind succeeded = port NOT in use, keep waiting
+                except OSError as e:
+                    if e.errno in (98, 48, 10048):  # EADDRINUSE
                         return True
-            except OSError:
-                pass
+                finally:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
             time.sleep(1)
         return False
 
