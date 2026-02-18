@@ -212,13 +212,56 @@ from utils.service_check import daemon_reload
 success, msg = daemon_reload()
 ```
 
+### Starting / Stopping Services
+```python
+from utils.service_check import start_service, stop_service
+
+# Start a service (uses _sudo_cmd internally):
+success, msg = start_service('meshtasticd')
+
+# Stop a service before reboot:
+success, msg = stop_service('meshtasticd')
+```
+
+### Writing to System Paths (/etc/)
+```python
+from utils.service_check import _sudo_write
+
+# Write a systemd service file (elevates with sudo tee when not root):
+success, msg = _sudo_write('/etc/systemd/system/rnsd.service', service_content)
+
+# Write a config file:
+success, msg = _sudo_write('/etc/meshtasticd/config.yaml', yaml_content)
+```
+
+### Privilege Elevation for Arbitrary Commands
+```python
+from utils.service_check import _sudo_cmd
+
+# Wrap any command that needs root — adds 'sudo' only when not already root:
+subprocess.run(_sudo_cmd(['raspi-config', 'nonint', 'do_spi', '0']), check=True, timeout=30)
+subprocess.run(_sudo_cmd(['reboot']), timeout=10)
+```
+
 ### Available Helpers
 | Function | Use Case |
 |----------|----------|
 | `check_service(name)` | Pre-flight check before connecting |
 | `apply_config_and_restart(name)` | After config file changes |
 | `enable_service(name, start=False)` | After creating service files |
+| `start_service(name)` | Start a stopped service |
+| `stop_service(name)` | Stop a running service |
 | `daemon_reload()` | After modifying .service units |
+| `_sudo_cmd(cmd_list)` | Prefix command with sudo when not root |
+| `_sudo_write(path, content)` | Write to /etc/ with privilege elevation |
+
+### NOPASSWD Sudoers Rule (Turnkey Appliances)
+For dedicated mesh appliances where interactive password entry is impractical:
+```bash
+sudo cp templates/sudoers.d/meshforge-nopasswd /etc/sudoers.d/meshforge
+sudo chmod 440 /etc/sudoers.d/meshforge
+sudo visudo -cf /etc/sudoers.d/meshforge  # validate syntax
+```
 
 ### Note on Fallbacks
 Legacy fallback patterns were removed in v0.5.2 (Issue #26). All code now imports
