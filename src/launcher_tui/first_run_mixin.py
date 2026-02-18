@@ -40,8 +40,8 @@ if not _HAS_PATHS:
         return Path('/root')
 
 # Import service check
-check_service, apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'apply_config_and_restart'
+check_service, apply_config_and_restart, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
+    'utils.service_check', 'check_service', 'apply_config_and_restart', '_sudo_cmd'
 )
 
 # Import device scanner
@@ -361,8 +361,8 @@ class FirstRunMixin:
             if _HAS_APPLY_RESTART:
                 success, msg = apply_config_and_restart('meshtasticd')
             else:
-                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
 
             self.dialog.msgbox(
                 "Configuration Applied",
@@ -557,8 +557,8 @@ class FirstRunMixin:
             if _HAS_APPLY_RESTART:
                 success, msg = apply_config_and_restart('meshtasticd')
             else:
-                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
 
             self.dialog.msgbox(
                 "Configuration Applied",
@@ -598,8 +598,8 @@ Serial:
             if _HAS_APPLY_RESTART:
                 success, msg = apply_config_and_restart('meshtasticd')
             else:
-                subprocess.run(['systemctl', 'daemon-reload'], timeout=30, check=False)
-                subprocess.run(['systemctl', 'restart', 'meshtasticd'], timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'daemon-reload']), timeout=30, check=False)
+                subprocess.run(_sudo_cmd(['systemctl', 'restart', 'meshtasticd']), timeout=30, check=False)
 
             self.dialog.msgbox(
                 "USB Configured",

@@ -25,17 +25,36 @@ Usage:
         show_fix(status.fix_hint)
 """
 
+import os
 import socket
 import subprocess
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from enum import Enum
 
 from utils.ports import MESHTASTICD_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
 
 logger = logging.getLogger(__name__)
+
+
+def _sudo_cmd(cmd: List[str]) -> List[str]:
+    """Prefix a command with 'sudo' when MeshForge is not running as root.
+
+    Allows MeshForge to run as a normal user and only elevate for
+    specific operations (systemctl, iptables, etc.).  When already root,
+    returns the command unchanged.
+
+    Args:
+        cmd: Command and arguments, e.g. ['systemctl', 'restart', 'rnsd']
+
+    Returns:
+        The command, possibly prefixed with ['sudo'].
+    """
+    if os.geteuid() != 0:
+        return ['sudo'] + cmd
+    return cmd
 
 # Public API - these are the functions/classes intended for external use
 __all__ = [
@@ -55,6 +74,8 @@ __all__ = [
     'unlock_port_external',      # Restore external access to a port
     'check_port_locked',         # Check if port is locked to localhost
     'persist_iptables',          # Save iptables rules to survive reboot
+    # Privilege elevation
+    '_sudo_cmd',            # Prefix command with sudo when not root
     # Data classes
     'ServiceStatus',        # Return type from check_service
     'ServiceState',         # Status enum (AVAILABLE, DEGRADED, FAILED, etc.)
@@ -733,20 +754,20 @@ def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 3
     """
     try:
         # Step 1: Reload systemd daemon to pick up any service file changes
-        daemon_reload = subprocess.run(
-            ['systemctl', 'daemon-reload'],
+        reload_cmd = subprocess.run(
+            _sudo_cmd(['systemctl', 'daemon-reload']),
             capture_output=True,
             text=True,
             timeout=timeout
         )
-        if daemon_reload.returncode != 0:
-            error_msg = daemon_reload.stderr.strip() or "daemon-reload failed"
+        if reload_cmd.returncode != 0:
+            error_msg = reload_cmd.stderr.strip() or "daemon-reload failed"
             logger.error(f"daemon-reload failed: {error_msg}")
             return False, f"daemon-reload failed: {error_msg}"
 
         # Step 2: Restart the service
         restart = subprocess.run(
-            ['systemctl', 'restart', service_name],
+            _sudo_cmd(['systemctl', 'restart', service_name]),
             capture_output=True,
             text=True,
             timeout=timeout
@@ -794,7 +815,7 @@ def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:
     """
     try:
         result = subprocess.run(
-            ['systemctl', 'daemon-reload'],
+            _sudo_cmd(['systemctl', 'daemon-reload']),
             capture_output=True,
             text=True,
             timeout=timeout
@@ -847,7 +868,7 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
     try:
         # Step 1: Reload systemd daemon to pick up service file changes
         reload_result = subprocess.run(
-            ['systemctl', 'daemon-reload'],
+            _sudo_cmd(['systemctl', 'daemon-reload']),
             capture_output=True,
             text=True,
             timeout=timeout
@@ -859,7 +880,7 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
 
         # Step 2: Enable the service
         enable_result = subprocess.run(
-            ['systemctl', 'enable', service_name],
+            _sudo_cmd(['systemctl', 'enable', service_name]),
             capture_output=True,
             text=True,
             timeout=timeout
@@ -872,7 +893,7 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
         # Step 3: Optionally start the service
         if start:
             start_result = subprocess.run(
-                ['systemctl', 'start', service_name],
+                _sudo_cmd(['systemctl', 'start', service_name]),
                 capture_output=True,
                 text=True,
                 timeout=timeout
@@ -927,7 +948,7 @@ def lock_port_external(port: int = 9443, timeout: int = 10) -> Tuple[bool, str]:
     try:
         # Check if rule already exists (idempotent)
         check = subprocess.run(
-            ['iptables', '-C', 'INPUT'] + rule_args,
+            _sudo_cmd(['iptables', '-C', 'INPUT'] + rule_args),
             capture_output=True, text=True, timeout=timeout
         )
         if check.returncode == 0:
@@ -936,7 +957,7 @@ def lock_port_external(port: int = 9443, timeout: int = 10) -> Tuple[bool, str]:
 
         # Add the rule
         result = subprocess.run(
-            ['iptables', '-A', 'INPUT'] + rule_args,
+            _sudo_cmd(['iptables', '-A', 'INPUT'] + rule_args),
             capture_output=True, text=True, timeout=timeout
         )
         if result.returncode == 0:
@@ -972,7 +993,7 @@ def unlock_port_external(port: int = 9443, timeout: int = 10) -> Tuple[bool, str
 
     try:
         result = subprocess.run(
-            ['iptables', '-D', 'INPUT'] + rule_args,
+            _sudo_cmd(['iptables', '-D', 'INPUT'] + rule_args),
             capture_output=True, text=True, timeout=timeout
         )
         if result.returncode == 0:
@@ -1004,7 +1025,7 @@ def check_port_locked(port: int = 9443, timeout: int = 10) -> bool:
                  '!', '-s', '127.0.0.1', '-j', 'REJECT']
     try:
         result = subprocess.run(
-            ['iptables', '-C', 'INPUT'] + rule_args,
+            _sudo_cmd(['iptables', '-C', 'INPUT'] + rule_args),
             capture_output=True, text=True, timeout=timeout
         )
         return result.returncode == 0
@@ -1024,7 +1045,7 @@ def persist_iptables(timeout: int = 30) -> Tuple[bool, str]:
     # Method 1: netfilter-persistent (Debian/Ubuntu with iptables-persistent)
     try:
         result = subprocess.run(
-            ['netfilter-persistent', 'save'],
+            _sudo_cmd(['netfilter-persistent', 'save']),
             capture_output=True, text=True, timeout=timeout
         )
         if result.returncode == 0:
@@ -1049,7 +1070,7 @@ def persist_iptables(timeout: int = 30) -> Tuple[bool, str]:
         rules_file = rules_dir / 'rules.v4'
 
         save_result = subprocess.run(
-            ['iptables-save'],
+            _sudo_cmd(['iptables-save']),
             capture_output=True, text=True, timeout=timeout
         )
         if save_result.returncode != 0:

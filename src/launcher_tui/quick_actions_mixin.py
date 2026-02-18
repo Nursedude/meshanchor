@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checking
-check_systemd_service, check_process_running, _check_port, _check_udp_port, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port'
+check_systemd_service, check_process_running, _check_port, _check_udp_port, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port', '_sudo_cmd'
 )
 
 # Optional modules for quick actions
@@ -219,7 +219,7 @@ class QuickActionsMixin:
         print("Restarting meshtasticd...\n")
         try:
             subprocess.run(
-                ['systemctl', 'restart', 'meshtasticd'],
+                _sudo_cmd(['systemctl', 'restart', 'meshtasticd']),
                 timeout=30
             )
             subprocess.run(
@@ -242,7 +242,7 @@ class QuickActionsMixin:
         print("Restarting rnsd...\n")
         try:
             subprocess.run(
-                ['systemctl', 'restart', 'rnsd'],
+                _sudo_cmd(['systemctl', 'restart', 'rnsd']),
                 timeout=30
             )
             subprocess.run(

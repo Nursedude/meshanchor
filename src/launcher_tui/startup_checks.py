@@ -248,8 +248,8 @@ class StartupChecker:
 
         # Ensure RNS storage directories exist (self-healing)
         # Prevents rnsd PermissionError on /etc/reticulum/storage/ratchets
-        if env.is_root:
-            self._heal_rns_storage_dirs()
+        # Runs as root or non-root — gracefully degrades if no permissions
+        self._heal_rns_storage_dirs()
 
         # Check services
         env.services = self._check_services()

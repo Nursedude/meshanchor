@@ -30,8 +30,8 @@ from backend import clear_screen
 # --- Optional dependency imports via safe_import ---
 from utils.safe_import import safe_import
 
-check_process_running, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running'
+check_process_running, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -624,7 +624,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         print("  Stopping rnsd...")
         try:
             subprocess.run(
-                ['systemctl', 'stop', 'rnsd'],
+                _sudo_cmd(['systemctl', 'stop', 'rnsd']),
                 capture_output=True, text=True, timeout=10
             )
             time.sleep(1)  # Give it time to fully stop
@@ -694,7 +694,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         print("  Starting rnsd...")
         try:
             result = subprocess.run(
-                ['systemctl', 'start', 'rnsd'],
+                _sudo_cmd(['systemctl', 'start', 'rnsd']),
                 capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0:
