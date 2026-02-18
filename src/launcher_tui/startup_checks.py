@@ -71,11 +71,8 @@ else:
             return Path(f'/home/{logname}')
         return Path('/root')
 
-# Import ReticulumPaths and apply_config_and_restart for _heal_rns_storage_dirs
+# Import ReticulumPaths for _heal_rns_storage_dirs (directory creation only)
 _ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')
-_apply_config_and_restart, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'apply_config_and_restart'
-)
 
 
 class ServiceRunState(Enum):
@@ -274,95 +271,31 @@ class StartupChecker:
         self._cache = None
 
     def _heal_rns_storage_dirs(self):
-        """Create missing RNS storage directories and restart rnsd if needed.
+        """Ensure RNS storage directories exist with correct permissions.
 
         RNS requires several subdirectories under /etc/reticulum/storage/:
         - ratchets/ (Identity.persist_job key ratcheting)
         - resources/ (Reticulum.__init__ resource storage)
         - cache/announces/ (Transport announce caching)
-        If any are missing, we create them and restart rnsd.
 
-        GUARD: Will NOT restart rnsd when running as root but rnsd runs as a
-        different user.  Restarting in that context regenerates shared_instance
-        auth tokens under root ownership, causing RPC auth failures for the
-        normal user after they exit the sudo session.  Directories are still
-        created/fixed — only the restart is suppressed.
+        This method ONLY creates missing directories and fixes permissions.
+        It never restarts rnsd — that's rnsd's job via systemd.  If rnsd is
+        crashing due to missing dirs, the health monitor will report it and
+        the user can restart from the service menu.
+
+        Previous versions auto-restarted rnsd here, which caused the #1
+        "gotcha": running sudo meshforge would restart rnsd under root
+        context, regenerating shared_instance auth tokens and breaking
+        RNS connectivity for the normal user.
         """
         if not _HAS_RETICULUM_PATHS:
             return
-
-        ratchets = _ReticulumPaths.ETC_RATCHETS
-        resources = _ReticulumPaths.ETC_RESOURCES
-        announces = _ReticulumPaths.ETC_ANNOUNCE_CACHE
-        needs_restart = (
-            _ReticulumPaths.ETC_BASE.exists()
-            and (
-                not ratchets.exists()
-                or not resources.exists()
-                or not announces.exists()
-                or self._has_permission_issues(announces)
-            )
-        )
 
         if not _ReticulumPaths.ensure_system_dirs():
             logger.debug("Could not create /etc/reticulum directories")
             return
 
-        if needs_restart:
-            # Check for root/rnsd user mismatch before restarting.
-            # If MeshForge runs as root but rnsd runs as a non-root user,
-            # restarting rnsd from this context corrupts shared_instance
-            # auth tokens — the #1 cause of "gotcha" RNS connectivity loss.
-            if self._has_rnsd_user_mismatch():
-                logger.warning(
-                    "RNS storage dirs fixed but skipping rnsd restart: "
-                    "root/rnsd user mismatch detected. "
-                    "User should restart rnsd manually after exiting sudo."
-                )
-                return
-
-            # No mismatch — safe to restart
-            logger.info("Created missing RNS storage/ratchets dir, restarting rnsd")
-            if _HAS_APPLY_RESTART:
-                success, msg = _apply_config_and_restart('rnsd')
-                if success:
-                    logger.info("rnsd restarted after storage dir fix")
-                else:
-                    logger.warning("rnsd restart failed: %s", msg)
-            else:
-                # Fallback if service_check not available
-                try:
-                    subprocess.run(
-                        ['systemctl', 'restart', 'rnsd'],
-                        timeout=30, capture_output=True
-                    )
-                except Exception as e:
-                    logger.debug("rnsd restart fallback failed: %s", e)
-
-    @staticmethod
-    def _has_rnsd_user_mismatch() -> bool:
-        """Check if rnsd runs as a different user than the current process.
-
-        Returns True if MeshForge is root but rnsd runs as a non-root user,
-        which means restarting rnsd from this context would corrupt
-        shared_instance auth tokens.
-        """
-        if os.geteuid() != 0:
-            return False  # Not root — no mismatch possible
-
-        try:
-            result = subprocess.run(
-                ['ps', '-o', 'user=', '-C', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                rnsd_user = result.stdout.strip().split('\n')[0]
-                if rnsd_user and rnsd_user != 'root':
-                    return True
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
-
-        return False
+        logger.debug("RNS storage directories verified")
 
     @staticmethod
     def _has_permission_issues(dir_path: Path) -> bool:
