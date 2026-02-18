@@ -281,6 +281,12 @@ class StartupChecker:
         - resources/ (Reticulum.__init__ resource storage)
         - cache/announces/ (Transport announce caching)
         If any are missing, we create them and restart rnsd.
+
+        GUARD: Will NOT restart rnsd when running as root but rnsd runs as a
+        different user.  Restarting in that context regenerates shared_instance
+        auth tokens under root ownership, causing RPC auth failures for the
+        normal user after they exit the sudo session.  Directories are still
+        created/fixed — only the restart is suppressed.
         """
         if not _HAS_RETICULUM_PATHS:
             return
@@ -303,7 +309,19 @@ class StartupChecker:
             return
 
         if needs_restart:
-            # Directories were just created — restart rnsd so it stops crashing
+            # Check for root/rnsd user mismatch before restarting.
+            # If MeshForge runs as root but rnsd runs as a non-root user,
+            # restarting rnsd from this context corrupts shared_instance
+            # auth tokens — the #1 cause of "gotcha" RNS connectivity loss.
+            if self._has_rnsd_user_mismatch():
+                logger.warning(
+                    "RNS storage dirs fixed but skipping rnsd restart: "
+                    "root/rnsd user mismatch detected. "
+                    "User should restart rnsd manually after exiting sudo."
+                )
+                return
+
+            # No mismatch — safe to restart
             logger.info("Created missing RNS storage/ratchets dir, restarting rnsd")
             if _HAS_APPLY_RESTART:
                 success, msg = _apply_config_and_restart('rnsd')
@@ -320,6 +338,31 @@ class StartupChecker:
                     )
                 except Exception as e:
                     logger.debug("rnsd restart fallback failed: %s", e)
+
+    @staticmethod
+    def _has_rnsd_user_mismatch() -> bool:
+        """Check if rnsd runs as a different user than the current process.
+
+        Returns True if MeshForge is root but rnsd runs as a non-root user,
+        which means restarting rnsd from this context would corrupt
+        shared_instance auth tokens.
+        """
+        if os.geteuid() != 0:
+            return False  # Not root — no mismatch possible
+
+        try:
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                rnsd_user = result.stdout.strip().split('\n')[0]
+                if rnsd_user and rnsd_user != 'root':
+                    return True
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+
+        return False
 
     @staticmethod
     def _has_permission_issues(dir_path: Path) -> bool:
