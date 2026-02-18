@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checking
-check_systemd_service, check_process_running, _check_port, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port'
+check_systemd_service, check_process_running, _check_port, _check_udp_port, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port'
 )
 
 # Optional modules for quick actions
@@ -275,12 +275,26 @@ class QuickActionsMixin:
             (1883, 'MQTT broker'),
         ]
 
+        # RNS uses UDP port 37428, all others are TCP
+        _udp_ports = {37428}
+
         for port, desc in ports:
             try:
-                if _HAS_SERVICE_CHECK:
+                if port in _udp_ports:
+                    if _HAS_SERVICE_CHECK:
+                        port_open = _check_udp_port(port)
+                    else:
+                        try:
+                            with sock.socket(sock.AF_INET, sock.SOCK_DGRAM) as s:
+                                s.settimeout(1)
+                                s.bind(('127.0.0.1', port))
+                                port_open = False  # Bind OK = not in use
+                        except OSError as e:
+                            port_open = e.errno in (98, 48, 10048)
+                elif _HAS_SERVICE_CHECK:
                     port_open = _check_port(port, host='127.0.0.1', timeout=1.0)
                 else:
-                    # Fallback to direct socket check
+                    # Fallback to direct TCP socket check
                     with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
                         s.settimeout(1)
                         result = s.connect_ex(('127.0.0.1', port))
