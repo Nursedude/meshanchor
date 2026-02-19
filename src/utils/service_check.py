@@ -26,6 +26,7 @@ Usage:
 """
 
 import os
+import re
 import socket
 import subprocess
 import logging
@@ -63,6 +64,7 @@ __all__ = [
     'require_service',      # Check with exception on failure
     'check_port',           # TCP port check (utility)
     'check_udp_port',       # UDP port check (utility)
+    'get_udp_port_owner',   # UDP port owner lookup (process name + PID)
     'check_process_running', # Process check via pgrep (utility)
     'check_systemd_service', # Systemd status check
     # Service management
@@ -327,6 +329,77 @@ def check_udp_port(port: int, host: str = '127.0.0.1', timeout: float = 2.0) -> 
                     pass
 
     return False
+
+
+def get_udp_port_owner(port: int) -> Optional[Tuple[str, int]]:
+    """Get the process name and PID that owns a UDP port.
+
+    Primary: ``ss -ulnp``. Fallback: ``/proc/net/udp`` inode scan.
+
+    Args:
+        port: UDP port number to check.
+
+    Returns:
+        Tuple of ``(process_name, pid)`` if found, ``None`` otherwise.
+    """
+    # Primary: ss -ulnp shows process info for UDP listeners
+    try:
+        result = subprocess.run(
+            ['ss', '-ulnp', 'sport', '=', f':{port}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Parse users:(("process",pid=NNN,fd=N)) pattern
+            m = re.search(
+                r'users:\(\("([^"]+)",pid=(\d+)',
+                result.stdout
+            )
+            if m:
+                return (m.group(1), int(m.group(2)))
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
+    # Fallback: find inode in /proc/net/udp, then scan /proc/*/fd
+    hex_port = f'{port:04X}'
+    target_inode = None
+    for proc_path in ('/proc/net/udp', '/proc/net/udp6'):
+        try:
+            with open(proc_path, 'r') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 10:
+                        local = parts[1]
+                        if local.endswith(':' + hex_port):
+                            target_inode = parts[9]
+                            break
+            if target_inode:
+                break
+        except (OSError, IOError):
+            continue
+
+    if not target_inode:
+        return None
+
+    # Scan /proc/*/fd for the inode
+    proc_dir = Path('/proc')
+    for pid_dir in proc_dir.iterdir():
+        if not pid_dir.name.isdigit():
+            continue
+        fd_dir = pid_dir / 'fd'
+        try:
+            for fd in fd_dir.iterdir():
+                try:
+                    link = os.readlink(str(fd))
+                    if f'socket:[{target_inode}]' in link:
+                        comm_path = pid_dir / 'comm'
+                        name = comm_path.read_text().strip()
+                        return (name, int(pid_dir.name))
+                except (OSError, ValueError):
+                    continue
+        except (OSError, PermissionError):
+            continue
+
+    return None
 
 
 def check_process_running(process_name: str) -> bool:
