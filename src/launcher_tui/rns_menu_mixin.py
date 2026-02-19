@@ -533,9 +533,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             "This will attempt to fix RNS shared instance issues.\n\n"
             "What it does:\n"
             "  1. Ensures /etc/reticulum/ dirs exist & deploys config if missing\n"
-            "  2. Validates rnsd.service file (fixes misplaced directives)\n"
-            "  3. Clears stale auth tokens & restarts rnsd\n"
-            "  4. Verifies port 37428 is listening\n\n"
+            "  2. Validates rnsd.service file (fixes ExecStart & directives)\n"
+            "  3. Checks rnsd Python dependencies (meshtastic, etc.)\n"
+            "  4. Clears stale auth tokens & restarts rnsd\n"
+            "  5. Verifies port 37428 is listening\n\n"
             "Your existing RNS config will NOT be overwritten.\n\n"
             "Run diagnostics first? Use RNS > Diagnostics.\n\n"
             "Proceed with repair?",
@@ -556,9 +557,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         Steps:
         1. Ensures /etc/reticulum/ directories exist with correct permissions,
            deploys template ONLY if no config exists anywhere (never overwrites)
-        2. Validates rnsd.service file (fixes misplaced systemd directives)
-        3. Clears stale auth tokens, checks blocking interfaces, restarts rnsd
-        4. Verifies shared instance is now available (UDP port 37428)
+        2. Validates rnsd.service file (fixes ExecStart path & misplaced directives)
+        3. Checks rnsd Python dependencies for enabled interface plugins
+        4. Clears stale auth tokens, checks blocking interfaces, restarts rnsd
+        5. Verifies shared instance is now available (UDP port 37428)
 
         Returns True if fix was successful.
         """
@@ -572,33 +574,20 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         target_dir = Path('/etc/reticulum')
         target = target_dir / 'config'
 
-        print(f"\n[1/4] Checking RNS config and directories...")
+        print(f"\n[1/5] Checking RNS config and directories...")
 
         try:
-            # Create /etc/reticulum/ directory structure
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create required subdirectories that rnsd needs to write to
-            storage_dir = target_dir / 'storage'
-            interfaces_dir = target_dir / 'interfaces'
-
-            # Use 0o777 for storage dirs — rnsd may run as a different user
-            # than MeshForge, and NomadNet launches as the real user (not root).
-            # Must match ensure_system_dirs() in paths.py.
-            old_umask = os.umask(0)
-            try:
-                storage_dir.mkdir(mode=0o777, exist_ok=True)
-                interfaces_dir.mkdir(mode=0o755, exist_ok=True)
-            finally:
-                os.umask(old_umask)
-
-            # Fix existing permissions (may have been set to 0o755 by older code)
-            target_dir.chmod(0o755)
-            storage_dir.chmod(0o777)
-            interfaces_dir.chmod(0o755)
-
-            print(f"  Ensured: {storage_dir}")
-            print(f"  Ensured: {interfaces_dir}")
+            # Create ALL /etc/reticulum/ subdirectories and fix file permissions.
+            # ReticulumPaths.ensure_system_dirs() is the SINGLE SOURCE OF TRUTH:
+            # creates storage/, ratchets/, resources/, cache/announces/, interfaces/
+            # and fixes file permissions inside storage/ (0o666 files, 0o777 dirs).
+            if ReticulumPaths.ensure_system_dirs():
+                print(f"  Ensured: {ReticulumPaths.ETC_STORAGE}")
+                print(f"  Ensured: {ReticulumPaths.ETC_INTERFACES}")
+            else:
+                print("  ERROR: Could not create /etc/reticulum/ directories")
+                print("  (Run MeshForge with sudo)")
+                return False
 
             # Only deploy template if NO config exists at ANY standard location.
             # Never overwrite an existing config — that destroys user interfaces.
@@ -620,7 +609,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             return False
 
         # Step 2: Validate rnsd.service file
-        print(f"\n[2/4] Validating rnsd systemd service file...")
+        print(f"\n[2/5] Validating rnsd systemd service file...")
         service_path = Path('/etc/systemd/system/rnsd.service')
         if service_path.exists():
             service_fixed = self._validate_rnsd_service_file()
@@ -629,8 +618,12 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         else:
             print("  Service file: not found (rnsd may not be installed as service)")
 
-        # Step 3: Stop rnsd, clear stale auth tokens, start rnsd
-        print(f"\n[3/4] Restarting rnsd service...")
+        # Step 3: Check rnsd Python dependencies
+        print(f"\n[3/5] Checking rnsd Python dependencies...")
+        self._ensure_rnsd_dependencies()
+
+        # Step 4: Stop rnsd, clear stale auth tokens, start rnsd
+        print(f"\n[4/5] Restarting rnsd service...")
 
         # Stop rnsd first (must stop before clearing auth files)
         print("  Stopping rnsd...")
@@ -718,8 +711,8 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         except Exception as e:
             print(f"  Warning: {e}")
 
-        # Step 4: Wait for port and verify
-        print(f"\n[4/4] Verifying shared instance...")
+        # Step 5: Wait for port and verify
+        print(f"\n[5/5] Verifying shared instance...")
         print("  Waiting for rnsd to bind port 37428...")
 
         # Poll for port with early crash detection (up to 15 seconds)
@@ -870,17 +863,24 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
                 misplaced_directives = True
                 break
 
-        # Check if ExecStart uses system rnsd when venv rnsd is available
-        # System rnsd lacks dependencies (meshtastic, etc.) that the venv has
+        # Check ExecStart — two problems to detect:
+        # 1. ExecStart points to a binary that doesn't exist on disk (critical)
+        # 2. ExecStart uses system rnsd when venv rnsd is available (venv has deps)
         wrong_rnsd_path = False
+        current_rnsd = None
+        exec_match = re.search(r'ExecStart\s*=\s*(.+)', content)
+        if exec_match:
+            current_rnsd = exec_match.group(1).strip()
+
         venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
-        if venv_rnsd.exists():
-            import re as _re
-            exec_match = _re.search(r'ExecStart\s*=\s*(.+)', content)
-            if exec_match:
-                current_rnsd = exec_match.group(1).strip()
-                if current_rnsd != str(venv_rnsd):
-                    wrong_rnsd_path = True
+
+        if current_rnsd:
+            # Critical: does the ExecStart binary actually exist?
+            if not Path(current_rnsd).exists():
+                wrong_rnsd_path = True
+            # Secondary: prefer venv rnsd if available (has all dependencies)
+            elif venv_rnsd.exists() and current_rnsd != str(venv_rnsd):
+                wrong_rnsd_path = True
 
         if not misplaced_directives and not wrong_rnsd_path:
             return False
@@ -888,15 +888,25 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         # Report what we're fixing
         if misplaced_directives:
             print("  Found: StartLimitIntervalSec in [Service] (should be [Unit])")
-        if wrong_rnsd_path:
-            print(f"  Found: ExecStart uses {current_rnsd}")
-            print(f"         Should use venv: {venv_rnsd}")
+        if wrong_rnsd_path and current_rnsd:
+            if not Path(current_rnsd).exists():
+                print(f"  Found: ExecStart binary missing: {current_rnsd}")
+            elif venv_rnsd.exists():
+                print(f"  Found: ExecStart uses {current_rnsd}")
+                print(f"         Should use venv: {venv_rnsd}")
         print("  Regenerating rnsd.service...")
 
         # Prefer venv rnsd — it has all dependencies
         rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
             shutil.which('rnsd') or '/usr/local/bin/rnsd'
         )
+
+        # Final sanity: make sure the resolved binary actually exists
+        if not Path(rnsd_path).exists():
+            print(f"  ERROR: No rnsd binary found on this system.")
+            print(f"  Checked: /opt/meshforge/venv/bin/rnsd, PATH, /usr/local/bin/rnsd")
+            print(f"  Install RNS: pip install rns")
+            return False
         service_content = f'''[Unit]
 Description=Reticulum Network Stack Daemon
 After=network-online.target
