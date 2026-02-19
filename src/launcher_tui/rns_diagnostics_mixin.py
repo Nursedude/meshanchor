@@ -17,8 +17,8 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 from utils.safe_import import safe_import
 
-check_process_running, check_udp_port, start_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', '_sudo_cmd'
+check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -266,6 +266,14 @@ class RNSDiagnosticsMixin:
             if result.rnsd_pid:
                 print(f"  rnsd PID:             {result.rnsd_pid}")
             print(f"\n  {color}Fix:{reset} {result.fix_hint}")
+
+            # Offer to fix now if possible
+            if result.can_auto_fix:
+                print()
+                self._offer_drift_fix(result)
+            else:
+                print()
+                self._wait_for_enter()
         else:
             print(f"  \033[0;32mNo drift detected\033[0m\n")
             print(f"  {result.message}")
@@ -274,6 +282,174 @@ class RNSDiagnosticsMixin:
             if result.rnsd_pid:
                 print(f"  rnsd PID: {result.rnsd_pid}")
             print(f"  Detection method: {result.detection_method}")
+
+            print()
+            self._wait_for_enter()
+
+    def _offer_drift_fix(self, drift_result):
+        """Offer to fix config drift by migrating to /etc/reticulum/.
+
+        Orchestrates existing primitives:
+        1. Migrate config to /etc/reticulum/config (via _migrate_rns_config_to_etc)
+        2. Ensure /etc/reticulum/storage/ dirs exist (via ReticulumPaths)
+        3. Clear stale auth tokens from all locations
+        4. Restart rnsd
+        5. Wait for port 37428
+        6. Verify drift is resolved
+        """
+        etc_config = Path('/etc/reticulum/config')
+
+        # Determine the source config to migrate — prefer rnsd's (actively in use)
+        source_candidates = []
+        if drift_result.rnsd_config_dir:
+            source_candidates.append(drift_result.rnsd_config_dir / 'config')
+        if drift_result.gateway_config_dir:
+            source_candidates.append(drift_result.gateway_config_dir / 'config')
+
+        source = None
+        for candidate in source_candidates:
+            if candidate.is_file():
+                source = candidate
+                break
+
+        if source is None:
+            print("  Cannot find a source config file to migrate.")
+            self._wait_for_enter()
+            return
+
+        # Build the dialog message
+        if etc_config.exists():
+            dialog_text = (
+                f"Config drift: gateway and rnsd use different paths.\n\n"
+                f"  Gateway: {drift_result.gateway_config_dir}\n"
+                f"  rnsd:    {drift_result.rnsd_config_dir}\n\n"
+                f"/etc/reticulum/config already exists.\n\n"
+                f"MeshForge will:\n"
+                f"  1. Keep existing /etc/reticulum/config\n"
+                f"  2. Rename old config(s) to .migrated\n"
+                f"  3. Clear stale auth tokens\n"
+                f"  4. Restart rnsd\n\n"
+                f"Fix now?"
+            )
+        else:
+            dialog_text = (
+                f"Config drift: gateway and rnsd use different paths.\n\n"
+                f"  Gateway: {drift_result.gateway_config_dir}\n"
+                f"  rnsd:    {drift_result.rnsd_config_dir}\n\n"
+                f"MeshForge will:\n"
+                f"  1. Migrate {source} to /etc/reticulum/config\n"
+                f"  2. Rename old config to .migrated\n"
+                f"  3. Clear stale auth tokens\n"
+                f"  4. Restart rnsd\n\n"
+                f"Fix now?"
+            )
+
+        if not self.dialog.yesno("Fix Config Drift", dialog_text):
+            self._wait_for_enter()
+            return
+
+        # === Execute the fix ===
+        print("\n--- Fixing Config Drift ---\n")
+
+        # Step 1: Migrate config to /etc/reticulum/config
+        print("[1/5] Migrating config to /etc/reticulum/...")
+        if etc_config.exists():
+            print(f"  /etc/reticulum/config already exists — keeping it")
+            # Rename competing configs to .migrated so RNS resolution
+            # finds /etc/reticulum/config first
+            for candidate in source_candidates:
+                if candidate.is_file() and not str(candidate).startswith('/etc/'):
+                    try:
+                        backup = candidate.with_suffix('.migrated')
+                        candidate.rename(backup)
+                        print(f"  Renamed: {candidate} -> {backup.name}")
+                    except (OSError, PermissionError) as e:
+                        print(f"  Warning: Could not rename {candidate}: {e}")
+        else:
+            if self._migrate_rns_config_to_etc(source):
+                print(f"  Migrated: {source} -> /etc/reticulum/config")
+            else:
+                print("  Migration failed. Aborting.")
+                self._wait_for_enter()
+                return
+
+        # Step 2: Ensure system directories exist with correct permissions
+        print("\n[2/5] Ensuring /etc/reticulum/ directory structure...")
+        if ReticulumPaths.ensure_system_dirs():
+            print("  Directories OK (storage, ratchets, cache, interfaces)")
+        else:
+            print("  Warning: Could not create all directories (need sudo?)")
+
+        # Step 3: Clear stale auth tokens from all locations
+        print("\n[3/5] Clearing stale auth tokens...")
+        user_home = get_real_user_home()
+        storage_dirs = [
+            Path('/etc/reticulum/storage'),
+            Path('/root/.reticulum/storage'),
+            user_home / '.reticulum' / 'storage',
+            user_home / '.config' / 'reticulum' / 'storage',
+        ]
+        files_cleared = 0
+        for storage_dir in storage_dirs:
+            if storage_dir.exists():
+                for auth_file in storage_dir.glob('shared_instance_*'):
+                    try:
+                        auth_file.unlink()
+                        files_cleared += 1
+                        print(f"  Removed: {auth_file}")
+                    except (OSError, PermissionError) as e:
+                        print(f"  Warning: Could not remove {auth_file}: {e}")
+        if files_cleared == 0:
+            print("  No stale auth files found")
+
+        # Step 4: Restart rnsd
+        print("\n[4/5] Restarting rnsd...")
+        if _HAS_SERVICE_CHECK:
+            success, msg = stop_service('rnsd')
+            if not success:
+                print(f"  Warning stopping rnsd: {msg}")
+            time.sleep(1)
+
+            # Reset failed state in case rnsd was in a crash loop
+            try:
+                subprocess.run(
+                    _sudo_cmd(['systemctl', 'reset-failed', 'rnsd']),
+                    capture_output=True, timeout=5
+                )
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+            success, msg = start_service('rnsd')
+            if success:
+                print("  rnsd started")
+            else:
+                print(f"  Warning: {msg}")
+        else:
+            print("  Service management not available — restart manually:")
+            print("    sudo systemctl restart rnsd")
+
+        # Step 5: Wait for port and verify
+        print("\n[5/5] Verifying fix...")
+        print("  Waiting for port 37428...")
+        port_ok = self._wait_for_rns_port(max_wait=15)
+
+        if port_ok:
+            print("  Port 37428: listening")
+
+            # Re-run drift detection to confirm fix
+            verify = detect_rnsd_config_drift()
+            if not verify.drifted:
+                print(f"\n  \033[0;32mDrift resolved!\033[0m Config aligned at: "
+                      f"{verify.gateway_config_dir}")
+            else:
+                print(f"\n  \033[0;33mDrift may persist.\033[0m")
+                print(f"  Gateway: {verify.gateway_config_dir}")
+                print(f"  rnsd:    {verify.rnsd_config_dir}")
+                print("  You may need to restart MeshForge for path resolution to update.")
+        else:
+            print("  Port 37428 not listening after 15s.")
+            print("  rnsd may be slow to initialize or may have crashed.")
+            print("  Check: sudo journalctl -u rnsd -n 20")
 
         print()
         self._wait_for_enter()
