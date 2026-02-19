@@ -698,6 +698,15 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             else:
                 print("  Proceeding without disabling (rnsd may hang)...\n")
 
+        # Clear any systemd start limit (after 5 crashes, systemd refuses to start)
+        try:
+            subprocess.run(
+                ['systemctl', 'reset-failed', 'rnsd'],
+                capture_output=True, timeout=5
+            )
+        except (subprocess.SubprocessError, OSError):
+            pass
+
         # Start rnsd with fresh state
         print("  Starting rnsd...")
         try:
@@ -709,39 +718,81 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         except Exception as e:
             print(f"  Warning: {e}")
 
-        # Give rnsd time to start and bind the port
-        print("  Waiting for rnsd to initialize...")
-        time.sleep(2)
-
-        # Step 4: Verify shared instance is now available
+        # Step 4: Wait for port and verify
         print(f"\n[4/4] Verifying shared instance...")
-        try:
-            # Check if rnsd is listening on UDP port 37428
-            # Port 37428 is UDP, not TCP — must use UDP check
-            port_ok = False
+        print("  Waiting for rnsd to bind port 37428...")
+
+        # Poll for port with early crash detection (up to 15 seconds)
+        port_ok = False
+        rnsd_crashed = False
+        for i in range(15):
+            # Check if port is up
             if _HAS_SERVICE_CHECK and check_udp_port:
                 port_ok = check_udp_port(37428)
             else:
-                # Fallback: ss with UDP flag
-                result = subprocess.run(
-                    ['ss', '-ulnp'],
+                try:
+                    result = subprocess.run(
+                        ['ss', '-ulnp'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    port_ok = '37428' in result.stdout
+                except (subprocess.SubprocessError, OSError):
+                    pass
+            if port_ok:
+                break
+
+            # Early exit: check if rnsd has already crashed
+            try:
+                r = subprocess.run(
+                    ['systemctl', 'is-active', 'rnsd'],
                     capture_output=True, text=True, timeout=5
                 )
-                port_ok = '37428' in result.stdout
-            if port_ok:
-                print("  SUCCESS: rnsd is now listening on port 37428")
-                print("\n" + "=" * 50)
-                print("RNS shared instance is now available!")
-                print("=" * 50 + "\n")
-                return True
-            else:
-                print("  WARNING: rnsd not yet listening on port 37428")
-                print("  Service may need more time to start.")
-                print("  Check logs: sudo journalctl -u rnsd -n 20")
-                return False
-        except Exception as e:
-            print(f"  Cannot verify: {e}")
+                state = r.stdout.strip()
+                if state in ('failed', 'inactive'):
+                    rnsd_crashed = True
+                    break
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+            time.sleep(1)
+
+        if port_ok:
+            print("  SUCCESS: rnsd is now listening on port 37428")
+            print("\n" + "=" * 50)
+            print("RNS shared instance is now available!")
+            print("=" * 50 + "\n")
+            return True
+
+        if rnsd_crashed:
+            print("  FAILED: rnsd crashed on startup")
+            print()
+            # Capture the actual traceback by running rnsd directly
+            rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
+            print("  Running rnsd directly to capture error...")
+            print("  " + "-" * 46)
+            try:
+                r = subprocess.run(
+                    [rnsd_path],
+                    capture_output=True, text=True, timeout=10
+                )
+                output = ((r.stdout or "") + (r.stderr or "")).strip()
+                if output:
+                    for line in output.splitlines()[-20:]:
+                        print(f"  {line}")
+                else:
+                    print("  (no output captured)")
+            except subprocess.TimeoutExpired:
+                print("  rnsd hung (no crash within 10s — likely a blocking interface)")
+            except (OSError, FileNotFoundError) as e:
+                print(f"  Could not run rnsd: {e}")
+            print("  " + "-" * 46)
             return False
+
+        # Port never came up but rnsd didn't crash — still initializing
+        print("  WARNING: rnsd not yet listening on port 37428 after 15s")
+        print("  rnsd may be slow to initialize with multiple interfaces.")
+        print("  Check logs: sudo journalctl -u rnsd -n 20")
+        return False
 
     def _validate_rnsd_service_file(self) -> bool:
         """Validate and fix the rnsd systemd service file.
