@@ -31,9 +31,9 @@ from backend import clear_screen
 from utils.safe_import import safe_import
 
 check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, \
-    daemon_reload, _sudo_write, _HAS_SERVICE_CHECK = safe_import(
+    daemon_reload, _sudo_write, enable_service, _HAS_SERVICE_CHECK = safe_import(
     'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd',
-    'daemon_reload', '_sudo_write',
+    'daemon_reload', '_sudo_write', 'enable_service',
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -937,6 +937,14 @@ WantedBy=multi-user.target
                         print("  Reloaded: systemd daemon-reload complete")
                     else:
                         print(f"  Warning: daemon-reload failed: {msg}")
+                # Re-enable so rnsd starts on boot (regenerating the
+                # service file can drop the symlink)
+                if enable_service:
+                    ok, msg = enable_service('rnsd')
+                    if ok:
+                        print("  Enabled: rnsd will start on boot")
+                    else:
+                        print(f"  Warning: could not enable rnsd: {msg}")
                 return True
             else:
                 print(f"  Warning: Could not write service file: {write_msg}")
