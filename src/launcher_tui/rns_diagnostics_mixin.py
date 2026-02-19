@@ -294,8 +294,9 @@ class RNSDiagnosticsMixin:
         2. Ensure /etc/reticulum/storage/ dirs exist (via ReticulumPaths)
         3. Clear stale auth tokens from all locations
         4. Validate rnsd.service (ExecStart path, systemd directives)
-        5. Restart rnsd
-        6. Wait for port 37428 and verify drift is resolved
+        5. Verify rnsd Python dependencies (install missing packages)
+        6. Restart rnsd
+        7. Wait for port 37428 and verify drift is resolved
         """
         etc_config = Path('/etc/reticulum/config')
 
@@ -352,7 +353,7 @@ class RNSDiagnosticsMixin:
         print("\n--- Fixing Config Drift ---\n")
 
         # Step 1: Migrate config to /etc/reticulum/config
-        print("[1/6] Migrating config to /etc/reticulum/...")
+        print("[1/7] Migrating config to /etc/reticulum/...")
         if etc_config.exists():
             print(f"  /etc/reticulum/config already exists — keeping it")
             # Rename competing configs to .migrated so RNS resolution
@@ -374,14 +375,14 @@ class RNSDiagnosticsMixin:
                 return
 
         # Step 2: Ensure system directories exist with correct permissions
-        print("\n[2/6] Ensuring /etc/reticulum/ directory structure...")
+        print("\n[2/7] Ensuring /etc/reticulum/ directory structure...")
         if ReticulumPaths.ensure_system_dirs():
             print("  Directories OK (storage, ratchets, cache, interfaces)")
         else:
             print("  Warning: Could not create all directories (need sudo?)")
 
         # Step 3: Clear stale auth tokens from all locations
-        print("\n[3/6] Clearing stale auth tokens...")
+        print("\n[3/7] Clearing stale auth tokens...")
         user_home = get_real_user_home()
         storage_dirs = [
             Path('/etc/reticulum/storage'),
@@ -403,13 +404,17 @@ class RNSDiagnosticsMixin:
             print("  No stale auth files found")
 
         # Step 4: Validate rnsd.service file (ExecStart path, directives)
-        print("\n[4/6] Validating rnsd.service...")
+        print("\n[4/7] Validating rnsd.service...")
         service_fixed = self._validate_rnsd_service_file()
         if not service_fixed:
             print("  Service file: OK")
 
-        # Step 5: Restart rnsd
-        print("\n[5/6] Restarting rnsd...")
+        # Step 5: Verify rnsd Python dependencies
+        print("\n[5/7] Checking rnsd Python dependencies...")
+        self._ensure_rnsd_dependencies()
+
+        # Step 6: Restart rnsd
+        print("\n[6/7] Restarting rnsd...")
         if _HAS_SERVICE_CHECK:
             success, msg = stop_service('rnsd')
             if not success:
@@ -434,8 +439,8 @@ class RNSDiagnosticsMixin:
             print("  Service management not available — restart manually:")
             print("    sudo systemctl restart rnsd")
 
-        # Step 6: Wait for port and verify
-        print("\n[6/6] Verifying fix...")
+        # Step 7: Wait for port and verify
+        print("\n[7/7] Verifying fix...")
         print("  Waiting for port 37428...")
         port_ok = self._wait_for_rns_port(max_wait=15)
 
@@ -459,6 +464,111 @@ class RNSDiagnosticsMixin:
 
         print()
         self._wait_for_enter()
+
+    # Known RNS external interface plugins and their pip package dependencies.
+    # Key: plugin filename in /etc/reticulum/interfaces/
+    # Value: list of (import_name, pip_package) tuples
+    _INTERFACE_DEPS = {
+        'Meshtastic_Interface.py': [('meshtastic', 'meshtastic')],
+    }
+
+    def _ensure_rnsd_dependencies(self):
+        """Check that rnsd's Python can import packages required by enabled interfaces.
+
+        Scans /etc/reticulum/interfaces/ for known plugin files, checks if their
+        Python dependencies are importable by rnsd's interpreter, and offers to
+        install missing packages system-wide via pip.
+
+        Common failure: meshtastic installed via pipx (isolated venv, CLI only)
+        but Meshtastic_Interface.py needs it importable by system Python.
+        """
+        interfaces_dir = Path('/etc/reticulum/interfaces')
+        if not interfaces_dir.is_dir():
+            print("  No external interfaces directory")
+            return
+
+        # Determine rnsd's Python interpreter from its shebang
+        rnsd_path = Path('/usr/local/bin/rnsd')
+        if not rnsd_path.exists():
+            import shutil
+            rnsd_which = shutil.which('rnsd')
+            if rnsd_which:
+                rnsd_path = Path(rnsd_which)
+            else:
+                print("  rnsd not found — skipping dependency check")
+                return
+
+        # Read shebang to find which Python rnsd uses
+        try:
+            first_line = rnsd_path.read_text().split('\n', 1)[0]
+            if first_line.startswith('#!'):
+                rnsd_python = first_line[2:].strip().split()[0]
+            else:
+                rnsd_python = 'python3'
+        except (OSError, PermissionError):
+            rnsd_python = 'python3'
+
+        # Check each known plugin
+        missing = []
+        for plugin_file, deps in self._INTERFACE_DEPS.items():
+            if not (interfaces_dir / plugin_file).exists():
+                continue
+            for import_name, pip_name in deps:
+                try:
+                    result = subprocess.run(
+                        [rnsd_python, '-c', f'import {import_name}'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode != 0:
+                        missing.append((plugin_file, import_name, pip_name))
+                        print(f"  {plugin_file} needs '{import_name}' — NOT installed")
+                    else:
+                        print(f"  {plugin_file} needs '{import_name}' — OK")
+                except (subprocess.SubprocessError, OSError):
+                    missing.append((plugin_file, import_name, pip_name))
+                    print(f"  {plugin_file} needs '{import_name}' — check failed")
+
+        if not missing:
+            print("  All interface dependencies met")
+            return
+
+        # Offer to install missing packages
+        pkg_list = ', '.join(pip_name for _, _, pip_name in missing)
+        if self.dialog.yesno(
+            "Install Missing Packages",
+            f"rnsd's Python ({rnsd_python}) is missing packages\n"
+            f"required by external interface plugins:\n\n"
+            + '\n'.join(
+                f"  {plugin}: {imp} (pip: {pip})"
+                for plugin, imp, pip in missing
+            )
+            + f"\n\nInstall system-wide with:\n"
+            f"  sudo {rnsd_python} -m pip install {pkg_list}\n\n"
+            f"Without these, rnsd will crash on startup.\n\n"
+            f"Install now?"
+        ):
+            for _, _, pip_name in missing:
+                print(f"  Installing {pip_name}...")
+                try:
+                    result = subprocess.run(
+                        _sudo_cmd([rnsd_python, '-m', 'pip', 'install', pip_name]),
+                        capture_output=True, text=True, timeout=120
+                    )
+                    if result.returncode == 0:
+                        print(f"  {pip_name}: installed")
+                    else:
+                        # Show last line of error for context
+                        err_lines = (result.stderr or result.stdout or '').strip().split('\n')
+                        print(f"  {pip_name}: FAILED")
+                        if err_lines:
+                            print(f"    {err_lines[-1]}")
+                except subprocess.TimeoutExpired:
+                    print(f"  {pip_name}: timed out (network issue?)")
+                except (subprocess.SubprocessError, OSError) as e:
+                    print(f"  {pip_name}: error — {e}")
+        else:
+            print(f"  Skipped. Install manually: sudo {rnsd_python} -m pip install {pkg_list}")
+            print(f"  Without these packages, rnsd will crash on startup.")
 
     def _run_rns_tool(self, cmd: list, tool_name: str):
         """Run an RNS CLI tool with address-in-use error detection.
