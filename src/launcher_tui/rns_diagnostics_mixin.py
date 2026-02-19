@@ -579,7 +579,8 @@ class RNSDiagnosticsMixin:
             for _, _, pip_name in missing:
                 print(f"  Installing {pip_name}...")
                 try:
-                    install_cmd = [rnsd_python, '-m', 'pip', 'install', pip_name]
+                    install_cmd = [rnsd_python, '-m', 'pip', 'install',
+                                    '--break-system-packages', pip_name]
                     if _HAS_SERVICE_CHECK:
                         install_cmd = _sudo_cmd(install_cmd)
                     elif os.getuid() != 0:
