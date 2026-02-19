@@ -30,8 +30,10 @@ from backend import clear_screen
 # --- Optional dependency imports via safe_import ---
 from utils.safe_import import safe_import
 
-check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd'
+check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, \
+    daemon_reload, _sudo_write, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd',
+    'daemon_reload', '_sudo_write',
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -530,11 +532,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             "RNS Repair Wizard",
             "This will attempt to fix RNS shared instance issues.\n\n"
             "What it does:\n"
-            "  1. Ensures /etc/reticulum/ dirs exist with correct perms\n"
-            "  2. Deploys config template ONLY if no config exists\n"
-            "  3. Clears stale auth tokens (all locations)\n"
-            "  4. Checks for blocking interfaces\n"
-            "  5. Restarts rnsd and verifies port 37428\n\n"
+            "  1. Ensures /etc/reticulum/ dirs exist & deploys config if missing\n"
+            "  2. Validates rnsd.service file (fixes misplaced directives)\n"
+            "  3. Clears stale auth tokens & restarts rnsd\n"
+            "  4. Verifies port 37428 is listening\n\n"
             "Your existing RNS config will NOT be overwritten.\n\n"
             "Run diagnostics first? Use RNS > Diagnostics.\n\n"
             "Proceed with repair?",
@@ -553,10 +554,11 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         Repair menu, etc.) — never from error handlers in _run_rns_tool().
 
         Steps:
-        1. Ensures /etc/reticulum/ directories exist with correct permissions
-        2. Deploys template ONLY if no config exists anywhere (never overwrites)
-        3. Clears stale auth tokens and restarts rnsd
-        4. Verifies shared instance is now available
+        1. Ensures /etc/reticulum/ directories exist with correct permissions,
+           deploys template ONLY if no config exists anywhere (never overwrites)
+        2. Validates rnsd.service file (fixes misplaced systemd directives)
+        3. Clears stale auth tokens, checks blocking interfaces, restarts rnsd
+        4. Verifies shared instance is now available (UDP port 37428)
 
         Returns True if fix was successful.
         """
@@ -570,7 +572,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         target_dir = Path('/etc/reticulum')
         target = target_dir / 'config'
 
-        print(f"\n[1/3] Checking RNS config and directories...")
+        print(f"\n[1/4] Checking RNS config and directories...")
 
         try:
             # Create /etc/reticulum/ directory structure
@@ -617,8 +619,18 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             print("  (Run MeshForge with sudo)")
             return False
 
-        # Step 2: Stop rnsd, clear stale auth tokens, start rnsd
-        print(f"\n[2/3] Restarting rnsd service...")
+        # Step 2: Validate rnsd.service file
+        print(f"\n[2/4] Validating rnsd systemd service file...")
+        service_path = Path('/etc/systemd/system/rnsd.service')
+        if service_path.exists():
+            service_fixed = self._validate_rnsd_service_file()
+            if not service_fixed:
+                print("  Service file: OK")
+        else:
+            print("  Service file: not found (rnsd may not be installed as service)")
+
+        # Step 3: Stop rnsd, clear stale auth tokens, start rnsd
+        print(f"\n[3/4] Restarting rnsd service...")
 
         # Stop rnsd first (must stop before clearing auth files)
         print("  Stopping rnsd...")
@@ -701,8 +713,8 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         print("  Waiting for rnsd to initialize...")
         time.sleep(2)
 
-        # Step 3: Verify shared instance is now available
-        print(f"\n[3/3] Verifying shared instance...")
+        # Step 4: Verify shared instance is now available
+        print(f"\n[4/4] Verifying shared instance...")
         try:
             # Check if rnsd is listening on UDP port 37428
             # Port 37428 is UDP, not TCP — must use UDP check
@@ -729,6 +741,84 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
                 return False
         except Exception as e:
             print(f"  Cannot verify: {e}")
+            return False
+
+    def _validate_rnsd_service_file(self) -> bool:
+        """Validate and fix the rnsd systemd service file.
+
+        Detects common issues like StartLimitIntervalSec in [Service]
+        instead of [Unit], and regenerates the service file if needed.
+
+        Returns True if the service file was fixed (daemon-reload needed).
+        """
+        service_path = Path('/etc/systemd/system/rnsd.service')
+        if not service_path.exists():
+            return False
+
+        try:
+            content = service_path.read_text()
+        except (OSError, PermissionError):
+            return False
+
+        # Check for StartLimitIntervalSec in [Service] section (should be in [Unit])
+        # Parse sections to find misplaced directives
+        needs_fix = False
+        current_section = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('[') and stripped.endswith(']'):
+                current_section = stripped
+            elif current_section == '[Service]' and 'StartLimitIntervalSec' in stripped:
+                needs_fix = True
+                break
+            elif current_section == '[Service]' and 'StartLimitBurst' in stripped:
+                needs_fix = True
+                break
+
+        if not needs_fix:
+            return False
+
+        # Regenerate the service file with correct section placement
+        print("  Found: StartLimitIntervalSec in [Service] (should be [Unit])")
+        print("  Regenerating rnsd.service with correct layout...")
+
+        rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
+        service_content = f'''[Unit]
+Description=Reticulum Network Stack Daemon
+After=network-online.target
+Wants=network-online.target
+
+# Stop crash-looping after 5 failures in 60 seconds
+# (e.g., NomadNet holding port 37428)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart={rnsd_path}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+'''
+        if _HAS_SERVICE_CHECK and _sudo_write:
+            write_ok, write_msg = _sudo_write(str(service_path), service_content)
+            if write_ok:
+                print("  Fixed: rnsd.service regenerated")
+                # daemon-reload so systemd picks up the change
+                if daemon_reload:
+                    ok, msg = daemon_reload()
+                    if ok:
+                        print("  Reloaded: systemd daemon-reload complete")
+                    else:
+                        print(f"  Warning: daemon-reload failed: {msg}")
+                return True
+            else:
+                print(f"  Warning: Could not write service file: {write_msg}")
+                return False
+        else:
+            print("  Warning: service_check not available, cannot write service file")
             return False
 
     def _check_meshtastic_plugin(self) -> bool:
