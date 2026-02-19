@@ -26,6 +26,8 @@ from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
+from utils.paths import ReticulumPaths
+
 from utils.safe_import import safe_import
 
 # Import centralized service checking
