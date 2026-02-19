@@ -53,7 +53,7 @@ class RNSDiagnosticsMixin:
         warnings = []
 
         # 1. Service status
-        print("[1/5] Checking rnsd service...")
+        print("[1/6] Checking rnsd service...")
         status = get_status()
         status_data = status.data or {}
         running = status_data.get('rnsd_running', False)
@@ -93,19 +93,47 @@ class RNSDiagnosticsMixin:
         nomadnet_conflict = self._check_nomadnet_conflict()
         if nomadnet_conflict:
             print(f"  NomadNet: RUNNING (port conflict!)")
+            # Show port 37428 owner for clarity
+            try:
+                from utils.service_check import get_udp_port_owner
+                owner = get_udp_port_owner(37428)
+                if owner:
+                    proc_name, pid = owner
+                    print(f"  Port 37428 owner: {proc_name} (PID {pid})")
+            except ImportError:
+                pass
         if service_state == 'failed' or (not running and nomadnet_conflict):
             print("")
             if nomadnet_conflict:
-                print("  WARNING: NomadNet is holding the RNS shared instance port.")
-                print("  rnsd cannot bind port 37428 while NomadNet is running.")
-                print("  Fix: stop NomadNet first, or disable rnsd and let NomadNet")
+                print("  WARNING: NomadNet is holding the RNS shared "
+                      "instance port.")
+                print("  rnsd cannot bind port 37428 while NomadNet "
+                      "is running.")
+                print("  Fix: stop NomadNet first, or disable rnsd "
+                      "and let NomadNet")
                 print("  serve as the shared instance.")
+                # Show NomadNet log tail for context
+                nn_logfile = (get_real_user_home()
+                              / '.nomadnetwork' / 'logfile')
+                if nn_logfile.exists():
+                    try:
+                        import collections
+                        with open(nn_logfile, 'r') as f:
+                            last_lines = list(
+                                collections.deque(f, maxlen=5)
+                            )
+                        if last_lines:
+                            print("\n  Recent NomadNet log entries:")
+                            for line in last_lines:
+                                print(f"    {line[:100]}")
+                    except (OSError, PermissionError):
+                        print("    (cannot read NomadNet logfile)")
             elif service_state == 'failed':
                 print("  WARNING: rnsd has crashed. Check logs:")
                 print("    sudo journalctl -u rnsd -n 30")
 
         # 2. Config check
-        print("\n[2/5] Checking configuration...")
+        print("\n[2/6] Checking configuration...")
         config_exists = status_data.get('config_exists', False)
         print(f"  Config: {'found' if config_exists else 'MISSING'}")
         if config_exists:
@@ -113,7 +141,7 @@ class RNSDiagnosticsMixin:
             print(f"  Interfaces: {iface_count}")
 
         # 3. Identity check
-        print("\n[3/5] Checking identity...")
+        print("\n[3/6] Checking identity...")
         identity_exists = status_data.get('identity_exists', False)
         print(f"  Gateway identity: {'found' if identity_exists else 'not created'}")
         config_dir = ReticulumPaths.get_config_dir()
@@ -121,7 +149,7 @@ class RNSDiagnosticsMixin:
         print(f"  RNS identity: {'found' if rns_identity.exists() else 'not created'}")
 
         # 4. Full connectivity check
-        print("\n[4/5] Running connectivity check...")
+        print("\n[4/6] Running connectivity check...")
         conn = check_connectivity()
         conn_data = conn.data or {}
         print(f"  RNS importable: {'yes' if conn_data.get('can_import_rns') else 'NO'}")
@@ -135,7 +163,7 @@ class RNSDiagnosticsMixin:
         warnings.extend(conn_data.get('warnings', []))
 
         # 5. Interface dependencies
-        print("\n[5/5] Checking interface dependencies...")
+        print("\n[5/6] Checking interface dependencies...")
         try:
             blocking = self._find_blocking_interfaces()
             if blocking:
@@ -172,19 +200,63 @@ class RNSDiagnosticsMixin:
                         pass
             if running and not port_ok:
                 print("  ! rnsd running but port 37428 NOT listening")
+                # Show who owns the port (if anyone)
+                try:
+                    from utils.service_check import get_udp_port_owner
+                    owner = get_udp_port_owner(37428)
+                    if owner:
+                        proc_name, pid = owner
+                        print(f"    Port held by: {proc_name} "
+                              f"(PID {pid})")
+                except ImportError:
+                    pass
                 # Check if share_instance is enabled in config
                 share_ok = conn_data.get('share_instance', None)
                 if share_ok is False:
-                    print("    Cause: share_instance is not enabled in [reticulum] config")
-                    print("    Fix: Add 'share_instance = Yes' to [reticulum] section,")
-                    print("         then restart: sudo systemctl restart rnsd")
-                    issues.append("share_instance not enabled — gateway cannot connect to rnsd")
+                    print("    Cause: share_instance is not "
+                          "enabled in [reticulum] config")
+                    print("    Fix: Add 'share_instance = Yes' "
+                          "to [reticulum] section,")
+                    print("         then restart: sudo systemctl "
+                          "restart rnsd")
+                    issues.append(
+                        "share_instance not enabled — gateway "
+                        "cannot connect to rnsd")
                 else:
-                    warnings.append("rnsd active but shared instance port not bound")
+                    warnings.append(
+                        "rnsd active but shared instance port "
+                        "not bound")
             elif running and port_ok:
                 print(f"  Shared instance port 37428: listening")
         except Exception:
             pass
+
+        # 6. Interface TX/RX health
+        print("\n[6/6] Checking interface traffic...")
+        try:
+            iface_health = self._check_rns_interface_health()
+            if iface_health:
+                rx_only_found = False
+                for name, tx, rx, healthy in iface_health:
+                    if healthy:
+                        print(f"  {name}: ↑{tx} ↓{rx}")
+                    else:
+                        print(f"  {name}: RX-ONLY (↑{tx} ↓{rx})")
+                        issues.append(
+                            f"Interface {name} is RX-only (no TX)")
+                        rx_only_found = True
+                if rx_only_found:
+                    print("\n  RX-only interfaces = link "
+                          "establishment failing.")
+                    print("  Common cause: shared instance port "
+                          "37428 not bound.")
+            else:
+                print("  Could not retrieve interface traffic "
+                      "(rnstatus not available or rnsd not "
+                      "connected)")
+        except Exception as e:
+            logger.debug("Interface health check failed: %s", e)
+            print(f"  Could not check: {e}")
 
         # Summary
         if issues:
@@ -854,6 +926,89 @@ class RNSDiagnosticsMixin:
             return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
             return False
+
+    def _check_rns_interface_health(self):
+        """Run rnstatus and parse per-interface TX/RX counters.
+
+        Returns a list of (interface_name, tx_str, rx_str, is_healthy)
+        tuples. An interface is unhealthy if it has RX but zero TX
+        (link establishment / SYN/ACK failing).
+
+        Returns empty list if rnstatus is unavailable or fails.
+        """
+        rnstatus_path = shutil.which('rnstatus')
+        if not rnstatus_path:
+            user_home = get_real_user_home()
+            candidate = user_home / '.local' / 'bin' / 'rnstatus'
+            if candidate.exists():
+                rnstatus_path = str(candidate)
+        if not rnstatus_path:
+            return []
+
+        try:
+            result = subprocess.run(
+                [rnstatus_path],
+                capture_output=True, text=True, timeout=15
+            )
+            combined = (result.stdout or '') + (result.stderr or '')
+            if ('no shared' in combined.lower()
+                    or 'could not' in combined.lower()):
+                return []
+        except (subprocess.SubprocessError, FileNotFoundError,
+                OSError):
+            return []
+
+        interfaces = []
+        current_iface = None
+        tx_cache = {}
+
+        for line in combined.splitlines():
+            # Interface header: InterfaceType[DisplayName]
+            iface_match = re.match(r'\s*(\w+)\[(.+?)\]', line)
+            if iface_match:
+                current_iface = (
+                    f"{iface_match.group(1)}"
+                    f"[{iface_match.group(2)}]"
+                )
+                continue
+
+            # TX line: ↑NNN B  NNN bps
+            tx_match = re.search(
+                r'↑\s*([\d,.]+)\s*(\w+)', line
+            )
+            if tx_match and current_iface:
+                tx_cache[current_iface] = (
+                    tx_match.group(1).replace(',', ''),
+                    tx_match.group(2),
+                )
+
+            # RX line: ↓NNN B  NNN bps
+            rx_match = re.search(
+                r'↓\s*([\d,.]+)\s*(\w+)', line
+            )
+            if rx_match and current_iface:
+                rx_val = rx_match.group(1).replace(',', '')
+                rx_unit = rx_match.group(2)
+                tx_info = tx_cache.get(
+                    current_iface, ('0', 'B')
+                )
+                tx_str = f"{tx_info[0]} {tx_info[1]}"
+                rx_str = f"{rx_val} {rx_unit}"
+
+                try:
+                    tx_bytes = float(tx_info[0])
+                    rx_bytes = float(rx_val)
+                except ValueError:
+                    tx_bytes = rx_bytes = 0
+
+                # Healthy if TX > 0, or both are 0 (just started)
+                healthy = not (rx_bytes > 0 and tx_bytes == 0)
+                interfaces.append(
+                    (current_iface, tx_str, rx_str, healthy)
+                )
+                current_iface = None
+
+        return interfaces
 
     def _diagnose_rns_port_conflict(self):
         """Diagnose and offer to fix RNS port conflicts from the TUI."""
