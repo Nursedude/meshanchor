@@ -47,6 +47,10 @@ class RNSDiagnosticsMixin:
             self._wait_for_enter()
             return
 
+        # Collect issues and warnings throughout diagnostics
+        issues = []
+        warnings = []
+
         # 1. Service status
         print("[1/5] Checking rnsd service...")
         status = get_status()
@@ -58,6 +62,31 @@ class RNSDiagnosticsMixin:
             print(f"  PID: {status_data['rnsd_pid']}")
         if service_state:
             print(f"  State: {service_state}")
+
+        # Check rnsd.service file for misplaced directives
+        service_file = Path('/etc/systemd/system/rnsd.service')
+        if service_file.exists():
+            try:
+                svc_content = service_file.read_text()
+                svc_section = None
+                for svc_line in svc_content.splitlines():
+                    svc_stripped = svc_line.strip()
+                    if svc_stripped.startswith('[') and svc_stripped.endswith(']'):
+                        svc_section = svc_stripped
+                    elif svc_section == '[Service]' and (
+                        'StartLimitIntervalSec' in svc_stripped
+                        or 'StartLimitBurst' in svc_stripped
+                    ):
+                        print(f"  Service file: has misplaced directives in [Service]")
+                        warnings.append(
+                            "rnsd.service: StartLimitIntervalSec in [Service] "
+                            "(should be [Unit]) — run Repair to fix"
+                        )
+                        break
+                else:
+                    print(f"  Service file: OK")
+            except (OSError, PermissionError):
+                print("  Service file: could not read (check permissions)")
 
         # Detect NomadNet conflict (common cause of rnsd crash-loops)
         nomadnet_conflict = self._check_nomadnet_conflict()
@@ -100,9 +129,9 @@ class RNSDiagnosticsMixin:
         print(f"  Config valid: {'yes' if conn_data.get('config_valid') else 'NO'}")
         print(f"  Interfaces enabled: {conn_data.get('interfaces_enabled', 0)}")
 
-        # Collect issues and warnings from connectivity check
-        issues = list(conn_data.get('issues', []))
-        warnings = list(conn_data.get('warnings', []))
+        # Merge issues and warnings from connectivity check
+        issues.extend(conn_data.get('issues', []))
+        warnings.extend(conn_data.get('warnings', []))
 
         # 5. Interface dependencies
         print("\n[5/5] Checking interface dependencies...")
