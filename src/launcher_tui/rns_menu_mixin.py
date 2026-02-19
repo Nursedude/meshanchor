@@ -975,10 +975,10 @@ WantedBy=multi-user.target
         return plugin_path.exists()
 
     def _install_meshtastic_interface_plugin(self):
-        """Download and install Meshtastic_Interface.py plugin from GitHub.
+        """Install Meshtastic_Interface.py plugin to RNS interfaces directory.
 
-        Clones the RNS_Over_Meshtastic_Gateway repository and copies the
-        Meshtastic_Interface.py file to the RNS interfaces directory.
+        Prefers the vendored copy shipped with MeshForge (templates/interfaces/).
+        Falls back to cloning from GitHub if the vendored file is missing.
         """
         interfaces_dir = ReticulumPaths.get_interfaces_dir()
         plugin_path = interfaces_dir / 'Meshtastic_Interface.py'
@@ -996,51 +996,73 @@ WantedBy=multi-user.target
             "Install Meshtastic Interface Plugin",
             "The Meshtastic_Interface.py plugin is required for\n"
             "bridging RNS over Meshtastic LoRa mesh networks.\n\n"
-            "Source: github.com/landandair/RNS_Over_Meshtastic\n\n"
             f"Install to:\n  {plugin_path}\n\n"
-            "Requires: git and internet connection.\n\n"
             "Install now?"
         ):
             return
 
-        # Clone repo to temp dir and copy plugin
-        import tempfile
-        tmp_dir = tempfile.mkdtemp(prefix='meshforge_rns_plugin_')
+        # Locate the plugin source — prefer vendored copy, fall back to git
+        source_file = None
+        tmp_dir = None
         clone_url = "https://github.com/landandair/RNS_Over_Meshtastic.git"
 
+        # 1. Vendored copy shipped with MeshForge (bug-fixed version)
+        vendored = Path(__file__).parent.parent.parent / 'templates' / 'interfaces' / 'Meshtastic_Interface.py'
+        if vendored.exists():
+            source_file = vendored
+            print(f"  Using vendored plugin: {vendored}")
+        else:
+            # 2. Fall back to cloning from GitHub
+            import tempfile
+            tmp_dir = tempfile.mkdtemp(prefix='meshforge_rns_plugin_')
+            try:
+                result = subprocess.run(
+                    ['git', 'clone', '--depth', '1', clone_url, tmp_dir],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                if result.returncode != 0:
+                    self.dialog.msgbox(
+                        "Clone Failed",
+                        f"Failed to clone repository:\n{result.stderr}\n\n"
+                        f"Manual install:\n"
+                        f"  git clone {clone_url}\n"
+                        f"  cp RNS_Over_Meshtastic/Interface/Meshtastic_Interface.py \\\n"
+                        f"    {interfaces_dir}/"
+                    )
+                    return
+
+                # Find the plugin file (in Interface/ subfolder per upstream repo)
+                candidate = Path(tmp_dir) / 'Interface' / 'Meshtastic_Interface.py'
+                if not candidate.exists():
+                    candidate = Path(tmp_dir) / 'Meshtastic_Interface.py'
+                if not candidate.exists():
+                    self.dialog.msgbox(
+                        "Plugin Not Found",
+                        f"Meshtastic_Interface.py not found in repository.\n\n"
+                        f"Expected at: Interface/Meshtastic_Interface.py\n"
+                        f"Check: {clone_url}"
+                    )
+                    return
+                source_file = candidate
+            except FileNotFoundError:
+                self.dialog.msgbox(
+                    "Git Not Found",
+                    "Vendored plugin not found and git is not installed.\n\n"
+                    "Install git: sudo apt install git\n\n"
+                    "Or manually download from:\n"
+                    f"  {clone_url}"
+                )
+                return
+            except subprocess.TimeoutExpired:
+                self.dialog.msgbox(
+                    "Timeout",
+                    "Download timed out. Check your internet connection."
+                )
+                return
+
         try:
-            # Clone the repository
-            result = subprocess.run(
-                ['git', 'clone', '--depth', '1', clone_url, tmp_dir],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            if result.returncode != 0:
-                self.dialog.msgbox(
-                    "Clone Failed",
-                    f"Failed to clone repository:\n{result.stderr}\n\n"
-                    f"Manual install:\n"
-                    f"  git clone {clone_url}\n"
-                    f"  cp RNS_Over_Meshtastic/Interface/Meshtastic_Interface.py \\\n"
-                    f"    {interfaces_dir}/"
-                )
-                return
-
-            # Find the plugin file (in Interface/ subfolder per upstream repo)
-            source_file = Path(tmp_dir) / 'Interface' / 'Meshtastic_Interface.py'
-            if not source_file.exists():
-                # Fallback: check repo root in case structure changes
-                source_file = Path(tmp_dir) / 'Meshtastic_Interface.py'
-            if not source_file.exists():
-                self.dialog.msgbox(
-                    "Plugin Not Found",
-                    f"Meshtastic_Interface.py not found in repository.\n\n"
-                    f"Expected at: Interface/Meshtastic_Interface.py\n"
-                    f"Check: {clone_url}"
-                )
-                return
-
             # Create interfaces directory and copy plugin
             interfaces_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(source_file), str(plugin_path))
@@ -1082,19 +1104,6 @@ WantedBy=multi-user.target
                 f"{restart_hint}"
             )
 
-        except FileNotFoundError:
-            self.dialog.msgbox(
-                "Git Not Found",
-                "git is required to download the plugin.\n\n"
-                "Install git: sudo apt install git\n\n"
-                "Or manually download from:\n"
-                f"  {clone_url}"
-            )
-        except subprocess.TimeoutExpired:
-            self.dialog.msgbox(
-                "Timeout",
-                "Download timed out. Check your internet connection."
-            )
         except (OSError, PermissionError) as e:
             self.dialog.msgbox(
                 "Install Failed",
@@ -1103,8 +1112,8 @@ WantedBy=multi-user.target
                 f"  sudo cp Meshtastic_Interface.py {interfaces_dir}/"
             )
         finally:
-            # Clean up temp dir
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _find_blocking_interfaces(self) -> list:
         """Check if enabled RNS interfaces have missing dependencies.
