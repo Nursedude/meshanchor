@@ -578,7 +578,12 @@ class SetupWizard:
         """Create rnsd systemd service"""
         self._print("Creating rnsd systemd service...", "dim")
         try:
-            rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
+            # Prefer venv rnsd — it has all dependencies (meshtastic, etc.)
+            # System rnsd uses system Python which may lack required modules
+            venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+            rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
+                shutil.which('rnsd') or '/usr/local/bin/rnsd'
+            )
             service_content = f'''[Unit]
 Description=Reticulum Network Stack Daemon
 After=network-online.target

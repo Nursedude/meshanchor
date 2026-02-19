@@ -767,9 +767,14 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             print("  FAILED: rnsd crashed on startup")
             print()
             # Capture the actual traceback by running rnsd directly
-            rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
+            # Use venv rnsd if available (matches service file)
+            venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+            rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
+                shutil.which('rnsd') or '/usr/local/bin/rnsd'
+            )
             print("  Running rnsd directly to capture error...")
             print("  " + "-" * 46)
+            output = ""
             try:
                 r = subprocess.run(
                     [rnsd_path],
@@ -786,6 +791,44 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             except (OSError, FileNotFoundError) as e:
                 print(f"  Could not run rnsd: {e}")
             print("  " + "-" * 46)
+
+            # Detect missing meshtastic module and offer to install
+            if 'meshtastic module' in output.lower() or 'meshtastic' in output.lower():
+                print()
+                print("  Cause: Meshtastic_Interface.py plugin needs the meshtastic module")
+                venv_pip = Path('/opt/meshforge/venv/bin/pip')
+                if venv_pip.exists() and self.dialog.yesno(
+                    "Install meshtastic Module",
+                    "The Meshtastic_Interface.py plugin requires the\n"
+                    "meshtastic Python module, which is not installed.\n\n"
+                    "Install it now?\n\n"
+                    "  pip install meshtastic (into MeshForge venv)",
+                ):
+                    print("  Installing meshtastic module...")
+                    pip_r = subprocess.run(
+                        [str(venv_pip), 'install', 'meshtastic'],
+                        capture_output=True, text=True, timeout=120
+                    )
+                    if pip_r.returncode == 0:
+                        print("  meshtastic installed. Restarting rnsd...")
+                        # Reset failed state and restart
+                        subprocess.run(
+                            ['systemctl', 'reset-failed', 'rnsd'],
+                            capture_output=True, timeout=5
+                        )
+                        start_service('rnsd')
+                        time.sleep(3)
+                        if _HAS_SERVICE_CHECK and check_udp_port:
+                            if check_udp_port(37428):
+                                print("  SUCCESS: rnsd is now listening on port 37428")
+                                print("\n" + "=" * 50)
+                                print("RNS shared instance is now available!")
+                                print("=" * 50 + "\n")
+                                return True
+                        print("  rnsd restarted — check with RNS > Diagnostics")
+                    else:
+                        print(f"  pip install failed: {pip_r.stderr.strip()[:200]}")
+
             return False
 
         # Port never came up but rnsd didn't crash — still initializing
@@ -797,8 +840,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
     def _validate_rnsd_service_file(self) -> bool:
         """Validate and fix the rnsd systemd service file.
 
-        Detects common issues like StartLimitIntervalSec in [Service]
-        instead of [Unit], and regenerates the service file if needed.
+        Detects and fixes:
+        - StartLimitIntervalSec in [Service] instead of [Unit]
+        - ExecStart pointing to system rnsd instead of venv rnsd
+          (venv has all dependencies like meshtastic)
 
         Returns True if the service file was fixed (daemon-reload needed).
         """
@@ -812,28 +857,46 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
             return False
 
         # Check for StartLimitIntervalSec in [Service] section (should be in [Unit])
-        # Parse sections to find misplaced directives
-        needs_fix = False
+        misplaced_directives = False
         current_section = None
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.startswith('[') and stripped.endswith(']'):
                 current_section = stripped
-            elif current_section == '[Service]' and 'StartLimitIntervalSec' in stripped:
-                needs_fix = True
-                break
-            elif current_section == '[Service]' and 'StartLimitBurst' in stripped:
-                needs_fix = True
+            elif current_section == '[Service]' and (
+                'StartLimitIntervalSec' in stripped
+                or 'StartLimitBurst' in stripped
+            ):
+                misplaced_directives = True
                 break
 
-        if not needs_fix:
+        # Check if ExecStart uses system rnsd when venv rnsd is available
+        # System rnsd lacks dependencies (meshtastic, etc.) that the venv has
+        wrong_rnsd_path = False
+        venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+        if venv_rnsd.exists():
+            import re as _re
+            exec_match = _re.search(r'ExecStart\s*=\s*(.+)', content)
+            if exec_match:
+                current_rnsd = exec_match.group(1).strip()
+                if current_rnsd != str(venv_rnsd):
+                    wrong_rnsd_path = True
+
+        if not misplaced_directives and not wrong_rnsd_path:
             return False
 
-        # Regenerate the service file with correct section placement
-        print("  Found: StartLimitIntervalSec in [Service] (should be [Unit])")
-        print("  Regenerating rnsd.service with correct layout...")
+        # Report what we're fixing
+        if misplaced_directives:
+            print("  Found: StartLimitIntervalSec in [Service] (should be [Unit])")
+        if wrong_rnsd_path:
+            print(f"  Found: ExecStart uses {current_rnsd}")
+            print(f"         Should use venv: {venv_rnsd}")
+        print("  Regenerating rnsd.service...")
 
-        rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
+        # Prefer venv rnsd — it has all dependencies
+        rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
+            shutil.which('rnsd') or '/usr/local/bin/rnsd'
+        )
         service_content = f'''[Unit]
 Description=Reticulum Network Stack Daemon
 After=network-online.target
@@ -956,12 +1019,31 @@ WantedBy=multi-user.target
             shutil.copy2(str(source_file), str(plugin_path))
             plugin_path.chmod(0o644)
 
+            # Install meshtastic Python module — required by the plugin.
+            # Install into the venv so rnsd (using venv Python) can load it.
+            meshtastic_installed = False
+            venv_pip = Path('/opt/meshforge/venv/bin/pip')
+            if venv_pip.exists():
+                print("Installing meshtastic Python module...")
+                pip_result = subprocess.run(
+                    [str(venv_pip), 'install', '-q', 'meshtastic'],
+                    capture_output=True, text=True, timeout=120
+                )
+                meshtastic_installed = pip_result.returncode == 0
+
+            restart_hint = "Restart rnsd to load the new interface:\n  sudo systemctl restart rnsd"
+            if not meshtastic_installed:
+                restart_hint = (
+                    "NOTE: The meshtastic Python module is also required.\n"
+                    "Install it: /opt/meshforge/venv/bin/pip install meshtastic\n\n"
+                    "Then restart rnsd:\n  sudo systemctl restart rnsd"
+                )
+
             self.dialog.msgbox(
                 "Plugin Installed",
                 f"Meshtastic_Interface.py installed to:\n"
                 f"  {plugin_path}\n\n"
-                f"Restart rnsd to load the new interface:\n"
-                f"  sudo systemctl restart rnsd"
+                f"{restart_hint}"
             )
 
         except FileNotFoundError:
