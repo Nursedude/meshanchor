@@ -5,6 +5,7 @@ Extracted from rns_menu_mixin.py to reduce file size per CLAUDE.md guidelines.
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -490,7 +491,6 @@ class RNSDiagnosticsMixin:
         # Determine rnsd's Python interpreter from its shebang
         rnsd_path = Path('/usr/local/bin/rnsd')
         if not rnsd_path.exists():
-            import shutil
             rnsd_which = shutil.which('rnsd')
             if rnsd_which:
                 rnsd_path = Path(rnsd_which)
@@ -550,8 +550,13 @@ class RNSDiagnosticsMixin:
             for _, _, pip_name in missing:
                 print(f"  Installing {pip_name}...")
                 try:
+                    install_cmd = [rnsd_python, '-m', 'pip', 'install', pip_name]
+                    if _HAS_SERVICE_CHECK:
+                        install_cmd = _sudo_cmd(install_cmd)
+                    elif os.getuid() != 0:
+                        install_cmd = ['sudo'] + install_cmd
                     result = subprocess.run(
-                        _sudo_cmd([rnsd_python, '-m', 'pip', 'install', pip_name]),
+                        install_cmd,
                         capture_output=True, text=True, timeout=120
                     )
                     if result.returncode == 0:
