@@ -582,21 +582,46 @@ class RNSDiagnosticsMixin:
                     install_cmd = [rnsd_python, '-m', 'pip', 'install',
                                     '--break-system-packages', pip_name]
                     if _HAS_SERVICE_CHECK:
-                        install_cmd = _sudo_cmd(install_cmd)
+                        base_cmd = _sudo_cmd(install_cmd)
                     elif os.getuid() != 0:
-                        install_cmd = ['sudo'] + install_cmd
+                        base_cmd = ['sudo'] + install_cmd
+                    else:
+                        base_cmd = install_cmd
                     result = subprocess.run(
-                        install_cmd,
+                        base_cmd,
                         capture_output=True, text=True, timeout=120
                     )
                     if result.returncode == 0:
                         print(f"  {pip_name}: installed")
                     else:
-                        # Show last line of error for context
-                        err_lines = (result.stderr or result.stdout or '').strip().split('\n')
-                        print(f"  {pip_name}: FAILED")
-                        if err_lines:
-                            print(f"    {err_lines[-1]}")
+                        # Detect Debian-managed package conflict:
+                        # pip says "installed by debian/apt" when it refuses
+                        # to overwrite an apt-owned package.
+                        err_text = (result.stderr or result.stdout or '').lower()
+                        if 'installed by' in err_text or 'externally-managed' in err_text:
+                            print(f"  {pip_name}: Debian package conflict, retrying with --ignore-installed...")
+                            retry_cmd = [rnsd_python, '-m', 'pip', 'install',
+                                         '--break-system-packages', '--ignore-installed', pip_name]
+                            if _HAS_SERVICE_CHECK:
+                                retry_cmd = _sudo_cmd(retry_cmd)
+                            elif os.getuid() != 0:
+                                retry_cmd = ['sudo'] + retry_cmd
+                            retry = subprocess.run(
+                                retry_cmd,
+                                capture_output=True, text=True, timeout=120
+                            )
+                            if retry.returncode == 0:
+                                print(f"  {pip_name}: installed (bypassed Debian package)")
+                            else:
+                                err_lines = (retry.stderr or retry.stdout or '').strip().split('\n')
+                                print(f"  {pip_name}: FAILED (even with --ignore-installed)")
+                                if err_lines:
+                                    print(f"    {err_lines[-1]}")
+                        else:
+                            err_lines = (result.stderr or result.stdout or '').strip().split('\n')
+                            print(f"  {pip_name}: FAILED")
+                            if err_lines:
+                                print(f"    {err_lines[-1]}")
                 except subprocess.TimeoutExpired:
                     print(f"  {pip_name}: timed out (network issue?)")
                 except (subprocess.SubprocessError, OSError) as e:
