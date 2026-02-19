@@ -457,7 +457,7 @@ class UpdatesMixin:
             f"Git: {git_output.strip()[:200]}\n"
             f"{svc_info}\n"
             "Please restart MeshForge to apply changes.\n\n"
-            "Run: sudo meshforge"
+            "Run: meshforge"
         )
 
     def _run_update_command(self, component: str, command: str) -> Tuple[bool, str]:
