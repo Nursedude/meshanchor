@@ -293,9 +293,9 @@ class RNSDiagnosticsMixin:
         1. Migrate config to /etc/reticulum/config (via _migrate_rns_config_to_etc)
         2. Ensure /etc/reticulum/storage/ dirs exist (via ReticulumPaths)
         3. Clear stale auth tokens from all locations
-        4. Restart rnsd
-        5. Wait for port 37428
-        6. Verify drift is resolved
+        4. Validate rnsd.service (ExecStart path, systemd directives)
+        5. Restart rnsd
+        6. Wait for port 37428 and verify drift is resolved
         """
         etc_config = Path('/etc/reticulum/config')
 
@@ -352,7 +352,7 @@ class RNSDiagnosticsMixin:
         print("\n--- Fixing Config Drift ---\n")
 
         # Step 1: Migrate config to /etc/reticulum/config
-        print("[1/5] Migrating config to /etc/reticulum/...")
+        print("[1/6] Migrating config to /etc/reticulum/...")
         if etc_config.exists():
             print(f"  /etc/reticulum/config already exists — keeping it")
             # Rename competing configs to .migrated so RNS resolution
@@ -374,14 +374,14 @@ class RNSDiagnosticsMixin:
                 return
 
         # Step 2: Ensure system directories exist with correct permissions
-        print("\n[2/5] Ensuring /etc/reticulum/ directory structure...")
+        print("\n[2/6] Ensuring /etc/reticulum/ directory structure...")
         if ReticulumPaths.ensure_system_dirs():
             print("  Directories OK (storage, ratchets, cache, interfaces)")
         else:
             print("  Warning: Could not create all directories (need sudo?)")
 
         # Step 3: Clear stale auth tokens from all locations
-        print("\n[3/5] Clearing stale auth tokens...")
+        print("\n[3/6] Clearing stale auth tokens...")
         user_home = get_real_user_home()
         storage_dirs = [
             Path('/etc/reticulum/storage'),
@@ -402,8 +402,14 @@ class RNSDiagnosticsMixin:
         if files_cleared == 0:
             print("  No stale auth files found")
 
-        # Step 4: Restart rnsd
-        print("\n[4/5] Restarting rnsd...")
+        # Step 4: Validate rnsd.service file (ExecStart path, directives)
+        print("\n[4/6] Validating rnsd.service...")
+        service_fixed = self._validate_rnsd_service_file()
+        if not service_fixed:
+            print("  Service file: OK")
+
+        # Step 5: Restart rnsd
+        print("\n[5/6] Restarting rnsd...")
         if _HAS_SERVICE_CHECK:
             success, msg = stop_service('rnsd')
             if not success:
@@ -428,8 +434,8 @@ class RNSDiagnosticsMixin:
             print("  Service management not available — restart manually:")
             print("    sudo systemctl restart rnsd")
 
-        # Step 5: Wait for port and verify
-        print("\n[5/5] Verifying fix...")
+        # Step 6: Wait for port and verify
+        print("\n[6/6] Verifying fix...")
         print("  Waiting for port 37428...")
         port_ok = self._wait_for_rns_port(max_wait=15)
 
