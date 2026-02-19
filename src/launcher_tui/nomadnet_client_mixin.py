@@ -241,6 +241,7 @@ class NomadNetClientMixin:
                 else:
                     choices.append(("textui", "Launch Text UI (interactive)"))
                     choices.append(("daemon", "Start as Daemon (background)"))
+                choices.append(("logs", "View NomadNet Logs"))
                 choices.append(("config", "View NomadNet Config"))
                 choices.append(("edit", "Edit NomadNet Config"))
             else:
@@ -263,6 +264,7 @@ class NomadNetClientMixin:
                 "textui": ("Launch NomadNet TUI", self._launch_nomadnet_textui),
                 "daemon": ("Start NomadNet Daemon", self._launch_nomadnet_daemon),
                 "stop": ("Stop NomadNet", self._stop_nomadnet),
+                "logs": ("View NomadNet Logs", self._view_nomadnet_logs),
                 "config": ("View NomadNet Config", self._view_nomadnet_config),
                 "edit": ("Edit NomadNet Config", self._edit_nomadnet_config),
                 "install": ("Install NomadNet", self._install_nomadnet),
@@ -480,8 +482,11 @@ class NomadNetClientMixin:
         error_hints = []
         if logfile.exists():
             try:
-                content = logfile.read_text()
-                last_lines = content.strip().split('\n')[-20:]
+                import collections
+                with open(logfile, 'r') as f:
+                    last_lines = list(
+                        collections.deque(f, maxlen=20)
+                    )
 
                 # Look for known error patterns
                 for line in last_lines:
@@ -572,6 +577,107 @@ class NomadNetClientMixin:
             print("\nCheck logs for details:")
             print(f"  cat {logfile}")
             print("  journalctl --user -u nomadnet -n 50")
+
+    # ------------------------------------------------------------------
+    # Log viewer
+    # ------------------------------------------------------------------
+
+    def _view_nomadnet_logs(self):
+        """View NomadNet logfile (works in daemon and textui mode).
+
+        NomadNet writes to ~/.nomadnetwork/logfile independently of
+        stdout/stderr, so this works regardless of launch mode.
+        """
+        import collections
+
+        user_home = get_real_user_home()
+        logfile = user_home / '.nomadnetwork' / 'logfile'
+
+        if not logfile.exists():
+            self.dialog.msgbox(
+                "No Logs",
+                "NomadNet logfile not found yet.\n\n"
+                f"Expected at: {logfile}\n\n"
+                "Logs are created when NomadNet runs.",
+            )
+            return
+
+        clear_screen()
+
+        # Offer view options
+        choices = [
+            ("last50", "Last 50 lines"),
+            ("last200", "Last 200 lines"),
+            ("errors", "Errors only (last 200 lines)"),
+            ("follow", "Follow live (Ctrl+C to stop)"),
+            ("back", "Back"),
+        ]
+
+        choice = self.dialog.menu(
+            "NomadNet Logs",
+            f"Logfile: {logfile}",
+            choices,
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        if choice == "follow":
+            clear_screen()
+            print(f"=== NomadNet log — {logfile} "
+                  f"(Ctrl+C to stop) ===\n")
+            try:
+                subprocess.run(
+                    ['tail', '-f', '-n', '30', str(logfile)],
+                    timeout=None
+                )
+            except KeyboardInterrupt:
+                pass
+            return
+
+        # Read the logfile tail
+        if choice == "last200":
+            maxlines = 200
+        else:
+            maxlines = 50  # last50 and errors both read 200
+
+        clear_screen()
+
+        try:
+            with open(logfile, 'r') as f:
+                lines = list(collections.deque(
+                    f, maxlen=max(maxlines, 200)
+                ))
+
+            if choice == "errors":
+                error_patterns = [
+                    'Error', 'Exception', 'CRITICAL',
+                    'WARNING', 'AuthenticationError',
+                    'PermissionError', 'Traceback',
+                ]
+                lines = [
+                    line for line in lines
+                    if any(p in line for p in error_patterns)
+                ]
+                print(f"=== NomadNet errors "
+                      f"({len(lines)} found) ===\n")
+            else:
+                lines = lines[-maxlines:]
+                print(f"=== NomadNet log (last "
+                      f"{len(lines)} lines) ===\n")
+
+            if lines:
+                for line in lines:
+                    print(line.rstrip())
+            else:
+                print("  (no matching lines)")
+
+        except PermissionError:
+            print(f"Cannot read {logfile} — permission denied")
+        except OSError as e:
+            print(f"Error reading logfile: {e}")
+
+        self._wait_for_enter()
 
     # ------------------------------------------------------------------
     # Launch daemon
