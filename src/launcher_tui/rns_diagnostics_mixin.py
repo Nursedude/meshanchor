@@ -488,15 +488,44 @@ class RNSDiagnosticsMixin:
             print("  No external interfaces directory")
             return
 
-        # Determine rnsd's Python interpreter from its shebang
-        rnsd_path = Path('/usr/local/bin/rnsd')
-        if not rnsd_path.exists():
-            rnsd_which = shutil.which('rnsd')
-            if rnsd_which:
-                rnsd_path = Path(rnsd_which)
+        # Determine rnsd's Python interpreter from its shebang.
+        # Check multiple locations in priority order:
+        # 1. ExecStart from the service file (the actual binary systemd uses)
+        # 2. Venv rnsd (has all dependencies)
+        # 3. System rnsd (PATH or /usr/local/bin)
+        rnsd_path = None
+
+        # Try ExecStart from the service file first — most accurate
+        service_file = Path('/etc/systemd/system/rnsd.service')
+        if service_file.exists():
+            try:
+                svc_content = service_file.read_text()
+                exec_match = re.search(r'ExecStart\s*=\s*(.+)', svc_content)
+                if exec_match:
+                    candidate = Path(exec_match.group(1).strip())
+                    if candidate.exists():
+                        rnsd_path = candidate
+            except (OSError, PermissionError):
+                pass
+
+        # Fallback: venv path
+        if rnsd_path is None:
+            venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+            if venv_rnsd.exists():
+                rnsd_path = venv_rnsd
+
+        # Fallback: system path
+        if rnsd_path is None:
+            sys_rnsd = Path('/usr/local/bin/rnsd')
+            if sys_rnsd.exists():
+                rnsd_path = sys_rnsd
             else:
-                print("  rnsd not found — skipping dependency check")
-                return
+                rnsd_which = shutil.which('rnsd')
+                if rnsd_which:
+                    rnsd_path = Path(rnsd_which)
+                else:
+                    print("  rnsd not found — skipping dependency check")
+                    return
 
         # Read shebang to find which Python rnsd uses
         try:
