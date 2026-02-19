@@ -267,19 +267,25 @@ class RNSDiagnosticsMixin:
             # RNS tools may log errors to stdout or stderr depending on config
             combined = (result.stdout or "") + (result.stderr or "")
 
-            if result.returncode == 0:
-                # Success - show normal output
-                if result.stdout:
-                    print(result.stdout, end='')
-            elif "address already in use" in combined.lower():
+            # Check for error patterns BEFORE returncode — rnstatus returns
+            # exit code 0 even when the shared instance is unreachable.
+            lower_combined = combined.lower()
+            has_shared_error = any(p in lower_combined for p in (
+                "no shared", "could not connect", "could not get",
+                "shared instance", "authenticationerror", "digest",
+            ))
+
+            if "address already in use" in lower_combined:
                 # Suppress noisy traceback, show actionable diagnostics
                 print("\nError: RNS port conflict (Address already in use)")
                 print("Another process is bound to the RNS AutoInterface port.\n")
                 self._diagnose_rns_port_conflict()
-            elif "no shared" in combined.lower() or "could not connect" in combined.lower() or "could not get" in combined.lower() or "shared instance" in combined.lower() or "authenticationerror" in combined.lower() or "digest" in combined.lower():
+            elif has_shared_error:
                 # RNS shared instance issue — DIAGNOSE, don't auto-fix.
                 # Auto-fix was the #1 source of regressions (see persistent_issues.md).
                 # Policy: show what's wrong, let the user decide what to do.
+                if result.returncode == 0 and result.stdout:
+                    print(result.stdout, end='')
                 print(f"\nRNS connectivity issue detected.")
 
                 # Check if rnsd is actually running
@@ -346,6 +352,10 @@ class RNSDiagnosticsMixin:
                     else:
                         # Port never came up — show diagnostics
                         self._diagnose_rns_connectivity(combined)
+            elif result.returncode == 0:
+                # Clean success — no error patterns detected
+                if result.stdout:
+                    print(result.stdout, end='')
             else:
                 # Other error - DON'T auto-fix, just show output
                 # RNS tools may return non-zero for benign reasons (empty table, no paths)

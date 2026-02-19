@@ -30,8 +30,8 @@ from backend import clear_screen
 # --- Optional dependency imports via safe_import ---
 from utils.safe_import import safe_import
 
-check_process_running, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'start_service', 'stop_service', '_sudo_cmd'
+check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd'
 )
 
 get_identity_path, create_identities, list_known_destinations, \
@@ -704,12 +704,19 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         # Step 3: Verify shared instance is now available
         print(f"\n[3/3] Verifying shared instance...")
         try:
-            # Check if rnsd is listening on port 37428
-            result = subprocess.run(
-                ['ss', '-tlnp'],
-                capture_output=True, text=True, timeout=5
-            )
-            if '37428' in result.stdout:
+            # Check if rnsd is listening on UDP port 37428
+            # Port 37428 is UDP, not TCP — must use UDP check
+            port_ok = False
+            if _HAS_SERVICE_CHECK and check_udp_port:
+                port_ok = check_udp_port(37428)
+            else:
+                # Fallback: ss with UDP flag
+                result = subprocess.run(
+                    ['ss', '-ulnp'],
+                    capture_output=True, text=True, timeout=5
+                )
+                port_ok = '37428' in result.stdout
+            if port_ok:
                 print("  SUCCESS: rnsd is now listening on port 37428")
                 print("\n" + "=" * 50)
                 print("RNS shared instance is now available!")

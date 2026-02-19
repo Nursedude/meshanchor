@@ -581,12 +581,18 @@ class SetupWizard:
             rnsd_path = shutil.which('rnsd') or '/usr/local/bin/rnsd'
             service_content = f'''[Unit]
 Description=Reticulum Network Stack Daemon
-After=network.target
+After=network-online.target
+Wants=network-online.target
+
+# Stop crash-looping after 5 failures in 60 seconds
+# (e.g., NomadNet holding port 37428)
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart={rnsd_path}
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 [Install]
