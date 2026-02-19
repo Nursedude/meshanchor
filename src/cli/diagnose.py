@@ -8,7 +8,9 @@ Usage:
     sudo python3 src/cli/diagnose.py  # For full diagnostics
 """
 
+import collections
 import os
+import re
 import sys
 import socket
 import subprocess
@@ -33,6 +35,10 @@ _find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
 
 _GatewayDiagnostic, _HAS_GATEWAY_DIAG = safe_import(
     'utils.gateway_diagnostic', 'GatewayDiagnostic'
+)
+
+_get_udp_port_owner, _HAS_PORT_OWNER = safe_import(
+    'utils.service_check', 'get_udp_port_owner'
 )
 
 
@@ -140,6 +146,12 @@ def check_rns_port():
     try:
         if port_bound:
             print_status("RNS shared instance", True, "listening on UDP 37428")
+            # Show which process owns the port
+            if _HAS_PORT_OWNER:
+                owner = _get_udp_port_owner(37428)
+                if owner:
+                    proc_name, pid = owner
+                    print(f"    Owner: {proc_name} (PID {pid})")
         else:
             # Check if share_instance is disabled in config
             hint = "not running"
@@ -154,6 +166,19 @@ def check_rns_port():
             except ImportError:
                 pass
             print_status("RNS shared instance", False, hint)
+
+            # Check if another process is holding the port
+            if _HAS_PORT_OWNER:
+                owner = _get_udp_port_owner(37428)
+                if owner:
+                    proc_name, pid = owner
+                    print(f"    Port held by: {proc_name} (PID {pid})")
+                    if 'nomadnet' in proc_name.lower():
+                        print("    NOTE: NomadNet is holding port 37428.")
+                        print("    rnsd cannot bind while NomadNet owns "
+                              "this port.")
+                        print("    Fix: Stop NomadNet, start rnsd first, "
+                              "then NomadNet.")
     except Exception as e:
         print_status("RNS shared instance", False, str(e))
 
@@ -273,8 +298,135 @@ def check_rns_config():
         print("    Run 'rnsd' once to create default config")
 
 
+def check_rns_interfaces():
+    """Check RNS interface status via rnstatus.
+
+    Parses rnstatus output to show per-interface TX/RX counters.
+    Detects RX-only interfaces (link establishment failing) and
+    zero-traffic interfaces (not yet active).
+    """
+    print_header("RNS INTERFACES")
+
+    rnstatus_path = shutil.which('rnstatus')
+    if not rnstatus_path:
+        # Check user local bin
+        user_home = get_real_user_home()
+        candidate = user_home / '.local' / 'bin' / 'rnstatus'
+        if candidate.exists():
+            rnstatus_path = str(candidate)
+
+    if not rnstatus_path:
+        print_status("rnstatus", False,
+                     "not found (install RNS: pipx install rns)")
+        return
+
+    try:
+        result = subprocess.run(
+            [rnstatus_path],
+            capture_output=True, text=True, timeout=15
+        )
+        combined = (result.stdout or '') + (result.stderr or '')
+        if ('no shared' in combined.lower()
+                or 'could not' in combined.lower()):
+            print_status("RNS shared instance", False,
+                         "cannot connect to rnsd")
+            return
+
+        # Parse interface lines from rnstatus output
+        # Format:  InterfaceName[DisplayName]
+        #   Traffic   : ↑NNN B  NNN bps
+        #               ↓NNN B  NNN bps
+        current_iface = None
+        tx_cache = {}
+        rx_only_ifaces = []
+        zero_traffic_ifaces = []
+        any_iface_found = False
+
+        for line in combined.splitlines():
+            # Interface header line
+            iface_match = re.match(
+                r'\s*(\w+)\[(.+?)\]', line
+            )
+            if iface_match:
+                current_iface = (
+                    f"{iface_match.group(1)}[{iface_match.group(2)}]"
+                )
+                any_iface_found = True
+                continue
+
+            # TX line (↑ = upload/transmit)
+            tx_match = re.search(r'↑\s*([\d,.]+)\s*(\w+)', line)
+            if tx_match and current_iface:
+                tx_val = tx_match.group(1).replace(',', '')
+                tx_unit = tx_match.group(2)
+                tx_cache[current_iface] = (
+                    float(tx_val), tx_unit
+                )
+
+            # RX line (↓ = download/receive)
+            rx_match = re.search(r'↓\s*([\d,.]+)\s*(\w+)', line)
+            if rx_match and current_iface:
+                rx_val = rx_match.group(1).replace(',', '')
+                rx_unit = rx_match.group(2)
+
+                tx_info = tx_cache.get(
+                    current_iface, (0, 'B')
+                )
+                tx_bytes = tx_info[0]
+                rx_bytes = float(rx_val)
+
+                if rx_bytes > 0 and tx_bytes == 0:
+                    print_status(
+                        current_iface, False,
+                        f"RX-only (↑0 ↓{rx_val} {rx_unit})"
+                    )
+                    rx_only_ifaces.append(current_iface)
+                elif rx_bytes == 0 and tx_bytes == 0:
+                    print_status(
+                        current_iface, False,
+                        "no traffic (↑0 ↓0)"
+                    )
+                    zero_traffic_ifaces.append(current_iface)
+                else:
+                    print_status(
+                        current_iface, True,
+                        f"↑{tx_info[0]:.0f} {tx_info[1]}  "
+                        f"↓{rx_val} {rx_unit}"
+                    )
+                current_iface = None
+
+        if rx_only_ifaces:
+            print()
+            print("  WARNING: RX-only interfaces detected.")
+            print("  Packets received but link establishment "
+                  "(SYN/ACK) failing.")
+            print("  Common causes:")
+            print("    - Shared instance not fully initialized")
+            print("    - NomadNet/rnsd port conflict on 37428")
+            print("    - Blocking interface preventing startup")
+
+        if zero_traffic_ifaces:
+            mesh_zero = [i for i in zero_traffic_ifaces
+                         if 'Meshtastic' in i]
+            if mesh_zero:
+                print()
+                print("  NOTE: Meshtastic interface(s) show zero "
+                      "traffic.")
+                print("  If rnsd just restarted, allow 60-90s for "
+                      "link establishment.")
+
+        if not any_iface_found:
+            print("  No interfaces found in rnstatus output.")
+
+    except FileNotFoundError:
+        print_status("rnstatus", False, "not found")
+    except subprocess.TimeoutExpired:
+        print_status("rnstatus", False,
+                     "timed out (rnsd may be unresponsive)")
+
+
 def check_nomadnet():
-    """Check NomadNet installation."""
+    """Check NomadNet installation and recent logs."""
     print_header("NOMADNET")
 
     # Check if installed
@@ -301,6 +453,53 @@ def check_nomadnet():
                 print(f"    Running (PIDs: {', '.join(pids)})")
         except Exception:
             pass
+
+        # Read NomadNet logfile for recent errors
+        user_home = get_real_user_home()
+        logfile = user_home / '.nomadnetwork' / 'logfile'
+        if logfile.exists():
+            try:
+                with open(logfile, 'r') as f:
+                    last_lines = list(
+                        collections.deque(f, maxlen=10)
+                    )
+                error_found = False
+                for line in last_lines:
+                    if ('AuthenticationError' in line
+                            or 'digest' in line.lower()):
+                        print_status(
+                            "NomadNet log", False,
+                            "RPC auth failure (identity mismatch)"
+                        )
+                        print("    Fix: Ensure rnsd and NomadNet use "
+                              "same RNS config")
+                        error_found = True
+                        break
+                    elif 'PermissionError' in line:
+                        print_status(
+                            "NomadNet log", False,
+                            "permission denied in recent logs"
+                        )
+                        print("    Check: ls -la ~/.nomadnetwork/")
+                        error_found = True
+                        break
+                    elif ('ModuleNotFoundError' in line
+                            or 'ImportError' in line):
+                        print_status(
+                            "NomadNet log", False,
+                            "missing Python dependency"
+                        )
+                        print("    Fix: pipx reinstall nomadnet")
+                        error_found = True
+                        break
+                if not error_found:
+                    print_status("NomadNet log", True,
+                                 "no recent errors")
+            except PermissionError:
+                print_status("NomadNet log", False,
+                             f"cannot read {logfile}")
+        else:
+            print(f"    Log: {logfile} (not found yet)")
     else:
         print_status("NomadNet", False, "not installed")
         print("    Install with: pipx install nomadnet")
@@ -523,7 +722,8 @@ def check_logs():
     for name, cmd in log_sources:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            lines = [l for l in result.stdout.strip().split('\n') if l and '-- No entries --' not in l]
+            lines = [l for l in result.stdout.strip().split('\n')
+                     if l and '-- No entries --' not in l]
             if lines:
                 print(f"\n  {name} errors ({len(lines)} recent):")
                 for line in lines[:3]:  # Show first 3
@@ -532,6 +732,31 @@ def check_logs():
                 print_status(f"{name} errors", True, "none")
         except Exception:
             pass
+
+    # NomadNet logfile (not in journalctl — uses its own logfile)
+    user_home = get_real_user_home()
+    nomadnet_log = user_home / '.nomadnetwork' / 'logfile'
+    if nomadnet_log.exists():
+        try:
+            with open(nomadnet_log, 'r') as f:
+                lines = list(collections.deque(f, maxlen=20))
+            error_patterns = [
+                'Error', 'Exception', 'CRITICAL',
+                'AuthenticationError', 'PermissionError',
+            ]
+            error_lines = [
+                line for line in lines
+                if any(p in line for p in error_patterns)
+            ]
+            if error_lines:
+                print(f"\n  NomadNet errors "
+                      f"({len(error_lines)} recent):")
+                for line in error_lines[:3]:
+                    print(f"    {line[:80]}")
+            else:
+                print_status("NomadNet errors", True, "none")
+        except (OSError, PermissionError):
+            print_status("NomadNet log", False, "cannot read")
 
 
 def check_ham_callsign():
@@ -631,6 +856,7 @@ Examples:
     check_cli()
     check_rns_port()
     check_rns_config()
+    check_rns_interfaces()
     check_nomadnet()
     check_processes()
 
