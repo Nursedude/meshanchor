@@ -802,6 +802,15 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
                         [str(venv_pip), 'install', 'meshtastic'],
                         capture_output=True, text=True, timeout=120
                     )
+                    if pip_r.returncode != 0:
+                        # Retry with --ignore-installed for Debian package conflicts
+                        err_text = (pip_r.stderr or pip_r.stdout or '').lower()
+                        if 'installed by' in err_text or 'externally-managed' in err_text:
+                            print("  Debian package conflict, retrying with --ignore-installed...")
+                            pip_r = subprocess.run(
+                                [str(venv_pip), 'install', '--ignore-installed', 'meshtastic'],
+                                capture_output=True, text=True, timeout=120
+                            )
                     if pip_r.returncode == 0:
                         print("  meshtastic installed. Restarting rnsd...")
                         # Reset failed state and restart
@@ -1047,6 +1056,15 @@ WantedBy=multi-user.target
                     [str(venv_pip), 'install', '-q', 'meshtastic'],
                     capture_output=True, text=True, timeout=120
                 )
+                if pip_result.returncode != 0:
+                    # Retry with --ignore-installed for Debian package conflicts
+                    err_text = (pip_result.stderr or pip_result.stdout or '').lower()
+                    if 'installed by' in err_text or 'externally-managed' in err_text:
+                        print("  Debian package conflict, retrying...")
+                        pip_result = subprocess.run(
+                            [str(venv_pip), 'install', '-q', '--ignore-installed', 'meshtastic'],
+                            capture_output=True, text=True, timeout=120
+                        )
                 meshtastic_installed = pip_result.returncode == 0
 
             restart_hint = "Restart rnsd to load the new interface:\n  sudo systemctl restart rnsd"

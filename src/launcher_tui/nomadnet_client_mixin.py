@@ -520,11 +520,48 @@ class NomadNetClientMixin:
                             error_hints.append("Permission denied accessing files")
                             error_hints.append(f"Check ownership: ls -la ~/.nomadnetwork/")
                         break
+                    elif 'meshtastic' in line.lower() and (
+                        'critical' in line.lower() or 'requires' in line.lower()
+                        or 'no module' in line.lower() or 'modulenotfounderror' in line.lower()
+                    ):
+                        error_hints.append("rnsd cannot load the meshtastic module")
+                        error_hints.append("The Meshtastic_Interface.py plugin requires meshtastic")
+                        error_hints.append(
+                            "Fix: sudo pip3 install --break-system-packages "
+                            "--ignore-installed meshtastic"
+                        )
+                        error_hints.append("Then: sudo systemctl restart rnsd")
+                        break
                     elif 'ModuleNotFoundError' in line or 'ImportError' in line:
                         error_hints.append("Missing Python dependencies")
                         error_hints.append("Try: pipx reinstall nomadnet")
                         break
             except (OSError, PermissionError):
+                pass
+
+        # If no NomadNet-specific error found, check rnsd journal for clues.
+        # NomadNet fails when rnsd is down due to meshtastic module issue.
+        if not error_hints:
+            try:
+                journal_r = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '20', '--no-pager', '-q'],
+                    capture_output=True, text=True, timeout=5
+                )
+                journal_text = journal_r.stdout.lower()
+                if 'meshtastic' in journal_text and (
+                    'critical' in journal_text or 'module' in journal_text
+                ):
+                    error_hints.append("rnsd crashed because the meshtastic module is missing")
+                    error_hints.append("NomadNet depends on rnsd for network access")
+                    error_hints.append(
+                        "Fix: sudo pip3 install --break-system-packages "
+                        "--ignore-installed meshtastic"
+                    )
+                    error_hints.append("Then: sudo systemctl restart rnsd")
+                elif 'status=255' in journal_text or 'exception' in journal_text:
+                    error_hints.append("rnsd is crashing (exit code 255)")
+                    error_hints.append("Check: sudo journalctl -u rnsd -n 30")
+            except (subprocess.SubprocessError, OSError):
                 pass
 
         if error_hints:
