@@ -587,7 +587,7 @@ class ServiceOrchestrator:
                     logger.error(f"  • {svc_name}")
                     logger.error(f"    Fix: {fix_cmd}")
                 logger.error("")
-                logger.error("After installing, run: sudo meshforge-noc --start")
+                logger.error("After installing, run: meshforge-noc --start")
                 logger.error("Or run the full installer: sudo bash /opt/meshforge/scripts/install_noc.sh")
                 return False
             else:

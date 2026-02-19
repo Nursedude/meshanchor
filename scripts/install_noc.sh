@@ -546,7 +546,7 @@ FALLBACK_CONFIG
                     fi
 
                     # User needs to install native meshtasticd manually
-                    echo -e "  ${YELLOW}After installing meshtasticd, run 'sudo meshforge' to select your HAT${NC}"
+                    echo -e "  ${YELLOW}After installing meshtasticd, run 'meshforge' to select your HAT${NC}"
                 fi
             fi
 
@@ -1408,10 +1408,10 @@ echo -e "  ${GREEN}meshforge-status${NC}             - Quick system status (no s
 echo -e "  ${GREEN}meshforge-web${NC}                - Open radio web client (config)"
 echo -e "  ${GREEN}meshforge-map url${NC}            - Show NOC map URL (port 5000)"
 echo -e "  ${GREEN}meshforge-map status${NC}         - Check map server status"
-echo -e "  ${GREEN}sudo meshforge${NC}               - Launch interface wizard"
-echo -e "  ${GREEN}sudo meshforge-noc --start${NC}   - Start NOC services"
-echo -e "  ${GREEN}sudo meshforge-noc --status${NC}  - Check service status"
-echo -e "  ${GREEN}sudo meshforge-noc --stop${NC}    - Stop NOC services"
+echo -e "  ${GREEN}meshforge${NC}                    - Launch interface wizard"
+echo -e "  ${GREEN}meshforge-noc --start${NC}        - Start NOC services"
+echo -e "  ${GREEN}meshforge-noc --status${NC}       - Check service status"
+echo -e "  ${GREEN}meshforge-noc --stop${NC}         - Stop NOC services"
 echo ""
 echo -e "${CYAN}Systemd Services:${NC}"
 echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}       - Enable NOC on boot"
@@ -1510,7 +1510,7 @@ if [[ "$DAEMON_TYPE" != "spi-pending" && "$DAEMON_TYPE" != "placeholder" ]] && [
         echo -e "${GREEN}Starting MeshForge NOC...${NC}"
         /usr/local/bin/meshforge-noc --start
         echo ""
-        echo -e "${GREEN}NOC is running. Launch interface with: sudo meshforge${NC}"
+        echo -e "${GREEN}NOC is running. Launch interface with: meshforge${NC}"
     fi
 fi
 
