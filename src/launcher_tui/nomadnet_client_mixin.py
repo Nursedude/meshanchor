@@ -35,22 +35,8 @@ check_process_running, start_service, stop_service, apply_config_and_restart, _s
     'utils.service_check', 'check_process_running', 'start_service', 'stop_service', 'apply_config_and_restart', '_sudo_cmd'
 )
 
-# Import for sudo-safe home directory - see persistent_issues.md Issue #1
-_get_real_user_home_mod, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-
-if _HAS_PATHS:
-    get_real_user_home = _get_real_user_home_mod
-else:
-    def get_real_user_home():
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
+# Sudo-safe home directory — first-party, always available (MF001)
+from utils.paths import get_real_user_home
 
 
 class NomadNetClientMixin:

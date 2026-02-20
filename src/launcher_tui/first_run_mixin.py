@@ -23,21 +23,8 @@ from typing import Optional, List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
+from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
-
-# Import path utilities
-get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-if not _HAS_PATHS:
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
 
 # Import service check
 check_service, apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(

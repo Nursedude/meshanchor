@@ -20,22 +20,7 @@ from utils.safe_import import safe_import
 _version_val, _HAS_VERSION = safe_import('__version__', '__version__')
 __version__ = _version_val if _HAS_VERSION else "0.5.0-beta"
 
-_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-
-if _HAS_PATHS:
-    get_real_user_home = _get_real_user_home
-else:
-    def get_real_user_home() -> Path:
-        """Fallback: resolve real user home under sudo."""
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            candidate = Path(f'/home/{sudo_user}')
-            return candidate
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            candidate = Path(f'/home/{logname}')
-            return candidate
-        return Path('/root')
+from utils.paths import get_real_user_home
 
 # NOC orchestrator for service management
 ServiceOrchestrator, ServiceState, _HAS_ORCHESTRATOR = safe_import(
