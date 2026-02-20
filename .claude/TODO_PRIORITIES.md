@@ -72,11 +72,14 @@
 
 | File | Lines | Status |
 |------|-------|--------|
-| knowledge_content.py | 1,824 | OK — content file by design |
-| service_menu_mixin.py | 1,611 | MONITOR — OpenHamClock/MQTT extraction candidates |
-| rns_bridge.py | 1,525 | MONITOR — MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
-| map_data_collector.py | 1,516 | Borderline, monitor |
-| launcher_tui/main.py | 1,516 | Borderline — 33 mixins, monitor |
+| knowledge_content.py | 1,993 | OK — content file by design |
+| service_menu_mixin.py | 1,575 | MONITOR — OpenHamClock/MQTT extraction candidates |
+| rns_bridge.py | 1,570 | MONITOR — MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
+| map_data_collector.py | 1,529 | Borderline, monitor |
+| nomadnet_client_mixin.py | 1,519 | MONITOR — new to tracking |
+| commands/rns.py | 1,516 | MONITOR — new to tracking |
+| launcher_tui/main.py | 1,507 | Borderline — 33 mixins, monitor |
+| prometheus_exporter.py | 1,505 | MONITOR — grew after metrics_export split |
 
 ---
 
