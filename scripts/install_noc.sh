@@ -995,11 +995,41 @@ if $INSTALL_RNS; then
     chmod 755 /etc/reticulum/storage/resources
     chmod 755 /etc/reticulum/interfaces
 
+    # Deploy reticulum config — template if none exists, validate if it does
+    if [[ ! -f /etc/reticulum/config ]]; then
+        if [[ -f "$INSTALL_DIR/templates/reticulum.conf" ]]; then
+            cp "$INSTALL_DIR/templates/reticulum.conf" /etc/reticulum/config
+            chmod 644 /etc/reticulum/config
+            echo -e "  ${GREEN}✓ RNS config deployed (share_instance=Yes)${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ No config template found — rnsd will create default${NC}"
+        fi
+    else
+        # Existing config — validate share_instance is enabled
+        # Without this, rnsd runs but port 37428 never binds
+        if grep -q '^\s*share_instance\s*=\s*[Yy]es' /etc/reticulum/config 2>/dev/null || \
+           grep -q '^\s*share_instance\s*=\s*[Tt]rue' /etc/reticulum/config 2>/dev/null; then
+            echo -e "  Existing config preserved (share_instance=Yes)"
+        else
+            echo -e "  ${YELLOW}⚠ Existing config has share_instance disabled${NC}"
+            if grep -q '^\s*share_instance' /etc/reticulum/config 2>/dev/null; then
+                sed -i 's/^\(\s*\)share_instance\s*=.*/\1share_instance = Yes/' /etc/reticulum/config
+            elif grep -q '^\[reticulum\]' /etc/reticulum/config 2>/dev/null; then
+                sed -i '/^\[reticulum\]/a\  share_instance = Yes' /etc/reticulum/config
+            fi
+            echo -e "  ${GREEN}✓ Fixed: share_instance = Yes${NC}"
+        fi
+    fi
+
     # Create systemd service (deploy from template or create inline)
     echo "  Setting up rnsd systemd service..."
 
-    # Find rnsd binary
-    RNSD_BIN=$(command -v rnsd 2>/dev/null || echo "/usr/local/bin/rnsd")
+    # Find rnsd binary — prefer venv (has all dependencies)
+    if [[ -x "$VENV_DIR/bin/rnsd" ]]; then
+        RNSD_BIN="$VENV_DIR/bin/rnsd"
+    else
+        RNSD_BIN=$(command -v rnsd 2>/dev/null || echo "/usr/local/bin/rnsd")
+    fi
 
     # System-wide service (root) - based on templates/systemd/rnsd-user.service
     # but adapted for system-level (User=root, absolute paths)
@@ -1054,6 +1084,9 @@ RNSD_SERVICE
     fi
 
     systemctl daemon-reload
+    systemctl enable rnsd 2>/dev/null
+    systemctl start rnsd 2>/dev/null
+    echo -e "  ${GREEN}✓ rnsd enabled and started${NC}"
 
     echo -e "  ${GREEN}✓ Reticulum installed${NC}"
 else

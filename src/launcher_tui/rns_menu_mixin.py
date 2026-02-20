@@ -872,8 +872,8 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         import re as _re
                         if _re.search(r'^\s*share_instance\s*=', config_content, _re.MULTILINE):
                             fixed = _re.sub(
-                                r'^(\s*)share_instance\s*=\s*\S+',
-                                r'\1share_instance = Yes',
+                                r'^(\s*share_instance\s*=\s*).*$',
+                                r'\1Yes',
                                 config_content,
                                 count=1,
                                 flags=_re.MULTILINE
@@ -890,6 +890,11 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         if _HAS_SERVICE_CHECK and _sudo_write:
                             ok, msg = _sudo_write(str(config_path), fixed)
                             if ok:
+                                # Verify the write took effect
+                                verify = config_path.read_text()
+                                if not _parse_share_instance(verify):
+                                    print("  WARNING: Config write did not take effect")
+                                    return False
                                 print("  Fixed: share_instance = Yes")
                                 # Restart and re-check
                                 stop_service('rnsd')
@@ -994,14 +999,14 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         missing_ordering = False
         if 'meshtasticd.service' not in content:
             try:
-                from utils.rns_utils import ReticulumPaths
                 rns_config = ReticulumPaths.get_config_file()
                 if rns_config.exists():
                     rns_content = rns_config.read_text()
-                    if 'Meshtastic' in rns_content:
+                    # Match actual interface section, not comments
+                    if re.search(r'^\s*\[\[.*Meshtastic', rns_content, re.MULTILINE):
                         missing_ordering = True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Warning: Could not check RNS config: {e}")
 
         if not misplaced_directives and not wrong_rnsd_path and not missing_ordering:
             return False
