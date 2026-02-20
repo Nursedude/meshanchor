@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 from rns_sniffer_mixin import RNSSnifferMixin
 from rns_config_mixin import RNSConfigMixin
 from rns_diagnostics_mixin import RNSDiagnosticsMixin
+from rns_monitor_mixin import RNSMonitorMixin
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
@@ -48,12 +49,13 @@ detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
 )
 
 
-class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
+class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMonitorMixin):
     """Mixin providing RNS/Reticulum menu functionality.
 
     Inherits sniffer methods from RNSSnifferMixin.
     Inherits config methods from RNSConfigMixin.
     Inherits diagnostics methods from RNSDiagnosticsMixin.
+    Inherits monitor methods from RNSMonitorMixin.
     """
 
     def _rns_menu(self):
@@ -61,6 +63,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
         while True:
             choices = [
                 ("status", "RNS Status (rnstatus)"),
+                ("monitor", "Live RNS Monitor (auto-refresh)"),
                 ("paths", "RNS Path Table (rnpath)"),
                 ("sniffer", "RNS Traffic Sniffer (Wireshark-grade)"),
                 ("topology", "Network Topology (graph view)"),
@@ -91,6 +94,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin):
                 break
 
             dispatch = {
+                "monitor": ("Live RNS Monitor", self._rns_status_monitor),
                 "sniffer": ("RNS Traffic Sniffer", self._rns_traffic_sniffer),
                 "topology": ("Network Topology", self._topology_menu),
                 "quality": ("Link Quality Analysis", self._link_quality_menu),
