@@ -893,18 +893,21 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         # 2. ExecStart uses system rnsd when venv rnsd is available (venv has deps)
         wrong_rnsd_path = False
         current_rnsd = None
+        current_rnsd_binary = None
         exec_match = re.search(r'ExecStart\s*=\s*(.+)', content)
         if exec_match:
             current_rnsd = exec_match.group(1).strip()
+            # Extract just the binary path, stripping args like --service
+            current_rnsd_binary = current_rnsd.split()[0]
 
         venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
 
-        if current_rnsd:
+        if current_rnsd_binary:
             # Critical: does the ExecStart binary actually exist?
-            if not Path(current_rnsd).exists():
+            if not Path(current_rnsd_binary).exists():
                 wrong_rnsd_path = True
             # Secondary: prefer venv rnsd if available (has all dependencies)
-            elif venv_rnsd.exists() and current_rnsd != str(venv_rnsd):
+            elif venv_rnsd.exists() and current_rnsd_binary != str(venv_rnsd):
                 wrong_rnsd_path = True
 
         # Check for missing meshtasticd ordering dependency.
@@ -929,11 +932,11 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         # Report what we're fixing
         if misplaced_directives:
             print("  Found: StartLimitIntervalSec in [Service] (should be [Unit])")
-        if wrong_rnsd_path and current_rnsd:
-            if not Path(current_rnsd).exists():
-                print(f"  Found: ExecStart binary missing: {current_rnsd}")
+        if wrong_rnsd_path and current_rnsd_binary:
+            if not Path(current_rnsd_binary).exists():
+                print(f"  Found: ExecStart binary missing: {current_rnsd_binary}")
             elif venv_rnsd.exists():
-                print(f"  Found: ExecStart uses {current_rnsd}")
+                print(f"  Found: ExecStart uses {current_rnsd_binary}")
                 print(f"         Should use venv: {venv_rnsd}")
         if missing_ordering:
             print("  Found: Missing After=meshtasticd.service")
@@ -963,7 +966,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart={rnsd_path}
+ExecStart={rnsd_path} --service
 Restart=on-failure
 RestartSec=5
 
