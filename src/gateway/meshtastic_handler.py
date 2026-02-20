@@ -193,14 +193,14 @@ class MeshtasticHandler:
             self._connected = self._test_cli()
             return self._connected
 
-        # Pre-flight: verify meshtasticd is running before attempting TCP connection
+        # Advisory pre-flight: warn if meshtasticd not detected, but attempt
+        # connection anyway — service may be running outside systemd (Docker, manual)
         status = check_service('meshtasticd')
         if not status.available:
-            logger.warning("meshtasticd not available: %s", status.message)
+            logger.warning("meshtasticd service check: %s (attempting connection anyway)",
+                           status.message)
             if status.fix_hint:
                 logger.info("Fix: %s", status.fix_hint)
-            self._connected = False
-            return False
 
         try:
             host = self.config.meshtastic.host
