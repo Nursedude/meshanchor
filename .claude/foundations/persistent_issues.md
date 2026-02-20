@@ -69,22 +69,36 @@ config_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
 ### Rule
 **Always call `check_service()` before connecting to services.**
 
-```python
-from utils.service_check import check_service, ServiceState
+**Advisory vs Blocking**:
+- **Advisory** (background daemons): Warn but continue — service may run outside systemd
+- **Blocking** (user-facing TUI menus): Show error + fix hint, don't proceed
 
+```python
+# ADVISORY — for background daemon connections (gateway, bridges)
 status = check_service('meshtasticd')
 if not status.available:
-    logger.warning("meshtasticd not available: %s", status.message)
-    if status.fix_hint:
-        logger.info("Fix: %s", status.fix_hint)
-    return False
+    logger.warning("meshtasticd service check: %s (attempting connection anyway)",
+                   status.message)
+    # Continue — TCP connect attempt is the definitive test
+
+# BLOCKING — for user-initiated TUI actions
+status = check_service('meshtasticd')
+if not status.available:
+    show_error(status.message)
+    show_fix(status.fix_hint)
+    return  # Don't proceed
 ```
 
 ### Completed (2026-02-20)
-- `meshtastic_handler.py` — `check_service('meshtasticd')` before TCP connect
-- `mqtt_bridge_handler.py` — `check_service('mosquitto')` for localhost brokers
+- `meshtastic_handler.py` — Advisory `check_service('meshtasticd')` before TCP connect
+- `mqtt_bridge_handler.py` — Advisory `check_service('mosquitto')` for localhost brokers
 - `rns_bridge.py` — Advisory `check_service('rnsd')` before RNS init
 - `meshtastic_connection.py` — Replaced raw `systemctl restart` with `restart_service()`
+
+**Note**: Gateway pre-flight checks are ADVISORY (warn + continue), not blocking.
+Services may run outside systemd (Docker, manual start). The actual connection
+attempt is the definitive test. Blocking checks caused "waiting for delivery"
+regression when mosquitto wasn't detectable via systemctl.
 
 ### Remaining (34+ locations)
 - 8 files create `TCPInterface` without meshtasticd checks
