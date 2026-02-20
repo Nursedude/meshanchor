@@ -1007,7 +1007,7 @@ if $INSTALL_RNS; then
 [Unit]
 Description=Reticulum Network Stack Daemon
 Documentation=https://reticulum.network
-After=network-online.target
+After=network-online.target meshtasticd.service
 Wants=network-online.target
 
 # Stop crash-looping after 5 failures in 60 seconds
@@ -1044,15 +1044,16 @@ RNSD_SERVICE
         echo -e "  ${GREEN}✓ User service templates deployed to ${USER_SYSTEMD_DIR}${NC}"
     fi
 
-    systemctl daemon-reload
-
-    # Check if Meshtastic_Interface.py plugin exists - if so, install meshtastic module
-    # This is required for the RNS-over-Meshtastic bridge to work (Issue #24)
-    if [[ -f "/etc/reticulum/interfaces/Meshtastic_Interface.py" ]]; then
-        echo "  Meshtastic_Interface.py detected, installing meshtastic module..."
+    # Deploy Meshtastic_Interface.py from vendored template
+    if [[ -f "$INSTALL_DIR/templates/interfaces/Meshtastic_Interface.py" ]]; then
+        cp "$INSTALL_DIR/templates/interfaces/Meshtastic_Interface.py" /etc/reticulum/interfaces/
+        chmod 644 /etc/reticulum/interfaces/Meshtastic_Interface.py
+        echo -e "  ${GREEN}✓ Meshtastic_Interface.py deployed to /etc/reticulum/interfaces/${NC}"
         pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
         echo -e "  ${GREEN}✓ meshtastic module installed for rnsd${NC}"
     fi
+
+    systemctl daemon-reload
 
     echo -e "  ${GREEN}✓ Reticulum installed${NC}"
 else
