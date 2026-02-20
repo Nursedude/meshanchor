@@ -588,7 +588,8 @@ class RNSDiagnosticsMixin:
                 svc_content = service_file.read_text()
                 exec_match = re.search(r'ExecStart\s*=\s*(.+)', svc_content)
                 if exec_match:
-                    candidate = Path(exec_match.group(1).strip())
+                    # Extract just the binary path, stripping args like --service
+                    candidate = Path(exec_match.group(1).strip().split()[0])
                     if candidate.exists():
                         rnsd_path = candidate
             except (OSError, PermissionError):
@@ -666,7 +667,8 @@ class RNSDiagnosticsMixin:
                 print(f"  Installing {pip_name}...")
                 try:
                     install_cmd = [rnsd_python, '-m', 'pip', 'install',
-                                    '--break-system-packages', pip_name]
+                                    '--break-system-packages', pip_name,
+                                    'cryptography>=45.0.7,<47', 'pyopenssl>=25.3.0']
                     if _HAS_SERVICE_CHECK:
                         base_cmd = _sudo_cmd(install_cmd)
                     elif os.getuid() != 0:
@@ -687,7 +689,8 @@ class RNSDiagnosticsMixin:
                         if 'installed by' in err_text or 'externally-managed' in err_text:
                             print(f"  {pip_name}: Debian package conflict, retrying with --ignore-installed...")
                             retry_cmd = [rnsd_python, '-m', 'pip', 'install',
-                                         '--break-system-packages', '--ignore-installed', pip_name]
+                                         '--break-system-packages', '--ignore-installed', pip_name,
+                                         'cryptography>=45.0.7,<47', 'pyopenssl>=25.3.0']
                             if _HAS_SERVICE_CHECK:
                                 retry_cmd = _sudo_cmd(retry_cmd)
                             elif os.getuid() != 0:
