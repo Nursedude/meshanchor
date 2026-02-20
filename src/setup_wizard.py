@@ -337,8 +337,8 @@ class SetupWizard:
                     if other_pids:
                         status.state = WizardServiceState.RUNNING
                         status.notes.append(f"Running as process (PID: {other_pids[0]})")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Process check for %s failed: %s", svc['name'], e)
 
         self._log(f"Service {svc['name']}: {status.state.value}")
         return status
@@ -385,8 +385,8 @@ class SetupWizard:
                         if 'pgrep' not in line and str(os.getpid()) not in line:
                             rns_processes.append(proc_name)
                             break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("RNS process detection failed for %s: %s", proc_name, e)
 
         if len(rns_processes) > 1:
             conflicts.append(
@@ -415,8 +415,8 @@ class SetupWizard:
                             f"CONFLICT: Port {port} ({service}) has multiple bindings.\n"
                             "  This may cause connection issues."
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Port conflict check failed for %d: %s", port, e)
 
         # Check for RNS shared instance config
         rns_status = self.service_status.get('rnsd')

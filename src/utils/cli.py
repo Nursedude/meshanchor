@@ -45,9 +45,10 @@ def find_meshtastic_cli():
             return user_path
 
     # Check common known locations
+    from utils.paths import get_real_user_home
     known_paths = [
         '/root/.local/bin/meshtastic',
-        os.path.expanduser('~/.local/bin/meshtastic'),
+        str(get_real_user_home() / '.local' / 'bin' / 'meshtastic'),
         '/usr/local/bin/meshtastic',
     ]
 

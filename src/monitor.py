@@ -42,24 +42,9 @@ from typing import Optional
 from utils.safe_import import safe_import
 
 # Module-level safe imports
-_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+from utils.paths import get_real_user_home
 _NodeMonitor_src, _HAS_MONITOR_SRC = safe_import('src.monitoring', 'NodeMonitor')
 _NodeMonitor_rel, _HAS_MONITOR_REL = safe_import('monitoring', 'NodeMonitor')
-
-
-def get_real_user_home() -> Path:
-    """Get real user home even under sudo."""
-    if _HAS_PATHS:
-        return _get_real_user_home()
-    sudo_user = os.environ.get('SUDO_USER', '')
-    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-        candidate = Path(f'/home/{sudo_user}')
-        return candidate
-    logname = os.environ.get('LOGNAME', '')
-    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-        candidate = Path(f'/home/{logname}')
-        return candidate
-    return Path('/root')
 
 # Config file location
 CONFIG_DIR = get_real_user_home() / '.config' / 'meshtastic-monitor'

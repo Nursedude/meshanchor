@@ -28,17 +28,8 @@ logger = logging.getLogger(__name__)
 )
 _HAS_APPLY_RESTART = _HAS_SERVICE_CHECK
 
-# Import centralized path utility
-get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-if not _HAS_PATHS:
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f'/home/{logname}')
-        return Path('/root')
+# Sudo-safe home directory — first-party, always available (MF001)
+from utils.paths import get_real_user_home
 
 # Import port lockdown helpers
 (lock_port_external, unlock_port_external,

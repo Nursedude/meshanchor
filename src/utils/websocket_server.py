@@ -344,9 +344,12 @@ def get_websocket_server(port: int = 5001) -> MessageWebSocketServer:
 
 
 def start_websocket_server(port: int = 5001) -> bool:
-    """Start the global WebSocket server."""
+    """Start the global WebSocket server and subscribe to event bus."""
     server = get_websocket_server(port)
-    return server.start()
+    started = server.start()
+    if started:
+        subscribe_event_bus()
+    return started
 
 
 def stop_websocket_server():
@@ -364,3 +367,67 @@ def broadcast_message(message: Dict[str, Any]):
 def is_websocket_available() -> bool:
     """Check if WebSocket functionality is available."""
     return WEBSOCKETS_AVAILABLE
+
+
+# =============================================================================
+# Event Bus Integration (Issue #20 Phase 3)
+#
+# Subscribe to the MeshForge event bus so that RX messages, service status
+# changes, and node updates are pushed to all WebSocket clients in real-time.
+# =============================================================================
+
+_event_bus_subscribed = False
+
+
+def subscribe_event_bus():
+    """Subscribe WebSocket broadcasts to the event bus.
+
+    Call once after starting the WebSocket server. Subsequent calls are no-ops.
+    """
+    global _event_bus_subscribed
+    if _event_bus_subscribed:
+        return
+
+    try:
+        from utils.event_bus import event_bus
+    except ImportError:
+        logger.debug("event_bus not available, WebSocket event forwarding disabled")
+        return
+
+    def _on_message_event(event):
+        broadcast_message({
+            'type': 'message',
+            'direction': event.direction,
+            'content': event.content,
+            'node_id': event.node_id,
+            'node_name': event.node_name,
+            'channel': event.channel,
+            'network': event.network,
+            'timestamp': event.timestamp.isoformat(),
+        })
+
+    def _on_service_event(event):
+        broadcast_message({
+            'type': 'service_status',
+            'service': event.service_name,
+            'available': event.available,
+            'message': event.message,
+            'timestamp': event.timestamp.isoformat(),
+        })
+
+    def _on_node_event(event):
+        broadcast_message({
+            'type': 'node_update',
+            'event_type': event.event_type,
+            'node_id': event.node_id,
+            'node_name': event.node_name,
+            'latitude': event.latitude,
+            'longitude': event.longitude,
+            'timestamp': event.timestamp.isoformat(),
+        })
+
+    event_bus.subscribe('message', _on_message_event)
+    event_bus.subscribe('service', _on_service_event)
+    event_bus.subscribe('node', _on_node_event)
+    _event_bus_subscribed = True
+    logger.info("WebSocket server subscribed to event bus")
