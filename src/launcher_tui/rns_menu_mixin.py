@@ -847,10 +847,87 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
 
             return False
 
-        # Port never came up but rnsd didn't crash — still initializing
+        # Port never came up but rnsd didn't crash — diagnose why
         print("  WARNING: rnsd not yet listening on port 37428 after 15s")
-        print("  rnsd may be slow to initialize with multiple interfaces.")
-        print("  Check logs: sudo journalctl -u rnsd -n 20")
+
+        # Check if share_instance is disabled in config (most common cause)
+        try:
+            from commands.rns import _parse_share_instance
+            config_path = ReticulumPaths.get_config_file()
+            if config_path.exists():
+                config_content = config_path.read_text()
+                if not _parse_share_instance(config_content):
+                    print("  Cause: share_instance not enabled in [reticulum] config")
+                    print("  Port 37428 requires share_instance = Yes")
+
+                    if self.dialog.yesno(
+                        "Fix share_instance",
+                        "The shared instance is disabled in the RNS config.\n\n"
+                        "Without it, rnsd won't listen on port 37428\n"
+                        "and no client apps (gateway, rnstatus) can connect.\n\n"
+                        f"Config: {config_path}\n\n"
+                        "Set share_instance = Yes and restart rnsd?"
+                    ):
+                        # Fix the config: replace existing setting or add it
+                        import re as _re
+                        if _re.search(r'^\s*share_instance\s*=', config_content, _re.MULTILINE):
+                            fixed = _re.sub(
+                                r'^(\s*)share_instance\s*=\s*\S+',
+                                r'\1share_instance = Yes',
+                                config_content,
+                                count=1,
+                                flags=_re.MULTILINE
+                            )
+                        elif '[reticulum]' in config_content.lower():
+                            fixed = config_content.replace(
+                                '[reticulum]',
+                                '[reticulum]\n  share_instance = Yes',
+                                1
+                            )
+                        else:
+                            fixed = '[reticulum]\n  share_instance = Yes\n\n' + config_content
+
+                        if _HAS_SERVICE_CHECK and _sudo_write:
+                            ok, msg = _sudo_write(str(config_path), fixed)
+                            if ok:
+                                print("  Fixed: share_instance = Yes")
+                                # Restart and re-check
+                                stop_service('rnsd')
+                                time.sleep(1)
+                                start_service('rnsd')
+                                print("  Waiting for port 37428...")
+                                for _ in range(10):
+                                    time.sleep(1)
+                                    if check_udp_port and check_udp_port(37428):
+                                        print("  SUCCESS: rnsd is now listening on port 37428")
+                                        print("\n" + "=" * 50)
+                                        print("RNS shared instance is now available!")
+                                        print("=" * 50 + "\n")
+                                        return True
+                                print("  Port still not bound after config fix")
+                            else:
+                                print(f"  Could not write config: {msg}")
+                    else:
+                        return False
+        except Exception as e:
+            print(f"  (config check failed: {e})")
+
+        # Fetch recent journal errors to show why port isn't binding
+        try:
+            r = subprocess.run(
+                ['journalctl', '-u', 'rnsd', '-n', '10', '--no-pager',
+                 '-p', 'warning', '-q', '--no-hostname'],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.stdout and r.stdout.strip():
+                print("  Recent rnsd errors:")
+                for line in r.stdout.strip().splitlines()[-5:]:
+                    print(f"    {line.strip()[:100]}")
+            else:
+                print("  No recent errors in journal")
+        except (subprocess.SubprocessError, OSError):
+            print("  Check logs: sudo journalctl -u rnsd -n 20")
+
         return False
 
     def _validate_rnsd_service_file(self) -> bool:
