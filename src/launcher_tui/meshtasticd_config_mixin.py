@@ -14,12 +14,14 @@ from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
-from utils.safe_import import safe_import
-
-# Import centralized service checker - SINGLE SOURCE OF TRUTH
-check_service, check_systemd_service, ServiceState, apply_config_and_restart, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'check_systemd_service', 'ServiceState', 'apply_config_and_restart', '_sudo_cmd'
+# Import centralized service checker - SINGLE SOURCE OF TRUTH (first-party)
+from utils.service_check import (
+    check_service, check_systemd_service, ServiceState,
+    apply_config_and_restart, _sudo_cmd,
 )
+_HAS_APPLY_RESTART = True
+
+from utils.safe_import import safe_import
 
 # Hoist function-level imports to module level
 _get_cli, _HAS_MESHTASTIC_CLI = safe_import('core.meshtastic_cli', 'get_cli')
@@ -123,23 +125,9 @@ class MeshtasticdConfigMixin:
 
         try:
             # ---- Service state (SINGLE SOURCE OF TRUTH: systemctl) ----
-            if check_service is not None and check_systemd_service is not None:
-                status = check_service('meshtasticd')
-                is_running = status.available
-                _, is_enabled = check_systemd_service('meshtasticd')
-            else:
-                # Fallback if service_check not available
-                result = subprocess.run(
-                    ['systemctl', 'status', 'meshtasticd'],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                is_running = "active (running)" in result.stdout
-                is_enabled = subprocess.run(
-                    ['systemctl', 'is-enabled', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                ).returncode == 0
+            status = check_service('meshtasticd')
+            is_running = status.available
+            _, is_enabled = check_systemd_service('meshtasticd')
 
             # ---- Preset detection (separate from service state) ----
             preset_display = "Unknown (select via Radio Presets)"
@@ -164,15 +152,23 @@ class MeshtasticdConfigMixin:
             config_d = Path('/etc/meshtasticd/config.d')
             active_configs = list(config_d.glob('*.yaml')) if config_d.exists() else []
 
-            # ---- Build display (service state and preset shown separately) ----
+            # ---- Build display (Issue #20 Phase 2: service state and
+            #      detection shown separately with actionable hints) ----
             text = "Meshtasticd Service Status:\n"
-            text += f"\nService: {'running' if is_running else 'stopped'}"
+            if is_running:
+                text += "\nService: RUNNING"
+            else:
+                text += "\nService: STOPPED"
+                if status.fix_hint:
+                    text += f"\n  Hint: {status.fix_hint}"
             text += f"\nBoot:    {'enabled' if is_enabled else 'not enabled (will not start on reboot)'}"
             text += f"\n\nPreset:  {preset_display}"
             if region_display:
                 text += f"\nRegion:  {region_display}"
             if detection_method:
                 text += f"\n  (detected via {detection_method})"
+            elif is_running and preset_display.startswith("Unknown"):
+                text += "\n  (CLI detection unavailable — select preset manually)"
             text += f"\n\nConfig File: {config_path}"
             text += f"\nConfig Exists: {'Yes' if config_exists else 'No'}"
             text += f"\n\nActive Hardware Configs: {len(active_configs)}"

@@ -1124,6 +1124,14 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
             self._rns_init_failed_permanently = True
             return
 
+        # Pre-flight: verify rnsd is available (advisory, not blocking)
+        rnsd_status = check_service('rnsd')
+        if not rnsd_status.available:
+            logger.warning("rnsd not available: %s", rnsd_status.message)
+            if rnsd_status.fix_hint:
+                logger.info("Fix: %s", rnsd_status.fix_hint)
+            # Continue anyway — RNS can init standalone without rnsd
+
         RNS = _RNS_mod
         LXMF = _LXMF_mod
 

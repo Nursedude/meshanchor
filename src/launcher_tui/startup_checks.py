@@ -56,20 +56,8 @@ else:
     RNS_TCP_SERVER_PORT = 4242
     MQTT_PORT = 1883
 
-# Import path utilities
-_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-if _HAS_PATHS:
-    get_real_user_home = _get_real_user_home
-else:
-    def get_real_user_home() -> Path:
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f'/home/{sudo_user}')
-        # Fallback: check LOGNAME before defaulting to /root (MF001)
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f'/home/{logname}')
-        return Path('/root')
+# Sudo-safe home directory — first-party, always available (MF001)
+from utils.paths import get_real_user_home
 
 # Import ReticulumPaths for _heal_rns_storage_dirs (directory creation only)
 _ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')

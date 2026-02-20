@@ -32,6 +32,7 @@ except ImportError:
     def broadcast_message(*args, **kwargs):
         pass
 from utils.safe_import import safe_import
+from utils.service_check import check_service
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -191,6 +192,15 @@ class MeshtasticHandler:
             logger.warning("pubsub not available, using CLI fallback")
             self._connected = self._test_cli()
             return self._connected
+
+        # Pre-flight: verify meshtasticd is running before attempting TCP connection
+        status = check_service('meshtasticd')
+        if not status.available:
+            logger.warning("meshtasticd not available: %s", status.message)
+            if status.fix_hint:
+                logger.info("Fix: %s", status.fix_hint)
+            self._connected = False
+            return False
 
         try:
             host = self.config.meshtastic.host

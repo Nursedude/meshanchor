@@ -9,12 +9,15 @@ Provides interactive tools for:
 - Safe reboot with application check
 """
 
+import logging
 import subprocess
 import os
 import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from rich.console import Console
 from rich.table import Table
@@ -334,8 +337,8 @@ class HardwareConfigurator:
                 console.print("[green]dtoverlay=spi0-0cs is already configured[/green]")
                 input("\nPress Enter to continue...")
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("SPI overlay check failed: %s", e)
 
         if not Confirm.ask("Add dtoverlay=spi0-0cs to config.txt?", default=True):
             return
@@ -395,8 +398,8 @@ class HardwareConfigurator:
                     for p in parts:
                         if p not in ['--', '']:
                             i2c_devices.append(f"0x{p}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("I2C device scan failed: %s", e)
         table.add_row("I2C", i2c_status, ', '.join(i2c_devices[:5]) or "-")
 
         # Serial
