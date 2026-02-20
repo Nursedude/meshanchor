@@ -98,11 +98,23 @@ class MeshtasticInterface(Interface):
         pub.subscribe(self.connection_complete, "meshtastic.connection.established")
         pub.subscribe(self.connection_closed, "meshtastic.connection.lost")
 
-        try:
-            self.open_interface()
-        except Exception as e:
-            RNS.log("Meshtastic: Could not open meshtastic interface " + str(self), RNS.LOG_ERROR)
-            raise e
+        max_retries = 3
+        base_delay = 5
+        for attempt in range(max_retries):
+            try:
+                self.open_interface()
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    RNS.log("Meshtastic: Could not open interface after "
+                            + str(max_retries) + " attempts: " + str(e), RNS.LOG_ERROR)
+                    raise e
+                delay = base_delay * (2 ** attempt)
+                RNS.log("Meshtastic: Connect failed (" + str(e)
+                        + "), retrying in " + str(delay) + "s ("
+                        + str(attempt + 1) + "/" + str(max_retries) + ")",
+                        RNS.LOG_WARNING)
+                time.sleep(delay)
 
     def open_interface(self):
         if self.port:

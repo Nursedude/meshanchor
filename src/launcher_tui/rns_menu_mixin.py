@@ -860,6 +860,8 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         - StartLimitIntervalSec in [Service] instead of [Unit]
         - ExecStart pointing to system rnsd instead of venv rnsd
           (venv has all dependencies like meshtastic)
+        - Missing After=meshtasticd.service when MeshtasticInterface is
+          configured (rnsd crashes if meshtasticd isn't ready yet)
 
         Returns True if the service file was fixed (daemon-reload needed).
         """
@@ -905,7 +907,23 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
             elif venv_rnsd.exists() and current_rnsd != str(venv_rnsd):
                 wrong_rnsd_path = True
 
-        if not misplaced_directives and not wrong_rnsd_path:
+        # Check for missing meshtasticd ordering dependency.
+        # If a MeshtasticInterface is configured, rnsd must start AFTER
+        # meshtasticd — otherwise the initial TCP connect fails and rnsd
+        # crashes with "Connection refused".
+        missing_ordering = False
+        if 'meshtasticd.service' not in content:
+            try:
+                from utils.rns_utils import ReticulumPaths
+                rns_config = ReticulumPaths.get_config_file()
+                if rns_config.exists():
+                    rns_content = rns_config.read_text()
+                    if 'Meshtastic' in rns_content:
+                        missing_ordering = True
+            except Exception:
+                pass
+
+        if not misplaced_directives and not wrong_rnsd_path and not missing_ordering:
             return False
 
         # Report what we're fixing
@@ -917,6 +935,9 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
             elif venv_rnsd.exists():
                 print(f"  Found: ExecStart uses {current_rnsd}")
                 print(f"         Should use venv: {venv_rnsd}")
+        if missing_ordering:
+            print("  Found: Missing After=meshtasticd.service")
+            print("         rnsd can crash if meshtasticd isn't ready")
         print("  Regenerating rnsd.service...")
 
         # Prefer venv rnsd — it has all dependencies
@@ -932,7 +953,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
             return False
         service_content = f'''[Unit]
 Description=Reticulum Network Stack Daemon
-After=network-online.target
+After=network-online.target meshtasticd.service
 Wants=network-online.target
 
 # Stop crash-looping after 5 failures in 60 seconds
