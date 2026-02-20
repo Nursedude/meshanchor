@@ -120,6 +120,57 @@ class TestServiceChecks:
         assert result in (SYM_UNKNOWN, SYM_STOPPED)
 
 
+class TestRnsdZombieDetection:
+    """Test rnsd zombie detection: systemd active but port not bound."""
+
+    def test_rnsd_zombie_shows_stopped(self):
+        """rnsd active in systemd but port 37428 not bound → stopped."""
+        bar = StatusBar(version="1.0")
+        with patch('status_bar.check_systemd_service', return_value=(True, True)):
+            with patch('status_bar._check_udp_port', return_value=False):
+                with patch('status_bar._HAS_SERVICE_CHECK', True):
+                    result = bar._check_systemd_active('rnsd')
+        assert result == SYM_STOPPED
+
+    def test_rnsd_healthy_shows_running(self):
+        """rnsd active in systemd and port 37428 bound → running."""
+        bar = StatusBar(version="1.0")
+        with patch('status_bar.check_systemd_service', return_value=(True, True)):
+            with patch('status_bar._check_udp_port', return_value=True):
+                with patch('status_bar._HAS_SERVICE_CHECK', True):
+                    result = bar._check_systemd_active('rnsd')
+        assert result == SYM_RUNNING
+
+    def test_rnsd_systemd_inactive_skips_port_check(self):
+        """rnsd not active in systemd → stopped without port check."""
+        bar = StatusBar(version="1.0")
+        with patch('status_bar.check_systemd_service', return_value=(False, False)):
+            with patch('status_bar._check_udp_port') as mock_udp:
+                with patch('status_bar._HAS_SERVICE_CHECK', True):
+                    result = bar._check_systemd_active('rnsd')
+        mock_udp.assert_not_called()
+        assert result == SYM_STOPPED
+
+    def test_meshtasticd_no_port_check(self):
+        """meshtasticd should not trigger UDP port check."""
+        bar = StatusBar(version="1.0")
+        with patch('status_bar.check_systemd_service', return_value=(True, True)):
+            with patch('status_bar._check_udp_port') as mock_udp:
+                with patch('status_bar._HAS_SERVICE_CHECK', True):
+                    result = bar._check_systemd_active('meshtasticd')
+        mock_udp.assert_not_called()
+        assert result == SYM_RUNNING
+
+    def test_udp_check_unavailable_falls_through(self):
+        """When check_udp_port is None (import failed), trust systemd only."""
+        bar = StatusBar(version="1.0")
+        with patch('status_bar.check_systemd_service', return_value=(True, True)):
+            with patch('status_bar._check_udp_port', None):
+                with patch('status_bar._HAS_SERVICE_CHECK', True):
+                    result = bar._check_systemd_active('rnsd')
+        assert result == SYM_RUNNING
+
+
 class TestBridgeCheck:
     """Test bridge status checking."""
 

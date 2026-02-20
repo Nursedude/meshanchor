@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 from utils.safe_import import safe_import
 
 # Import centralized service checking
-check_systemd_service, check_process_running, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_systemd_service', 'check_process_running'
+check_systemd_service, check_process_running, _check_udp_port, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_udp_port'
 )
 
 # Import startup checker for enhanced status
@@ -45,6 +45,9 @@ _event_bus, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'event_bus')
 
 # Node tracker for initial node count seeding
 _get_node_tracker, _HAS_NODE_TRACKER = safe_import('gateway.node_tracker', 'get_node_tracker')
+
+# RNS shared instance port (UDP) — rnsd must bind this to be functional
+_RNS_PORT = 37428
 
 # Cache TTL in seconds — how often to re-check service status
 STATUS_CACHE_TTL = 10.0
@@ -173,6 +176,8 @@ class StatusBar:
         """Check if a systemd service is active.
 
         Uses centralized service_check module when available.
+        For rnsd, also verifies UDP port 37428 is bound — systemd can
+        report "active" while the service fails to bind its port (zombie).
 
         Args:
             service: Service unit name.
@@ -183,7 +188,14 @@ class StatusBar:
         try:
             if _HAS_SERVICE_CHECK:
                 is_running, _ = check_systemd_service(service)
-                return SYM_RUNNING if is_running else SYM_STOPPED
+                if not is_running:
+                    return SYM_STOPPED
+                # rnsd zombie detection: systemd active but port not bound
+                if service == 'rnsd' and _check_udp_port is not None:
+                    if not _check_udp_port(_RNS_PORT):
+                        logger.debug("rnsd active but port %d not bound", _RNS_PORT)
+                        return SYM_STOPPED
+                return SYM_RUNNING
 
             # Fallback to direct systemctl call
             result = subprocess.run(
@@ -191,6 +203,9 @@ class StatusBar:
                 capture_output=True, text=True, timeout=3
             )
             if result.stdout.strip() == 'active':
+                if service == 'rnsd' and _check_udp_port is not None:
+                    if not _check_udp_port(_RNS_PORT):
+                        return SYM_STOPPED
                 return SYM_RUNNING
             return SYM_STOPPED
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
