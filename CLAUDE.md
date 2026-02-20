@@ -120,14 +120,14 @@ print(f'Issues: {report.total_issues}')
 
 ## Research Documents
 
-Deep documentation in `.claude/`:
-- `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical — satellites link here)
+Deep documentation in `.claude/` (~55 files after 2026-02-20 cleanup):
+- `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical)
 - `dude_ai_university.md` - Complete project knowledge base
 - `foundations/domain_architecture.md` - **ARCHITECTURE: Core vs Plugin model**
 - `foundations/ai_principles.md` - Human-centered design philosophy
 - `foundations/persistent_issues.md` - **CRITICAL: Known issues & fixes**
-- `foundations/documentation_audit.md` - Doc structure & conflicts
-- `research/README.md` - Index of technical deep dives (RNS, AREDN, HamClock, etc.)
+- `INDEX.md` - Full documentation index with quick lookups
+- `research/README.md` - Index of 21 technical deep dives (RNS, AREDN, HamClock, RF, etc.)
 
 ## Architecture Model
 
@@ -268,6 +268,8 @@ sudo visudo -cf /etc/sudoers.d/meshforge  # validate syntax
 ### Note on Fallbacks
 Legacy fallback patterns were removed in v0.5.2 (Issue #26). All code now imports
 directly from `utils.service_check` — no try/except compatibility shims needed.
+Similarly, all `safe_import('utils.paths', ...)` fallbacks were consolidated to direct
+imports in v0.5.4 (Issue #5, 2026-02-20).
 
 ## safe_import Rules (utils/safe_import.py)
 

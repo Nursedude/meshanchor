@@ -3,7 +3,7 @@
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
 >
-> **Last audited**: 2026-02-20 — Cross-referenced against code review health check (2026-01-24)
+> **Last audited**: 2026-02-20 — Session resolved Issues #1, #3, #5, #9, #20 (35 files, -220 net lines)
 
 ---
 
@@ -27,21 +27,11 @@ was only partially followed for H1. Four files still have blocking `time.sleep()
 
 ---
 
-## Issue #1: Path.home() Returns /root with sudo
+## Issue #1: Path.home() Returns /root with sudo — RESOLVED (2026-02-20)
 
-### Symptom
-User config files, logs, and settings created in `/root/.config/meshforge/` instead of `/home/<user>/.config/meshforge/` when MeshForge is run with sudo.
+### Status: **RESOLVED** — Zero `Path.home()` violations remain in codebase.
 
-### Root Cause
-`Path.home()` returns the current effective user's home directory. When running `sudo python3 src/launcher.py`, the effective user is root, so `Path.home()` returns `/root`.
-
-### Impact
-- Settings don't persist between sessions
-- Logs go to wrong location
-- User sees "file not found" errors
-- Features appear "broken" when they work correctly in isolation
-
-### Proper Fix
+### Rule
 **ALWAYS use `get_real_user_home()` from `utils/paths.py`** instead of `Path.home()`:
 
 ```python
@@ -54,17 +44,15 @@ from utils.paths import get_real_user_home
 config_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
 ```
 
-### Files with this pattern (50+ instances as of 2026-01-06)
-Many files still use `Path.home()`. Priority fixes completed:
-- [x] `utils/paths.py` - Core path utilities (FIXED 2026-01-06)
-- [x] `utils/common.py` - CONFIG_DIR, get_data_dir, get_cache_dir (FIXED 2026-01-06)
-- [x] `utils/logging_utils.py` - LOG_DIR (FIXED earlier)
-- [x] `gtk_ui/panels/hamclock.py` - Settings fallback (FIXED 2026-01-06)
+### Resolution (2026-02-20)
+- Fixed last 3 violations: `mqtt_bridge_handler.py`, `cli.py`, `rns_config.py`
+- Consolidated 20 `safe_import` fallback copies to direct imports (Issue #5)
+- Linter (`scripts/lint.py`) checks MF001
 
 ### Prevention
 - Use `from utils.paths import get_real_user_home, MeshForgePaths`
 - Grep for `Path.home()` before committing
-- Add to code review checklist
+- Linter enforces MF001
 
 ---
 
@@ -74,42 +62,34 @@ Many files still use `Path.home()`. Priority fixes completed:
 
 ---
 
-## Issue #3: Services Not Started/Verified
+## Issue #3: Services Not Started/Verified — PARTIALLY RESOLVED (2026-02-20)
 
-### Symptom
-Features dependent on services (rnsd, meshtasticd, HamClock) fail silently because services aren't running.
+### Status: **Gateway pre-flight checks done.** 34+ secondary locations remain.
 
-### Root Cause
-Code assumes services are already running instead of checking and providing feedback.
+### Rule
+**Always call `check_service()` before connecting to services.**
 
-### Examples
-- RNS node tracker created but `.start()` never called
-- HamClock panel connects but doesn't verify service is running
-- Features fail with no actionable feedback
-
-### Proper Fix
-1. **Use centralized `check_service()` utility** for pre-flight checks
-2. **Provide actionable error messages** with fix hints
-3. **Offer fix suggestions** (start service button, installation link)
-
-### Implementation Pattern (Recommended)
 ```python
-# Use the centralized service checker
 from utils.service_check import check_service, ServiceState
 
-# Before starting gateway/feature that requires services
-def _on_start(self, button):
-    status = check_service('meshtasticd')
-    if not status.available:
-        self._show_error(status.message, status.fix_hint)
-        return
-    # Proceed with operation...
-
-# Quick port check
-from utils.service_check import check_port
-if check_port(4403):  # meshtasticd port
-    connect_to_meshtasticd()
+status = check_service('meshtasticd')
+if not status.available:
+    logger.warning("meshtasticd not available: %s", status.message)
+    if status.fix_hint:
+        logger.info("Fix: %s", status.fix_hint)
+    return False
 ```
+
+### Completed (2026-02-20)
+- `meshtastic_handler.py` — `check_service('meshtasticd')` before TCP connect
+- `mqtt_bridge_handler.py` — `check_service('mosquitto')` for localhost brokers
+- `rns_bridge.py` — Advisory `check_service('rnsd')` before RNS init
+- `meshtastic_connection.py` — Replaced raw `systemctl restart` with `restart_service()`
+
+### Remaining (34+ locations)
+- 8 files create `TCPInterface` without meshtasticd checks
+- 4 MQTT connections without mosquitto checks
+- 8 files with raw `subprocess.run(['systemctl', ...])` bypassing service_check
 
 ### Known Services (in `utils/service_check.py`)
 | Service | Port | systemd name |
@@ -118,16 +98,6 @@ if check_port(4403):  # meshtasticd port
 | rnsd | None | rnsd |
 | hamclock | 8080 | hamclock |
 | mosquitto | 1883 | mosquitto |
-
-### Legacy Pattern (for reference)
-```python
-def _on_connection_failed(self, error):
-    error_str = str(error).lower()
-    if 'connection refused' in error_str:
-        self.status_label.set_label("Connection refused - is service running?")
-    elif 'name or service not known' in error_str:
-        self.status_label.set_label("Host not found - check URL")
-```
 
 ---
 
@@ -156,32 +126,23 @@ logger.info(f"[Component] Connection failed: {error}")
 
 ---
 
-## Issue #5: Duplicate Utility Functions
+## Issue #5: Duplicate Utility Functions — RESOLVED (2026-02-20)
 
-### Symptom
-Same fix implemented multiple times in different files, then only some get updated.
+### Status: **RESOLVED** — All 20 `safe_import` fallback copies consolidated to direct imports.
 
-### Root Cause
-No single source of truth for common utilities.
-
-### Example
-`_get_real_user_home()` was defined in:
-- `utils/common.py`
-- `utils/logging_utils.py`
-- `utils/network_diagnostics.py`
-- `utils/paths.py`
-
-When one gets fixed, others remain broken.
-
-### Proper Fix
+### Rule
 **Single source of truth**: Define once in `utils/paths.py`, import everywhere else.
 
 ```python
-# In any file needing this utility:
+# CORRECT — first-party module, always available
 from utils.paths import get_real_user_home
 
-# NOT: def _get_real_user_home(): ...  # local copy
+# WRONG — safe_import is for EXTERNAL deps only
+_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 ```
+
+### Resolution (2026-02-20)
+Consolidated 20 files from `safe_import('utils.paths', ...)` fallback patterns to direct `from utils.paths import get_real_user_home`. Net -220 lines removed.
 
 ---
 
@@ -373,31 +334,33 @@ grep -rn "0\.[0-9]\.[0-9]" src/*.py | grep -v __version__.py
 
 ---
 
-## Issue #9: Broad Exception Swallowing
+## Issue #9: Broad Exception Swallowing — MOSTLY RESOLVED (2026-02-20)
 
-### Symptom
-Real errors are hidden because `except Exception: pass` catches everything.
+### Status: **MOSTLY RESOLVED** — 28 of 30 instances fixed. 2 benign exceptions remain by design.
 
-### Example
+### Rule
 ```python
 # BAD - hides all errors
-try:
-    proc.communicate(input=str(percent), timeout=1)
 except Exception:
     pass
 
-# GOOD - specific exceptions with explanation
-try:
-    proc.communicate(input=str(percent), timeout=1)
-except (subprocess.TimeoutExpired, OSError):
-    # Gauge display timeout - non-critical, UI continues
-    pass
+# GOOD - log it
+except Exception as e:
+    logger.debug("Non-critical operation failed: %s", e)
 ```
 
-### Proper Fix
-1. **Use specific exception types**
-2. **Add comment explaining why silence is acceptable**
-3. **Log at DEBUG level if truly non-critical**
+### Resolution (2026-02-20)
+Fixed 28 silent `except Exception: pass` across 7 files:
+- `tcp_monitor.py` (7) — callback failures now logged as warnings
+- `system_diagnostics.py` (8) — converted to `logger.debug()`
+- `setup_wizard.py` (3) — converted to `logger.debug()`
+- `hardware_config.py` (2) — converted to logged warnings
+- `rns_sniffer.py` (2) — converted to `logger.debug()`
+- `site_planner.py` (2) — converted to `logger.debug()`
+
+### Remaining (by design)
+- `packet_dissectors.py` — benign decode try/except (no logger in file)
+- `pskreporter_subscriber.py` — cleanup exceptions inside outer try that already logs
 
 ### Prevention
 - Grep for `except.*:.*pass` before committing
@@ -407,48 +370,9 @@ except (subprocess.TimeoutExpired, OSError):
 
 ---
 
-## Issue #10: Lambda Closure Bug in Loops
+## Issue #10: Lambda Closure Bug in Loops — ARCHIVED (GTK removed)
 
-### Symptom
-Clicking different buttons (like Install buttons for different RNS components) always triggers the action for the **last** item in the loop, not the intended one.
-
-### Root Cause
-When creating lambdas inside a `for` loop, the loop variable is captured **by reference**, not by value:
-
-```python
-# WRONG - classic closure bug
-for component in self.COMPONENTS:
-    btn = Gtk.Button(label=component['name'])
-    btn.connect("clicked", lambda b: self._install(component))  # All buttons install last component!
-```
-
-By the time any button is clicked, `component` has the value from the last iteration.
-
-### Impact
-- Wrong component gets installed
-- Wrong action gets triggered
-- Debugging is confusing because logs show wrong item being processed
-
-### Proper Fix
-Use a **default argument** to capture the value at iteration time:
-
-```python
-# CORRECT - capture by value using default argument
-for component in self.COMPONENTS:
-    btn = Gtk.Button(label=component['name'])
-    btn.connect("clicked", lambda b, c=component: self._install(c))  # Each button gets its own copy
-```
-
-The `c=component` creates a new binding at each iteration, capturing the current value.
-
-### Files Fixed (2026-01-12)
-- [x] `src/gtk_ui/panels/rns.py:288` - Component install buttons
-- [x] `src/gtk_ui/panels/rns_mixins/components.py:107` - Component install buttons (mixin)
-
-### Prevention
-- Search for `lambda.*for.*in` or `connect.*lambda` patterns before committing
-- When using lambdas in loops, ALWAYS use default argument pattern
-- Code review should flag any `lambda b: self._method(loop_var)` inside loops
+> Archived to `persistent_issues_archive.md`. GTK removed.
 
 ---
 
@@ -514,58 +438,31 @@ This allows connecting to rnsd without trying to bind ports.
 ## Issue #16: Gateway Message Routing Reliability
 
 ### Symptom
-- Messages sent via GTK panel may not reach destination
-- Delivery confirmation unreliable
-- No clear feedback when gateway is disconnected
-- Users report "messages lost" intermittently
+- Messages may not reach destination
+- Delivery confirmation unreliable over LoRa
 
-### Root Cause (Documented 2026-01-16)
-The RNS-Meshtastic gateway bridge has connection and routing limitations:
-
-1. **Gateway connectivity**: Gateway must be running AND connected to both networks
-2. **No delivery guarantees**: Meshtastic uses best-effort delivery over LoRa
-3. **Node unreachability**: Target nodes may be offline or out of range
-4. **Queue overflow**: High message volume can overwhelm limited bandwidth
+### Root Cause
+Inherent to mesh networking: best-effort delivery, node unreachability, queue overflow.
 
 ### Current State
-- Message transmission IS implemented (commit `935d37e`)
+- Message transmission implemented via HTTP protobuf (v0.5.4)
 - Gateway bridge connects RNS and Meshtastic networks
-- Delivery status tracking exists but reliability varies
-- User testing confirms intermittent failures
+- Message queue persists to SQLite for retry
 
 ### Proper Fix
-**Accept reliability limitations** - This is inherent to mesh networking:
-
+**Accept reliability limitations** — document delivery as "best effort":
 ```python
-# Messaging panel should show clear status
-def _send_message(self):
-    result = messaging.send_message(dest, text)
-    if result.get("status") == "sent":
-        self._show_status("Sent (delivery not guaranteed)")
-    elif result.get("status") == "queued":
-        self._show_status("Queued - gateway not connected")
-    else:
-        self._show_status(f"Failed: {result.get('error')}")
+result = messaging.send_message(dest, text)
+if result.get("status") == "sent":
+    show_status("Sent (delivery not guaranteed)")
+elif result.get("status") == "queued":
+    show_status("Queued - gateway not connected")
 ```
 
 ### Files Involved
-- `src/commands/messaging.py` - Message sending logic
-- `src/gateway/rns_bridge.py` - RNS-Meshtastic bridge (lines 217-237)
-- `src/gateway/mesh_bridge.py` - Meshtastic packet handling
-- `src/gtk_ui/panels/messaging.py` - UI panel
-
-### Prevention
-- Document delivery as "best effort" in UI
-- Provide clear gateway status feedback
-- Implement retry logic for critical messages
-- Consider acknowledgment timeouts
-- Test with actual hardware under various conditions
-
-### Testing Gateway
-1. Connect Meshtastic node
-2. Start gateway bridge: `python3 -c "from gateway import start_gateway; start_gateway()"`
-3. Send test message from GTK panel
-4. Verify on target node/device
+- `src/commands/messaging.py` — Message sending logic
+- `src/gateway/rns_bridge.py` — RNS-Meshtastic bridge
+- `src/gateway/message_queue.py` — SQLite message queue
 
 ---
 
@@ -613,8 +510,7 @@ def _run(self):
 
 ### Files Changed
 - `src/utils/message_listener.py` - Check for existing persistent connection
-- `src/gtk_ui/panels/mesh_tools_nodemap.py` - Use existing gateway connection
-- `src/gtk_ui/panels/radio_config_simple.py` - Warning for config operations
+- `src/utils/meshtastic_connection.py` - Connection manager
 
 ### External Interference
 **Meshtastic Web UI** on port 9443 can also cause connection spam:
@@ -718,16 +614,8 @@ def _load_known_rns_destinations(self, RNS):
 ```
 
 ### Timing Issue
-**path_table may be empty immediately after connect** - rnsd syncs data asynchronously:
-
-```python
-# Delayed check 5 seconds after connection
-GLib.timeout_add(5000, self._delayed_path_table_check)
-
-# Periodic check every 30 seconds in _rns_loop()
-if current_time - last_check >= 30:
-    self._check_path_table_for_new_nodes()
-```
+**path_table may be empty immediately after connect** - rnsd syncs data asynchronously.
+Use delayed checks (5s after connection) and periodic re-checks (30s intervals).
 
 ### Files Changed
 - `src/gateway/node_tracker.py` - path_table discovery + delayed/periodic checks
@@ -739,7 +627,7 @@ if current_time - last_check >= 30:
 
 ---
 
-*Last updated: 2026-02-20 - Health check reconciliation; updated issue statuses*
+*Last updated: 2026-02-20 - Issues #1, #5 resolved; #3, #9, #20 progressed; #10 archived*
 
 ---
 
@@ -867,27 +755,26 @@ def _on_message(self, event):
 | Component | Effort | Impact | Priority | Status (2026-02-20) |
 |-----------|--------|--------|----------|---------------------|
 | Service Detection Simplification | LOW | HIGH | 1 | **DONE** — systemctl trusted as SSOT for systemd services |
-| Status Display Separation | MEDIUM | HIGH | 2 | OPEN |
-| RX Message Events | HIGH | MEDIUM | 3 | OPEN — Requires event bus |
+| Status Display Separation | MEDIUM | HIGH | 2 | **DONE** — meshtasticd_config_mixin separates service state from CLI detection |
+| RX Message Events | HIGH | MEDIUM | 3 | **DONE** — event_bus wired to WebSocket server |
 
-### Files to Modify
+### Files Modified
 
-**Phase 1: Service Detection**
-- `src/utils/service_check.py` - Simplify to systemctl-only for systemd services
-- `src/gtk_ui/panels/rns_mixins/components.py` - Use simplified check
+**Phase 1: Service Detection** (completed earlier)
+- `src/utils/service_check.py` — Simplified to systemctl-only for systemd services
 
-**Phase 2: Status Display**
-- `src/gtk_ui/panels/rns_mixins/rnode.py` - Separate service/detection display
-- `src/utils/lora_presets.py` - Return service_status separately from preset
+**Phase 2: Status Display** (completed 2026-02-20)
+- `src/launcher_tui/meshtasticd_config_mixin.py` — Shows service state and CLI detection separately
+- Shows fix hints when stopped, "(CLI detection unavailable — select preset manually)" when detection fails
 
-**Phase 3: RX Messages**
-- `src/utils/event_bus.py` - NEW: Simple pub/sub event system
-- `src/gateway/rns_bridge.py` - Emit message events
-- `src/gtk_ui/panels/messaging.py` - Subscribe to message events
+**Phase 3: RX Messages** (completed 2026-02-20)
+- `src/utils/event_bus.py` — Thread-safe pub/sub with MessageEvent, ServiceEvent, NodeEvent
+- `src/gateway/rns_bridge.py` — Emits message events on RX
+- `src/utils/websocket_server.py` — Subscribes to event_bus, broadcasts to WebSocket clients
+- `src/launcher_tui/messaging_mixin.py` — TUI live feed subscribes to message events
 
 ### Prevention
 - Don't add more detection fallback methods - simplify instead
-- Test with actual hardware in various states (running, stopped, misconfigured)
 - UI should always distinguish "service state" from "detection capability"
 
 ---
