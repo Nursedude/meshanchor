@@ -770,7 +770,6 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                 shutil.which('rnsd') or '/usr/local/bin/rnsd'
             )
             print("  Running rnsd directly to capture error...")
-            print("  " + "-" * 46)
             output = ""
             try:
                 r = subprocess.run(
@@ -779,15 +778,26 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                 )
                 output = ((r.stdout or "") + (r.stderr or "")).strip()
                 if output:
-                    for line in output.splitlines()[-20:]:
-                        print(f"  {line}")
+                    # Detect known error patterns and show actionable messages
+                    lower_output = output.lower()
+                    if 'address already in use' in lower_output:
+                        print("  Cause: Port conflict (another process holds the port)")
+                    elif 'permission' in lower_output and 'denied' in lower_output:
+                        print("  Cause: Permission denied")
+                    elif 'connection refused' in lower_output:
+                        print("  Cause: meshtasticd not running (Connection refused)")
+                        print("  Fix: sudo systemctl start meshtasticd")
+                    else:
+                        # Unknown error — show last 5 lines (not raw 20-line traceback)
+                        for line in output.splitlines()[-5:]:
+                            print(f"  {line}")
+                    print(f"  Full log: sudo journalctl -u rnsd -n 20")
                 else:
                     print("  (no output captured)")
             except subprocess.TimeoutExpired:
                 print("  rnsd hung (no crash within 10s — likely a blocking interface)")
             except (OSError, FileNotFoundError) as e:
                 print(f"  Could not run rnsd: {e}")
-            print("  " + "-" * 46)
 
             # Detect missing meshtastic module and offer to install
             if 'meshtastic module' in output.lower() or 'meshtastic' in output.lower():

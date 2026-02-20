@@ -18,6 +18,11 @@ import socket
 import subprocess
 from pathlib import Path
 
+# Ensure src directory is in path for imports
+_src_dir = Path(__file__).parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 from utils.safe_import import safe_import
 
 # Module-level safe imports

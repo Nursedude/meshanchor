@@ -737,8 +737,7 @@ class RNSDiagnosticsMixin:
                 # RNS shared instance issue — DIAGNOSE, don't auto-fix.
                 # Auto-fix was the #1 source of regressions (see persistent_issues.md).
                 # Policy: show what's wrong, let the user decide what to do.
-                if result.returncode == 0 and result.stdout:
-                    print(result.stdout, end='')
+                # Don't dump raw stdout — the diagnostic path below shows actionable info.
                 print(f"\nRNS connectivity issue detected.")
 
                 # Check if rnsd is actually running
@@ -815,12 +814,10 @@ class RNSDiagnosticsMixin:
                 if result.stdout:
                     print(result.stdout, end='')
                 if result.stderr and result.stderr.strip():
-                    # Only show stderr if it contains actual error info
+                    # Show concise error hint — not raw tracebacks
                     stderr_lower = result.stderr.lower()
-                    if "error" in stderr_lower or "failed" in stderr_lower or "exception" in stderr_lower:
-                        print(f"\nNote: {tool_name} reported an issue:")
-                        for line in result.stderr.strip().split('\n')[-3:]:
-                            print(f"  {line}")
+                    if "error" in stderr_lower or "traceback" in stderr_lower or "exception" in stderr_lower:
+                        print(f"\n{tool_name} reported an error. Check: sudo journalctl -u rnsd -n 10")
         except FileNotFoundError:
             print(f"\n{tool_name} not found. Is RNS installed?")
             print("Install: pipx install rns")
