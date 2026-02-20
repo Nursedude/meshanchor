@@ -223,6 +223,20 @@ class RNSDiagnosticsMixin:
                         "share_instance not enabled — gateway "
                         "cannot connect to rnsd")
                 else:
+                    # Surface recent journal errors to explain WHY
+                    try:
+                        r = subprocess.run(
+                            ['journalctl', '-u', 'rnsd', '-n', '10',
+                             '--no-pager', '-p', 'warning', '-q',
+                             '--no-hostname'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if r.stdout and r.stdout.strip():
+                            print("    Recent rnsd errors:")
+                            for line in r.stdout.strip().splitlines()[-5:]:
+                                print(f"      {line.strip()[:100]}")
+                    except (subprocess.SubprocessError, OSError):
+                        pass
                     warnings.append(
                         "rnsd active but shared instance port "
                         "not bound")

@@ -228,6 +228,22 @@ class RNSMonitorMixin:
         print(f"  Port 37428: {_color_dot(port_bound)}"
               f" {'bound' if port_bound else 'NOT bound'}")
 
+        # Surface recent errors when rnsd is active but port not bound
+        if sd_state == 'available' and not port_bound:
+            try:
+                r = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '5', '--no-pager',
+                     '-p', 'err', '-q', '--no-hostname'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.stdout and r.stdout.strip():
+                    print(f"  {_YELLOW}Recent errors:{_RESET}")
+                    for line in r.stdout.strip().splitlines()[:3]:
+                        display = line.strip()[:80]
+                        print(f"    {_DIM}{display}{_RESET}")
+            except (subprocess.SubprocessError, OSError):
+                pass
+
         # Transport
         if status.transport.running:
             print(f"  Transport: {_color_dot(True)} running"

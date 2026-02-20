@@ -98,23 +98,36 @@ class MeshtasticInterface(Interface):
         pub.subscribe(self.connection_complete, "meshtastic.connection.established")
         pub.subscribe(self.connection_closed, "meshtastic.connection.lost")
 
+        # Try initial connection with brief retries.
+        # If all fail, start a background retry thread instead of raising.
+        # This lets rnsd proceed to bind port 37428 even if meshtasticd
+        # isn't ready yet (boot race condition).
         max_retries = 3
         base_delay = 5
+        connected = False
         for attempt in range(max_retries):
             try:
                 self.open_interface()
+                connected = True
                 break
             except Exception as e:
                 if attempt == max_retries - 1:
-                    RNS.log("Meshtastic: Could not open interface after "
-                            + str(max_retries) + " attempts: " + str(e), RNS.LOG_ERROR)
-                    raise e
-                delay = base_delay * (2 ** attempt)
-                RNS.log("Meshtastic: Connect failed (" + str(e)
-                        + "), retrying in " + str(delay) + "s ("
-                        + str(attempt + 1) + "/" + str(max_retries) + ")",
-                        RNS.LOG_WARNING)
-                time.sleep(delay)
+                    RNS.log("Meshtastic: Could not connect after "
+                            + str(max_retries) + " attempts: " + str(e),
+                            RNS.LOG_WARNING)
+                    RNS.log("Meshtastic: Will retry in background "
+                            "— rnsd continues starting",
+                            RNS.LOG_WARNING)
+                else:
+                    delay = base_delay * (2 ** attempt)
+                    RNS.log("Meshtastic: Connect failed (" + str(e)
+                            + "), retrying in " + str(delay) + "s ("
+                            + str(attempt + 1) + "/" + str(max_retries)
+                            + ")", RNS.LOG_WARNING)
+                    time.sleep(delay)
+
+        if not connected:
+            self._start_background_connect()
 
     def open_interface(self):
         if self.port:
@@ -135,6 +148,37 @@ class MeshtasticInterface(Interface):
             self.interface = TCPInterface(hostname=host, portNumber=port)
         else:
             raise ValueError(f"No port, ble_port, or tcp_port specified for {self}")
+
+    def _start_background_connect(self):
+        """Start a background thread to retry connection so rnsd can proceed."""
+        thread = threading.Thread(
+            target=self._background_connect_loop, daemon=True)
+        thread.start()
+
+    def _background_connect_loop(self):
+        """Retry connection with exponential backoff in the background.
+
+        Modeled after connection_closed() which uses the same retry
+        pattern without raising — lets rnsd continue running.
+        """
+        max_retries = 10
+        base_delay = 10
+        for attempt in range(max_retries):
+            delay = min(base_delay * (2 ** min(attempt, 5)), 300)
+            RNS.log("Meshtastic: Background connect in " + str(delay)
+                    + "s (attempt " + str(attempt + 1) + "/"
+                    + str(max_retries) + ")")
+            time.sleep(delay)
+            try:
+                self.open_interface()
+                RNS.log("Meshtastic: Background connection succeeded",
+                        RNS.LOG_NOTICE)
+                return
+            except Exception as e:
+                RNS.log("Meshtastic: Background connect failed: "
+                        + str(e), RNS.LOG_WARNING)
+        RNS.log("Meshtastic: All background connect attempts exhausted",
+                RNS.LOG_ERROR)
 
     def configure_device(self, interface):
         ourNode = interface.getNode('^local')

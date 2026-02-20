@@ -1212,7 +1212,9 @@ WantedBy=multi-user.target
                                       re.IGNORECASE | re.MULTILINE)
 
                 if tcp_match:
-                    # TCP mode → needs meshtasticd running
+                    # TCP mode → needs meshtasticd running AND its TCP port
+                    # accepting connections. systemd "active" only means the
+                    # process started, NOT that port 4403 is ready.
                     host_port = tcp_match.group(1)
                     try:
                         r = subprocess.run(
@@ -1225,6 +1227,34 @@ WantedBy=multi-user.target
                                 f"needs meshtasticd ({host_port}) but it is not running",
                                 "sudo systemctl start meshtasticd"
                             ))
+                        else:
+                            # meshtasticd is "active" — verify TCP port is ready
+                            import socket
+                            tcp_host = host_port
+                            tcp_port_num = 4403
+                            if ':' in host_port:
+                                parts = host_port.rsplit(':', 1)
+                                tcp_host = parts[0]
+                                try:
+                                    tcp_port_num = int(parts[1])
+                                except ValueError:
+                                    pass
+                            try:
+                                sock = socket.socket(
+                                    socket.AF_INET, socket.SOCK_STREAM)
+                                sock.settimeout(2)
+                                sock.connect((tcp_host, tcp_port_num))
+                                sock.close()
+                            except (socket.timeout, ConnectionRefusedError,
+                                    OSError):
+                                blocking.append((
+                                    name,
+                                    f"meshtasticd running but TCP port "
+                                    f"{tcp_host}:{tcp_port_num} not accepting "
+                                    f"connections (still starting?)",
+                                    f"Wait for meshtasticd to finish starting, "
+                                    f"or: sudo systemctl restart meshtasticd"
+                                ))
                     except (subprocess.SubprocessError, OSError):
                         pass
                 elif port_match:
