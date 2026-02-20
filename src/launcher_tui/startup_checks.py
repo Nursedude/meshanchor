@@ -145,9 +145,13 @@ class EnvironmentState:
 
     @property
     def all_services_running(self) -> bool:
-        """Check if all expected services are running."""
+        """Check if all expected services are running and functional.
+
+        A service with state RUNNING but port not bound (zombie) is
+        not considered fully running.
+        """
         return all(
-            s.state == ServiceRunState.RUNNING
+            s.state == ServiceRunState.RUNNING and (not s.port or s.port_open)
             for s in self.services.values()
         )
 
@@ -161,10 +165,17 @@ class EnvironmentState:
         parts = []
         for name, info in self.services.items():
             if info.state == ServiceRunState.RUNNING:
-                if plain:
-                    parts.append(f"{name}: UP")
+                # Zombie detection: systemd active but port not bound
+                if info.port and not info.port_open:
+                    if plain:
+                        parts.append(f"{name}: UP(no port)")
+                    else:
+                        parts.append(f"{name} \033[33m●\033[0m")  # yellow
                 else:
-                    parts.append(f"{name} \033[32m●\033[0m")
+                    if plain:
+                        parts.append(f"{name}: UP")
+                    else:
+                        parts.append(f"{name} \033[32m●\033[0m")
             elif info.state == ServiceRunState.FAILED:
                 if plain:
                     parts.append(f"{name}: FAIL")
