@@ -466,14 +466,16 @@ class RNSMeshtasticTransport:
 
                 # Send each fragment with delay
                 for fragment in fragments:
-                    if not self._running:
+                    if not self._running or self._stop_event.is_set():
                         break
 
                     self._send_fragment(fragment, destination)
 
                     # Delay between fragments based on speed preset
                     if len(fragments) > 1:
-                        time.sleep(self._fragment_delay)
+                        self._stop_event.wait(self._fragment_delay)
+                        if self._stop_event.is_set():
+                            break
 
                 self.stats.packets_sent += 1
                 self.stats.bytes_sent += len(packet)
