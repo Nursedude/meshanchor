@@ -1010,145 +1010,98 @@ WantedBy=multi-user.target
         return plugin_path.exists()
 
     def _install_meshtastic_interface_plugin(self):
-        """Install Meshtastic_Interface.py plugin to RNS interfaces directory.
+        """Install or update Meshtastic_Interface.py from vendored template.
 
-        Prefers the vendored copy shipped with MeshForge (templates/interfaces/).
-        Falls back to cloning from GitHub if the vendored file is missing.
+        MeshForge maintains its own copy in templates/interfaces/.
+        Deploys to the RNS interfaces directory and installs dependencies.
         """
         interfaces_dir = ReticulumPaths.get_interfaces_dir()
         plugin_path = interfaces_dir / 'Meshtastic_Interface.py'
 
-        if plugin_path.exists():
+        # Locate vendored source
+        vendored = (Path(__file__).parent.parent.parent
+                    / 'templates' / 'interfaces' / 'Meshtastic_Interface.py')
+        if not vendored.exists():
             self.dialog.msgbox(
-                "Already Installed",
-                f"Meshtastic_Interface.py is already installed at:\n"
-                f"  {plugin_path}\n\n"
-                f"Size: {plugin_path.stat().st_size} bytes"
+                "Template Missing",
+                "Vendored Meshtastic_Interface.py not found.\n\n"
+                f"Expected at:\n  {vendored}\n\n"
+                "Reinstall MeshForge to restore templates."
             )
             return
 
+        # Check if already installed and up to date
+        action = "Install"
+        if plugin_path.exists():
+            import filecmp
+            if filecmp.cmp(str(vendored), str(plugin_path), shallow=False):
+                self.dialog.msgbox(
+                    "Up to Date",
+                    f"Meshtastic_Interface.py is already current at:\n"
+                    f"  {plugin_path}"
+                )
+                return
+            action = "Update"
+
         if not self.dialog.yesno(
-            "Install Meshtastic Interface Plugin",
-            "The Meshtastic_Interface.py plugin is required for\n"
-            "bridging RNS over Meshtastic LoRa mesh networks.\n\n"
-            f"Install to:\n  {plugin_path}\n\n"
-            "Install now?"
+            f"{action} Meshtastic Interface Plugin",
+            f"The Meshtastic_Interface.py plugin bridges RNS over\n"
+            f"Meshtastic LoRa mesh networks.\n\n"
+            f"{action} to:\n  {plugin_path}\n\n"
+            f"Source:\n  {vendored}\n\n"
+            f"{action} now?"
         ):
             return
 
-        # Locate the plugin source — prefer vendored copy, fall back to git
-        source_file = None
-        tmp_dir = None
-        clone_url = "https://github.com/landandair/RNS_Over_Meshtastic.git"
-
-        # 1. Vendored copy shipped with MeshForge (bug-fixed version)
-        vendored = Path(__file__).parent.parent.parent / 'templates' / 'interfaces' / 'Meshtastic_Interface.py'
-        if vendored.exists():
-            source_file = vendored
-            print(f"  Using vendored plugin: {vendored}")
-        else:
-            # 2. Fall back to cloning from GitHub
-            import tempfile
-            tmp_dir = tempfile.mkdtemp(prefix='meshforge_rns_plugin_')
-            try:
-                result = subprocess.run(
-                    ['git', 'clone', '--depth', '1', clone_url, tmp_dir],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                if result.returncode != 0:
-                    self.dialog.msgbox(
-                        "Clone Failed",
-                        f"Failed to clone repository:\n{result.stderr}\n\n"
-                        f"Manual install:\n"
-                        f"  git clone {clone_url}\n"
-                        f"  cp RNS_Over_Meshtastic/Interface/Meshtastic_Interface.py \\\n"
-                        f"    {interfaces_dir}/"
-                    )
-                    return
-
-                # Find the plugin file (in Interface/ subfolder per upstream repo)
-                candidate = Path(tmp_dir) / 'Interface' / 'Meshtastic_Interface.py'
-                if not candidate.exists():
-                    candidate = Path(tmp_dir) / 'Meshtastic_Interface.py'
-                if not candidate.exists():
-                    self.dialog.msgbox(
-                        "Plugin Not Found",
-                        f"Meshtastic_Interface.py not found in repository.\n\n"
-                        f"Expected at: Interface/Meshtastic_Interface.py\n"
-                        f"Check: {clone_url}"
-                    )
-                    return
-                source_file = candidate
-            except FileNotFoundError:
-                self.dialog.msgbox(
-                    "Git Not Found",
-                    "Vendored plugin not found and git is not installed.\n\n"
-                    "Install git: sudo apt install git\n\n"
-                    "Or manually download from:\n"
-                    f"  {clone_url}"
-                )
-                return
-            except subprocess.TimeoutExpired:
-                self.dialog.msgbox(
-                    "Timeout",
-                    "Download timed out. Check your internet connection."
-                )
-                return
-
         try:
-            # Create interfaces directory and copy plugin
             interfaces_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(source_file), str(plugin_path))
+            shutil.copy2(str(vendored), str(plugin_path))
             plugin_path.chmod(0o644)
+            print(f"  {action}d: {plugin_path}")
 
             # Install meshtastic Python module — required by the plugin.
-            # Install into the venv so rnsd (using venv Python) can load it.
             meshtastic_installed = False
             venv_pip = Path('/opt/meshforge/venv/bin/pip')
             if venv_pip.exists():
-                print("Installing meshtastic Python module...")
+                print("  Installing meshtastic Python module...")
                 pip_result = subprocess.run(
                     [str(venv_pip), 'install', '-q', 'meshtastic'],
                     capture_output=True, text=True, timeout=120
                 )
                 if pip_result.returncode != 0:
-                    # Retry with --ignore-installed for Debian package conflicts
                     err_text = (pip_result.stderr or pip_result.stdout or '').lower()
                     if 'installed by' in err_text or 'externally-managed' in err_text:
                         print("  Debian package conflict, retrying...")
                         pip_result = subprocess.run(
-                            [str(venv_pip), 'install', '-q', '--ignore-installed', 'meshtastic'],
+                            [str(venv_pip), 'install', '-q',
+                             '--ignore-installed', 'meshtastic'],
                             capture_output=True, text=True, timeout=120
                         )
                 meshtastic_installed = pip_result.returncode == 0
 
-            restart_hint = "Restart rnsd to load the new interface:\n  sudo systemctl restart rnsd"
+            restart_hint = ("Restart rnsd to load the new interface:\n"
+                            "  sudo systemctl restart rnsd")
             if not meshtastic_installed:
                 restart_hint = (
                     "NOTE: The meshtastic Python module is also required.\n"
-                    "Install it: /opt/meshforge/venv/bin/pip install meshtastic\n\n"
-                    "Then restart rnsd:\n  sudo systemctl restart rnsd"
+                    "Install it: /opt/meshforge/venv/bin/pip install meshtastic"
+                    "\n\nThen restart rnsd:\n  sudo systemctl restart rnsd"
                 )
 
             self.dialog.msgbox(
-                "Plugin Installed",
-                f"Meshtastic_Interface.py installed to:\n"
+                f"Plugin {action}d",
+                f"Meshtastic_Interface.py {action.lower()}d at:\n"
                 f"  {plugin_path}\n\n"
                 f"{restart_hint}"
             )
 
         except (OSError, PermissionError) as e:
             self.dialog.msgbox(
-                "Install Failed",
-                f"Failed to install plugin:\n{e}\n\n"
+                f"{action} Failed",
+                f"Failed to {action.lower()} plugin:\n{e}\n\n"
                 f"Try running with sudo, or manually copy:\n"
-                f"  sudo cp Meshtastic_Interface.py {interfaces_dir}/"
+                f"  sudo cp {vendored} {interfaces_dir}/"
             )
-        finally:
-            if tmp_dir:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _find_blocking_interfaces(self) -> list:
         """Check if enabled RNS interfaces have missing dependencies.
