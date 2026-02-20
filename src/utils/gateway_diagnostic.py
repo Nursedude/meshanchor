@@ -759,8 +759,8 @@ class GatewayDiagnostic:
             if not plugin_path.exists():
                 lines.append(f"\n⚠  Meshtastic_Interface.py plugin NOT installed")
                 lines.append(f"   Required for RNS over Meshtastic bridging")
-                lines.append(f"   Install from: github.com/landandair/RNS_Over_Meshtastic")
-                lines.append(f"   Copy to: {ReticulumPaths.get_interfaces_dir()}/")
+                lines.append(f"   Install from: RNS menu > Install Meshtastic Interface")
+                lines.append(f"   Target: {ReticulumPaths.get_interfaces_dir()}/")
 
             # Recommend connection type
             config_path = ReticulumPaths.get_config_file()
