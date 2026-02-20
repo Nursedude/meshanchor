@@ -648,6 +648,116 @@ class TestSeedNodeCount:
         assert bar._node_count is None
 
 
+class TestStartupChecksZombieDetection:
+    """Test zombie detection in startup_checks.py status display."""
+
+    def test_zombie_rnsd_shows_degraded_plain(self):
+        """rnsd running + port not open → 'UP(no port)' in plain mode."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'meshtasticd': ServiceInfo(name='meshtasticd', state=ServiceRunState.RUNNING,
+                                       port=4403, port_open=True),
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=False),
+        }
+        line = env.get_status_line(plain=True)
+        assert "meshtasticd: UP" in line
+        assert "rnsd: UP(no port)" in line
+
+    def test_healthy_rnsd_shows_up(self):
+        """rnsd running + port open → 'UP' in plain mode."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=True),
+        }
+        line = env.get_status_line(plain=True)
+        assert "rnsd: UP" in line
+        assert "no port" not in line
+
+    def test_no_port_service_not_affected(self):
+        """Service without port config is not affected by zombie check."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'test_svc': ServiceInfo(name='test_svc', state=ServiceRunState.RUNNING,
+                                    port=None, port_open=False),
+        }
+        line = env.get_status_line(plain=True)
+        assert "test_svc: UP" in line
+        assert "no port" not in line
+
+    def test_all_services_running_false_when_zombie(self):
+        """all_services_running should be False when rnsd is a zombie."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'meshtasticd': ServiceInfo(name='meshtasticd', state=ServiceRunState.RUNNING,
+                                       port=4403, port_open=True),
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=False),
+        }
+        assert env.all_services_running is False
+
+    def test_all_services_running_true_when_healthy(self):
+        """all_services_running should be True when all ports are bound."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'meshtasticd': ServiceInfo(name='meshtasticd', state=ServiceRunState.RUNNING,
+                                       port=4403, port_open=True),
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=True),
+        }
+        assert env.all_services_running is True
+
+    def test_zombie_rnsd_yellow_in_ansi_mode(self):
+        """rnsd zombie should use yellow (33m) in ANSI mode, not green."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        env = EnvironmentState()
+        env.services = {
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=False),
+        }
+        line = env.get_status_line(plain=False)
+        assert '\033[33m' in line  # yellow for zombie
+        assert '\033[32m' not in line  # NOT green
+
+
+class TestEnhancedStatusLineZombie:
+    """Test zombie detection in enhanced status line."""
+
+    def test_enhanced_zombie_rnsd_shows_stopped(self):
+        """Enhanced status line should show stopped for zombie rnsd."""
+        from startup_checks import EnvironmentState, ServiceInfo, ServiceRunState
+
+        bar = StatusBar(version="1.0")
+        env = EnvironmentState()
+        env.is_root = True
+        env.services = {
+            'meshtasticd': ServiceInfo(name='meshtasticd', state=ServiceRunState.RUNNING,
+                                       port=4403, port_open=True),
+            'rnsd': ServiceInfo(name='rnsd', state=ServiceRunState.RUNNING,
+                                port=37428, port_open=False),
+        }
+        env.conflicts = []
+
+        with patch.object(bar, 'get_environment', return_value=env):
+            with patch('status_bar.ServiceRunState', ServiceRunState):
+                line = bar.get_enhanced_status_line()
+
+        assert f"mesh:{SYM_RUNNING}" in line
+        assert f"rnsd:{SYM_STOPPED}" in line
+
+
 class TestEventDrivenServiceSkip:
     """Test that services updated by events skip polling."""
 
