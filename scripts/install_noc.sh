@@ -503,7 +503,7 @@ UDEV_RULES
                 if ! $NATIVE_INSTALLED; then
                     echo -e "  ${YELLOW}Native meshtasticd required for SPI radios${NC}"
                     echo -e "  ${YELLOW}Install from: https://meshtastic.org/docs/software/linux-native/${NC}"
-                    pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
+                    pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt 'cryptography>=45.0.7,<47' 'pyopenssl>=25.3.0'
 
                     # Create placeholder service explaining the requirement
                     cat > /etc/systemd/system/meshtasticd.service << 'SPI_NEEDS_NATIVE'
@@ -821,7 +821,7 @@ NATIVE_SERVICE
             echo -e "  ${CYAN}Installing for USB serial radio...${NC}"
 
             # Install meshtastic Python package for CLI tools
-            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt 'cryptography>=45.0.7,<47' 'pyopenssl>=25.3.0'
 
             USB_DEV=$(get_usb_device)
             echo -e "  ${GREEN}✓ Python meshtastic CLI installed${NC}"
@@ -903,7 +903,7 @@ USB_PLACEHOLDER
             echo -e "  ${YELLOW}⚠ No radio detected${NC}"
             echo -e "  ${YELLOW}  Installing Python meshtastic CLI tools${NC}"
 
-            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
+            pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt 'cryptography>=45.0.7,<47' 'pyopenssl>=25.3.0'
 
             # Check if native meshtasticd is available
             if command -v meshtasticd &> /dev/null; then
@@ -975,7 +975,7 @@ if $INSTALL_RNS; then
         apt-get install -y -qq pipx &>/dev/null
     fi
 
-    pip3 install $PIP_ARGS --ignore-installed -q rns
+    pip3 install $PIP_ARGS --ignore-installed -q rns 'cryptography>=45.0.7,<47' 'pyopenssl>=25.3.0'
 
     # Create /etc/reticulum directory structure
     # RNS stores data in a 'storage' subdirectory of its config directory.
@@ -1049,7 +1049,7 @@ RNSD_SERVICE
         cp "$INSTALL_DIR/templates/interfaces/Meshtastic_Interface.py" /etc/reticulum/interfaces/
         chmod 644 /etc/reticulum/interfaces/Meshtastic_Interface.py
         echo -e "  ${GREEN}✓ Meshtastic_Interface.py deployed to /etc/reticulum/interfaces/${NC}"
-        pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt
+        pip3 install $PIP_ARGS --ignore-installed -q meshtastic paho-mqtt 'cryptography>=45.0.7,<47' 'pyopenssl>=25.3.0'
         echo -e "  ${GREEN}✓ meshtastic module installed for rnsd${NC}"
     fi
 
