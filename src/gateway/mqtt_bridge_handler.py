@@ -49,8 +49,9 @@ _get_protobuf_client, _HAS_PROTOBUF_CLIENT = safe_import(
     '.meshtastic_protobuf_client', 'get_protobuf_client', package='gateway',
 )
 
-# Optional paths utility
-_get_real_user_home_fn, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
+# Sudo-safe home directory — first-party, always available (MF001)
+from utils.paths import get_real_user_home as _get_real_user_home_fn
+from utils.service_check import check_service as _check_service
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -163,8 +164,17 @@ class MQTTBridgeHandler:
             logger.error("paho-mqtt not installed. Install with: pip install paho-mqtt")
             return False
 
-        mqtt = _mqtt_mod
+        # Pre-flight: verify MQTT broker is running
         mqtt_cfg = self.config.mqtt_bridge
+        if mqtt_cfg.broker in ('localhost', '127.0.0.1', '::1'):
+            broker_status = _check_service('mosquitto')
+            if not broker_status.available:
+                logger.warning("MQTT broker not available: %s", broker_status.message)
+                if broker_status.fix_hint:
+                    logger.info("Fix: %s", broker_status.fix_hint)
+                return False
+
+        mqtt = _mqtt_mod
 
         try:
             # Create MQTT client
@@ -699,11 +709,7 @@ class MQTTBridgeHandler:
 
     def _get_user_bin(self):
         """Get user's local bin directory."""
-        if _HAS_PATHS:
-            return _get_real_user_home_fn() / '.local' / 'bin'
-        else:
-            from pathlib import Path
-            return Path.home() / '.local' / 'bin'
+        return _get_real_user_home_fn() / '.local' / 'bin'
 
     @staticmethod
     def _path_exists(path: str) -> bool:
