@@ -169,10 +169,11 @@ class MQTTBridgeHandler:
         if mqtt_cfg.broker in ('localhost', '127.0.0.1', '::1'):
             broker_status = _check_service('mosquitto')
             if not broker_status.available:
-                logger.warning("MQTT broker not available: %s", broker_status.message)
+                logger.warning("mosquitto service check: %s (attempting connection anyway)",
+                               broker_status.message)
                 if broker_status.fix_hint:
                     logger.info("Fix: %s", broker_status.fix_hint)
-                return False
+                # Continue — mosquitto may be running outside systemd
 
         mqtt = _mqtt_mod
 
