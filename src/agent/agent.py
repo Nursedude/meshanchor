@@ -207,6 +207,7 @@ class AgentDaemon:
 
         # Background threads
         self._running = threading.Event()
+        self._stop_event = threading.Event()
         self._metrics_thread: Optional[threading.Thread] = None
         self._health_thread: Optional[threading.Thread] = None
 
@@ -250,6 +251,7 @@ class AgentDaemon:
 
                 # Start background threads
                 self._running.set()
+                self._stop_event.clear()
                 self._start_background_threads()
 
                 # Register signal handlers
@@ -278,6 +280,7 @@ class AgentDaemon:
 
             # Stop background threads
             self._running.clear()
+            self._stop_event.set()
 
             if self._metrics_thread:
                 self._metrics_thread.join(timeout=timeout / 3)
@@ -511,7 +514,9 @@ class AgentDaemon:
         from agent.protocol import Message, MessageType
 
         while self._running.is_set():
-            time.sleep(self.config.metrics_interval)
+            self._stop_event.wait(self.config.metrics_interval)
+            if self._stop_event.is_set():
+                break
 
             if not self._protocol or not self._protocol.is_connected:
                 continue

@@ -2,6 +2,28 @@
 
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
+>
+> **Last audited**: 2026-02-20 — Cross-referenced against code review health check (2026-01-24)
+
+---
+
+## Health Check Reconciliation (2026-02-20)
+
+The code review health check (2026-01-24) identified 5 critical (C1-C5) and 1 high (H1)
+issues. After auditing the current codebase, here is their status:
+
+| ID | Issue | Status | Evidence |
+|----|-------|--------|----------|
+| C1 | LXMF Source None after partial RNS init | **MITIGATED** | Guard at `rns_bridge.py:579-580` returns False instead of crashing |
+| C2 | reconnect.py raises None on early interruption | **FIXED** | `reconnect.py:176-178` raises ConnectionError |
+| C3 | Unbounded node tracking dicts (memory leak) | **FIXED** | MAX_NODES caps + eviction in node_tracker.py and node_monitor.py |
+| C4 | Stats dict race conditions (24 racy increments) | **FIXED** | threading.Lock added across all affected files |
+| C5 | Atomic write uses deterministic temp path | **FIXED** | `paths.py` uses `tempfile.mkstemp()` for unique temp files |
+| H1 | Non-interruptible shutdown in daemon loops | **FIXED** (2026-02-20) | All daemon loops now use `_stop_event.wait()` instead of `time.sleep()` |
+
+**Key lesson**: File-scoped fixes applied between Jan 24 — Feb 20 resolved C2-C5 individually,
+but the pattern-scoped approach recommended by the health check (grep codebase for all instances)
+was only partially followed for H1. Four files still have blocking `time.sleep()` in daemon loops.
 
 ---
 
@@ -228,14 +250,17 @@ def test_rns(self): ...  # Now _HAS_RNS is True
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-02-06)
+### Current Status (2026-02-20)
 
 **Python files over 1,500 lines:**
 
 | File | Lines | Status | Notes |
 |------|-------|--------|-------|
-| `src/utils/knowledge_content.py` | 1,688 | OK | Content file by design - no split needed |
-| `src/gateway/rns_bridge.py` | 1,614 | MONITOR | Down from 1,991; MeshtasticHandler extracted |
+| `src/utils/knowledge_content.py` | 1,824 | OK | Content file by design - no split needed |
+| `src/launcher_tui/service_menu_mixin.py` | 1,611 | MONITOR | OpenHamClock/MQTT extraction candidates |
+| `src/gateway/rns_bridge.py` | 1,525 | MONITOR | MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
+| `src/launcher_tui/main.py` | 1,516 | MONITOR | 33 mixins, borderline |
+| `src/utils/map_data_collector.py` | 1,516 | MONITOR | Borderline |
 
 **Previously over threshold (NOW RESOLVED):**
 
@@ -714,7 +739,7 @@ if current_time - last_check >= 30:
 
 ---
 
-*Last updated: 2026-01-23 - Removed stale Textual/Flask/Web UI references after UI consolidation*
+*Last updated: 2026-02-20 - Health check reconciliation; updated issue statuses*
 
 ---
 
@@ -839,11 +864,11 @@ def _on_message(self, event):
 
 ### Implementation Priority
 
-| Component | Effort | Impact | Priority |
-|-----------|--------|--------|----------|
-| Service Detection Simplification | LOW | HIGH | 1 - Do first |
-| Status Display Separation | MEDIUM | HIGH | 2 |
-| RX Message Events | HIGH | MEDIUM | 3 - Requires event bus |
+| Component | Effort | Impact | Priority | Status (2026-02-20) |
+|-----------|--------|--------|----------|---------------------|
+| Service Detection Simplification | LOW | HIGH | 1 | **DONE** — systemctl trusted as SSOT for systemd services |
+| Status Display Separation | MEDIUM | HIGH | 2 | OPEN |
+| RX Message Events | HIGH | MEDIUM | 3 | OPEN — Requires event bus |
 
 ### Files to Modify
 
