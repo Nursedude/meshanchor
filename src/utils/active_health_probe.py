@@ -41,6 +41,7 @@ from enum import Enum
 from utils.safe_import import safe_import
 
 _emit_service_status, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_service_status')
+_check_udp_port_fn, _HAS_UDP_CHECK = safe_import('utils.service_check', 'check_udp_port')
 
 logger = logging.getLogger(__name__)
 
@@ -410,24 +411,32 @@ class ActiveHealthProbe:
         """
         Probe RNS shared instance port.
 
-        Checks if the UDP port is bound (service is listening).
-        RNS uses UDP, so we can't do a TCP connect test.
+        Primary: uses check_udp_port() from service_check which reads
+        /proc/net/udp for reliable detection. Falls back to bind test
+        if service_check is unavailable.
 
         Args:
             port: RNS shared instance port (default: 37428)
             host: Host to check (default: 127.0.0.1)
         """
+        # Primary: /proc/net/udp-based check (reliable)
+        if _HAS_UDP_CHECK:
+            try:
+                if _check_udp_port_fn(port, host):
+                    return HealthResult(healthy=True, reason="port_bound")
+                return HealthResult(healthy=False, reason="port_not_bound")
+            except Exception as e:
+                return HealthResult(healthy=False, reason=f"check_error: {e}")
+
+        # Fallback: bind test (unreliable with SO_REUSEADDR)
         sock = None
         try:
-            # Try to bind to the port - if it fails, port is in use (good!)
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(2)
             sock.bind((host, port))
-            # If we successfully bound, port was NOT in use
             return HealthResult(healthy=False, reason="port_not_bound")
         except OSError as e:
-            # EADDRINUSE means the port is already bound (service running)
-            if e.errno in (98, 48, 10048):  # Linux, macOS, Windows
+            if e.errno in (98, 48, 10048):  # EADDRINUSE
                 return HealthResult(healthy=True, reason="port_bound")
             return HealthResult(healthy=False, reason=f"socket_error: {e}")
         finally:
