@@ -116,6 +116,7 @@ class InfluxDBExporter:
 
         # Background flush thread
         self._running = False
+        self._stop_event = threading.Event()
         self._flush_thread: Optional[threading.Thread] = None
 
         # Determine API version
@@ -502,13 +503,14 @@ class InfluxDBExporter:
         interval = interval or self._flush_interval
 
         def export_loop():
-            while self._running:
+            while self._running and not self._stop_event.is_set():
                 try:
                     self.write_metrics()
                 except Exception as e:
                     logger.debug(f"InfluxDB export error: {e}")
-                time.sleep(interval)
+                self._stop_event.wait(interval)
 
+        self._stop_event.clear()
         self._flush_thread = threading.Thread(target=export_loop, daemon=True)
         self._flush_thread.start()
         logger.info(f"InfluxDB exporter started (interval: {interval}s)")
@@ -516,6 +518,7 @@ class InfluxDBExporter:
     def stop(self) -> None:
         """Stop background export thread."""
         self._running = False
+        self._stop_event.set()
         if self._flush_thread:
             self._flush_thread.join(timeout=5)
             self._flush_thread = None
