@@ -5,7 +5,6 @@ Extracted from rns_menu_mixin.py to reduce file size per CLAUDE.md guidelines.
 """
 
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -16,22 +15,14 @@ logger = logging.getLogger(__name__)
 
 from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
-from utils.safe_import import safe_import
-
-check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd'
+from utils.service_check import (
+    check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd,
 )
-
-get_identity_path, create_identities, list_known_destinations, \
-    check_connectivity, get_status, _HAS_RNS_COMMANDS = safe_import(
-    'commands.rns',
-    'get_identity_path', 'create_identities', 'list_known_destinations',
-    'check_connectivity', 'get_status',
+from commands.rns import (
+    get_identity_path, create_identities, list_known_destinations,
+    check_connectivity, get_status,
 )
-
-detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
-    'utils.config_drift', 'detect_rnsd_config_drift'
-)
+from utils.config_drift import detect_rnsd_config_drift
 
 
 class RNSDiagnosticsMixin:
@@ -41,12 +32,6 @@ class RNSDiagnosticsMixin:
         """Run comprehensive RNS diagnostics."""
         clear_screen()
         print("=== RNS Diagnostics ===\n")
-
-        if not _HAS_RNS_COMMANDS:
-            print("RNS commands module not available.")
-            print("Run from MeshForge root: sudo python3 src/launcher_tui/main.py")
-            self._wait_for_enter()
-            return
 
         # Collect issues and warnings throughout diagnostics
         issues = []
@@ -179,71 +164,74 @@ class RNSDiagnosticsMixin:
 
         # Check if shared instance port is actually listening
         # RNS uses UDP port 37428, NOT TCP — must use UDP bind test
+        port_ok = False
         try:
-            if _HAS_SERVICE_CHECK:
-                port_ok = check_udp_port(37428)
-            else:
-                # Fallback: try UDP bind test inline
-                import socket
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    sock.settimeout(1)
-                    sock.bind(('127.0.0.1', 37428))
-                    sock.close()
-                    port_ok = False  # Bind succeeded = port NOT in use
-                except OSError as e:
-                    port_ok = e.errno in (98, 48, 10048)  # EADDRINUSE = port in use
-                finally:
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
+            port_ok = check_udp_port(37428)
             if running and not port_ok:
-                print("  ! rnsd running but port 37428 NOT listening")
-                # Show who owns the port (if anyone)
-                try:
-                    from utils.service_check import get_udp_port_owner
-                    owner = get_udp_port_owner(37428)
-                    if owner:
-                        proc_name, pid = owner
-                        print(f"    Port held by: {proc_name} "
-                              f"(PID {pid})")
-                except ImportError:
-                    pass
-                # Check if share_instance is enabled in config
-                share_ok = conn_data.get('share_instance', None)
-                if share_ok is False:
-                    print("    Cause: share_instance is not "
-                          "enabled in [reticulum] config")
-                    print("    Fix: Add 'share_instance = Yes' "
-                          "to [reticulum] section,")
-                    print("         then restart: sudo systemctl "
-                          "restart rnsd")
-                    issues.append(
-                        "share_instance not enabled — gateway "
-                        "cannot connect to rnsd")
+                # rnsd may still be initializing — wait before declaring failure
+                print("  rnsd running but port 37428 not yet listening...")
+                print("  Waiting for rnsd to finish initializing...")
+                port_ok = self._wait_for_rns_port(max_wait=10)
+                if port_ok:
+                    print("  Shared instance port 37428: listening (slow startup)")
                 else:
-                    # Surface recent journal errors to explain WHY
+                    print("  ! rnsd running but port 37428 NOT listening after 10s wait")
+                    # Show who owns the port (if anyone)
                     try:
-                        r = subprocess.run(
-                            ['journalctl', '-u', 'rnsd', '-n', '10',
-                             '--no-pager', '-p', 'warning', '-q',
-                             '--no-hostname'],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        if r.stdout and r.stdout.strip():
-                            print("    Recent rnsd errors:")
-                            for line in r.stdout.strip().splitlines()[-5:]:
-                                print(f"      {line.strip()[:100]}")
-                    except (subprocess.SubprocessError, OSError):
+                        from utils.service_check import get_udp_port_owner
+                        owner = get_udp_port_owner(37428)
+                        if owner:
+                            proc_name, pid = owner
+                            print(f"    Port held by: {proc_name} "
+                                  f"(PID {pid})")
+                    except ImportError:
                         pass
-                    warnings.append(
-                        "rnsd active but shared instance port "
-                        "not bound")
+                    # Check if share_instance is enabled in config
+                    share_ok = conn_data.get('share_instance', None)
+                    if share_ok is False:
+                        print("    Cause: share_instance is not "
+                              "enabled in [reticulum] config")
+                        print("    Fix: Add 'share_instance = Yes' "
+                              "to [reticulum] section,")
+                        print("         then restart: sudo systemctl "
+                              "restart rnsd")
+                        issues.append(
+                            "share_instance not enabled — gateway "
+                            "cannot connect to rnsd")
+                    else:
+                        # Check for config drift as potential root cause
+                        try:
+                            drift = detect_rnsd_config_drift()
+                            if drift.drifted:
+                                print(f"    Config drift: gateway reads {drift.gateway_config_dir}")
+                                print(f"                  rnsd reads    {drift.rnsd_config_dir}")
+                                print(f"    Fix: {drift.fix_hint}")
+                                issues.append(
+                                    "Config drift — rnsd and gateway "
+                                    "use different config paths")
+                        except Exception as e:
+                            logger.debug("Config drift check failed: %s", e)
+                        # Surface recent journal errors to explain WHY
+                        try:
+                            r = subprocess.run(
+                                ['journalctl', '-u', 'rnsd', '-n', '10',
+                                 '--no-pager', '-p', 'warning', '-q',
+                                 '--no-hostname'],
+                                capture_output=True, text=True, timeout=10
+                            )
+                            if r.stdout and r.stdout.strip():
+                                print("    Recent rnsd errors:")
+                                for line in r.stdout.strip().splitlines()[-5:]:
+                                    print(f"      {line.strip()[:100]}")
+                        except (subprocess.SubprocessError, OSError):
+                            pass
+                        warnings.append(
+                            "rnsd active but shared instance port "
+                            "not bound")
             elif running and port_ok:
                 print(f"  Shared instance port 37428: listening")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Port check failed: %s", e)
 
         # 6. Interface TX/RX health
         print("\n[6/6] Checking interface traffic...")
@@ -265,9 +253,14 @@ class RNSDiagnosticsMixin:
                     print("  Common cause: shared instance port "
                           "37428 not bound.")
             else:
-                print("  Could not retrieve interface traffic "
-                      "(rnstatus not available or rnsd not "
-                      "connected)")
+                # Provide specific reason instead of generic message
+                rnstatus_path = shutil.which('rnstatus')
+                if not rnstatus_path:
+                    print("  rnstatus not installed — install RNS tools: pip install rns")
+                elif running and not port_ok:
+                    print("  rnstatus available but cannot connect (port 37428 not bound)")
+                else:
+                    print("  Could not retrieve interface traffic from rnstatus")
         except Exception as e:
             logger.debug("Interface health check failed: %s", e)
             print(f"  Could not check: {e}")
@@ -286,6 +279,22 @@ class RNSDiagnosticsMixin:
             print("\n--- All checks passed ---")
         elif not issues:
             print("\n--- Connectivity OK (with warnings) ---")
+
+        # Offer inline repair if port 37428 is not listening
+        if running and not port_ok:
+            print("\n--- Quick Fix ---")
+            if self.dialog.yesno(
+                "Repair RNS",
+                "Port 37428 is not listening.\n\n"
+                "Run the RNS repair wizard now?\n"
+                "This will clear auth tokens, check dependencies,\n"
+                "and restart rnsd.\n\n"
+                "Repair now?"
+            ):
+                clear_screen()
+                self._repair_rns_shared_instance()
+                self._wait_for_enter()
+                return
 
         # Offer to create missing identities
         if not identity_exists or not rns_identity.exists():
@@ -327,12 +336,6 @@ class RNSDiagnosticsMixin:
         clear_screen()
         print("=== RNS Config Drift Check ===\n")
         print("Comparing gateway config path vs rnsd actual path...\n")
-
-        if not _HAS_CONFIG_DRIFT:
-            print("  Config drift module not available.")
-            print("  File: src/utils/config_drift.py")
-            self._wait_for_enter()
-            return
 
         result = detect_rnsd_config_drift()
 
@@ -502,29 +505,25 @@ class RNSDiagnosticsMixin:
 
         # Step 6: Restart rnsd
         print("\n[6/7] Restarting rnsd...")
-        if _HAS_SERVICE_CHECK:
-            success, msg = stop_service('rnsd')
-            if not success:
-                print(f"  Warning stopping rnsd: {msg}")
-            time.sleep(1)
+        success, msg = stop_service('rnsd')
+        if not success:
+            print(f"  Warning stopping rnsd: {msg}")
+        time.sleep(1)
 
-            # Reset failed state in case rnsd was in a crash loop
-            try:
-                subprocess.run(
-                    _sudo_cmd(['systemctl', 'reset-failed', 'rnsd']),
-                    capture_output=True, timeout=5
-                )
-            except (subprocess.SubprocessError, OSError):
-                pass
+        # Reset failed state in case rnsd was in a crash loop
+        try:
+            subprocess.run(
+                _sudo_cmd(['systemctl', 'reset-failed', 'rnsd']),
+                capture_output=True, timeout=5
+            )
+        except (subprocess.SubprocessError, OSError):
+            pass
 
-            success, msg = start_service('rnsd')
-            if success:
-                print("  rnsd started")
-            else:
-                print(f"  Warning: {msg}")
+        success, msg = start_service('rnsd')
+        if success:
+            print("  rnsd started")
         else:
-            print("  Service management not available — restart manually:")
-            print("    sudo systemctl restart rnsd")
+            print(f"  Warning: {msg}")
 
         # Step 7: Wait for port and verify
         print("\n[7/7] Verifying fix...")
@@ -669,12 +668,7 @@ class RNSDiagnosticsMixin:
                     install_cmd = [rnsd_python, '-m', 'pip', 'install',
                                     '--break-system-packages', pip_name,
                                     'cryptography>=45.0.7,<47', 'pyopenssl>=25.3.0']
-                    if _HAS_SERVICE_CHECK:
-                        base_cmd = _sudo_cmd(install_cmd)
-                    elif os.getuid() != 0:
-                        base_cmd = ['sudo'] + install_cmd
-                    else:
-                        base_cmd = install_cmd
+                    base_cmd = _sudo_cmd(install_cmd)
                     result = subprocess.run(
                         base_cmd,
                         capture_output=True, text=True, timeout=120
@@ -688,13 +682,9 @@ class RNSDiagnosticsMixin:
                         err_text = (result.stderr or result.stdout or '').lower()
                         if 'installed by' in err_text or 'externally-managed' in err_text:
                             print(f"  {pip_name}: Debian package conflict, retrying with --ignore-installed...")
-                            retry_cmd = [rnsd_python, '-m', 'pip', 'install',
+                            retry_cmd = _sudo_cmd([rnsd_python, '-m', 'pip', 'install',
                                          '--break-system-packages', '--ignore-installed', pip_name,
-                                         'cryptography>=45.0.7,<47', 'pyopenssl>=25.3.0']
-                            if _HAS_SERVICE_CHECK:
-                                retry_cmd = _sudo_cmd(retry_cmd)
-                            elif os.getuid() != 0:
-                                retry_cmd = ['sudo'] + retry_cmd
+                                         'cryptography>=45.0.7,<47', 'pyopenssl>=25.3.0'])
                             retry = subprocess.run(
                                 retry_cmd,
                                 capture_output=True, text=True, timeout=120
@@ -849,26 +839,8 @@ class RNSDiagnosticsMixin:
         Returns True if port becomes available, False if timeout expires.
         """
         for i in range(max_wait):
-            if _HAS_SERVICE_CHECK:
-                if check_udp_port(37428):
-                    return True
-            else:
-                # Fallback: inline UDP bind test
-                import socket
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    sock.settimeout(1)
-                    sock.bind(('127.0.0.1', 37428))
-                    sock.close()
-                    # Bind succeeded = port NOT in use, keep waiting
-                except OSError as e:
-                    if e.errno in (98, 48, 10048):  # EADDRINUSE
-                        return True
-                finally:
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
+            if check_udp_port(37428):
+                return True
             time.sleep(1)
         return False
 
@@ -1060,16 +1032,7 @@ class RNSDiagnosticsMixin:
                     print("Done. Startup order: rnsd -> NomadNet -> MeshForge\n")
                 return
 
-            # Use centralized service check when available
-            if _HAS_SERVICE_CHECK:
-                rnsd_running = check_process_running('rnsd')
-            else:
-                # Fallback to direct pgrep
-                result = subprocess.run(
-                    ['pgrep', '-f', 'rnsd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                rnsd_running = result.returncode == 0
+            rnsd_running = check_process_running('rnsd')
 
             if rnsd_running:
                 # Get PID for diagnostic message
@@ -1086,7 +1049,7 @@ class RNSDiagnosticsMixin:
                 print("  sudo systemctl restart rnsd")
             else:
                 print("No rnsd found. A stale process may be holding the port.")
-                print("  Find it:    sudo lsof -i UDP:29716")
+                print("  Find it:    sudo lsof -i UDP:37428")
                 print("  Kill stale: pkill -f rnsd")
                 print("  Or wait ~30s for the socket to timeout")
         except (subprocess.SubprocessError, OSError) as e:

@@ -28,25 +28,15 @@ from rns_monitor_mixin import RNSMonitorMixin
 from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 
-# --- Optional dependency imports via safe_import ---
-from utils.safe_import import safe_import
-
-check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd, \
-    daemon_reload, _sudo_write, enable_service, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'check_udp_port', 'start_service', 'stop_service', '_sudo_cmd',
-    'daemon_reload', '_sudo_write', 'enable_service',
+from utils.service_check import (
+    check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd,
+    daemon_reload, _sudo_write, enable_service,
 )
-
-get_identity_path, create_identities, list_known_destinations, \
-    check_connectivity, get_status, _HAS_RNS_COMMANDS = safe_import(
-    'commands.rns',
-    'get_identity_path', 'create_identities', 'list_known_destinations',
-    'check_connectivity', 'get_status',
+from commands.rns import (
+    get_identity_path, create_identities, list_known_destinations,
+    check_connectivity, get_status,
 )
-
-detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
-    'utils.config_drift', 'detect_rnsd_config_drift'
-)
+from utils.config_drift import detect_rnsd_config_drift
 
 
 class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMonitorMixin):
@@ -173,10 +163,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
             # Check identity status for menu hints
             config_dir = ReticulumPaths.get_config_dir()
             rnsd_exists = (config_dir / 'identity').exists()
-            if _HAS_RNS_COMMANDS:
-                gw_exists = get_identity_path().exists()
-            else:
-                gw_exists = False
+            gw_exists = get_identity_path().exists()
 
             choices = [
                 ("show", "Show local identity"),
@@ -217,16 +204,15 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         print(f"rnsd identity: {rnsd_identity}")
                         print("  Not found — use 'Create identities' to generate.\n")
 
-                    if _HAS_RNS_COMMANDS:
-                        gw_id = get_identity_path()
-                        print(f"\nMeshForge gateway identity: {gw_id}")
-                        if gw_id.exists():
-                            self._run_rns_tool(
-                                ['rnid', '-i', str(gw_id), '-p'],
-                                'rnid'
-                            )
-                        else:
-                            print("  Not created — use 'Create identities' to generate.")
+                    gw_id = get_identity_path()
+                    print(f"\nMeshForge gateway identity: {gw_id}")
+                    if gw_id.exists():
+                        self._run_rns_tool(
+                            ['rnid', '-i', str(gw_id), '-p'],
+                            'rnid'
+                        )
+                    else:
+                        print("  Not created — use 'Create identities' to generate.")
                     self._wait_for_enter()
 
                 elif choice == "path":
@@ -245,14 +231,13 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                     else:
                         print("  Not found (created on first rnsd start)")
 
-                    if _HAS_RNS_COMMANDS:
-                        gw_id = get_identity_path()
-                        print(f"\nMeshForge gateway:  {gw_id}")
-                        if gw_id.exists():
-                            stat = gw_id.stat()
-                            print(f"  Size: {stat.st_size} bytes")
-                        else:
-                            print("  Not created yet")
+                    gw_id = get_identity_path()
+                    print(f"\nMeshForge gateway:  {gw_id}")
+                    if gw_id.exists():
+                        stat = gw_id.stat()
+                        print(f"  Size: {stat.st_size} bytes")
+                    else:
+                        print("  Not created yet")
                     self._wait_for_enter()
 
                 elif choice == "recall":
@@ -287,12 +272,6 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         """
         clear_screen()
         print("=== Create RNS Identities ===\n")
-
-        if not _HAS_RNS_COMMANDS:
-            print("ERROR: RNS module not installed.")
-            print("  Install: pip install rns")
-            self._wait_for_enter()
-            return
 
         try:
             config_dir = ReticulumPaths.get_config_dir()
@@ -331,37 +310,32 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         clear_screen()
         print("=== Known RNS Destinations ===\n")
 
-        if not _HAS_RNS_COMMANDS:
-            # Fallback: use rnstatus which also shows some destination info
-            print("Commands module not available, falling back to rnstatus...\n")
-            self._run_rns_tool(['rnstatus', '-a'], 'rnstatus')
-        else:
-            result = list_known_destinations()
+        result = list_known_destinations()
 
-            if result.success:
-                nodes = result.data.get('nodes', [])
-                count = result.data.get('count', 0)
+        if result.success:
+            nodes = result.data.get('nodes', [])
+            count = result.data.get('count', 0)
 
-                if count == 0:
-                    print("No known destinations yet.")
-                    print("\nNodes appear when they announce or when you request paths.")
-                    print("Make sure rnsd is running: sudo systemctl start rnsd")
-                else:
-                    print(f"Found {count} destination(s):\n")
-                    print(f"{'Hash':>10}  {'Hops':>5}  {'Source':<20}  {'Name'}")
-                    print("-" * 60)
-                    for node in nodes:
-                        short = node.get('short_hash', '?')
-                        hops = node.get('hops', -1)
-                        hops_str = str(hops) if hops >= 0 else '?'
-                        source = node.get('source', 'unknown')
-                        name = node.get('name', '')
-                        print(f"{short:>10}  {hops_str:>5}  {source:<20}  {name}")
+            if count == 0:
+                print("No known destinations yet.")
+                print("\nNodes appear when they announce or when you request paths.")
+                print("Make sure rnsd is running: sudo systemctl start rnsd")
             else:
-                print(f"Error: {result.message}")
-                fix_hint = (result.data or {}).get('fix_hint', '')
-                if fix_hint:
-                    print(f"Fix: {fix_hint}")
+                print(f"Found {count} destination(s):\n")
+                print(f"{'Hash':>10}  {'Hops':>5}  {'Source':<20}  {'Name'}")
+                print("-" * 60)
+                for node in nodes:
+                    short = node.get('short_hash', '?')
+                    hops = node.get('hops', -1)
+                    hops_str = str(hops) if hops >= 0 else '?'
+                    source = node.get('source', 'unknown')
+                    name = node.get('name', '')
+                    print(f"{short:>10}  {hops_str:>5}  {source:<20}  {name}")
+        else:
+            print(f"Error: {result.message}")
+            fix_hint = (result.data or {}).get('fix_hint', '')
+            if fix_hint:
+                print(f"Fix: {fix_hint}")
 
         self._wait_for_enter()
 
@@ -724,17 +698,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         rnsd_crashed = False
         for i in range(15):
             # Check if port is up
-            if _HAS_SERVICE_CHECK and check_udp_port:
-                port_ok = check_udp_port(37428)
-            else:
-                try:
-                    result = subprocess.run(
-                        ['ss', '-ulnp'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    port_ok = '37428' in result.stdout
-                except (subprocess.SubprocessError, OSError):
-                    pass
+            port_ok = check_udp_port(37428)
             if port_ok:
                 break
 
@@ -834,13 +798,12 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         )
                         start_service('rnsd')
                         time.sleep(3)
-                        if _HAS_SERVICE_CHECK and check_udp_port:
-                            if check_udp_port(37428):
-                                print("  SUCCESS: rnsd is now listening on port 37428")
-                                print("\n" + "=" * 50)
-                                print("RNS shared instance is now available!")
-                                print("=" * 50 + "\n")
-                                return True
+                        if check_udp_port(37428):
+                            print("  SUCCESS: rnsd is now listening on port 37428")
+                            print("\n" + "=" * 50)
+                            print("RNS shared instance is now available!")
+                            print("=" * 50 + "\n")
+                            return True
                         print("  rnsd restarted — check with RNS > Diagnostics")
                     else:
                         print(f"  pip install failed: {pip_r.stderr.strip()[:200]}")
@@ -887,31 +850,30 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         else:
                             fixed = '[reticulum]\n  share_instance = Yes\n\n' + config_content
 
-                        if _HAS_SERVICE_CHECK and _sudo_write:
-                            ok, msg = _sudo_write(str(config_path), fixed)
-                            if ok:
-                                # Verify the write took effect
-                                verify = config_path.read_text()
-                                if not _parse_share_instance(verify):
-                                    print("  WARNING: Config write did not take effect")
-                                    return False
-                                print("  Fixed: share_instance = Yes")
-                                # Restart and re-check
-                                stop_service('rnsd')
+                        ok, msg = _sudo_write(str(config_path), fixed)
+                        if ok:
+                            # Verify the write took effect
+                            verify = config_path.read_text()
+                            if not _parse_share_instance(verify):
+                                print("  WARNING: Config write did not take effect")
+                                return False
+                            print("  Fixed: share_instance = Yes")
+                            # Restart and re-check
+                            stop_service('rnsd')
+                            time.sleep(1)
+                            start_service('rnsd')
+                            print("  Waiting for port 37428...")
+                            for _ in range(10):
                                 time.sleep(1)
-                                start_service('rnsd')
-                                print("  Waiting for port 37428...")
-                                for _ in range(10):
-                                    time.sleep(1)
-                                    if check_udp_port and check_udp_port(37428):
-                                        print("  SUCCESS: rnsd is now listening on port 37428")
-                                        print("\n" + "=" * 50)
-                                        print("RNS shared instance is now available!")
-                                        print("=" * 50 + "\n")
-                                        return True
-                                print("  Port still not bound after config fix")
-                            else:
-                                print(f"  Could not write config: {msg}")
+                                if check_udp_port(37428):
+                                    print("  SUCCESS: rnsd is now listening on port 37428")
+                                    print("\n" + "=" * 50)
+                                    print("RNS shared instance is now available!")
+                                    print("=" * 50 + "\n")
+                                    return True
+                            print("  Port still not bound after config fix")
+                        else:
+                            print(f"  Could not write config: {msg}")
                     else:
                         return False
         except Exception as e:
@@ -1055,31 +1017,25 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 '''
-        if _HAS_SERVICE_CHECK and _sudo_write:
-            write_ok, write_msg = _sudo_write(str(service_path), service_content)
-            if write_ok:
-                print("  Fixed: rnsd.service regenerated")
-                # daemon-reload so systemd picks up the change
-                if daemon_reload:
-                    ok, msg = daemon_reload()
-                    if ok:
-                        print("  Reloaded: systemd daemon-reload complete")
-                    else:
-                        print(f"  Warning: daemon-reload failed: {msg}")
-                # Re-enable so rnsd starts on boot (regenerating the
-                # service file can drop the symlink)
-                if enable_service:
-                    ok, msg = enable_service('rnsd')
-                    if ok:
-                        print("  Enabled: rnsd will start on boot")
-                    else:
-                        print(f"  Warning: could not enable rnsd: {msg}")
-                return True
+        write_ok, write_msg = _sudo_write(str(service_path), service_content)
+        if write_ok:
+            print("  Fixed: rnsd.service regenerated")
+            # daemon-reload so systemd picks up the change
+            ok, msg = daemon_reload()
+            if ok:
+                print("  Reloaded: systemd daemon-reload complete")
             else:
-                print(f"  Warning: Could not write service file: {write_msg}")
-                return False
+                print(f"  Warning: daemon-reload failed: {msg}")
+            # Re-enable so rnsd starts on boot (regenerating the
+            # service file can drop the symlink)
+            ok, msg = enable_service('rnsd')
+            if ok:
+                print("  Enabled: rnsd will start on boot")
+            else:
+                print(f"  Warning: could not enable rnsd: {msg}")
+            return True
         else:
-            print("  Warning: service_check not available, cannot write service file")
+            print(f"  Warning: Could not write service file: {write_msg}")
             return False
 
     def _check_meshtastic_plugin(self) -> bool:
