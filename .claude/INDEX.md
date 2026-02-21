@@ -86,9 +86,9 @@ Quick navigation for AI assistants. Load only what you need.
 ## Directories
 
 - **agents/** - Agent definitions (3 files)
-- **articles/** - Development stories (4 files)
+- **articles/** - Development stories & completed plans (5 files)
 - **assessments/** - Reliability assessments (1 file)
-- **audits/** - Code review reports (5 files)
+- **audits/** - Code review reports (4 files)
 - **commands/** - Slash command definitions (6 files)
 - **foundations/** - Core principles (10 files)
 - **hardware/** - Device-specific docs (1 file)
@@ -97,6 +97,8 @@ Quick navigation for AI assistants. Load only what you need.
 - **publications/** - Whitepaper (1 file)
 - **research/** - Technical research (21 files)
 - **rules/** - Security & testing rules (2 files)
+- **session-notes/** - Session notes, naming convention: `YYYY-MM-DD-topic.md` (3 files)
+- **tasks/** - Active task plans (0 files — completed plans moved to articles/)
 
 ## Quick Lookups
 
@@ -106,4 +108,4 @@ Quick navigation for AI assistants. Load only what you need.
 **Large file guidelines?** -> `foundations/persistent_issues.md#issue-6`
 
 ---
-*Updated: 2026-02-21. ~90 files after cleanup (session notes removed, AI docs consolidated, GTK issues archived).*
+*Updated: 2026-02-21. ~78 files after cleanup. Session notes standardized to YYYY-MM-DD naming. Stale GTK roadmap and duplicate audit deleted. Healthcheck skill updated with doc freshness audit.*
