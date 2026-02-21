@@ -71,13 +71,12 @@ Flag files over 1,500 lines (run: `find src -name "*.py" -exec wc -l {} \; | sor
 
 | File | Lines | Status |
 |------|-------|--------|
-| launcher_tui/main.py | 2800+ | Consider splitting |
-| gtk_ui/panels/hamclock.py | 2600+ | Extract API client |
-| gtk_ui/panels/mesh_tools.py | 1900+ | Monitor |
-| gtk_ui/panels/tools.py | 1800+ | Monitor |
-| tui/app.py | 1700+ | Extract panes |
+| launcher_tui/main.py | 1507 | 33 mixins, borderline — monitor |
+| service_menu_mixin.py | 1575 | OpenHamClock/MQTT extraction candidates |
+| rns_bridge.py | 1570 | MeshCoreBridgeMixin + MessageRouter extracted |
+| knowledge_content.py | 1993 | Content file by design |
 
-*Note: rns.py, main_web.py have been successfully refactored.*
+*Note: GTK files (gtk_ui/, main_web.py) were removed in v0.5.x. TUI is the only interface.*
 
 ---
 

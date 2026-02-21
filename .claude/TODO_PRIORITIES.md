@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-20
+> **Last Updated:** 2026-02-21
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -57,6 +57,7 @@
 - [x] **Issue #3**: Service pre-flight — Gateway files (meshtastic_handler, mqtt_bridge, rns_bridge)
 - [x] **Issue #20 Phase 2**: Status display separation in meshtasticd_config_mixin
 - [x] **Issue #20 Phase 3**: Event bus wired to WebSocket server
+- [x] **.claude/ cleanup**: Removed 62 stale files (session notes, GTK issues), consolidated AI docs
 
 ### v0.5.4-beta (2026-02-11)
 - [x] Gateway TX path fix — HTTP protobuf instead of CLI subprocess
