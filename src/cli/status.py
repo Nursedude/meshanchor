@@ -30,7 +30,7 @@ _check_port, _check_udp_port, _check_systemd_service, _check_process_running, _H
     'utils.service_check', 'check_port', 'check_udp_port', 'check_systemd_service', 'check_process_running'
 )
 
-_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+from utils.cli import find_meshtastic_cli
 
 
 # ANSI colors
@@ -170,11 +170,7 @@ def get_local_ip():
 
 def _find_cli():
     """Find meshtastic CLI path using centralized resolver."""
-    if _HAS_CLI:
-        return _find_meshtastic_cli()
-    else:
-        import shutil
-        return shutil.which('meshtastic')
+    return find_meshtastic_cli()
 
 
 def get_radio_info():

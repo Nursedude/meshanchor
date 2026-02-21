@@ -17,10 +17,8 @@ import socket
 import subprocess
 import threading
 
-from utils.safe_import import safe_import
-
 # Import _sudo_cmd for privileged systemctl calls
-_sudo_cmd, _HAS_SERVICE_CHECK = safe_import('utils.service_check', '_sudo_cmd')
+from utils.service_check import _sudo_cmd
 
 logger = logging.getLogger(__name__)
 

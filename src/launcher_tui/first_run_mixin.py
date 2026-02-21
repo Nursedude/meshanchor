@@ -32,7 +32,7 @@ check_service, apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(
 )
 
 # Import device scanner
-DeviceScanner, _HAS_DEVICE_SCANNER = safe_import('utils.device_scanner', 'DeviceScanner')
+from utils.device_scanner import DeviceScanner
 
 # Import startup checker for hardware detection
 StartupChecker, _HAS_STARTUP_CHECKER = safe_import('startup_checks', 'StartupChecker')
@@ -621,14 +621,6 @@ Serial:
                     )
                     lines = ["Hardware Detection\n", "=" * 40]
                     lines.append("\n✓ SPI Enabled (reboot required)")
-
-        if DeviceScanner is None:
-            if not spi_devices:
-                lines.append("\n✗ Device scanner not available")
-                lines.append("\nConnect a Meshtastic device via USB")
-                lines.append("or configure meshtasticd for HAT/SPI")
-            self.dialog.msgbox("Step 1: Hardware", "\n".join(lines))
-            return
 
         scanner = DeviceScanner()
         results = scanner.scan_all()

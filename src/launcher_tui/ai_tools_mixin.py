@@ -45,7 +45,7 @@ ReviewOrchestrator, ReviewScope, _HAS_AUTO_REVIEW = safe_import(
 )
 
 # Import service helpers for privileged systemctl calls
-_sudo_cmd, start_service, _HAS_SUDO_CMD = safe_import('utils.service_check', '_sudo_cmd', 'start_service')
+from utils.service_check import _sudo_cmd, start_service
 
 logger = logging.getLogger(__name__)
 

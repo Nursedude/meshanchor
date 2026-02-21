@@ -33,14 +33,12 @@ check_systemd_service, check_process_running, _check_port, _check_udp_port, appl
     'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port', 'apply_config_and_restart', 'restart_service', '_sudo_cmd'
 )
 
-# Optional modules for quick actions
-generate_report, _HAS_REPORT_GENERATOR = safe_import('utils.report_generator', 'generate_report')
-NodeInventory, _HAS_NODE_INVENTORY = safe_import('utils.node_inventory', 'NodeInventory')
-GPSManager, _HAS_GPS_INTEGRATION = safe_import('utils.gps_integration', 'GPSManager')
-get_diagnostic_engine, _HAS_DIAGNOSTIC_ENGINE = safe_import(
-    'utils.diagnostic_engine', 'get_diagnostic_engine'
-)
-ChannelMonitor, _HAS_CHANNEL_SCAN = safe_import('utils.channel_scan', 'ChannelMonitor')
+# First-party modules for quick actions
+from utils.report_generator import generate_report
+from utils.node_inventory import NodeInventory
+from utils.gps_integration import GPSManager
+from utils.diagnostic_engine import get_diagnostic_engine
+from utils.channel_scan import ChannelMonitor
 
 
 # Quick action definitions: (tag, description, method_name)
@@ -312,26 +310,23 @@ class QuickActionsMixin:
         clear_screen()
         print("Generating status report...\n")
 
-        if not _HAS_REPORT_GENERATOR:
-            print("Error: Report generator module not available.")
-        else:
-            try:
-                report = generate_report()
-                # Print report, paginated
-                lines = report.split('\n')
-                for i, line in enumerate(lines):
-                    print(line)
-                    # Pause every 40 lines
-                    if (i + 1) % 40 == 0 and i + 1 < len(lines):
-                        try:
-                            resp = input("\n--- More (Enter=continue, q=quit) ---\n")
-                        except (KeyboardInterrupt, EOFError):
-                            print()
-                            break
-                        if resp.strip().lower() == 'q':
-                            break
-            except Exception as e:
-                print(f"Error generating report: {e}")
+        try:
+            report = generate_report()
+            # Print report, paginated
+            lines = report.split('\n')
+            for i, line in enumerate(lines):
+                print(line)
+                # Pause every 40 lines
+                if (i + 1) % 40 == 0 and i + 1 < len(lines):
+                    try:
+                        resp = input("\n--- More (Enter=continue, q=quit) ---\n")
+                    except (KeyboardInterrupt, EOFError):
+                        print()
+                        break
+                    if resp.strip().lower() == 'q':
+                        break
+        except Exception as e:
+            print(f"Error generating report: {e}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")
@@ -341,49 +336,46 @@ class QuickActionsMixin:
         clear_screen()
         print("=== Node Inventory ===\n")
 
-        if not _HAS_NODE_INVENTORY:
-            print("Error: Node inventory module not available.")
-        else:
-            try:
-                from utils.paths import get_real_user_home
+        try:
+            from utils.paths import get_real_user_home
 
-                path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
-                inv = NodeInventory(path=path)
+            path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+            inv = NodeInventory(path=path)
 
-                stats = inv.get_stats()
-                print(f"  Total nodes:    {stats['total']}")
-                print(f"  Online:         {stats['online']}")
-                print(f"  Offline:        {stats['offline']}")
-                print(f"  Stale (>7d):    {stats['stale']}")
-                print(f"  With position:  {stats['with_position']}")
+            stats = inv.get_stats()
+            print(f"  Total nodes:    {stats['total']}")
+            print(f"  Online:         {stats['online']}")
+            print(f"  Offline:        {stats['offline']}")
+            print(f"  Stale (>7d):    {stats['stale']}")
+            print(f"  With position:  {stats['with_position']}")
 
-                if stats['total'] > 0:
-                    # Show node list (non-stale only)
-                    nodes = [n for n in inv.get_all_nodes() if not n.is_stale]
-                    if nodes:
-                        print(f"\n  {'ID':<12} {'Name':<20} {'Status':<8} {'SNR':>5}  {'Hardware'}")
-                        print(f"  {'-'*12} {'-'*20} {'-'*8} {'-'*5}  {'-'*12}")
-                        for node in nodes[:25]:  # Cap at 25 for readability
-                            name = node.display_name[:20]
-                            nid = node.node_id[:12]
-                            status = node.status
-                            snr = f"{node.last_snr:.1f}" if node.last_snr is not None else "  -"
-                            hw = node.hardware[:12] if node.hardware else "-"
-                            print(f"  {nid:<12} {name:<20} {status:<8} {snr:>5}  {hw}")
-                        if len(nodes) > 25:
-                            print(f"\n  ... and {len(nodes) - 25} more nodes")
+            if stats['total'] > 0:
+                # Show node list (non-stale only)
+                nodes = [n for n in inv.get_all_nodes() if not n.is_stale]
+                if nodes:
+                    print(f"\n  {'ID':<12} {'Name':<20} {'Status':<8} {'SNR':>5}  {'Hardware'}")
+                    print(f"  {'-'*12} {'-'*20} {'-'*8} {'-'*5}  {'-'*12}")
+                    for node in nodes[:25]:  # Cap at 25 for readability
+                        name = node.display_name[:20]
+                        nid = node.node_id[:12]
+                        status = node.status
+                        snr = f"{node.last_snr:.1f}" if node.last_snr is not None else "  -"
+                        hw = node.hardware[:12] if node.hardware else "-"
+                        print(f"  {nid:<12} {name:<20} {status:<8} {snr:>5}  {hw}")
+                    if len(nodes) > 25:
+                        print(f"\n  ... and {len(nodes) - 25} more nodes")
 
-                    # Role breakdown
-                    if stats['roles']:
-                        roles_str = ", ".join(f"{r}: {c}" for r, c in stats['roles'].items())
-                        print(f"\n  Roles: {roles_str}")
-                else:
-                    print("\n  No nodes tracked yet.")
-                    print("  Nodes are added when received via MQTT or meshtastic CLI.")
+                # Role breakdown
+                if stats['roles']:
+                    roles_str = ", ".join(f"{r}: {c}" for r, c in stats['roles'].items())
+                    print(f"\n  Roles: {roles_str}")
+            else:
+                print("\n  No nodes tracked yet.")
+                print("  Nodes are added when received via MQTT or meshtastic CLI.")
 
-            except Exception as e:
-                logger.debug(f"Node inventory quick action failed: {e}")
-                print(f"Error: {e}")
+        except Exception as e:
+            logger.debug(f"Node inventory quick action failed: {e}")
+            print(f"Error: {e}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")
@@ -393,48 +385,45 @@ class QuickActionsMixin:
         clear_screen()
         print("=== GPS Position ===\n")
 
-        if not _HAS_GPS_INTEGRATION:
-            print("Error: GPS integration module not available.")
-        else:
+        try:
+            from utils.paths import get_real_user_home
+
+            config_path = get_real_user_home() / ".config" / "meshforge" / "operator_position.json"
+            gps = GPSManager(config_path=config_path)
+
+            # Try to get nodes for distance calculation
+            nodes = []
             try:
-                from utils.paths import get_real_user_home
-
-                config_path = get_real_user_home() / ".config" / "meshforge" / "operator_position.json"
-                gps = GPSManager(config_path=config_path)
-
-                # Try to get nodes for distance calculation
-                nodes = []
-                try:
-                    from utils.node_inventory import NodeInventory as _NodeInv
-                    inv_path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
-                    inv = _NodeInv(path=inv_path)
-                    for node in inv.get_all_nodes():
-                        if node.has_position:
-                            nodes.append({
-                                'id': node.node_id,
-                                'name': node.display_name,
-                                'lat': node.lat,
-                                'lon': node.lon,
-                            })
-                except Exception as e:
-                    logger.debug("Node inventory for GPS report unavailable: %s", e)
-
-                # Display position report
-                report = gps.format_position_report(nodes=nodes if nodes else None)
-                print(f"  {report.replace(chr(10), chr(10) + '  ')}")
-
-                # Show gpsd status
-                print()
-                if gps.gpsd_available:
-                    print("  gpsd: connected")
-                else:
-                    print("  gpsd: not available")
-                    if not gps.has_position:
-                        print("  Tip: Set position manually in Tools > GPS")
-
+                from utils.node_inventory import NodeInventory as _NodeInv
+                inv_path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+                inv = _NodeInv(path=inv_path)
+                for node in inv.get_all_nodes():
+                    if node.has_position:
+                        nodes.append({
+                            'id': node.node_id,
+                            'name': node.display_name,
+                            'lat': node.lat,
+                            'lon': node.lon,
+                        })
             except Exception as e:
-                logger.debug(f"GPS quick action failed: {e}")
-                print(f"Error: {e}")
+                logger.debug("Node inventory for GPS report unavailable: %s", e)
+
+            # Display position report
+            report = gps.format_position_report(nodes=nodes if nodes else None)
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+
+            # Show gpsd status
+            print()
+            if gps.gpsd_available:
+                print("  gpsd: connected")
+            else:
+                print("  gpsd: not available")
+                if not gps.has_position:
+                    print("  Tip: Set position manually in Tools > GPS")
+
+        except Exception as e:
+            logger.debug(f"GPS quick action failed: {e}")
+            print(f"Error: {e}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")
@@ -444,31 +433,28 @@ class QuickActionsMixin:
         clear_screen()
         print("=== Diagnostic Health Check ===\n")
 
-        if not _HAS_DIAGNOSTIC_ENGINE:
-            print("Error: Diagnostic engine not available.")
-        else:
-            try:
-                engine = get_diagnostic_engine()
-                summary = engine.get_health_summary()
+        try:
+            engine = get_diagnostic_engine()
+            summary = engine.get_health_summary()
 
-                print(f"  Overall Health:    {summary['overall_health']}")
-                print(f"  Symptoms (1h):     {summary['symptoms_last_hour']}")
-                print(f"  Total Diagnoses:   {summary['stats'].get('diagnoses_made', 0)}")
-                print(f"  Auto-Recoveries:   {summary['stats'].get('auto_recoveries', 0)}")
-                print(f"  Rules Loaded:      {summary['stats'].get('rules_loaded', 0)}")
+            print(f"  Overall Health:    {summary['overall_health']}")
+            print(f"  Symptoms (1h):     {summary['symptoms_last_hour']}")
+            print(f"  Total Diagnoses:   {summary['stats'].get('diagnoses_made', 0)}")
+            print(f"  Auto-Recoveries:   {summary['stats'].get('auto_recoveries', 0)}")
+            print(f"  Rules Loaded:      {summary['stats'].get('rules_loaded', 0)}")
 
-                # Recent issues
-                recent = engine.get_recent_diagnoses(limit=5)
-                if recent:
-                    print(f"\n  Recent Issues ({len(recent)}):")
-                    for d in recent[-5:]:
-                        cat = d.symptom.category.value
-                        print(f"    [{cat}] {d.likely_cause[:60]}")
-                else:
-                    print("\n  No recent issues detected.")
+            # Recent issues
+            recent = engine.get_recent_diagnoses(limit=5)
+            if recent:
+                print(f"\n  Recent Issues ({len(recent)}):")
+                for d in recent[-5:]:
+                    cat = d.symptom.category.value
+                    print(f"    [{cat}] {d.likely_cause[:60]}")
+            else:
+                print("\n  No recent issues detected.")
 
-            except Exception as e:
-                print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")
@@ -478,26 +464,23 @@ class QuickActionsMixin:
         clear_screen()
         print("=== Channel Activity ===\n")
 
-        if not _HAS_CHANNEL_SCAN:
-            print("Error: Channel scan module not available.")
-        else:
-            try:
-                monitor = ChannelMonitor()
+        try:
+            monitor = ChannelMonitor()
 
-                # Try to query device for channel config
-                channels = monitor.query_device_channels()
-                if not channels:
-                    print("  (Could not query device channels)")
-                    print("  Showing activity from MQTT monitoring only.")
-                    print()
+            # Try to query device for channel config
+            channels = monitor.query_device_channels()
+            if not channels:
+                print("  (Could not query device channels)")
+                print("  Showing activity from MQTT monitoring only.")
+                print()
 
-                # Display activity report
-                report = monitor.get_activity_report()
-                print(f"  {report.replace(chr(10), chr(10) + '  ')}")
+            # Display activity report
+            report = monitor.get_activity_report()
+            print(f"  {report.replace(chr(10), chr(10) + '  ')}")
 
-            except Exception as e:
-                logger.debug(f"Channel scan quick action failed: {e}")
-                print(f"Error: {e}")
+        except Exception as e:
+            logger.debug(f"Channel scan quick action failed: {e}")
+            print(f"Error: {e}")
 
         print()
         self._wait_for_enter("Press Enter to continue...")

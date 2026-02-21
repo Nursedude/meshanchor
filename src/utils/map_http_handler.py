@@ -62,7 +62,7 @@ _SRTMProvider, _LOSAnalyzer, _HAS_TERRAIN = safe_import(
 _MessageQueue, _HAS_MSG_QUEUE = safe_import(
     'gateway.message_queue', 'MessageQueue'
 )
-_messaging_mod, _HAS_MESSAGING = safe_import('commands.messaging')
+from commands import messaging
 _get_listener_status, _HAS_MSG_LISTENER = safe_import(
     'utils.message_listener', 'get_listener_status'
 )
@@ -726,32 +726,29 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
 
         messages = []
 
-        if not _HAS_MESSAGING:
-            logger.debug("Messaging module not available")
-        else:
-            try:
-                result = _messaging_mod.get_messages(limit=limit, network=network)
+        try:
+            result = messaging.get_messages(limit=limit, network=network)
 
-                if result.success and result.data:
-                    all_messages = result.data.get('messages', [])
+            if result.success and result.data:
+                all_messages = result.data.get('messages', [])
 
-                    # Filter by timestamp if 'since' is provided
-                    if since:
-                        try:
-                            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
-                            all_messages = [
-                                m for m in all_messages
-                                if m.get('timestamp') and
-                                datetime.fromisoformat(m['timestamp']) > since_dt
-                            ]
-                        except (ValueError, TypeError):
-                            pass  # Invalid timestamp, skip filtering
+                # Filter by timestamp if 'since' is provided
+                if since:
+                    try:
+                        since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                        all_messages = [
+                            m for m in all_messages
+                            if m.get('timestamp') and
+                            datetime.fromisoformat(m['timestamp']) > since_dt
+                        ]
+                    except (ValueError, TypeError):
+                        pass  # Invalid timestamp, skip filtering
 
-                    # Filter to show only received messages (from_id != 'local')
-                    messages = [m for m in all_messages if m.get('from_id') != 'local']
+                # Filter to show only received messages (from_id != 'local')
+                messages = [m for m in all_messages if m.get('from_id') != 'local']
 
-            except Exception as e:
-                logger.debug(f"Error getting received messages: {e}")
+        except Exception as e:
+            logger.debug(f"Error getting received messages: {e}")
 
         self._serve_json({
             "messages": messages,
