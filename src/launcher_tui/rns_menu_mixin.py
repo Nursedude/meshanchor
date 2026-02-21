@@ -693,10 +693,11 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         print(f"\n[5/5] Verifying shared instance...")
         print("  Waiting for rnsd to bind port 37428...")
 
-        # Poll for port with early crash detection (up to 15 seconds)
+        # Poll for port with early crash detection (up to 30 seconds)
+        # rnsd can take 20-30s to initialize on slower hardware (Pi)
         port_ok = False
         rnsd_crashed = False
-        for i in range(15):
+        for i in range(30):
             # Check if port is up
             port_ok = check_udp_port(37428)
             if port_ok:
@@ -811,7 +812,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
             return False
 
         # Port never came up but rnsd didn't crash — diagnose why
-        print("  WARNING: rnsd not yet listening on port 37428 after 15s")
+        print("  WARNING: rnsd not yet listening on port 37428 after 30s")
 
         # Check if share_instance is disabled in config (most common cause)
         try:

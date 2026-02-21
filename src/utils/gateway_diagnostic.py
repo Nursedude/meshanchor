@@ -14,18 +14,13 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Dict, Optional
 
-# Import centralized path utility
+# First-party imports — always available
 from utils.paths import get_real_user_home
-from utils.safe_import import safe_import
+from utils.service_check import check_service, check_systemd_service, check_process_with_pid, ServiceState
+from utils.config_drift import detect_rnsd_config_drift
 
-# Optional dependencies — module-level safe imports
-check_service, check_systemd_service, check_process_with_pid, ServiceState, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'check_systemd_service',
-    'check_process_with_pid', 'ServiceState'
-)
-detect_rnsd_config_drift, _HAS_CONFIG_DRIFT = safe_import(
-    'utils.config_drift', 'detect_rnsd_config_drift'
-)
+# Optional external dependencies
+from utils.safe_import import safe_import
 _meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
 MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
     'plugins.meshchat', 'MeshChatService', 'ServiceState'
@@ -300,13 +295,12 @@ class GatewayDiagnostic:
             has_meshtastic = 'meshtastic' in content.lower()
 
             # Check for config drift between gateway and rnsd
-            if _HAS_CONFIG_DRIFT:
-                drift = detect_rnsd_config_drift()
-                if drift.drifted:
-                    issues.append(
-                        f"Config drift: gateway uses {drift.gateway_config_dir} "
-                        f"but rnsd uses {drift.rnsd_config_dir}"
-                    )
+            drift = detect_rnsd_config_drift()
+            if drift.drifted:
+                issues.append(
+                    f"Config drift: gateway uses {drift.gateway_config_dir} "
+                    f"but rnsd uses {drift.rnsd_config_dir}"
+                )
 
             if issues:
                 return CheckResult(
@@ -336,18 +330,7 @@ class GatewayDiagnostic:
     def check_rnsd_running(self) -> CheckResult:
         """Check if rnsd daemon is running."""
         try:
-            # Use centralized service check when available
-            if _HAS_SERVICE_CHECK:
-                running, pid = check_process_with_pid('rnsd')
-            else:
-                # Fallback to direct pgrep
-                result = subprocess.run(
-                    ['pgrep', '-f', 'rnsd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                running = result.returncode == 0 and result.stdout.strip()
-                pid = result.stdout.strip().split('\n')[0] if running else None
-
+            running, pid = check_process_with_pid('rnsd')
             if running:
                 return CheckResult(
                     name="RNS Daemon (rnsd)",
@@ -498,17 +481,7 @@ class GatewayDiagnostic:
     def check_meshtasticd(self) -> CheckResult:
         """Check if meshtasticd service is running."""
         try:
-            # Use centralized service check when available
-            if _HAS_SERVICE_CHECK:
-                running, _ = check_process_with_pid('meshtasticd')
-            else:
-                # Fallback to direct pgrep
-                result = subprocess.run(
-                    ['pgrep', '-f', 'meshtasticd'],
-                    capture_output=True, text=True, timeout=5
-                )
-                running = result.returncode == 0 and result.stdout.strip()
-
+            running, _ = check_process_with_pid('meshtasticd')
             if running:
                 # Also check TCP port
                 if self.check_tcp_port('localhost', 4403):
@@ -707,19 +680,9 @@ class GatewayDiagnostic:
     def _check_ble_available(self) -> bool:
         """Check if Bluetooth LE is available."""
         try:
-            # Use centralized service checker if available
-            if _HAS_SERVICE_CHECK:
-                is_running, is_enabled = check_systemd_service('bluetooth')
-                if is_running:
-                    return True
-            else:
-                # Fallback to direct systemctl call
-                result = subprocess.run(
-                    ['systemctl', 'is-active', 'bluetooth'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.stdout.strip() == 'active':
-                    return True
+            is_running, is_enabled = check_systemd_service('bluetooth')
+            if is_running:
+                return True
         except Exception:
             pass
 

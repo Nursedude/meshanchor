@@ -26,11 +26,10 @@ from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
-from utils.safe_import import safe_import
-
-# Import centralized service checking
-check_systemd_service, check_process_running, _check_port, _check_udp_port, apply_config_and_restart, restart_service, _sudo_cmd, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_systemd_service', 'check_process_running', 'check_port', 'check_udp_port', 'apply_config_and_restart', 'restart_service', '_sudo_cmd'
+# Centralized service checking — first-party, always available
+from utils.service_check import (
+    check_systemd_service, check_process_running, check_port, check_udp_port,
+    apply_config_and_restart, restart_service, _sudo_cmd,
 )
 
 # First-party modules for quick actions
@@ -98,15 +97,8 @@ class QuickActionsMixin:
             if svc == 'meshforge':
                 is_systemd = False
                 try:
-                    if _HAS_SERVICE_CHECK:
-                        is_running, _ = check_systemd_service(svc)
-                        is_systemd = is_running
-                    else:
-                        result = subprocess.run(
-                            ['systemctl', 'is-active', svc],
-                            capture_output=True, text=True, timeout=5
-                        )
-                        is_systemd = result.stdout.strip() == 'active'
+                    is_running, _ = check_systemd_service(svc)
+                    is_systemd = is_running
                 except Exception:
                     pass
                 mode = "service" if is_systemd else "interactive"
@@ -114,22 +106,8 @@ class QuickActionsMixin:
                 continue
 
             try:
-                if _HAS_SERVICE_CHECK:
-                    is_running, is_enabled = check_systemd_service(svc)
-                    status = 'active' if is_running else 'inactive'
-                else:
-                    # Fallback to direct systemctl call
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', svc],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    status = result.stdout.strip()
-                    # Check boot persistence via fallback
-                    enabled_result = subprocess.run(
-                        ['systemctl', 'is-enabled', svc],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    is_enabled = enabled_result.returncode == 0
+                is_running, is_enabled = check_systemd_service(svc)
+                status = 'active' if is_running else 'inactive'
 
                 # Check boot persistence
                 boot_info = ""
@@ -138,7 +116,11 @@ class QuickActionsMixin:
                     warnings.append(svc)
 
                 if status == 'active':
-                    print(f"  * {svc:<18} running{boot_info}")
+                    # rnsd zombie detection: systemd active but port not bound
+                    if svc == 'rnsd' and not check_udp_port(37428):
+                        print(f"  ! {svc:<18} running (port 37428 not bound)")
+                    else:
+                        print(f"  * {svc:<18} running{boot_info}")
                 elif status == 'failed':
                     print(f"  ! {svc:<18} FAILED")
                 else:
@@ -149,16 +131,7 @@ class QuickActionsMixin:
 
         # Bridge process (not a systemd service — no boot persistence check)
         try:
-            if _HAS_SERVICE_CHECK:
-                bridge_running = check_process_running('rns_bridge')
-            else:
-                # Fallback to direct pgrep call
-                result = subprocess.run(
-                    ['pgrep', '-f', 'rns_bridge'],
-                    capture_output=True, timeout=3
-                )
-                bridge_running = result.returncode == 0
-
+            bridge_running = check_process_running('rns_bridge')
             bridge_status = "running" if bridge_running else "not running"
             sym = "*" if bridge_running else "-"
             print(f"  {sym} {'rns_bridge':<18} {bridge_status}")
@@ -254,11 +227,7 @@ class QuickActionsMixin:
         self._wait_for_enter("Press Enter to continue...")
 
     def _qa_port_check(self):
-        """Quick: check network ports.
-
-        Uses centralized service_check module when available.
-        """
-        import socket as sock
+        """Quick: check network ports."""
         clear_screen()
         print("=== Port Check ===\n")
 
@@ -275,24 +244,9 @@ class QuickActionsMixin:
         for port, desc in ports:
             try:
                 if port in _udp_ports:
-                    if _HAS_SERVICE_CHECK:
-                        port_open = _check_udp_port(port)
-                    else:
-                        try:
-                            with sock.socket(sock.AF_INET, sock.SOCK_DGRAM) as s:
-                                s.settimeout(1)
-                                s.bind(('127.0.0.1', port))
-                                port_open = False  # Bind OK = not in use
-                        except OSError as e:
-                            port_open = e.errno in (98, 48, 10048)
-                elif _HAS_SERVICE_CHECK:
-                    port_open = _check_port(port, host='127.0.0.1', timeout=1.0)
+                    port_open = check_udp_port(port)
                 else:
-                    # Fallback to direct TCP socket check
-                    with sock.socket(sock.AF_INET, sock.SOCK_STREAM) as s:
-                        s.settimeout(1)
-                        result = s.connect_ex(('127.0.0.1', port))
-                        port_open = result == 0
+                    port_open = check_port(port, host='127.0.0.1', timeout=1.0)
 
                 if port_open:
                     print(f"  * {port:<6} {desc}")
