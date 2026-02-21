@@ -533,6 +533,8 @@ Terminal-first design principles:
 
 ### HamClock Integration
 
+> **Note (2026-02-21)**: NOAA SWPC is now the primary/always-available data source via `commands/propagation.py`. HamClock and OpenHamClock are optional enhancements. New code should use `commands.propagation`, not `commands.hamclock` directly.
+
 [HamClock](https://www.clearskyinstitute.com/ham/HamClock/) is a powerful ham radio dashboard that provides:
 
 #### Features to Integrate
