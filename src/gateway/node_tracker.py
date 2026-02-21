@@ -184,6 +184,17 @@ shared_instance_port = 37428
 instance_control_port = 37429
 """)
 
+                # Pre-flight: check if shared instance port is listening
+                try:
+                    from utils.service_check import check_udp_port
+                    if not check_udp_port(37428):
+                        logger.warning(
+                            "rnsd PID %d found but port 37428 not listening "
+                            "(may be initializing or hung)", rns_pids[0]
+                        )
+                except ImportError:
+                    pass  # service_check not available, proceed anyway
+
                 # Connect using client-only config
                 self._reticulum = RNS.Reticulum(configdir=str(client_config_dir))
                 self._rns_connected = True
@@ -245,7 +256,11 @@ instance_control_port = 37429
 
             except Exception as e:
                 logger.warning(f"Could not connect to rnsd: {e}")
-                logger.info("RNS nodes may not appear on map - ensure rnsd is running properly")
+                try:
+                    from utils.gateway_diagnostic import diagnose_rnsd_connection
+                    diagnose_rnsd_connection(rns_pids, error=e)
+                except Exception:
+                    pass  # diagnostic failure should never block startup
                 self._rns_connected = False
 
         except Exception as e:
