@@ -3,11 +3,12 @@
 MeshForge Linter - Check for common issues and coding standards.
 
 Checks:
-- Path.home() violations (must use get_real_user_home for sudo compatibility)
-- shell=True in subprocess calls (security risk)
-- Bare except: clauses (should use except Exception:)
-- Missing timeout in subprocess calls
-- Command injection risks
+- MF001: Path.home() violations (must use get_real_user_home for sudo compatibility)
+- MF002: shell=True in subprocess calls (security risk)
+- MF003: Bare except: clauses (should use except Exception:)
+- MF004: Missing timeout in subprocess calls
+- MF005: GLib.idle_add check for thread-safe UI updates
+- MF006: safe_import for first-party modules (must use direct imports)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -188,6 +189,22 @@ class MeshForgeLinter:
                             filepath, lineno, Severity.WARNING, "MF004",
                             "subprocess call without timeout parameter"
                         ))
+
+        # MF006: safe_import for first-party modules
+        # First-party modules must use direct imports, not safe_import
+        if 'safe_import(' in line and 'safe_import.py' not in filepath:
+            first_party_prefixes = (
+                "'utils.", "'commands.", "'gateway.", "'core.",
+                "'launcher_tui.", "'config.", "'monitoring.", "'plugins.",
+                "'cli.", "'agent.", "'amateur.", "'diagnostics.", "'updates.",
+            )
+            if any(prefix in line for prefix in first_party_prefixes):
+                # Skip docstrings/comments/examples
+                if not stripped.startswith('#') and not stripped.startswith('"') and not stripped.startswith("'"):
+                    issues.append(LintIssue(
+                        filepath, lineno, Severity.ERROR, "MF006",
+                        "safe_import used for first-party module - use direct import instead"
+                    ))
 
         # MF005: GLib.idle_add check - UI updates from threads
         # Only check for actual GTK widget methods, not generic list operations

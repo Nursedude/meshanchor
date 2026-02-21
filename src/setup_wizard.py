@@ -23,8 +23,6 @@ from enum import Enum
 # Setup logging
 logger = logging.getLogger(__name__)
 
-from utils.safe_import import safe_import
-
 # Service management — first-party, direct import per CLAUDE.md
 from utils.service_check import (
     check_service as _check_service_central,
@@ -36,9 +34,7 @@ from utils.service_check import (
     _sudo_write,
 )
 
-_get_real_user_home_mod, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-
-_ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')
+from utils.paths import get_real_user_home, ReticulumPaths
 
 
 class WizardServiceState(Enum):
@@ -144,15 +140,7 @@ class SetupWizard:
 
     def _get_real_home(self) -> Path:
         """Get real user home even when running as sudo"""
-        if _HAS_PATHS:
-            return _get_real_user_home_mod()
-        sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-            return Path(f"/home/{sudo_user}")
-        logname = os.environ.get('LOGNAME', '')
-        if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-            return Path(f"/home/{logname}")
-        return Path('/root')
+        return get_real_user_home()
 
     def _setup_logging(self):
         """Setup file logging for the wizard"""
@@ -425,10 +413,7 @@ class SetupWizard:
         if (rns_status and rns_status.state == WizardServiceState.RUNNING and
             nomad_status and nomad_status.state == WizardServiceState.RUNNING):
             # Both running - check if nomadnet is configured to use shared instance
-            if _HAS_RETICULUM_PATHS:
-                config_path = _ReticulumPaths.get_config_file()
-            else:
-                config_path = self._get_real_home() / ".reticulum" / "config"
+            config_path = ReticulumPaths.get_config_file()
             if config_path.exists():
                 try:
                     config_text = config_path.read_text()

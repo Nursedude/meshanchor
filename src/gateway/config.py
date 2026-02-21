@@ -12,11 +12,9 @@ from typing import Optional, List, Dict, Any, Tuple
 import logging
 
 from utils.safe_import import safe_import
+from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
-
-# Import centralized path utility for sudo compatibility
-_get_real_user_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 
 # Import config drift validation (optional)
 _validate_gateway_rns_config, _HAS_CONFIG_DRIFT = safe_import(
@@ -138,22 +136,6 @@ def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[Confi
             severity="info"
         )
     return None
-
-def get_real_user_home() -> Path:
-    """Get real user home directory with sudo compatibility."""
-    if _HAS_PATHS:
-        return _get_real_user_home()
-    # Fallback for when utils.paths is not in Python path
-    sudo_user = os.environ.get('SUDO_USER', '')
-    if sudo_user and sudo_user != 'root' and '/' not in sudo_user and '..' not in sudo_user:
-        candidate = Path(f'/home/{sudo_user}')
-        return candidate
-    logname = os.environ.get('LOGNAME', '')
-    if logname and logname != 'root' and '/' not in logname and '..' not in logname:
-        candidate = Path(f'/home/{logname}')
-        return candidate
-    return Path('/root')
-
 
 @dataclass
 class MeshtasticConfig:
