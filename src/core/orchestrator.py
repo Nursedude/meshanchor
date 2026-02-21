@@ -37,7 +37,7 @@ from utils.safe_import import safe_import
 _yaml, _HAS_YAML = safe_import('yaml')
 # Import centralized port checker for consistency across MeshForge
 # See: utils/service_check.py - SINGLE SOURCE OF TRUTH
-_centralized_check_port, _HAS_SERVICE_CHECK = safe_import('utils.service_check', 'check_port')
+from utils.service_check import check_port as _centralized_check_port
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -370,18 +370,7 @@ class ServiceOrchestrator:
 
         Uses centralized port checker from utils/service_check.py for consistency.
         """
-        if _HAS_SERVICE_CHECK and _centralized_check_port is not None:
-            return _centralized_check_port(port, host, timeout)
-
-        # Fallback if service_check not available
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
-        except (socket.error, OSError):
-            return False
+        return _centralized_check_port(port, host, timeout)
 
     def _check_command(self, command: List[str], timeout: int = 10) -> bool:
         """Run command and check for success."""

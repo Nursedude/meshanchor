@@ -41,11 +41,11 @@ from utils.paths import get_real_user_home
 )
 
 # Import RNS identity helpers
-get_identity_path, _HAS_RNS_IDENTITY = safe_import('commands.rns', 'get_identity_path')
-create_identities, _HAS_RNS_CREATE = safe_import('commands.rns', 'create_identities')
+from commands.rns import get_identity_path
+from commands.rns import create_identities
 
 # Import propagation module
-propagation_mod, _HAS_PROPAGATION = safe_import('commands.propagation')
+from commands import propagation
 
 
 class ServiceMenuMixin:
@@ -155,10 +155,9 @@ class ServiceMenuMixin:
             pass
 
         # 3. Check gateway identity exists
-        if _HAS_RNS_IDENTITY:
-            gw_id = get_identity_path()
-            if not gw_id.exists():
-                issues.append("Gateway identity not created yet")
+        gw_id = get_identity_path()
+        if not gw_id.exists():
+            issues.append("Gateway identity not created yet")
 
         if not issues:
             return True
@@ -217,15 +216,14 @@ class ServiceMenuMixin:
                 print("  Bridge may fail to connect.\n")
 
         # Create gateway identity if missing
-        if _HAS_RNS_IDENTITY and _HAS_RNS_CREATE:
-            gw_id = get_identity_path()
-            if not gw_id.exists():
-                print("[3] Creating gateway identity...")
-                result = create_identities()
-                if result.success:
-                    print(f"  {result.message}\n")
-                else:
-                    print(f"  Warning: {result.message}\n")
+        gw_id = get_identity_path()
+        if not gw_id.exists():
+            print("[3] Creating gateway identity...")
+            result = create_identities()
+            if result.success:
+                print(f"  {result.message}\n")
+            else:
+                print(f"  Warning: {result.message}\n")
 
         # Restart NomadNet as client (if we stopped it)
         if nomadnet_conflict:
@@ -1262,13 +1260,12 @@ WantedBy=multi-user.target
                 )
                 if result.returncode == 0:
                     print("\033[0;32m✓\033[0m OpenHamClock started on port 3000")
-                    if _HAS_PROPAGATION:
-                        print("\nAuto-configuring MeshForge...")
-                        propagation_mod.configure_source(
-                            propagation_mod.DataSource.OPENHAMCLOCK,
-                            host="localhost", port=3000
-                        )
-                        print("\033[0;32m✓\033[0m MeshForge configured for OpenHamClock")
+                    print("\nAuto-configuring MeshForge...")
+                    propagation.configure_source(
+                        propagation.DataSource.OPENHAMCLOCK,
+                        host="localhost", port=3000
+                    )
+                    print("\033[0;32m✓\033[0m MeshForge configured for OpenHamClock")
                 else:
                     print(f"\033[0;31mError:\033[0m {result.stderr}")
 

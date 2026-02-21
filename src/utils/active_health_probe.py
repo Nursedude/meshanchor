@@ -38,10 +38,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, List
 from enum import Enum
 
-from utils.safe_import import safe_import
-
-_emit_service_status, _HAS_EVENT_BUS = safe_import('utils.event_bus', 'emit_service_status')
-_check_udp_port_fn, _HAS_UDP_CHECK = safe_import('utils.service_check', 'check_udp_port')
+from utils.event_bus import emit_service_status
+from utils.service_check import check_udp_port
 
 logger = logging.getLogger(__name__)
 
@@ -411,40 +409,19 @@ class ActiveHealthProbe:
         """
         Probe RNS shared instance port.
 
-        Primary: uses check_udp_port() from service_check which reads
-        /proc/net/udp for reliable detection. Falls back to bind test
-        if service_check is unavailable.
+        Uses check_udp_port() from service_check which reads
+        /proc/net/udp for reliable detection.
 
         Args:
             port: RNS shared instance port (default: 37428)
             host: Host to check (default: 127.0.0.1)
         """
-        # Primary: /proc/net/udp-based check (reliable)
-        if _HAS_UDP_CHECK:
-            try:
-                if _check_udp_port_fn(port, host):
-                    return HealthResult(healthy=True, reason="port_bound")
-                return HealthResult(healthy=False, reason="port_not_bound")
-            except Exception as e:
-                return HealthResult(healthy=False, reason=f"check_error: {e}")
-
-        # Fallback: bind test (unreliable with SO_REUSEADDR)
-        sock = None
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(2)
-            sock.bind((host, port))
-            return HealthResult(healthy=False, reason="port_not_bound")
-        except OSError as e:
-            if e.errno in (98, 48, 10048):  # EADDRINUSE
+            if check_udp_port(port, host):
                 return HealthResult(healthy=True, reason="port_bound")
-            return HealthResult(healthy=False, reason=f"socket_error: {e}")
-        finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+            return HealthResult(healthy=False, reason="port_not_bound")
+        except Exception as e:
+            return HealthResult(healthy=False, reason=f"check_error: {e}")
 
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """
@@ -511,15 +488,12 @@ def _emit_state_change(service_name: str, new_state: HealthState) -> None:
     Emits a ServiceEvent whenever a service transitions between states,
     enabling the status bar and other subscribers to react without polling.
     """
-    if _HAS_EVENT_BUS:
-        available = new_state == HealthState.HEALTHY
-        _emit_service_status(
-            service_name=service_name,
-            available=available,
-            message=f"{service_name}: {new_state.value}",
-        )
-    else:
-        logger.debug("event_bus not available for health probe callback")
+    available = new_state == HealthState.HEALTHY
+    emit_service_status(
+        service_name=service_name,
+        available=available,
+        message=f"{service_name}: {new_state.value}",
+    )
 
 
 # Module-level singleton so all callers share one probe instance

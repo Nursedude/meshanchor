@@ -16,9 +16,7 @@ import socket as sock
 import subprocess
 from pathlib import Path
 from backend import clear_screen
-from utils.safe_import import safe_import
-
-_check_udp_port, _HAS_UDP_CHECK = safe_import('utils.service_check', 'check_udp_port')
+from utils.service_check import check_udp_port
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +217,8 @@ class NetworkToolsMixin:
 
         for port, proto, desc in ports:
             try:
-                if proto == 'udp' and _HAS_UDP_CHECK:
-                    is_open = _check_udp_port(port)
+                if proto == 'udp':
+                    is_open = check_udp_port(port)
                 else:
                     s = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
                     try:
