@@ -3,7 +3,7 @@
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
 >
-> **Last audited**: 2026-02-20 — Session resolved Issues #1, #3, #5, #9, #20 (35 files, -220 net lines)
+> **Last audited**: 2026-02-21 — Security & code review (v0.5.4-beta): 0 linter violations, 3 LOW fixes (stderr handle, file URI encoding), SECURITY.md rewrite, doc freshness updates
 
 ---
 

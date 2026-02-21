@@ -129,7 +129,7 @@ src/
 ├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
 │   ├── main.py        # NOC dispatcher (whiptail/dialog)
 │   ├── backend/       # Backend services
-│   └── *_mixin.py     # 36 feature mixins
+│   └── *_mixin.py     # 46 feature mixins
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway (MQTT transport)
 │   └── message_queue.py # SQLite queue

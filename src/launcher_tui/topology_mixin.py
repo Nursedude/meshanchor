@@ -803,11 +803,11 @@ class TopologyMixin:
                         )
                     if result.returncode != 0:
                         # Fallback to webbrowser module
-                        webbrowser.open(f"file://{output_path}")
+                        webbrowser.open(Path(output_path).as_uri())
                 except (subprocess.SubprocessError, OSError) as e:
                     logger.debug("xdg-open failed, trying webbrowser: %s", e)
                     try:
-                        webbrowser.open(f"file://{output_path}")
+                        webbrowser.open(Path(output_path).as_uri())
                     except OSError as e2:
                         logger.debug("webbrowser fallback also failed: %s", e2)
 
