@@ -56,9 +56,10 @@ config_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
 
 ---
 
-## Issue #2: WebKit Disabled When Running as Root (MOOT — GTK removed) — ARCHIVED (GTK removed)
+## Archived GTK Issues (#2, #10, #11, #13, #14, #15)
 
-> Archived to `persistent_issues_archive.md`. Gtk removed
+GTK4 was removed in v0.5.x. These issues are no longer relevant.
+Historical details in `persistent_issues_archive.md`.
 
 ---
 
@@ -218,8 +219,6 @@ def test_rns(self): ...  # Now _HAS_RNS is True
 
 ---
 
----
-
 ## Issue #6: Large Files Exceeding Guidelines
 
 ### Symptom
@@ -294,8 +293,6 @@ rns.py (extracted config editor + mixins). Web UI and Rich CLI were deleted in c
 
 ---
 
----
-
 ## Issue #7: Missing File References in Launchers
 
 ### Symptom
@@ -318,9 +315,9 @@ Adding menu options that reference new scripts without creating the scripts firs
 ### Prevention
 Run this verification before committing launcher changes:
 ```bash
-# Check all referenced files exist (post-consolidation: 2 UIs only)
-for f in src/main_gtk.py src/launcher.py src/launcher_tui/main.py \
-         src/standalone.py src/monitor.py; do
+# Check all referenced files exist
+for f in src/launcher.py src/launcher_tui/main.py \
+         src/standalone.py; do
   [ -f "$f" ] && echo "OK: $f" || echo "MISSING: $f"
 done
 ```
@@ -387,26 +384,10 @@ Fixed 28 silent `except Exception: pass` across 7 files:
 
 ---
 
----
-
-## Issue #10: Lambda Closure Bug in Loops — ARCHIVED (GTK removed)
-
-> Archived to `persistent_issues_archive.md`. GTK removed.
-
----
-
----
-
-## Issue #11: GTK4/Libadwaita Taskbar Icon Shows Generic — ARCHIVED (GTK removed)
-
-> Archived to `persistent_issues_archive.md`. Gtk removed
-
----
-
 ## Issue #12: RNS "Address Already in Use" When Connecting as Client
 
 ### Symptom
-GTK crashes or shows errors like:
+Application errors like:
 ```
 [Error] The interface "Default Interface" could not be created
 [Error] The contained exception was: [Errno 98] Address already in use
@@ -433,24 +414,6 @@ This allows connecting to rnsd without trying to bind ports.
 ### Prevention
 - When connecting to shared RNS instances, always use a client-only config
 - Never call `RNS.Reticulum()` without a configdir when rnsd is running
-
----
-
-## Issue #13: Meshtastic CLI Auto-Detection Freezes GTK — ARCHIVED (GTK removed)
-
-> Archived to `persistent_issues_archive.md`. Gtk removed
-
----
-
-## Issue #14: GTK Panel Lifecycle - Missing Cleanup Methods — ARCHIVED (GTK removed)
-
-> Archived to `persistent_issues_archive.md`. Gtk removed
-
----
-
-## Issue #15: GTK Startup Performance - Thundering Herd — ARCHIVED (GTK removed)
-
-> Archived to `persistent_issues_archive.md`. Gtk removed
 
 ---
 
@@ -646,7 +609,7 @@ Use delayed checks (5s after connection) and periodic re-checks (30s intervals).
 
 ---
 
-*Last updated: 2026-02-20 - Issues #1, #5 resolved; #3, #9, #20 progressed; #10 archived*
+*Last updated: 2026-02-21 - Cleanup: consolidated archived stubs, removed GTK references, cleaned separators*
 
 ---
 
@@ -1115,15 +1078,9 @@ The gateway diagnostic (`src/utils/gateway_diagnostic.py`) should be updated to:
 
 ---
 
-## Issue #25: rnsd PermissionError on /etc/reticulum/storage/ratchets — ARCHIVED (resolved)
+## Archived Resolved Issues (#25, #26, #28)
 
-> Archived to `persistent_issues_archive.md`. Resolved
-
----
-
-## Issue #26: ReticulumPaths Fallback Copies Cause Config Divergence — ARCHIVED (resolved)
-
-> Archived to `persistent_issues_archive.md`. Resolved
+Issues #25 (rnsd ratchets PermissionError), #26 (ReticulumPaths fallback copies), and #28 (API proxy fromradio) are resolved. Historical details in `persistent_issues_archive.md`.
 
 ---
 
@@ -1174,9 +1131,3 @@ Both MQTT and RNS can coexist. The private broker handles Meshtastic transport,
 RNS handles encrypted mesh-independent routing.
 
 ### Status: DOCUMENTED
-
----
-
-## Issue #28: API Proxy Steals fromradio Packets from Native Web Client — ARCHIVED (resolved)
-
-> Archived to `persistent_issues_archive.md`. Resolved

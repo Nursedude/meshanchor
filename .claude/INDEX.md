@@ -18,14 +18,13 @@ Quick navigation for AI assistants. Load only what you need.
 | `foundations/tui_architecture.md` | Mixin pattern, DialogBackend, adding features |
 | `foundations/ui_design_decisions.md` | TUI design principles |
 | `foundations/persistent_issues.md` | Recurring bugs & resolution patterns |
-| `foundations/persistent_issues_archive.md` | Resolved/archived issues (historical) |
+| `foundations/persistent_issues_archive.md` | Resolved issues (historical) |
 
 ### AI & Development Practices
 | File | Purpose |
 |------|---------|
-| `foundations/ai_principles.md` | Human-centered design philosophy |
+| `foundations/ai_principles.md` | Human-centered design philosophy + AI interface guidelines |
 | `foundations/ai_development_practices.md` | AI coding guidelines |
-| `foundations/ai_interface_guidelines.md` | UI/UX design guidelines |
 | `foundations/auto_review_principles.md` | Auto-review system principles |
 
 ### Active Development
@@ -33,7 +32,6 @@ Quick navigation for AI assistants. Load only what you need.
 |------|---------|
 | `TODO_PRIORITIES.md` | Current task priorities & branch strategy |
 | `foundations/missing_features.md` | TUI features gap tracker |
-| `session_notes.md` | Consolidated backlog of P2/P3 gaps |
 
 ### RNS/Gateway Research
 | File | Purpose |
@@ -92,7 +90,7 @@ Quick navigation for AI assistants. Load only what you need.
 - **assessments/** - Reliability assessments (1 file)
 - **audits/** - Code review reports (5 files)
 - **commands/** - Slash command definitions (6 files)
-- **foundations/** - Core principles (11 files)
+- **foundations/** - Core principles (10 files)
 - **hardware/** - Device-specific docs (1 file)
 - **plans/** - Implementation plans (4 files)
 - **postmortems/** - Session retrospectives (7 files)
@@ -108,4 +106,4 @@ Quick navigation for AI assistants. Load only what you need.
 **Large file guidelines?** -> `foundations/persistent_issues.md#issue-6`
 
 ---
-*Updated: 2026-02-20. ~55 files after cleanup (35 stale files removed).*
+*Updated: 2026-02-21. ~90 files after cleanup (session notes removed, AI docs consolidated, GTK issues archived).*
