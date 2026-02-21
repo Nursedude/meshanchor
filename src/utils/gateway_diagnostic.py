@@ -944,6 +944,64 @@ def find_rns_processes() -> List[int]:
     return pids
 
 
+def diagnose_rnsd_connection(rns_pids: List[int], error: Exception = None) -> None:
+    """Log diagnostic info when rnsd connection fails.
+
+    Follows 'Eight Times Blind' principle: check port, check known causes,
+    show the log. POLICY: Diagnose only — never restarts services or
+    modifies configs.
+
+    Args:
+        rns_pids: PIDs returned by find_rns_processes()
+        error: The exception from the failed RNS.Reticulum() call
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # 1. Check if shared instance port is actually listening
+    try:
+        from utils.service_check import check_udp_port
+        port_listening = check_udp_port(37428)
+    except ImportError:
+        port_listening = None  # Can't check
+
+    if rns_pids and port_listening is False:
+        _log.warning(
+            "rnsd PID %d exists but port 37428 not listening "
+            "(zombie or hung during init)", rns_pids[0]
+        )
+    elif rns_pids and port_listening is True:
+        # Port is listening but connection still failed — likely auth or config issue
+        err_str = str(error).lower() if error else ""
+        if "authentication" in err_str or "digest" in err_str:
+            _log.warning("Cause: RPC auth mismatch (stale shared_instance tokens)")
+            _log.info("Fix: sudo systemctl stop rnsd && "
+                      "sudo rm -f /etc/reticulum/storage/shared_instance_* && "
+                      "sudo systemctl start rnsd")
+        else:
+            _log.warning("rnsd port 37428 listening but connection failed — "
+                         "possible config mismatch")
+
+    # 2. Show recent rnsd journal (the actual diagnostic, per "Eight Times Blind")
+    try:
+        r = subprocess.run(
+            ['journalctl', '-u', 'rnsd', '-n', '15', '--no-pager'],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.stdout and r.stdout.strip():
+            _log.warning("Recent rnsd log:")
+            for line in r.stdout.strip().splitlines():
+                _log.warning("  %s", line.strip())
+        else:
+            _log.info("(no rnsd journal output)")
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
+        _log.debug("Could not read rnsd journal")
+
+    # 3. Actionable hints
+    _log.info("Restart rnsd: sudo systemctl restart rnsd")
+    _log.info("Full logs: journalctl -u rnsd -n 50")
+
+
 def kill_rns_processes(force: bool = False) -> Dict[str, any]:
     """
     Kill running RNS processes to free up the port.
