@@ -136,23 +136,19 @@
 | Issue | Status | Resolution |
 |-------|--------|------------|
 | #1 Path.home() | RESOLVED | `get_real_user_home()` everywhere |
-| #2 WebKit Root | DOCUMENTED | Known limitation, browser fallback |
-| #3 Service Verification | IMPROVED | Graceful mode in orchestrator |
+| #2 WebKit Root | ARCHIVED (GTK removed) | GTK4 removed, no longer relevant |
+| #3 Service Verification | PARTIALLY RESOLVED | Gateway pre-flight done, 34+ locations remain |
 | #4 Silent DEBUG Logging | IMPROVED | Exception handlers now log |
 | #5 Duplicate Utilities | RESOLVED | Centralized in utils/ |
-| #6 Large Files | MONITORED | 5 files over 1,500 lines |
-| #9 Exception Swallowing | FIXED (2026-01-19) | Added logging to 6 handlers |
-| #10 Lambda Closure Bug | FIXED | Default argument pattern |
-| #11 Taskbar Icon | FIXED | install-desktop.sh |
+| #6 Large Files | MONITORED | 8 files over 1,500 lines |
+| #9 Exception Swallowing | MOSTLY RESOLVED (2026-02-20) | 28 of 30 fixed, 2 benign by design |
+| #10-#11, #13-#15 | ARCHIVED (GTK removed) | GTK4 removed, no longer relevant |
 | #12 RNS Address In Use | FIXED | Client-only config in /tmp/ |
-| #13 CLI Auto-Detect Freeze | FIXED | Port check before CLI call |
-| #14 Panel Lifecycle | FIXED | PanelBase class |
-| #15 Thundering Herd | FIXED | Lazy loading, deferred refresh |
 | #16 Gateway Reliability | DOCUMENTED | Best-effort delivery |
 | #17 Connection Contention | FIXED | Shared connection manager |
 | #18 Auto-Reconnect | IMPLEMENTED | Exponential backoff |
 | #19 path_table Discovery | IMPLEMENTED | Check path_table for nodes |
-| #20 Service Detection | PHASE 1&2 DONE | Phase 3 solution documented |
+| #20 Service Detection | ALL 3 PHASES DONE | systemctl-only, status display, event bus |
 
 ---
 
@@ -211,6 +207,6 @@ Regional RNS (192.168.86.38:4242)
 
 ---
 
-*Memory verified: 2026-02-17*
+*Memory verified: 2026-02-21*
 *Timeline continuous: v1.0.0 → v0.5.4-beta*
 *No gaps detected*
