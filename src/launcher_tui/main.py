@@ -1398,8 +1398,10 @@ def main():
 
     stderr_log = log_dir / "tui_errors.log"
     _original_stderr = sys.stderr
+    _stderr_file = None
     try:
-        sys.stderr = open(stderr_log, 'a')
+        _stderr_file = open(stderr_log, 'a')  # noqa: SIM115 — long-lived redirect
+        sys.stderr = _stderr_file
     except Exception:
         pass  # Keep original stderr if can't redirect
 
@@ -1413,9 +1415,10 @@ def main():
     except Exception as e:
         # Restore stderr FIRST so the user can see the error message
         try:
-            if sys.stderr != _original_stderr:
-                sys.stderr.close()
-                sys.stderr = _original_stderr
+            sys.stderr = _original_stderr
+            if _stderr_file is not None:
+                _stderr_file.close()
+                _stderr_file = None
         except Exception:
             pass
 
@@ -1461,11 +1464,11 @@ def main():
             except Exception as e:
                 logger.warning(f"Cleanup failed for map server: {e}")
 
-        # Restore stderr
+        # Restore stderr and close the log file handle
         try:
-            if sys.stderr != _original_stderr:
-                sys.stderr.close()
-                sys.stderr = _original_stderr
+            sys.stderr = _original_stderr
+            if _stderr_file is not None:
+                _stderr_file.close()
         except Exception:
             pass
         sys.exit(exit_code)
