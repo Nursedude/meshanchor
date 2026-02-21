@@ -52,7 +52,7 @@ MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RN
 1. **Professional-grade** - Quality suitable for Anthropic review
 2. **Portable** - Runs on Pi, uConsole, HackerGadgets devices
 3. **Manageable** - Don't let it become unwieldy
-4. **Multi-interface** - TUI, CLI, Web UI with consistent experience
+4. **TUI-first** - Terminal interface primary, CLI for automation
 5. **Interoperable** - Bridge different mesh technologies
 
 ---
@@ -61,17 +61,18 @@ MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RN
 
 ### Keep It Manageable
 ```
-meshforge/
-├── src/
-│   ├── gateway/          # RNS-Meshtastic bridge (self-contained)
-│   ├── launcher_tui/     # Terminal UI (whiptail/dialog)
-│   ├── config/           # Configuration management
-│   ├── monitoring/       # Node tracking
-│   ├── services/         # System service management
-│   ├── tools/            # RF and network utilities
-│   └── utils/            # Shared utilities
-├── web/                  # Web assets (HTML, JS)
-└── templates/            # Config templates
+src/
+├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
+│   ├── main.py        # NOC dispatcher (whiptail/dialog)
+│   └── *_mixin.py     # Feature mixins (33+)
+├── commands/          # Command modules
+├── gateway/           # RNS-Meshtastic bridge
+├── monitoring/        # Network monitoring
+├── plugins/           # Protocol plugins
+├── utils/             # RF tools, common utilities
+├── launcher.py        # Auto-detect launcher
+├── standalone.py      # Zero-dependency RF tools
+└── __version__.py     # Version and changelog
 ```
 
 ### Module Independence
@@ -80,15 +81,8 @@ meshforge/
 - Clear interfaces between components
 - Gateway can run standalone or integrated
 
-### Interface Parity
-All interfaces (TUI, CLI, Web) should provide:
-- Same core functionality
-- Consistent terminology
-- Similar navigation structure
-- Shared backend logic
-
 ### Portability Checklist
-- [ ] No hardcoded paths (use `~/.config/meshforge/`)
+- [ ] No hardcoded paths (use `get_real_user_home()` from `utils/paths.py`)
 - [ ] Graceful degradation (external browser for web content)
 - [ ] Minimal dependencies for core functionality
 - [ ] ARM64 and x86_64 compatible
@@ -527,13 +521,15 @@ Terminal-first design principles:
    - systemd integration
    - journalctl log access
 
+### Implemented Integrations
+1. **MQTT** - IoT integration, MQTT bridge, nodeless monitoring
+2. **HamClock/Propagation** - Space weather via NOAA (primary) + optional HamClock/OpenHamClock
+3. **NomadNet** - Browse RNS pages
+
 ### Planned Integrations
-1. **NomadNet** - Browse RNS pages
-2. **Sideband** - Telemetry sharing
-3. **LXST** - Real-time voice streaming
-4. **MQTT** - IoT integration
-5. **Site Planner API** - Coverage analysis
-6. **HamClock** - Propagation and space weather
+1. **Sideband** - Telemetry sharing
+2. **LXST** - Real-time voice streaming
+3. **Site Planner API** - Coverage analysis
 
 ### HamClock Integration
 
@@ -637,14 +633,16 @@ Comprehensive security review performed. Issues found and fixed:
 
 #### Fixed Vulnerabilities
 
-| Issue | Severity | File | Fix Applied |
-|-------|----------|------|-------------|
-| DOM-based XSS | CRITICAL | main_web.py | Added `escapeHtml()` function, sanitize all dynamic content |
-| journalctl injection | CRITICAL | main_web.py | Added `validate_journalctl_since()` with whitelist patterns |
-| Insecure default binding | HIGH | main_web.py | Changed default to `127.0.0.1`, added security warning |
-| Missing security headers | HIGH | main_web.py | Added CSP, X-Frame-Options, X-XSS-Protection headers |
-| TUI command injection | HIGH | tui/app.py | Use `shlex.split()` for proper command parsing |
-| Message validation | MEDIUM | main_web.py | Added length limit (230 bytes), hex node ID validation |
+| Issue | Severity | Fix Applied |
+|-------|----------|-------------|
+| DOM-based XSS | CRITICAL | Added `escapeHtml()`, sanitize all dynamic content |
+| journalctl injection | CRITICAL | Added `validate_journalctl_since()` with whitelist patterns |
+| Insecure default binding | HIGH | Changed default to `127.0.0.1`, added security warning |
+| Missing security headers | HIGH | Added CSP, X-Frame-Options, X-XSS-Protection headers |
+| TUI command injection | HIGH | Use `shlex.split()` for proper command parsing |
+| Message validation | MEDIUM | Added length limit (230 bytes), hex node ID validation |
+
+> *Note: Original fixes applied to legacy GTK/Web files (main_web.py, tui/app.py) which were removed when TUI became the only interface. Security patterns carried forward.*
 
 #### Already Secure (Confirmed)
 - ✓ Path traversal prevention (`validate_config_name()`)
@@ -665,33 +663,26 @@ Comprehensive security review performed. Issues found and fixed:
 
 ## Future Roadmap
 
-### v4.3 - UI Polish
-- [ ] Compact mode for small screens
-- [ ] Responsive TUI layouts
-- [ ] Terminal size detection
+> See `plans/v1.0_roadmap.md` for detailed v1.0 criteria and `TODO_PRIORITIES.md` for current sprint work.
 
-### v4.4 - Site Planner Integration
-- [ ] Browser-based coverage viewer
-- [ ] Auto-populate from mesh
-- [ ] Save coverage analysis
+### Current: v0.5.4-beta
+- [x] Gateway bridge (RNS-Meshtastic)
+- [x] TUI with 33+ mixins
+- [x] MQTT bridge architecture
+- [x] 3,400+ tests
+- [x] Propagation data (NOAA primary)
 
-### v4.5 - LXMF Integration (Partial Complete)
-- [x] RNS panel
-- [x] Gateway bridge
-- [x] Config editor
+### Next: v0.6.0-alpha (MeshCore)
+- [ ] MeshCore 3-way routing
+- [ ] Companion radio management
+- [ ] MeshCore protocol handler
+
+### Future
 - [ ] NomadNet page browser
 - [ ] LXST voice streaming
-
-### v4.6 - Node Flashing
-- [ ] esptool integration
-- [ ] Firmware download/flash
-- [ ] Config backup/restore
-
-### v5.0 - Dude AI Assistant
-- [ ] In-app help system
-- [ ] Debugging assistant
-- [ ] Configuration suggestions
-- [ ] Problem diagnosis
+- [ ] Site Planner integration
+- [ ] Firmware flashing from TUI
+- [ ] NanoVNA antenna tuning plugin
 
 #### ML/AI Research for Dude AI
 
@@ -994,7 +985,7 @@ When resuming development:
 
 ### Research Documents
 - `.claude/research/rns_comprehensive.md` - RNS ecosystem deep dive
-- `.claude/session_notes.md` - Development session history
+- `.claude/INDEX.md` - Documentation index
 
 ### Technical References
 - [LoRa Spreading Factors](https://www.thethingsnetwork.org/docs/lorawan/spreading-factors/) - TTN documentation
@@ -1006,9 +997,7 @@ When resuming development:
 
 ---
 
----
-
-## Plugin Architecture (v0.4.3)
+## Plugin Architecture
 
 MeshForge now supports an extensible plugin system for adding functionality without modifying core code.
 
@@ -1166,32 +1155,24 @@ MeshForge uses TDD for reliable, maintainable code:
 5. Commit implementation  → git commit -m "feat: Add feature"
 ```
 
-### Test Suites
+### Test Coverage
 
-| Suite | Tests | Purpose |
-|-------|-------|---------|
-| `test_security.py` | 24 | Input validation, path safety |
-| `test_rf_utils.py` | 13 | RF calculations |
-| `test_gateway_diagnostic.py` | 18 | Gateway setup wizard |
-| `test_plugins.py` | 15 | Plugin architecture |
-| **Total** | **70** | All passing |
+- **3,400+ tests** across security, RF, gateway, plugins, TUI, and integration suites
+- Test-to-code ratio: ~31%
 
 ### Running Tests
 
 ```bash
 # Run all tests
-python3 tests/test_security.py
-python3 tests/test_rf_utils.py
-python3 tests/test_gateway_diagnostic.py
-python3 tests/test_plugins.py
+python3 -m pytest tests/ -v
 
-# Verify syntax
-python3 -m py_compile src/**/*.py
+# Run with coverage
+python3 -m pytest tests/ --cov=src --cov-report=term-missing
 ```
 
 ---
 
-*Last updated: 2026-02-18*
-*Version: 0.5.4-beta (knowledge base rev 4 - GTK references removed, TUI-only)*
+*Last updated: 2026-02-21*
+*Version: 0.5.4-beta (knowledge base rev 5 - stale content cleanup, session files removed)*
 *Dude AI - Network Engineer, Physicist, Programmer, Project Manager*
 *Made with aloha 🤙 - nurse dude (wh6gxz)*
