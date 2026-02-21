@@ -31,10 +31,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from utils.safe_import import safe_import
-
-# Module-level safe imports
-_find_meshtastic_cli, _HAS_CLI_UTIL = safe_import('utils.cli', 'find_meshtastic_cli')
+from utils.cli import find_meshtastic_cli
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +85,7 @@ class MeshtasticCLI:
 
     def _find_cli(self) -> Optional[str]:
         """Find meshtastic CLI using centralized path resolver."""
-        if _HAS_CLI_UTIL:
-            return _find_meshtastic_cli()
-        return shutil.which('meshtastic')
+        return find_meshtastic_cli()
 
     def _build_base_args(self) -> List[str]:
         """Build base CLI arguments for connection."""

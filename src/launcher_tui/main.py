@@ -33,19 +33,15 @@ _launcher_dir = Path(__file__).parent
 if str(_launcher_dir) not in sys.path:
     sys.path.insert(0, str(_launcher_dir))
 
-from utils.safe_import import safe_import
-
 # Import version
-__version__, _HAS_VERSION = safe_import('__version__', '__version__')
-if not _HAS_VERSION:
-    __version__ = "0.5.0-beta"
+from __version__ import __version__
 
 # Import optional modules at module level
-_find_meshtastic_cli, _HAS_CLI_UTIL = safe_import('utils.cli', 'find_meshtastic_cli')
-_get_health_probe, _HAS_HEALTH_PROBE = safe_import('utils.active_health_probe', 'get_health_probe')
-_config_api_mod, _HAS_CONFIG_API = safe_import('utils.config_api')
-_lock_port_external, _HAS_PORT_LOCK = safe_import('utils.service_check', 'lock_port_external')
-_TopologyVisualizer, _HAS_TOPO_VIZ = safe_import('utils.topology_visualizer', 'TopologyVisualizer')
+from utils.cli import find_meshtastic_cli
+from utils.active_health_probe import get_health_probe
+from utils import config_api as config_api_mod
+from utils.service_check import lock_port_external
+from utils.topology_visualizer import TopologyVisualizer
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
@@ -54,23 +50,14 @@ from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-check_service, check_port, apply_config_and_restart, ServiceState, _sudo_cmd, _HAS_APPLY_RESTART = safe_import(
-    'utils.service_check', 'check_service', 'check_port', 'apply_config_and_restart', 'ServiceState', '_sudo_cmd'
-)
+from utils.service_check import check_service, check_port, apply_config_and_restart, ServiceState, _sudo_cmd
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend, clear_screen
 
 # Import startup checks and conflict resolution (v0.4.8)
-StartupChecker, EnvironmentState, ServiceRunState, HAS_STARTUP_CHECKS = safe_import(
-    'startup_checks', 'StartupChecker', 'EnvironmentState', 'ServiceRunState'
-)
-if HAS_STARTUP_CHECKS:
-    check_and_resolve_conflicts, _ = safe_import(
-        'conflict_resolver', 'check_and_resolve_conflicts'
-    )
-else:
-    check_and_resolve_conflicts = None
+from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
+from conflict_resolver import check_and_resolve_conflicts
 
 # Import mixins to reduce file size
 from rf_tools_mixin import RFToolsMixin
@@ -172,7 +159,7 @@ class MeshForgeLauncher(
         self._bridge_log_path = None  # Path to active bridge log file
         self._config_api_server = None  # Config API HTTP server
         # Enhanced startup checker (v0.4.8)
-        self._startup_checker = StartupChecker() if HAS_STARTUP_CHECKS else None
+        self._startup_checker = StartupChecker()
         self._env_state: Optional[EnvironmentState] = None
 
     @staticmethod
@@ -194,10 +181,7 @@ class MeshForgeLauncher(
     def _get_meshtastic_cli(self) -> str:
         """Find the meshtastic CLI binary path, with caching."""
         if self._meshtastic_path is None:
-            if _HAS_CLI_UTIL:
-                self._meshtastic_path = _find_meshtastic_cli() or 'meshtastic'
-            else:
-                self._meshtastic_path = shutil.which('meshtastic') or 'meshtastic'
+            self._meshtastic_path = find_meshtastic_cli() or 'meshtastic'
         return self._meshtastic_path
 
     @staticmethod
@@ -425,12 +409,8 @@ class MeshForgeLauncher(
         rnsd, and mosquitto every 30 seconds. State changes are pushed
         to the EventBus, which the StatusBar subscribes to.
         """
-        if not _HAS_HEALTH_PROBE:
-            logger.debug("active_health_probe not available — health monitor disabled")
-            self._health_probe = None
-            return
         try:
-            self._health_probe = _get_health_probe(interval=30, fails=3, passes=2)
+            self._health_probe = get_health_probe(interval=30, fails=3, passes=2)
             self._health_probe.start()
             logger.info("Health monitor started (30s interval)")
         except Exception as e:
@@ -451,7 +431,7 @@ class MeshForgeLauncher(
         Returns:
             True to continue, False if user aborted
         """
-        if not HAS_STARTUP_CHECKS or not self._startup_checker:
+        if not self._startup_checker:
             return True
 
         # Get environment state
@@ -614,13 +594,9 @@ class MeshForgeLauncher(
         Provides RESTful configuration API on localhost:8081.
         Silent operation - no dialogs on failure.
         """
-        if not _HAS_CONFIG_API:
-            logger.debug("Config API module not available")
-            return
-
         try:
-            create_gateway_config_api = _config_api_mod.create_gateway_config_api
-            ConfigAPIServer = _config_api_mod.ConfigAPIServer
+            create_gateway_config_api = config_api_mod.create_gateway_config_api
+            ConfigAPIServer = config_api_mod.ConfigAPIServer
             api = create_gateway_config_api()
             self._config_api_server = ConfigAPIServer(api, host="127.0.0.1", port=8081)
             if self._config_api_server.start():
@@ -647,12 +623,8 @@ class MeshForgeLauncher(
 
         Silent operation - logs result but no dialogs on failure.
         """
-        if not _HAS_PORT_LOCK:
-            logger.debug("Port lockdown not available (missing service_check)")
-            return
-
         try:
-            success, msg = _lock_port_external(9443)
+            success, msg = lock_port_external(9443)
             if success:
                 logger.info("Startup port lock: %s", msg)
             else:
@@ -986,10 +958,6 @@ class MeshForgeLauncher(
 
     def _export_topology_data(self, format_type: str):
         """Export topology data in specified format."""
-        if not _HAS_TOPO_VIZ:
-            self.dialog.msgbox("Export Failed", "Topology visualizer module not available.")
-            return
-
         try:
             # Get topology from TopologyMixin (properly populated)
             topology = self._get_topology()
@@ -1002,7 +970,7 @@ class MeshForgeLauncher(
                 return
 
             # Create visualizer from actual topology data
-            viz = _TopologyVisualizer.from_topology(topology)
+            viz = TopologyVisualizer.from_topology(topology)
 
             if format_type == "geojson":
                 path, count = viz.export_geojson()

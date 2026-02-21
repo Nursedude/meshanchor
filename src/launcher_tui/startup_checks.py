@@ -41,26 +41,17 @@ check_service, ServiceState, ServiceStatus, _check_udp_port_fn, _HAS_SERVICE_CHE
     'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus', 'check_udp_port'
 )
 
-_ports_mod, _HAS_PORTS = safe_import('utils.ports')
-if _HAS_PORTS:
-    MESHTASTICD_PORT = _ports_mod.MESHTASTICD_PORT
-    MESHTASTICD_WEB_PORT = _ports_mod.MESHTASTICD_WEB_PORT
-    RNS_SHARED_INSTANCE_PORT = _ports_mod.RNS_SHARED_INSTANCE_PORT
-    RNS_TCP_SERVER_PORT = _ports_mod.RNS_TCP_SERVER_PORT
-    MQTT_PORT = _ports_mod.MQTT_PORT
-else:
-    # Fallback constants if utils not available
-    MESHTASTICD_PORT = 4403
-    MESHTASTICD_WEB_PORT = 9443
-    RNS_SHARED_INSTANCE_PORT = 37428
-    RNS_TCP_SERVER_PORT = 4242
-    MQTT_PORT = 1883
+from utils import ports
+MESHTASTICD_PORT = ports.MESHTASTICD_PORT
+MESHTASTICD_WEB_PORT = ports.MESHTASTICD_WEB_PORT
+RNS_SHARED_INSTANCE_PORT = ports.RNS_SHARED_INSTANCE_PORT
+RNS_TCP_SERVER_PORT = ports.RNS_TCP_SERVER_PORT
+MQTT_PORT = ports.MQTT_PORT
 
 # Sudo-safe home directory — first-party, always available (MF001)
 from utils.paths import get_real_user_home
 
-# Import ReticulumPaths for _heal_rns_storage_dirs (directory creation only)
-_ReticulumPaths, _HAS_RETICULUM_PATHS = safe_import('utils.paths', 'ReticulumPaths')
+from utils.paths import ReticulumPaths
 
 
 class ServiceRunState(Enum):
@@ -287,10 +278,7 @@ class StartupChecker:
         context, regenerating shared_instance auth tokens and breaking
         RNS connectivity for the normal user.
         """
-        if not _HAS_RETICULUM_PATHS:
-            return
-
-        if not _ReticulumPaths.ensure_system_dirs():
+        if not ReticulumPaths.ensure_system_dirs():
             logger.debug("Could not create /etc/reticulum directories")
             return
 

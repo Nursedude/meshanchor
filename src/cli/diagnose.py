@@ -31,7 +31,7 @@ _check_service, _check_port, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
 )
 SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
 
-_find_meshtastic_cli, _HAS_CLI = safe_import('utils.cli', 'find_meshtastic_cli')
+from utils.cli import find_meshtastic_cli
 
 _GatewayDiagnostic, _HAS_GATEWAY_DIAG = safe_import(
     'utils.gateway_diagnostic', 'GatewayDiagnostic'
@@ -236,33 +236,25 @@ def check_cli():
     """Check meshtastic CLI availability."""
     print_header("MESHTASTIC CLI")
 
-    if _HAS_CLI:
-        cli_path = _find_meshtastic_cli()
+    cli_path = find_meshtastic_cli()
 
-        if cli_path:
-            print_status("meshtastic CLI", True, cli_path)
+    if cli_path:
+        print_status("meshtastic CLI", True, cli_path)
 
-            # Get version
-            try:
-                result = subprocess.run(
-                    [cli_path, '--version'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    version = result.stdout.strip()
-                    print(f"    Version: {version}")
-            except Exception:
-                pass
-        else:
-            print_status("meshtastic CLI", False, "not found")
-            print("    Install with: pipx install meshtastic")
+        # Get version
+        try:
+            result = subprocess.run(
+                [cli_path, '--version'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                print(f"    Version: {version}")
+        except Exception:
+            pass
     else:
-        # Fallback
-        cli_path = shutil.which('meshtastic')
-        if cli_path:
-            print_status("meshtastic CLI", True, cli_path)
-        else:
-            print_status("meshtastic CLI", False, "not found")
+        print_status("meshtastic CLI", False, "not found")
+        print("    Install with: pipx install meshtastic")
 
 
 def check_rns_config():

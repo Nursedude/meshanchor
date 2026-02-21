@@ -127,27 +127,24 @@ class TestRnsdZombieDetection:
         """rnsd active in systemd but port 37428 not bound → stopped."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar._check_udp_port', return_value=False):
-                with patch('status_bar._HAS_SERVICE_CHECK', True):
-                    result = bar._check_systemd_active('rnsd')
+            with patch('status_bar.check_udp_port', return_value=False):
+                result = bar._check_systemd_active('rnsd')
         assert result == SYM_STOPPED
 
     def test_rnsd_healthy_shows_running(self):
         """rnsd active in systemd and port 37428 bound → running."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar._check_udp_port', return_value=True):
-                with patch('status_bar._HAS_SERVICE_CHECK', True):
-                    result = bar._check_systemd_active('rnsd')
+            with patch('status_bar.check_udp_port', return_value=True):
+                result = bar._check_systemd_active('rnsd')
         assert result == SYM_RUNNING
 
     def test_rnsd_systemd_inactive_skips_port_check(self):
         """rnsd not active in systemd → stopped without port check."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(False, False)):
-            with patch('status_bar._check_udp_port') as mock_udp:
-                with patch('status_bar._HAS_SERVICE_CHECK', True):
-                    result = bar._check_systemd_active('rnsd')
+            with patch('status_bar.check_udp_port') as mock_udp:
+                result = bar._check_systemd_active('rnsd')
         mock_udp.assert_not_called()
         assert result == SYM_STOPPED
 
@@ -155,20 +152,19 @@ class TestRnsdZombieDetection:
         """meshtasticd should not trigger UDP port check."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar._check_udp_port') as mock_udp:
-                with patch('status_bar._HAS_SERVICE_CHECK', True):
-                    result = bar._check_systemd_active('meshtasticd')
+            with patch('status_bar.check_udp_port') as mock_udp:
+                result = bar._check_systemd_active('meshtasticd')
         mock_udp.assert_not_called()
         assert result == SYM_RUNNING
 
     def test_udp_check_unavailable_falls_through(self):
-        """When check_udp_port is None (import failed), trust systemd only."""
+        """When check_udp_port raises OSError, exception is caught gracefully."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar._check_udp_port', None):
-                with patch('status_bar._HAS_SERVICE_CHECK', True):
-                    result = bar._check_systemd_active('rnsd')
-        assert result == SYM_RUNNING
+            with patch('status_bar.check_udp_port', side_effect=OSError("unavailable")):
+                result = bar._check_systemd_active('rnsd')
+        # OSError caught by the try/except → SYM_UNKNOWN
+        assert result in (SYM_UNKNOWN, SYM_STOPPED)
 
 
 class TestBridgeCheck:
@@ -437,9 +433,8 @@ class TestSpaceWeather:
         MockAPI = MagicMock()
         MockAPI.return_value.get_current_conditions.return_value = mock_data
 
-        with patch('status_bar._SpaceWeatherAPI', MockAPI):
-            with patch('status_bar._HAS_SPACE_WEATHER', True):
-                bar._check_space_weather()
+        with patch('status_bar.SpaceWeatherAPI', MockAPI):
+            bar._check_space_weather()
 
         assert bar._space_weather == "SFI:145 K:3"
 
@@ -451,18 +446,17 @@ class TestSpaceWeather:
         MockAPI = MagicMock()
         MockAPI.return_value.get_current_conditions.side_effect = Exception("Network error")
 
-        with patch('status_bar._SpaceWeatherAPI', MockAPI):
-            with patch('status_bar._HAS_SPACE_WEATHER', True):
-                bar._check_space_weather()
+        with patch('status_bar.SpaceWeatherAPI', MockAPI):
+            bar._check_space_weather()
 
         # Should be cleared on failure
         assert bar._space_weather is None
 
     def test_space_weather_import_error(self):
-        """Missing space_weather module should not crash."""
+        """SpaceWeatherAPI raising should not crash."""
         bar = StatusBar(version="1.0")
 
-        with patch('status_bar._HAS_SPACE_WEATHER', False):
+        with patch('status_bar.SpaceWeatherAPI', side_effect=Exception("import error")):
             bar._check_space_weather()
             assert bar._space_weather is None
 
@@ -477,9 +471,8 @@ class TestSpaceWeather:
         MockAPI = MagicMock()
         MockAPI.return_value.get_current_conditions.return_value = mock_data
 
-        with patch('status_bar._SpaceWeatherAPI', MockAPI):
-            with patch('status_bar._HAS_SPACE_WEATHER', True):
-                bar._check_space_weather()
+        with patch('status_bar.SpaceWeatherAPI', MockAPI):
+            bar._check_space_weather()
 
         assert bar._space_weather == "SFI:120"
         assert "K:" not in bar._space_weather
@@ -617,9 +610,8 @@ class TestSeedNodeCount:
         mock_tracker = MagicMock()
         mock_tracker.get_all_nodes.return_value = [MagicMock()] * 5
 
-        with patch('status_bar._get_node_tracker', return_value=mock_tracker):
-            with patch('status_bar._HAS_NODE_TRACKER', True):
-                bar._seed_node_count()
+        with patch('status_bar.get_node_tracker', return_value=mock_tracker):
+            bar._seed_node_count()
 
         assert bar._node_count == 5
 
@@ -631,18 +623,17 @@ class TestSeedNodeCount:
         mock_tracker = MagicMock()
         mock_tracker.get_all_nodes.return_value = []
 
-        with patch('status_bar._get_node_tracker', return_value=mock_tracker):
-            with patch('status_bar._HAS_NODE_TRACKER', True):
-                bar._seed_node_count()
+        with patch('status_bar.get_node_tracker', return_value=mock_tracker):
+            bar._seed_node_count()
 
         assert bar._node_count is None
 
     def test_seed_import_failure(self):
-        """Missing node tracker should not crash."""
+        """get_node_tracker raising should not crash."""
         bar = StatusBar(version="1.0")
         bar._node_count = None
 
-        with patch('status_bar._HAS_NODE_TRACKER', False):
+        with patch('status_bar.get_node_tracker', side_effect=Exception("import error")):
             bar._seed_node_count()
 
         assert bar._node_count is None
