@@ -1108,6 +1108,11 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
                 logger.warning(f"RNS port conflict: {e} (will retry in background)")
             else:
                 logger.warning(f"RNS pre-init failed: {e}")
+                try:
+                    from utils.gateway_diagnostic import diagnose_rnsd_connection
+                    diagnose_rnsd_connection(rns_pids, error=e)
+                except Exception:
+                    pass  # diagnostic failure should never block init
 
     def _connect_rns(self):
         """Initialize RNS and LXMF.
@@ -1177,6 +1182,13 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
 
             except Exception as e:
                 logger.error(f"Failed to connect to RNS: {e}")
+                try:
+                    from utils.gateway_diagnostic import (
+                        diagnose_rnsd_connection, find_rns_processes
+                    )
+                    diagnose_rnsd_connection(find_rns_processes(), error=e)
+                except Exception:
+                    pass  # diagnostic failure should never block bridge
                 self._connected_rns = False
 
     def _setup_lxmf(self, RNS, LXMF):
