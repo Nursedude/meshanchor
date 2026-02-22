@@ -19,6 +19,7 @@
 
 | Document | Description |
 |----------|-------------|
+| `xtoc_integration.md` | XTOC/XCOM tactical operations features, X1 protocol, integration roadmap |
 | `hamclock_complete.md` | HamClock/NOAA API and integration (NOAA primary, HamClock optional) |
 | `hamclock_decoupling.md` | HamClock decoupling session notes |
 | `aredn_integration.md` | AREDN mesh network integration research |
@@ -61,4 +62,4 @@
 
 ---
 
-*21 research documents. Updated 2026-02-20 (15 stale/duplicate files removed).*
+*22 research documents. Updated 2026-02-22.*
