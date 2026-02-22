@@ -98,7 +98,11 @@ The alpha branch (`0.6.0-alpha`) includes:
 - **Canonical message format** — unified multi-protocol message representation
 - **MeshCore TUI menu** — device management from the terminal interface
 
-> **Note:** The alpha branch is experimental and periodically rebased from `main`.
+> **Note:** The `main` and `alpha/meshcore-bridge` branches have diverged into
+> parallel development tracks (~2,200 commits ahead, ~100 behind as of Feb 2026).
+> Main includes tactical ops (XTOC/ATAK interop), MQTT bridge enhancements, and
+> security hardening that alpha does not have. Alpha includes MeshCore 3-way routing
+> that main does not have. Convergence will require a dedicated reconciliation effort.
 > Report issues on the [alpha/meshcore-bridge](https://github.com/Nursedude/meshforge/issues) tracker.
 
 ### Already Have meshtasticd?
@@ -217,6 +221,7 @@ Main Menu (MeshForge NOC)
 | First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
 | Network topology visualization | Done | D3.js + ASCII modes |
 | Node health & predictive maintenance | Done | Battery forecasting, signal trending |
+| Tactical messaging (XTOC interop) | Done (v0.5.4) | 8 templates, X1 codec, KML/CoT/ATAK export |
 
 **Next Phase: Hardening & Hardware (v0.6.x - v0.8.x)**
 
@@ -237,6 +242,20 @@ Main Menu (MeshForge NOC)
 | NanoVNA antenna integration | v0.9.0 | Alpha |
 | Firmware flashing | v1.0.0 | Alpha (high risk) |
 | v1.0 stable release | -- | See `.claude/plans/v1.0_roadmap.md` |
+
+**Future Alpha Candidates**
+
+Features under research that would require alpha-branch development before
+merging to stable main:
+
+| Feature | Risk | Notes |
+|---------|------|-------|
+| MeshCore merge to main | High | Branches diverged ~2,200 commits; needs dedicated reconciliation |
+| Full ATAK plugin bridge | Medium | Bidirectional CoT ↔ mesh relay, protocol complexity |
+| SDR spectrum analysis (RTL-SDR) | Medium | Hardware dependency, driver integration |
+| MANET/LAN bridging | Medium | New transport layer (XTOC-style IP mesh networking) |
+| Firmware flashing | High | Brick risk, device-specific, needs extensive testing |
+| Satellite tracking (TLE/SATCOM) | Low | Isolated feature, XTOC reference implementation exists |
 
 ### Known Limitations
 
@@ -960,6 +979,52 @@ See the full changelog in `src/__version__.py` or run:
 ```bash
 python3 -c "from src.__version__ import show_version_history; show_version_history()"
 ```
+
+---
+
+## Research & Technical Foundation
+
+MeshForge development is backed by 22 technical research documents covering
+protocol analysis, integration architecture, and RF engineering. These inform
+every major design decision in the codebase.
+
+### Multi-Protocol Bridging
+
+Deep analysis of bridging incompatible mesh ecosystems:
+- MeshCore ↔ Meshtastic dual-protocol bridge architecture (3-way routing design)
+- MeshCore reliability patterns: canonical packet format, MQTT origin filtering, lenient parsing
+- Gateway scenario analysis: multi-protocol deployment topologies and trade-offs
+
+### Tactical Operations & ATAK Interoperability
+
+Research into tactical messaging standards and the ATAK ecosystem:
+- [XTOC/XCOM](https://www.mkme.org/xtocapp/) integration analysis: X1 compact packet protocol,
+  structured message templates, offline-first tactical operations
+- ATAK ecosystem: [Meshtastic ATAK Plugin](https://github.com/meshtastic/ATAK-Plugin) (CoT XML,
+  PLI, GeoChat, fountain code file transfer), [Akita MeshTAK](https://github.com/AkitaEngineering/Akita-MeshTAK)
+  (SOS alerts, device health), real-world deployments (300+ personnel exercises, SAR operations)
+- **Implemented on main (v0.5.4):** 8 tactical templates (SITREP, TASK, CHECKIN, ZONE, RESOURCE,
+  MISSION, EVENT, ASSET), X1 codec for XTOC interop, transport-aware chunking, ham compliance
+  (CLEAR/SECURE modes), QR code transport, tactical map with KML/CoT export for ATAK/WinTAK
+
+### RF & Physical Layer
+
+- LoRa PHY deep-dive: CSS modulation, spreading factors, SNR limits, link budget calculations
+- Official Semtech LoRa reference data for engineering-grade RF planning
+
+### Protocol Documentation
+
+- Complete Reticulum/RNS protocol documentation, configuration guides, and integration patterns
+- Meshtastic JavaScript API reference
+- AREDN mesh network integration research
+
+### Architecture & Infrastructure
+
+- MQTT zero-interference bridging design (the foundation of v0.5.4's gateway)
+- NGINX reliability patterns applied to mesh networking APIs
+- uConsole AIO V2 portable NOC design for field operations
+
+Full research library: [`.claude/research/`](.claude/research/README.md)
 
 ---
 
