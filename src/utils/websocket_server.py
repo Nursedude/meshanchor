@@ -68,12 +68,15 @@ class MessageWebSocketServer:
     Thread-safe broadcast method can be called from any thread.
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 5001):
+    # Allowed WebSocket origin prefixes (localhost only by default)
+    _ALLOWED_ORIGINS = ['http://localhost', 'https://localhost']
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5001):
         """
         Initialize WebSocket server.
 
         Args:
-            host: Bind address (0.0.0.0 for all interfaces)
+            host: Bind address (127.0.0.1 for localhost only)
             port: WebSocket port (default 5001, one above HTTP)
         """
         self.host = host
@@ -208,12 +211,20 @@ class MessageWebSocketServer:
 
     async def _serve(self):
         """Async server coroutine."""
+        serve_kwargs = dict(
+            ping_interval=30,
+            ping_timeout=10,
+        )
+        # Restrict allowed origins to localhost (prevents cross-site WebSocket hijacking)
+        try:
+            serve_kwargs['origins'] = self._ALLOWED_ORIGINS
+        except Exception:
+            pass  # Older websockets versions may not support origins
         async with serve(
             self._handle_client,
             self.host,
             self.port,
-            ping_interval=30,
-            ping_timeout=10,
+            **serve_kwargs,
         ) as server:
             self._server = server
             # Keep running until stopped
@@ -262,9 +273,17 @@ class MessageWebSocketServer:
                 self._clients.discard(websocket)
             logger.info(f"WebSocket client removed: {client_id}")
 
+    # Allowed client message types
+    _ALLOWED_MSG_TYPES = frozenset({'ping', 'get_history', 'get_stats'})
+
     async def _handle_client_message(self, websocket, data: Dict[str, Any]):
         """Handle a message from a client."""
+        if not isinstance(data, dict):
+            return
+
         msg_type = data.get('type')
+        if msg_type not in self._ALLOWED_MSG_TYPES:
+            return
 
         if msg_type == 'ping':
             await websocket.send(json.dumps({
@@ -272,7 +291,7 @@ class MessageWebSocketServer:
                 'timestamp': datetime.now().isoformat()
             }))
         elif msg_type == 'get_history':
-            limit = min(data.get('limit', 50), self._history_max)
+            limit = min(int(data.get('limit', 50)), self._history_max)
             await websocket.send(json.dumps({
                 'type': 'history',
                 'messages': list(self._history[-limit:])
