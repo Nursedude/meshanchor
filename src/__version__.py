@@ -7,7 +7,7 @@ __version__ = "0.5.4-beta"
 __version_info__ = (0, 5, 4, 'beta')
 __release_date__ = "2026-02-11"
 __app_name__ = "MeshForge"
-__app_description__ = "LoRa Mesh Network Development & Operations Suite"
+__app_description__ = "Mesh Network Operations Center & Development Ecosystem"
 __app_tagline__ = "Build. Test. Deploy. Monitor."
 __target_audience__ = "RF engineers, network operators, and amateur radio operators"
 __status__ = "beta"  # alpha=experimental, beta=testing, stable=production
