@@ -67,7 +67,7 @@ from utils.service_check import check_service, ServiceState
 HAS_SERVICE_CHECK = True
 
 # Import event bus for RX message notifications (Issue #17 Phase 3)
-from utils.event_bus import emit_message
+from utils.event_bus import emit_message, emit_tactical
 HAS_EVENT_BUS = True
 
 # RNS sniffer is optional monitoring — not required for message bridging
@@ -1535,6 +1535,23 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
                 )
             except Exception as e:
                 logger.debug(f"Event bus emit failed: {e}")
+
+        # Auto-ingest tactical messages (X1 format) to timeline + event bus
+        msg_type = getattr(msg, 'message_type', None)
+        if msg_type is not None and hasattr(msg_type, 'value') and msg_type.value == 'tactical':
+            try:
+                from tactical.x1_codec import decode as x1_decode, is_x1
+                if is_x1(msg.content):
+                    tac_msg = x1_decode(msg.content)
+                    emit_tactical(
+                        tactical_type=tac_msg.tactical_type.name,
+                        message_id=tac_msg.id,
+                        sender_id=tac_msg.sender_id,
+                        content=tac_msg.content,
+                        encryption_mode=tac_msg.encryption_mode.value,
+                    )
+            except Exception as e:
+                logger.debug(f"Tactical auto-ingest failed: {e}")
 
     def _start_websocket_server(self):
         """Start WebSocket server for real-time message broadcast to web UI."""
