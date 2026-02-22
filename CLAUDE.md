@@ -15,7 +15,11 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 | `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore integration — 3-way routing, MeshCore handler, companion radio management |
 
 - **main** is the production-ready line. All PRs targeting stable features merge here.
-- **alpha/meshcore-bridge** tracks experimental MeshCore work (16 commits ahead of main as of 2026-02-17). Periodically rebased/merged from main.
+  Includes tactical ops (XTOC interop, ATAK/KML/CoT), MQTT bridge, security hardening.
+- **alpha/meshcore-bridge** has diverged significantly from main (~2,200 commits ahead,
+  ~100 behind as of 2026-02-22). Contains MeshCore 3-way routing and handler but lacks
+  main's tactical module, contact mapping, and several utilities. These are parallel
+  development tracks; convergence requires a dedicated reconciliation effort.
 - Feature branches use `claude/` prefix and merge via PR to the appropriate target branch.
 
 ## Development Principles
