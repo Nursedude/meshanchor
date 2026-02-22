@@ -1138,10 +1138,23 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         # Regular config path
         return ("config", ".".join(parts[1:]))
 
+    # Maximum request body size (1 MB)
+    _MAX_BODY_SIZE = 1_048_576
+
+    def _check_localhost(self) -> bool:
+        """Verify request originates from localhost. Returns True if allowed."""
+        try:
+            client_ip = __import__('ipaddress').ip_address(self.client_address[0])
+            return client_ip.is_loopback
+        except (ValueError, AttributeError):
+            return False
+
     def _read_body(self) -> Optional[Any]:
         """Read and parse JSON request body."""
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
+            return None
+        if content_length > self._MAX_BODY_SIZE:
             return None
 
         body = self.rfile.read(content_length)
@@ -1196,6 +1209,9 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         """Handle PUT requests (set configuration)."""
+        if not self._check_localhost():
+            self._send_error_json(403, "Forbidden — localhost only")
+            return
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1222,6 +1238,9 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         """Handle DELETE requests."""
+        if not self._check_localhost():
+            self._send_error_json(403, "Forbidden — localhost only")
+            return
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1240,6 +1259,9 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         """Handle PATCH requests (partial update)."""
+        if not self._check_localhost():
+            self._send_error_json(403, "Forbidden — localhost only")
+            return
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1263,6 +1285,9 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle POST requests (reset)."""
+        if not self._check_localhost():
+            self._send_error_json(403, "Forbidden — localhost only")
+            return
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
