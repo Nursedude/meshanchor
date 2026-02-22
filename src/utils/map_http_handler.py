@@ -90,8 +90,8 @@ class MapRequestHandler(SimpleHTTPRequestHandler):
     web_dir: Optional[str] = None
     # CORS: None = allow all, list = allow specific origins
     allowed_origins: Optional[List[str]] = None
-    # Meshtastic API proxy (set by MapServer when proxy is enabled)
-    api_proxy = None  # MeshtasticApiProxy instance
+    # Meshtastic API proxy (deprecated — always None, kept for graceful 503 responses)
+    api_proxy = None
 
     # Default allowed origins when none explicitly configured
     _DEFAULT_ORIGINS = ['http://localhost', 'https://localhost']
