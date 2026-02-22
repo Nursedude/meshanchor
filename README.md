@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1743%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1801%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 ## What is MeshForge?
 
-**MeshForge turns a Raspberry Pi into a mesh network operations center.**
+**MeshForge turns a Raspberry Pi into a mesh network operations center and development platform.**
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum via MQTT (zero interference)
@@ -56,6 +56,8 @@ sudo python3 src/launcher_tui/main.py
 ---
 
 ## Quick Start
+
+> **Already running MeshForge?** See [Upgrading](#upgrading-meshforge) for upgrade paths.
 
 ### Fresh Install
 
@@ -161,144 +163,12 @@ Main Menu (MeshForge NOC)
 
 ---
 
-## Upgrading MeshForge
-
-### Decision Tree
-
-```
-Do you need to upgrade?
-  │
-  ├── Import errors, stale .pyc, major version bump, or something "feels off"
-  │   └── Clean Reinstall (recommended)
-  │
-  └── Small code change, update service files
-      └── Quick Update (update.sh)
-```
-
-### Clean Reinstall (Recommended)
-
-The safest upgrade path. Guarantees fresh code, correct dependencies, no stale files:
-
-```bash
-sudo bash /opt/meshforge/scripts/reinstall.sh
-```
-
-**What happens:**
-1. Backs up configs to `~/meshforge-backup-<timestamp>/`
-2. Stops MeshForge services
-3. Removes `/opt/meshforge` (source + venv only)
-4. Fresh `git clone` from GitHub
-5. Runs `install_noc.sh` to rebuild
-6. Restores your configs from backup
-
-**What is preserved (never touched):**
-
-| Preserved | Path | Why |
-|-----------|------|-----|
-| meshtasticd | apt package + `/etc/meshtasticd/config.yaml` | Separate package, your radio config |
-| Radio hardware configs | `/etc/meshtasticd/config.d/` | Backed up + restored |
-| Reticulum identity | `~/.reticulum/` | Your RNS address + keys |
-| MeshForge user settings | `~/.config/meshforge/` | Backed up + restored |
-| MQTT broker | mosquitto service + config | Separate service |
-| System packages | pip, apt installs | Not managed by MeshForge |
-
-No need to re-image your Pi. Your radio stays configured.
-
-**Reinstall flags:**
-```bash
-sudo bash scripts/reinstall.sh --no-confirm    # Skip confirmation prompt
-```
-
-### Quick Update
-
-For developers tracking the repo. Updates code, dependencies, and service files:
-
-```bash
-cd /opt/meshforge && sudo bash scripts/update.sh
-```
-
-**What happens:**
-1. Pulls latest code from GitHub
-2. Updates Python dependencies if `requirements.txt` changed
-3. Updates desktop integration
-4. Deploys updated systemd service files (rnsd crash-loop protection, startup ordering)
-5. Runs `systemctl daemon-reload`
-
-Or manually (code only — does NOT update service files):
-```bash
-cd /opt/meshforge && sudo git pull origin main
-```
-
-### Post-Upgrade Verification
-
-Run the built-in verification after any upgrade:
-
-```bash
-# Automated check (recommended)
-sudo bash scripts/install_noc.sh --verify-install
-
-# Manual checks
-python3 -c "from src.__version__ import __version__; print(__version__)"
-systemctl status meshtasticd rnsd
-sudo python3 src/launcher_tui/main.py
-```
-
-The `--verify-install` flag checks Python imports, service status, config
-file integrity, and radio hardware detection without modifying anything.
-
-### Troubleshooting Upgrades
-
-| Issue | Solution |
-|-------|----------|
-| Python import errors | `sudo bash scripts/reinstall.sh` (clean reinstall) |
-| `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
-| Service won't start | `journalctl -u meshtasticd -n 50` |
-| Config file conflicts | Restore from `~/meshforge-backup-*` or regenerate via TUI |
-| `meshtastic` module not found | See "Python Library Conflicts" below |
-| Stale `.pyc` files | Clean reinstall handles this automatically |
-| Wrong bridge mode after upgrade | New installs default to `mqtt_bridge`; existing configs preserved |
-
-#### Python Library Conflicts
-
-On Raspberry Pi OS Bookworm+ (externally-managed Python), the `meshtastic`
-library may fail to install. If you see "externally-managed-environment" or
-module import failures:
-
-```bash
-# Force reinstall (use with caution on managed Python)
-pip install meshtastic --break-system-packages --ignore-installed
-
-# Alternative: virtual environment
-python3 -m venv ~/.meshforge-venv
-source ~/.meshforge-venv/bin/activate
-pip install meshtastic
-```
-
-The `--break-system-packages` flag bypasses PEP 668 protections. Only use
-this if you understand the implications for your system Python.
-
-MeshForge's diagnostics can detect this automatically:
-```bash
-# TUI: System → Diagnostics → Gateway Pre-flight
-# Or directly:
-sudo python3 src/launcher_tui/main.py  # Dashboard shows import warnings
-```
-
-### Version History
-
-See the full changelog in `src/__version__.py` or run:
-```bash
-python3 -c "from src.__version__ import show_version_history; show_version_history()"
-```
-
----
-
 ## What Works (v0.5.4-beta)
 
 | Category | Capabilities | Status |
 |----------|-------------|--------|
 | **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics | Stable |
-| **TUI Reliability** | Defense-in-depth error handling — 46 mixin dispatch loops protected with `_safe_call` | Stable |
+| **TUI Reliability** | Defense-in-depth error handling — 47 mixin dispatch loops protected with `_safe_call` | Stable |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
@@ -342,8 +212,8 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | Feature | Status | Notes |
 |---------|--------|-------|
 | MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
-| Defense-in-depth TUI | Done (v0.5.2) | 46 mixin `_safe_call` protection |
-| Gateway-essential test suite | Done (v0.5.3) | 1,743 tests across 50 files |
+| Defense-in-depth TUI | Done (v0.5.2) | 47 mixin `_safe_call` protection |
+| Gateway-essential test suite | Done (v0.5.3) | 1,801 tests across 56 files |
 | First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
 | Network topology visualization | Done | D3.js + ASCII modes |
 | Node health & predictive maintenance | Done | Battery forecasting, signal trending |
@@ -667,35 +537,48 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,478 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,482 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 46 feature modules (RF, channels, AI, MeshCore, topology, emergency, etc.)
+│   └── *_mixin.py         # 47 feature modules (RF, channels, AI, MeshCore, topology, emergency, etc.)
+├── commands/              # Command modules
+│   ├── propagation.py     # Space weather & HF propagation (NOAA primary)
+│   ├── rns.py             # RNS/Reticulum commands
+│   ├── meshtastic.py      # Meshtastic CLI integration
+│   ├── hamclock.py        # HamClock client (optional/legacy)
+│   └── ...                # gateway, hardware, messaging, diagnostics, service
+├── plugins/               # Protocol plugins
+│   ├── eas_alerts.py      # NOAA/NWS/FEMA emergency alerts
+│   ├── meshcore.py        # MeshCore plugin (alpha branch)
+│   ├── mqtt_bridge.py     # MQTT bridge plugin
+│   └── meshchat/          # MeshChat integration
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
+│   ├── mqtt_bridge_handler.py # MQTT-based bridge (zero interference)
 │   ├── message_queue.py   # Persistent SQLite queue
 │   ├── node_tracker.py    # Unified node discovery
 │   ├── meshtastic_protobuf_client.py  # Protobuf-over-HTTP transport
-│   └── meshtastic_protobuf_ops.py     # Protobuf data classes + parsers
+│   └── ...                # circuit_breaker, reconnect, network_topology, templates
 ├── monitoring/            # Network monitoring
 │   ├── mqtt_subscriber.py # Nodeless MQTT node tracking
 │   ├── traffic_inspector.py # Packet capture + protocol analysis
-│   └── path_visualizer.py # Multi-hop path tracing
-├── utils/                 # Core utilities
+│   ├── rns_sniffer.py     # RNS packet capture + announce tracking
+│   ├── path_visualizer.py # Multi-hop path tracing
+│   └── ...                # node_monitor, tcp_monitor, packet_dissectors
+├── utils/                 # Core utilities (100+ modules)
 │   ├── rf.py              # RF calculations (well-tested)
 │   ├── coverage_map.py    # Folium map generator + tile cache
 │   ├── config_api.py      # RESTful configuration API
+│   ├── service_check.py   # Systemd service management (single source of truth)
 │   ├── diagnostic_engine.py # Rule-based AI diagnostics
-│   ├── diagnostic_rules.py  # Diagnostic rule definitions
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
-│   ├── knowledge_base.py   # Core knowledge base class
-│   ├── knowledge_content.py # 20+ mesh networking topics
-│   ├── shared_health_state.py # Cross-component health tracking
-│   ├── metrics_export.py   # Prometheus/JSON metrics export
+│   ├── knowledge_base.py   # Core knowledge base + 20 topics
+│   ├── prometheus_exporter.py # Prometheus/Grafana metrics
 │   ├── uconsole.py        # uConsole AIO V2 hardware profile
 │   ├── aredn.py           # AREDN mesh client
-│   └── paths.py           # Sudo-safe path resolution
+│   ├── paths.py           # Sudo-safe path resolution
+│   └── ...                # metrics, webhooks, topology, device_backup, wifi_ap, etc.
 ├── standalone.py          # Zero-dependency RF tools
 └── __version__.py         # Version tracking
 
@@ -846,7 +729,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**1,743 tests** across 50 test files:
+**1,801 tests** across 56 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -863,7 +746,7 @@ connection (port 4403):
 | `test_bridge_health.py` | 55 | Gateway health monitoring, circuit breaker patterns |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,743 across 50 files as new features (topology, node health, MQTT robustness, protobuf client) were added with test coverage.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,801 across 56 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops) were added with test coverage.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -945,6 +828,138 @@ Templates for multi-node setups:
 - `templates/gateway-pair/` — dual-gateway preset bridging
 - `templates/meshforge-presets/` — per-node presets (MOC1 broker, etc.)
 - `templates/gateway-pair/moc-mqtt-bridge.md` — MQTT-bridged topology guide
+
+---
+
+## Upgrading MeshForge
+
+### Decision Tree
+
+```
+Do you need to upgrade?
+  │
+  ├── Import errors, stale .pyc, major version bump, or something "feels off"
+  │   └── Clean Reinstall (recommended)
+  │
+  └── Small code change, update service files
+      └── Quick Update (update.sh)
+```
+
+### Clean Reinstall (Recommended)
+
+The safest upgrade path. Guarantees fresh code, correct dependencies, no stale files:
+
+```bash
+sudo bash /opt/meshforge/scripts/reinstall.sh
+```
+
+**What happens:**
+1. Backs up configs to `~/meshforge-backup-<timestamp>/`
+2. Stops MeshForge services
+3. Removes `/opt/meshforge` (source + venv only)
+4. Fresh `git clone` from GitHub
+5. Runs `install_noc.sh` to rebuild
+6. Restores your configs from backup
+
+**What is preserved (never touched):**
+
+| Preserved | Path | Why |
+|-----------|------|-----|
+| meshtasticd | apt package + `/etc/meshtasticd/config.yaml` | Separate package, your radio config |
+| Radio hardware configs | `/etc/meshtasticd/config.d/` | Backed up + restored |
+| Reticulum identity | `~/.reticulum/` | Your RNS address + keys |
+| MeshForge user settings | `~/.config/meshforge/` | Backed up + restored |
+| MQTT broker | mosquitto service + config | Separate service |
+| System packages | pip, apt installs | Not managed by MeshForge |
+
+No need to re-image your Pi. Your radio stays configured.
+
+**Reinstall flags:**
+```bash
+sudo bash scripts/reinstall.sh --no-confirm    # Skip confirmation prompt
+```
+
+### Quick Update
+
+For developers tracking the repo. Updates code, dependencies, and service files:
+
+```bash
+cd /opt/meshforge && sudo bash scripts/update.sh
+```
+
+**What happens:**
+1. Pulls latest code from GitHub
+2. Updates Python dependencies if `requirements.txt` changed
+3. Updates desktop integration
+4. Deploys updated systemd service files (rnsd crash-loop protection, startup ordering)
+5. Runs `systemctl daemon-reload`
+
+Or manually (code only — does NOT update service files):
+```bash
+cd /opt/meshforge && sudo git pull origin main
+```
+
+### Post-Upgrade Verification
+
+Run the built-in verification after any upgrade:
+
+```bash
+# Automated check (recommended)
+sudo bash scripts/install_noc.sh --verify-install
+
+# Manual checks
+python3 -c "from src.__version__ import __version__; print(__version__)"
+systemctl status meshtasticd rnsd
+sudo python3 src/launcher_tui/main.py
+```
+
+The `--verify-install` flag checks Python imports, service status, config
+file integrity, and radio hardware detection without modifying anything.
+
+### Troubleshooting Upgrades
+
+| Issue | Solution |
+|-------|----------|
+| Python import errors | `sudo bash scripts/reinstall.sh` (clean reinstall) |
+| `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
+| Service won't start | `journalctl -u meshtasticd -n 50` |
+| Config file conflicts | Restore from `~/meshforge-backup-*` or regenerate via TUI |
+| `meshtastic` module not found | See "Python Library Conflicts" below |
+| Stale `.pyc` files | Clean reinstall handles this automatically |
+| Wrong bridge mode after upgrade | New installs default to `mqtt_bridge`; existing configs preserved |
+
+#### Python Library Conflicts
+
+On Raspberry Pi OS Bookworm+ (externally-managed Python), the `meshtastic`
+library may fail to install. If you see "externally-managed-environment" or
+module import failures:
+
+```bash
+# Force reinstall (use with caution on managed Python)
+pip install meshtastic --break-system-packages --ignore-installed
+
+# Alternative: virtual environment
+python3 -m venv ~/.meshforge-venv
+source ~/.meshforge-venv/bin/activate
+pip install meshtastic
+```
+
+The `--break-system-packages` flag bypasses PEP 668 protections. Only use
+this if you understand the implications for your system Python.
+
+MeshForge's diagnostics can detect this automatically:
+```bash
+# TUI: System → Diagnostics → Gateway Pre-flight
+# Or directly:
+sudo python3 src/launcher_tui/main.py  # Dashboard shows import warnings
+```
+
+### Version History
+
+See the full changelog in `src/__version__.py` or run:
+```bash
+python3 -c "from src.__version__ import show_version_history; show_version_history()"
+```
 
 ---
 
