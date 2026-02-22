@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>Turnkey Mesh Network Operations Center</strong><br>
-  <em>Meshtastic + Reticulum + AREDN — One Box, One Interface</em>
+  <strong>Mesh Network Operations Center & Development Ecosystem</strong><br>
+  <em>Meshtastic + Reticulum + MeshCore + AREDN — Build. Test. Deploy. Monitor.</em>
 </p>
 
 <p align="center">
