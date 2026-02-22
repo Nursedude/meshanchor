@@ -102,6 +102,7 @@ from rnode_mixin import RNodeMixin
 from latency_mixin import LatencyMixin
 from dashboard_mixin import DashboardMixin
 from meshcore_mixin import MeshCoreMixin
+from tactical_ops_mixin import TacticalOpsMixin
 
 
 class MeshForgeLauncher(
@@ -147,6 +148,7 @@ class MeshForgeLauncher(
     LatencyMixin,
     DashboardMixin,
     MeshCoreMixin,
+    TacticalOpsMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -707,6 +709,7 @@ class MeshForgeLauncher(
                 ("5", "Configuration       Radio, services, settings"),
                 ("6", "System              Hardware, logs, Linux tools"),
                 # Quick Access
+                ("t", "Tactical Ops        SITREP, zones, QR, ATAK"),
                 ("q", "Quick Actions       Common shortcuts"),
                 ("e", "Emergency Mode      Field operations"),
                 # Meta
@@ -749,6 +752,7 @@ class MeshForgeLauncher(
             "4": ("Maps & Visualization", self._maps_viz_menu),
             "5": ("Configuration", self._configuration_menu),
             "6": ("System Tools", self._system_menu),
+            "t": ("Tactical Ops", self._tactical_ops_menu),
             "q": ("Quick Actions", self._quick_actions_menu),
             "e": ("Emergency Mode", self._emergency_mode),
             "a": ("About", self._about_menu),
