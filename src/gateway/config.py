@@ -145,6 +145,13 @@ class MeshtasticConfig:
     channel: int = 0  # Primary channel for gateway messages
     use_mqtt: bool = False
     mqtt_topic: str = ""
+    # MQTT connection settings (used when use_mqtt=True)
+    mqtt_broker: str = "localhost"
+    mqtt_port: int = 1883
+    mqtt_channel: str = "LongFast"
+    mqtt_region: str = "US"
+    # HTTP port for protobuf TX (meshtasticd web server)
+    http_port: int = 443
     # LoRa preset identifier (for documentation/display)
     # Values: LONG_FAST, LONG_SLOW, MEDIUM_FAST, MEDIUM_SLOW,
     #         SHORT_FAST, SHORT_SLOW, SHORT_TURBO
