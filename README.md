@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1411%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1743%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -141,7 +141,7 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 ```
 Main Menu (MeshForge NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
-├── 2. Mesh Networks         Meshtastic, RNS, AREDN, MQTT, Gateway, Favorites
+├── 2. Mesh Networks         Meshtastic, RNS, MeshCore, AREDN, MQTT, Gateway
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
 ├── 5. Configuration         Radio, channels, RNS config, services, backup
@@ -298,7 +298,7 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | Category | Capabilities | Status |
 |----------|-------------|--------|
 | **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics | Stable |
-| **TUI Reliability** | Defense-in-depth error handling — 16 mixin dispatch loops protected with `_safe_call` | Stable |
+| **TUI Reliability** | Defense-in-depth error handling — 46 mixin dispatch loops protected with `_safe_call` | Stable |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
@@ -317,6 +317,19 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 | **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
 | **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs, channels, traceroute, neighbor info) | Beta |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
+| **Network Topology** | D3.js force-directed graphs, path tracing, ASCII display, topology events | Beta |
+| **Node Health** | Predictive maintenance, battery forecasting, signal trending, latency probes | Beta |
+| **Link Quality** | Link scoring, degradation alerts, best/worst link identification | Beta |
+| **RNS Packet Sniffer** | Live RNS capture, announce tracking, destination filtering, path discovery | Beta |
+| **Device Backup** | Configuration backup/restore, versioned snapshots, scheduled backups | Beta |
+| **First-Run Wizard** | Hardware auto-detect templates, region selection, service verification | Stable |
+| **Messaging** | Broadcast/direct messaging, LXMF routing, message history | Beta |
+| **Amateur Radio** | Callsign management, Part 97 reference, ARES/RACES info | Beta |
+| **Webhooks** | Event routing, external system integration | Beta |
+| **Analytics** | Network usage statistics, traffic analysis, performance metrics | Beta |
+| **Service Discovery** | Auto-detect available services, port scanning | Beta |
+| **Latency Monitoring** | Service latency probing, response time tracking | Beta |
+| **Broker Profiles** | MQTT broker profile management, health monitoring | Beta |
 | **MeshCore** | Companion radio management, device detection, 3-way bridge routing, TUI menu | Alpha (`alpha/meshcore-bridge` branch) |
 | **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
 
@@ -324,14 +337,36 @@ python3 -c "from src.__version__ import show_version_history; show_version_histo
 
 ### Roadmap
 
+**Current Phase: Stability & Reliability (v0.5.x)**
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
+| Defense-in-depth TUI | Done (v0.5.2) | 46 mixin `_safe_call` protection |
+| Gateway-essential test suite | Done (v0.5.3) | 1,743 tests across 50 files |
+| First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
+| Network topology visualization | Done | D3.js + ASCII modes |
+| Node health & predictive maintenance | Done | Battery forecasting, signal trending |
+
+**Next Phase: Hardening & Hardware (v0.6.x - v0.8.x)**
+
 | Feature | Target | Status |
 |---------|--------|--------|
-| Historical playback (Live Map Phase 6) | Q2 2026 | Planned |
-| Packet decode (protobuf + RNS frames) | Q2 2026 | Planned |
-| SDR spectrum analysis (RTL-SDR) | Q2 2026 | Planned |
-| GPS tracking + GPX export | Q2 2026 | Planned |
-| NanoVNA antenna integration | Q2 2026 | Alpha |
-| Firmware flashing | Q3 2026 | Alpha (high risk) |
+| MeshCore 3-way bridge | v0.6.0 | Alpha (`alpha/meshcore-bridge`) |
+| Historical playback (Live Map) | v0.7.0 | Planned |
+| Packet decode (protobuf + RNS frames) | v0.7.0 | Planned |
+| SDR spectrum analysis (RTL-SDR) | v0.7.0 | Planned |
+| Hardware support matrix (RAK, Heltec, uConsole) | v0.8.0 | In progress |
+| GPS tracking + GPX export | v0.8.0 | Planned |
+
+**Future: Intelligence & v1.0 (v0.9.x+)**
+
+| Feature | Target | Status |
+|---------|--------|--------|
+| AI predictive analytics enhancement | v0.9.0 | Planned |
+| NanoVNA antenna integration | v0.9.0 | Alpha |
+| Firmware flashing | v1.0.0 | Alpha (high risk) |
+| v1.0 stable release | -- | See `.claude/plans/v1.0_roadmap.md` |
 
 ### Known Limitations
 
@@ -632,11 +667,11 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,516 lines)
+│   ├── main.py            # NOC dispatcher + menus (1,478 lines)
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── *_mixin.py         # 45 feature modules (RF, channels, AI, MeshCore, system, etc.)
+│   └── *_mixin.py         # 46 feature modules (RF, channels, AI, MeshCore, topology, emergency, etc.)
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── message_queue.py   # Persistent SQLite queue
@@ -811,18 +846,24 @@ connection (port 4403):
 
 ### Test Coverage
 
-**1,411 tests passing** across 45 gateway-essential test files:
+**1,743 tests** across 50 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
-| `test_rns_bridge.py` | 136 | Core bridge: routing, circuit breaker, message processing, callbacks, lifecycle |
+| `test_rns_bridge.py` | 140 | Core bridge: routing, circuit breaker, message processing, callbacks, lifecycle |
 | `test_rns_transport.py` | 97 | Packet fragmentation, reassembly, transport stats, connection management |
-| `test_meshtastic_handler.py` | 147 | Meshtastic connection, message handling, node tracking |
-| `test_packet_dissectors.py` | 130 | Protocol analysis, packet tree, display filters |
+| `test_rns_status_parser.py` | 56 | RNS status output parsing, edge cases |
+| `test_meshtastic_protobuf.py` | 74 | Protobuf HTTP client, device config, channel management |
+| `test_meshtastic_handler.py` | 57 | Meshtastic connection, message handling, node tracking |
 | `test_message_queue.py` | 72 | Persistent SQLite queue, retry policy, dead letter, overflow shedding |
+| `test_node_tracker.py` | 68 | Unified node tracking, RNS + Meshtastic state management |
+| `test_status_bar.py` | 70 | TUI status bar rendering, health state display |
+| `test_mqtt_robustness.py` | 66 | MQTT reconnection, message loss recovery, broker failover |
+| `test_commands.py` | 61 | CLI command handlers, output parsing |
+| `test_bridge_health.py` | 55 | Gateway health monitoring, circuit breaker patterns |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 
-*Note: Test suite trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Non-gateway tests (RF tools, TUI mixins, monitoring, analytics, plugins) removed.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,743 across 50 files as new features (topology, node health, MQTT robustness, protobuf client) were added with test coverage.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
