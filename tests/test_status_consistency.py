@@ -134,6 +134,16 @@ class TestServiceCheckContract:
         assert rnsd_config.get('port_type') == 'unix_socket', \
             "rnsd should be configured with port_type 'unix_socket'"
 
+    def test_startup_checks_rnsd_matches_known_services(self):
+        """Startup checks rnsd port_type must match KNOWN_SERVICES."""
+        from src.launcher_tui.startup_checks import StartupChecker
+        from src.utils.service_check import KNOWN_SERVICES
+
+        startup_rnsd = StartupChecker.SERVICES_TO_CHECK['rnsd']
+        known_rnsd = KNOWN_SERVICES['rnsd']
+        assert startup_rnsd['port_type'] == known_rnsd['port_type'], \
+            f"startup_checks port_type '{startup_rnsd['port_type']}' != KNOWN_SERVICES '{known_rnsd['port_type']}'"
+
 
 class TestRnsdStatusAcrossUIs:
     """Integration test: rnsd status should be consistent across all UIs.
