@@ -201,7 +201,7 @@ class StartupChecker:
     # Services to check with their expected ports
     SERVICES_TO_CHECK = {
         'meshtasticd': {'port': MESHTASTICD_PORT, 'port_type': 'tcp', 'systemd': True},
-        'rnsd': {'port': RNS_SHARED_INSTANCE_PORT, 'port_type': 'udp', 'systemd': True},
+        'rnsd': {'port': RNS_SHARED_INSTANCE_PORT, 'port_type': 'unix_socket', 'systemd': True},
     }
 
     # Ports that MeshForge needs
