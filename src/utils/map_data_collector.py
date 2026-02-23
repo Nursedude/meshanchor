@@ -1117,30 +1117,14 @@ class MapDataCollector:
         """
         features = []
 
-        # Quick check if rnsd shared instance is running (UDP port 37428)
+        # Quick check if rnsd shared instance is available
         try:
-            from utils.service_check import check_udp_port
-            if not check_udp_port(37428):
-                logger.debug("rnsd shared instance not available on port 37428")
+            from utils.service_check import check_rns_shared_instance
+            if not check_rns_shared_instance():
+                logger.debug("rnsd shared instance not available")
                 return []
         except ImportError:
-            # Fallback: inline UDP bind test
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.settimeout(2)
-                sock.bind(('127.0.0.1', 37428))
-                sock.close()
-                # Bind succeeded = port NOT in use
-                logger.debug("rnsd shared instance not available on port 37428")
-                return []
-            except OSError as e:
-                if e.errno not in (98, 48, 10048):  # Not EADDRINUSE = real error
-                    return []
-            finally:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+            pass  # Proceed without pre-check
 
         if not _HAS_RNS:
             logger.debug("RNS module not available for direct query")

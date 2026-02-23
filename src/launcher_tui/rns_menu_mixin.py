@@ -29,7 +29,9 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 
 from utils.service_check import (
-    check_process_running, check_udp_port, start_service, stop_service, _sudo_cmd,
+    check_process_running, check_udp_port, check_rns_shared_instance,
+    get_rns_shared_instance_info, get_udp_port_owner,
+    start_service, stop_service, _sudo_cmd,
     daemon_reload, _sudo_write, enable_service,
 )
 from commands.rns import (
@@ -636,9 +638,110 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         if files_cleared == 0:
             print("    No stale auth files found")
 
+        # Pre-flight 4a: Validate share_instance = Yes BEFORE restart.
+        # Without this, rnsd won't expose the shared instance at all.
+        # Previously this was only checked POST-failure after 30s timeout.
+        try:
+            from commands.rns import _parse_share_instance
+            config_path = ReticulumPaths.get_config_file()
+            if config_path.exists():
+                config_content = config_path.read_text()
+                share_ok = _parse_share_instance(config_content)
+                if share_ok:
+                    print("  share_instance: Yes (OK)")
+                else:
+                    print("  share_instance: DISABLED")
+                    print("  Without share_instance = Yes, rnsd won't accept")
+                    print("  connections from gateway, rnstatus, or other tools.")
+                    if self.dialog.yesno(
+                        "Fix share_instance",
+                        "share_instance is disabled in the RNS config.\n\n"
+                        "Without it, rnsd won't expose the shared instance\n"
+                        "and no client apps (gateway, rnstatus) can connect.\n\n"
+                        f"Config: {config_path}\n\n"
+                        "Set share_instance = Yes?"
+                    ):
+                        import re as _re
+                        if _re.search(r'^\s*share_instance\s*=',
+                                      config_content, _re.MULTILINE):
+                            fixed = _re.sub(
+                                r'^(\s*share_instance\s*=\s*).*$',
+                                r'\1Yes',
+                                config_content,
+                                count=1,
+                                flags=_re.MULTILINE
+                            )
+                        elif '[reticulum]' in config_content.lower():
+                            fixed = config_content.replace(
+                                '[reticulum]',
+                                '[reticulum]\n  share_instance = Yes',
+                                1
+                            )
+                        else:
+                            fixed = ('[reticulum]\n  share_instance = Yes\n\n'
+                                     + config_content)
+                        ok, msg = _sudo_write(str(config_path), fixed)
+                        if ok:
+                            verify = config_path.read_text()
+                            if _parse_share_instance(verify):
+                                print("  Fixed: share_instance = Yes")
+                            else:
+                                print("  WARNING: Config write did not take effect")
+                        else:
+                            print(f"  Could not write config: {msg}")
+            else:
+                print(f"  Config not found at {config_path}")
+        except Exception as e:
+            logger.debug("Pre-flight share_instance check failed: %s", e)
+
+        # Pre-flight 4b: Check config drift (gateway vs rnsd config paths).
+        # If rnsd reads a different config file, the repair may fix the wrong one.
+        try:
+            drift = detect_rnsd_config_drift()
+            if drift.drifted:
+                print(f"\n  WARNING: Config drift detected!")
+                print(f"    Gateway reads: {drift.gateway_config_dir}")
+                print(f"    rnsd reads:    {drift.rnsd_config_dir}")
+                print(f"    Fix: {drift.fix_hint}")
+                print("    The checks above may have validated the wrong config.")
+        except Exception as e:
+            logger.debug("Pre-flight config drift check failed: %s", e)
+
+        # Pre-flight 4c: Check NomadNet conflict.
+        # NomadNet can hold the shared instance, preventing rnsd from binding.
+        try:
+            if self._check_nomadnet_conflict():
+                print("\n  WARNING: NomadNet is running!")
+                print("  NomadNet may hold the RNS shared instance,")
+                print("  preventing rnsd from becoming the shared instance.")
+                owner = get_udp_port_owner(37428)
+                if owner:
+                    print(f"  Port 37428 held by: {owner[0]} (PID {owner[1]})")
+                if self.dialog.yesno(
+                    "Stop NomadNet?",
+                    "NomadNet is running and may hold the\n"
+                    "RNS shared instance port.\n\n"
+                    "Stop NomadNet before starting rnsd?\n"
+                    "(NomadNet can be restarted afterward as a client)",
+                ):
+                    try:
+                        subprocess.run(
+                            ['pkill', '-f', 'nomadnet'],
+                            capture_output=True, timeout=5
+                        )
+                        time.sleep(1)
+                        print("  NomadNet stopped")
+                    except (subprocess.SubprocessError, OSError) as e:
+                        print(f"  Could not stop NomadNet: {e}")
+                else:
+                    print("  Proceeding with NomadNet running (rnsd may fail)...")
+        except Exception as e:
+            logger.debug("Pre-flight NomadNet check failed: %s", e)
+
         # Pre-flight: check for blocking interfaces BEFORE starting rnsd.
         # If enabled interfaces have missing dependencies (e.g., meshtasticd
         # not running), rnsd will hang during init and never bind port 37428.
+        user_declined_disable = False
         blocking = self._find_blocking_interfaces()
         if blocking:
             print("\n  WARNING: Enabled interfaces have missing dependencies:")
@@ -667,6 +770,7 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                 else:
                     print("  Could not disable interfaces — rnsd may hang")
             else:
+                user_declined_disable = True
                 print("  Proceeding without disabling (rnsd may hang)...\n")
 
         # Clear any systemd start limit (after 5 crashes, systemd refuses to start)
@@ -689,18 +793,20 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
         except Exception as e:
             print(f"  Warning: {e}")
 
-        # Step 5: Wait for port and verify
+        # Step 5: Wait for shared instance and verify
         print(f"\n[5/5] Verifying shared instance...")
-        print("  Waiting for rnsd to bind port 37428...")
+        print("  Waiting for rnsd shared instance...")
 
-        # Poll for port with early crash detection (up to 30 seconds)
+        # Poll for shared instance with early crash detection (up to 30 seconds)
         # rnsd can take 20-30s to initialize on slower hardware (Pi)
-        port_ok = False
+        # RNS uses abstract Unix domain sockets on Linux (\0rns/default),
+        # NOT UDP port 37428. check_rns_shared_instance() checks both.
+        instance_ok = False
         rnsd_crashed = False
         for i in range(30):
-            # Check if port is up
-            port_ok = check_udp_port(37428)
-            if port_ok:
+            # Check if shared instance is reachable (domain socket, TCP, or UDP)
+            instance_ok = check_rns_shared_instance()
+            if instance_ok:
                 break
 
             # Early exit: check if rnsd has already crashed
@@ -718,8 +824,10 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
 
             time.sleep(1)
 
-        if port_ok:
-            print("  SUCCESS: rnsd is now listening on port 37428")
+        if instance_ok:
+            info = get_rns_shared_instance_info()
+            print(f"  SUCCESS: RNS shared instance is available")
+            print(f"  Method: {info['detail']}")
             print("\n" + "=" * 50)
             print("RNS shared instance is now available!")
             print("=" * 50 + "\n")
@@ -799,8 +907,8 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
                         )
                         start_service('rnsd')
                         time.sleep(3)
-                        if check_udp_port(37428):
-                            print("  SUCCESS: rnsd is now listening on port 37428")
+                        if check_rns_shared_instance():
+                            print("  SUCCESS: RNS shared instance is available")
                             print("\n" + "=" * 50)
                             print("RNS shared instance is now available!")
                             print("=" * 50 + "\n")
@@ -811,91 +919,114 @@ class RNSMenuMixin(RNSSnifferMixin, RNSConfigMixin, RNSDiagnosticsMixin, RNSMoni
 
             return False
 
-        # Port never came up but rnsd didn't crash — diagnose why
-        print("  WARNING: rnsd not yet listening on port 37428 after 30s")
+        # Shared instance not available after 30s but rnsd didn't crash.
+        # Run comprehensive diagnostics to identify the root cause.
+        print("  WARNING: Shared instance not available after 30s")
+        print()
+        print("  --- Diagnosing root cause ---")
 
-        # Check if share_instance is disabled in config (most common cause)
+        # Diagnostic 1: Show shared instance detection details
+        info = get_rns_shared_instance_info()
+        print(f"  Shared instance: {info['detail']}")
+
+        # Diagnostic 2: Check who owns port 37428 (if TCP/UDP mode)
+        try:
+            owner = get_udp_port_owner(37428)
+            if owner:
+                print(f"  Port 37428 owner: {owner[0]} (PID {owner[1]})")
+                if owner[0] in ('nomadnet', 'python', 'python3'):
+                    print("  Likely cause: NomadNet is holding the port")
+        except Exception:
+            pass
+
+        # Diagnostic 3: Re-check share_instance (config drift may mean
+        # rnsd read a different config than pre-flight validated)
         try:
             from commands.rns import _parse_share_instance
             config_path = ReticulumPaths.get_config_file()
             if config_path.exists():
                 config_content = config_path.read_text()
                 if not _parse_share_instance(config_content):
-                    print("  Cause: share_instance not enabled in [reticulum] config")
-                    print("  Port 37428 requires share_instance = Yes")
+                    print("  Cause: share_instance not enabled in config")
+                    print("  (pre-flight fix may not have applied due to config drift)")
+        except Exception:
+            pass
 
+        # Diagnostic 4: Config drift (more accurate now that rnsd is running,
+        # can read /proc/<pid>/cmdline for actual config path)
+        try:
+            drift = detect_rnsd_config_drift()
+            if drift.drifted:
+                print(f"  Config drift: gateway reads {drift.gateway_config_dir}")
+                print(f"                rnsd reads    {drift.rnsd_config_dir}")
+                print(f"  Fix: {drift.fix_hint}")
+        except Exception:
+            pass
+
+        # Diagnostic 5: NomadNet conflict (may have started after pre-flight)
+        try:
+            if self._check_nomadnet_conflict():
+                print("  NomadNet is running (may hold the shared instance)")
+        except Exception:
+            pass
+
+        # Diagnostic 6: Blocking interfaces — offer second chance
+        try:
+            post_blocking = self._find_blocking_interfaces()
+            if post_blocking:
+                print("\n  Blocking interfaces detected:")
+                for iface_name, reason, fix in post_blocking:
+                    print(f"    [{iface_name}] {reason}")
+                if user_declined_disable:
+                    print("\n  These are likely why rnsd is stuck.")
+                    iface_names = [b[0] for b in post_blocking]
+                    names_str = ", ".join(iface_names)
                     if self.dialog.yesno(
-                        "Fix share_instance",
-                        "The shared instance is disabled in the RNS config.\n\n"
-                        "Without it, rnsd won't listen on port 37428\n"
-                        "and no client apps (gateway, rnstatus) can connect.\n\n"
-                        f"Config: {config_path}\n\n"
-                        "Set share_instance = Yes and restart rnsd?"
+                        "Disable Blocking Interfaces?",
+                        f"Blocking interfaces are preventing rnsd\n"
+                        f"from initializing:\n"
+                        f"  {names_str}\n\n"
+                        f"Disable them and restart rnsd?"
                     ):
-                        # Fix the config: replace existing setting or add it
-                        import re as _re
-                        if _re.search(r'^\s*share_instance\s*=', config_content, _re.MULTILINE):
-                            fixed = _re.sub(
-                                r'^(\s*share_instance\s*=\s*).*$',
-                                r'\1Yes',
-                                config_content,
-                                count=1,
-                                flags=_re.MULTILINE
-                            )
-                        elif '[reticulum]' in config_content.lower():
-                            fixed = config_content.replace(
-                                '[reticulum]',
-                                '[reticulum]\n  share_instance = Yes',
-                                1
-                            )
-                        else:
-                            fixed = '[reticulum]\n  share_instance = Yes\n\n' + config_content
-
-                        ok, msg = _sudo_write(str(config_path), fixed)
-                        if ok:
-                            # Verify the write took effect
-                            verify = config_path.read_text()
-                            if not _parse_share_instance(verify):
-                                print("  WARNING: Config write did not take effect")
-                                return False
-                            print("  Fixed: share_instance = Yes")
-                            # Restart and re-check
+                        disabled = self._disable_interfaces_in_config(iface_names)
+                        if disabled:
+                            print(f"  Disabled {len(disabled)} interface(s)")
                             stop_service('rnsd')
                             time.sleep(1)
                             start_service('rnsd')
-                            print("  Waiting for port 37428...")
-                            for _ in range(10):
+                            print("  Waiting for shared instance...")
+                            for _ in range(15):
                                 time.sleep(1)
-                                if check_udp_port(37428):
-                                    print("  SUCCESS: rnsd is now listening on port 37428")
+                                if check_rns_shared_instance():
+                                    si = get_rns_shared_instance_info()
+                                    print(f"  SUCCESS: {si['detail']}")
                                     print("\n" + "=" * 50)
                                     print("RNS shared instance is now available!")
                                     print("=" * 50 + "\n")
                                     return True
-                            print("  Port still not bound after config fix")
-                        else:
-                            print(f"  Could not write config: {msg}")
-                    else:
-                        return False
-        except Exception as e:
-            print(f"  (config check failed: {e})")
+                            print("  Still not available after disabling interfaces")
+        except Exception:
+            pass
 
-        # Fetch recent journal errors to show why port isn't binding
+        # Diagnostic 7: Unfiltered journal (no -p warning filter).
+        # Info-level messages reveal where rnsd is stuck during init.
+        print()
         try:
             r = subprocess.run(
-                ['journalctl', '-u', 'rnsd', '-n', '10', '--no-pager',
-                 '-p', 'warning', '-q', '--no-hostname'],
+                ['journalctl', '-u', 'rnsd', '-n', '15', '--no-pager',
+                 '-q', '--no-hostname'],
                 capture_output=True, text=True, timeout=10
             )
             if r.stdout and r.stdout.strip():
-                print("  Recent rnsd errors:")
-                for line in r.stdout.strip().splitlines()[-5:]:
+                print("  Recent rnsd log:")
+                for line in r.stdout.strip().splitlines()[-10:]:
                     print(f"    {line.strip()[:100]}")
             else:
-                print("  No recent errors in journal")
+                print("  No journal entries for rnsd")
         except (subprocess.SubprocessError, OSError):
             print("  Check logs: sudo journalctl -u rnsd -n 20")
 
+        print("\n  Run RNS > Diagnostics for a full health check.")
         return False
 
     def _validate_rnsd_service_file(self) -> bool:

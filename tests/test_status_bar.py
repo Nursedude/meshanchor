@@ -121,47 +121,47 @@ class TestServiceChecks:
 
 
 class TestRnsdZombieDetection:
-    """Test rnsd zombie detection: systemd active but port not bound."""
+    """Test rnsd zombie detection: systemd active but shared instance not available."""
 
     def test_rnsd_zombie_shows_stopped(self):
-        """rnsd active in systemd but port 37428 not bound → stopped."""
+        """rnsd active in systemd but shared instance not available → stopped."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar.check_udp_port', return_value=False):
+            with patch('status_bar.check_rns_shared_instance', return_value=False):
                 result = bar._check_systemd_active('rnsd')
         assert result == SYM_STOPPED
 
     def test_rnsd_healthy_shows_running(self):
-        """rnsd active in systemd and port 37428 bound → running."""
+        """rnsd active in systemd and shared instance available → running."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar.check_udp_port', return_value=True):
+            with patch('status_bar.check_rns_shared_instance', return_value=True):
                 result = bar._check_systemd_active('rnsd')
         assert result == SYM_RUNNING
 
-    def test_rnsd_systemd_inactive_skips_port_check(self):
-        """rnsd not active in systemd → stopped without port check."""
+    def test_rnsd_systemd_inactive_skips_instance_check(self):
+        """rnsd not active in systemd → stopped without shared instance check."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(False, False)):
-            with patch('status_bar.check_udp_port') as mock_udp:
+            with patch('status_bar.check_rns_shared_instance') as mock_rns:
                 result = bar._check_systemd_active('rnsd')
-        mock_udp.assert_not_called()
+        mock_rns.assert_not_called()
         assert result == SYM_STOPPED
 
-    def test_meshtasticd_no_port_check(self):
-        """meshtasticd should not trigger UDP port check."""
+    def test_meshtasticd_no_instance_check(self):
+        """meshtasticd should not trigger RNS shared instance check."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar.check_udp_port') as mock_udp:
+            with patch('status_bar.check_rns_shared_instance') as mock_rns:
                 result = bar._check_systemd_active('meshtasticd')
-        mock_udp.assert_not_called()
+        mock_rns.assert_not_called()
         assert result == SYM_RUNNING
 
-    def test_udp_check_unavailable_falls_through(self):
-        """When check_udp_port raises OSError, exception is caught gracefully."""
+    def test_instance_check_unavailable_falls_through(self):
+        """When check_rns_shared_instance raises OSError, exception is caught."""
         bar = StatusBar(version="1.0")
         with patch('status_bar.check_systemd_service', return_value=(True, True)):
-            with patch('status_bar.check_udp_port', side_effect=OSError("unavailable")):
+            with patch('status_bar.check_rns_shared_instance', side_effect=OSError("unavailable")):
                 result = bar._check_systemd_active('rnsd')
         # OSError caught by the try/except → SYM_UNKNOWN
         assert result in (SYM_UNKNOWN, SYM_STOPPED)

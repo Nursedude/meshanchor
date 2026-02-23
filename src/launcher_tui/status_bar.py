@@ -26,7 +26,7 @@ from typing import Dict, Optional, List
 logger = logging.getLogger(__name__)
 
 # Import centralized service checking
-from utils.service_check import check_systemd_service, check_process_running, check_udp_port
+from utils.service_check import check_systemd_service, check_process_running, check_udp_port, check_rns_shared_instance
 
 # Import startup checker for enhanced status
 from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
@@ -184,10 +184,10 @@ class StatusBar:
             is_running, _ = check_systemd_service(service)
             if not is_running:
                 return SYM_STOPPED
-            # rnsd zombie detection: systemd active but port not bound
+            # rnsd zombie detection: systemd active but shared instance not available
             if service == 'rnsd':
-                if not check_udp_port(_RNS_PORT):
-                    logger.debug("rnsd active but port %d not bound", _RNS_PORT)
+                if not check_rns_shared_instance():
+                    logger.debug("rnsd active but shared instance not available")
                     return SYM_STOPPED
             return SYM_RUNNING
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

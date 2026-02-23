@@ -19,8 +19,8 @@ from utils.rns_status_parser import (
 )
 from utils.safe_import import safe_import
 
-check_service, check_udp_port, start_service, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'check_udp_port', 'start_service',
+check_service, check_udp_port, check_rns_shared_instance, start_service, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'check_udp_port', 'check_rns_shared_instance', 'start_service',
 )
 
 logger = logging.getLogger(__name__)
@@ -168,9 +168,9 @@ class RNSMonitorMixin:
             logger.debug("check_service('rnsd') failed: %s", e)
 
         try:
-            result['port_bound'] = check_udp_port(37428)
+            result['port_bound'] = check_rns_shared_instance()
         except Exception as e:
-            logger.debug("check_udp_port(37428) failed: %s", e)
+            logger.debug("check_rns_shared_instance failed: %s", e)
 
         # Get PID via pgrep
         try:
