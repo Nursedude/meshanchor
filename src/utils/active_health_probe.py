@@ -39,7 +39,7 @@ from typing import Callable, Dict, Optional, List
 from enum import Enum
 
 from utils.event_bus import emit_service_status
-from utils.service_check import check_udp_port
+from utils.service_check import check_udp_port, check_rns_shared_instance
 
 logger = logging.getLogger(__name__)
 
@@ -407,19 +407,19 @@ class ActiveHealthProbe:
 
     def check_rns_port(self, port: int = 37428, host: str = "127.0.0.1") -> HealthResult:
         """
-        Probe RNS shared instance port.
+        Probe RNS shared instance availability.
 
-        Uses check_udp_port() from service_check which reads
-        /proc/net/udp for reliable detection.
+        Uses check_rns_shared_instance() which checks abstract Unix domain
+        sockets (Linux default), TCP, and UDP for reliable detection.
 
         Args:
-            port: RNS shared instance port (default: 37428)
+            port: RNS shared instance port for TCP/UDP fallback (default: 37428)
             host: Host to check (default: 127.0.0.1)
         """
         try:
-            if check_udp_port(port, host):
-                return HealthResult(healthy=True, reason="port_bound")
-            return HealthResult(healthy=False, reason="port_not_bound")
+            if check_rns_shared_instance(port=port):
+                return HealthResult(healthy=True, reason="shared_instance_available")
+            return HealthResult(healthy=False, reason="shared_instance_unavailable")
         except Exception as e:
             return HealthResult(healthy=False, reason=f"check_error: {e}")
 

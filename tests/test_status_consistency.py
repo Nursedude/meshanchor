@@ -122,17 +122,17 @@ class TestServiceCheckContract:
             assert result is not None, "check_service should never return None"
 
     def test_rnsd_check_uses_udp_port(self):
-        """rnsd status check should include UDP port 37428 check."""
+        """rnsd status check should use shared instance detection."""
         from src.utils.service_check import KNOWN_SERVICES
 
-        # Verify rnsd is configured with UDP port
+        # Verify rnsd is configured with unix_socket (abstract domain socket)
         assert 'rnsd' in KNOWN_SERVICES, "rnsd should be in KNOWN_SERVICES"
         rnsd_config = KNOWN_SERVICES['rnsd']
-        # Port may be the constant value 37428
+        # Port retained for TCP/UDP fallback
         assert rnsd_config.get('port') == 37428, \
-            "rnsd should be configured with UDP port 37428"
-        assert rnsd_config.get('port_type') == 'udp', \
-            "rnsd should be configured with port_type 'udp'"
+            "rnsd should be configured with fallback port 37428"
+        assert rnsd_config.get('port_type') == 'unix_socket', \
+            "rnsd should be configured with port_type 'unix_socket'"
 
 
 class TestRnsdStatusAcrossUIs:

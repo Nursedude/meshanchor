@@ -19,6 +19,7 @@ from utils.service_check import (
     check_systemd_service, check_process_running, check_service,
     apply_config_and_restart, enable_service, start_service, stop_service,
     restart_service, ServiceState, _sudo_cmd, check_udp_port,
+    check_rns_shared_instance,
     lock_port_external, unlock_port_external,
     check_port_locked, persist_iptables,
 )
@@ -453,9 +454,9 @@ class ServiceMenuMixin:
                     warnings.append(svc)
 
                 if svc_status.available:
-                    # rnsd zombie detection: systemd active but port not bound
-                    if svc == 'rnsd' and not check_udp_port(37428):
-                        print(f"  \033[0;33m●\033[0m {svc:<18} running (port 37428 not bound)")
+                    # rnsd zombie detection: systemd active but shared instance not available
+                    if svc == 'rnsd' and not check_rns_shared_instance():
+                        print(f"  \033[0;33m●\033[0m {svc:<18} running (shared instance not available)")
                     else:
                         print(f"  \033[0;32m●\033[0m {svc:<18} running{boot_info}")
                 elif svc_status.state in (ServiceState.FAILED, ServiceState.DEGRADED):

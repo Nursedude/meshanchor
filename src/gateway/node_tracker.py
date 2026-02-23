@@ -186,10 +186,10 @@ instance_control_port = 37429
 
                 # Pre-flight: check if shared instance port is listening
                 try:
-                    from utils.service_check import check_udp_port
-                    if not check_udp_port(37428):
+                    from utils.service_check import check_rns_shared_instance
+                    if not check_rns_shared_instance():
                         logger.warning(
-                            "rnsd PID %d found but port 37428 not listening "
+                            "rnsd PID %d found but shared instance not available "
                             "(may be initializing or hung)", rns_pids[0]
                         )
                 except ImportError:
