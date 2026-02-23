@@ -262,6 +262,7 @@ if [[ -z "$INSTALL_DIR" ]] || [[ "$INSTALL_DIR" == "/" ]]; then
     exit 1
 fi
 if [[ -d "$INSTALL_DIR" ]]; then
+    cd /  # Escape CWD before removing it (script runs from inside INSTALL_DIR)
     rm -rf "$INSTALL_DIR"
     echo -e "  ${GREEN}✓${NC} Removed $INSTALL_DIR"
 else
