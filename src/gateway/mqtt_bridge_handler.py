@@ -542,10 +542,30 @@ class MQTTBridgeHandler:
     ) -> bool:
         """Send text via HTTP protobuf transport (preferred TX path).
 
-        Uses MeshtasticProtobufClient.send_text() which POSTs a serialized
-        ToRadio protobuf to /api/v1/toradio. Same endpoint the web client
-        uses — zero TCP contention, no subprocess overhead.
+        Primary: Stateless direct POST to /api/v1/toradio — NEVER reads
+        from /api/v1/fromradio, so the web client at :9443 is never
+        starved of delivery ACK packets.
+
+        Fallback: Session-based protobuf client (legacy, only if direct
+        send fails).
         """
+        # Convert hex node ID string to int (e.g. "!aabbccdd" -> 0xaabbccdd)
+        dest_num = None
+        if destination:
+            dest_num = self._node_id_to_num(destination)
+
+        # Primary: stateless direct send — zero fromradio contention
+        try:
+            from .meshtastic_protobuf_client import send_text_direct
+            host = self.config.meshtastic.host
+            http_port = getattr(self.config.meshtastic, 'http_port', 9443) or 9443
+            if send_text_direct(text=message, host=host, port=http_port,
+                                destination=dest_num, channel_index=channel):
+                return True
+        except Exception as e:
+            logger.debug(f"Stateless HTTP protobuf TX failed: {e}")
+
+        # Fallback: session-based send (reads fromradio during connect)
         if not _HAS_PROTOBUF_CLIENT:
             return False
 
@@ -559,18 +579,13 @@ class MQTTBridgeHandler:
                     logger.debug("Protobuf client failed to connect for TX")
                     return False
 
-            # Convert hex node ID string to int (e.g. "!aabbccdd" -> 0xaabbccdd)
-            dest_num = None
-            if destination:
-                dest_num = self._node_id_to_num(destination)
-
             return client.send_text(
                 text=message,
                 destination=dest_num,
                 channel_index=channel,
             )
         except Exception as e:
-            logger.debug(f"HTTP protobuf TX failed: {e}")
+            logger.debug(f"Session-based HTTP protobuf TX failed: {e}")
             return False
 
     @staticmethod
