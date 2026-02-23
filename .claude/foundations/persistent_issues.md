@@ -494,14 +494,32 @@ def _run(self):
 - `src/utils/message_listener.py` - Check for existing persistent connection
 - `src/utils/meshtastic_connection.py` - Connection manager
 
-### External Interference
-**Meshtastic Web UI** on port 9443 can also cause connection spam:
-```bash
-netstat -tlnp | grep 9443  # Check if Web UI is running
-```
-User should disable Web UI if not needed, or accept that MeshForge will compete for the connection.
+### HTTP fromradio Contention Fix (2026-02-23)
+
+**Additional root cause**: The `/api/v1/fromradio` HTTP endpoint is also single-consumer.
+When the protobuf client calls `connect()`, it drains all fromradio packets (including
+delivery ACKs) during session setup, starving the meshtasticd web client at :9443 and
+causing "waiting for delivery" hangs. The meshtastic CLI fallback also competes via TCP.
+
+**Fix**: `send_text_direct()` — a stateless TX function that POSTs directly to
+`/api/v1/toradio` without ever reading from `/api/v1/fromradio`. meshtasticd fills
+in the source node number automatically, so no session handshake is needed for sending.
+
+All TX paths now use `send_text_direct()` as primary, with session-based send as fallback:
+- `mqtt_bridge_handler.py` — gateway MQTT bridge TX
+- `mesh_bridge.py` — preset bridge TX
+- `commands/meshtastic.py` — TUI/CLI message sending (before CLI subprocess fallback)
+
+### Files Changed
+- `src/gateway/meshtastic_protobuf_client.py` — Added `send_text_direct()` stateless TX
+- `src/gateway/mqtt_bridge_handler.py` — Stateless TX as primary path
+- `src/gateway/mesh_bridge.py` — Stateless TX as primary path
+- `src/commands/meshtastic.py` — HTTP protobuf before CLI subprocess
 
 ### Prevention
+- **NEVER read from `/api/v1/fromradio` during TX operations**
+- Use `send_text_direct()` for all message sending (write-only to toradio)
+- Reserve session-based `connect()` + `start_polling()` for config read operations only
 - Always use `get_connection_manager()` instead of creating `TCPInterface` directly
 - Check `has_persistent()` before creating connections
 - Use `acquire_persistent(owner="component_name")` for long-lived connections
