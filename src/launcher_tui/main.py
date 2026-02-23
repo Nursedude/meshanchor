@@ -1386,10 +1386,17 @@ def main():
     import os
     import datetime
 
-    # Set all loggers to CRITICAL to prevent output during TUI
-    logging.getLogger().setLevel(logging.CRITICAL)
+    # Suppress CONSOLE logging to prevent TUI corruption, but keep file
+    # handlers active so errors are still captured in log files.
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            handler.setLevel(logging.CRITICAL)
     for name in logging.root.manager.loggerDict:
-        logging.getLogger(name).setLevel(logging.CRITICAL)
+        lgr = logging.getLogger(name)
+        for handler in lgr.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                handler.setLevel(logging.CRITICAL)
 
     # Redirect stderr to log file to prevent TUI corruption
     log_dir = Path("/tmp")
@@ -1398,7 +1405,7 @@ def main():
         log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
-        pass
+        logger.debug("Could not create log dir, falling back to /tmp")
 
     stderr_log = log_dir / "tui_errors.log"
     _original_stderr = sys.stderr
@@ -1407,7 +1414,7 @@ def main():
         _stderr_file = open(stderr_log, 'a')  # noqa: SIM115 — long-lived redirect
         sys.stderr = _stderr_file
     except Exception:
-        pass  # Keep original stderr if can't redirect
+        logger.debug("Could not redirect stderr, keeping original")
 
     launcher = None
     exit_code = 0
