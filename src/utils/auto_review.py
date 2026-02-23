@@ -197,8 +197,7 @@ class ReviewPatterns:
     """
     Centralized review patterns for each agent category.
 
-    These patterns align with the MeshForge Auto-Review Principles
-    documented in .claude/foundations/auto_review_principles.md
+    These patterns align with the MeshForge Auto-Review Principles.
     """
 
     # Security patterns (Priority order: CRITICAL, HIGH, MEDIUM)
@@ -1185,7 +1184,7 @@ class ReviewOrchestrator:
     Orchestrates the auto-review process across all agents.
 
     This class coordinates the parallel execution of specialized review agents,
-    following the schema defined in auto_review_principles.md.
+    following the auto-review schema.
     """
 
     def __init__(self, source_directory: Path = None):
