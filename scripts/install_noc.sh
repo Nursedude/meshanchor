@@ -396,6 +396,35 @@ if ls /usr/lib/python3*/EXTERNALLY-MANAGED 1>/dev/null 2>&1; then
 fi
 
 # ─────────────────────────────────────────────────────────────────
+# Fix known ALSA udev packaging bug (RPi OS)
+# 90-alsa-restore.rules may have GOTO targets with no matching LABEL
+# ─────────────────────────────────────────────────────────────────
+ALSA_RULES="/usr/lib/udev/rules.d/90-alsa-restore.rules"
+if [[ -f "$ALSA_RULES" ]] && [[ ! -f /etc/udev/rules.d/90-alsa-restore.rules ]]; then
+    NEEDS_FIX=false
+    while IFS= read -r goto_label; do
+        if ! grep -q "LABEL=\"$goto_label\"" "$ALSA_RULES"; then
+            NEEDS_FIX=true
+            break
+        fi
+    done < <(grep -oP 'GOTO="\K[^"]+' "$ALSA_RULES" | sort -u)
+
+    if $NEEDS_FIX; then
+        echo -e "  ${YELLOW}Fixing broken ALSA udev rules (RPi OS packaging bug)...${NC}"
+        cp "$ALSA_RULES" /etc/udev/rules.d/90-alsa-restore.rules
+        # Append missing LABEL declarations before EOF
+        while IFS= read -r goto_label; do
+            if ! grep -q "LABEL=\"$goto_label\"" "$ALSA_RULES"; then
+                echo "LABEL=\"$goto_label\"" >> /etc/udev/rules.d/90-alsa-restore.rules
+                echo "    Added missing LABEL=\"$goto_label\""
+            fi
+        done < <(grep -oP 'GOTO="\K[^"]+' "$ALSA_RULES" | sort -u)
+        udevadm control --reload-rules 2>/dev/null || true
+        echo -e "  ${GREEN}ALSA udev rules fixed${NC}"
+    fi
+fi
+
+# ─────────────────────────────────────────────────────────────────
 # Install meshtasticd (auto-detect USB vs SPI)
 # ─────────────────────────────────────────────────────────────────
 if $INSTALL_MESHTASTICD; then

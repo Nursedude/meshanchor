@@ -319,6 +319,28 @@ else
         "May cause permission issues with USB radios"
 fi
 
+# Check ALSA udev rules for broken GOTO labels (RPi OS packaging bug)
+ALSA_RULES="/usr/lib/udev/rules.d/90-alsa-restore.rules"
+if [[ -f "$ALSA_RULES" ]]; then
+    BROKEN_GOTOS=""
+    while IFS= read -r goto_label; do
+        if ! grep -q "LABEL=\"$goto_label\"" "$ALSA_RULES"; then
+            BROKEN_GOTOS="${BROKEN_GOTOS:+$BROKEN_GOTOS, }$goto_label"
+        fi
+    done < <(grep -oP 'GOTO="\K[^"]+' "$ALSA_RULES" | sort -u)
+
+    if [[ -n "$BROKEN_GOTOS" ]]; then
+        if [[ -f /etc/udev/rules.d/90-alsa-restore.rules ]]; then
+            check_pass "ALSA udev rules" "Override exists in /etc/udev/rules.d/"
+        else
+            check_warn "ALSA udev rules" "Broken GOTO labels: $BROKEN_GOTOS" \
+                "Run installer or: sudo python3 -c \"from utils.udev_fix import fix_broken_udev_rules; print(fix_broken_udev_rules())\""
+        fi
+    else
+        check_pass "ALSA udev rules" "No broken GOTO labels"
+    fi
+fi
+
 log ""
 
 # ─────────────────────────────────────────────────────────────────
