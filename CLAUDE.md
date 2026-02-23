@@ -304,27 +304,28 @@ serial, gi.repository, yaml — genuinely optional external packages.
 
 Split files exceeding 1,500 lines (see `.claude/foundations/persistent_issues.md` Issue #6):
 
-**File size audit (2026-02-21):**
+**File size audit (2026-02-23):**
 - ⚠️ `knowledge_content.py` (1,993 lines) - Content file by design, acceptable
-- ⚠️ `service_menu_mixin.py` (1,572 lines) - Monitor; OpenHamClock/MQTT candidates for extraction
-- ⚠️ `rns_bridge.py` (1,570 lines) - MeshCoreBridgeMixin + MessageRouter + gateway_cli.py extracted
+- ⚠️ `rns_bridge.py` (1,599 lines) - MeshCoreBridgeMixin + MessageRouter + gateway_cli.py extracted
+- ⚠️ `prometheus_exporter.py` (1,521 lines) - Grew after metrics_export split, monitor
 - ⚠️ `nomadnet_client_mixin.py` (1,519 lines) - Monitor
-- ⚠️ `commands/rns.py` (1,516 lines) - Monitor
-- ⚠️ `prometheus_exporter.py` (1,505 lines) - Grew after metrics_export split, monitor
-- ⚠️ `config_api.py` (1,499 lines) - Monitor
-- ⚠️ `map_data_collector.py` (1,491 lines) - Monitor
-- ⚠️ `launcher_tui/main.py` (1,475 lines) - 46 mixins, borderline — monitor
-- ⚠️ `map_http_handler.py` (1,465 lines) - Monitor
-- ⚠️ `service_check.py` (1,415 lines) - Monitor
-- ✅ `metrics_export.py` (96 lines) - Split to 3 modules (hub)
-- ✅ `node_tracker.py` (975 lines) - Data classes extracted
+- ⚠️ `service_check.py` (1,515 lines) - Growing, monitor
+- ⚠️ `commands/rns.py` (1,505 lines) - Monitor
+- ⚠️ `rns_menu_mixin.py` (1,496 lines) - Grew after extraction, monitor
+- ✅ `launcher_tui/main.py` (1,489 lines) - 43 mixins, under threshold
+- ✅ `service_menu_mixin.py` (1,487 lines) - Under threshold
+- ✅ `utils/map_http_handler.py` (1,475 lines) - Under threshold
+- ✅ `utils/map_data_collector.py` (1,475 lines) - Under threshold
+- ✅ `config_api.py` (1,316 lines) - Dropped well under threshold
 - ✅ `hamclock.py` (1,025 lines)
+- ✅ `node_tracker.py` (989 lines) - Data classes extracted
+- ✅ `metrics_export.py` (96 lines) - Split to 3 modules (hub)
 
 **Refactoring history:**
-- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488 → 1,516 → 1,507 → 1,475)
-- `rns_bridge.py` (was 1,991 → 1,614 → 1,694 → 1,495 → 1,485 → 1,652 → 1,525 → 1,570, MeshtasticHandler + MessageRouter + gateway_cli + MeshCoreBridgeMixin extracted)
-- `node_tracker.py` (was 1,808 → 930, node_models.py extracted)
-- `rns_menu_mixin.py` (was 1,524 → 1,210 → 1,904 → 1,041, rns_sniffer_mixin + rns_config_mixin + rns_diagnostics_mixin extracted)
+- `launcher_tui/main.py` (was 2,822 → 1,336 → 1,799 → 1,433 → 1,488 → 1,516 → 1,507 → 1,475 → 1,489)
+- `rns_bridge.py` (was 1,991 → 1,614 → 1,694 → 1,495 → 1,485 → 1,652 → 1,525 → 1,570 → 1,599, MeshtasticHandler + MessageRouter + gateway_cli + MeshCoreBridgeMixin extracted)
+- `node_tracker.py` (was 1,808 → 930 → 989, node_models.py extracted)
+- `rns_menu_mixin.py` (was 1,524 → 1,210 → 1,904 → 1,041 → 1,496, rns_sniffer_mixin + rns_config_mixin + rns_diagnostics_mixin extracted)
 - `metrics_export.py` (was 1,762 → 96, split to common/prometheus/influxdb)
 - `hamclock.py` (2,625 → 1,525 → 1,025)
 - GTK4 panels removed (TUI is now only interface)
