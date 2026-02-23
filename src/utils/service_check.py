@@ -406,27 +406,49 @@ def get_udp_port_owner(port: int) -> Optional[Tuple[str, int]]:
 
 def check_rns_shared_instance(instance_name: str = 'default',
                                port: int = 37428) -> bool:
-    """Check if the RNS shared instance is accepting connections.
+    """Check if the RNS shared instance is available.
 
-    RNS uses abstract Unix domain sockets on Linux by default
-    (``\\0rns/{instance_name}``).  Falls back to TCP port 37428 when
-    ``shared_instance_type = tcp`` is configured or on platforms
-    without AF_UNIX support.
+    Uses passive detection (reads /proc files) to avoid disrupting the
+    shared instance.  Safe to call in tight poll loops.
 
     Checks in priority order:
-        1. Abstract Unix domain socket (Linux default)
-        2. TCP port (fallback)
-        3. UDP port (legacy)
+        1. ``/proc/net/unix`` for abstract domain socket (Linux default)
+        2. TCP port via ``check_port()`` (fallback)
+        3. UDP port via ``check_udp_port()`` (legacy)
 
     Args:
         instance_name: RNS instance name (default: ``'default'``).
         port: Shared instance port for TCP/UDP fallback (default: 37428).
 
     Returns:
-        True if the shared instance is reachable via any method.
+        True if the shared instance is detected via any method.
     """
     info = get_rns_shared_instance_info(instance_name, port)
     return info['available']
+
+
+def _check_proc_net_unix(socket_name: str) -> bool:
+    """Check if an abstract Unix domain socket exists via /proc/net/unix.
+
+    Passive check — reads a proc file, never connects to the service.
+    Abstract sockets appear in /proc/net/unix with ``@`` prefix.
+
+    Args:
+        socket_name: Socket name WITHOUT the null byte or ``@`` prefix.
+                     e.g. ``'rns/default'`` to match ``@rns/default``.
+
+    Returns:
+        True if the socket is listed in /proc/net/unix.
+    """
+    target = f'@{socket_name}'
+    try:
+        with open('/proc/net/unix', 'r') as f:
+            for line in f:
+                if target in line:
+                    return True
+    except OSError:
+        pass
+    return False
 
 
 def get_rns_shared_instance_info(instance_name: str = 'default',
@@ -443,46 +465,25 @@ def get_rns_shared_instance_info(instance_name: str = 'default',
         instance_name: RNS instance name (default: ``'default'``).
         port: Shared instance port for TCP/UDP fallback (default: 37428).
     """
-    # 1. Abstract Unix domain socket (Linux default for RNS)
-    # RNS uses abstract namespace: \0rns/{instance_name}
-    socket_path = f'\0rns/{instance_name}'
-    if hasattr(socket, 'AF_UNIX'):
-        try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            sock.connect(socket_path)
-            sock.close()
-            return {
-                'available': True,
-                'method': 'unix_socket',
-                'detail': f'@rns/{instance_name} (abstract domain socket)',
-            }
-        except (OSError, ConnectionRefusedError):
-            pass
-        finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
+    # 1. Passive check: scan /proc/net/unix for the abstract domain socket.
+    # RNS creates @rns/{instance_name} (LocalInterface data transport).
+    # This mirrors how check_udp_port() reads /proc/net/udp — no connection
+    # to the service, zero side effects, safe to call in tight poll loops.
+    socket_name = f'rns/{instance_name}'
+    if _check_proc_net_unix(socket_name):
+        return {
+            'available': True,
+            'method': 'unix_socket',
+            'detail': f'@rns/{instance_name} (abstract domain socket)',
+        }
 
-    # 2. TCP port (used when shared_instance_type = tcp)
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        sock.connect(('127.0.0.1', port))
-        sock.close()
+    # 2. TCP port (used when shared_instance_type = tcp in RNS config)
+    if check_port(port):
         return {
             'available': True,
             'method': 'tcp',
             'detail': f'127.0.0.1:{port} (TCP)',
         }
-    except (OSError, ConnectionRefusedError):
-        pass
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
 
     # 3. UDP port (legacy fallback)
     if check_udp_port(port):
