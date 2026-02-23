@@ -227,31 +227,40 @@ def test_rns(self): ...  # Now _HAS_RNS is True
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-02-20, refreshed)
+### Current Status (2026-02-23, refreshed)
 
 **Python files over 1,500 lines:**
 
 | File | Lines | Status | Notes |
 |------|-------|--------|-------|
 | `src/utils/knowledge_content.py` | 1,993 | OK | Content file by design - no split needed |
-| `src/launcher_tui/service_menu_mixin.py` | 1,575 | MONITOR | OpenHamClock/MQTT extraction candidates |
-| `src/gateway/rns_bridge.py` | 1,570 | MONITOR | MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
-| `src/utils/map_data_collector.py` | 1,529 | MONITOR | Borderline |
-| `src/launcher_tui/nomadnet_client_mixin.py` | 1,519 | MONITOR | New to tracking |
-| `src/commands/rns.py` | 1,516 | MONITOR | New to tracking |
-| `src/launcher_tui/main.py` | 1,507 | MONITOR | 33 mixins, borderline |
-| `src/utils/prometheus_exporter.py` | 1,505 | MONITOR | Grew after metrics_export split |
+| `src/gateway/rns_bridge.py` | 1,599 | MONITOR | MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
+| `src/utils/prometheus_exporter.py` | 1,521 | MONITOR | Grew after metrics_export split |
+| `src/launcher_tui/nomadnet_client_mixin.py` | 1,519 | MONITOR | Stable |
+| `src/utils/service_check.py` | 1,515 | MONITOR | Growing — watch for extraction candidates |
+| `src/commands/rns.py` | 1,505 | MONITOR | Stable |
+
+**Under threshold (previously tracked):**
+
+| File | Lines | Notes |
+|------|-------|-------|
+| `src/launcher_tui/rns_menu_mixin.py` | 1,496 | Grew after extractions but still under 1,500 |
+| `src/launcher_tui/main.py` | 1,489 | 43 mixins, under threshold |
+| `src/launcher_tui/service_menu_mixin.py` | 1,487 | Dropped below threshold |
+| `src/utils/map_http_handler.py` | 1,475 | Under threshold |
+| `src/utils/map_data_collector.py` | 1,475 | Under threshold |
+| `src/utils/config_api.py` | 1,316 | Well under threshold |
 
 **Previously over threshold (NOW RESOLVED):**
 
 | File | Was | Now | Resolution |
 |------|-----|-----|------------|
 | `src/monitoring/traffic_inspector.py` | 2,194 | 442 | Extracted to packet_dissectors, traffic_models, traffic_storage |
-| `src/gateway/node_tracker.py` | 1,808 | 930 | Extracted to node_models.py |
-| `src/launcher_tui/main.py` | 1,799 | 1,433 | Extracted network_tools, web_client, data_path mixins; removed dead code |
+| `src/gateway/node_tracker.py` | 1,808 | 989 | Extracted to node_models.py |
+| `src/launcher_tui/main.py` | 1,799 | 1,489 | Extracted network_tools, web_client, data_path mixins; removed dead code |
 | `src/core/diagnostics/engine.py` | 1,767 | 709 | Extracted to models.py |
 | `src/utils/metrics_export.py` | 1,762 | 96 | Split to common/prometheus/influxdb modules |
-| `src/launcher_tui/rns_menu_mixin.py` | 1,524 | 1,210 | Extracted rns_sniffer_mixin.py |
+| `src/launcher_tui/rns_menu_mixin.py` | 1,524 | 1,496 | Extracted rns_sniffer_mixin + rns_config_mixin + rns_diagnostics_mixin |
 
 **GTK files removed from tracking (GTK deprecated):**
 - GTK4 interface was removed; TUI is now the only interface
@@ -260,24 +269,26 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 
 | File | Lines | Action |
 |------|-------|--------|
-| `.claude/foundations/persistent_issues.md` | 1,451 | Growing - consider archiving resolved issues |
-| `.claude/dude_ai_university.md` | 1,206 | Consider splitting by topic |
+| `.claude/dude_ai_university.md` | 1,180 | Consider splitting by topic |
+| `.claude/foundations/persistent_issues.md` | 1,165 | Stable after archiving resolved issues |
 | `.claude/foundations/ai_development_practices.md` | 1,069 | Review for outdated content |
 
 ### Remaining Extraction Candidates
 
-1. **rns_bridge.py** (1,570 lines) - Over threshold
+1. **rns_bridge.py** (1,599 lines) - Over threshold
    - Potential: Extract `meshtastic_handler.py` (Meshtastic connection/send/receive) ~400 lines
    - Only split if file grows further
-2. **prometheus_exporter.py** (1,505 lines) - Over threshold after metrics_export split
+2. **prometheus_exporter.py** (1,521 lines) - Over threshold after metrics_export split
    - Monitor for now; split if it grows
+3. **service_check.py** (1,515 lines) - Growing, new to tracking
+   - Monitor for now
 
 ### Completed Extractions (2026-02-06)
 
 All previously tracked files are now under 1,500 lines:
 - traffic_inspector.py: 2,194 → 442 (split to 4 modules)
-- main.py: 1,799 → 1,433 (30 mixins extracted, dead code removed)
-- node_tracker.py: 1,808 → 930 (node_models.py extracted)
+- main.py: 1,799 → 1,489 (43 mixins extracted, dead code removed)
+- node_tracker.py: 1,808 → 989 (node_models.py extracted)
 - metrics_export.py: 1,762 → 96 (split to common/prometheus/influxdb)
 - engine.py: 1,767 → 709 (models.py extracted)
 - rns_menu_mixin.py: 1,524 → 1,210 (sniffer extracted)

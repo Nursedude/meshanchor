@@ -123,15 +123,18 @@ class AIToolsMixin:
             return  # Successfully started via systemd
 
         # Fall back to in-process server (non-systemd environments)
-        # Suppress stdout/stderr AND logging to prevent TUI corruption
+        # Suppress console output to prevent TUI corruption, keep file logging
         try:
             import logging
             from contextlib import redirect_stdout, redirect_stderr
             from io import StringIO
 
             root_logger = logging.getLogger()
-            old_level = root_logger.level
-            root_logger.setLevel(logging.CRITICAL + 1)
+            old_handler_levels = []
+            for handler in root_logger.handlers:
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    old_handler_levels.append((handler, handler.level))
+                    handler.setLevel(logging.CRITICAL + 1)
 
             try:
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
@@ -139,11 +142,12 @@ class AIToolsMixin:
                     server = MapServer(port=5000)
                     server.start_background()
             finally:
-                root_logger.setLevel(old_level)
+                for handler, level in old_handler_levels:
+                    handler.setLevel(level)
 
             self._map_server = server
         except Exception as e:
-            logger.debug("Map server auto-start failed: %s", e)
+            logger.warning("Map server auto-start failed: %s", e)
 
     def _try_start_map_service_quiet(self) -> bool:
         """Try to start map server via systemd (quiet, no TUI output).
@@ -371,8 +375,11 @@ class AIToolsMixin:
             captured_err = StringIO()
 
             root_logger = logging.getLogger()
-            old_level = root_logger.level
-            root_logger.setLevel(logging.CRITICAL + 1)
+            old_handler_levels = []
+            for handler in root_logger.handlers:
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    old_handler_levels.append((handler, handler.level))
+                    handler.setLevel(logging.CRITICAL + 1)
 
             try:
                 with redirect_stdout(captured_out), redirect_stderr(captured_err):
@@ -383,7 +390,8 @@ class AIToolsMixin:
 
                     time.sleep(0.1)
             finally:
-                root_logger.setLevel(old_level)
+                for handler, level in old_handler_levels:
+                    handler.setLevel(level)
 
             self._map_server = server
 
