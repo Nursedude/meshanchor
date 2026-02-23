@@ -32,13 +32,12 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
 
-from utils.safe_import import safe_import
-
 logger = logging.getLogger(__name__)
 
-# Import service check utilities
-check_service, ServiceState, ServiceStatus, _check_udp_port_fn, _check_rns_shared_instance_fn, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus', 'check_udp_port', 'check_rns_shared_instance'
+# Service check utilities — first-party, always available (direct import per Issue #5)
+from utils.service_check import (
+    check_service, ServiceState, ServiceStatus,
+    check_udp_port, check_rns_shared_instance,
 )
 
 from utils import ports
@@ -433,10 +432,10 @@ class StartupChecker:
         For UDP ports, uses centralized check_udp_port().
         """
         try:
-            if port_type == 'unix_socket' and _HAS_SERVICE_CHECK:
-                return _check_rns_shared_instance_fn()
-            if port_type == 'udp' and _HAS_SERVICE_CHECK:
-                return _check_udp_port_fn(port)
+            if port_type == 'unix_socket':
+                return check_rns_shared_instance()
+            if port_type == 'udp':
+                return check_udp_port(port)
 
             sock_type = socket.SOCK_STREAM if port_type == 'tcp' else socket.SOCK_DGRAM
             with socket.socket(socket.AF_INET, sock_type) as sock:
