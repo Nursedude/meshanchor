@@ -171,8 +171,9 @@ class StatusBar:
         """Check if a systemd service is active.
 
         Uses centralized service_check module when available.
-        For rnsd, also verifies UDP port 37428 is bound — systemd can
-        report "active" while the service fails to bind its port (zombie).
+        For rnsd, also verifies the RNS shared instance is reachable —
+        systemd can report "active" while the service fails to bind its
+        socket (zombie).
 
         Args:
             service: Service unit name.
