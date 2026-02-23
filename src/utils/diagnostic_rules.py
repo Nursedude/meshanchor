@@ -278,6 +278,26 @@ def load_mesh_rules(engine: "DiagnosticEngine") -> None:
     # ===== CONFIGURATION RULES =====
 
     engine.add_rule(DiagnosticRule(
+        name="alsa_udev_broken_goto",
+        pattern=r"(?i)(alsa|udev).*(goto|label).*(missing|broken|no matching|ignoring)",
+        category=Category.CONFIGURATION,
+        cause_template=(
+            "ALSA udev rules have GOTO references to non-existent labels. "
+            "This is a known alsa-utils packaging bug on Raspberry Pi OS. "
+            "Harmless but produces udev errors on every boot."
+        ),
+        suggestions=[
+            "Fix automatically: sudo python3 -c "
+            "\"from utils.udev_fix import fix_broken_udev_rules; "
+            "print(fix_broken_udev_rules())\"",
+            "Or re-run the installer: sudo bash scripts/install_noc.sh",
+            "Manual: copy 90-alsa-restore.rules to /etc/udev/rules.d/ "
+            "and add the missing LABEL line",
+        ],
+        confidence_base=0.95,
+    ))
+
+    engine.add_rule(DiagnosticRule(
         name="config_file_missing",
         pattern=r"(?i)(config|configuration).*(missing|not found|does not exist)",
         category=Category.CONFIGURATION,
