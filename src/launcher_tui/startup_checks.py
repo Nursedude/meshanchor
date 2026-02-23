@@ -116,6 +116,9 @@ class EnvironmentState:
     is_first_run: bool = False
     config_exists: bool = False
 
+    # System-level warnings (udev bugs, packaging issues, etc.)
+    system_warnings: List[str] = field(default_factory=list)
+
     @property
     def has_conflicts(self) -> bool:
         """Check if there are any port conflicts."""
@@ -251,6 +254,11 @@ class StartupChecker:
 
         # Check first run status
         env.is_first_run, env.config_exists = self._check_first_run()
+
+        # Detect system-level issues (udev packaging bugs, etc.)
+        alsa_warning = self._check_alsa_udev()
+        if alsa_warning:
+            env.system_warnings.append(alsa_warning)
 
         self._cache = env
         return env
@@ -601,6 +609,33 @@ class StartupChecker:
         config_exists = settings_file.exists()
 
         return is_first_run, config_exists
+
+    def _check_alsa_udev(self) -> Optional[str]:
+        """Detect broken ALSA udev rules (RPi OS packaging bug).
+
+        Returns a warning string if broken, None if OK or not applicable.
+        """
+        override = Path("/etc/udev/rules.d/90-alsa-restore.rules")
+        pkg_rules = Path("/usr/lib/udev/rules.d/90-alsa-restore.rules")
+
+        if override.exists() or not pkg_rules.exists():
+            return None
+
+        try:
+            content = pkg_rules.read_text()
+            gotos = set(re.findall(r'GOTO="([^"]+)"', content))
+            labels = set(re.findall(r'LABEL="([^"]+)"', content))
+            missing = gotos - labels
+            if missing:
+                return (
+                    f"ALSA udev rules have broken GOTO labels: {missing} "
+                    f"(fix: sudo python3 -c "
+                    f"\"from utils.udev_fix import fix_broken_udev_rules; "
+                    f"fix_broken_udev_rules()\")"
+                )
+        except OSError:
+            pass
+        return None
 
 
 def resolve_conflict(conflict: PortConflict, action: str = 'stop') -> bool:
