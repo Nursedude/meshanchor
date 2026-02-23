@@ -159,6 +159,9 @@ _home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
 ### Resolution (2026-02-20)
 Consolidated 20 files from `safe_import('utils.paths', ...)` fallback patterns to direct `from utils.paths import get_real_user_home`. Net -220 lines removed.
 
+### Follow-up (2026-02-23)
+Review found `startup_checks.py` still used `safe_import('utils.service_check', ...)` with `_HAS_SERVICE_CHECK` guard — converted to direct import. The guard created a dead fallback path that would silently revert RNS socket detection to broken UDP-only behavior.
+
 ---
 
 ## Development Checklist
@@ -773,9 +776,20 @@ def _on_message(self, event):
 - `src/utils/websocket_server.py` — Subscribes to event_bus, broadcasts to WebSocket clients
 - `src/launcher_tui/messaging_mixin.py` — TUI live feed subscribes to message events
 
+### RNS Socket Detection Enhancement (2026-02-22, PRs #920-922)
+RNS uses abstract Unix domain sockets (`\0rns/{instance_name}`), not UDP port 37428.
+All 20+ `check_udp_port(37428)` calls replaced with `check_rns_shared_instance()` which
+uses 3-tier detection: abstract Unix socket -> TCP -> UDP fallback. KNOWN_SERVICES rnsd
+`port_type` changed from `'udp'` to `'unix_socket'`. 18 unit tests added; consistency
+test prevents drift between `startup_checks.SERVICES_TO_CHECK` and `KNOWN_SERVICES`.
+
+Stale docstring in `status_bar.py` (said "UDP port 37428") and `safe_import` for
+first-party `utils.service_check` in `startup_checks.py` cleaned up 2026-02-23.
+
 ### Prevention
 - Don't add more detection fallback methods - simplify instead
 - UI should always distinguish "service state" from "detection capability"
+- Use `check_rns_shared_instance()` for all rnsd reachability checks (never raw UDP)
 
 ---
 
