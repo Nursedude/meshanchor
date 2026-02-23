@@ -44,6 +44,11 @@ python3 src/standalone.py               # Zero-dependency RF tools
 python3 -m pytest tests/ -v       # Run tests
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
+# Regression prevention (Issue #29)
+python3 scripts/lint.py --all                          # Lint (MF001-MF010)
+python3 -m pytest tests/test_regression_guards.py -v   # Regression guards
+git config core.hooksPath .githooks                    # Enable pre-commit hook
+
 # Version is in src/__version__.py
 # main: 0.5.4-beta | alpha/meshcore-bridge: 0.6.0-alpha
 ```
@@ -96,6 +101,13 @@ src/
 - NO bare `except:` clauses
 - Validate all user inputs
 - Use `subprocess.run()` with list args and timeouts
+
+### Service Interaction Rules (Regression Prevention — Issue #29)
+- **NEVER** create `TCPInterface()` directly — use `MeshtasticConnection` from `connection_manager.py` or acquire `MESHTASTIC_CONNECTION_LOCK` first (meshtasticd supports ONE TCP client)
+- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()` from `meshtastic_protobuf_client.py`
+- **NEVER** call `RNS.Reticulum()` without `configdir=` — causes EADDRINUSE when rnsd is running
+- **NEVER** use raw `systemctl is-active` for service state — use `check_service()` from `service_check.py`
+- **ALWAYS** use `_stop_event.wait()` instead of `time.sleep()` in daemon loops
 
 ### Style
 - Python 3.9+ features OK

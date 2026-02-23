@@ -704,26 +704,47 @@ class MeshtasticPresetBridge:
 
     def _connect_tcp(self, config: MeshtasticConfig, name: str,
                      callback: Callable) -> tuple:
-        """Connect via TCP (legacy mode — blocks web client)."""
+        """Connect via TCP (legacy mode — contends with web client at :9443).
+
+        WARNING: Direct TCPInterface creation competes for meshtasticd's single
+        TCP slot (Issue #17). Prefer MQTT mode or HTTP send_text_direct() for TX.
+        This method acquires the global connection lock to prevent thrashing.
+        """
         if not _HAS_MESHTASTIC or not _HAS_MESHTASTIC_TCP or not _HAS_PUBSUB:
             logger.error("Meshtastic library not installed")
             return None, False
 
         try:
-            logger.info(
-                f"Connecting to {name} via TCP at {config.host}:{config.port}"
+            logger.warning(
+                f"TCP legacy mode for {name} — this contends with :9443 web client. "
+                "Consider switching to MQTT mode (see mesh_bridge config)."
             )
 
-            interface = _meshtastic_tcp.TCPInterface(hostname=config.host)
+            from utils.meshtastic_connection import (
+                MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown
+            )
 
-            def on_receive(packet, interface):
-                callback(packet)
+            # Acquire global lock to prevent connection thrashing
+            if not MESHTASTIC_CONNECTION_LOCK.acquire(timeout=10):
+                logger.error("TCP connection lock busy — another component owns it")
+                return None, False
 
-            _pub.subscribe(on_receive, "meshtastic.receive")
+            try:
+                wait_for_cooldown()
+                interface = _meshtastic_tcp.TCPInterface(hostname=config.host)
 
-            logger.info(f"Connected to {name} via TCP ({config.preset})")
-            self._notify_status(f"{name}_connected")
-            return interface, True
+                def on_receive(packet, interface):
+                    callback(packet)
+
+                _pub.subscribe(on_receive, "meshtastic.receive")
+
+                logger.info(f"Connected to {name} via TCP ({config.preset})")
+                self._notify_status(f"{name}_connected")
+                # Note: lock stays held — released on disconnect
+                return interface, True
+            except Exception:
+                MESHTASTIC_CONNECTION_LOCK.release()
+                raise
 
         except Exception as e:
             logger.error(f"Failed to connect to {name} via TCP: {e}")
