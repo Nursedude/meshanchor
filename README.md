@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1801%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1729%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -176,7 +176,7 @@ Main Menu (MeshForge NOC)
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
-| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity create/manage, pre-flight checks | Stable |
+| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity create/manage, shared instance detection (domain socket + TCP + UDP), pre-flight checks | Stable |
 | **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS — accessible from Emergency Mode | Beta |
 | **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device, filter by favorites | Beta |
 | **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Beta |
@@ -217,7 +217,7 @@ Main Menu (MeshForge NOC)
 |---------|--------|-------|
 | MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
 | Defense-in-depth TUI | Done (v0.5.2) | 47 mixin `_safe_call` protection |
-| Gateway-essential test suite | Done (v0.5.3) | 1,801 tests across 56 files |
+| Gateway-essential test suite | Done (v0.5.3) | 1,729 tests across 56 files |
 | First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
 | Network topology visualization | Done | D3.js + ASCII modes |
 | Node health & predictive maintenance | Done | Battery forecasting, signal trending |
@@ -589,7 +589,7 @@ src/
 │   ├── rf.py              # RF calculations (well-tested)
 │   ├── coverage_map.py    # Folium map generator + tile cache
 │   ├── config_api.py      # RESTful configuration API
-│   ├── service_check.py   # Systemd service management (single source of truth)
+│   ├── service_check.py   # Service management + RNS shared instance detection (single source of truth)
 │   ├── diagnostic_engine.py # Rule-based AI diagnostics
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
 │   ├── knowledge_base.py   # Core knowledge base + 20 topics
@@ -637,6 +637,12 @@ Auto-deploys a working config from `templates/reticulum.conf`:
 - AutoInterface (LAN discovery)
 - Meshtastic Interface on `127.0.0.1:4403`
 - RNode LoRa (optional, for dedicated RNS radio)
+
+**Shared instance detection**: RNS uses abstract Unix domain sockets
+(`@rns/default`) on Linux by default — not TCP/UDP port 37428. MeshForge
+detects the shared instance via domain socket first, falling back to TCP
+then UDP for non-standard configurations. This ensures accurate health
+checks across status bar, diagnostics, repair wizard, and gateway pre-flight.
 
 ### Prometheus Metrics
 
@@ -748,7 +754,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**1,801 tests** across 56 test files:
+**1,729 tests** across 56 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -765,7 +771,7 @@ connection (port 4403):
 | `test_bridge_health.py` | 55 | Gateway health monitoring, circuit breaker patterns |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,801 across 56 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops) were added with test coverage.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,729 across 56 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection) were added with test coverage.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -800,6 +806,8 @@ print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanne
 - Crash-loop protection: `StartLimitBurst=5` / `StartLimitIntervalSec=60` on rnsd
 - Startup ordering: meshforge.service `After=rnsd.service` ensures identity exists
 - Pre-flight `check_service()` before connecting to meshtasticd/rnsd
+- RNS shared instance detection via abstract Unix domain socket (`@rns/default`), with TCP/UDP fallback
+- RNS repair wizard pre-flight: validates `share_instance = Yes`, detects config drift, checks NomadNet conflicts
 - RNS identity pre-flight: startup checks verify `~/.reticulum/storage/identities` exists
 - Shared connection manager prevents TCP:4403 client contention
 - Exponential backoff reconnection (1s → 2s → 4s → ... → 30s max)
