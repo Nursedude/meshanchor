@@ -488,7 +488,7 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
                 integrate_with_traffic_inspector()
                 logger.info("RNS packet sniffer started for traffic capture")
             except Exception as e:
-                logger.debug(f"Could not start RNS sniffer: {e}")
+                logger.warning(f"Could not start RNS sniffer: {e}")
 
         logger.info("Bridge started")
         self._notify_status("started")
@@ -531,8 +531,8 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
             try:
                 from monitoring.rns_sniffer import stop_rns_capture
                 stop_rns_capture()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"RNS sniffer stop error: {e}")
 
         logger.info("Bridge stopped")
         self._notify_status("stopped")
@@ -1005,7 +1005,7 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
         try:
             self._persistent_queue.process_once(batch_size=5)
         except Exception as e:
-            logger.debug(f"Persistent queue drain error: {e}")
+            logger.warning(f"Persistent queue drain error: {e}")
 
     @staticmethod
     @contextmanager
@@ -1534,7 +1534,7 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
                     }
                 )
             except Exception as e:
-                logger.debug(f"Event bus emit failed: {e}")
+                logger.warning(f"Event bus emit failed: {e}")
 
         # Auto-ingest tactical messages (X1 format) to timeline + event bus
         msg_type = getattr(msg, 'message_type', None)
@@ -1551,7 +1551,7 @@ class RNSMeshtasticBridge(MeshCoreBridgeMixin):
                         encryption_mode=tac_msg.encryption_mode.value,
                     )
             except Exception as e:
-                logger.debug(f"Tactical auto-ingest failed: {e}")
+                logger.warning(f"Tactical auto-ingest failed: {e}")
 
     def _start_websocket_server(self):
         """Start WebSocket server for real-time message broadcast to web UI."""
