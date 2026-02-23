@@ -1298,28 +1298,17 @@ def list_known_destinations() -> CommandResult:
     # First check if rnsd is running (using improved detection)
     status = get_status()
     if not status.data.get('rnsd_running'):
-        # Also check UDP port as fallback
-        import socket
+        # Also check shared instance as fallback (domain socket, TCP, or UDP)
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(1)
-            try:
-                sock.bind(('127.0.0.1', 37428))
-                sock.close()
-                # If we can bind, rnsd is NOT running
+            from utils.service_check import check_rns_shared_instance
+            if not check_rns_shared_instance():
                 return CommandResult.fail(
                     "rnsd not running",
                     fix_hint="Start with: rnsd or sudo systemctl start rnsd"
                 )
-            except OSError as e:
-                sock.close()
-                if e.errno in (98, 48, 10048):  # EADDRINUSE
-                    pass  # rnsd is running, continue
-                else:
-                    return CommandResult.fail(
-                        "rnsd not running",
-                        fix_hint="Start with: rnsd or sudo systemctl start rnsd"
-                    )
+            # Shared instance is reachable, continue
+        except ImportError:
+            pass  # No service_check available, proceed anyway
         except Exception as e:
             logger.debug(f"RNS availability check error: {e}")
 

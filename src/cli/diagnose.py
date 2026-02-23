@@ -122,10 +122,10 @@ def check_rns_port():
         except Exception:
             pass
 
-    # Check shared instance port (RNS uses UDP, not TCP)
+    # Check shared instance (RNS uses abstract domain sockets on Linux)
     try:
-        from utils.service_check import check_udp_port
-        port_bound = check_udp_port(37428)
+        from utils.service_check import check_rns_shared_instance
+        port_bound = check_rns_shared_instance()
     except ImportError:
         # Fallback: inline UDP bind test
         port_bound = False

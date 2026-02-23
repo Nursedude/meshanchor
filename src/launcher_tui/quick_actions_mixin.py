@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Centralized service checking — first-party, always available
 from utils.service_check import (
     check_systemd_service, check_process_running, check_port, check_udp_port,
+    check_rns_shared_instance,
     apply_config_and_restart, restart_service, _sudo_cmd,
 )
 
@@ -116,9 +117,9 @@ class QuickActionsMixin:
                     warnings.append(svc)
 
                 if status == 'active':
-                    # rnsd zombie detection: systemd active but port not bound
-                    if svc == 'rnsd' and not check_udp_port(37428):
-                        print(f"  ! {svc:<18} running (port 37428 not bound)")
+                    # rnsd zombie detection: systemd active but shared instance not available
+                    if svc == 'rnsd' and not check_rns_shared_instance():
+                        print(f"  ! {svc:<18} running (shared instance not available)")
                     else:
                         print(f"  * {svc:<18} running{boot_info}")
                 elif status == 'failed':
@@ -238,13 +239,13 @@ class QuickActionsMixin:
             (1883, 'MQTT broker'),
         ]
 
-        # RNS uses UDP port 37428, all others are TCP
-        _udp_ports = {37428}
+        # RNS uses abstract domain sockets on Linux (not UDP/TCP port)
+        _rns_port = 37428
 
         for port, desc in ports:
             try:
-                if port in _udp_ports:
-                    port_open = check_udp_port(port)
+                if port == _rns_port:
+                    port_open = check_rns_shared_instance()
                 else:
                     port_open = check_port(port, host='127.0.0.1', timeout=1.0)
 
