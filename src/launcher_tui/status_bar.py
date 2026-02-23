@@ -467,11 +467,7 @@ class StatusBar:
         # Service statuses from enhanced checker
         for name, info in env.services.items():
             if info.state == ServiceRunState.RUNNING:
-                # Zombie detection: systemd active but port not bound
-                if info.port and not info.port_open:
-                    parts.append(f"{name[:4]}:{SYM_STOPPED}")
-                else:
-                    parts.append(f"{name[:4]}:{SYM_RUNNING}")
+                parts.append(f"{name[:4]}:{SYM_RUNNING}")
             elif info.state == ServiceRunState.FAILED:
                 parts.append(f"{name[:4]}:!")
             else:

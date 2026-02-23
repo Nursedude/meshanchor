@@ -146,17 +146,10 @@ class EnvironmentState:
         parts = []
         for name, info in self.services.items():
             if info.state == ServiceRunState.RUNNING:
-                # Zombie detection: systemd active but port not bound
-                if info.port and not info.port_open:
-                    if plain:
-                        parts.append(f"{name}: UP(no port)")
-                    else:
-                        parts.append(f"{name} \033[33m●\033[0m")  # yellow
+                if plain:
+                    parts.append(f"{name}: UP")
                 else:
-                    if plain:
-                        parts.append(f"{name}: UP")
-                    else:
-                        parts.append(f"{name} \033[32m●\033[0m")
+                    parts.append(f"{name} \033[32m●\033[0m")
             elif info.state == ServiceRunState.FAILED:
                 if plain:
                     parts.append(f"{name}: FAIL")
