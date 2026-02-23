@@ -37,8 +37,8 @@ from utils.safe_import import safe_import
 logger = logging.getLogger(__name__)
 
 # Import service check utilities
-check_service, ServiceState, ServiceStatus, _check_udp_port_fn, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus', 'check_udp_port'
+check_service, ServiceState, ServiceStatus, _check_udp_port_fn, _check_rns_shared_instance_fn, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_service', 'ServiceState', 'ServiceStatus', 'check_udp_port', 'check_rns_shared_instance'
 )
 
 from utils import ports
@@ -428,11 +428,13 @@ class StartupChecker:
     def _check_port(self, port: int, port_type: str = 'tcp') -> bool:
         """Check if a port is open.
 
-        For UDP ports, uses centralized check_udp_port() which queries
-        kernel socket state via ss(8) — reliable even when the service
-        sets SO_REUSEADDR.
+        For RNS (unix_socket), uses check_rns_shared_instance() which checks
+        abstract domain sockets (Linux default) and falls back to TCP/UDP.
+        For UDP ports, uses centralized check_udp_port().
         """
         try:
+            if port_type == 'unix_socket' and _HAS_SERVICE_CHECK:
+                return _check_rns_shared_instance_fn()
             if port_type == 'udp' and _HAS_SERVICE_CHECK:
                 return _check_udp_port_fn(port)
 

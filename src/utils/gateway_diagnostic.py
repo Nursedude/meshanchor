@@ -921,16 +921,16 @@ def diagnose_rnsd_connection(rns_pids: List[int], error: Exception = None) -> No
     import logging
     _log = logging.getLogger(__name__)
 
-    # 1. Check if shared instance port is actually listening
+    # 1. Check if shared instance is actually available
     try:
-        from utils.service_check import check_udp_port
-        port_listening = check_udp_port(37428)
+        from utils.service_check import check_rns_shared_instance
+        port_listening = check_rns_shared_instance()
     except ImportError:
         port_listening = None  # Can't check
 
     if rns_pids and port_listening is False:
         _log.warning(
-            "rnsd PID %d exists but port 37428 not listening "
+            "rnsd PID %d exists but shared instance not available "
             "(zombie or hung during init)", rns_pids[0]
         )
     elif rns_pids and port_listening is True:

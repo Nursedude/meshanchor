@@ -64,6 +64,8 @@ __all__ = [
     'require_service',      # Check with exception on failure
     'check_port',           # TCP port check (utility)
     'check_udp_port',       # UDP port check (utility)
+    'check_rns_shared_instance',  # RNS shared instance check (domain socket + TCP + UDP)
+    'get_rns_shared_instance_info',  # RNS shared instance diagnostics
     'get_udp_port_owner',   # UDP port owner lookup (process name + PID)
     'check_process_running', # Process check via pgrep (utility)
     'check_systemd_service', # Systemd status check
@@ -130,7 +132,7 @@ KNOWN_SERVICES = {
     },
     'rnsd': {
         'port': RNS_SHARED_INSTANCE_PORT,
-        'port_type': 'udp',
+        'port_type': 'unix_socket',  # RNS uses abstract domain sockets on Linux
         'systemd_name': 'rnsd',
         'is_systemd': True,  # rnsd runs as systemd service (install_noc.sh creates unit)
         'description': 'Reticulum Network Stack daemon',
@@ -400,6 +402,103 @@ def get_udp_port_owner(port: int) -> Optional[Tuple[str, int]]:
             continue
 
     return None
+
+
+def check_rns_shared_instance(instance_name: str = 'default',
+                               port: int = 37428) -> bool:
+    """Check if the RNS shared instance is accepting connections.
+
+    RNS uses abstract Unix domain sockets on Linux by default
+    (``\\0rns/{instance_name}``).  Falls back to TCP port 37428 when
+    ``shared_instance_type = tcp`` is configured or on platforms
+    without AF_UNIX support.
+
+    Checks in priority order:
+        1. Abstract Unix domain socket (Linux default)
+        2. TCP port (fallback)
+        3. UDP port (legacy)
+
+    Args:
+        instance_name: RNS instance name (default: ``'default'``).
+        port: Shared instance port for TCP/UDP fallback (default: 37428).
+
+    Returns:
+        True if the shared instance is reachable via any method.
+    """
+    info = get_rns_shared_instance_info(instance_name, port)
+    return info['available']
+
+
+def get_rns_shared_instance_info(instance_name: str = 'default',
+                                  port: int = 37428) -> dict:
+    """Get detailed shared instance connectivity info for diagnostics.
+
+    Returns a dict with keys:
+        - ``available`` (bool): Whether shared instance is reachable.
+        - ``method`` (str): Detection method that succeeded
+          (``'unix_socket'``, ``'tcp'``, ``'udp'``, or ``'none'``).
+        - ``detail`` (str): Human-readable connection detail.
+
+    Args:
+        instance_name: RNS instance name (default: ``'default'``).
+        port: Shared instance port for TCP/UDP fallback (default: 37428).
+    """
+    # 1. Abstract Unix domain socket (Linux default for RNS)
+    # RNS uses abstract namespace: \0rns/{instance_name}
+    socket_path = f'\0rns/{instance_name}'
+    if hasattr(socket, 'AF_UNIX'):
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            sock.connect(socket_path)
+            sock.close()
+            return {
+                'available': True,
+                'method': 'unix_socket',
+                'detail': f'@rns/{instance_name} (abstract domain socket)',
+            }
+        except (OSError, ConnectionRefusedError):
+            pass
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    # 2. TCP port (used when shared_instance_type = tcp)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        sock.connect(('127.0.0.1', port))
+        sock.close()
+        return {
+            'available': True,
+            'method': 'tcp',
+            'detail': f'127.0.0.1:{port} (TCP)',
+        }
+    except (OSError, ConnectionRefusedError):
+        pass
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+    # 3. UDP port (legacy fallback)
+    if check_udp_port(port):
+        return {
+            'available': True,
+            'method': 'udp',
+            'detail': f'127.0.0.1:{port} (UDP)',
+        }
+
+    return {
+        'available': False,
+        'method': 'none',
+        'detail': (f'No shared instance found '
+                   f'(checked @rns/{instance_name}, '
+                   f'TCP:{port}, UDP:{port})'),
+    }
 
 
 def check_process_running(process_name: str) -> bool:
