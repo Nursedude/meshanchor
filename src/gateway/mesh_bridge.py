@@ -259,9 +259,31 @@ class MQTTMeshInterface:
         """
         Send text message via HTTP protobuf (compatible with TCPInterface API).
 
-        Primary: HTTP protobuf to /api/v1/toradio.
-        Fallback: Returns False (caller should log error).
+        Primary: Stateless direct POST to /api/v1/toradio — NEVER reads
+        from /api/v1/fromradio, so the web client at :9443 is never
+        starved of delivery ACK packets.
+
+        Fallback: Session-based protobuf client (legacy).
         """
+        dest_num = None
+        if destinationId:
+            dest_num = self._node_id_to_num(destinationId)
+
+        # Primary: stateless direct send — zero fromradio contention
+        try:
+            from .meshtastic_protobuf_client import send_text_direct
+            if send_text_direct(
+                text=text,
+                host=self._config.host,
+                port=self._config.http_port,
+                destination=dest_num,
+                channel_index=channelIndex,
+            ):
+                return True
+        except Exception as e:
+            logger.debug(f"[{self._name}] Stateless TX failed: {e}")
+
+        # Fallback: session-based send (reads fromradio during connect)
         if not _HAS_PROTOBUF_CLIENT or not _HAS_PROTOBUF_CONFIG:
             logger.warning(f"[{self._name}] Protobuf client unavailable for TX")
             return False
@@ -279,17 +301,13 @@ class MQTTMeshInterface:
                     logger.debug(f"[{self._name}] Protobuf client connect failed")
                     return False
 
-            dest_num = None
-            if destinationId:
-                dest_num = self._node_id_to_num(destinationId)
-
             return client.send_text(
                 text=text,
                 destination=dest_num,
                 channel_index=channelIndex,
             )
         except Exception as e:
-            logger.error(f"[{self._name}] HTTP protobuf TX failed: {e}")
+            logger.error(f"[{self._name}] Session-based TX failed: {e}")
             return False
 
     @staticmethod
