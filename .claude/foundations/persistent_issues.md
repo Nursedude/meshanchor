@@ -1174,3 +1174,80 @@ Both MQTT and RNS can coexist. The private broker handles Meshtastic transport,
 RNS handles encrypted mesh-independent routing.
 
 ### Status: DOCUMENTED
+
+---
+
+## Issue #29: Regression Prevention System (2026-02-23)
+
+### Status: **ACTIVE** — Automated guards preventing circular regressions.
+
+### Problem
+100+ hours spent in circular regressions across meshtasticd (:4403/:9443), rnsd,
+gateway bridge, and MQTT. Fix one service → break another → fix that → break the first.
+
+### Root Causes
+1. **TCP Connection Contention** (Issue #17): meshtasticd supports ONE TCP client.
+   Multiple components creating `TCPInterface()` directly caused connection thrashing.
+2. **fromradio Endpoint Draining**: Reading `/api/v1/fromradio` starved :9443 web client.
+3. **Config Drift**: Gateway and rnsd reading different config files silently.
+4. **No automated regression guards** to catch anti-patterns at code-change time.
+
+### Solution: 4-Layer Prevention
+
+#### Layer 1: Lint Rules (`scripts/lint.py`)
+| Rule | Severity | What It Catches |
+|------|----------|-----------------|
+| MF007 | ERROR | Direct `TCPInterface()` creation outside connection infrastructure |
+| MF008 | WARNING | Raw `systemctl` for service state decisions (use `service_check`) |
+| MF009 | ERROR | `RNS.Reticulum()` without `configdir=` (causes EADDRINUSE) |
+| MF010 | WARNING | `time.sleep()` in daemon loops (blocks clean shutdown) |
+
+#### Layer 2: Regression Guard Tests (`tests/test_regression_guards.py`)
+Codebase-scanning pytest tests that fail if anti-patterns reappear:
+- `TestTCPConnectionContract` — No new files creating TCPInterface directly
+- `TestFromradioContract` — TX paths use `send_text_direct()`
+- `TestServiceCheckContract` — Service state via `check_service()` only
+- `TestPathHomeContract` — No `Path.home()` violations
+- `TestNoShellTrue` — No `shell=True` in subprocess
+- `TestKnownServicesConsistency` — KNOWN_SERVICES stays correct
+
+#### Layer 3: Pre-Commit Hook (`.githooks/pre-commit`)
+Runs linter + regression guards before every commit.
+Setup: `git config core.hooksPath .githooks`
+
+#### Layer 4: TCPInterface Violations Fixed
+All direct `TCPInterface()` creation routed through connection manager or global lock:
+- `node_health_mixin.py` — TCP fallback removed (HTTP-only)
+- `favorites_mixin.py` — Uses `MeshtasticConnection` context manager
+- `config/device.py` — Uses `MeshtasticConnection` context manager
+- `device_controller.py` — Acquires `MESHTASTIC_CONNECTION_LOCK`
+- `mesh_bridge.py` — Acquires lock + deprecation warning
+- `rns_transport.py` — Acquires lock + releases on disconnect
+
+### How to Work With This System
+
+**Adding a new file that needs meshtasticd TCP:**
+```python
+# For short-lived reads:
+from utils.connection_manager import MeshtasticConnection
+with MeshtasticConnection() as conn:
+    if conn:
+        nodes = conn.nodes
+
+# For long-lived connections:
+from utils.meshtastic_connection import MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown
+if MESHTASTIC_CONNECTION_LOCK.acquire(timeout=10):
+    wait_for_cooldown()
+    interface = TCPInterface(hostname='localhost')
+    # ... use interface ...
+    # Release lock on disconnect
+```
+
+**Adding a legitimate TCPInterface creation:**
+1. Add the filename to `ALLOWLISTED` in `TestTCPConnectionContract`
+2. Add the filename to `lock_aware_files` in lint.py MF007 rule
+3. Ensure the code acquires `MESHTASTIC_CONNECTION_LOCK` before creating
+
+**Updating ratchet counts:**
+When fixing a violation, update the expected count in the corresponding test class.
+The test will fail if the count goes DOWN without updating (forces tightening).
