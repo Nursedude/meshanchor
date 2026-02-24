@@ -12,7 +12,13 @@ Data flow:
   Meshtastic (Short Turbo) <> meshtasticd <> MeshForge Gateway
   <> LXMF <> rnsd <> LXMF <> MeshChat
 
-Requires:  git clone + pip install (see INSTALL_HINT)
+Install:  Automated via TUI (git clone + npm + pip + systemd service)
+          Or manually: see plugins/meshchat/service.py INSTALL_HINT
+
+LXMF exclusivity:
+  MeshChat and NomadNet are both LXMF clients. Only one should run
+  at a time to avoid port 37428 conflicts. The _ensure_lxmf_exclusive()
+  helper enforces this by offering to stop the other app before starting.
 """
 
 import logging
@@ -142,6 +148,7 @@ class MeshChatClientMixin:
                 else:
                     choices.append(("start", "Start MeshChat"))
                 choices.append(("logs", "View Logs"))
+                choices.append(("uninstall", "Disable MeshChat"))
             else:
                 choices.append(("install", "Install MeshChat"))
 
@@ -167,6 +174,7 @@ class MeshChatClientMixin:
                 "web": ("MeshChat Web UI", self._meshchat_web_ui),
                 "logs": ("View MeshChat Logs", self._meshchat_logs),
                 "install": ("Install MeshChat", self._install_meshchat),
+                "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -248,6 +256,10 @@ class MeshChatClientMixin:
 
     def _launch_meshchat(self):
         """Start MeshChat service."""
+        # Preflight: ensure NomadNet is not running (one LXMF app at a time)
+        if not self._ensure_lxmf_exclusive("meshchat"):
+            return
+
         # Preflight: check RNS availability
         if not self._check_rns_for_meshchat():
             return
@@ -504,7 +516,7 @@ class MeshChatClientMixin:
                         for line in result.stdout.strip().split('\n'):
                             print(f"  {line}")
                         shown = True
-            except (subprocess.SubprocessError, OSError, Exception) as e:
+            except (subprocess.SubprocessError, OSError) as e:
                 logger.debug("MeshChat journal read failed: %s", e)
 
         # Try log file paths
@@ -548,25 +560,469 @@ class MeshChatClientMixin:
         self._wait_for_enter()
 
     # ------------------------------------------------------------------
-    # Install
+    # Install (fully automated)
     # ------------------------------------------------------------------
 
+    MESHCHAT_REPO = "https://github.com/liamcottle/reticulum-meshchat"
+    MESHCHAT_SERVICE_NAME = "reticulum-meshchat"
+
+    def _get_meshchat_install_dir(self) -> Path:
+        """Return the MeshChat install directory under user home."""
+        return get_real_user_home() / 'reticulum-meshchat'
+
+    def _get_pip_command(self) -> list:
+        """Return the pip command appropriate for this install.
+
+        Prefers MeshForge's venv pip, falls back to system pip3
+        with --break-system-packages for PEP 668 compatibility.
+        """
+        venv_pip = Path('/opt/meshforge/venv/bin/pip')
+        if venv_pip.exists():
+            return [str(venv_pip)]
+
+        # Check for PEP 668 (externally-managed Python)
+        import glob
+        if glob.glob('/usr/lib/python3*/EXTERNALLY-MANAGED'):
+            return ['pip3', 'install', '--break-system-packages']
+
+        return ['pip3']
+
     def _install_meshchat(self):
-        """Show MeshChat installation instructions."""
-        self.dialog.msgbox(
+        """Automated MeshChat installation.
+
+        Steps:
+        1. Confirm with user
+        2. Check/install prerequisites (git, nodejs, npm)
+        3. git clone reticulum-meshchat
+        4. pip install -r requirements.txt
+        5. npm install && npm run build-frontend
+        6. Create systemd service
+        7. Enable + start service
+        """
+        if self._is_meshchat_installed():
+            self.dialog.msgbox(
+                "Already Installed",
+                "MeshChat is already installed.\n\n"
+                "Use Start/Stop from the menu to manage it.",
+            )
+            return
+
+        if not self.dialog.yesno(
             "Install MeshChat",
-            "MeshChat (Reticulum MeshChat) provides LXMF messaging\n"
-            "with a web UI at http://127.0.0.1:8000.\n\n"
-            "Install:\n"
-            "  git clone https://github.com/liamcottle/reticulum-meshchat\n"
-            "  cd reticulum-meshchat\n"
-            "  pip install -r requirements.txt\n"
-            "  npm install --omit=dev && npm run build-frontend\n"
-            "  python meshchat.py\n\n"
-            "For systemd service (auto-start on boot):\n"
-            "  Create /etc/systemd/system/reticulum-meshchat.service\n"
-            "  with ExecStart pointing to meshchat.py",
+            "Install MeshChat (Reticulum MeshChat)?\n\n"
+            "This will:\n"
+            "  1. Install Node.js/npm (if needed)\n"
+            "  2. Clone the MeshChat repository\n"
+            "  3. Install Python dependencies\n"
+            "  4. Build the web frontend (npm)\n"
+            "  5. Create a systemd service\n\n"
+            "MeshChat provides LXMF messaging with a\n"
+            "web UI at http://127.0.0.1:8000\n\n"
+            "Source: github.com/liamcottle/reticulum-meshchat\n\n"
+            "Install now?",
+        ):
+            return
+
+        # LXMF exclusivity check — stop NomadNet if running
+        if not self._ensure_lxmf_exclusive("meshchat"):
+            return
+
+        clear_screen()
+        print("=== Installing MeshChat ===\n")
+
+        install_dir = self._get_meshchat_install_dir()
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
+        try:
+            # Step 1: Prerequisites
+            if not self._install_meshchat_prerequisites():
+                self._wait_for_enter()
+                return
+
+            # Step 2: Git clone
+            if not self._install_meshchat_clone(install_dir, run_as_user):
+                self._wait_for_enter()
+                return
+
+            # Step 3: pip install
+            if not self._install_meshchat_pip(install_dir, run_as_user):
+                self._wait_for_enter()
+                return
+
+            # Step 4: npm build
+            if not self._install_meshchat_npm(install_dir, run_as_user):
+                self._wait_for_enter()
+                return
+
+            # Step 5: systemd service
+            if not self._install_meshchat_service(install_dir, run_as_user):
+                print("\nSystemd service creation failed.")
+                print("You can still run MeshChat manually:")
+                print(f"  cd {install_dir} && python3 meshchat.py")
+
+            # Step 6: Start service
+            print("\nStarting MeshChat service...")
+            try:
+                subprocess.run(
+                    ['systemctl', 'start', self.MESHCHAT_SERVICE_NAME],
+                    capture_output=True, timeout=15,
+                )
+                time.sleep(3)
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.debug("Service start failed: %s", e)
+
+            # Verify
+            if self._is_meshchat_running():
+                print("\nMeshChat is running!")
+                print("Web UI: http://127.0.0.1:8000")
+            else:
+                print("\nMeshChat installed but may not be running yet.")
+                print(f"Check: systemctl status {self.MESHCHAT_SERVICE_NAME}")
+
+            print("\nInstallation complete.")
+
+        except KeyboardInterrupt:
+            print("\n\nInstallation cancelled.")
+        except Exception as e:
+            print(f"\nInstallation error: {e}")
+            logger.exception("MeshChat install failed")
+
+        try:
+            self._wait_for_enter()
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+    def _install_meshchat_prerequisites(self) -> bool:
+        """Check and install git, nodejs, npm. Returns True on success."""
+        # git
+        if not shutil.which('git'):
+            print("Installing git...")
+            result = subprocess.run(
+                ['apt-get', 'install', '-y', '-qq', 'git'],
+                capture_output=True, timeout=120,
+            )
+            if result.returncode != 0:
+                print("Failed to install git.")
+                print("Try: sudo apt install git")
+                return False
+
+        # Node.js + npm
+        if not shutil.which('node') or not shutil.which('npm'):
+            print("Installing Node.js and npm...")
+            result = subprocess.run(
+                ['apt-get', 'install', '-y', '-qq', 'nodejs', 'npm'],
+                capture_output=True, timeout=180,
+            )
+            if result.returncode != 0:
+                print("Failed to install Node.js/npm.")
+                print("Try: sudo apt install nodejs npm")
+                return False
+            print("Node.js and npm installed.")
+
+        # Verify
+        for tool in ['git', 'node', 'npm']:
+            if not shutil.which(tool):
+                print(f"Error: {tool} not found after install.")
+                return False
+
+        print("Prerequisites OK (git, node, npm)\n")
+        return True
+
+    def _install_meshchat_clone(self, install_dir: Path, run_as_user: str = None) -> bool:
+        """Clone the MeshChat repository. Returns True on success."""
+        if install_dir.exists():
+            print(f"Directory exists: {install_dir}")
+            # Pull latest instead of clone
+            print("Pulling latest changes...")
+            cmd = ['git', '-C', str(install_dir), 'pull', '--ff-only']
+            if run_as_user:
+                cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                print(f"Git pull failed: {result.stderr.strip()}")
+                print("Continuing with existing checkout.")
+            else:
+                print("Repository updated.")
+            return True
+
+        print(f"Cloning MeshChat to {install_dir}...")
+        cmd = ['git', 'clone', self.MESHCHAT_REPO, str(install_dir)]
+        if run_as_user:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+
+        result = subprocess.run(cmd, timeout=120)
+        if result.returncode != 0:
+            print("Git clone failed.")
+            print(f"Try: git clone {self.MESHCHAT_REPO} {install_dir}")
+            return False
+
+        print("Repository cloned.\n")
+        return True
+
+    def _install_meshchat_pip(self, install_dir: Path, run_as_user: str = None) -> bool:
+        """Install MeshChat Python dependencies. Returns True on success."""
+        req_file = install_dir / 'requirements.txt'
+        if not req_file.exists():
+            print("No requirements.txt found — skipping pip install.")
+            return True
+
+        print("Installing Python dependencies...")
+        pip_cmd = self._get_pip_command()
+
+        # Build install command
+        if len(pip_cmd) > 1 and pip_cmd[1] == 'install':
+            # pip3 install --break-system-packages case
+            cmd = pip_cmd + ['--timeout', '60', '-r', str(req_file)]
+        else:
+            cmd = pip_cmd + ['install', '--timeout', '60', '-r', str(req_file)]
+
+        if run_as_user:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+
+        result = subprocess.run(cmd, timeout=300)
+        if result.returncode != 0:
+            print("pip install failed.")
+            print(f"Try: pip3 install -r {req_file}")
+            return False
+
+        print("Python dependencies installed.\n")
+        return True
+
+    def _install_meshchat_npm(self, install_dir: Path, run_as_user: str = None) -> bool:
+        """Build MeshChat web frontend with npm. Returns True on success."""
+        pkg_json = install_dir / 'package.json'
+        if not pkg_json.exists():
+            print("No package.json found — skipping npm build.")
+            return True
+
+        print("Installing npm dependencies...")
+        cmd = ['npm', 'install', '--omit=dev']
+        if run_as_user:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+
+        result = subprocess.run(cmd, cwd=str(install_dir), timeout=300)
+        if result.returncode != 0:
+            print("npm install failed.")
+            print(f"Try: cd {install_dir} && npm install --omit=dev")
+            return False
+
+        print("Building web frontend...")
+        cmd = ['npm', 'run', 'build-frontend']
+        if run_as_user:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+
+        result = subprocess.run(cmd, cwd=str(install_dir), timeout=300)
+        if result.returncode != 0:
+            print("npm build failed.")
+            print(f"Try: cd {install_dir} && npm run build-frontend")
+            return False
+
+        print("Web frontend built.\n")
+        return True
+
+    def _install_meshchat_service(self, install_dir: Path, run_as_user: str = None) -> bool:
+        """Create systemd service for MeshChat. Returns True on success."""
+        service_user = run_as_user or 'root'
+        user_home = get_real_user_home()
+        python_path = shutil.which('python3') or '/usr/bin/python3'
+        meshchat_py = install_dir / 'meshchat.py'
+
+        service_content = (
+            f"[Unit]\n"
+            f"Description=Reticulum MeshChat LXMF Client\n"
+            f"After=network.target rnsd.service\n"
+            f"Wants=rnsd.service\n"
+            f"\n"
+            f"[Service]\n"
+            f"Type=simple\n"
+            f"User={service_user}\n"
+            f"WorkingDirectory={install_dir}\n"
+            f"ExecStart={python_path} {meshchat_py}\n"
+            f"Restart=on-failure\n"
+            f"RestartSec=5\n"
+            f"StartLimitBurst=5\n"
+            f"StartLimitIntervalSec=60\n"
+            f"Environment=HOME={user_home}\n"
+            f"\n"
+            f"[Install]\n"
+            f"WantedBy=multi-user.target\n"
         )
+
+        service_path = f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
+        print(f"Creating systemd service: {service_path}")
+
+        try:
+            # Write service file
+            with open(service_path, 'w') as f:
+                f.write(service_content)
+
+            # Reload systemd and enable
+            subprocess.run(
+                ['systemctl', 'daemon-reload'],
+                capture_output=True, timeout=15,
+            )
+            subprocess.run(
+                ['systemctl', 'enable', self.MESHCHAT_SERVICE_NAME],
+                capture_output=True, timeout=15,
+            )
+            print("Service created and enabled.\n")
+            return True
+
+        except (IOError, OSError, subprocess.SubprocessError) as e:
+            print(f"Failed to create service: {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Uninstall (stop + disable)
+    # ------------------------------------------------------------------
+
+    def _uninstall_meshchat(self):
+        """Stop and disable MeshChat service.
+
+        Leaves files in place for easy re-enable. Does not delete
+        the cloned repository or configuration.
+        """
+        if not self.dialog.yesno(
+            "Disable MeshChat",
+            "Stop and disable the MeshChat service?\n\n"
+            "This will:\n"
+            "  - Stop MeshChat if running\n"
+            "  - Disable auto-start on boot\n\n"
+            "Files remain at ~/reticulum-meshchat\n"
+            "for easy re-enable later.\n\n"
+            "Disable now?",
+        ):
+            return
+
+        clear_screen()
+        print("=== Disabling MeshChat ===\n")
+
+        # Stop service
+        try:
+            print("Stopping MeshChat...")
+            subprocess.run(
+                ['systemctl', 'stop', self.MESHCHAT_SERVICE_NAME],
+                capture_output=True, timeout=15,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Service stop: %s", e)
+
+        # Kill any running process
+        try:
+            subprocess.run(
+                ['pkill', '-f', 'meshchat.py'],
+                capture_output=True, timeout=5,
+            )
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        time.sleep(1)
+
+        # Disable service
+        try:
+            print("Disabling auto-start...")
+            subprocess.run(
+                ['systemctl', 'disable', self.MESHCHAT_SERVICE_NAME],
+                capture_output=True, timeout=15,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Service disable: %s", e)
+
+        install_dir = self._get_meshchat_install_dir()
+        if self._is_meshchat_running():
+            print("\nMeshChat may still be running.")
+            print("Try: sudo pkill -f meshchat.py")
+        else:
+            print("\nMeshChat stopped and disabled.")
+
+        print(f"\nFiles remain at: {install_dir}")
+        print("To re-enable: systemctl enable --now reticulum-meshchat")
+
+        self._wait_for_enter()
+
+    # ------------------------------------------------------------------
+    # LXMF exclusivity (one app at a time)
+    # ------------------------------------------------------------------
+
+    def _ensure_lxmf_exclusive(self, starting_app: str) -> bool:
+        """Ensure only one LXMF app runs at a time.
+
+        MeshChat and NomadNet both use LXMF and can conflict on
+        port 37428 when connecting to rnsd. Only one should run.
+
+        Args:
+            starting_app: "meshchat" or "nomadnet"
+
+        Returns:
+            True if OK to proceed, False if user cancelled.
+        """
+        if starting_app == "meshchat":
+            # Check if NomadNet is running
+            nomadnet_running = False
+            if _HAS_SERVICE_CHECK and check_process_running:
+                nomadnet_running = check_process_running('nomadnet')
+            if not nomadnet_running:
+                try:
+                    result = subprocess.run(
+                        ['pgrep', '-f', 'bin/nomadnet'],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    nomadnet_running = (
+                        result.returncode == 0 and
+                        bool(result.stdout.strip())
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+            if nomadnet_running:
+                if not self.dialog.yesno(
+                    "NomadNet Running",
+                    "NomadNet is currently running.\n\n"
+                    "Only one LXMF app should run at a time\n"
+                    "to avoid port 37428 conflicts.\n\n"
+                    "Stop NomadNet and start MeshChat?",
+                ):
+                    return False
+                # Stop NomadNet
+                try:
+                    subprocess.run(
+                        ['pkill', '-f', 'bin/nomadnet'],
+                        capture_output=True, timeout=10,
+                    )
+                    time.sleep(2)
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+        elif starting_app == "nomadnet":
+            # Check if MeshChat is running
+            if self._is_meshchat_running():
+                if not self.dialog.yesno(
+                    "MeshChat Running",
+                    "MeshChat is currently running.\n\n"
+                    "Only one LXMF app should run at a time\n"
+                    "to avoid port 37428 conflicts.\n\n"
+                    "Stop MeshChat and start NomadNet?",
+                ):
+                    return False
+                # Stop MeshChat
+                try:
+                    subprocess.run(
+                        ['systemctl', 'stop', self.MESHCHAT_SERVICE_NAME],
+                        capture_output=True, timeout=15,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+                try:
+                    subprocess.run(
+                        ['pkill', '-f', 'meshchat.py'],
+                        capture_output=True, timeout=5,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+                time.sleep(2)
+
+        return True
 
     # ------------------------------------------------------------------
     # Preflight: RNS check

@@ -30,6 +30,7 @@
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum via MQTT (zero interference)
+- **MeshChat** LXMF messaging with web UI — automated install from the TUI
 - **Live NOC maps** showing Meshtastic AND RNS nodes on one map
 - **Coverage maps** with SNR-based link quality
 - **Wireshark-grade packet inspection** for both networks
@@ -107,13 +108,14 @@ The alpha branch (`0.6.0-alpha`) includes:
 
 ### Deployment Profiles
 
-MeshForge supports 5 deployment profiles. Install only the dependencies you need:
+MeshForge supports 6 deployment profiles. Install only the dependencies you need:
 
 | Profile | Services Needed | Install | Use Case |
 |---------|----------------|---------|----------|
 | `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
 | `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
 | `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
+| `meshchat` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt` + MeshChat | LXMF messaging with web UI |
 | `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
 | `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
 
@@ -170,6 +172,7 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 Main Menu (MeshForge NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
 ├── 2. Mesh Networks         Meshtastic, RNS, MeshCore, AREDN, MQTT, Gateway
+│       └── RNS submenu      NomadNet Client, MeshChat Client (install/manage)
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
 ├── 5. Configuration         Radio, channels, RNS config, services, backup
@@ -219,6 +222,7 @@ Main Menu (MeshForge NOC)
 | **RNS Packet Sniffer** | Live RNS capture, announce tracking, destination filtering, path discovery | Beta |
 | **Device Backup** | Configuration backup/restore, versioned snapshots, scheduled backups | Beta |
 | **First-Run Wizard** | Hardware auto-detect templates, region selection, service verification | Stable |
+| **MeshChat** | Automated install, LXMF messaging, web UI (:8000), HTTP API, peer discovery, LXMF announce, systemd service | Beta |
 | **Messaging** | Broadcast/direct messaging, LXMF routing, message history | Beta |
 | **Amateur Radio** | Callsign management, Part 97 reference, ARES/RACES info | Beta |
 | **Webhooks** | Event routing, external system integration | Beta |
@@ -315,6 +319,7 @@ graph TB
     subgraph External Services
         MESHTASTICD[meshtasticd<br>LoRa radio daemon]
         RNSD[rnsd<br>Reticulum transport]
+        MESHCHAT[MeshChat<br>LXMF messaging :8000]
         AREDN_NET[AREDN<br>IP mesh network]
         MQTT[MQTT Broker<br>Node telemetry]
         NOAA[NOAA SWPC<br>Space weather]
@@ -338,6 +343,7 @@ graph TB
 
     GATEWAY --> MQTT
     GATEWAY --> RNSD
+    MESHCHAT --> RNSD
     MONITOR --> MQTT
     MQTT --> MESHTASTICD
     TRAFFIC --> GATEWAY
@@ -354,6 +360,7 @@ graph TB
     style BROWSER fill:#2d5016,color:#fff
     style CLI fill:#2d5016,color:#fff
     style GATEWAY fill:#1a3a5c,color:#fff
+    style MESHCHAT fill:#1a5c3a,color:#fff
     style TRAFFIC fill:#3a1a5c,color:#fff
     style AI fill:#5c1a3a,color:#fff
     style UCONSOLE fill:#5c4a1a,color:#fff
@@ -415,6 +422,29 @@ sudo apt install mosquitto                     # MQTT broker
 - Gateway Bridge: `Mesh Networks → Gateway Config → Templates → mqtt_bridge`
 - MQTT Monitor: `Mesh Networks → MQTT Monitor → Configure → Use Local Broker`
 - MQTT Settings: `Gateway Config → MQTT Bridge Settings → Run Setup Guide`
+
+### MeshChat (LXMF Messaging)
+
+MeshChat provides LXMF encrypted messaging with a web UI at `http://127.0.0.1:8000`.
+MeshForge automates the full installation and manages MeshChat as a systemd service.
+
+**Install from TUI:**
+```
+Mesh Networks → RNS → MeshChat Client → Install MeshChat
+```
+
+The installer handles everything: Node.js/npm prerequisites, git clone, Python
+dependencies, frontend build, and systemd service creation. MeshChat connects
+to rnsd as a shared instance client for Meshtastic bridging.
+
+**LXMF app exclusivity:** MeshChat and NomadNet are both LXMF clients. Only one
+should run at a time to avoid port conflicts. MeshForge enforces this — starting
+one will offer to stop the other.
+
+**Data flow:**
+```
+Meshtastic Node → meshtasticd → MeshForge Gateway → LXMF → rnsd → MeshChat (:8000)
+```
 
 ### Design Principles
 
@@ -582,6 +612,8 @@ src/
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
+│   ├── meshchat_client_mixin.py  # MeshChat install/manage/monitor (automated)
+│   ├── nomadnet_client_mixin.py # NomadNet install/launch/configure
 │   └── *_mixin.py         # 47 feature modules (RF, channels, AI, MeshCore, topology, emergency, etc.)
 ├── commands/              # Command modules
 │   ├── propagation.py     # Space weather & HF propagation (NOAA primary)
@@ -705,6 +737,7 @@ See `dashboards/README.md` and `docs/METRICS.md` for full setup instructions.
 | 1883 | mosquitto MQTT | mosquitto | Multi-consumer (optional) |
 | 5000 | MeshForge Map Server | **MeshForge** | Live NOC map + REST API (20 endpoints) |
 | 5001 | MeshForge WebSocket | **MeshForge** | Real-time message broadcast |
+| 8000 | MeshChat Web UI | MeshChat | LXMF messaging + HTTP API |
 | 8081 | MeshForge Config API | **MeshForge** | RESTful config management |
 | 9090 | Prometheus metrics | **MeshForge** | Prometheus + Grafana JSON API |
 | 9443 | meshtasticd Web UI | meshtasticd | Protobuf + JSON endpoints |
@@ -1069,6 +1102,7 @@ Full research library: [`.claude/research/`](.claude/research/README.md)
 | Development Blog | [nursedude.substack.com](https://nursedude.substack.com) | Project updates |
 | Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) | Primary radio network |
 | Reticulum Network | [reticulum.network](https://reticulum.network/) | Bridge target (encrypted transport) |
+| MeshChat | [github.com/liamcottle/reticulum-meshchat](https://github.com/liamcottle/reticulum-meshchat) | LXMF messaging client (automated install) |
 | AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) | Monitoring integration |
 | RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) | Spectrum analysis (planned) |
 | uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) | Field hardware (Q2 2026) |
