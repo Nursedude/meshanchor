@@ -1429,6 +1429,29 @@ def main():
 
     stderr_log = log_dir / "tui_errors.log"
     _original_stderr = sys.stderr
+
+    # Last-resort exception hook — catches crashes that bypass try/except
+    _original_excepthook = sys.excepthook
+
+    def _crash_hook(exc_type, exc_value, exc_tb):
+        try:
+            with open(stderr_log, 'a') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"[{datetime.datetime.now().isoformat()}] "
+                        f"UNHANDLED {exc_type.__name__}\n")
+                traceback.print_exception(
+                    exc_type, exc_value, exc_tb, file=f)
+                f.write(f"{'='*60}\n")
+                f.flush()
+        except Exception:
+            pass
+        _original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _crash_hook
+
+    # Show log path before stderr redirect so user knows where to look
+    print(f"  Log: {stderr_log}", file=_original_stderr)
+
     _stderr_file = None
     try:
         _stderr_file = open(stderr_log, 'a')  # noqa: SIM115 — long-lived redirect
@@ -1499,9 +1522,11 @@ def main():
         try:
             sys.stderr = _original_stderr
             if _stderr_file is not None:
+                _stderr_file.flush()
                 _stderr_file.close()
         except Exception:
             pass
+        sys.excepthook = _original_excepthook
         sys.exit(exit_code)
 
 
