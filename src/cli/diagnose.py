@@ -100,16 +100,29 @@ def check_rns_port():
     """Check if RNS port is available."""
     print_header("RNS NETWORK")
 
+    # Check if rnsd is running (via service_check single source of truth)
+    rnsd_running = False
+    if SERVICE_CHECK_AVAILABLE:
+        rnsd_status = _check_service('rnsd')
+        rnsd_running = rnsd_status.available
+
     # Check port 29716 (RNS AutoInterface)
+    port_available = True
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         sock.bind(('::', 29716))
         sock.close()
-        print_status("RNS port 29716", True, "available")
     except OSError as e:
-        print_status("RNS port 29716", False, f"in use ({e})")
+        port_available = False
+        if rnsd_running:
+            # Port in use BY rnsd — this is correct and expected
+            print_status("RNS port 29716", True,
+                         "in use by rnsd (expected)")
+        else:
+            # Port in use but rnsd not running — real conflict
+            print_status("RNS port 29716", False, f"in use ({e})")
 
-        # Try to find what's using it
+        # Show process info either way for diagnostics
         try:
             result = subprocess.run(
                 ['lsof', '-i', ':29716'],
@@ -117,10 +130,13 @@ def check_rns_port():
             )
             if result.stdout:
                 print(f"    Process using port:")
-                for line in result.stdout.strip().split('\n')[1:2]:  # First result only
+                for line in result.stdout.strip().split('\n')[1:2]:
                     print(f"      {line}")
         except Exception:
             pass
+
+    if port_available:
+        print_status("RNS port 29716", True, "available")
 
     # Check shared instance (RNS uses abstract domain sockets on Linux)
     try:
@@ -322,6 +338,24 @@ def check_rns_interfaces():
                 or 'could not' in combined.lower()):
             print_status("RNS shared instance", False,
                          "cannot connect to rnsd")
+            # Check if port 37428 appears bound (contradictory state)
+            try:
+                from utils.service_check import (
+                    check_rns_shared_instance, get_udp_port_owner
+                )
+                if check_rns_shared_instance():
+                    print("    Note: Port 37428 appears bound but "
+                          "rnstatus cannot connect.")
+                    print("    This may indicate rnsd is initializing "
+                          "or in a degraded state.")
+                    print("    Try: sudo systemctl restart rnsd")
+                    owner = get_udp_port_owner(37428)
+                    if owner:
+                        proc_name, pid = owner
+                        print(f"    Port owner: {proc_name} "
+                              f"(PID {pid})")
+            except ImportError:
+                pass
             return
 
         # Parse interface lines from rnstatus output
