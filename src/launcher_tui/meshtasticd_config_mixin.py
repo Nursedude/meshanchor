@@ -29,8 +29,21 @@ from utils.broker_profiles import get_active_profile
 class MeshtasticdConfigMixin:
     """Mixin providing meshtasticd configuration methods for the launcher."""
 
+    def _ensure_meshtasticd_config(self):
+        """Auto-create /etc/meshtasticd structure and templates if missing."""
+        try:
+            from core.meshtasticd_config import MeshtasticdConfig
+            MeshtasticdConfig().ensure_structure()
+        except PermissionError:
+            logger.debug("Cannot auto-create meshtasticd config (no root)")
+        except Exception as e:
+            logger.debug("meshtasticd config auto-create failed: %s", e)
+
     def _meshtasticd_menu(self):
         """Meshtasticd configuration menu."""
+        # Auto-create config structure if missing
+        self._ensure_meshtasticd_config()
+
         while True:
             choices = [
                 ("web", "Web Client (Full Config)"),
@@ -146,8 +159,16 @@ class MeshtasticdConfigMixin:
             config_path = Path('/etc/meshtasticd/config.yaml')
             config_exists = config_path.exists()
 
+            # Auto-create if missing
+            if not config_exists:
+                self._ensure_meshtasticd_config()
+                config_exists = config_path.exists()
+
             config_d = Path('/etc/meshtasticd/config.d')
             active_configs = list(config_d.glob('*.yaml')) if config_d.exists() else []
+
+            available_d = Path('/etc/meshtasticd/available.d')
+            available_count = len(list(available_d.glob('*.yaml'))) if available_d.exists() else 0
 
             # ---- Build display (Issue #20 Phase 2: service state and
             #      detection shown separately with actionable hints) ----
@@ -167,7 +188,8 @@ class MeshtasticdConfigMixin:
             elif is_running and preset_display.startswith("Unknown"):
                 text += "\n  (CLI detection unavailable — select preset manually)"
             text += f"\n\nConfig File: {config_path}"
-            text += f"\nConfig Exists: {'Yes' if config_exists else 'No'}"
+            text += f"\nConfig Exists: {'Yes' if config_exists else 'No — run with sudo to create'}"
+            text += f"\nAvailable Templates: {available_count}"
             text += f"\n\nActive Hardware Configs: {len(active_configs)}"
 
             for cfg in active_configs[:5]:
@@ -175,6 +197,9 @@ class MeshtasticdConfigMixin:
 
             if len(active_configs) > 5:
                 text += f"\n  ... and {len(active_configs) - 5} more"
+
+            if not active_configs and available_count > 0:
+                text += "\n  (none — select hardware from Hardware Config)"
 
             self.dialog.msgbox("Meshtasticd Status", text)
 
