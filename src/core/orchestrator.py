@@ -41,6 +41,7 @@ from utils.service_check import (
     check_port as _centralized_check_port,
     check_service,
     _detect_radio_hardware,
+    ServiceState as _CheckState,
 )
 
 # Setup logging
@@ -496,6 +497,24 @@ class ServiceOrchestrator:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
+    def _log_journal_tail(self, service_name: str, lines: int = 8):
+        """Log recent journal entries for a failed service to aid debugging."""
+        config = self.SERVICES.get(service_name)
+        if not config:
+            return
+        try:
+            result = subprocess.run(
+                ['journalctl', '-u', config.systemd_name, '-n', str(lines),
+                 '--no-pager', '-o', 'short-iso'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                logger.error(f"Recent {service_name} logs:")
+                for line in result.stdout.strip().splitlines():
+                    logger.error(f"  {line}")
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+
     def get_status(self, service_name: str) -> ServiceStatus:
         """Get detailed status of a service."""
         config = self.SERVICES.get(service_name)
@@ -623,26 +642,73 @@ class ServiceOrchestrator:
             return False
 
         if wait:
-            # Wait for startup delay
-            time.sleep(config.startup_delay)
+            # Poll service status with crash detection instead of blind sleep
+            max_wait = config.startup_delay + 5  # e.g., 10s for meshtasticd
+            service_up = False
 
-            # Verify service stayed running (systemctl only — not port)
-            if not self.is_running(service_name):
-                logger.warning(f"{service_name} started but not running, retrying...")
-                time.sleep(2)
-                if not self.is_running(service_name):
-                    logger.error(f"{service_name} failed to stay running")
-                    self._emit('service_failed', service_name)
-                    return False
+            for elapsed in range(1, max_wait + 1):
+                time.sleep(1)
+                status = check_service(config.systemd_name)
 
-            # Log port readiness as informational (not a gate)
+                if status.available:
+                    service_up = True
+                    break
+
+                if status.state == _CheckState.FAILED:
+                    # Service crashed — log diagnostics immediately
+                    logger.warning(
+                        f"{service_name} crashed during startup (after {elapsed}s)"
+                    )
+                    self._log_journal_tail(service_name, lines=8)
+
+                    # One restart attempt (device node may now be ready)
+                    logger.info(f"Restarting {service_name}...")
+                    subprocess.run(
+                        ['systemctl', 'restart', config.systemd_name],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    # Wait for second attempt
+                    for _ in range(config.startup_delay):
+                        time.sleep(1)
+                        status = check_service(config.systemd_name)
+                        if status.available:
+                            service_up = True
+                            break
+                    if not service_up:
+                        logger.error(
+                            f"{service_name} failed to start after restart"
+                        )
+                        self._log_journal_tail(service_name, lines=8)
+                        self._emit('service_failed', service_name)
+                        return False
+                    break
+
+            if not service_up:
+                # Timed out — never became available or crashed
+                logger.error(
+                    f"{service_name} did not start within {max_wait}s"
+                )
+                self._log_journal_tail(service_name, lines=8)
+                self._emit('service_failed', service_name)
+                return False
+
+            # Port readiness check with retries (non-blocking, per SSOT)
             if config.check_port:
-                if self._check_port(config.check_port):
-                    logger.info(f"{service_name} port {config.check_port} ready")
-                else:
-                    logger.info(
-                        f"{service_name} running (port {config.check_port} not yet "
-                        f"bound — configure radio via web UI at port 9443)"
+                port_ready = False
+                for _ in range(5):
+                    if self._check_port(config.check_port):
+                        port_ready = True
+                        logger.info(
+                            f"{service_name} port {config.check_port} ready"
+                        )
+                        break
+                    time.sleep(1)
+
+                if not port_ready:
+                    logger.warning(
+                        f"{service_name} running but port {config.check_port} "
+                        f"not yet bound — may need more startup time or "
+                        f"radio configuration"
                     )
 
         logger.info(f"{service_name} started successfully")
