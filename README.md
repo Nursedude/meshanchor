@@ -30,13 +30,16 @@
 
 Plug in a LoRa radio, run the installer, and you get:
 - A **gateway** bridging Meshtastic and Reticulum via MQTT (zero interference)
-- **MeshChat** LXMF messaging with web UI — automated install from the TUI
 - **Live NOC maps** showing Meshtastic AND RNS nodes on one map
 - **Coverage maps** with SNR-based link quality
 - **Wireshark-grade packet inspection** for both networks
 - **RF engineering tools** for site planning
 - **meshtastic CLI** integration for radio config (transient, no interference)
 - **AI diagnostics** that work offline
+
+Optional add-ons (install from TUI when you need them):
+- **MeshChat** — LXMF messaging with web UI (Reticulum users)
+- **NomadNet** — terminal-based LXMF client (Reticulum users)
 
 ### The Vision
 
