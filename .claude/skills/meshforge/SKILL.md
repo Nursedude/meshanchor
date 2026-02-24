@@ -155,6 +155,6 @@ Critical resolved issues:
 ## For Detailed Reference
 
 - Architecture: `.claude/foundations/domain_architecture.md`
-- Timeline: `.claude/memory_timeline.md`
+- Index: `.claude/INDEX.md`
 - Research: `.claude/research/` directory
 - Knowledge Base: `src/utils/knowledge_base.py`

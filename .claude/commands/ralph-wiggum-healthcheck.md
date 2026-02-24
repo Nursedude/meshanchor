@@ -91,8 +91,8 @@ grep -r "gtk_ui\|GLib.idle_add\|main_web.py" .claude/ --include="*.md" -l
 # Version references — should all match src/__version__.py
 grep -rn "v0\.[0-4]\." .claude/ --include="*.md" | grep -v "archive\|timeline\|history\|postmortem\|article"
 
-# Session notes without date prefixes (naming convention: YYYY-MM-DD-topic.md)
-ls .claude/session-notes/ | grep -v "^[0-9]\{4\}-"
+# Archived session notes (moved to archive/ in dedup audit)
+# ls .claude/archive/session-notes/
 ```
 
 Cross-check:
