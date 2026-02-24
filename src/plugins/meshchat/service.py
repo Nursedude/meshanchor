@@ -78,7 +78,10 @@ class MeshChatService:
     # Installation hints
     INSTALL_URL = "https://github.com/liamcottle/reticulum-meshchat"
     INSTALL_HINT = (
-        "Install MeshChat:\n"
+        "Install MeshChat from TUI:\n"
+        "  Mesh Networks > RNS > MeshChat Client > Install MeshChat\n\n"
+        "Or manually:\n"
+        "  sudo apt install nodejs npm\n"
         "  git clone https://github.com/liamcottle/reticulum-meshchat\n"
         "  cd reticulum-meshchat\n"
         "  pip install -r requirements.txt\n"

@@ -230,6 +230,7 @@ class NomadNetClientMixin:
                 choices.append(("logs", "View NomadNet Logs"))
                 choices.append(("config", "View NomadNet Config"))
                 choices.append(("edit", "Edit NomadNet Config"))
+                choices.append(("uninstall", "Disable NomadNet"))
             else:
                 choices.append(("install", "Install NomadNet"))
 
@@ -254,6 +255,7 @@ class NomadNetClientMixin:
                 "config": ("View NomadNet Config", self._view_nomadnet_config),
                 "edit": ("Edit NomadNet Config", self._edit_nomadnet_config),
                 "install": ("Install NomadNet", self._install_nomadnet),
+                "uninstall": ("Disable NomadNet", self._uninstall_nomadnet),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -379,6 +381,11 @@ class NomadNetClientMixin:
         nn_path = self._find_nomadnet_binary()
         if not nn_path:
             return
+
+        # LXMF exclusivity: stop MeshChat if running (one at a time)
+        if hasattr(self, '_ensure_lxmf_exclusive'):
+            if not self._ensure_lxmf_exclusive("nomadnet"):
+                return
 
         # Fix ownership of user directories if they were created by root
         # This is a common issue when MeshForge runs with sudo
@@ -675,6 +682,11 @@ class NomadNetClientMixin:
             self.dialog.msgbox("Already Running", "NomadNet is already running.")
             return
 
+        # LXMF exclusivity: stop MeshChat if running (one at a time)
+        if hasattr(self, '_ensure_lxmf_exclusive'):
+            if not self._ensure_lxmf_exclusive("nomadnet"):
+                return
+
         # Fix ownership of user directories if they were created by root
         if not self._fix_user_directory_ownership():
             return
@@ -782,6 +794,64 @@ class NomadNetClientMixin:
                 self.dialog.msgbox("Warning", "NomadNet may still be running.\nTry: sudo pkill -9 -f nomadnet")
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to stop NomadNet:\n{e}")
+
+    # ------------------------------------------------------------------
+    # Uninstall (stop + disable)
+    # ------------------------------------------------------------------
+
+    def _uninstall_nomadnet(self):
+        """Stop NomadNet and leave it disabled.
+
+        Does not remove files — just stops the process and shows how
+        to reinstall later if desired.
+        """
+        if not self.dialog.yesno(
+            "Disable NomadNet",
+            "Stop NomadNet and disable it?\n\n"
+            "This will:\n"
+            "  - Stop NomadNet if running\n"
+            "  - Leave files in place\n\n"
+            "Reinstall later with: pipx install nomadnet\n\n"
+            "Disable now?",
+        ):
+            return
+
+        clear_screen()
+        print("=== Disabling NomadNet ===\n")
+
+        # Stop running processes
+        if self._is_nomadnet_running():
+            print("Stopping NomadNet...")
+            try:
+                subprocess.run(
+                    ['pkill', '-f', 'bin/nomadnet'],
+                    capture_output=True, timeout=10,
+                )
+                time.sleep(2)
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+            if self._is_nomadnet_running():
+                try:
+                    subprocess.run(
+                        ['pkill', '-9', '-f', 'bin/nomadnet'],
+                        capture_output=True, timeout=10,
+                    )
+                    time.sleep(1)
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+        if self._is_nomadnet_running():
+            print("NomadNet may still be running.")
+            print("Try: sudo pkill -9 -f nomadnet")
+        else:
+            print("NomadNet stopped.")
+
+        user_home = get_real_user_home()
+        print(f"\nConfig remains at: {user_home}/.nomadnetwork/")
+        print("Reinstall: pipx install nomadnet")
+
+        self._wait_for_enter()
 
     # ------------------------------------------------------------------
     # Config management
@@ -1413,7 +1483,6 @@ hide_guide = no
             # Fix ownership if running via sudo
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':
-                import subprocess
                 subprocess.run(
                     ['chown', f'{sudo_user}:{sudo_user}', str(config_path)],
                     capture_output=True, timeout=10
