@@ -1215,15 +1215,8 @@ class NomadNetClientMixin:
                     return False
 
         # Check if rnsd is running and get its user
-        try:
-            result = subprocess.run(
-                ['ps', '-o', 'user=', '-C', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            rnsd_user = result.stdout.strip() if result.returncode == 0 else None
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.debug("rnsd user detection failed: %s", e)
-            rnsd_user = None
+        # Uses shared helper from RNSDiagnosticsMixin (same MRO)
+        rnsd_user = self._get_rnsd_user()
 
         if not rnsd_user:
             # rnsd not running -- warn but allow proceeding
@@ -1361,76 +1354,8 @@ class NomadNetClientMixin:
         # rnsd running as correct user (or no sudo context)
         return True
 
-    def _fix_rnsd_user(self, target_user: str) -> bool:
-        """Configure rnsd systemd service to run as the specified user.
-
-        Creates a systemd override to set User= directive, then restarts rnsd.
-        This is the proper fix for the identity mismatch problem.
-        """
-        override_dir = Path('/etc/systemd/system/rnsd.service.d')
-        override_file = override_dir / 'user.conf'
-
-        self.dialog.infobox("Configuring rnsd", f"Setting rnsd to run as {target_user}...")
-
-        try:
-            # Create override directory
-            override_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write override config
-            override_content = f"""[Service]
-User={target_user}
-Group={target_user}
-"""
-            override_file.write_text(override_content)
-
-            # Reload systemd and restart rnsd
-            stop_service('rnsd')
-            subprocess.run(['pkill', '-f', 'rnsd'], capture_output=True, timeout=5)
-            time.sleep(1)
-            apply_config_and_restart('rnsd')
-            time.sleep(2)
-
-            # Verify it's running as the right user now
-            result = subprocess.run(
-                ['ps', '-o', 'user=', '-C', 'rnsd'],
-                capture_output=True, text=True, timeout=5
-            )
-            new_user = result.stdout.strip()
-
-            if new_user == target_user:
-                self.dialog.msgbox(
-                    "rnsd Fixed",
-                    f"rnsd is now running as {target_user}.\n\n"
-                    f"Override created: {override_file}\n\n"
-                    "NomadNet will now be able to connect via RPC.",
-                )
-                return True
-            else:
-                self.dialog.msgbox(
-                    "Fix May Have Failed",
-                    f"rnsd is running as '{new_user}' (expected '{target_user}').\n\n"
-                    f"Check: systemctl status rnsd\n"
-                    f"       cat {override_file}",
-                )
-                return True  # Let them try anyway
-
-        except PermissionError:
-            self.dialog.msgbox(
-                "Permission Denied",
-                f"Cannot write to {override_dir}\n\n"
-                "MeshForge needs to run with sudo to fix this.",
-            )
-            return False
-        except Exception as e:
-            self.dialog.msgbox(
-                "Configuration Failed",
-                f"Could not configure rnsd: {e}\n\n"
-                "Manual fix:\n"
-                f"  sudo systemctl edit rnsd\n"
-                f"  Add: [Service]\n"
-                f"       User={target_user}",
-            )
-            return False
+    # _fix_rnsd_user() lives in RNSDiagnosticsMixin (rns_diagnostics_mixin.py)
+    # and is accessible via self through Python MRO.
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
