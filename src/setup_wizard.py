@@ -35,6 +35,12 @@ from utils.service_check import (
 )
 
 from utils.paths import get_real_user_home, ReticulumPaths
+from utils.safe_import import safe_import
+
+# Deployment profiles (optional)
+_list_profiles, _save_profile, _detect_profile, _get_profile_by_name, _HAS_PROFILES = safe_import(
+    'utils.deployment_profiles', 'list_profiles', 'save_profile', 'detect_profile', 'get_profile_by_name'
+)
 
 
 class WizardServiceState(Enum):
@@ -441,6 +447,36 @@ class SetupWizard:
         if self.interactive:
             input("Press Enter to continue...")
 
+    def _select_deployment_profile(self):
+        """Ask user to select a deployment profile."""
+        if not _HAS_PROFILES:
+            self._log("Deployment profiles module not available, skipping")
+            return
+
+        self._print("\n=== Deployment Profile ===", "header")
+        self._print("Choose how you plan to use MeshForge:\n")
+
+        profiles = _list_profiles()
+        for i, p in enumerate(profiles, 1):
+            self._print(f"  {i}. {p.display_name:15s} {p.description}", "dim")
+        self._print(f"  a. Auto-detect       Let MeshForge detect your setup", "dim")
+
+        choices = [str(i) for i in range(1, len(profiles) + 1)] + ['a']
+        choice = self._ask("\nSelect profile", choices, 'a')
+
+        if choice == 'a':
+            profile = _detect_profile()
+            self._print(f"\nAuto-detected: {profile.display_name}", "success")
+        else:
+            idx = int(choice) - 1
+            profile = profiles[idx]
+            self._print(f"\nSelected: {profile.display_name}", "success")
+
+        _save_profile(profile)
+        self._record_decision("deployment", "Deployment profile?", profile.display_name,
+                              f"Saved as {profile.name.value}")
+        self._log(f"Deployment profile selected: {profile.display_name}")
+
     def run_interactive_setup(self):
         """Run the interactive setup wizard"""
         self._print("\n" + "="*60, "header")
@@ -449,6 +485,9 @@ class SetupWizard:
         self._print("\nThis wizard will detect installed services and guide you")
         self._print("through configuration options.\n")
         self._log("Starting interactive setup wizard")
+
+        # Step 1: Deployment profile selection
+        self._select_deployment_profile()
 
         # Detect services
         self.detect_services()

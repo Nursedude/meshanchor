@@ -152,7 +152,7 @@ class MeshForgeLauncher(
 ):
     """MeshForge launcher with raspi-config style interface."""
 
-    def __init__(self):
+    def __init__(self, profile=None):
         self.dialog = DialogBackend()
         self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
@@ -163,6 +163,18 @@ class MeshForgeLauncher(
         # Enhanced startup checker (v0.4.8)
         self._startup_checker = StartupChecker()
         self._env_state: Optional[EnvironmentState] = None
+        # Deployment profile for menu filtering
+        self._profile = profile
+        self._feature_flags = getattr(profile, 'feature_flags', {}) if profile else {}
+
+    def _feature_enabled(self, feature: str) -> bool:
+        """Check if a feature is enabled in the current deployment profile.
+
+        When no profile is set, all features are enabled (backward compatible).
+        """
+        if not self._feature_flags:
+            return True
+        return self._feature_flags.get(feature, True)
 
     @staticmethod
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
@@ -705,17 +717,21 @@ class MeshForgeLauncher(
                 ("1", "Dashboard           Status, health, alerts"),
                 ("2", "Mesh Networks       Meshtastic, RNS, AREDN"),
                 ("3", "RF & SDR            Calculators, SDR monitoring"),
-                ("4", "Maps & Viz          Coverage maps, topology"),
-                ("5", "Configuration       Radio, services, settings"),
-                ("6", "System              Hardware, logs, Linux tools"),
-                # Quick Access
-                ("t", "Tactical Ops        SITREP, zones, QR, ATAK"),
+            ]
+            if self._feature_enabled("maps"):
+                choices.append(("4", "Maps & Viz          Coverage maps, topology"))
+            choices.append(("5", "Configuration       Radio, services, settings"))
+            choices.append(("6", "System              Hardware, logs, Linux tools"))
+            # Quick Access
+            if self._feature_enabled("tactical"):
+                choices.append(("t", "Tactical Ops        SITREP, zones, QR, ATAK"))
+            choices.extend([
                 ("q", "Quick Actions       Common shortcuts"),
                 ("e", "Emergency Mode      Field operations"),
                 # Meta
                 ("a", "About               Version, help, web client"),
                 ("x", "Exit"),
-            ]
+            ])
 
             choice = self.dialog.menu(
                 f"MeshForge NOC v{__version__}",
@@ -813,20 +829,24 @@ class MeshForgeLauncher(
     def _mesh_networks_menu(self):
         """Mesh Networks - Meshtastic, RNS, AREDN."""
         while True:
-            choices = [
-                ("meshtastic", "Meshtastic          Radio, channels, CLI"),
-                ("meshcore", "MeshCore            Companion radio, config"),
-                ("rns", "RNS / Reticulum     Status, gateway, NomadNet"),
-                ("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"),
-                ("aredn", "AREDN Mesh          AREDN integration"),
-                ("messaging", "Messaging           Send/receive messages"),
-                ("traffic", "Traffic Classifier  Routing & notification stats"),
-                ("mqtt", "MQTT Monitor        Nodeless mesh observation"),
-                ("favorites", "Favorites           Manage favorite nodes"),
-                ("ham", "Ham Radio           Callsign, Part 97, ARES"),
-                ("services", "Service Control     Start/stop/restart"),
-                ("back", "Back"),
-            ]
+            choices = []
+            if self._feature_enabled("meshtastic"):
+                choices.append(("meshtastic", "Meshtastic          Radio, channels, CLI"))
+            if self._feature_enabled("meshcore"):
+                choices.append(("meshcore", "MeshCore            Companion radio, config"))
+            if self._feature_enabled("rns"):
+                choices.append(("rns", "RNS / Reticulum     Status, gateway, NomadNet"))
+            if self._feature_enabled("gateway"):
+                choices.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
+            choices.append(("aredn", "AREDN Mesh          AREDN integration"))
+            choices.append(("messaging", "Messaging           Send/receive messages"))
+            choices.append(("traffic", "Traffic Classifier  Routing & notification stats"))
+            if self._feature_enabled("mqtt"):
+                choices.append(("mqtt", "MQTT Monitor        Nodeless mesh observation"))
+            choices.append(("favorites", "Favorites           Manage favorite nodes"))
+            choices.append(("ham", "Ham Radio           Callsign, Part 97, ARES"))
+            choices.append(("services", "Service Control     Start/stop/restart"))
+            choices.append(("back", "Back"))
 
             choice = self.dialog.menu(
                 "Mesh Networks",
