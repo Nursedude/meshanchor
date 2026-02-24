@@ -447,26 +447,34 @@ class ServiceOrchestrator:
 
     def is_healthy(self, service_name: str) -> bool:
         """
-        Double-tap health check.
+        Service health = systemctl is-active.
 
-        First check: systemctl is-active
-        Second check: functional verification (port or command)
+        Port/command checks are readiness indicators, not health gates.
+        meshtasticd may be running (healthy) before port 4403 binds —
+        the user configures the radio via the web UI at port 9443.
+        For port readiness, use is_ready() instead.
+        """
+        return self.is_running(service_name)
+
+    def is_ready(self, service_name: str) -> bool:
+        """
+        Full readiness: service running AND port/command responding.
+
+        Use this when you need to verify the service is accepting
+        connections (e.g., before opening a TCP client to port 4403).
         """
         config = self.SERVICES.get(service_name)
         if not config:
             return False
 
-        # First tap: systemctl
         if not self.is_running(service_name):
             return False
 
-        # Second tap: functional check
         if config.check_port:
             return self._check_port(config.check_port)
         elif config.check_command:
             return self._check_command(config.check_command)
 
-        # No functional check defined, trust systemctl
         return True
 
     def _check_port(self, port: int, host: str = 'localhost', timeout: float = 2.0) -> bool:
@@ -522,15 +530,20 @@ class ServiceOrchestrator:
                 message=f"{service_name} is stopped"
             )
 
-        if not self.is_healthy(service_name):
-            return ServiceStatus(
-                name=service_name,
-                state=ServiceState.FAILED,
-                message=f"{service_name} running but not responding"
-            )
-
         # Get PID
         pid = self._get_pid(service_name)
+
+        # Port readiness is informational, not a failure state
+        if config.check_port and not self._check_port(config.check_port):
+            return ServiceStatus(
+                name=service_name,
+                state=ServiceState.RUNNING,
+                pid=pid,
+                message=(
+                    f"{service_name} is running "
+                    f"(port {config.check_port} not yet bound)"
+                )
+            )
 
         return ServiceStatus(
             name=service_name,
@@ -593,8 +606,8 @@ class ServiceOrchestrator:
                 logger.error("meshtasticd cannot start without a radio config")
                 return False
 
-        if self.is_healthy(service_name):
-            logger.info(f"{service_name} is already running and healthy")
+        if self.is_running(service_name):
+            logger.info(f"{service_name} is already running")
             return True
 
         logger.info(f"Starting {service_name}...")
@@ -613,14 +626,24 @@ class ServiceOrchestrator:
             # Wait for startup delay
             time.sleep(config.startup_delay)
 
-            # Verify health (double-tap)
-            if not self.is_healthy(service_name):
-                logger.warning(f"{service_name} started but not healthy, retrying check...")
-                time.sleep(2)  # One more try
-                if not self.is_healthy(service_name):
-                    logger.error(f"{service_name} failed health check")
+            # Verify service stayed running (systemctl only — not port)
+            if not self.is_running(service_name):
+                logger.warning(f"{service_name} started but not running, retrying...")
+                time.sleep(2)
+                if not self.is_running(service_name):
+                    logger.error(f"{service_name} failed to stay running")
                     self._emit('service_failed', service_name)
                     return False
+
+            # Log port readiness as informational (not a gate)
+            if config.check_port:
+                if self._check_port(config.check_port):
+                    logger.info(f"{service_name} port {config.check_port} ready")
+                else:
+                    logger.info(
+                        f"{service_name} running (port {config.check_port} not yet "
+                        f"bound — configure radio via web UI at port 9443)"
+                    )
 
         logger.info(f"{service_name} started successfully")
         self._emit('service_started', service_name)
@@ -711,8 +734,8 @@ class ServiceOrchestrator:
                     logger.warning(f"Skipping {service_name}: dependency {dep} not available")
                     dep_failed = True
                     break
-                if not self.is_healthy(dep):
-                    logger.warning(f"Skipping {service_name}: dependency {dep} not healthy")
+                if not self.is_running(dep):
+                    logger.warning(f"Skipping {service_name}: dependency {dep} not running")
                     dep_failed = True
                     break
 
@@ -833,8 +856,8 @@ class ServiceOrchestrator:
                 if not config or not config.required:
                     continue
 
-                if not self.is_healthy(service_name):
-                    logger.warning(f"{service_name} health check failed")
+                if not self.is_running(service_name):
+                    logger.warning(f"{service_name} not running")
 
                     if self.config.get('restart_on_failure', True):
                         max_attempts = self.config.get('max_restart_attempts', 3)
@@ -1016,7 +1039,10 @@ def main():
             }.get(status.state, '?')
             pid_str = f" (PID: {status.pid})" if status.pid else ""
             print(f"  {state_icon} {name}: {status.state.value}{pid_str}")
-            if status.message and status.state not in (ServiceState.RUNNING,):
+            if status.message and (
+                status.state != ServiceState.RUNNING
+                or "not yet bound" in status.message
+            ):
                 print(f"      {status.message}")
         print()
         sys.exit(0)
