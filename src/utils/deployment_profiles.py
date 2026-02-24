@@ -41,6 +41,7 @@ class ProfileName(Enum):
     RADIO_MAPS = "radio_maps"
     MONITOR = "monitor"
     MESHCORE = "meshcore"
+    MESHCHAT = "meshchat"
     GATEWAY = "gateway"
     FULL = "full"
 
@@ -111,6 +112,7 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "meshcore": False,
             "rns": False,
             "gateway": False,
+            "meshchat": False,
             "mqtt": False,
             "maps": True,
             "tactical": False,
@@ -129,6 +131,7 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "meshcore": False,
             "rns": False,
             "gateway": False,
+            "meshchat": False,
             "mqtt": True,
             "maps": False,
             "tactical": False,
@@ -147,8 +150,28 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "meshcore": True,
             "rns": False,
             "gateway": False,
+            "meshchat": False,
             "mqtt": False,
             "maps": False,
+            "tactical": False,
+        },
+    ),
+    ProfileName.MESHCHAT: ProfileDefinition(
+        name=ProfileName.MESHCHAT,
+        display_name="MeshChat",
+        description="Meshtastic <> RNS bridge with MeshChat LXMF messaging",
+        required_services=["meshtasticd", "rnsd"],
+        optional_services=["reticulum-meshchat", "meshchat"],
+        required_packages=["rich", "yaml", "requests", "RNS", "LXMF"],
+        optional_packages=["paho", "psutil", "folium"],
+        feature_flags={
+            "meshtastic": True,
+            "meshcore": False,
+            "rns": True,
+            "gateway": True,
+            "meshchat": True,
+            "mqtt": False,
+            "maps": True,
             "tactical": False,
         },
     ),
@@ -165,6 +188,7 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "meshcore": False,
             "rns": True,
             "gateway": True,
+            "meshchat": False,
             "mqtt": True,
             "maps": True,
             "tactical": True,
@@ -186,6 +210,7 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "meshcore": True,
             "rns": True,
             "gateway": True,
+            "meshchat": True,
             "mqtt": True,
             "maps": True,
             "tactical": True,
@@ -270,10 +295,11 @@ def detect_profile() -> ProfileDefinition:
 
     Detection priority (most specific first):
     1. Full — all 3 services running
-    2. Gateway — meshtasticd + rnsd running
-    3. MeshCore — meshcore package available
-    4. Monitor — paho-mqtt available, no radio services
-    5. Radio+Maps — meshtasticd running (fallback)
+    2. MeshChat — meshtasticd + rnsd + MeshChat port 8000
+    3. Gateway — meshtasticd + rnsd running
+    4. MeshCore — meshcore package available
+    5. Monitor — paho-mqtt available, no radio services
+    6. Radio+Maps — meshtasticd running (fallback)
 
     Returns the best-fit profile, defaulting to radio_maps.
     """
@@ -286,8 +312,15 @@ def detect_profile() -> ProfileDefinition:
         logger.info("Auto-detected profile: full (all services running)")
         return PROFILES[ProfileName.FULL]
 
-    # Gateway: meshtasticd + rnsd
+    # Gateway + MeshChat: meshtasticd + rnsd + MeshChat port 8000
     if has_meshtasticd and has_rnsd:
+        try:
+            from utils.service_check import check_port
+            if check_port(8000, '127.0.0.1'):
+                logger.info("Auto-detected profile: meshchat (gateway + meshchat)")
+                return PROFILES[ProfileName.MESHCHAT]
+        except Exception:
+            pass
         logger.info("Auto-detected profile: gateway (meshtasticd + rnsd)")
         return PROFILES[ProfileName.GATEWAY]
 
@@ -367,6 +400,7 @@ def list_profiles() -> List[ProfileDefinition]:
         PROFILES[ProfileName.RADIO_MAPS],
         PROFILES[ProfileName.MONITOR],
         PROFILES[ProfileName.MESHCORE],
+        PROFILES[ProfileName.MESHCHAT],
         PROFILES[ProfileName.GATEWAY],
         PROFILES[ProfileName.FULL],
     ]

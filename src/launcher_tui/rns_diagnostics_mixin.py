@@ -85,10 +85,10 @@ class RNSDiagnosticsMixin:
             except (OSError, PermissionError):
                 print("  Service file: could not read (check permissions)")
 
-        # Detect NomadNet conflict (common cause of rnsd crash-loops)
-        nomadnet_conflict = self._check_nomadnet_conflict()
-        if nomadnet_conflict:
-            print(f"  NomadNet: RUNNING (port conflict!)")
+        # Detect LXMF app conflict (common cause of rnsd crash-loops)
+        conflicting_app = self._check_lxmf_app_conflict()
+        if conflicting_app:
+            print(f"  {conflicting_app}: RUNNING (port conflict!)")
             # Show port 37428 owner for clarity
             try:
                 from utils.service_check import get_udp_port_owner
@@ -1027,6 +1027,10 @@ class RNSDiagnosticsMixin:
                 f"= auth failure\n"
             )
             nomadnet_installed = bool(shutil.which('nomadnet'))
+            meshchat_installed = (
+                hasattr(self, '_is_meshchat_installed')
+                and self._is_meshchat_installed()
+            )
             menu_items = [
                 ("fix", f"Fix rnsd to run as {sudo_user} (recommended)"),
             ]
@@ -1034,6 +1038,11 @@ class RNSDiagnosticsMixin:
                 menu_items.append(
                     ("nomadnet",
                      "Stop rnsd — let NomadNet manage RNS"),
+                )
+            if meshchat_installed:
+                menu_items.append(
+                    ("meshchat",
+                     "Stop rnsd — let MeshChat manage RNS"),
                 )
             menu_items.append(("skip", "Skip (show diagnostics)"))
 
@@ -1049,7 +1058,8 @@ class RNSDiagnosticsMixin:
                 if self._fix_rnsd_user(sudo_user):
                     print("\nRetry: RNS > Status from the menu.")
                 return
-            elif choice == "nomadnet":
+            elif choice in ("nomadnet", "meshchat"):
+                app_name = "NomadNet" if choice == "nomadnet" else "MeshChat"
                 self.dialog.infobox(
                     "Stopping rnsd",
                     "Stopping rnsd service...",
@@ -1062,11 +1072,11 @@ class RNSDiagnosticsMixin:
                 time.sleep(1)
                 self.dialog.msgbox(
                     "rnsd Stopped",
-                    "rnsd has been stopped.\n\n"
-                    "NomadNet will start its own RNS instance.\n"
-                    "The gateway bridge will connect to NomadNet's\n"
-                    "shared instance as a client.\n\n"
-                    "Note: RNS is only available while NomadNet runs.",
+                    f"rnsd has been stopped.\n\n"
+                    f"{app_name} will start its own RNS instance.\n"
+                    f"The gateway bridge will connect to {app_name}'s\n"
+                    f"shared instance as a client.\n\n"
+                    f"Note: RNS is only available while {app_name} runs.",
                 )
                 return
             elif choice is None:
@@ -1120,6 +1130,38 @@ class RNSDiagnosticsMixin:
             return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
             return False
+
+    def _check_lxmf_app_conflict(self) -> Optional[str]:
+        """Check if an LXMF app (NomadNet or MeshChat) holds port 37428.
+
+        Both NomadNet and MeshChat can create their own RNS shared instance,
+        which conflicts with rnsd if both try to bind port 37428.
+
+        Returns the app name if conflict detected, None otherwise.
+        """
+        # Check NomadNet
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'nomadnet'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return "NomadNet"
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # Check MeshChat
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'meshchat'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return "MeshChat"
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        return None
 
     def _check_rns_interface_health(self):
         """Run rnstatus and parse per-interface TX/RX counters.
@@ -1207,23 +1249,25 @@ class RNSDiagnosticsMixin:
     def _diagnose_rns_port_conflict(self):
         """Diagnose and offer to fix RNS port conflicts from the TUI."""
         try:
-            # Check NomadNet first — most common cause of port conflicts
-            if self._check_nomadnet_conflict():
-                print("CAUSE: NomadNet is running and owns port 37428.")
-                print("rnsd can't start because NomadNet has the port.\n")
+            # Check LXMF apps — most common cause of port conflicts
+            conflicting_app = self._check_lxmf_app_conflict()
+            if conflicting_app:
+                app_lower = conflicting_app.lower()
+                print(f"CAUSE: {conflicting_app} is running and owns port 37428.")
+                print(f"rnsd can't start because {conflicting_app} has the port.\n")
 
                 if self.dialog.yesno(
                     "Fix Port Conflict",
-                    "NomadNet is holding port 37428.\n\n"
-                    "MeshForge can fix this:\n"
-                    "  1. Stop NomadNet\n"
-                    "  2. Start rnsd (becomes shared instance)\n"
-                    "  3. Restart NomadNet (connects as client)\n\n"
-                    "Fix now?"
+                    f"{conflicting_app} is holding port 37428.\n\n"
+                    f"MeshForge can fix this:\n"
+                    f"  1. Stop {conflicting_app}\n"
+                    f"  2. Start rnsd (becomes shared instance)\n"
+                    f"  3. Restart {conflicting_app} (connects as client)\n\n"
+                    f"Fix now?"
                 ):
-                    print("Stopping NomadNet...")
+                    print(f"Stopping {conflicting_app}...")
                     subprocess.run(
-                        ['pkill', '-f', 'nomadnet'],
+                        ['pkill', '-f', app_lower],
                         capture_output=True, timeout=5
                     )
                     time.sleep(1)
@@ -1232,12 +1276,7 @@ class RNSDiagnosticsMixin:
                     start_service('rnsd')
                     time.sleep(2)
 
-                    print("Restarting NomadNet as client...")
-                    subprocess.run(
-                        ['systemctl', '--user', 'start', 'nomadnet'],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    print("Done. Startup order: rnsd -> NomadNet -> MeshForge\n")
+                    print(f"Done. Startup order: rnsd -> {conflicting_app} -> MeshForge\n")
                 return
 
             rnsd_running = check_process_running('rnsd')

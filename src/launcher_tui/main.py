@@ -72,6 +72,7 @@ from quick_actions_mixin import QuickActionsMixin
 from emergency_mode_mixin import EmergencyModeMixin
 from rns_interfaces_mixin import RNSInterfacesMixin
 from nomadnet_client_mixin import NomadNetClientMixin
+from meshchat_client_mixin import MeshChatClientMixin
 from topology_mixin import TopologyMixin
 from rf_awareness_mixin import RFAwarenessMixin
 from metrics_mixin import MetricsMixin
@@ -118,6 +119,7 @@ class MeshForgeLauncher(
     EmergencyModeMixin,
     RNSInterfacesMixin,
     NomadNetClientMixin,
+    MeshChatClientMixin,
     TopologyMixin,
     RFAwarenessMixin,
     MetricsMixin,
@@ -835,7 +837,7 @@ class MeshForgeLauncher(
             if self._feature_enabled("meshcore"):
                 choices.append(("meshcore", "MeshCore            Companion radio, config"))
             if self._feature_enabled("rns"):
-                choices.append(("rns", "RNS / Reticulum     Status, gateway, NomadNet"))
+                choices.append(("rns", "RNS / Reticulum     Status, gateway, messaging"))
             if self._feature_enabled("gateway"):
                 choices.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
             choices.append(("aredn", "AREDN Mesh          AREDN integration"))
