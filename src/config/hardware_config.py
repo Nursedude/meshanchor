@@ -626,7 +626,7 @@ class HardwareConfigurator:
             console.print(f"\n[green]Copied: {src.name} -> config.d/[/green]")
 
             if Confirm.ask("Edit the config file now?", default=False):
-                subprocess.run(_sudo_cmd(['nano', str(dst)]))  # Interactive, no timeout
+                subprocess.run(_sudo_cmd(['nano', str(dst)]), timeout=None)  # Interactive editor
 
             if Confirm.ask("Restart meshtasticd to apply?", default=False):
                 success, msg = apply_config_and_restart('meshtasticd')
@@ -685,7 +685,7 @@ class HardwareConfigurator:
             console.print("[red]Invalid input[/red]")
             return
 
-        subprocess.run(_sudo_cmd(['nano', str(cfg_path)]))  # Interactive editor, no timeout
+        subprocess.run(_sudo_cmd(['nano', str(cfg_path)]), timeout=None)  # Interactive editor
 
         # Validate YAML
         console.print("\n[cyan]Validating YAML syntax...[/cyan]")
