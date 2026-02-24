@@ -25,6 +25,13 @@ from commands.rns import (
 )
 from utils.config_drift import detect_rnsd_config_drift
 
+# Error patterns indicating RNS shared instance connectivity failure.
+# Used in _run_rns_tool() for both initial detection and retry validation.
+_RNS_SHARED_ERRORS = (
+    "no shared", "could not connect", "could not get",
+    "shared instance", "authenticationerror", "digest",
+)
+
 
 class RNSDiagnosticsMixin:
     """Mixin providing RNS diagnostics and tool execution functionality."""
@@ -737,10 +744,7 @@ class RNSDiagnosticsMixin:
             # Check for error patterns BEFORE returncode — rnstatus returns
             # exit code 0 even when the shared instance is unreachable.
             lower_combined = combined.lower()
-            has_shared_error = any(p in lower_combined for p in (
-                "no shared", "could not connect", "could not get",
-                "shared instance", "authenticationerror", "digest",
-            ))
+            has_shared_error = any(p in lower_combined for p in _RNS_SHARED_ERRORS)
 
             if "address already in use" in lower_combined:
                 # Suppress noisy traceback, show actionable diagnostics
@@ -779,14 +783,33 @@ class RNSDiagnosticsMixin:
                             print("Starting rnsd...")
                             if self._wait_for_rns_shared_instance(max_wait=10):
                                 print(f"rnsd started. Retrying {tool_name}...\n")
-                                retry_result = subprocess.run(
-                                    cmd, capture_output=True, text=True, timeout=15
-                                )
-                                if retry_result.returncode == 0 and retry_result.stdout:
-                                    print(retry_result.stdout, end='')
+                                # rnsd creates the socket before fully
+                                # initializing. Retry with stabilization
+                                # delays to handle the startup race.
+                                retry_combined = ""
+                                for attempt in range(3):
+                                    if attempt > 0:
+                                        time.sleep(2)
+                                    retry_result = subprocess.run(
+                                        cmd, capture_output=True,
+                                        text=True, timeout=15,
+                                    )
+                                    retry_combined = (
+                                        (retry_result.stdout or "")
+                                        + (retry_result.stderr or "")
+                                    )
+                                    retry_has_error = any(
+                                        p in retry_combined.lower()
+                                        for p in _RNS_SHARED_ERRORS
+                                    )
+                                    if (retry_result.returncode == 0
+                                            and retry_result.stdout
+                                            and not retry_has_error):
+                                        print(retry_result.stdout, end='')
+                                        break
                                 else:
                                     self._diagnose_rns_connectivity(
-                                        (retry_result.stdout or "") + (retry_result.stderr or "")
+                                        retry_combined
                                     )
                             else:
                                 print("rnsd started but shared instance not available.")
@@ -803,18 +826,33 @@ class RNSDiagnosticsMixin:
                     print("rnsd is running — waiting for shared instance...")
                     port_ready = self._wait_for_rns_shared_instance()
                     if port_ready:
-                        # Shared instance came up — retry the tool
+                        # Shared instance socket detected — but rnsd may still
+                        # be initializing (crypto, interfaces). Retry with
+                        # stabilization delays to handle the startup race.
                         print(f"Shared instance ready. Retrying {tool_name}...\n")
-                        retry_result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=15
-                        )
-                        if retry_result.returncode == 0 and retry_result.stdout:
-                            print(retry_result.stdout, end='')
-                        else:
-                            # Port is up but tool still fails — auth or config issue
-                            self._diagnose_rns_connectivity(
-                                (retry_result.stdout or "") + (retry_result.stderr or "")
+                        retry_combined = ""
+                        for attempt in range(3):
+                            if attempt > 0:
+                                time.sleep(2)
+                            retry_result = subprocess.run(
+                                cmd, capture_output=True, text=True, timeout=15
                             )
+                            retry_combined = (
+                                (retry_result.stdout or "")
+                                + (retry_result.stderr or "")
+                            )
+                            retry_has_error = any(
+                                p in retry_combined.lower()
+                                for p in _RNS_SHARED_ERRORS
+                            )
+                            if (retry_result.returncode == 0
+                                    and retry_result.stdout
+                                    and not retry_has_error):
+                                print(retry_result.stdout, end='')
+                                break
+                        else:
+                            # All retries exhausted — show diagnostics
+                            self._diagnose_rns_connectivity(retry_combined)
                     else:
                         # Port never came up — show diagnostics
                         self._diagnose_rns_connectivity(combined)
