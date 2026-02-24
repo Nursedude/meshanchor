@@ -918,11 +918,14 @@ def main():
     if args.start or not any([args.stop, args.restart, args.status, args.install, args.config]):
         success = orch.startup(graceful=args.graceful)
         if (success or args.graceful) and args.monitor:
+            import threading
+            _stop_event = threading.Event()
             orch.start_monitoring()
             try:
-                while True:
-                    time.sleep(1)
+                while not _stop_event.is_set():
+                    _stop_event.wait(1)
             except KeyboardInterrupt:
+                _stop_event.set()
                 orch.shutdown()
         sys.exit(0 if success else 1)
 

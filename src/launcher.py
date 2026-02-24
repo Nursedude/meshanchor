@@ -22,6 +22,11 @@ __version__ = _version_val if _HAS_VERSION else "0.5.0-beta"
 
 from utils.paths import get_real_user_home
 
+# Deployment profiles
+load_or_detect_profile, get_profile_by_name, _HAS_PROFILES = safe_import(
+    'utils.deployment_profiles', 'load_or_detect_profile', 'get_profile_by_name'
+)
+
 # NOC orchestrator for service management
 ServiceOrchestrator, ServiceState, _HAS_ORCHESTRATOR = safe_import(
     'core.orchestrator', 'ServiceOrchestrator', 'ServiceState'
@@ -144,8 +149,12 @@ def print_banner():
 {Colors.NC}""")
 
 
-def show_startup_health():
-    """Show startup health summary."""
+def show_startup_health(profile=None):
+    """Show startup health summary.
+
+    Args:
+        profile: Optional deployment profile for context-aware health check.
+    """
     if not _HAS_HEALTH_CHECK:
         return
 
@@ -153,7 +162,7 @@ def show_startup_health():
     print()
 
     try:
-        health = run_health_check()
+        health = run_health_check(profile=profile)
         summary = print_health_summary(health, use_color=True)
         print(summary)
     except Exception as e:
@@ -425,6 +434,20 @@ def main():
     if '--tui' in sys.argv:
         launch_interface('1')
 
+    # Load deployment profile (--profile <name> or auto-detect)
+    profile = None
+    if _HAS_PROFILES:
+        for i, arg in enumerate(sys.argv):
+            if arg == '--profile' and i + 1 < len(sys.argv):
+                profile = get_profile_by_name(sys.argv[i + 1])
+                if profile:
+                    print(f"{Colors.GREEN}Profile: {profile.display_name}{Colors.NC}")
+                else:
+                    print(f"{Colors.YELLOW}Unknown profile '{sys.argv[i + 1]}', auto-detecting...{Colors.NC}")
+                break
+        if profile is None:
+            profile = load_or_detect_profile()
+
     # Start NOC services if in local mode
     if '--no-services' not in sys.argv:
         start_noc_services()
@@ -455,7 +478,7 @@ def main():
         subprocess.run(['clear'] if os.name == 'posix' else ['cls'], check=False, timeout=5)
 
         print_banner()
-        show_startup_health()
+        show_startup_health(profile=profile)
 
         env = detect_environment()
         print_environment_info(env)
