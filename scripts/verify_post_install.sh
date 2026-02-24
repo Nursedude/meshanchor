@@ -98,6 +98,17 @@ check_skip() {
     log "  ${CYAN}[SKIP]${NC} $name - $reason"
 }
 
+check_info() {
+    local name="$1"
+    local detail="$2"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+    RESULTS+=("{\"check\":\"$name\",\"status\":\"info\",\"detail\":\"$detail\"}")
+    log "  ${CYAN}[INFO]${NC} $name"
+    if [[ -n "$detail" ]]; then
+        log "        ${CYAN}$detail${NC}"
+    fi
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Header
 # ─────────────────────────────────────────────────────────────────
@@ -246,9 +257,12 @@ log ""
 # ─────────────────────────────────────────────────────────────────
 log "${BOLD}[4/6] Service Status${NC}"
 
+MESHTASTICD_RUNNING=false
+
 # Check meshtasticd service
 if systemctl is-active --quiet meshtasticd 2>/dev/null; then
     check_pass "meshtasticd service" "Running"
+    MESHTASTICD_RUNNING=true
 elif systemctl is-enabled --quiet meshtasticd 2>/dev/null; then
     check_warn "meshtasticd service" "Enabled but not running" "Start: sudo systemctl start meshtasticd"
 else
@@ -256,10 +270,28 @@ else
 fi
 
 # Check if port 4403 is listening (meshtasticd TCP)
+# Retry when service is running but port hasn't bound yet (startup race)
+PORT_4403_OK=false
 if ss -tlnp 2>/dev/null | grep -q ":4403 "; then
+    PORT_4403_OK=true
+elif $MESHTASTICD_RUNNING; then
+    for _attempt in 1 2 3; do
+        sleep 1
+        if ss -tlnp 2>/dev/null | grep -q ":4403 "; then
+            PORT_4403_OK=true
+            break
+        fi
+    done
+fi
+
+if $PORT_4403_OK; then
     check_pass "Port 4403 (TCP)" "meshtasticd TCP interface listening"
+elif $MESHTASTICD_RUNNING; then
+    check_warn "Port 4403 (TCP)" "Not listening yet" \
+        "Service is running but TCP port may need more startup time. Check: sudo journalctl -u meshtasticd -f"
 else
-    check_warn "Port 4403 (TCP)" "Not listening" "meshtasticd may not be running or configured"
+    check_warn "Port 4403 (TCP)" "Not listening" \
+        "meshtasticd is not running. Start: sudo systemctl start meshtasticd"
 fi
 
 # Web client is on port 9443 (HTTPS, checked in Section 6)
@@ -335,11 +367,18 @@ for dev in /dev/ttyUSB* /dev/ttyACM*; do
 done
 
 if ! $RADIO_FOUND; then
-    check_warn "Radio hardware" "No SPI or USB radio detected" \
-        "Connect USB radio or enable SPI for HAT"
-    log "  Available USB templates: heltec-usb, meshstick-usb, meshtoad-usb,"
-    log "    rak4631-usb, station-g2-usb, tbeam-usb, usb-serial-generic"
-    log "  Select in TUI: Configuration > Hardware Config"
+    if $MESHTASTICD_RUNNING && [[ "$ACTIVE_COUNT" -gt 0 ]]; then
+        # Service is running with active config — hardware not visible but
+        # likely working (common in containers or when device managed by daemon)
+        check_info "Radio hardware" \
+            "No /dev device visible but meshtasticd is running with active config ($ACTIVE_NAME)"
+    else
+        check_warn "Radio hardware" "No SPI or USB radio detected" \
+            "Connect USB radio or enable SPI for HAT"
+        log "  Available USB templates: heltec-usb, meshstick-usb, meshtoad-usb,"
+        log "    rak4631-usb, station-g2-usb, tbeam-usb, usb-serial-generic"
+        log "  Select in TUI: Configuration > Hardware Config"
+    fi
 fi
 
 # Check udev rules
