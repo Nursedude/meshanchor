@@ -37,7 +37,7 @@ from utils.safe_import import safe_import
 _yaml, _HAS_YAML = safe_import('yaml')
 # Import centralized port checker for consistency across MeshForge
 # See: utils/service_check.py - SINGLE SOURCE OF TRUTH
-from utils.service_check import check_port as _centralized_check_port
+from utils.service_check import check_port as _centralized_check_port, check_service
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -328,18 +328,13 @@ class ServiceOrchestrator:
         return config.systemd_name in result.stdout
 
     def is_running(self, service_name: str) -> bool:
-        """Check if service is running (systemctl is-active)."""
+        """Check if service is running via check_service() (SSOT)."""
         config = self.SERVICES.get(service_name)
         if not config:
             return False
 
-        result = subprocess.run(
-            ['systemctl', 'is-active', config.systemd_name],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return result.returncode == 0
+        status = check_service(config.systemd_name)
+        return status.available
 
     def is_healthy(self, service_name: str) -> bool:
         """

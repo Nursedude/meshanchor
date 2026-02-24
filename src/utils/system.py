@@ -532,13 +532,24 @@ def get_service_status(service_name: str) -> str:
 
 
 def is_service_running(service_name: str) -> bool:
-    """Check if a systemd service is running"""
+    """Check if a systemd service is running.
+
+    .. deprecated::
+        Prefer ``check_service()`` from ``utils.service_check`` (SINGLE SOURCE
+        OF TRUTH for service management). This wrapper is kept for installer
+        compatibility in minimal environments.
+    """
     is_running, is_enabled = check_systemd_service(service_name)
     return is_running
 
 
 def enable_service(service_name: str) -> bool:
-    """Enable and start a systemd service
+    """Enable and start a systemd service.
+
+    .. deprecated::
+        Prefer ``enable_service()`` / ``start_service()`` from
+        ``utils.service_check`` (SINGLE SOURCE OF TRUTH). This wrapper is
+        kept for installer compatibility in minimal environments.
 
     Args:
         service_name: Name of the systemd service (validated, no shell chars)
@@ -550,7 +561,12 @@ def enable_service(service_name: str) -> bool:
 
 
 def restart_service(service_name: str) -> bool:
-    """Restart a systemd service
+    """Restart a systemd service.
+
+    .. deprecated::
+        Prefer ``restart_service()`` from ``utils.service_check`` (SINGLE
+        SOURCE OF TRUTH). This wrapper is kept for installer compatibility
+        in minimal environments.
 
     Args:
         service_name: Name of the systemd service (validated, no shell chars)
