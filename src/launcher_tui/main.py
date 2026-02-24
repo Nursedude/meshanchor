@@ -41,7 +41,7 @@ from utils.cli import find_meshtastic_cli
 from utils.active_health_probe import get_health_probe
 from utils import config_api as config_api_mod
 from utils.service_check import lock_port_external
-from utils.topology_visualizer import TopologyVisualizer
+# TopologyVisualizer imported in topology_mixin.py (export functions moved there)
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
@@ -951,79 +951,6 @@ class MeshForgeLauncher(
             entry = dispatch.get(choice)
             if entry:
                 self._safe_call(*entry)
-
-    def _export_data_menu(self):
-        """Export data in various formats."""
-        while True:
-            choices = [
-                ("geojson", "GeoJSON             For mapping tools"),
-                ("csv", "CSV                 Spreadsheet format"),
-                ("graphml", "GraphML             For graph analysis"),
-                ("d3", "D3.js JSON          For web visualization"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Export Data",
-                "Export network data:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            dispatch = {
-                "geojson": ("GeoJSON Export", lambda: self._export_topology_data("geojson")),
-                "csv": ("CSV Export", lambda: self._export_topology_data("csv")),
-                "graphml": ("GraphML Export", lambda: self._export_topology_data("graphml")),
-                "d3": ("D3.js Export", lambda: self._export_topology_data("d3")),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
-
-    def _export_topology_data(self, format_type: str):
-        """Export topology data in specified format."""
-        try:
-            # Get topology from TopologyMixin (properly populated)
-            topology = self._get_topology()
-            if topology is None:
-                self.dialog.msgbox(
-                    "Export Unavailable",
-                    "Network topology not loaded.\n\n"
-                    "The gateway service may need to be running."
-                )
-                return
-
-            # Create visualizer from actual topology data
-            viz = TopologyVisualizer.from_topology(topology)
-
-            if format_type == "geojson":
-                path, count = viz.export_geojson()
-                self.dialog.msgbox(
-                    "GeoJSON Export",
-                    f"Exported {count} features.\n\nFile: {path}"
-                )
-            elif format_type == "csv":
-                nodes_path, edges_path = viz.export_csv()
-                self.dialog.msgbox(
-                    "CSV Export",
-                    f"Exported CSV files:\n\nNodes: {nodes_path}\nEdges: {edges_path}"
-                )
-            elif format_type == "graphml":
-                path, count = viz.export_graphml()
-                self.dialog.msgbox(
-                    "GraphML Export",
-                    f"Exported {count} edges.\n\nFile: {path}"
-                )
-            elif format_type == "d3":
-                path, count = viz.export_d3_json()
-                self.dialog.msgbox(
-                    "D3.js Export",
-                    f"Exported {count} nodes + links.\n\nFile: {path}"
-                )
-        except Exception as e:
-            self.dialog.msgbox("Export Failed", f"Error: {e}")
 
     # --- NEW Submenu: Configuration (5) ---
 

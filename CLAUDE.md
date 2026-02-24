@@ -75,7 +75,10 @@ src/
 │   ├── message_routing.py     # 3-way routing classifier (alpha branch)
 │   └── message_queue.py # Persistent message queue (SQLite)
 ├── monitoring/        # Network monitoring
-│   └── mqtt_subscriber.py # Nodeless MQTT monitoring
+│   ├── mqtt_subscriber.py # Nodeless MQTT monitoring
+│   ├── node_monitor.py    # Node status tracking
+│   ├── traffic_inspector.py # Packet capture & analysis
+│   └── packet_dissectors.py # Protocol-specific packet parsing
 ├── plugins/           # Protocol plugins
 │   └── meshcore.py    # MeshCore plugin (alpha branch)
 ├── utils/             # RF tools, common utilities
