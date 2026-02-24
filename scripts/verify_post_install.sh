@@ -275,8 +275,8 @@ PORT_4403_OK=false
 if ss -tlnp 2>/dev/null | grep -q ":4403 "; then
     PORT_4403_OK=true
 elif $MESHTASTICD_RUNNING; then
-    for _attempt in 1 2 3; do
-        sleep 1
+    for _attempt in 1 2 3 4 5; do
+        sleep 2
         if ss -tlnp 2>/dev/null | grep -q ":4403 "; then
             PORT_4403_OK=true
             break
