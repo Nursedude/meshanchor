@@ -1126,13 +1126,26 @@ SUPPORT:
 
     # --- Config Menu - meshtasticd config.d/ management ---
 
+    def _ensure_meshtasticd_config(self):
+        """Auto-create /etc/meshtasticd structure and templates if missing."""
+        try:
+            from core.meshtasticd_config import MeshtasticdConfig
+            MeshtasticdConfig().ensure_structure()
+        except PermissionError:
+            logger.debug("Cannot auto-create meshtasticd config (no root)")
+        except Exception as e:
+            logger.debug("meshtasticd config auto-create failed: %s", e)
+
     def _config_menu(self):
         """Configuration management for meshtasticd."""
+        # Auto-create /etc/meshtasticd structure if missing
+        self._ensure_meshtasticd_config()
+
         while True:
             choices = [
                 ("view", "View Active Config"),
                 ("overlays", "View config.d/ Overlays"),
-                ("available", "Available HAT Configs"),
+                ("available", "Available Hardware Configs"),
                 ("presets", "LoRa Presets"),
                 ("channels", "Channel Configuration"),
                 ("meshtasticd", "Advanced meshtasticd Config"),
@@ -1153,7 +1166,7 @@ SUPPORT:
             dispatch = {
                 "view": ("View Active Config", self._view_active_config),
                 "overlays": ("Config Overlays", self._view_config_overlays),
-                "available": ("Available HAT Configs", self._view_available_hats),
+                "available": ("Available Hardware Configs", self._view_available_configs),
                 "presets": ("LoRa Presets", self._radio_presets_menu),
                 "channels": ("Channel Config", self._channel_config_menu),
                 "meshtasticd": ("Advanced Config", self._meshtasticd_menu),
@@ -1170,6 +1183,11 @@ SUPPORT:
         print("=== meshtasticd config.yaml ===\n")
 
         config_path = Path('/etc/meshtasticd/config.yaml')
+
+        # Auto-create if missing
+        if not config_path.exists():
+            self._ensure_meshtasticd_config()
+
         if config_path.exists():
             print(f"File: {config_path}\n")
             try:
@@ -1177,32 +1195,42 @@ SUPPORT:
             except PermissionError:
                 print("Permission denied. Try: sudo cat /etc/meshtasticd/config.yaml")
         else:
-            print("config.yaml not found!")
-            print("\nInstall meshtasticd:")
-            print("  sudo apt install meshtasticd")
-            print("  # or run the MeshForge installer")
+            print("config.yaml not found!\n")
+            print("Run MeshForge with sudo to auto-create:")
+            print("  sudo python3 src/launcher_tui/main.py")
+            print("\nOr create manually:")
+            print("  sudo mkdir -p /etc/meshtasticd/{available.d,config.d}")
+            print("  sudo cp templates/config.yaml /etc/meshtasticd/")
+            print("  sudo cp templates/available.d/*.yaml /etc/meshtasticd/available.d/")
 
         self._wait_for_enter()
 
     def _view_config_overlays(self):
-        """Show config.d/ overlay files."""
+        """Show config.d/ overlay files (active hardware configs)."""
         clear_screen()
-        print("=== config.d/ Overlays ===\n")
+        print("=== config.d/ Active Hardware Configs ===\n")
 
         config_d = Path('/etc/meshtasticd/config.d')
+
+        # Auto-create if missing
+        if not config_d.exists():
+            self._ensure_meshtasticd_config()
+
         if not config_d.exists():
             print("config.d/ directory not found.")
-            print("Create it: sudo mkdir -p /etc/meshtasticd/config.d")
+            print("\nRun with sudo to auto-create, or:")
+            print("  sudo mkdir -p /etc/meshtasticd/config.d")
             self._wait_for_enter()
             return
 
         overlays = sorted(config_d.glob('*.yaml'))
         if not overlays:
-            print("No overlay files in config.d/")
-            print("\nOverlays override sections from config.yaml")
-            print("MeshForge writes here instead of touching config.yaml")
+            print("No active hardware configs in config.d/\n")
+            print("Select your hardware from:")
+            print("  Configuration > Available Hardware Configs")
+            print("  Configuration > Advanced meshtasticd Config > Hardware Config")
         else:
-            print(f"Found {len(overlays)} overlay(s):\n")
+            print(f"Found {len(overlays)} active config(s):\n")
             for f in overlays:
                 size = f.stat().st_size
                 print(f"  {f.name} ({size} bytes)")
@@ -1218,32 +1246,54 @@ SUPPORT:
 
         self._wait_for_enter()
 
-    def _view_available_hats(self):
-        """Show available HAT configurations from meshtasticd package."""
+    def _view_available_configs(self):
+        """Show available hardware configs (USB + SPI HATs)."""
         clear_screen()
-        print("=== Available HAT Configs ===\n")
+        print("=== Available Hardware Configs ===\n")
 
         available_d = Path('/etc/meshtasticd/available.d')
+
+        # Auto-create if missing
         if not available_d.exists():
-            print("available.d/ not found.")
-            print("meshtasticd package should provide this.")
-            print("\nInstall: sudo apt install meshtasticd")
+            self._ensure_meshtasticd_config()
+
+        if not available_d.exists():
+            print("available.d/ not found.\n")
+            print("Run with sudo to auto-create, or:")
+            print("  sudo mkdir -p /etc/meshtasticd/available.d")
+            print("  sudo cp templates/available.d/*.yaml /etc/meshtasticd/available.d/")
             self._wait_for_enter()
             return
 
         configs = sorted(available_d.glob('*.yaml'))
         if not configs:
-            print("No HAT configs available.")
+            print("No hardware configs available.")
         else:
-            print(f"Found {len(configs)} HAT config(s):\n")
-            for i, f in enumerate(configs, 1):
-                print(f"  {i:2d}. {f.name}")
+            # Categorize USB vs SPI
+            usb_configs = [f for f in configs if '-usb' in f.stem or f.stem.startswith('usb-')]
+            spi_configs = [f for f in configs if f not in usb_configs]
 
-            print("\nTo activate a HAT config:")
-            print("  sudo cp /etc/meshtasticd/available.d/<file>.yaml \\")
-            print("         /etc/meshtasticd/config.d/")
-            print("  sudo systemctl restart meshtasticd")
-            print("\nWARNING: Only ONE Lora config should be in config.d/")
+            if usb_configs:
+                print(f"USB Radios ({len(usb_configs)}):")
+                for i, f in enumerate(usb_configs, 1):
+                    print(f"  {i:2d}. {f.stem}")
+
+            if spi_configs:
+                if usb_configs:
+                    print()
+                print(f"SPI HATs ({len(spi_configs)}):")
+                for i, f in enumerate(spi_configs, 1):
+                    print(f"  {i:2d}. {f.stem}")
+
+            # Show active
+            config_d = Path('/etc/meshtasticd/config.d')
+            if config_d.exists():
+                active = list(config_d.glob('*.yaml'))
+                if active:
+                    print(f"\nActive: {', '.join(f.stem for f in active)}")
+
+            print(f"\nTotal: {len(configs)} templates")
+            print("\nActivate via: Configuration > Advanced meshtasticd Config > Hardware Config")
 
         self._wait_for_enter()
 
