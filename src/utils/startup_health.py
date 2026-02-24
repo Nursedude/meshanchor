@@ -54,6 +54,7 @@ class HardwareHealth:
     device_name: str = ""
     device_type: str = ""  # "spi", "usb", "unknown"
     port: str = ""
+    template_match: str = ""  # Matched template filename from available.d
 
 
 @dataclass
@@ -251,9 +252,57 @@ def detect_hardware() -> HardwareHealth:
             hardware.port = str(usb_devices[0])
             hardware.device_name = "USB Serial Radio"
             hardware.detected = True
+
+            # Try to identify specific device using USB vendor:product IDs
+            usb_id = _get_usb_vendor_product(usb_devices[0])
+            if usb_id:
+                try:
+                    from config.hardware import HardwareDetector
+                    device_name = HardwareDetector.get_device_name_for_usb_id(usb_id)
+                    if device_name:
+                        hardware.device_name = device_name
+                    template = HardwareDetector.match_usb_to_template(usb_id)
+                    if template:
+                        hardware.template_match = template
+                except ImportError:
+                    logger.debug("config.hardware not available for USB identification")
+
             break
 
     return hardware
+
+
+def _get_usb_vendor_product(dev_path: Path) -> Optional[str]:
+    """Get USB vendor:product ID for a serial device using udevadm.
+
+    Args:
+        dev_path: Path to /dev/ttyUSB* or /dev/ttyACM* device
+
+    Returns:
+        USB ID string like '303a:1001' or None if unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ['udevadm', 'info', '--query=property', str(dev_path)],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return None
+
+        vendor = None
+        product = None
+        for line in result.stdout.splitlines():
+            if line.startswith('ID_VENDOR_ID='):
+                vendor = line.split('=', 1)[1].strip()
+            elif line.startswith('ID_MODEL_ID='):
+                product = line.split('=', 1)[1].strip()
+
+        if vendor and product:
+            return f"{vendor}:{product}"
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("udevadm query failed for %s: %s", dev_path, e)
+
+    return None
 
 
 def get_node_count() -> int:
@@ -394,7 +443,10 @@ def print_health_summary(summary: HealthSummary, use_color: bool = True) -> str:
 
     # Hardware section
     if summary.hardware.detected:
-        lines.append(f"  {GREEN}✓{RESET} Hardware: {summary.hardware.device_name} detected")
+        hw_line = f"  {GREEN}✓{RESET} Hardware: {summary.hardware.device_name} detected"
+        if summary.hardware.template_match:
+            hw_line += f" (template: {summary.hardware.template_match})"
+        lines.append(hw_line)
     else:
         lines.append(f"  {YELLOW}⚠{RESET} Hardware: No radio detected")
 
