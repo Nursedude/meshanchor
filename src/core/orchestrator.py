@@ -37,7 +37,11 @@ from utils.safe_import import safe_import
 _yaml, _HAS_YAML = safe_import('yaml')
 # Import centralized port checker for consistency across MeshForge
 # See: utils/service_check.py - SINGLE SOURCE OF TRUTH
-from utils.service_check import check_port as _centralized_check_port, check_service
+from utils.service_check import (
+    check_port as _centralized_check_port,
+    check_service,
+    _detect_radio_hardware,
+)
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -281,6 +285,111 @@ class ServiceOrchestrator:
             )
             logger.info("Configured for Python meshtastic CLI (USB radio)")
 
+    def _check_meshtasticd_config(self) -> bool:
+        """Check that meshtasticd has a radio config in config.d/.
+
+        Without a radio config template, meshtasticd starts but never binds
+        TCP port 4403 — causing health checks to fail.
+
+        If config.d/ is empty, attempts auto-detection of connected hardware
+        and deploys the matching template.
+
+        Returns:
+            True if config.d/ has at least one config (or was auto-populated).
+        """
+        config_d = MESHTASTICD_CONFIG_DIR / "config.d"
+        available_d = MESHTASTICD_CONFIG_DIR / "available.d"
+
+        # Check if config.d/ already has configs
+        if config_d.exists():
+            existing = list(config_d.glob("*.yaml"))
+            if existing:
+                return True
+
+        logger.warning("No radio config in /etc/meshtasticd/config.d/")
+        logger.info("Attempting auto-detection of radio hardware...")
+
+        # Detect hardware
+        hw = _detect_radio_hardware()
+
+        if not available_d.exists():
+            logger.error(
+                "No templates in /etc/meshtasticd/available.d/ — "
+                "reinstall meshtasticd or run install_noc.sh"
+            )
+            return False
+
+        template_name = None
+
+        # USB auto-detection via vendor:product ID → template mapping
+        if hw['has_usb']:
+            try:
+                from config.hardware import HardwareDetector
+                # Get USB vendor:product ID for first device
+                usb_dev = Path(hw['usb_device'])
+                usb_id_result = subprocess.run(
+                    ['udevadm', 'info', '--query=property', str(usb_dev)],
+                    capture_output=True, text=True, timeout=5
+                )
+                vendor = product = None
+                for line in usb_id_result.stdout.splitlines():
+                    if line.startswith('ID_VENDOR_ID='):
+                        vendor = line.split('=', 1)[1].strip()
+                    elif line.startswith('ID_MODEL_ID='):
+                        product = line.split('=', 1)[1].strip()
+
+                if vendor and product:
+                    usb_id = f"{vendor}:{product}"
+                    template_name = HardwareDetector.match_usb_to_template(usb_id)
+                    if template_name:
+                        device_name = HardwareDetector.get_device_name_for_usb_id(usb_id) or usb_id
+                        logger.info(f"Detected USB radio: {device_name} → {template_name}")
+            except (ImportError, subprocess.SubprocessError, OSError) as e:
+                logger.debug(f"USB auto-detection failed: {e}")
+
+            # Fallback: use usb-serial-generic.yaml
+            if not template_name:
+                template_name = 'usb-serial-generic.yaml'
+                logger.info(f"USB device found at {hw['usb_device']} — using {template_name}")
+
+        # SPI auto-detection: look for first matching SPI template
+        elif hw['has_spi']:
+            spi_templates = list(available_d.glob("*-spi.yaml")) + list(available_d.glob("*-hat*.yaml"))
+            if spi_templates:
+                template_name = spi_templates[0].name
+                logger.info(f"SPI device detected — using {template_name}")
+
+        if not template_name:
+            logger.error(
+                "No radio hardware detected (no SPI or USB devices). "
+                "meshtasticd cannot bind port 4403 without a radio config."
+            )
+            logger.error(
+                "Fix: cp /etc/meshtasticd/available.d/<your-radio>.yaml "
+                "/etc/meshtasticd/config.d/"
+            )
+            return False
+
+        # Deploy the template
+        template_path = available_d / template_name
+        if not template_path.exists():
+            logger.error(f"Template not found: {template_path}")
+            return False
+
+        try:
+            config_d.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(str(template_path), str(config_d / template_name))
+            logger.info(f"Auto-deployed radio config: {template_name} → config.d/")
+            return True
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to deploy config: {e}")
+            logger.error(
+                "Fix: sudo cp /etc/meshtasticd/available.d/"
+                f"{template_name} /etc/meshtasticd/config.d/"
+            )
+            return False
+
     def get_config_info(self) -> Dict[str, Any]:
         """Get current configuration information."""
         return {
@@ -477,6 +586,12 @@ class ServiceOrchestrator:
         if not self.is_installed(service_name):
             logger.error(f"{service_name} is not installed")
             return False
+
+        # Pre-start: ensure meshtasticd has a radio config in config.d/
+        if service_name == 'meshtasticd' and config.check_port:
+            if not self._check_meshtasticd_config():
+                logger.error("meshtasticd cannot start without a radio config")
+                return False
 
         if self.is_healthy(service_name):
             logger.info(f"{service_name} is already running and healthy")
