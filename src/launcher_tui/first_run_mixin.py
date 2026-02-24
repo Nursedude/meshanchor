@@ -279,7 +279,17 @@ class FirstRunMixin:
             desc += "  Raspberry Pi detected (SPI can be enabled)\n"
 
         if usb_devices:
-            desc += f"  {len(usb_devices)} USB serial device(s) found\n"
+            # Show specific device names when possible
+            device_names = []
+            for dev in usb_devices:
+                name = dev.get('name', 'Unknown')
+                if name and name != 'Unknown':
+                    device_names.append(name)
+
+            if device_names:
+                desc += f"  USB detected: {', '.join(device_names[:3])}\n"
+            else:
+                desc += f"  {len(usb_devices)} USB serial device(s) found\n"
 
         desc += "\nSelect your connection type:"
 
@@ -419,8 +429,62 @@ class FirstRunMixin:
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to apply config: {e}")
 
+    def _detect_usb_device_template(self) -> 'tuple[Optional[str], Optional[str]]':
+        """Auto-detect connected USB radio and match to a template.
+
+        Uses DeviceScanner to find USB devices, then matches vendor:product
+        IDs against HardwareDetector.USB_ID_TO_TEMPLATE.
+
+        Returns:
+            Tuple of (template_filename, device_name) or (None, None).
+        """
+        try:
+            from config.hardware import HardwareDetector
+        except ImportError:
+            logger.debug("config.hardware not available for USB auto-detect")
+            return None, None
+
+        try:
+            scanner = DeviceScanner()
+            results = scanner.scan_all()
+
+            # Check USB devices for known vendor:product IDs
+            for dev in results.get('usb_devices', []):
+                vid = getattr(dev, 'vendor_id', '')
+                pid = getattr(dev, 'product_id', '')
+                if vid and pid:
+                    usb_id = f"{vid}:{pid}"
+                    template = HardwareDetector.match_usb_to_template(usb_id)
+                    if template:
+                        device_name = HardwareDetector.get_device_name_for_usb_id(usb_id)
+                        if not device_name:
+                            device_name = getattr(dev, 'description', 'Unknown USB device')
+                        return template, device_name
+
+            # Fallback: check serial ports for USB IDs
+            for port in results.get('serial_ports', []):
+                vid = getattr(port, 'usb_vendor', '')
+                pid = getattr(port, 'usb_product', '')
+                if vid and pid:
+                    usb_id = f"{vid}:{pid}"
+                    template = HardwareDetector.match_usb_to_template(usb_id)
+                    if template:
+                        device_name = HardwareDetector.get_device_name_for_usb_id(usb_id)
+                        if not device_name:
+                            device_name = getattr(port, 'description', 'Unknown USB device')
+                        return template, device_name
+
+        except Exception as e:
+            logger.debug("USB auto-detect failed: %s", e)
+
+        return None, None
+
     def _wizard_step_usb_config(self):
-        """Configure USB serial connection using templates from available.d."""
+        """Configure USB serial connection using templates from available.d.
+
+        Enhanced: auto-detects connected USB device and recommends the
+        matching template before falling back to the full template list.
+        """
         self._ensure_template_structure()
 
         config_d = Path('/etc/meshtasticd/config.d')
@@ -430,7 +494,25 @@ class FirstRunMixin:
         if not self._check_existing_configs(config_d, 'USB'):
             return
 
-        # Get USB templates from available.d
+        # --- Auto-detect connected USB radio ---
+        matched_template, device_name = self._detect_usb_device_template()
+
+        if matched_template and available_d.exists():
+            src = available_d / matched_template
+            if src.exists():
+                apply_auto = self.dialog.yesno(
+                    "USB Radio Detected!",
+                    f"Detected: {device_name}\n"
+                    f"Recommended template: {matched_template}\n\n"
+                    f"Apply this configuration now?\n\n"
+                    f"(Select No to choose a different template)"
+                )
+                if apply_auto:
+                    self._apply_hardware_config_from_file(src, config_d)
+                    return
+                # User declined — fall through to full template list
+
+        # --- Full template list (original behavior) ---
         usb_templates, _ = self._classify_templates(available_d)
 
         if usb_templates:
@@ -445,14 +527,20 @@ class FirstRunMixin:
                 status = " [ACTIVE]" if is_active else ""
                 # Create readable name: "heltec-usb" -> "Heltec Usb"
                 display_name = tmpl.stem.replace('-', ' ').title()
-                choices.append((tmpl.name, f"{display_name}{status}"))
+                # Mark recommended template if detected
+                recommend = " [DETECTED]" if tmpl.name == matched_template else ""
+                choices.append((tmpl.name, f"{display_name}{status}{recommend}"))
 
             choices.append(("custom", "Custom USB Device (manual path)"))
 
+            desc = "Select your USB radio from meshtasticd templates:\n\n"
+            if matched_template:
+                desc += f"Detected device: {device_name}\n"
+            desc += f"Templates: {available_d}"
+
             choice = self.dialog.menu(
                 "Step 2: Select USB Hardware",
-                "Select your USB radio from meshtasticd templates:\n\n"
-                f"Templates: {available_d}",
+                desc,
                 choices
             )
 
