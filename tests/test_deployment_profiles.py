@@ -36,9 +36,9 @@ class TestProfileDefinitions:
         names = [p.name for p in PROFILES.values()]
         assert len(names) == len(set(names))
 
-    def test_five_profiles_defined(self):
-        """Exactly 5 profiles should be defined."""
-        assert len(PROFILES) == 5
+    def test_six_profiles_defined(self):
+        """Exactly 6 profiles should be defined."""
+        assert len(PROFILES) == 6
 
     def test_all_profile_names_in_enum(self):
         """All ProfileName enum values should have a corresponding profile."""
@@ -95,10 +95,10 @@ class TestProfileDefinitions:
                     f"{profile.name}.feature_flags[{key}] = {val!r} is not bool"
                 )
 
-    def test_gateway_flag_only_in_gateway_and_full(self):
-        """Gateway feature should only be enabled in gateway and full profiles."""
+    def test_gateway_flag_only_in_gateway_meshchat_and_full(self):
+        """Gateway feature should only be enabled in gateway, meshchat, and full profiles."""
         for name, profile in PROFILES.items():
-            if name in (ProfileName.GATEWAY, ProfileName.FULL):
+            if name in (ProfileName.GATEWAY, ProfileName.MESHCHAT, ProfileName.FULL):
                 assert profile.feature_flags.get("gateway") is True
             else:
                 assert profile.feature_flags.get("gateway") is False
@@ -264,10 +264,10 @@ class TestProfileLookup:
         assert get_profile_by_name("nonexistent") is None
         assert get_profile_by_name("") is None
 
-    def test_list_profiles_returns_all_five(self):
-        """list_profiles returns all 5 profiles."""
+    def test_list_profiles_returns_all_six(self):
+        """list_profiles returns all 6 profiles."""
         profiles = list_profiles()
-        assert len(profiles) == 5
+        assert len(profiles) == 6
 
     def test_list_profiles_order(self):
         """list_profiles returns profiles in display order."""

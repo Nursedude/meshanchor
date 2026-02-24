@@ -29,6 +29,13 @@ if not _HAS_MESHCHAT:
     MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
         'src.plugins.meshchat', 'MeshChatService', 'ServiceState'
     )
+MeshChatClient, _HAS_MESHCHAT_CLIENT = safe_import(
+    'plugins.meshchat.client', 'MeshChatClient'
+)
+if not _HAS_MESHCHAT_CLIENT:
+    MeshChatClient, _HAS_MESHCHAT_CLIENT = safe_import(
+        'src.plugins.meshchat.client', 'MeshChatClient'
+    )
 
 
 class CheckStatus(Enum):
@@ -92,6 +99,7 @@ class GatewayDiagnostic:
 
         # Optional integrations
         self.results.append(self.check_meshchat())
+        self.results.append(self.check_meshchat_rns_integration())
 
         # Connection checks
         conn_types = self.detect_connection_types()
@@ -565,6 +573,51 @@ class GatewayDiagnostic:
         except Exception as e:
             return CheckResult(
                 name="MeshChat (Optional)",
+                status=CheckStatus.SKIP,
+                message=f"Check skipped: {e}"
+            )
+
+    def check_meshchat_rns_integration(self) -> CheckResult:
+        """Check if MeshChat is properly connected to RNS (optional)."""
+        if not _HAS_MESHCHAT_CLIENT:
+            return CheckResult(
+                name="MeshChat-RNS Link",
+                status=CheckStatus.SKIP,
+                message="MeshChat client not available"
+            )
+
+        try:
+            client = MeshChatClient(timeout=3)
+            if not client.is_available():
+                return CheckResult(
+                    name="MeshChat-RNS Link",
+                    status=CheckStatus.SKIP,
+                    message="MeshChat not running"
+                )
+
+            mc_status = client.get_status()
+            if mc_status.rns_connected:
+                details = []
+                if mc_status.peer_count:
+                    details.append(f"{mc_status.peer_count} peers")
+                if mc_status.message_count:
+                    details.append(f"{mc_status.message_count} messages")
+                detail_str = f" ({', '.join(details)})" if details else ""
+                return CheckResult(
+                    name="MeshChat-RNS Link",
+                    status=CheckStatus.PASS,
+                    message=f"Connected to RNS{detail_str}"
+                )
+            else:
+                return CheckResult(
+                    name="MeshChat-RNS Link",
+                    status=CheckStatus.FAIL,
+                    message="MeshChat running but RNS not connected",
+                    fix_hint="Check that rnsd is running with share_instance = Yes"
+                )
+        except Exception as e:
+            return CheckResult(
+                name="MeshChat-RNS Link",
                 status=CheckStatus.SKIP,
                 message=f"Check skipped: {e}"
             )
