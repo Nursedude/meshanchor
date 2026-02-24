@@ -3,7 +3,7 @@
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
 >
-> **Last audited**: 2026-02-21 — Security & code review (v0.5.4-beta): 0 linter violations, 3 LOW fixes (stderr handle, file URI encoding), SECURITY.md rewrite, doc freshness updates
+> **Last audited**: 2026-02-24 — Security & QA sweep (v0.5.4-beta): GTK4 remnant removed from plugin_base.py, raw systemctl bypasses fixed in orchestrator + installer, safe_import violation fixed, main.py trimmed below 1500 via export extraction to topology_mixin, line counts refreshed, H1 fully resolved
 
 ---
 
@@ -21,9 +21,10 @@ issues. After auditing the current codebase, here is their status:
 | C5 | Atomic write uses deterministic temp path | **FIXED** | `paths.py` uses `tempfile.mkstemp()` for unique temp files |
 | H1 | Non-interruptible shutdown in daemon loops | **FIXED** (2026-02-20) | All daemon loops now use `_stop_event.wait()` instead of `time.sleep()` |
 
-**Key lesson**: File-scoped fixes applied between Jan 24 — Feb 20 resolved C2-C5 individually,
-but the pattern-scoped approach recommended by the health check (grep codebase for all instances)
-was only partially followed for H1. Four files still have blocking `time.sleep()` in daemon loops.
+**Key lesson**: File-scoped fixes applied between Jan 24 — Feb 20 resolved C2-C5 individually.
+H1 was fully resolved by Feb 20 — all daemon loops now use `_stop_event.wait()`. Remaining
+`time.sleep()` calls (49 files) are in bounded connection-wait loops, one-shot delays, and
+interactive pauses, which are acceptable patterns.
 
 ---
 
@@ -227,7 +228,7 @@ def test_rns(self): ...  # Now _HAS_RNS is True
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-02-23, refreshed)
+### Current Status (2026-02-24, refreshed)
 
 **Python files over 1,500 lines:**
 
@@ -236,19 +237,19 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 | `src/utils/knowledge_content.py` | 1,993 | OK | Content file by design - no split needed |
 | `src/gateway/rns_bridge.py` | 1,599 | MONITOR | MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
 | `src/utils/prometheus_exporter.py` | 1,521 | MONITOR | Grew after metrics_export split |
-| `src/launcher_tui/nomadnet_client_mixin.py` | 1,519 | MONITOR | Stable |
 | `src/utils/service_check.py` | 1,515 | MONITOR | Growing — watch for extraction candidates |
+| `src/launcher_tui/nomadnet_client_mixin.py` | 1,505 | MONITOR | Stable |
 | `src/commands/rns.py` | 1,505 | MONITOR | Stable |
 
 **Under threshold (previously tracked):**
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `src/launcher_tui/rns_menu_mixin.py` | 1,496 | Grew after extractions but still under 1,500 |
-| `src/launcher_tui/main.py` | 1,489 | 43 mixins, under threshold |
+| `src/launcher_tui/rns_menu_mixin.py` | 1,498 | Grew slightly but still under 1,500 |
 | `src/launcher_tui/service_menu_mixin.py` | 1,487 | Dropped below threshold |
 | `src/utils/map_http_handler.py` | 1,475 | Under threshold |
 | `src/utils/map_data_collector.py` | 1,475 | Under threshold |
+| `src/launcher_tui/main.py` | 1,463 | Trimmed 2026-02-24: export functions → topology_mixin |
 | `src/utils/config_api.py` | 1,316 | Well under threshold |
 
 **Previously over threshold (NOW RESOLVED):**
