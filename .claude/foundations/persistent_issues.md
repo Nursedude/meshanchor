@@ -269,9 +269,8 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 
 | File | Lines | Action |
 |------|-------|--------|
-| `.claude/dude_ai_university.md` | 1,180 | Consider splitting by topic |
+| `.claude/dude_ai_university.md` | ~200 | Trimmed in dedup audit (2026-02-23) |
 | `.claude/foundations/persistent_issues.md` | 1,165 | Stable after archiving resolved issues |
-| `.claude/foundations/ai_development_practices.md` | 1,069 | Review for outdated content |
 
 ### Remaining Extraction Candidates
 
