@@ -903,8 +903,11 @@ class RNSDiagnosticsMixin:
                 ['ps', '-o', 'user=', '-C', 'rnsd'],
                 capture_output=True, text=True, timeout=5
             )
-            user = result.stdout.strip() if result.returncode == 0 else ''
-            return user if user else None
+            if result.returncode != 0:
+                return None
+            # Take first line only — multiple rnsd processes may exist
+            lines = result.stdout.strip().splitlines()
+            return lines[0].strip() if lines else None
         except (subprocess.SubprocessError, OSError):
             return None
 
@@ -915,6 +918,14 @@ class RNSDiagnosticsMixin:
         This is the proper fix for the identity mismatch problem where rnsd
         runs as root but user tools expect a different RNS identity.
         """
+        # Validate username to prevent systemd directive injection
+        if not re.match(r'^[a-z_][a-z0-9_.-]{0,31}$', target_user):
+            self.dialog.msgbox(
+                "Invalid Username",
+                f"'{target_user}' is not a valid Linux username.",
+            )
+            return False
+
         override_dir = Path('/etc/systemd/system/rnsd.service.d')
         override_file = override_dir / 'user.conf'
 
@@ -1058,6 +1069,8 @@ class RNSDiagnosticsMixin:
                     "Note: RNS is only available while NomadNet runs.",
                 )
                 return
+            elif choice is None:
+                return  # User cancelled
             # "skip" falls through to existing diagnostics
 
         # Check for blocking interfaces (most common root cause)
