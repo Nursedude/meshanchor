@@ -60,16 +60,177 @@ class RadioConfig:
     config_file: Optional[str] = None
 
 
-# Default config templates for common radios
+# Default config templates for all supported radios
+# GPIO pins sourced from src/config/hardware.py KNOWN_SPI_HATS / KNOWN_USB_MODULES
 RADIO_TEMPLATES = {
+    # ─────────────────────────────────────────────
+    # USB Radios (run own firmware, managed via serial)
+    # ─────────────────────────────────────────────
+    "heltec-usb": {
+        "name": "heltec-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "Heltec V3/V4 USB (ESP32-S3, 28dBm TX, gateway)",
+        "config": """\
+# Heltec V3/V4 USB Radio Configuration
+# Chipset: ESP32-S3 (USB CDC)
+# V4 supports 28dBm TX power. Gateway capable.
+# Power: 500mA typical, 1A peak (V4 at max TX)
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "station-g2-usb": {
+        "name": "station-g2-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "Station G2 USB (CP2102, gateway, PoE)",
+        "config": """\
+# Station G2 USB Radio Configuration
+# Chipset: CP2102 USB-Serial
+# Gateway capable. PoE option available.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "tbeam-usb": {
+        "name": "tbeam-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "LILYGO T-Beam S3 USB (CH9102, GPS, gateway)",
+        "config": """\
+# LILYGO T-Beam S3 USB Radio Configuration
+# Chipset: CH9102 USB-Serial
+# Built-in GPS. Gateway capable.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "rak4631-usb": {
+        "name": "rak4631-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "RAK4631 USB (nRF52840 + SX1262, ultra-low power)",
+        "config": """\
+# RAK4631 USB Radio Configuration
+# Chipset: nRF52840 + SX1262
+# Ultra-low power. Flash via UF2.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "meshtoad-usb": {
+        "name": "meshtoad-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "MeshToad/MeshTadpole USB (CH340, MtnMesh)",
+        "config": """\
+# MeshToad / MeshTadpole USB Radio Configuration
+# Chipset: CH340/CH341 USB-Serial
+# MtnMesh devices. 900mA peak power draw.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "meshstick-usb": {
+        "name": "meshstick-usb",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "MeshStick USB (official Meshtastic device)",
+        "config": """\
+# MeshStick USB Radio Configuration
+# Official Meshtastic USB device.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "usb-serial-generic": {
+        "name": "usb-serial-generic",
+        "radio_type": RadioType.USB_SERIAL,
+        "description": "Generic USB Serial Radio (FTDI/FT232, fallback)",
+        "config": """\
+# Generic USB Serial Radio Configuration
+# For FTDI (FT232) and other USB-serial LoRa boards.
+# Use as fallback when your specific device is not listed.
+
+Serial:
+  Device: auto
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    # ─────────────────────────────────────────────
+    # SPI HATs (GPIO-connected, native meshtasticd)
+    # ─────────────────────────────────────────────
     "meshtoad-spi": {
         "name": "meshtoad-spi",
         "radio_type": RadioType.NATIVE_SPI,
         "chip": "sx1262",
         "description": "Meshtoad/MeshStick SPI Radio (SX1262 via CH341)",
-        "config": """# Meshtoad / MeshStick SPI Radio Configuration
+        "config": """\
+# Meshtoad / MeshStick SPI Radio Configuration
 # Uses CH341 USB-to-SPI adapter with SX1262
-# Reference: https://github.com/markbirss/MESHSTICK
 
 Lora:
   Module: sx1262
@@ -80,39 +241,315 @@ Lora:
   Busy: 4
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "meshadv-pi-hat": {
+        "name": "meshadv-pi-hat",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshAdv-Pi-Hat 1W (SX1262, GPS, high-power)",
+        "config": """\
+# MeshAdv-Pi-Hat SPI Configuration (1W High-Power)
+# Hardware: E22-900M30S/33S (SX1262), +33dBm (1W)
+# Features: GPS (ATGM336H), I2C/Qwiic, PPS
+
+Lora:
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  RXen: 12
+  TXen: 13
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+GPS:
+  SerialPath: /dev/ttyS0
+
+I2C:
+  I2CDevice: /dev/i2c-1
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "meshadv-mini": {
+        "name": "meshadv-mini",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshAdv-Mini (SX1262, GPS, +22dBm)",
+        "config": """\
+# MeshAdv-Mini SPI Configuration
+# Hardware: SX1262/SX1268, +22dBm
+# Features: GPS, Temperature Sensor, PWM Fan, I2C/Qwiic
+
+Lora:
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+  RXen: 12
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+GPS:
+  SerialPath: /dev/ttyS0
+
+I2C:
+  I2CDevice: /dev/i2c-1
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "meshadv-pi-v1.1": {
+        "name": "meshadv-pi-v1.1",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshAdv-Pi v1.1 (SX1262)",
+        "config": """\
+# MeshAdv-Pi v1.1 SPI Configuration
+# Hardware: SX1262
+
+Lora:
+  CS: 8
+  IRQ: 22
+  Busy: 23
+  Reset: 24
+  DIO2_AS_RF_SWITCH: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "waveshare-sx1262": {
+        "name": "waveshare-sx1262",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Waveshare SX1262 LoRa HAT",
+        "config": """\
+# Waveshare SX1262 LoRa HAT SPI Configuration
+
+Lora:
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  DIO2_AS_RF_SWITCH: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
 """
     },
     "rak-hat-spi": {
         "name": "rak-hat-spi",
         "radio_type": RadioType.NATIVE_SPI,
         "chip": "sx1262",
-        "description": "RAK WisLink SPI HAT (SX1262)",
-        "config": """# RAK WisLink SPI HAT Configuration
-# Direct GPIO connection on Raspberry Pi
+        "description": "RAK WisLink / RAK2287 SPI HAT (SX1262)",
+        "config": """\
+# RAK WisLink / RAK2287 SPI HAT Configuration
 
 Lora:
-  Module: sx1262
-  CS: 0
-  IRQ: 22
-  Busy: 23
-  Reset: 24
+  CS: 8
+  IRQ: 25
+  Busy: 24
+  Reset: 17
+  DIO2_AS_RF_SWITCH: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
 
 Logging:
   LogLevel: info
 """
     },
-    "usb-serial": {
-        "name": "usb-serial",
-        "radio_type": RadioType.USB_SERIAL,
-        "description": "USB Serial Radio (T-Beam, Heltec, etc.)",
-        "config": """# USB Serial Radio Configuration
-# For radios connected via USB (T-Beam, Heltec, RAK USB)
+    "adafruit-rfm9x": {
+        "name": "adafruit-rfm9x",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1276",
+        "description": "Adafruit RFM9x LoRa Radio Bonnet (SX1276)",
+        "config": """\
+# Adafruit RFM9x LoRa Radio Bonnet SPI Configuration
+# Hardware: SX1276 (RFM95/RFM96) — no Busy pin
 
-# Serial device will be auto-detected
-# Common paths: /dev/ttyUSB0, /dev/ttyACM0
+Lora:
+  Module: sx1276
+  CS: 7
+  IRQ: 25
+  Reset: 17
 
-Serial:
-  Device: auto  # or specify: /dev/ttyUSB0
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "femtofox": {
+        "name": "femtofox",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "FemtoFox LoRa Board (compact SX1262)",
+        "config": """\
+# FemtoFox LoRa Board SPI Configuration
+
+Lora:
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "ebyte-e22-900m30s": {
+        "name": "ebyte-e22-900m30s",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Ebyte E22-900M30S 1W (SX1262, 915MHz)",
+        "config": """\
+# Ebyte E22-900M30S SPI Configuration (1W, 915MHz)
+# WARNING: High-power module — requires adequate power supply.
+
+Lora:
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  RXen: 12
+  TXen: 13
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "ebyte-e22-400m30s": {
+        "name": "ebyte-e22-400m30s",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1268",
+        "description": "Ebyte E22-400M30S 1W (SX1268, 433MHz EU/Asia)",
+        "config": """\
+# Ebyte E22-400M30S SPI Configuration (1W, 433MHz EU/Asia)
+# WARNING: High-power module — requires adequate power supply.
+
+Lora:
+  Module: sx1268
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  RXen: 12
+  TXen: 13
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "elecrow-rfm95": {
+        "name": "elecrow-rfm95",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1276",
+        "description": "Elecrow RFM95 LoRa HAT (SX1276)",
+        "config": """\
+# Elecrow RFM95 LoRa HAT SPI Configuration
+# Hardware: SX1276 (RFM95) — no Busy pin
+
+Lora:
+  Module: sx1276
+  CS: 25
+  IRQ: 5
+  Reset: 17
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "seeed-sensecap": {
+        "name": "seeed-sensecap",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Seeed SenseCAP E5 LoRa HAT (SX1262)",
+        "config": """\
+# Seeed SenseCAP E5 LoRa HAT SPI Configuration
+
+Lora:
+  CS: 8
+  IRQ: 25
+  Reset: 22
+  DIO2_AS_RF_SWITCH: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
 
 Logging:
   LogLevel: info
@@ -127,10 +564,9 @@ class MeshtasticdConfig:
 
     Directory structure:
         /etc/meshtasticd/
-        ├── available.d/     # Available radio configs
-        │   ├── meshtoad-spi.yaml
-        │   ├── rak-hat-spi.yaml
-        │   └── usb-serial.yaml
+        ├── available.d/     # Available radio configs (19 templates)
+        │   ├── heltec-usb.yaml, tbeam-usb.yaml, ...  (7 USB)
+        │   └── meshtoad-spi.yaml, rak-hat-spi.yaml, ... (12 SPI)
         ├── config.d/        # Enabled configs (symlinks to available.d)
         │   └── active.yaml -> ../available.d/meshtoad-spi.yaml
         ├── config.yaml      # Main config (merged from config.d)

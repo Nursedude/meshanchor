@@ -413,6 +413,16 @@ Press Cancel to keep current values."""
 
     def _hardware_config_menu(self):
         """Hardware configuration selection."""
+        # Auto-create directory structure and templates if missing
+        try:
+            from core.meshtasticd_config import MeshtasticdConfig
+            config_mgr = MeshtasticdConfig()
+            config_mgr.ensure_structure()
+        except PermissionError:
+            logger.debug("Cannot auto-create templates (no root), using existing")
+        except Exception as e:
+            logger.debug("Template auto-creation failed: %s", e)
+
         available_dir = Path('/etc/meshtasticd/available.d')
         config_d = Path('/etc/meshtasticd/config.d')
 
@@ -420,13 +430,15 @@ Press Cancel to keep current values."""
             self.dialog.msgbox("Error",
                 "Hardware templates not found.\n\n"
                 f"Expected: {available_dir}\n\n"
-                "Run the installer to set up templates.")
+                "Run with sudo to auto-create, or run the installer.")
             return
 
         # List available hardware configs
         available = list(available_dir.glob('*.yaml'))
         if not available:
-            self.dialog.msgbox("Error", "No hardware templates found.")
+            self.dialog.msgbox("Error",
+                "No hardware templates found.\n\n"
+                "Run with sudo to auto-create, or run the installer.")
             return
 
         # Get currently active configs
@@ -893,8 +905,17 @@ Press Cancel to keep current values."""
     def _edit_file(self, path: str):
         """Edit a file with nano."""
         if not Path(path).exists():
-            self.dialog.msgbox("Error", f"File not found:\n{path}")
-            return
+            # Try to auto-create meshtasticd config structure
+            if '/etc/meshtasticd/' in path:
+                try:
+                    from core.meshtasticd_config import MeshtasticdConfig
+                    config_mgr = MeshtasticdConfig()
+                    config_mgr.ensure_structure()
+                except Exception as e:
+                    logger.debug("Auto-create config failed: %s", e)
+            if not Path(path).exists():
+                self.dialog.msgbox("Error", f"File not found:\n{path}")
+                return
 
         # Clear screen and run nano
         clear_screen()
