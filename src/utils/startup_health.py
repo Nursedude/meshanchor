@@ -87,14 +87,26 @@ class HealthSummary:
 def check_meshtasticd() -> ServiceHealth:
     """Check meshtasticd service status."""
     if HAS_SERVICE_CHECK:
+        from utils.service_check import check_port
         status = check_service('meshtasticd')
+
+        # Port 4403 is informational — service is healthy if systemctl says so
+        port_up = check_port(4403) if status.available else False
+        fix_hint = ""
+        if not status.available:
+            fix_hint = status.fix_hint
+        elif not port_up:
+            fix_hint = "Radio config via web UI: https://<ip>:9443"
+
         return ServiceHealth(
             name="meshtasticd",
             running=status.available,
-            port=4403 if status.available else None,
-            status_text=status.message,
+            port=4403 if port_up else None,
+            status_text=status.message if not status.available else (
+                "running" if port_up else "running (port 4403 not yet bound)"
+            ),
             optional=False,
-            fix_hint=status.fix_hint if not status.available else ""
+            fix_hint=fix_hint,
         )
 
     # Fallback: try systemctl directly
