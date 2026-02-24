@@ -5,19 +5,22 @@ Extracted from rns_menu_mixin.py to reduce file size per CLAUDE.md guidelines.
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from utils.paths import get_real_user_home, ReticulumPaths
 from backend import clear_screen
 from utils.service_check import (
-    check_process_running, check_udp_port, check_rns_shared_instance,
-    get_rns_shared_instance_info, start_service, stop_service, _sudo_cmd,
+    apply_config_and_restart, check_process_running, check_udp_port,
+    check_rns_shared_instance, get_rns_shared_instance_info,
+    start_service, stop_service, _sudo_cmd,
 )
 from commands.rns import (
     get_identity_path, create_identities, list_known_destinations,
@@ -893,6 +896,94 @@ class RNSDiagnosticsMixin:
     # Keep old name as alias for any callers during transition
     _wait_for_rns_port = _wait_for_rns_shared_instance
 
+    def _get_rnsd_user(self) -> Optional[str]:
+        """Get the OS user running the rnsd process, or None if not running."""
+        try:
+            result = subprocess.run(
+                ['ps', '-o', 'user=', '-C', 'rnsd'],
+                capture_output=True, text=True, timeout=5
+            )
+            user = result.stdout.strip() if result.returncode == 0 else ''
+            return user if user else None
+        except (subprocess.SubprocessError, OSError):
+            return None
+
+    def _fix_rnsd_user(self, target_user: str) -> bool:
+        """Configure rnsd systemd service to run as the specified user.
+
+        Creates a systemd override to set User= directive, then restarts rnsd.
+        This is the proper fix for the identity mismatch problem where rnsd
+        runs as root but user tools expect a different RNS identity.
+        """
+        override_dir = Path('/etc/systemd/system/rnsd.service.d')
+        override_file = override_dir / 'user.conf'
+
+        self.dialog.infobox(
+            "Configuring rnsd",
+            f"Setting rnsd to run as {target_user}...",
+        )
+
+        try:
+            # Create override directory
+            override_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write override config
+            override_content = (
+                f"[Service]\n"
+                f"User={target_user}\n"
+                f"Group={target_user}\n"
+            )
+            override_file.write_text(override_content)
+
+            # Reload systemd and restart rnsd
+            stop_service('rnsd')
+            subprocess.run(
+                ['pkill', '-f', 'rnsd'],
+                capture_output=True, timeout=5,
+            )
+            time.sleep(1)
+            apply_config_and_restart('rnsd')
+            time.sleep(2)
+
+            # Verify it's running as the right user now
+            new_user = self._get_rnsd_user()
+
+            if new_user == target_user:
+                self.dialog.msgbox(
+                    "rnsd Fixed",
+                    f"rnsd is now running as {target_user}.\n\n"
+                    f"Override created: {override_file}\n\n"
+                    "RNS tools and NomadNet can now connect via RPC.",
+                )
+                return True
+            else:
+                self.dialog.msgbox(
+                    "Fix May Have Failed",
+                    f"rnsd is running as '{new_user}' "
+                    f"(expected '{target_user}').\n\n"
+                    f"Check: systemctl status rnsd\n"
+                    f"       cat {override_file}",
+                )
+                return True  # Let them try anyway
+
+        except PermissionError:
+            self.dialog.msgbox(
+                "Permission Denied",
+                f"Cannot write to {override_dir}\n\n"
+                "MeshForge needs to run with sudo to fix this.",
+            )
+            return False
+        except Exception as e:
+            self.dialog.msgbox(
+                "Configuration Failed",
+                f"Could not configure rnsd: {e}\n\n"
+                "Manual fix:\n"
+                f"  sudo systemctl edit rnsd\n"
+                f"  Add: [Service]\n"
+                f"       User={target_user}",
+            )
+            return False
+
     def _diagnose_rns_connectivity(self, error_output: str):
         """Show targeted diagnostics when rnsd is running but tools can't connect.
 
@@ -913,6 +1004,61 @@ class RNSDiagnosticsMixin:
             print(f"  rm -f {user_home}/.reticulum/storage/shared_instance_*")
             print("  sudo systemctl start rnsd")
             return
+
+        # Check if rnsd is running as root (causes identity/auth mismatch)
+        rnsd_user = self._get_rnsd_user()
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
+            print(
+                f"Cause: rnsd is running as root, but you are "
+                f"'{sudo_user}'\n"
+                f"       Different users = different RNS identities "
+                f"= auth failure\n"
+            )
+            nomadnet_installed = bool(shutil.which('nomadnet'))
+            menu_items = [
+                ("fix", f"Fix rnsd to run as {sudo_user} (recommended)"),
+            ]
+            if nomadnet_installed:
+                menu_items.append(
+                    ("nomadnet",
+                     "Stop rnsd — let NomadNet manage RNS"),
+                )
+            menu_items.append(("skip", "Skip (show diagnostics)"))
+
+            choice = self.dialog.menu(
+                "rnsd Running as Root",
+                "rnsd is running as root, but RNS tools run as\n"
+                f"'{sudo_user}'. Different users = different RNS\n"
+                "identities = RPC authentication failure.\n\n"
+                "How do you want to fix this?",
+                menu_items,
+            )
+            if choice == "fix":
+                if self._fix_rnsd_user(sudo_user):
+                    print("\nRetry: RNS > Status from the menu.")
+                return
+            elif choice == "nomadnet":
+                self.dialog.infobox(
+                    "Stopping rnsd",
+                    "Stopping rnsd service...",
+                )
+                stop_service('rnsd')
+                subprocess.run(
+                    ['pkill', '-f', 'rnsd'],
+                    capture_output=True, timeout=5,
+                )
+                time.sleep(1)
+                self.dialog.msgbox(
+                    "rnsd Stopped",
+                    "rnsd has been stopped.\n\n"
+                    "NomadNet will start its own RNS instance.\n"
+                    "The gateway bridge will connect to NomadNet's\n"
+                    "shared instance as a client.\n\n"
+                    "Note: RNS is only available while NomadNet runs.",
+                )
+                return
+            # "skip" falls through to existing diagnostics
 
         # Check for blocking interfaces (most common root cause)
         blocking = self._find_blocking_interfaces()
