@@ -3,6 +3,7 @@
 import os
 import glob
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 
 from utils.system import run_command
@@ -102,6 +103,59 @@ class HardwareDetector:
             'flash_method': 'esptool'
         }
     }
+
+    # USB vendor:product ID → meshtasticd template mapping
+    # Maps detected USB chipsets to the correct template in available.d/
+    USB_ID_TO_TEMPLATE = {
+        # Heltec ESP32-S3 variants
+        '303a:1001': 'heltec-usb.yaml',      # ESP32-S3 CDC (Heltec V3/V4)
+        '303a:4001': 'heltec-usb.yaml',      # ESP32-S3 JTAG
+        '303a:1002': 'heltec-usb.yaml',      # ESP32-S3 Native USB
+        # MeshStick
+        '1209:0000': 'meshstick-usb.yaml',   # Official Meshtastic USB device
+        # MeshToad / CH340 family
+        '1a86:7523': 'meshtoad-usb.yaml',    # CH340 (MeshToad, MeshTadpole)
+        '1a86:55d4': 'meshtoad-usb.yaml',    # CH341 alternate
+        '1a86:7522': 'meshtoad-usb.yaml',    # CH340K variant
+        # RAK4631 / nRF52840
+        '239a:8029': 'rak4631-usb.yaml',     # Adafruit nRF52840 (RAK4631)
+        '239a:0029': 'rak4631-usb.yaml',     # RAK4631 bootloader mode
+        '19d2:0016': 'rak4631-usb.yaml',     # RAK WisBlock USB
+        # Station G2 / CP2102
+        '10c4:ea60': 'station-g2-usb.yaml',  # CP2102 (Station G2)
+        # T-Beam S3 / CH9102
+        '1a86:55d3': 'tbeam-usb.yaml',       # CH9102 (T-Beam S3)
+        # Generic USB-serial fallback
+        '0403:6001': 'usb-serial-generic.yaml',  # FT232R
+        '0403:6015': 'usb-serial-generic.yaml',  # FT231X
+    }
+
+    @classmethod
+    def match_usb_to_template(cls, vendor_product_id: str) -> 'Optional[str]':
+        """Match a USB vendor:product ID to a meshtasticd template filename.
+
+        Args:
+            vendor_product_id: USB ID in 'vendor:product' format (e.g. '303a:1001')
+
+        Returns:
+            Template filename (e.g. 'heltec-usb.yaml') or None if no match.
+        """
+        return cls.USB_ID_TO_TEMPLATE.get(vendor_product_id.lower())
+
+    @classmethod
+    def get_device_name_for_usb_id(cls, vendor_product_id: str) -> 'Optional[str]':
+        """Get human-readable device name for a USB vendor:product ID.
+
+        Args:
+            vendor_product_id: USB ID in 'vendor:product' format (e.g. '303a:1001')
+
+        Returns:
+            Device name string (e.g. 'Heltec V3/V4') or None.
+        """
+        info = cls.KNOWN_USB_MODULES.get(vendor_product_id.lower())
+        if info:
+            return ', '.join(info.get('common_devices', [info['name']]))
+        return None
 
     # Known SPI LoRa HATs with detailed configuration
     KNOWN_SPI_HATS = {

@@ -297,11 +297,39 @@ if [[ -e /dev/spidev0.0 ]] || [[ -e /dev/spidev0.1 ]]; then
     fi
 fi
 
-# Check for USB serial devices
+# Check for USB serial devices and identify them
+USB_DEVICE_FOUND=false
 for dev in /dev/ttyUSB* /dev/ttyACM*; do
     if [[ -e "$dev" ]]; then
         check_pass "USB serial device" "$dev"
         RADIO_FOUND=true
+        USB_DEVICE_FOUND=true
+
+        # Try to identify specific device via USB vendor:product ID
+        USB_VID=$(udevadm info --query=property "$dev" 2>/dev/null | grep '^ID_VENDOR_ID=' | cut -d= -f2)
+        USB_PID=$(udevadm info --query=property "$dev" 2>/dev/null | grep '^ID_MODEL_ID=' | cut -d= -f2)
+        if [[ -n "$USB_VID" && -n "$USB_PID" ]]; then
+            USB_ID="${USB_VID}:${USB_PID}"
+            case "$USB_ID" in
+                303a:1001|303a:4001|303a:1002)
+                    check_pass "USB radio identified" "Heltec V3/V4 (template: heltec-usb.yaml)" ;;
+                1209:0000)
+                    check_pass "USB radio identified" "MeshStick (template: meshstick-usb.yaml)" ;;
+                1a86:7523|1a86:55d4|1a86:7522)
+                    check_pass "USB radio identified" "MeshToad/CH340 (template: meshtoad-usb.yaml)" ;;
+                239a:8029|239a:0029|19d2:0016)
+                    check_pass "USB radio identified" "RAK4631 (template: rak4631-usb.yaml)" ;;
+                10c4:ea60)
+                    check_pass "USB radio identified" "Station G2/CP2102 (template: station-g2-usb.yaml)" ;;
+                1a86:55d3)
+                    check_pass "USB radio identified" "T-Beam S3/CH9102 (template: tbeam-usb.yaml)" ;;
+                0403:6001|0403:6015)
+                    check_pass "USB radio identified" "FTDI USB-Serial (template: usb-serial-generic.yaml)" ;;
+                *)
+                    check_warn "USB radio ID" "Unknown USB ID $USB_ID" \
+                        "Use generic template: usb-serial-generic.yaml" ;;
+            esac
+        fi
         break
     fi
 done
@@ -309,6 +337,9 @@ done
 if ! $RADIO_FOUND; then
     check_warn "Radio hardware" "No SPI or USB radio detected" \
         "Connect USB radio or enable SPI for HAT"
+    log "  Available USB templates: heltec-usb, meshstick-usb, meshtoad-usb,"
+    log "    rak4631-usb, station-g2-usb, tbeam-usb, usb-serial-generic"
+    log "  Select in TUI: Configuration > Hardware Config"
 fi
 
 # Check udev rules
