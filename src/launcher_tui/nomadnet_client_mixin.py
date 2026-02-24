@@ -479,23 +479,15 @@ class NomadNetClientMixin:
                     if 'AuthenticationError' in line or 'digest sent was rejected' in line:
                         error_hints.append("RPC authentication failed between NomadNet and rnsd")
                         # Check if rnsd is running as root
-                        try:
-                            ps_result = subprocess.run(
-                                ['ps', '-o', 'user=', '-C', 'rnsd'],
-                                capture_output=True, text=True, timeout=5
-                            )
-                            rnsd_user = ps_result.stdout.strip()
-                            if rnsd_user == 'root':
-                                error_hints.append("rnsd is running as root - identities don't match")
-                                error_hints.append("Fix: sudo systemctl stop rnsd")
-                                error_hints.append("     Then run rnsd as your user, or reconfigure")
-                            elif rnsd_user and rnsd_user != sudo_user:
-                                error_hints.append(f"rnsd runs as '{rnsd_user}', you are '{sudo_user}'")
-                            else:
-                                error_hints.append("Check that rnsd uses the same ~/.reticulum/ identity")
-                        except (subprocess.SubprocessError, OSError) as e:
-                            logger.debug("rnsd user lookup failed: %s", e)
-                            error_hints.append("Ensure rnsd and NomadNet use the same RNS identity")
+                        rnsd_user = self._get_rnsd_user()
+                        if rnsd_user == 'root':
+                            error_hints.append("rnsd is running as root - identities don't match")
+                            error_hints.append("Fix: sudo systemctl stop rnsd")
+                            error_hints.append("     Then run rnsd as your user, or reconfigure")
+                        elif rnsd_user and rnsd_user != sudo_user:
+                            error_hints.append(f"rnsd runs as '{rnsd_user}', you are '{sudo_user}'")
+                        else:
+                            error_hints.append("Check that rnsd uses the same ~/.reticulum/ identity")
                         break
                     elif 'KeyError' in line and 'textui' in line.lower():
                         error_hints.append("Config missing [textui] section")
