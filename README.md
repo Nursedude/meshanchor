@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1729%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-1986%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -104,6 +104,28 @@ The alpha branch (`0.6.0-alpha`) includes:
 > security hardening that alpha does not have. Alpha includes MeshCore 3-way routing
 > that main does not have. Convergence will require a dedicated reconciliation effort.
 > Report issues on the [alpha/meshcore-bridge](https://github.com/Nursedude/meshforge/issues) tracker.
+
+### Deployment Profiles
+
+MeshForge supports 5 deployment profiles. Install only the dependencies you need:
+
+| Profile | Services Needed | Install | Use Case |
+|---------|----------------|---------|----------|
+| `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
+| `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
+| `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
+| `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
+| `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
+
+```bash
+# Select profile at launch
+python3 src/launcher.py --profile gateway
+
+# Auto-detect (default): scans running services and installed packages
+python3 src/launcher.py
+
+# Profile is saved to ~/.config/meshforge/deployment.json
+```
 
 ### Already Have meshtasticd?
 
@@ -217,7 +239,7 @@ Main Menu (MeshForge NOC)
 |---------|--------|-------|
 | MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
 | Defense-in-depth TUI | Done (v0.5.2) | 47 mixin `_safe_call` protection |
-| Gateway-essential test suite | Done (v0.5.3) | 1,729 tests across 56 files |
+| Gateway-essential test suite | Done (v0.5.3) | 1,986 tests across 60 files |
 | First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
 | Network topology visualization | Done | D3.js + ASCII modes |
 | Node health & predictive maintenance | Done | Battery forecasting, signal trending |
@@ -754,7 +776,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**1,729 tests** across 56 test files:
+**1,986 tests** across 60 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -770,8 +792,12 @@ connection (port 4403):
 | `test_commands.py` | 61 | CLI command handlers, output parsing |
 | `test_bridge_health.py` | 55 | Gateway health monitoring, circuit breaker patterns |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
+| `test_rf.py` | 107 | RF calculations: haversine, FSPL, Fresnel, link budget, signal classification |
+| `test_deployment_profiles.py` | 31 | Deployment profile system (radio_maps, monitor, gateway, meshcore, full) |
+| `test_startup_health.py` | 20 | Startup health checks, service verification |
+| `test_compliance.py` | 13 | HAM compliance validation, encryption modes |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,729 across 56 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection) were added with test coverage.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 1,986 across 60 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection, RF engineering, deployment profiles) were added with test coverage.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
