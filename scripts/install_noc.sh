@@ -480,12 +480,27 @@ UDEV_RULES
     mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
     chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
 
-    # NOTE: We do NOT create HAT templates here!
-    # meshtasticd already ships with proper templates in available.d/
-    # See: /etc/meshtasticd/available.d/ after installing meshtasticd
-    # Users select their HAT via 'meshforge' menu which copies from available.d/ to config.d/
+    # Deploy MeshForge hardware templates (USB + SPI HATs) to available.d/
+    # Templates ship with MeshForge, not the meshtasticd Debian package
+    if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
+        cp -n "$INSTALL_DIR/templates/available.d/"*.yaml "$MESHTASTICD_CONFIG_DIR/available.d/" 2>/dev/null
+        DEPLOYED=$(ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | wc -l)
+        echo -e "  ${GREEN}✓ Deployed ${DEPLOYED} hardware templates to available.d/${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ templates/available.d/ not found in $INSTALL_DIR${NC}"
+    fi
 
-    echo -e "  ${CYAN}Available configs (from meshtasticd):${NC}"
+    # Deploy config.yaml if missing
+    if [[ ! -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
+        if [[ -f "$INSTALL_DIR/templates/config.yaml" ]]; then
+            cp "$INSTALL_DIR/templates/config.yaml" "$MESHTASTICD_CONFIG_DIR/config.yaml"
+            echo -e "  ${GREEN}✓ Created config.yaml${NC}"
+        fi
+    else
+        echo -e "  ${GREEN}✓ config.yaml already exists${NC}"
+    fi
+
+    echo -e "  ${CYAN}Available hardware configs:${NC}"
     if ls "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | head -5 >/dev/null; then
         ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | head -10 | xargs -I {} basename {} | sed 's/^/    - /'
         AVAIL_COUNT=$(ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | wc -l)
@@ -493,7 +508,7 @@ UDEV_RULES
             echo "    ... and $((AVAIL_COUNT - 10)) more"
         fi
     else
-        echo "    (will be populated when meshtasticd is installed)"
+        echo -e "  ${YELLOW}⚠ No templates deployed — TUI will generate from built-in list${NC}"
     fi
 
     # Install appropriate daemon based on radio type
@@ -780,7 +795,12 @@ SPI_CONFIG
                     fi
 
                     # ── Step 4: Create systemd service ──
-                    cat > /etc/systemd/system/meshtasticd.service << NATIVE_SERVICE
+                    if [[ -f "$INSTALL_DIR/templates/systemd/meshtasticd-native.service" ]]; then
+                        sed "s|@MESHTASTICD_BIN@|${MESHTASTICD_BIN}|g" \
+                            "$INSTALL_DIR/templates/systemd/meshtasticd-native.service" \
+                            > /etc/systemd/system/meshtasticd.service
+                    else
+                        cat > /etc/systemd/system/meshtasticd.service << NATIVE_SERVICE
 [Unit]
 Description=Meshtastic Daemon (Native SPI)
 Documentation=https://meshtastic.org
@@ -797,6 +817,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 NATIVE_SERVICE
+                    fi
 
                     systemctl daemon-reload
 
@@ -858,33 +879,66 @@ NATIVE_SERVICE
                 echo -e "  ${GREEN}  USB device: $USB_DEV${NC}"
             fi
 
-            # Enable USB config if meshtasticd provides one
-            if [[ -f "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" ]]; then
-                cp "$MESHTASTICD_CONFIG_DIR/available.d/usb-serial.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+            NATIVE_INSTALLED=false
+
+            # Check if native meshtasticd is already installed
+            if command -v meshtasticd &>/dev/null; then
+                INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
+                NATIVE_INSTALLED=true
+            else
+                # Install native meshtasticd via apt (same as SPI path)
+                if add_meshtastic_repo; then
+                    echo -e "  ${CYAN}Installing meshtasticd via apt...${NC}"
+                    if apt-get install -y -qq meshtasticd >/dev/null 2>&1; then
+                        if command -v meshtasticd &>/dev/null; then
+                            INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
+                            echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
+                            NATIVE_INSTALLED=true
+                        else
+                            echo -e "  ${RED}Package installed but binary not found${NC}"
+                        fi
+                    else
+                        echo -e "  ${YELLOW}⚠ apt install meshtasticd failed — will use USB templates only${NC}"
+                    fi
+                else
+                    echo -e "  ${YELLOW}⚠ Could not add Meshtastic repo — will use USB templates only${NC}"
+                fi
             fi
 
-            # Check if native meshtasticd is available (can work with USB serial too)
-            if command -v meshtasticd &> /dev/null; then
+            if $NATIVE_INSTALLED; then
                 MESHTASTICD_BIN=$(command -v meshtasticd)
-                echo -e "  ${GREEN}✓ Native meshtasticd available: ${MESHTASTICD_BIN}${NC}"
 
-                # Only create USB config if config.d/ is empty (no existing HAT config)
-                if [[ -n "$USB_DEV" ]]; then
+                # Let user select their USB hardware template from available.d
+                USB_TEMPLATES=()
+                for tmpl in "$MESHTASTICD_CONFIG_DIR/available.d/"*-usb.yaml "$MESHTASTICD_CONFIG_DIR/available.d/usb-"*.yaml; do
+                    [[ -f "$tmpl" ]] && USB_TEMPLATES+=("$tmpl")
+                done
+
+                if [[ ${#USB_TEMPLATES[@]} -gt 0 ]]; then
+                    echo ""
+                    echo -e "  ${CYAN}Available USB hardware templates:${NC}"
+                    for i in "${!USB_TEMPLATES[@]}"; do
+                        echo -e "    $((i+1)). $(basename "${USB_TEMPLATES[$i]}" .yaml)"
+                    done
+
+                    # Auto-select if only config.d is empty
                     EXISTING_CONFIGS=$(ls "$MESHTASTICD_CONFIG_DIR/config.d/"*.yaml 2>/dev/null | wc -l)
                     if [[ "$EXISTING_CONFIGS" -eq 0 ]]; then
-                        cat > "$MESHTASTICD_CONFIG_DIR/config.d/usb-device.yaml" << USB_CONFIG
-# USB Serial Radio Configuration (auto-generated by MeshForge)
-Lora:
-  SerialPath: ${USB_DEV}
-USB_CONFIG
-                        echo -e "  ${GREEN}✓ Created USB device config${NC}"
+                        echo -e "  ${YELLOW}  Select your USB radio in the MeshForge TUI:${NC}"
+                        echo -e "  ${YELLOW}    Configuration > Hardware Config${NC}"
                     else
-                        echo -e "  ${GREEN}✓ Existing config in config.d/ - skipping USB auto-config${NC}"
+                        echo -e "  ${GREEN}✓ Existing config in config.d/ — keeping current selection${NC}"
                     fi
                 fi
 
-                # Create service using native meshtasticd
-                cat > /etc/systemd/system/meshtasticd.service << NATIVE_USB_SERVICE
+                # Deploy systemd service from template or create inline
+                if [[ -f "$INSTALL_DIR/templates/systemd/meshtasticd-native.service" ]]; then
+                    sed "s|@MESHTASTICD_BIN@|${MESHTASTICD_BIN}|g" \
+                        "$INSTALL_DIR/templates/systemd/meshtasticd-native.service" \
+                        > /etc/systemd/system/meshtasticd.service
+                else
+                    cat > /etc/systemd/system/meshtasticd.service << NATIVE_USB_SERVICE
 [Unit]
 Description=Meshtastic Daemon (USB Serial)
 Documentation=https://meshtastic.org
@@ -901,30 +955,31 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 NATIVE_USB_SERVICE
+                fi
 
                 DAEMON_TYPE="native-usb"
             else
-                # No native daemon - USB radios work directly without a service
-                # The firmware handles mesh networking; CLI connects on demand
-                echo -e "  ${YELLOW}Note: USB radios don't require a daemon service${NC}"
-                echo -e "  ${YELLOW}  Use CLI: meshtastic --port ${USB_DEV:-/dev/ttyUSB0} --info${NC}"
+                # Native meshtasticd not available — create placeholder service
+                # User can install later from TUI: Configuration > Setup Wizard
+                echo -e "  ${YELLOW}Note: Native meshtasticd not installed${NC}"
+                echo -e "  ${YELLOW}  USB templates are available in ${MESHTASTICD_CONFIG_DIR}/available.d/${NC}"
+                echo -e "  ${YELLOW}  Install meshtasticd later: sudo apt install meshtasticd${NC}"
 
-                # Create a placeholder service that explains the situation
                 cat > /etc/systemd/system/meshtasticd.service << 'USB_PLACEHOLDER'
 [Unit]
-Description=Meshtastic USB Radio (No Daemon Needed)
+Description=Meshtastic (pending native install)
 Documentation=https://meshtastic.org
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/echo "USB radios work directly - use: meshtastic --port /dev/ttyUSB0 --info"
+ExecStart=/bin/echo "Install native meshtasticd: sudo apt install meshtasticd — then select hardware in MeshForge TUI"
 
 [Install]
 WantedBy=multi-user.target
 USB_PLACEHOLDER
 
-                DAEMON_TYPE="usb-direct"
+                DAEMON_TYPE="usb-pending"
             fi
             ;;
 

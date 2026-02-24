@@ -622,7 +622,26 @@ class MeshtasticdConfig:
             return False
 
     def _create_default_templates(self):
-        """Create default radio configuration templates."""
+        """Create default radio configuration templates.
+
+        Prefers repo templates from templates/available.d/ (richer content
+        with comments) over the inline RADIO_TEMPLATES dict.
+        """
+        # Try repo templates first (ship with MeshForge, have full comments)
+        repo_templates = Path(__file__).parent.parent.parent / 'templates' / 'available.d'
+        if repo_templates.exists():
+            deployed = 0
+            for tmpl in repo_templates.glob('*.yaml'):
+                dest = self.available_dir / tmpl.name
+                if not dest.exists():
+                    shutil.copy2(tmpl, dest)
+                    deployed += 1
+                    logger.debug(f"Deployed repo template: {dest}")
+            if deployed:
+                logger.info(f"Deployed {deployed} templates from {repo_templates}")
+            return
+
+        # Fallback: generate from built-in RADIO_TEMPLATES dict
         for name, template in RADIO_TEMPLATES.items():
             config_file = self.available_dir / f"{name}.yaml"
             if not config_file.exists():
@@ -630,9 +649,19 @@ class MeshtasticdConfig:
                 logger.debug(f"Created template: {config_file}")
 
     def _create_main_config(self):
-        """Create main config.yaml file."""
+        """Create main config.yaml file.
+
+        Prefers repo template from templates/config.yaml over inline fallback.
+        """
+        # Try repo template first
+        repo_config = Path(__file__).parent.parent.parent / 'templates' / 'config.yaml'
+        if repo_config.exists():
+            shutil.copy2(repo_config, self.main_config)
+            logger.info(f"Deployed config.yaml from {repo_config}")
+            return
+
+        # Fallback: generate inline
         config_content = """# Meshtasticd Configuration (fallback)
-# Normally provided by the meshtasticd package.
 # Individual radio configs are in config.d/
 
 Lora:
