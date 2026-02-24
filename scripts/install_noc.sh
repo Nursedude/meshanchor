@@ -916,19 +916,66 @@ NATIVE_SERVICE
                 done
 
                 if [[ ${#USB_TEMPLATES[@]} -gt 0 ]]; then
-                    echo ""
-                    echo -e "  ${CYAN}Available USB hardware templates:${NC}"
-                    for i in "${!USB_TEMPLATES[@]}"; do
-                        echo -e "    $((i+1)). $(basename "${USB_TEMPLATES[$i]}" .yaml)"
-                    done
+                    # Check if a USB config is already in config.d/
+                    EXISTING_USB=""
+                    if [[ -d "$MESHTASTICD_CONFIG_DIR/config.d" ]]; then
+                        EXISTING_USB=$(ls -1 "$MESHTASTICD_CONFIG_DIR/config.d/"*.yaml 2>/dev/null | head -1)
+                    fi
 
-                    # Auto-select if only config.d is empty
-                    EXISTING_CONFIGS=$(ls "$MESHTASTICD_CONFIG_DIR/config.d/"*.yaml 2>/dev/null | wc -l)
-                    if [[ "$EXISTING_CONFIGS" -eq 0 ]]; then
-                        echo -e "  ${YELLOW}  Select your USB radio in the MeshForge TUI:${NC}"
-                        echo -e "  ${YELLOW}    Configuration > Hardware Config${NC}"
+                    if [[ -n "$EXISTING_USB" ]]; then
+                        USB_NAME=$(basename "$EXISTING_USB")
+                        echo -e "  ${GREEN}✓ USB config already active: ${USB_NAME}${NC}"
                     else
-                        echo -e "  ${GREEN}✓ Existing config in config.d/ — keeping current selection${NC}"
+                        # Build USB menu from available.d/ (mirrors SPI HAT selection)
+                        AVAIL_DIR="$MESHTASTICD_CONFIG_DIR/available.d"
+                        declare -a USB_OPTIONS=()
+                        for tmpl in "${USB_TEMPLATES[@]}"; do
+                            usb_base=$(basename "$tmpl" .yaml)
+                            usb_desc=$(grep "^#" "$tmpl" 2>/dev/null | head -1 | sed 's/^# *//' || echo "$usb_base")
+                            [[ -z "$usb_desc" ]] && usb_desc="$usb_base"
+                            USB_OPTIONS+=("$usb_base" "$usb_desc")
+                        done
+
+                        if [[ ${#USB_OPTIONS[@]} -gt 0 ]]; then
+                            USB_COUNT=$((${#USB_OPTIONS[@]} / 2))
+
+                            if command -v whiptail &>/dev/null; then
+                                MENU_H=$((USB_COUNT + 7))
+                                [[ $MENU_H -lt 12 ]] && MENU_H=12
+                                [[ $MENU_H -gt 22 ]] && MENU_H=22
+
+                                SELECTED_USB=$(whiptail --title "USB Radio Selection" --menu \
+                                    "Which USB radio is connected?\n\nConfigs from: ${AVAIL_DIR}/" \
+                                    $MENU_H 70 $USB_COUNT \
+                                    "${USB_OPTIONS[@]}" \
+                                    3>&1 1>&2 2>&3) || SELECTED_USB=""
+                            else
+                                # Fallback: numbered text menu
+                                echo "" >&2
+                                echo -e "  ${BOLD}Select your USB radio:${NC}" >&2
+                                i=1
+                                for ((idx=0; idx<${#USB_OPTIONS[@]}; idx+=2)); do
+                                    echo "    $i) ${USB_OPTIONS[$idx]} - ${USB_OPTIONS[$((idx+1))]}" >&2
+                                    ((i++))
+                                done
+                                echo "" >&2
+                                read -rp "  Select [1-${USB_COUNT}]: " usb_choice
+                                if [[ "$usb_choice" =~ ^[0-9]+$ ]] && [[ "$usb_choice" -ge 1 ]] && [[ "$usb_choice" -le "$USB_COUNT" ]]; then
+                                    idx=$(( (usb_choice - 1) * 2 ))
+                                    SELECTED_USB="${USB_OPTIONS[$idx]}"
+                                fi
+                            fi
+
+                            if [[ -n "$SELECTED_USB" ]]; then
+                                # Copy selected USB config to config.d/
+                                mkdir -p "$MESHTASTICD_CONFIG_DIR/config.d"
+                                cp "$AVAIL_DIR/${SELECTED_USB}.yaml" "$MESHTASTICD_CONFIG_DIR/config.d/"
+                                echo -e "  ${GREEN}✓ USB config installed: ${SELECTED_USB}.yaml${NC}"
+                            else
+                                echo -e "  ${YELLOW}⚠ No USB radio selected — meshtasticd may not start correctly${NC}"
+                                echo -e "  ${YELLOW}  Fix: cp /etc/meshtasticd/available.d/<your-radio>.yaml /etc/meshtasticd/config.d/${NC}"
+                            fi
+                        fi
                     fi
                 fi
 
