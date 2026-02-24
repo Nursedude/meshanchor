@@ -67,6 +67,7 @@ class NetworkHealth:
 class HealthSummary:
     """Complete health summary."""
     version: str = __version__
+    profile_name: str = ""  # Deployment profile name (if set)
     services: List[ServiceHealth] = field(default_factory=list)
     hardware: HardwareHealth = field(default_factory=HardwareHealth)
     network: NetworkHealth = field(default_factory=NetworkHealth)
@@ -160,6 +161,45 @@ def check_rnsd() -> ServiceHealth:
         )
 
 
+def check_mosquitto() -> ServiceHealth:
+    """Check mosquitto MQTT broker status."""
+    if HAS_SERVICE_CHECK:
+        status = check_service('mosquitto')
+        return ServiceHealth(
+            name="mosquitto",
+            running=status.available,
+            port=1883 if status.available else None,
+            status_text=status.message,
+            optional=True,
+            fix_hint=status.fix_hint if not status.available else ""
+        )
+
+    # Fallback: try systemctl directly
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'mosquitto'],
+            capture_output=True, text=True, timeout=5
+        )
+        running = result.returncode == 0
+        return ServiceHealth(
+            name="mosquitto",
+            running=running,
+            port=1883 if running else None,
+            status_text="running" if running else "not running",
+            optional=True,
+            fix_hint="" if running else "sudo apt install mosquitto && sudo systemctl start mosquitto"
+        )
+    except Exception as e:
+        logger.debug("mosquitto check failed: %s", e)
+        return ServiceHealth(
+            name="mosquitto",
+            running=False,
+            status_text="check failed",
+            optional=True,
+            fix_hint="Install mosquitto: sudo apt install mosquitto"
+        )
+
+
 def detect_hardware() -> HardwareHealth:
     """Detect connected LoRa hardware."""
     hardware = HardwareHealth()
@@ -239,13 +279,43 @@ def get_node_count() -> int:
     return 0
 
 
-def run_health_check() -> HealthSummary:
-    """Run complete health check and return summary."""
+def run_health_check(profile=None) -> HealthSummary:
+    """Run complete health check and return summary.
+
+    Args:
+        profile: Optional ProfileDefinition from deployment_profiles.
+                 When provided, services are marked required/optional
+                 based on the profile instead of using hardcoded defaults.
+    """
     summary = HealthSummary()
 
-    # Check services
-    summary.services.append(check_meshtasticd())
-    summary.services.append(check_rnsd())
+    # Set profile context
+    if profile is not None:
+        summary.profile_name = getattr(profile, 'display_name', '')
+        required_services = set(getattr(profile, 'required_services', []))
+        optional_services = set(getattr(profile, 'optional_services', []))
+    else:
+        required_services = None
+        optional_services = None
+
+    # Check services — all 3, then mark optional per profile
+    service_checks = {
+        'meshtasticd': check_meshtasticd(),
+        'rnsd': check_rnsd(),
+        'mosquitto': check_mosquitto(),
+    }
+
+    for name, health in service_checks.items():
+        if required_services is not None:
+            # Profile-aware: override optional flag based on profile
+            if name in required_services:
+                health.optional = False
+            elif name in optional_services:
+                health.optional = True
+            else:
+                # Not in profile's services — mark as informational (optional)
+                health.optional = True
+        summary.services.append(health)
 
     # Detect hardware
     summary.hardware = detect_hardware()
@@ -299,8 +369,11 @@ def print_health_summary(summary: HealthSummary, use_color: bool = True) -> str:
 
     lines = []
 
-    # Header
-    lines.append(f"{BOLD}MeshForge v{summary.version}{RESET}")
+    # Header with optional profile name
+    header = f"{BOLD}MeshForge v{summary.version}{RESET}"
+    if summary.profile_name:
+        header += f"  [{summary.profile_name}]"
+    lines.append(header)
     lines.append("")
 
     # Services section

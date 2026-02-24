@@ -94,6 +94,31 @@ src/
 └── __version__.py     # Version and changelog
 ```
 
+## Deployment Profiles
+
+MeshForge supports 5 deployment scenarios. Dependencies don't block your choice.
+
+| Profile | Services Needed | Install | Use Case |
+|---------|----------------|---------|----------|
+| `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
+| `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
+| `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
+| `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
+| `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
+
+```bash
+# Select profile at launch
+python3 src/launcher.py --profile gateway
+
+# Auto-detect (default): scans running services and installed packages
+python3 src/launcher.py
+
+# Profile is saved to ~/.config/meshforge/deployment.json
+# Setup wizard also offers profile selection
+```
+
+**Key files**: `src/utils/deployment_profiles.py` (definitions), `src/utils/startup_health.py` (health checks), `src/utils/defaults.py` (constants), `src/utils/validation.py` (input validators)
+
 ## Code Standards
 
 **Security**: See `.claude/rules/security.md` (auto-loaded). Non-negotiable: no `shell=True`, no bare `except:`, validate inputs, timeouts on subprocess.
