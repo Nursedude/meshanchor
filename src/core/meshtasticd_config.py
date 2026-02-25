@@ -669,25 +669,50 @@ class MeshtasticdConfig:
             logger.info(f"Deployed config.yaml from {repo_config}")
             return
 
-        # Fallback: generate inline
-        config_content = """# Meshtasticd Configuration (fallback)
-# Individual radio configs are in config.d/
+        # Fallback: generate inline (matches upstream config-dist.yaml)
+        config_content = """\
+### Many device configs have been moved to /etc/meshtasticd/available.d
+### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 
+### Define your devices here using Broadcom pin numbering
+### Uncomment the block that corresponds to your hardware
+### Including the "Module:" line!
+---
 Lora:
   Module: auto
+
+GPS:
+#  SerialPath: /dev/ttyS0
+
+I2C:
+#  I2CDevice: /dev/i2c-1
+
+Display:
+
+Touchscreen:
+
+Input:
 
 Logging:
   LogLevel: info
 
 Webserver:
-  Port: 9443
-  RootPath: /usr/share/meshtasticd/web
+#  Port: 9443
+#  RootPath: /usr/share/meshtasticd/web
+
+HostMetrics:
+#  ReportInterval: 30
+
+Config:
+#  DisplayMode: TWOCOLOR
 
 General:
   MaxNodes: 200
   MaxMessageQueue: 100
   ConfigDirectory: /etc/meshtasticd/config.d/
   AvailableDirectory: /etc/meshtasticd/available.d/
+#  MACAddress: AA:BB:CC:DD:EE:FF
+#  MACAddressSource: eth0
 """
         self.main_config.write_text(config_content)
         logger.info(f"Created main config: {self.main_config}")
