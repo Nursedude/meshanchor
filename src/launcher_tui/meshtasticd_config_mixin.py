@@ -7,8 +7,11 @@ Extracted from main.py to reduce file size.
 """
 
 import logging
+import os
+import re
 import subprocess
 import sys
+import tempfile
 import yaml
 from pathlib import Path
 from backend import clear_screen
@@ -59,13 +62,27 @@ class MeshtasticdConfigMixin:
         return {}
 
     def _write_overlay(self, data: dict) -> bool:
-        """Write meshforge-overrides.yaml to config.d/. Never touches config.yaml."""
+        """Write meshforge-overrides.yaml to config.d/. Never touches config.yaml.
+
+        Uses atomic write (tempfile + rename) to prevent corruption on
+        power loss or interruption.
+        """
         try:
             OVERLAY_PATH.parent.mkdir(parents=True, exist_ok=True)
             content = OVERLAY_HEADER + "\n" + yaml.dump(
                 data, default_flow_style=False, sort_keys=False
             )
-            OVERLAY_PATH.write_text(content)
+            # Atomic write: temp file in same dir, then rename
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(OVERLAY_PATH.parent), suffix='.tmp'
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w') as f:
+                    f.write(content)
+                os.rename(tmp_path, str(OVERLAY_PATH))
+            except BaseException:
+                os.unlink(tmp_path)
+                raise
             return True
         except PermissionError:
             self.dialog.msgbox("Error", "Permission denied. Run with sudo.")
@@ -865,10 +882,13 @@ Press Cancel to keep current values."""
             self.dialog.msgbox("Error", f"Cannot read config:\n{e}")
             return
 
-        # Find current MaxNodes value
-        import re
+        # Find current MaxNodes value (check overlay first, then config.yaml)
+        overlay = self._read_overlay()
+        overlay_maxnodes = overlay.get('General', {}).get('MaxNodes')
+
         match = re.search(r'MaxNodes:\s*(\d+)', content)
-        current = int(match.group(1)) if match else None
+        base_value = int(match.group(1)) if match else None
+        current = overlay_maxnodes if overlay_maxnodes is not None else base_value
 
         if current is None:
             self.dialog.msgbox(
@@ -881,8 +901,9 @@ Press Cancel to keep current values."""
             )
             return
 
+        source = "overlay" if overlay_maxnodes is not None else "config.yaml"
         text = (
-            f"Current MaxNodes: {current}\n\n"
+            f"Current MaxNodes: {current} (from {source})\n\n"
             "MaxNodes limits how many nodes the device tracks.\n"
             "High values accumulate phantom MQTT nodes that\n"
             "can crash the web client.\n\n"
@@ -970,8 +991,8 @@ Press Cancel to keep current values."""
                 try:
                     base = yaml.safe_load(config_yaml.read_text()) or {}
                     base_lora = base.get('Lora', {})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read config.yaml for display: %s", e)
 
             # Effective = base merged with overlay
             effective = {**base_lora, **lora_overlay}
@@ -1077,6 +1098,8 @@ Press Cancel to keep current values."""
             "Busy", "GPIO pin for Busy signal\n(leave empty for RF95):",
             str(lora.get('Busy', '20'))
         )
+        if busy is None:
+            return
 
         reset = self.dialog.inputbox(
             "Reset", "GPIO pin for Reset:",
@@ -1137,7 +1160,7 @@ Press Cancel to keep current values."""
         if 'Lora' not in overlay:
             overlay['Lora'] = {}
 
-        overlay['Lora']['DIO2_AS_RF_SWITCH'] = dio2
+        overlay['Lora']['DIO2_AS_RF_SWITCH'] = bool(dio2)
 
         if tcxo and tcxo != "false":
             if tcxo == "true":
@@ -1168,6 +1191,15 @@ Press Cancel to keep current values."""
         if spidev is None:
             return
 
+        # Validate spidev name
+        if not re.match(r'^(spidev\d+\.\d+|ch341)$', spidev):
+            self.dialog.msgbox(
+                "Invalid",
+                f"Invalid SPI device: {spidev}\n\n"
+                "Expected: spidev0.0, spidev0.1, ch341"
+            )
+            return
+
         speed = self.dialog.inputbox(
             "SPI Speed",
             "SPI bus speed in Hz (default: 2000000):",
@@ -1182,7 +1214,7 @@ Press Cancel to keep current values."""
             try:
                 overlay['Lora']['spiSpeed'] = int(speed)
             except ValueError:
-                pass
+                self.dialog.msgbox("Warning", f"Invalid SPI speed '{speed}' — using default.")
 
         if self._write_overlay(overlay):
             self._offer_restart("SPI settings updated")
@@ -1375,7 +1407,8 @@ Press Cancel to keep current values."""
         del overlay['Lora']
 
         if overlay:
-            self._write_overlay(overlay)
+            if not self._write_overlay(overlay):
+                return
         else:
             # No remaining overrides — remove the file
             try:
