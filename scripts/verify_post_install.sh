@@ -213,7 +213,7 @@ if [[ -f "$CONFIG_YAML" ]]; then
         MODULE=$(grep -A1 "Lora:" "$CONFIG_YAML" | grep "Module:" | awk '{print $2}' || echo "auto")
         check_pass "Lora section" "Module: ${MODULE:-auto}"
     else
-        check_warn "Lora section" "Missing from config.yaml" "Add: Lora:\\n  Module: auto"
+        check_warn "Lora section" "Missing from config.yaml" "Reinstall meshtasticd package or run MeshForge ensure_structure() to regenerate"
     fi
 
     # Check for WRONG content (radio parameters that shouldn't be here)

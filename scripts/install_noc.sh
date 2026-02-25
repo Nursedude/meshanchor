@@ -571,7 +571,7 @@ SPI_NEEDS_NATIVE
                         cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'FALLBACK_CONFIG'
 ---
 Lora:
-  Module: auto
+  # Module: auto  # Disabled — select hardware via TUI or copy template to config.d/
 
 Logging:
   LogLevel: info
@@ -659,7 +659,7 @@ FALLBACK_CONFIG
                             cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'REBOOT_CONFIG'
 ---
 Lora:
-  Module: auto
+  # Module: auto  # Disabled — select hardware via TUI or copy template to config.d/
 
 Logging:
   LogLevel: info
@@ -776,7 +776,7 @@ ADD_WEBSERVER
                         cat > "$MESHTASTICD_CONFIG_DIR/config.yaml" << 'SPI_CONFIG'
 ---
 Lora:
-  Module: auto
+  # Module: auto  # Disabled — select hardware via TUI or copy template to config.d/
 
 Logging:
   LogLevel: info

@@ -683,11 +683,12 @@ class MeshtasticdConfig:
 ### To activate, simply copy or link the appropriate file into /etc/meshtasticd/config.d
 
 ### Define your devices here using Broadcom pin numbering
-### Uncomment the block that corresponds to your hardware
-### Including the "Module:" line!
+### Module is set by hardware templates in config.d/
+### DO NOT set Module: auto — it triggers meshtasticd autoconf crashes
+### Select your radio via TUI or: sudo cp available.d/<radio>.yaml config.d/
 ---
 Lora:
-  Module: auto
+#  Module: sx1262
 
 GPS:
 #  SerialPath: /dev/ttyS0
@@ -998,29 +999,17 @@ def get_config() -> MeshtasticdConfig:
 
 def setup_meshtasticd() -> bool:
     """
-    Quick setup: ensure config structure and detect radio.
+    Quick setup: ensure config structure exists.
+
+    Creates /etc/meshtasticd/{available.d,config.d,ssl} and deploys
+    templates to available.d/ if missing. Does NOT auto-enable any
+    radio config — the user must explicitly select their hardware.
 
     Returns:
         True if setup successful
     """
     config = get_config()
-
-    if not config.ensure_structure():
-        return False
-
-    radio_type = config.detect_radio_type()
-    daemon_type = config.get_daemon_type()
-
-    logger.info(f"Radio type: {radio_type.value}, Daemon: {daemon_type}")
-
-    # Auto-enable appropriate config
-    if radio_type == RadioType.NATIVE_SPI:
-        # Check for Meshtoad specifically
-        config.enable("meshtoad-spi")
-    elif radio_type == RadioType.USB_SERIAL:
-        config.enable("usb-serial")
-
-    return True
+    return config.ensure_structure()
 
 
 def print_status():
