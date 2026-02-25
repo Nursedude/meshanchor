@@ -406,6 +406,53 @@ class HardwareDetector:
         },
     }
 
+    # Mapping from KNOWN_SPI_HATS key → template filename in available.d/
+    HAT_KEY_TO_TEMPLATE = {
+        'MeshAdv-Mini': 'meshadv-mini.yaml',
+        'MeshAdv-Pi v1.1': 'meshadv-pi-v1.1.yaml',
+        'MeshAdv-Pi-Hat': 'meshadv-pi-hat.yaml',
+        'Adafruit RFM9x': 'adafruit-rfm9x.yaml',
+        'Waveshare SX126X': 'waveshare-sx1262.yaml',
+        'Elecrow LoRa RFM95': 'elecrow-rfm95.yaml',
+        'FemtoFox': 'femtofox.yaml',
+        'Ebyte E22-900M30S': 'ebyte-e22-900m30s.yaml',
+        'Ebyte E22-400M30S': 'ebyte-e22-400m30s.yaml',
+        'Seeed SenseCAP E5': 'seeed-sensecap.yaml',
+        'RAKwireless RAK2287': 'rak-hat-spi.yaml',
+    }
+
+    @classmethod
+    def match_eeprom_to_template(cls) -> Optional[str]:
+        """Match HAT EEPROM product string to a template filename.
+
+        Reads /proc/device-tree/hat/product (populated by RPi kernel
+        from HAT EEPROM at I2C address 0x50) and matches against
+        KNOWN_SPI_HATS keys.
+
+        Returns:
+            Template filename (e.g. 'meshadv-mini.yaml') or None.
+        """
+        try:
+            product_path = Path('/proc/device-tree/hat/product')
+            if not product_path.exists():
+                return None
+            product = product_path.read_text().strip('\x00').strip()
+            if not product:
+                return None
+
+            for hat_key in cls.KNOWN_SPI_HATS:
+                if hat_key.lower() in product.lower():
+                    template = cls.HAT_KEY_TO_TEMPLATE.get(hat_key)
+                    if template:
+                        log(
+                            f"EEPROM product '{product}' matched "
+                            f"HAT '{hat_key}' → template '{template}'"
+                        )
+                        return template
+            return None
+        except (OSError, PermissionError):
+            return None
+
     def __init__(self):
         self.detected_hardware = {}
 
