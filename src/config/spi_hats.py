@@ -344,16 +344,12 @@ class SPIHatConfigurator:
                 check=False, timeout=10
             )
 
-        # Generate config.yaml content
+        # Generate hardware config content
         yaml_content = self.generate_config_yaml(config)
 
-        # Save to config.yaml
-        config_yaml_path = '/etc/meshtasticd/config.yaml'
-        success, msg = _sudo_write(config_yaml_path, yaml_content)
-        if success:
-            saved_files.append(config_yaml_path)
-        else:
-            console.print(f"[red]Failed to write {config_yaml_path}: {msg}[/red]")
+        # NEVER overwrite /etc/meshtasticd/config.yaml — that is the user's
+        # file (MaxNodes, MaxMessageQueue, etc.).  Hardware-specific settings
+        # go to available.d/ with a symlink in config.d/ only.
 
         # Save device-specific config to available.d
         hat_name = config.get('hat', 'unknown').lower().replace(' ', '-')
