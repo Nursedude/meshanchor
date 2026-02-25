@@ -6,9 +6,12 @@
 ### Including the "Module:" line!
 ---
 Lora:
-  # Default to auto-detecting the module type
-  # This will be overridden by configs from config.d
-  Module: auto
+  # Module is set by hardware templates in config.d/
+  # DO NOT set Module: auto — it triggers meshtasticd's native autoconf
+  # which crashes when no hardware is detected (EEPROM CRC32, no CH341, etc.)
+  # Select your radio via TUI > Meshtasticd Config > Hardware Config
+  # Or: sudo cp /etc/meshtasticd/available.d/<radio>.yaml /etc/meshtasticd/config.d/
+#  Module: sx1262
 
 #  # Uncomment to enable Simulation mode, or use --sim
 #  Module: sim

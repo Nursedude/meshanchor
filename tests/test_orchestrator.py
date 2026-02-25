@@ -373,83 +373,74 @@ class TestFixStalePlaceholder:
             assert '@MESHTASTICD_BIN@' not in written_content
 
 
-class TestSPIAutoDetection:
-    """Test EEPROM-based SPI HAT auto-detection in _check_meshtasticd_config."""
+class TestConfigDValidation:
+    """Test _check_meshtasticd_config validates config.d/ state."""
 
-    def _mock_hardware_module(self, eeprom_return):
-        """Create a mock config.hardware module with HardwareDetector."""
-        mock_module = MagicMock()
-        mock_module.HardwareDetector.match_eeprom_to_template.return_value = eeprom_return
-        return mock_module
-
-    def test_eeprom_match_deploys_correct_template(self, orchestrator, tmp_path):
-        """When EEPROM matches a known HAT, deploy that template."""
-        config_d = tmp_path / "config.d"
-        available_d = tmp_path / "available.d"
-        config_d.mkdir()
-        available_d.mkdir()
-        (available_d / "meshadv-mini.yaml").write_text("Lora:\n  CS: 8\n")
-
-        mock_hw = self._mock_hardware_module('meshadv-mini.yaml')
-
-        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path), \
-             patch('core.orchestrator._detect_radio_hardware', return_value={
-                 'has_spi': True, 'has_usb': False,
-                 'spi_devices': ['/dev/spidev0.0'],
-                 'usb_devices': [], 'hardware_type': 'spi',
-             }), \
-             patch.dict(sys.modules, {'config.hardware': mock_hw}):
-
-            result = orchestrator._check_meshtasticd_config()
-
-            assert result is True
-            assert (config_d / "meshadv-mini.yaml").exists()
-            assert orchestrator._config_auto_deployed is True
-
-    def test_no_eeprom_match_refuses_to_guess(self, orchestrator, tmp_path):
-        """When EEPROM has no match, refuse to deploy and return False."""
-        config_d = tmp_path / "config.d"
-        available_d = tmp_path / "available.d"
-        config_d.mkdir()
-        available_d.mkdir()
-        (available_d / "meshadv-mini.yaml").write_text("Lora:\n  CS: 8\n")
-        (available_d / "rak-hat-spi.yaml").write_text("Lora:\n  CS: 8\n")
-
-        mock_hw = self._mock_hardware_module(None)
-
-        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path), \
-             patch('core.orchestrator._detect_radio_hardware', return_value={
-                 'has_spi': True, 'has_usb': False,
-                 'spi_devices': ['/dev/spidev0.0'],
-                 'usb_devices': [], 'hardware_type': 'spi',
-             }), \
-             patch.dict(sys.modules, {'config.hardware': mock_hw}):
-
-            result = orchestrator._check_meshtasticd_config()
-
-            assert result is False
-            # config_d should remain empty — no wrong config deployed
-            assert list(config_d.glob("*.yaml")) == []
-
-    def test_existing_config_skips_auto_detection(self, orchestrator, tmp_path):
-        """When config.d/ already has a config, skip auto-detection entirely."""
+    def test_existing_config_returns_true(self, orchestrator, tmp_path):
+        """When config.d/ has a config, return True."""
         config_d = tmp_path / "config.d"
         config_d.mkdir()
-        (config_d / "existing.yaml").write_text("Lora:\n  CS: 8\n")
+        (config_d / "my-radio.yaml").write_text("Lora:\n  Module: sx1262\n  CS: 8\n")
 
         with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path):
             result = orchestrator._check_meshtasticd_config()
-
             assert result is True
-            assert orchestrator._config_auto_deployed is False
+
+    def test_empty_config_d_returns_false(self, orchestrator, tmp_path):
+        """When config.d/ is empty, refuse to start."""
+        config_d = tmp_path / "config.d"
+        available_d = tmp_path / "available.d"
+        config_d.mkdir()
+        available_d.mkdir()
+        (available_d / "meshtoad-spi.yaml").write_text("Lora:\n  CS: 8\n")
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path):
+            result = orchestrator._check_meshtasticd_config()
+            assert result is False
+
+    def test_no_config_d_returns_false(self, orchestrator, tmp_path):
+        """When config.d/ doesn't exist, refuse to start."""
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path):
+            result = orchestrator._check_meshtasticd_config()
+            assert result is False
+
+    def test_logs_available_templates(self, orchestrator, tmp_path, caplog):
+        """When refusing to start, log available templates."""
+        import logging
+        config_d = tmp_path / "config.d"
+        available_d = tmp_path / "available.d"
+        config_d.mkdir()
+        available_d.mkdir()
+        (available_d / "meshtoad-spi.yaml").write_text("Lora:\n")
+        (available_d / "heltec-usb.yaml").write_text("Serial:\n")
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path), \
+             caplog.at_level(logging.ERROR):
+            result = orchestrator._check_meshtasticd_config()
+            assert result is False
+            assert "meshtoad-spi.yaml" in caplog.text
+            assert "heltec-usb.yaml" in caplog.text
+
+    def test_no_auto_deployment(self, orchestrator, tmp_path):
+        """When config.d/ is empty, no templates are auto-deployed."""
+        config_d = tmp_path / "config.d"
+        available_d = tmp_path / "available.d"
+        config_d.mkdir()
+        available_d.mkdir()
+        (available_d / "heltec-usb.yaml").write_text("Serial:\n  Device: auto\n")
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path):
+            result = orchestrator._check_meshtasticd_config()
+            assert result is False
+            # config_d should remain empty — no auto-deployment
+            assert list(config_d.glob("*.yaml")) == []
 
 
 class TestPostPortCrashDetection:
     """Test that service crash after port timeout is detected."""
 
-    def test_auto_deployed_config_hint_on_crash(self, orchestrator):
-        """When auto-deployed config causes crash, error includes config hint."""
-        orchestrator._config_auto_deployed = True
+    def test_config_hint_on_crash(self, orchestrator):
+        """When service crashes after start, error includes config check hint."""
         call_count = {'n': 0}
 
         def mock_check_service(name):
