@@ -499,8 +499,34 @@ Press Cancel to keep current values."""
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
 
+    def _classify_hardware_config(self, config_path: Path) -> str:
+        """Classify a hardware config as 'usb' or 'spi'.
+
+        Uses RADIO_TEMPLATES radio_type first, then falls back to
+        inspecting the YAML content for Serial: (USB) vs Lora:/Display: (SPI).
+        """
+        try:
+            from core.meshtasticd_config import RADIO_TEMPLATES, RadioType
+            template = RADIO_TEMPLATES.get(config_path.stem, {})
+            if template:
+                rtype = template.get("radio_type")
+                if rtype == RadioType.USB_SERIAL:
+                    return "usb"
+                return "spi"
+        except ImportError:
+            pass
+
+        # Fallback: inspect file content
+        try:
+            content = config_path.read_text(errors='replace')[:500]
+            if 'Serial:' in content and 'spidev' not in content.lower():
+                return "usb"
+        except Exception:
+            pass
+        return "spi"
+
     def _hardware_config_menu(self):
-        """Hardware configuration selection."""
+        """Hardware configuration selection with USB/SPI categorization."""
         # Auto-create directory structure and templates if missing
         try:
             from core.meshtasticd_config import MeshtasticdConfig
@@ -534,26 +560,48 @@ Press Cancel to keep current values."""
         if config_d.exists():
             active = {f.name for f in config_d.glob('*.yaml')}
 
-        choices = []
+        # Classify configs into USB and SPI categories
+        usb_configs = []
+        spi_configs = []
         for cfg in sorted(available):
-            status = "[ACTIVE]" if cfg.name in active else ""
-            # Truncate name for display
-            name = cfg.stem[:25]
-            choices.append((cfg.name, f"{name} {status}"))
+            if self._classify_hardware_config(cfg) == "usb":
+                usb_configs.append(cfg)
+            else:
+                spi_configs.append(cfg)
+
+        # Build categorized menu choices
+        choices = []
+        choices.append(("--usb--", f"--- USB Radios ({len(usb_configs)}) ---"))
+        for cfg in usb_configs:
+            status = " [ACTIVE]" if cfg.name in active else ""
+            choices.append((cfg.name, f"  {cfg.stem}{status}"))
+
+        choices.append(("--spi--", f"--- SPI HATs ({len(spi_configs)}) ---"))
+        for cfg in spi_configs:
+            status = " [ACTIVE]" if cfg.name in active else ""
+            choices.append((cfg.name, f"  {cfg.stem}{status}"))
 
         choices.append(("view", "View Config Details"))
         choices.append(("back", "Back"))
 
+        # Build subtitle with active config info
+        active_names = [n.replace('.yaml', '') for n in active
+                        if n != 'meshforge-overrides.yaml']
+        active_display = ', '.join(active_names) if active_names else 'none'
+
         choice = self.dialog.menu(
             "Hardware Config",
-            "Select hardware configuration to activate:\n\n"
-            f"Templates: {available_dir}\n"
-            f"Active: {config_d}",
+            f"Total: {len(available)} templates | "
+            f"Active: {active_display}\n\n"
+            "Select hardware configuration to activate:",
             choices
         )
 
         if choice is None or choice == "back":
             return
+        elif choice in ("--usb--", "--spi--"):
+            # Category header selected — re-show menu
+            self._hardware_config_menu()
         elif choice == "view":
             self._view_hardware_config(available)
         else:
