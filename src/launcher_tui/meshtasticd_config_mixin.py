@@ -355,8 +355,20 @@ Press Cancel to keep current values."""
                     self.dialog.msgbox("Error", f"Failed to set short name:\n{result.message}")
                     return
 
+            # Persist owner settings for restart survival
             if changes_made:
-                self.dialog.msgbox("Success", f"Owner settings updated:\n\n" + "\n".join(changes_made))
+                from utils.device_config_store import save_device_settings
+                owner_data = {}
+                if long_name:
+                    owner_data['long_name'] = long_name
+                if short_name:
+                    owner_data['short_name'] = short_name
+                save_device_settings({'owner': owner_data})
+
+                self.dialog.msgbox("Success",
+                    f"Owner settings updated:\n\n"
+                    + "\n".join(changes_made)
+                    + "\n\nSaved for restart persistence.")
             else:
                 self.dialog.msgbox("Info", "No changes made.")
 
@@ -474,7 +486,7 @@ Press Cancel to keep current values."""
         try:
             cli = get_cli()
 
-            # Apply modem preset
+            # Apply modem preset (with verification)
             result = cli.set_lora_preset(preset)
             if not result.success:
                 self.dialog.msgbox("Error",
@@ -483,7 +495,9 @@ Press Cancel to keep current values."""
                     "meshtasticd is running with region set.")
                 return
 
-            # Apply frequency slot
+            verified = '[verified]' in (result.output or '')
+
+            # Apply frequency slot (with verification)
             slot_result = cli.set_channel_num(freq_slot)
             slot_msg = ""
             if not slot_result.success:
@@ -491,11 +505,21 @@ Press Cancel to keep current values."""
             else:
                 slot_msg = f"\nFrequency slot: {freq_slot}"
 
+            # Persist settings for restart survival
+            from utils.device_config_store import save_device_settings
+            save_device_settings({
+                'lora': {
+                    'modem_preset': preset,
+                    'channel_num': freq_slot,
+                }
+            })
+
+            verify_note = " (verified)" if verified else ""
             self.dialog.msgbox("Success",
-                f"{preset} preset applied!\n\n"
+                f"{preset} preset applied!{verify_note}\n\n"
                 f"Modem preset: {preset}{slot_msg}\n\n"
-                "Settings applied via meshtastic CLI.\n"
-                "Device will reboot to apply changes.")
+                "Settings saved for restart persistence.\n"
+                "Will be re-applied if meshtasticd restarts.")
         except Exception as e:
             self.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
 
@@ -1580,14 +1604,15 @@ Press Cancel to keep current values."""
             self._edit_file(choice)
 
     def _restart_meshtasticd(self):
-        """Restart meshtasticd service."""
+        """Restart meshtasticd service and re-apply saved device settings."""
         confirm = self.dialog.yesno(
             "Restart Service",
             "Restart meshtasticd?\n\n"
             "This will:\n"
             "1. Reload systemd daemon\n"
             "2. Restart meshtasticd service\n"
-            "3. Apply any config changes",
+            "3. Wait for TCP readiness\n"
+            "4. Re-apply saved device settings",
             default_no=True
         )
 
@@ -1598,10 +1623,55 @@ Press Cancel to keep current values."""
             self.dialog.infobox("Restarting", "Restarting meshtasticd...")
 
             success, msg = apply_config_and_restart('meshtasticd')
-            if success:
-                self.dialog.msgbox("Success", "meshtasticd restarted successfully!")
-            else:
+            if not success:
                 self.dialog.msgbox("Error", f"Restart failed:\n{msg}")
+                return
+
+            # Check for saved device settings to re-apply
+            from utils.device_config_store import load_device_config, apply_saved_config
+            saved = load_device_config()
+
+            if not saved:
+                self.dialog.msgbox("Success", f"meshtasticd restarted.\n\n{msg}")
+                return
+
+            # Summarize what will be re-applied
+            sections = []
+            for section, values in saved.items():
+                items = [f"  {k}: {v}" for k, v in values.items()]
+                sections.append(f"{section}:\n" + "\n".join(items))
+            summary = "\n".join(sections)
+
+            reapply = self.dialog.yesno(
+                "Re-apply Settings?",
+                f"meshtasticd restarted.\n\n"
+                f"Saved device settings found:\n{summary}\n\n"
+                "Re-apply these settings now?\n"
+                "(Device config may have reverted to defaults)",
+                default_no=False
+            )
+
+            if not reapply:
+                self.dialog.msgbox("Info",
+                    "Settings NOT re-applied.\n\n"
+                    "You can re-apply manually via the\n"
+                    "Radio Presets or Owner Name menus.")
+                return
+
+            self.dialog.infobox("Applying", "Re-applying saved device settings...")
+
+            cli = get_cli()
+            all_ok, results = apply_saved_config(cli)
+
+            if all_ok:
+                self.dialog.msgbox("Success",
+                    "meshtasticd restarted and settings restored!\n\n"
+                    f"{results}")
+            else:
+                self.dialog.msgbox("Partial Success",
+                    "Some settings could not be restored:\n\n"
+                    f"{results}\n\n"
+                    "Check the web UI at :9443 to verify.")
 
         except subprocess.TimeoutExpired:
             self.dialog.msgbox("Error", "Restart timed out")
@@ -1694,6 +1764,8 @@ Press Cancel to keep current values."""
             )
             if result.returncode == 0:
                 print(f"\nMQTT {'enabled' if enabled else 'disabled'} successfully.")
+                from utils.device_config_store import save_device_setting
+                save_device_setting('mqtt', 'enabled', enabled)
             else:
                 print("\nCommand failed.")
         except Exception as e:
@@ -1731,6 +1803,8 @@ Press Cancel to keep current values."""
             )
             if result.returncode == 0:
                 print(f"\nMQTT broker set to: {broker}")
+                from utils.device_config_store import save_device_setting
+                save_device_setting('mqtt', 'address', broker.strip())
             else:
                 print("\nCommand failed.")
         except Exception as e:
@@ -1771,6 +1845,14 @@ Press Cancel to keep current values."""
                 result = subprocess.run(cmd, timeout=15)
                 if result.returncode == 0:
                     print("\nMQTT credentials updated.")
+                    from utils.device_config_store import save_device_settings
+                    cred_data = {}
+                    if username:
+                        cred_data['username'] = username
+                    if password:
+                        cred_data['password'] = password
+                    if cred_data:
+                        save_device_settings({'mqtt': cred_data})
                 else:
                     print("\nCommand failed.")
             else:
@@ -1802,6 +1884,8 @@ Press Cancel to keep current values."""
             )
             if result.returncode == 0:
                 print(f"\nMQTT root topic set to: {topic}")
+                from utils.device_config_store import save_device_setting
+                save_device_setting('mqtt', 'root_topic', topic.strip())
             else:
                 print("\nCommand failed.")
         except Exception as e:

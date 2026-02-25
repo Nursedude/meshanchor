@@ -686,6 +686,11 @@ class LoRaConfigurator:
 
             if result.returncode == 0:
                 console.print(f"[green]Modem preset set to {preset_key}[/green]")
+                try:
+                    from utils.device_config_store import save_device_setting
+                    save_device_setting('lora', 'modem_preset', preset_key)
+                except Exception:
+                    pass  # Non-critical: persistence is best-effort here
                 return True
             else:
                 console.print(f"[yellow]Warning: {result.stderr or 'Could not set preset'}[/yellow]")
