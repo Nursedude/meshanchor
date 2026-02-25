@@ -12,6 +12,7 @@
 #   sudo reboot
 
 Lora:
+  Module: sx1262
   CS: 21
   IRQ: 16
   Busy: 20
