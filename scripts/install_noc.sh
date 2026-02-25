@@ -1006,13 +1006,17 @@ NATIVE_USB_SERVICE
 
                 DAEMON_TYPE="native-usb"
             else
-                # Native meshtasticd not available — create placeholder service
-                # User can install later from TUI: Configuration > Setup Wizard
+                # Native meshtasticd not available
                 echo -e "  ${YELLOW}Note: Native meshtasticd not installed${NC}"
                 echo -e "  ${YELLOW}  USB templates are available in ${MESHTASTICD_CONFIG_DIR}/available.d/${NC}"
                 echo -e "  ${YELLOW}  Install meshtasticd later: sudo apt install meshtasticd${NC}"
 
-                cat > /etc/systemd/system/meshtasticd.service << 'USB_PLACEHOLDER'
+                # Don't overwrite a working service with a placeholder
+                if systemctl show meshtasticd --property=ExecStart 2>/dev/null | grep -q meshtasticd; then
+                    echo -e "  ${GREEN}✓ Existing meshtasticd service is valid — keeping it${NC}"
+                    DAEMON_TYPE="native-usb"
+                else
+                    cat > /etc/systemd/system/meshtasticd.service << 'USB_PLACEHOLDER'
 [Unit]
 Description=Meshtastic (pending native install)
 Documentation=https://meshtastic.org
@@ -1026,7 +1030,8 @@ ExecStart=/bin/echo "Install native meshtasticd: sudo apt install meshtasticd �
 WantedBy=multi-user.target
 USB_PLACEHOLDER
 
-                DAEMON_TYPE="usb-pending"
+                    DAEMON_TYPE="usb-pending"
+                fi
             fi
             ;;
 
@@ -1063,10 +1068,14 @@ NATIVE_GENERIC
 
                 DAEMON_TYPE="native"
             else
-                # Create a placeholder service
                 echo -e "  ${YELLOW}  Connect USB radio or configure SPI HAT${NC}"
 
-                cat > /etc/systemd/system/meshtasticd.service << 'NO_RADIO_SERVICE'
+                # Don't overwrite a working service with a placeholder
+                if systemctl show meshtasticd --property=ExecStart 2>/dev/null | grep -q meshtasticd; then
+                    echo -e "  ${GREEN}✓ Existing meshtasticd service is valid — keeping it${NC}"
+                    DAEMON_TYPE="native"
+                else
+                    cat > /etc/systemd/system/meshtasticd.service << 'NO_RADIO_SERVICE'
 [Unit]
 Description=Meshtastic (No Radio Configured)
 Documentation=https://meshtastic.org
@@ -1080,7 +1089,8 @@ ExecStart=/bin/echo "No radio detected. Connect USB radio or configure SPI HAT, 
 WantedBy=multi-user.target
 NO_RADIO_SERVICE
 
-                DAEMON_TYPE="placeholder"
+                    DAEMON_TYPE="placeholder"
+                fi
             fi
             ;;
     esac
