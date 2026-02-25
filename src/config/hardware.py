@@ -31,6 +31,14 @@ class HardwareDetector:
             'power_requirement': '900mA (peak)',
             'notes': 'MeshToad variant'
         },
+        '1a86:5512': {
+            'name': 'CH341 USB-to-SPI/I2C',
+            'common_devices': ['MeshToad E22', 'Pinedio USB', 'MeshStick 1262', 'PiggyStick'],
+            'meshtastic_compatible': True,
+            'power_requirement': '900mA (peak)',
+            'notes': 'CH341 in SPI/I2C bridge mode (not serial). Creates virtual spidev/i2c buses.',
+            'connection_type': 'spi'
+        },
         '10c4:ea60': {
             'name': 'CP2102 USB-Serial',
             'common_devices': ['Station G2', 'Various LoRa modules'],
@@ -116,6 +124,7 @@ class HardwareDetector:
         # MeshToad / CH340 family
         '1a86:7523': 'meshtoad-usb.yaml',    # CH340 (MeshToad, MeshTadpole)
         '1a86:55d4': 'meshtoad-usb.yaml',    # CH341 alternate
+        '1a86:5512': 'lora-usb-meshtoad-e22.yaml',  # CH341 SPI/I2C bridge
         '1a86:7522': 'meshtoad-usb.yaml',    # CH340K variant
         # RAK4631 / nRF52840
         '239a:8029': 'rak4631-usb.yaml',     # Adafruit nRF52840 (RAK4631)
@@ -492,7 +501,7 @@ class HardwareDetector:
                         }
 
                         # Check if it's likely a MeshToad
-                        if '1a86:7523' in vendor_product or '1a86:55d4' in vendor_product:
+                        if vendor_product in ('1a86:7523', '1a86:55d4', '1a86:5512'):
                             device_entry['likely_meshtoad'] = True
                             device_entry['recommended_config'] = 'MediumFast preset recommended for MtnMesh compatibility'
 
