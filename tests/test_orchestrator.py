@@ -212,14 +212,32 @@ class TestStartServiceAlreadyRunning:
     """Test early return when service is already running."""
 
     def test_already_running(self, orchestrator):
-        """Service already running — return True immediately."""
+        """Service already running — return True without checking config.d."""
         with patch.object(orchestrator, 'is_installed', return_value=True), \
              patch.object(orchestrator, 'is_running', return_value=True), \
-             patch.object(orchestrator, '_check_meshtasticd_config', return_value=True):
+             patch.object(orchestrator, '_check_meshtasticd_config') as mock_config_check:
 
             result = orchestrator.start_service('meshtasticd')
 
             assert result is True
+            # Config check must NOT be called when service is already running
+            mock_config_check.assert_not_called()
+
+    def test_already_running_empty_config_d(self, orchestrator):
+        """Service running with empty config.d — return True (bug fix).
+
+        Regression test: meshtasticd configured via config.yaml (not config.d/)
+        should not be rejected when it is already running and healthy.
+        """
+        with patch.object(orchestrator, 'is_installed', return_value=True), \
+             patch.object(orchestrator, 'is_running', return_value=True), \
+             patch.object(orchestrator, '_check_meshtasticd_config', return_value=False) as mock_config_check:
+
+            result = orchestrator.start_service('meshtasticd')
+
+            assert result is True
+            # Config check must not be called — service is already running
+            mock_config_check.assert_not_called()
 
 
 class TestLogJournalTail:
