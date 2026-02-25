@@ -11,6 +11,7 @@ Run: python3 -m pytest tests/test_orchestrator.py -v
 """
 
 import subprocess
+import sys
 import pytest
 from unittest.mock import patch, MagicMock, call
 from dataclasses import dataclass
@@ -163,8 +164,8 @@ class TestStartServicePortReadiness:
 
             assert result is True
 
-    def test_port_never_ready_still_succeeds(self, orchestrator):
-        """Port never binds — service still reports success (warning only)."""
+    def test_port_never_ready_service_alive_succeeds(self, orchestrator):
+        """Port never binds but service still alive — warning only, return True."""
         with patch.object(orchestrator, 'is_installed', return_value=True), \
              patch.object(orchestrator, 'is_running', return_value=False), \
              patch.object(orchestrator, '_check_meshtasticd_config', return_value=True), \
@@ -178,6 +179,33 @@ class TestStartServicePortReadiness:
 
             # Service is up, port not bound is just a warning
             assert result is True
+
+    def test_port_never_ready_service_crashed_returns_false(self, orchestrator):
+        """Port never binds AND service crashed — return False."""
+        # check_service returns available during startup polling,
+        # then not-running on post-port recheck (service crashed)
+        call_count = {'n': 0}
+
+        def mock_check_service(name):
+            call_count['n'] += 1
+            if call_count['n'] <= 1:
+                return _available()  # During startup polling
+            return _not_running()    # Post-port recheck — crashed
+
+        with patch.object(orchestrator, 'is_installed', return_value=True), \
+             patch.object(orchestrator, 'is_running', return_value=False), \
+             patch.object(orchestrator, '_check_meshtasticd_config', return_value=True), \
+             patch('core.orchestrator.check_service', side_effect=mock_check_service), \
+             patch('subprocess.run', return_value=MagicMock(returncode=0, stdout='', stderr='')), \
+             patch('time.sleep'), \
+             patch.object(orchestrator, '_check_port', return_value=False), \
+             patch.object(orchestrator, '_log_journal_tail'), \
+             patch.object(orchestrator, '_emit') as mock_emit:
+
+            result = orchestrator.start_service('meshtasticd')
+
+            assert result is False
+            mock_emit.assert_called_with('service_failed', 'meshtasticd')
 
 
 class TestStartServiceAlreadyRunning:
@@ -343,3 +371,182 @@ class TestFixStalePlaceholder:
             written_content = mock_write.call_args[0][1]
             assert '/usr/bin/meshtasticd' in written_content
             assert '@MESHTASTICD_BIN@' not in written_content
+
+
+class TestSPIAutoDetection:
+    """Test EEPROM-based SPI HAT auto-detection in _check_meshtasticd_config."""
+
+    def _mock_hardware_module(self, eeprom_return):
+        """Create a mock config.hardware module with HardwareDetector."""
+        mock_module = MagicMock()
+        mock_module.HardwareDetector.match_eeprom_to_template.return_value = eeprom_return
+        return mock_module
+
+    def test_eeprom_match_deploys_correct_template(self, orchestrator, tmp_path):
+        """When EEPROM matches a known HAT, deploy that template."""
+        config_d = tmp_path / "config.d"
+        available_d = tmp_path / "available.d"
+        config_d.mkdir()
+        available_d.mkdir()
+        (available_d / "meshadv-mini.yaml").write_text("Lora:\n  CS: 8\n")
+
+        mock_hw = self._mock_hardware_module('meshadv-mini.yaml')
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path), \
+             patch('core.orchestrator._detect_radio_hardware', return_value={
+                 'has_spi': True, 'has_usb': False,
+                 'spi_devices': ['/dev/spidev0.0'],
+                 'usb_devices': [], 'hardware_type': 'spi',
+             }), \
+             patch.dict(sys.modules, {'config.hardware': mock_hw}):
+
+            result = orchestrator._check_meshtasticd_config()
+
+            assert result is True
+            assert (config_d / "meshadv-mini.yaml").exists()
+            assert orchestrator._config_auto_deployed is True
+
+    def test_no_eeprom_match_refuses_to_guess(self, orchestrator, tmp_path):
+        """When EEPROM has no match, refuse to deploy and return False."""
+        config_d = tmp_path / "config.d"
+        available_d = tmp_path / "available.d"
+        config_d.mkdir()
+        available_d.mkdir()
+        (available_d / "meshadv-mini.yaml").write_text("Lora:\n  CS: 8\n")
+        (available_d / "rak-hat-spi.yaml").write_text("Lora:\n  CS: 8\n")
+
+        mock_hw = self._mock_hardware_module(None)
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path), \
+             patch('core.orchestrator._detect_radio_hardware', return_value={
+                 'has_spi': True, 'has_usb': False,
+                 'spi_devices': ['/dev/spidev0.0'],
+                 'usb_devices': [], 'hardware_type': 'spi',
+             }), \
+             patch.dict(sys.modules, {'config.hardware': mock_hw}):
+
+            result = orchestrator._check_meshtasticd_config()
+
+            assert result is False
+            # config_d should remain empty — no wrong config deployed
+            assert list(config_d.glob("*.yaml")) == []
+
+    def test_existing_config_skips_auto_detection(self, orchestrator, tmp_path):
+        """When config.d/ already has a config, skip auto-detection entirely."""
+        config_d = tmp_path / "config.d"
+        config_d.mkdir()
+        (config_d / "existing.yaml").write_text("Lora:\n  CS: 8\n")
+
+        with patch('core.orchestrator.MESHTASTICD_CONFIG_DIR', tmp_path):
+            result = orchestrator._check_meshtasticd_config()
+
+            assert result is True
+            assert orchestrator._config_auto_deployed is False
+
+
+class TestPostPortCrashDetection:
+    """Test that service crash after port timeout is detected."""
+
+    def test_auto_deployed_config_hint_on_crash(self, orchestrator):
+        """When auto-deployed config causes crash, error includes config hint."""
+        orchestrator._config_auto_deployed = True
+        call_count = {'n': 0}
+
+        def mock_check_service(name):
+            call_count['n'] += 1
+            if call_count['n'] <= 1:
+                return _available()
+            return _not_running()
+
+        with patch.object(orchestrator, 'is_installed', return_value=True), \
+             patch.object(orchestrator, 'is_running', return_value=False), \
+             patch.object(orchestrator, '_check_meshtasticd_config', return_value=True), \
+             patch('core.orchestrator.check_service', side_effect=mock_check_service), \
+             patch('subprocess.run', return_value=MagicMock(returncode=0, stdout='', stderr='')), \
+             patch('time.sleep'), \
+             patch.object(orchestrator, '_check_port', return_value=False), \
+             patch.object(orchestrator, '_log_journal_tail') as mock_journal, \
+             patch.object(orchestrator, '_emit'):
+
+            result = orchestrator.start_service('meshtasticd')
+
+            assert result is False
+            mock_journal.assert_called()
+
+
+class TestEEPROMTemplateMatching:
+    """Test HardwareDetector.match_eeprom_to_template classmethod."""
+
+    @pytest.fixture(autouse=True)
+    def _import_hardware(self):
+        """Import HardwareDetector with mocked dependencies."""
+        # Mock rich and utils.system/utils.logger which may not be installed
+        mock_rich = MagicMock()
+        mock_utils_system = MagicMock()
+        mock_utils_logger = MagicMock()
+        mock_utils_logger.log = MagicMock()
+
+        with patch.dict(sys.modules, {
+            'rich': mock_rich,
+            'rich.console': mock_rich,
+            'utils.system': mock_utils_system,
+            'utils.logger': mock_utils_logger,
+        }):
+            # Force re-import to pick up mocks
+            if 'config.hardware' in sys.modules:
+                del sys.modules['config.hardware']
+            from config.hardware import HardwareDetector
+            self.HardwareDetector = HardwareDetector
+            yield
+            # Clean up
+            if 'config.hardware' in sys.modules:
+                del sys.modules['config.hardware']
+
+    def test_known_hat_matches(self):
+        """EEPROM product matching a known HAT returns correct template."""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = 'MeshAdv-Mini\x00'
+
+        with patch('config.hardware.Path', return_value=mock_path):
+            result = self.HardwareDetector.match_eeprom_to_template()
+            assert result == 'meshadv-mini.yaml'
+
+    def test_rak_hat_matches(self):
+        """EEPROM product with RAK2287 returns rak-hat-spi template."""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = 'RAKwireless RAK2287\x00'
+
+        with patch('config.hardware.Path', return_value=mock_path):
+            result = self.HardwareDetector.match_eeprom_to_template()
+            assert result == 'rak-hat-spi.yaml'
+
+    def test_unknown_hat_returns_none(self):
+        """EEPROM product not matching any known HAT returns None."""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = 'UnknownDevice v3'
+
+        with patch('config.hardware.Path', return_value=mock_path):
+            result = self.HardwareDetector.match_eeprom_to_template()
+            assert result is None
+
+    def test_no_eeprom_file_returns_none(self):
+        """When /proc/device-tree/hat/product doesn't exist, returns None."""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = False
+
+        with patch('config.hardware.Path', return_value=mock_path):
+            result = self.HardwareDetector.match_eeprom_to_template()
+            assert result is None
+
+    def test_empty_eeprom_returns_none(self):
+        """When EEPROM file exists but is empty, returns None."""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = '\x00'
+
+        with patch('config.hardware.Path', return_value=mock_path):
+            result = self.HardwareDetector.match_eeprom_to_template()
+            assert result is None
