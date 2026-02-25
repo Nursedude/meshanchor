@@ -745,15 +745,18 @@ class ServiceOrchestrator:
             logger.error(f"{service_name} is not installed")
             return False
 
+        # Already running — no need to validate pre-start config
+        # (the service's configuration is valid however it was set up)
+        if self.is_running(service_name):
+            logger.info(f"{service_name} is already running")
+            return True
+
         # Pre-start: ensure meshtasticd has a radio config in config.d/
+        # Only reached when we are about to START the service.
         if service_name == 'meshtasticd' and config.check_port:
             if not self._check_meshtasticd_config():
                 logger.error("meshtasticd cannot start without a radio config")
                 return False
-
-        if self.is_running(service_name):
-            logger.info(f"{service_name} is already running")
-            return True
 
         # Auto-fix stale placeholder service files before starting
         self._fix_stale_placeholder(service_name)
