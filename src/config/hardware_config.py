@@ -99,6 +99,13 @@ HARDWARE_DEVICES = {
         requires_spi=True,
         notes='Uses CH341 SPI. Template: meshtoad.yaml'
     ),
+    'meshtoad-e22': HardwareDevice(
+        name='MeshToad E22',
+        description='MeshToad E22 USB-to-SPI adapter (CH341 + SX1262)',
+        yaml_file='lora-usb-meshtoad-e22.yaml',
+        requires_spi=True,
+        notes='CH341 SPI bridge (PID 0x5512). High-power E22 module.'
+    ),
     # Waveshare displays
     'display-waveshare-1.44': HardwareDevice(
         name='Waveshare 1.44" LCD',
