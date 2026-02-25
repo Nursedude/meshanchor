@@ -30,6 +30,7 @@ import re
 import socket
 import subprocess
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -979,6 +980,16 @@ def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 3
             return False, f"restart {service_name} failed: {error_msg}"
 
         logger.info(f"Successfully restarted {service_name}")
+
+        # Wait for TCP port readiness (meshtasticd binds 4403 on startup)
+        if service_name == 'meshtasticd':
+            tcp_ready = _wait_for_tcp_ready(4403, max_wait=15)
+            if tcp_ready:
+                return True, f"{service_name} restarted and accepting connections"
+            else:
+                logger.warning("meshtasticd restarted but TCP:4403 not ready within 15s")
+                return True, f"{service_name} restarted (TCP port not yet ready)"
+
         return True, f"{service_name} restarted successfully"
 
     except subprocess.TimeoutExpired:
@@ -990,6 +1001,30 @@ def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 3
     except Exception as e:
         logger.error(f"Error restarting {service_name}: {e}")
         return False, f"Error: {e}"
+
+
+def _wait_for_tcp_ready(port: int, host: str = 'localhost', max_wait: int = 15) -> bool:
+    """Poll a TCP port until it accepts connections.
+
+    Used after service restart to ensure the daemon is fully initialized
+    and accepting client connections before returning.
+
+    Args:
+        port: TCP port number to check
+        host: Host to connect to (default: localhost)
+        max_wait: Maximum seconds to wait (default: 15)
+
+    Returns:
+        True if port became ready, False if timeout
+    """
+    for _attempt in range(max_wait):
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                logger.debug("TCP port %d ready", port)
+                return True
+        except (ConnectionRefusedError, OSError):
+            time.sleep(1)
+    return False
 
 
 def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:
