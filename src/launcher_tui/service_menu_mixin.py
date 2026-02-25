@@ -620,25 +620,12 @@ class ServiceMenuMixin:
                     "Check: cat /etc/meshtasticd/config.yaml"
                 )
 
-            # Only create config.yaml if it doesn't exist or is empty
+            # Only create config.yaml if it doesn't exist or is empty.
+            # Uses centralized ensure_structure() so content stays in sync
+            # with templates/config.yaml.  NEVER overwrites user's config.
             if needs_config:
-                config_yaml.write_text("""---
-Lora:
-  Module: auto
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-  RootPath: /usr/share/meshtasticd/web
-
-General:
-  MaxNodes: 200
-  MaxMessageQueue: 100
-  ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
-""")
+                from core.meshtasticd_config import MeshtasticdConfig
+                MeshtasticdConfig().ensure_structure()
                 self.dialog.infobox("Fixing", "Created minimal config.yaml")
 
             # NOTE: We do NOT create HAT templates - meshtasticd provides them
@@ -741,38 +728,16 @@ General:
             result = subprocess.run(['which', 'meshtasticd'], capture_output=True, text=True, timeout=5)
             meshtasticd_bin = result.stdout.strip() if result.returncode == 0 else '/usr/bin/meshtasticd'
 
-            # Ensure config directories exist (meshtasticd package should create these)
+            # Ensure config directories and config.yaml exist.
+            # Uses centralized ensure_structure() — creates dirs, deploys
+            # templates from templates/config.yaml.  NEVER overwrites user's
+            # config.yaml (MaxNodes, MaxMessageQueue, etc.).
             config_dir = Path('/etc/meshtasticd')
-            config_dir.mkdir(parents=True, exist_ok=True)
-            (config_dir / 'available.d').mkdir(exist_ok=True)
-            (config_dir / 'config.d').mkdir(exist_ok=True)
-            (config_dir / 'ssl').mkdir(mode=0o700, exist_ok=True)
-
-            # Check if meshtasticd installed a valid config.yaml
-            # Only create one if missing or empty - NEVER overwrite
             config_yaml = config_dir / 'config.yaml'
-            if config_yaml.exists() and 'Webserver:' in config_yaml.read_text():
-                self.dialog.infobox("Installing", "Using existing config.yaml from meshtasticd package")
-            elif not config_yaml.exists() or not config_yaml.read_text().strip():
-                # No config or empty - create minimal one
-                config_yaml.write_text("""---
-Lora:
-  Module: auto
-
-Logging:
-  LogLevel: info
-
-Webserver:
-  Port: 9443
-  RootPath: /usr/share/meshtasticd/web
-
-General:
-  MaxNodes: 200
-  MaxMessageQueue: 100
-  ConfigDirectory: /etc/meshtasticd/config.d/
-  AvailableDirectory: /etc/meshtasticd/available.d/
-""")
-                self.dialog.infobox("Installing", "Created minimal config.yaml")
+            from core.meshtasticd_config import MeshtasticdConfig
+            MeshtasticdConfig().ensure_structure()
+            if config_yaml.exists():
+                self.dialog.infobox("Installing", "Config structure ready")
 
             # NOTE: We do NOT create HAT templates - meshtasticd package provides them
             # User selects their HAT from /etc/meshtasticd/available.d/ via Hardware Config menu

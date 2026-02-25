@@ -839,7 +839,13 @@ class ConfigFileManager:
             self._apply_changes()
 
     def _create_basic_config(self):
-        """Create a basic config.yaml with all required sections"""
+        """Create a basic config.yaml — only if it doesn't already exist.
+
+        NEVER overwrites the user's config.yaml (MaxNodes, etc.).
+        """
+        if self.MAIN_CONFIG.exists():
+            console.print(f"[yellow]{self.MAIN_CONFIG} already exists — not overwriting.[/yellow]")
+            return
         basic_config = """# Meshtasticd Configuration
 # See: https://meshtastic.org/docs/hardware/devices/linux-native-hardware/
 # Hardware-specific LoRa settings should be in config.d/*.yaml
