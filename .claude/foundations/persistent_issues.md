@@ -1251,3 +1251,22 @@ if MESHTASTIC_CONNECTION_LOCK.acquire(timeout=10):
 **Updating ratchet counts:**
 When fixing a violation, update the expected count in the corresponding test class.
 The test will fail if the count goes DOWN without updating (forces tightening).
+
+---
+
+## #10 Map Control Panel Scrollbar Overlap (2026-02-25)
+
+**Symptom**: On the `:5000` map page, the right-side control panel's native browser scrollbar
+(~15-17px wide) obstructs filter checkboxes, buttons, and stat rows when content overflows.
+
+**Root cause**: `.panel-body` used `overflow-y: auto` without any scrollbar styling, so the
+browser rendered a full-width native scrollbar inside the panel, consuming content space.
+
+**Fix**: Added thin dark-themed scrollbar CSS to `web/node_map.html`:
+- `scrollbar-width: thin` + `scrollbar-color` (Firefox)
+- `::-webkit-scrollbar` at 6px width (Chrome/Safari/Edge)
+- `scrollbar-gutter: stable` to prevent layout shift
+- `padding-right: 4px` on `.panel-body` for content buffer
+- Applied to `.panel-body`, `.no-gps-list`, and `.sim-links-list`
+
+**Status**: **FIXED**
