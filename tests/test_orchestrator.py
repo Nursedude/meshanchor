@@ -227,3 +227,119 @@ class TestLogJournalTail:
     def test_unknown_service(self, orchestrator):
         """No crash for unknown service name."""
         orchestrator._log_journal_tail('nonexistent')
+
+
+class TestFixStalePlaceholder:
+    """Test _fix_stale_placeholder() auto-fix for stale placeholder services."""
+
+    def test_regenerates_service_when_placeholder_and_binary_exists(self, orchestrator):
+        """When ExecStart is /bin/echo but real binary exists, regenerate service file."""
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            if cmd[0] == 'systemctl' and '--property=ExecStart' in cmd:
+                result.stdout = 'ExecStart=/bin/echo "Install native meshtasticd"'
+                result.returncode = 0
+            elif cmd[0] == 'which':
+                result.stdout = '/usr/bin/meshtasticd\n'
+                result.returncode = 0
+            else:
+                result.stdout = ''
+                result.returncode = 0
+            return result
+
+        with patch('subprocess.run', side_effect=mock_run), \
+             patch('core.orchestrator._sudo_write', return_value=(True, 'ok')) as mock_write, \
+             patch('core.orchestrator._sudo_cmd', side_effect=lambda c: c), \
+             patch('pathlib.Path.exists', return_value=False), \
+             patch('pathlib.Path.read_text', return_value=''):
+
+            result = orchestrator._fix_stale_placeholder('meshtasticd')
+
+            assert result is True
+            mock_write.assert_called_once()
+            written_path = mock_write.call_args[0][0]
+            written_content = mock_write.call_args[0][1]
+            assert written_path == '/etc/systemd/system/meshtasticd.service'
+            assert '/usr/bin/meshtasticd' in written_content
+            assert 'Type=simple' in written_content
+
+    def test_no_fix_when_binary_not_found(self, orchestrator):
+        """When ExecStart is /bin/echo and binary doesn't exist, log error, return False."""
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            if cmd[0] == 'systemctl' and '--property=ExecStart' in cmd:
+                result.stdout = 'ExecStart=/bin/echo "No radio detected"'
+                result.returncode = 0
+            elif cmd[0] == 'which':
+                result.stdout = ''
+                result.returncode = 1
+            else:
+                result.stdout = ''
+                result.returncode = 0
+            return result
+
+        with patch('subprocess.run', side_effect=mock_run), \
+             patch('core.orchestrator._sudo_write') as mock_write:
+
+            result = orchestrator._fix_stale_placeholder('meshtasticd')
+
+            assert result is False
+            mock_write.assert_not_called()
+
+    def test_real_service_unchanged(self, orchestrator):
+        """When ExecStart points to real binary, no fix needed."""
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            if cmd[0] == 'systemctl' and '--property=ExecStart' in cmd:
+                result.stdout = 'ExecStart=/usr/bin/meshtasticd -c /etc/meshtasticd/config.yaml'
+                result.returncode = 0
+            else:
+                result.stdout = ''
+                result.returncode = 0
+            return result
+
+        with patch('subprocess.run', side_effect=mock_run), \
+             patch('core.orchestrator._sudo_write') as mock_write:
+
+            result = orchestrator._fix_stale_placeholder('meshtasticd')
+
+            assert result is False
+            mock_write.assert_not_called()
+
+    def test_uses_template_when_available(self, orchestrator):
+        """When service template exists, use it instead of inline fallback."""
+        template_content = (
+            "[Unit]\n"
+            "Description=Meshtastic Daemon\n"
+            "[Service]\n"
+            "Type=simple\n"
+            "ExecStart=@MESHTASTICD_BIN@ -c /etc/meshtasticd/config.yaml\n"
+            "[Install]\n"
+            "WantedBy=multi-user.target\n"
+        )
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            if cmd[0] == 'systemctl' and '--property=ExecStart' in cmd:
+                result.stdout = 'ExecStart=/bin/echo "placeholder"'
+                result.returncode = 0
+            elif cmd[0] == 'which':
+                result.stdout = '/usr/bin/meshtasticd\n'
+                result.returncode = 0
+            else:
+                result.stdout = ''
+                result.returncode = 0
+            return result
+
+        with patch('subprocess.run', side_effect=mock_run), \
+             patch('core.orchestrator._sudo_write', return_value=(True, 'ok')) as mock_write, \
+             patch('core.orchestrator._sudo_cmd', side_effect=lambda c: c), \
+             patch('pathlib.Path.exists', return_value=True), \
+             patch('pathlib.Path.read_text', return_value=template_content):
+
+            result = orchestrator._fix_stale_placeholder('meshtasticd')
+
+            assert result is True
+            written_content = mock_write.call_args[0][1]
+            assert '/usr/bin/meshtasticd' in written_content
+            assert '@MESHTASTICD_BIN@' not in written_content

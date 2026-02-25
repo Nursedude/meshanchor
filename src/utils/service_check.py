@@ -695,10 +695,33 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
             # Check for placeholder services (active but exited = not a real daemon)
             if is_active and sub_state == "exited":
                 # This is a placeholder or oneshot that ran and exited
-                # Check if this is a mismatch (SPI HAT but USB placeholder)
                 hardware = _detect_radio_hardware()
 
-                if hardware['has_spi'] and not hardware['has_usb']:
+                # Check if the real binary exists — stale placeholder if so
+                has_binary = False
+                try:
+                    bin_result = subprocess.run(
+                        ['which', 'meshtasticd'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    has_binary = bin_result.returncode == 0
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    pass
+
+                if has_binary:
+                    # Real binary exists but service is a placeholder — stale
+                    return ServiceStatus(
+                        name=name,
+                        available=False,
+                        state=ServiceState.DEGRADED,
+                        message=f"{description}: stale placeholder — meshtasticd binary available",
+                        fix_hint="Restart NOC to auto-fix, or run: sudo bash scripts/install_noc.sh",
+                        port=check_port_num,
+                        detection_method="systemctl (exited) + binary exists"
+                    )
+                elif hardware['has_spi'] and not hardware['has_usb']:
                     # SPI HAT detected but placeholder service - MISMATCH!
                     return ServiceStatus(
                         name=name,
@@ -710,7 +733,7 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                         detection_method="systemctl (exited) + hardware mismatch"
                     )
                 elif hardware['has_usb']:
-                    # USB radio - placeholder is correct
+                    # USB radio, no native binary — placeholder is expected
                     return ServiceStatus(
                         name=name,
                         available=False,
