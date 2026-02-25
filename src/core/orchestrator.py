@@ -41,6 +41,8 @@ from utils.service_check import (
     check_port as _centralized_check_port,
     check_service,
     _detect_radio_hardware,
+    _sudo_cmd,
+    _sudo_write,
     ServiceState as _CheckState,
 )
 
@@ -599,6 +601,110 @@ class ServiceOrchestrator:
     # Service Control
     # ─────────────────────────────────────────────────────────────
 
+    def _fix_stale_placeholder(self, service_name: str) -> bool:
+        """
+        Detect and fix stale placeholder service files.
+
+        When a previous install created a placeholder systemd unit (Type=oneshot,
+        ExecStart=/bin/echo ...) but the real binary has since been installed,
+        regenerate the service file from the template and daemon-reload.
+
+        Returns:
+            True if a fix was applied, False if no fix was needed or possible.
+        """
+        config = self.SERVICES.get(service_name)
+        if not config or not config.check_binary:
+            return False
+
+        # Read the current ExecStart from systemd
+        try:
+            result = subprocess.run(
+                ['systemctl', 'show', config.systemd_name, '--property=ExecStart'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            exec_start = result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+
+        # Check if ExecStart is a placeholder (echo command)
+        if '/bin/echo' not in exec_start:
+            return False
+
+        # Placeholder detected — check if real binary exists
+        try:
+            bin_result = subprocess.run(
+                ['which', config.check_binary],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+
+        if bin_result.returncode != 0:
+            logger.error(
+                f"{service_name} service is a placeholder and binary not found. "
+                f"Install: sudo apt install {config.check_binary}"
+            )
+            return False
+
+        binary_path = bin_result.stdout.strip()
+        logger.warning(
+            f"{service_name} service is a stale placeholder — "
+            f"real binary found at {binary_path}"
+        )
+
+        # Regenerate from template (same logic as install_noc.sh)
+        template_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / 'templates' / 'systemd' / 'meshtasticd-native.service'
+        )
+
+        if template_path.exists():
+            template = template_path.read_text()
+            service_content = template.replace('@MESHTASTICD_BIN@', binary_path)
+        else:
+            # Inline fallback (matches install_noc.sh NATIVE_USB_SERVICE)
+            service_content = (
+                "[Unit]\n"
+                "Description=Meshtastic Daemon\n"
+                "Documentation=https://meshtastic.org\n"
+                "After=network.target\n"
+                "\n"
+                "[Service]\n"
+                "Type=simple\n"
+                "User=root\n"
+                "WorkingDirectory=/etc/meshtasticd\n"
+                f"ExecStart={binary_path} -c /etc/meshtasticd/config.yaml\n"
+                "Restart=on-failure\n"
+                "RestartSec=5\n"
+                "\n"
+                "[Install]\n"
+                "WantedBy=multi-user.target\n"
+            )
+
+        service_path = f'/etc/systemd/system/{config.systemd_name}.service'
+        success, msg = _sudo_write(service_path, service_content)
+        if not success:
+            logger.error(f"Failed to fix placeholder service: {msg}")
+            return False
+
+        # Reload systemd so it picks up the new unit file
+        try:
+            subprocess.run(
+                _sudo_cmd(['systemctl', 'daemon-reload']),
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            logger.warning("daemon-reload failed after fixing placeholder")
+
+        logger.info(f"Fixed stale placeholder service for {service_name}")
+        return True
+
     def start_service(self, service_name: str, wait: bool = True) -> bool:
         """
         Start a service with health verification.
@@ -628,6 +734,9 @@ class ServiceOrchestrator:
         if self.is_running(service_name):
             logger.info(f"{service_name} is already running")
             return True
+
+        # Auto-fix stale placeholder service files before starting
+        self._fix_stale_placeholder(service_name)
 
         logger.info(f"Starting {service_name}...")
         result = subprocess.run(
