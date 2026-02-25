@@ -140,6 +140,7 @@ class ServiceOrchestrator:
         self.STARTUP_ORDER = list(self.__class__.STARTUP_ORDER)
         self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
+        self._config_auto_deployed = False
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
         self._callbacks: Dict[str, List[Callable]] = {
@@ -355,12 +356,60 @@ class ServiceOrchestrator:
                 template_name = 'usb-serial-generic.yaml'
                 logger.info(f"USB device found at {hw['usb_device']} — using {template_name}")
 
-        # SPI auto-detection: look for first matching SPI template
+        # SPI auto-detection: use EEPROM if available, otherwise fail-safe
         elif hw['has_spi']:
-            spi_templates = list(available_d.glob("*-spi.yaml")) + list(available_d.glob("*-hat*.yaml"))
-            if spi_templates:
-                template_name = spi_templates[0].name
-                logger.info(f"SPI device detected — using {template_name}")
+            try:
+                from config.hardware import HardwareDetector
+                eeprom_template = HardwareDetector.match_eeprom_to_template()
+                if eeprom_template:
+                    template_name = eeprom_template
+                    logger.info(
+                        f"SPI HAT identified via EEPROM → {template_name}"
+                    )
+                    self._config_auto_deployed = True
+                else:
+                    # No EEPROM match — refuse to guess, list options
+                    spi_templates = sorted(
+                        list(available_d.glob("*-spi.yaml"))
+                        + list(available_d.glob("*-hat*.yaml"))
+                        + [t for t in available_d.glob("*.yaml")
+                           if '-usb' not in t.name
+                           and not t.name.startswith('usb-')]
+                    )
+                    seen = set()
+                    unique_templates = []
+                    for t in spi_templates:
+                        if t.name not in seen:
+                            seen.add(t.name)
+                            unique_templates.append(t)
+
+                    logger.error(
+                        "SPI detected but cannot identify HAT model "
+                        "(no EEPROM match). "
+                        "Auto-detection refused to guess — "
+                        "wrong GPIO pins will prevent radio init."
+                    )
+                    if unique_templates:
+                        logger.error(
+                            "Available SPI/HAT templates — "
+                            "select one manually:"
+                        )
+                        for t in unique_templates:
+                            logger.error(f"  - {t.name}")
+                    logger.error(
+                        "Fix: sudo cp /etc/meshtasticd/available.d/"
+                        "<your-hat>.yaml /etc/meshtasticd/config.d/"
+                    )
+                    logger.error(
+                        "Or run the interactive HAT wizard via the TUI: "
+                        "Hardware → Select & Configure Device"
+                    )
+                    return False
+            except ImportError:
+                logger.error(
+                    "SPI detected but hardware detection module unavailable"
+                )
+                return False
 
         if not template_name:
             logger.error(
@@ -384,6 +433,10 @@ class ServiceOrchestrator:
             import shutil
             shutil.copy2(str(template_path), str(config_d / template_name))
             logger.info(f"Auto-deployed radio config: {template_name} → config.d/")
+            logger.info(
+                "Config will be validated when meshtasticd starts "
+                "(port 4403 binding check)"
+            )
             return True
         except (OSError, PermissionError) as e:
             logger.error(f"Failed to deploy config: {e}")
@@ -814,6 +867,27 @@ class ServiceOrchestrator:
                     time.sleep(1)
 
                 if not port_ready:
+                    # Re-check service state — it may have crashed during
+                    # the port-wait window (e.g., wrong radio config →
+                    # GPIO init failure → meshtasticd exits)
+                    post_port_status = check_service(config.systemd_name)
+                    if not post_port_status.available:
+                        logger.error(
+                            f"{service_name} crashed after start "
+                            f"(port {config.check_port} never bound, "
+                            f"service state: {post_port_status.state.value})"
+                        )
+                        self._log_journal_tail(service_name, lines=10)
+                        if self._config_auto_deployed:
+                            logger.error(
+                                "The auto-deployed radio config may be "
+                                "wrong. Check /etc/meshtasticd/config.d/ "
+                                "and verify GPIO pins match your HAT."
+                            )
+                        self._emit('service_failed', service_name)
+                        return False
+
+                    # Service still running but port not bound — warn only
                     logger.warning(
                         f"{service_name} running but port {config.check_port} "
                         f"not yet bound — may need more startup time or "
