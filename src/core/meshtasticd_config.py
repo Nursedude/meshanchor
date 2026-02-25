@@ -563,6 +563,465 @@ Logging:
   LogLevel: info
 """
     },
+    # ─────────────────────────────────────────────
+    # USB Radios via CH341 USB-to-SPI (upstream naming)
+    # ─────────────────────────────────────────────
+    "lora-pinedio-usb-sx1262": {
+        "name": "lora-pinedio-usb-sx1262",
+        "radio_type": RadioType.USB_SERIAL,
+        "chip": "sx1262",
+        "description": "Pine64 Pinedio USB (CH341 + SX1262)",
+        "config": """\
+# Pine64 Pinedio USB LoRa Adapter (CH341 + SX1262)
+
+Lora:
+  Module: sx1262
+  CS: 0
+  IRQ: 10
+  spidev: ch341
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-usb-meshtoad-e22": {
+        "name": "lora-usb-meshtoad-e22",
+        "radio_type": RadioType.USB_SERIAL,
+        "chip": "sx1262",
+        "description": "MeshToad E22 USB (CH341 + SX1262)",
+        "config": """\
+# MeshToad E22 USB LoRa Adapter (CH341 + SX1262)
+
+Lora:
+  Module: sx1262
+  CS: 0
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  RXen: 1
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  spidev: ch341
+  USB_PID: 0x5512
+  USB_VID: 0x1A86
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    # ─────────────────────────────────────────────
+    # SPI HATs — upstream meshtasticd naming (lora-* prefix)
+    # ─────────────────────────────────────────────
+    "display-waveshare-1-44": {
+        "name": "display-waveshare-1-44",
+        "radio_type": RadioType.NATIVE_SPI,
+        "description": "Waveshare 1.44\" LCD HAT (ST7735S, trackball)",
+        "config": """\
+# Waveshare 1.44" LCD HAT (ST7735S) Display Configuration
+
+Display:
+  Panel: ST7735S
+  spidev: spidev0.0
+  DC: 25
+  Backlight: 24
+  Width: 128
+  Height: 128
+  Reset: 27
+  OffsetX: 2
+  OffsetY: 1
+
+Input:
+  TrackballUp: 6
+  TrackballDown: 19
+  TrackballLeft: 5
+  TrackballRight: 26
+  TrackballPress: 13
+  TrackballDirection: FALLING
+"""
+    },
+    "display-waveshare-2.8": {
+        "name": "display-waveshare-2.8",
+        "radio_type": RadioType.NATIVE_SPI,
+        "description": "Waveshare 2.8\" LCD + Touchscreen (ST7789)",
+        "config": """\
+# Waveshare 2.8" RPi LCD Display + Touchscreen
+
+Display:
+  Panel: ST7789
+  CS: 8
+  DC: 22
+  Backlight: 18
+  Width: 240
+  Height: 320
+  Reset: 27
+  Rotate: true
+  Invert: true
+
+Touchscreen:
+  Module: XPT2046
+  CS: 7
+  IRQ: 17
+"""
+    },
+    "lora-Adafruit-RFM9x": {
+        "name": "lora-Adafruit-RFM9x",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "RF95",
+        "description": "Adafruit RFM9x (upstream naming, RF95/SX1276)",
+        "config": """\
+# Adafruit RFM9x LoRa Radio Bonnet (upstream naming)
+
+Lora:
+  Module: RF95
+  Reset: 25
+  CS: 7
+  IRQ: 22
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-MeshAdv-900M30S": {
+        "name": "lora-MeshAdv-900M30S",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshAdv-Pi E22-900M30S 1W (SX1262, high-power)",
+        "config": """\
+# MeshAdv-Pi E22-900M30S SPI Configuration (1W)
+
+Lora:
+  Module: sx1262
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  TXen: 13
+  RXen: 12
+  DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-MeshAdv-Mini-900M22S": {
+        "name": "lora-MeshAdv-Mini-900M22S",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshAdv Mini E22-900M22S (SX1262)",
+        "config": """\
+# MeshAdv Mini E22-900M22S SPI Configuration
+
+Lora:
+  Module: sx1262
+  CS: 8
+  IRQ: 16
+  Busy: 20
+  Reset: 24
+  RXen: 12
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-RAK6421-13300-slot1": {
+        "name": "lora-RAK6421-13300-slot1",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "RAK6421 Pi-HAT RAK13300 Slot 1 (SX1262)",
+        "config": """\
+# RAK6421 Pi-HAT with RAK13300 — Slot 1
+
+Lora:
+  Module: sx1262
+  IRQ: 22
+  Reset: 16
+  Busy: 24
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.0
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-RAK6421-13300-slot2": {
+        "name": "lora-RAK6421-13300-slot2",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "RAK6421 Pi-HAT RAK13300 Slot 2 (SX1262)",
+        "config": """\
+# RAK6421 Pi-HAT with RAK13300 — Slot 2
+
+Lora:
+  Module: sx1262
+  IRQ: 18
+  Reset: 24
+  Busy: 19
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.1
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-lyra-picocalc-wio-sx1262": {
+        "name": "lora-lyra-picocalc-wio-sx1262",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Lyra PicoCalc WIO SX1262 (custom gpiochip)",
+        "config": """\
+# Lyra PicoCalc WIO SX1262 SPI Configuration
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  SX126X_MAX_POWER: 22
+  spidev: spidev1.0
+  SPI_Speed: 2000000
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-meshstick-1262": {
+        "name": "lora-meshstick-1262",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "MeshStick 1262 SPI (CH341 + SX1262)",
+        "config": """\
+# MeshStick 1262 SPI Configuration (CH341)
+
+Lora:
+  Module: sx1262
+  CS: 0
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  spidev: ch341
+  DIO3_TCXO_VOLTAGE: true
+  USB_PID: 0x5512
+  USB_VID: 0x1A86
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-piggystick-lr1121": {
+        "name": "lora-piggystick-lr1121",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "lr1121",
+        "description": "PiggyStick LR1121 (CH341 + LR1121)",
+        "config": """\
+# PiggyStick LR1121 SPI Configuration (CH341)
+
+Lora:
+  Module: lr1121
+  CS: 0
+  IRQ: 6
+  Reset: 2
+  Busy: 4
+  spidev: ch341
+  DIO3_TCXO_VOLTAGE: 1.8
+  USB_PID: 0x5512
+  USB_VID: 0x1A86
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-raxda-rock2f-starter-edition-hat": {
+        "name": "lora-raxda-rock2f-starter-edition-hat",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Radxa Rock 2F Starter Edition HAT (SX1262)",
+        "config": """\
+# Radxa Rock 2F Starter Edition HAT SPI Configuration
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: 1.8
+  spidev: spidev0.1
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-starter-edition-sx1262-i2c": {
+        "name": "lora-starter-edition-sx1262-i2c",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Starter Edition SX1262 I2C RPi HAT",
+        "config": """\
+# Starter Edition SX1262 I2C Raspberry Pi HAT
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  CS: 8
+  IRQ: 22
+  Busy: 4
+  Reset: 18
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-waveshare-sxxx": {
+        "name": "lora-waveshare-sxxx",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Waveshare SX126X XXXM LoRa HAT (SX1262)",
+        "config": """\
+# Waveshare SX126X XXXM LoRa HAT SPI Configuration
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+  SX126X_ANT_SW: 6
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-ws-raspberry-pi-pico-to-rpi-adapter": {
+        "name": "lora-ws-raspberry-pi-pico-to-rpi-adapter",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Waveshare Pico-to-RPi Adapter (SX1262)",
+        "config": """\
+# Waveshare Raspberry Pi Pico to RPi Adapter
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
+    "lora-ws-raspberry-pico-to-orangepi-03": {
+        "name": "lora-ws-raspberry-pico-to-orangepi-03",
+        "radio_type": RadioType.NATIVE_SPI,
+        "chip": "sx1262",
+        "description": "Waveshare SX1262 on Orange Pi Zero3 (gpiochip)",
+        "config": """\
+# Waveshare SX1262 on Orange Pi Zero3 via Pico Adapter
+
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  spidev: spidev1.1
+
+TCP:
+  Port: 4403
+
+Webserver:
+  Port: 443
+
+Logging:
+  LogLevel: info
+"""
+    },
 }
 
 
@@ -572,9 +1031,9 @@ class MeshtasticdConfig:
 
     Directory structure:
         /etc/meshtasticd/
-        ├── available.d/     # Available radio configs (19 templates)
-        │   ├── heltec-usb.yaml, tbeam-usb.yaml, ...  (7 USB)
-        │   └── meshtoad-spi.yaml, rak-hat-spi.yaml, ... (12 SPI)
+        ├── available.d/     # Available radio configs (36 templates)
+        │   ├── heltec-usb.yaml, tbeam-usb.yaml, ...  (9 USB)
+        │   └── meshtoad-spi.yaml, rak-hat-spi.yaml, ... (27 SPI)
         ├── config.d/        # Enabled configs (symlinks to available.d)
         │   └── active.yaml -> ../available.d/meshtoad-spi.yaml
         ├── config.yaml      # Main config (merged from config.d)
