@@ -141,7 +141,6 @@ class ServiceOrchestrator:
         self.STARTUP_ORDER = list(self.__class__.STARTUP_ORDER)
         self._config_path = config_path or NOC_CONFIG_PATH
         self._running = False
-        self._config_auto_deployed = False
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
         self._callbacks: Dict[str, List[Callable]] = {
@@ -296,11 +295,12 @@ class ServiceOrchestrator:
         Without a radio config template, meshtasticd starts but never binds
         TCP port 4403 — causing health checks to fail.
 
-        If config.d/ is empty, attempts auto-detection of connected hardware
-        and deploys the matching template.
+        If config.d/ is empty, REFUSES to start and logs clear instructions
+        directing the user to select hardware via the TUI or manual copy.
+        No auto-detection or auto-deployment of configs.
 
         Returns:
-            True if config.d/ has at least one config (or was auto-populated).
+            True if config.d/ has at least one valid config.
         """
         config_d = MESHTASTICD_CONFIG_DIR / "config.d"
         available_d = MESHTASTICD_CONFIG_DIR / "available.d"
@@ -309,160 +309,52 @@ class ServiceOrchestrator:
         if config_d.exists():
             existing = list(config_d.glob("*.yaml"))
             if existing:
-                # Ensure all SPI templates have explicit Module: to
-                # prevent config.yaml's 'Module: auto' from triggering
-                # meshtasticd's autoconf hardware scan (which can fail
-                # on EEPROM CRC32 and crash the service).
+                # Defense-in-depth: ensure SPI templates have explicit
+                # Module: to prevent any residual Module: auto in
+                # config.yaml from triggering meshtasticd autoconf.
                 for tmpl in existing:
-                    self._ensure_template_has_module(tmpl)
+                    self._validate_template_module(tmpl)
                 return True
 
-        logger.warning("No radio config in /etc/meshtasticd/config.d/")
-        logger.info("Attempting auto-detection of radio hardware...")
+        # ── config.d/ is empty — REFUSE to start ──
+        logger.error(
+            "No radio config in /etc/meshtasticd/config.d/ — "
+            "meshtasticd cannot start without hardware configuration."
+        )
+        logger.error("")
+        logger.error("Select your radio hardware using one of these methods:")
+        logger.error("")
+        logger.error(
+            "  1. TUI: sudo python3 src/launcher_tui/main.py"
+        )
+        logger.error(
+            "     → Meshtasticd Config → Hardware Config"
+        )
+        logger.error("")
+        logger.error(
+            "  2. Manual: sudo cp /etc/meshtasticd/available.d/"
+            "<your-radio>.yaml /etc/meshtasticd/config.d/"
+        )
+        logger.error("")
 
-        # Detect hardware
-        hw = _detect_radio_hardware()
+        # List available templates if the directory exists
+        if available_d.exists():
+            templates = sorted(available_d.glob("*.yaml"))
+            if templates:
+                logger.error("Available templates:")
+                for tmpl in templates:
+                    logger.error(f"  - {tmpl.name}")
+                logger.error("")
 
-        if not available_d.exists():
-            logger.error(
-                "No templates in /etc/meshtasticd/available.d/ — "
-                "reinstall meshtasticd or run install_noc.sh"
-            )
-            return False
+        return False
 
-        template_name = None
+    def _validate_template_module(self, deployed_path: Path) -> None:
+        """Validate that a deployed config.d template has an explicit Lora.Module line.
 
-        # USB auto-detection via vendor:product ID → template mapping
-        if hw['has_usb']:
-            try:
-                from config.hardware import HardwareDetector
-                # Get USB vendor:product ID for first device
-                usb_dev = Path(hw['usb_device'])
-                usb_id_result = subprocess.run(
-                    ['udevadm', 'info', '--query=property', str(usb_dev)],
-                    capture_output=True, text=True, timeout=5
-                )
-                vendor = product = None
-                for line in usb_id_result.stdout.splitlines():
-                    if line.startswith('ID_VENDOR_ID='):
-                        vendor = line.split('=', 1)[1].strip()
-                    elif line.startswith('ID_MODEL_ID='):
-                        product = line.split('=', 1)[1].strip()
-
-                if vendor and product:
-                    usb_id = f"{vendor}:{product}"
-                    template_name = HardwareDetector.match_usb_to_template(usb_id)
-                    if template_name:
-                        device_name = HardwareDetector.get_device_name_for_usb_id(usb_id) or usb_id
-                        logger.info(f"Detected USB radio: {device_name} → {template_name}")
-            except (ImportError, subprocess.SubprocessError, OSError) as e:
-                logger.debug(f"USB auto-detection failed: {e}")
-
-            # Fallback: use usb-serial-generic.yaml
-            if not template_name:
-                template_name = 'usb-serial-generic.yaml'
-                logger.info(f"USB device found at {hw['usb_device']} — using {template_name}")
-
-        # SPI auto-detection: use EEPROM if available, otherwise fail-safe
-        elif hw['has_spi']:
-            try:
-                from config.hardware import HardwareDetector
-                eeprom_template = HardwareDetector.match_eeprom_to_template()
-                if eeprom_template:
-                    template_name = eeprom_template
-                    logger.info(
-                        f"SPI HAT identified via EEPROM → {template_name}"
-                    )
-                    self._config_auto_deployed = True
-                else:
-                    # No EEPROM match — refuse to guess, list options
-                    spi_templates = sorted(
-                        list(available_d.glob("*-spi.yaml"))
-                        + list(available_d.glob("*-hat*.yaml"))
-                        + [t for t in available_d.glob("*.yaml")
-                           if '-usb' not in t.name
-                           and not t.name.startswith('usb-')]
-                    )
-                    seen = set()
-                    unique_templates = []
-                    for t in spi_templates:
-                        if t.name not in seen:
-                            seen.add(t.name)
-                            unique_templates.append(t)
-
-                    logger.error(
-                        "SPI detected but cannot identify HAT model "
-                        "(no EEPROM match). "
-                        "Auto-detection refused to guess — "
-                        "wrong GPIO pins will prevent radio init."
-                    )
-                    if unique_templates:
-                        logger.error(
-                            "Available SPI/HAT templates — "
-                            "select one manually:"
-                        )
-                        for t in unique_templates:
-                            logger.error(f"  - {t.name}")
-                    logger.error(
-                        "Fix: sudo cp /etc/meshtasticd/available.d/"
-                        "<your-hat>.yaml /etc/meshtasticd/config.d/"
-                    )
-                    logger.error(
-                        "Or run the interactive HAT wizard via the TUI: "
-                        "Hardware → Select & Configure Device"
-                    )
-                    return False
-            except ImportError:
-                logger.error(
-                    "SPI detected but hardware detection module unavailable"
-                )
-                return False
-
-        if not template_name:
-            logger.error(
-                "No radio hardware detected (no SPI or USB devices). "
-                "meshtasticd cannot bind port 4403 without a radio config."
-            )
-            logger.error(
-                "Fix: cp /etc/meshtasticd/available.d/<your-radio>.yaml "
-                "/etc/meshtasticd/config.d/"
-            )
-            return False
-
-        # Deploy the template
-        template_path = available_d / template_name
-        if not template_path.exists():
-            logger.error(f"Template not found: {template_path}")
-            return False
-
-        try:
-            config_d.mkdir(parents=True, exist_ok=True)
-            import shutil
-            deployed_path = config_d / template_name
-            shutil.copy2(str(template_path), str(deployed_path))
-            logger.info(f"Auto-deployed radio config: {template_name} → config.d/")
-            # Ensure deployed template has explicit Module: to prevent
-            # autoconf crash (defence-in-depth for older templates)
-            self._ensure_template_has_module(deployed_path)
-            logger.info(
-                "Config will be validated when meshtasticd starts "
-                "(port 4403 binding check)"
-            )
-            return True
-        except (OSError, PermissionError) as e:
-            logger.error(f"Failed to deploy config: {e}")
-            logger.error(
-                "Fix: sudo cp /etc/meshtasticd/available.d/"
-                f"{template_name} /etc/meshtasticd/config.d/"
-            )
-            return False
-
-    def _ensure_template_has_module(self, deployed_path: Path) -> None:
-        """Ensure a deployed config.d template has an explicit Lora.Module line.
-
-        Without Module:, the main config.yaml's 'Module: auto' survives
-        the merge, triggering meshtasticd's autoconf hardware scan which
-        can fail (EEPROM CRC32 missing) and crash the service.
+        Defense-in-depth: if a user manually copies an SPI template that
+        lacks Module:, this patches it to prevent any residual Module: auto
+        from triggering meshtasticd's autoconf hardware scan (which crashes
+        on EEPROM CRC32 missing, no CH341, etc.).
 
         If Module: is missing, infers the correct value from the
         RADIO_TEMPLATES metadata or falls back to sx1262 (most common).
@@ -953,12 +845,11 @@ class ServiceOrchestrator:
                             f"service state: {post_port_status.state.value})"
                         )
                         self._log_journal_tail(service_name, lines=10)
-                        if self._config_auto_deployed:
-                            logger.error(
-                                "The auto-deployed radio config may be "
-                                "wrong. Check /etc/meshtasticd/config.d/ "
-                                "and verify GPIO pins match your HAT."
-                            )
+                        logger.error(
+                            "Check /etc/meshtasticd/config.d/ — verify "
+                            "the radio config matches your hardware "
+                            "(correct GPIO pins, Module type, etc.)."
+                        )
                         self._emit('service_failed', service_name)
                         return False
 

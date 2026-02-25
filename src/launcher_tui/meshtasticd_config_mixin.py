@@ -43,7 +43,6 @@ class MeshtasticdConfigMixin:
 
     # LoRa module types supported by meshtasticd
     LORA_MODULES = {
-        "auto": "Auto-detect module type",
         "sx1262": "SX1262 (Waveshare, Ebyte E22-900M, MeshAdv, etc.)",
         "sx1268": "SX1268 (Ebyte E22-400M, etc.)",
         "sx1280": "SX1280 (2.4 GHz)",
