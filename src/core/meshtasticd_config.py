@@ -649,10 +649,19 @@ class MeshtasticdConfig:
                 logger.debug(f"Created template: {config_file}")
 
     def _create_main_config(self):
-        """Create main config.yaml file.
+        """Create main config.yaml file ONLY if it does not already exist.
+
+        SAFETY: NEVER overwrites an existing config.yaml. Users hand-edit
+        this file (e.g., MaxNodes: 400). MeshForge runtime changes go to
+        config.d/meshforge-overrides.yaml instead.
 
         Prefers repo template from templates/config.yaml over inline fallback.
         """
+        # Defense-in-depth: NEVER overwrite user's config.yaml
+        if self.main_config.exists():
+            logger.debug("config.yaml already exists, preserving: %s", self.main_config)
+            return
+
         # Try repo template first
         repo_config = Path(__file__).parent.parent.parent / 'templates' / 'config.yaml'
         if repo_config.exists():
