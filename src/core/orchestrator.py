@@ -20,6 +20,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import time
 import socket
@@ -308,6 +309,12 @@ class ServiceOrchestrator:
         if config_d.exists():
             existing = list(config_d.glob("*.yaml"))
             if existing:
+                # Ensure all SPI templates have explicit Module: to
+                # prevent config.yaml's 'Module: auto' from triggering
+                # meshtasticd's autoconf hardware scan (which can fail
+                # on EEPROM CRC32 and crash the service).
+                for tmpl in existing:
+                    self._ensure_template_has_module(tmpl)
                 return True
 
         logger.warning("No radio config in /etc/meshtasticd/config.d/")
@@ -431,8 +438,12 @@ class ServiceOrchestrator:
         try:
             config_d.mkdir(parents=True, exist_ok=True)
             import shutil
-            shutil.copy2(str(template_path), str(config_d / template_name))
+            deployed_path = config_d / template_name
+            shutil.copy2(str(template_path), str(deployed_path))
             logger.info(f"Auto-deployed radio config: {template_name} → config.d/")
+            # Ensure deployed template has explicit Module: to prevent
+            # autoconf crash (defence-in-depth for older templates)
+            self._ensure_template_has_module(deployed_path)
             logger.info(
                 "Config will be validated when meshtasticd starts "
                 "(port 4403 binding check)"
@@ -445,6 +456,70 @@ class ServiceOrchestrator:
                 f"{template_name} /etc/meshtasticd/config.d/"
             )
             return False
+
+    def _ensure_template_has_module(self, deployed_path: Path) -> None:
+        """Ensure a deployed config.d template has an explicit Lora.Module line.
+
+        Without Module:, the main config.yaml's 'Module: auto' survives
+        the merge, triggering meshtasticd's autoconf hardware scan which
+        can fail (EEPROM CRC32 missing) and crash the service.
+
+        If Module: is missing, infers the correct value from the
+        RADIO_TEMPLATES metadata or falls back to sx1262 (most common).
+        """
+        try:
+            content = deployed_path.read_text()
+        except OSError as e:
+            logger.warning(f"Cannot read deployed template for Module check: {e}")
+            return
+
+        # Only relevant for SPI templates (those with Lora: + GPIO pins)
+        if 'Lora:' not in content or 'CS:' not in content:
+            return
+
+        # Already has explicit Module: — nothing to do
+        if re.search(r'^\s+Module:\s*\S', content, re.MULTILINE):
+            return
+
+        # Determine correct Module value from RADIO_TEMPLATES chip metadata
+        stem = deployed_path.stem
+        module_value = None
+        try:
+            from core.meshtasticd_config import RADIO_TEMPLATES
+            chip = RADIO_TEMPLATES.get(stem, {}).get("chip")
+            if chip:
+                module_value = chip
+        except ImportError:
+            pass
+
+        if not module_value:
+            # Filename heuristics
+            lower = stem.lower()
+            if 'sx1276' in lower or 'rfm9' in lower or 'rfm95' in lower:
+                module_value = 'sx1276'
+            elif 'sx1268' in lower or '400m' in lower:
+                module_value = 'sx1268'
+            else:
+                module_value = 'sx1262'
+
+        # Inject Module: line after Lora: header
+        patched = re.sub(
+            r'^(Lora:\s*\n)',
+            f'\\1  Module: {module_value}\n',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+        if patched != content:
+            try:
+                deployed_path.write_text(patched)
+                logger.warning(
+                    f"Injected 'Module: {module_value}' into "
+                    f"{deployed_path.name} to prevent autoconf crash"
+                )
+            except OSError as e:
+                logger.error(f"Cannot patch deployed template: {e}")
 
     def get_config_info(self) -> Dict[str, Any]:
         """Get current configuration information."""

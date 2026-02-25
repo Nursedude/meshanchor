@@ -260,6 +260,7 @@ Logging:
 # Features: GPS (ATGM336H), I2C/Qwiic, PPS
 
 Lora:
+  Module: sx1262
   CS: 21
   IRQ: 16
   Busy: 20
@@ -296,6 +297,7 @@ Logging:
 # Features: GPS, Temperature Sensor, PWM Fan, I2C/Qwiic
 
 Lora:
+  Module: sx1262
   CS: 8
   IRQ: 16
   Busy: 20
@@ -330,6 +332,7 @@ Logging:
 # Hardware: SX1262
 
 Lora:
+  Module: sx1262
   CS: 8
   IRQ: 22
   Busy: 23
@@ -355,6 +358,7 @@ Logging:
 # Waveshare SX1262 LoRa HAT SPI Configuration
 
 Lora:
+  Module: sx1262
   CS: 21
   IRQ: 16
   Busy: 20
@@ -380,6 +384,7 @@ Logging:
 # RAK WisLink / RAK2287 SPI HAT Configuration
 
 Lora:
+  Module: sx1262
   CS: 8
   IRQ: 25
   Busy: 24
@@ -430,6 +435,7 @@ Logging:
 # FemtoFox LoRa Board SPI Configuration
 
 Lora:
+  Module: sx1262
   CS: 8
   IRQ: 16
   Busy: 20
@@ -457,6 +463,7 @@ Logging:
 # WARNING: High-power module — requires adequate power supply.
 
 Lora:
+  Module: sx1262
   CS: 21
   IRQ: 16
   Busy: 20
@@ -540,6 +547,7 @@ Logging:
 # Seeed SenseCAP E5 LoRa HAT SPI Configuration
 
 Lora:
+  Module: sx1262
   CS: 8
   IRQ: 25
   Reset: 22
