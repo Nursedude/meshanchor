@@ -66,7 +66,7 @@ class UnifiedNodeTracker:
     - Path table change monitoring with event logging
     """
 
-    OFFLINE_THRESHOLD = 3600  # 1 hour
+    OFFLINE_THRESHOLD = 900  # 15 minutes — consistent with map_data_collector default
     MAX_NODES = 10000  # Prevent unbounded memory growth
 
     @classmethod
@@ -531,7 +531,14 @@ instance_control_port = 37429
 
         # Update status
         existing.is_gateway = existing.is_gateway or new.is_gateway
-        existing.update_seen()
+        # Only mark as online if the incoming data is fresh (within threshold)
+        if new.last_seen:
+            age = (datetime.now() - new.last_seen).total_seconds()
+            if age < self.OFFLINE_THRESHOLD:
+                existing.update_seen()
+            # If new data is stale, don't call update_seen() — preserve existing status
+        else:
+            existing.update_seen()
 
     def _notify_callbacks(self, event: str, node: UnifiedNode):
         """Notify registered callbacks and emit to EventBus."""
