@@ -230,6 +230,13 @@ class ServiceMenuMixin:
 
         try:
             import tempfile
+            # Clean up previous bridge log to prevent /tmp accumulation
+            prev_log = getattr(self, '_bridge_log_path', None)
+            if prev_log and prev_log.exists():
+                try:
+                    prev_log.unlink()
+                except OSError:
+                    pass  # Non-critical — old log may still be in use
             log_fd, log_path_str = tempfile.mkstemp(
                 suffix='.log', prefix='meshforge-gateway-'
             )
