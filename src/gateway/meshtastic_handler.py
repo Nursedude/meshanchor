@@ -31,6 +31,7 @@ try:
 except ImportError:
     def broadcast_message(*args, **kwargs):
         pass
+from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
 from utils.safe_import import safe_import
 from utils.service_check import check_service
 
@@ -117,6 +118,18 @@ class MeshtasticHandler:
     def set_network_topology(self, topology) -> None:
         """Set network topology reference for relay node tracking."""
         self._network_topology = topology
+
+    def _truncate_if_needed(self, message: str) -> str:
+        """Truncate message to Meshtastic byte limit if needed."""
+        msg_bytes = message.encode('utf-8')
+        if len(msg_bytes) > MAX_MESHTASTIC_MSG_LENGTH:
+            logger.warning(
+                f"Message exceeds Meshtastic limit "
+                f"({len(msg_bytes)} > {MAX_MESHTASTIC_MSG_LENGTH} bytes), truncating"
+            )
+            truncated = msg_bytes[:MAX_MESHTASTIC_MSG_LENGTH - 3]
+            return truncated.decode('utf-8', errors='ignore') + '...'
+        return message
 
     def run_loop(self) -> None:
         """
@@ -254,8 +267,8 @@ class MeshtasticHandler:
             if self._pubsub_handler:
                 pub.unsubscribe(self._pubsub_handler, "meshtastic.receive")
                 self._pubsub_handler = None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Pubsub unsubscribe during disconnect: {e}")
 
         # Release persistent connection through the manager
         if self._conn_manager:
@@ -279,6 +292,8 @@ class MeshtasticHandler:
         Returns:
             True if message sent successfully, False otherwise.
         """
+        message = self._truncate_if_needed(message)
+
         if not self._connected:
             logger.warning("Not connected to Meshtastic")
             return False
@@ -287,7 +302,7 @@ class MeshtasticHandler:
             if self._interface:
                 # For broadcasts, use ^all instead of None
                 dest = destination if destination else "^all"
-                logger.info(f"Sending to Meshtastic: dest={dest}, ch={channel}, msg={message[:50]}")
+                logger.debug(f"Sending to Meshtastic: dest={dest}, ch={channel}, msg={message[:50]}")
                 result = self._interface.sendText(
                     message,
                     destinationId=dest,
@@ -318,7 +333,7 @@ class MeshtasticHandler:
         Returns:
             True if sent successfully, False otherwise.
         """
-        message = payload.get('message', '')
+        message = self._truncate_if_needed(payload.get('message', ''))
         destination = payload.get('destination')
         channel = payload.get('channel', 0)
 

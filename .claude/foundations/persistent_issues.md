@@ -7,24 +7,10 @@
 
 ---
 
-## Health Check Reconciliation (2026-02-20)
+## Health Check Reconciliation (2026-02-20) — ALL RESOLVED
 
-The code review health check (2026-01-24) identified 5 critical (C1-C5) and 1 high (H1)
-issues. After auditing the current codebase, here is their status:
-
-| ID | Issue | Status | Evidence |
-|----|-------|--------|----------|
-| C1 | LXMF Source None after partial RNS init | **MITIGATED** | Guard at `rns_bridge.py:579-580` returns False instead of crashing |
-| C2 | reconnect.py raises None on early interruption | **FIXED** | `reconnect.py:176-178` raises ConnectionError |
-| C3 | Unbounded node tracking dicts (memory leak) | **FIXED** | MAX_NODES caps + eviction in node_tracker.py and node_monitor.py |
-| C4 | Stats dict race conditions (24 racy increments) | **FIXED** | threading.Lock added across all affected files |
-| C5 | Atomic write uses deterministic temp path | **FIXED** | `paths.py` uses `tempfile.mkstemp()` for unique temp files |
-| H1 | Non-interruptible shutdown in daemon loops | **FIXED** (2026-02-20) | All daemon loops now use `_stop_event.wait()` instead of `time.sleep()` |
-
-**Key lesson**: File-scoped fixes applied between Jan 24 — Feb 20 resolved C2-C5 individually.
-H1 was fully resolved by Feb 20 — all daemon loops now use `_stop_event.wait()`. Remaining
-`time.sleep()` calls (49 files) are in bounded connection-wait loops, one-shot delays, and
-interactive pauses, which are acceptable patterns.
+C1-C5 and H1 from the 2026-01-24 code review are all FIXED/MITIGATED.
+Full details moved to `persistent_issues_archive.md` (2026-02-26).
 
 ---
 
