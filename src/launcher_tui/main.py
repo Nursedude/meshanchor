@@ -232,7 +232,8 @@ class MeshForgeLauncher(
             from status_bar import StatusBar
             self._status_bar = StatusBar(version=__version__)
             self.dialog.set_status_bar(self._status_bar)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Status bar initialization skipped: {e}")
             self._status_bar = None
 
     def _get_error_log_path(self) -> Path:
@@ -241,7 +242,8 @@ class MeshForgeLauncher(
             log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             return log_dir / "tui_errors.log"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Cannot create log directory, using /tmp fallback: {e}")
             return Path("/tmp/meshforge_tui_errors.log")
 
     def _log_error(self, context: str, exc: Exception) -> None:
