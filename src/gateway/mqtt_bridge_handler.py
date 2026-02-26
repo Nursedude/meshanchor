@@ -37,7 +37,7 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
+from .base_handler import BaseMessageHandler
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from .node_tracker import UnifiedNodeTracker
 
 
-class MQTTBridgeHandler:
+class MQTTBridgeHandler(BaseMessageHandler):
     """
     MQTT-based Meshtastic handler for the gateway bridge.
 
@@ -96,22 +96,21 @@ class MQTTBridgeHandler:
         status_callback: Optional[Callable] = None,
         should_bridge: Optional[Callable] = None,
     ):
-        self.config = config
-        self.node_tracker = node_tracker
-        self.health = health
-        self._stop_event = stop_event
-        self.stats = stats
-        self._stats_lock = stats_lock
-        self._mesh_to_rns_queue = message_queue
+        super().__init__(
+            config=config,
+            node_tracker=node_tracker,
+            health=health,
+            stop_event=stop_event,
+            stats=stats,
+            stats_lock=stats_lock,
+            message_queue=message_queue,
+            message_callback=message_callback,
+            status_callback=status_callback,
+            should_bridge=should_bridge,
+        )
 
-        # Callbacks
-        self._message_callback = message_callback
-        self._status_callback = status_callback
-        self._should_bridge = should_bridge
-
-        # MQTT client
+        # MQTT client (handler-specific)
         self._client = None
-        self._connected = False
         self._mqtt_lock = threading.Lock()
 
         # Meshtastic CLI path (cached)
@@ -120,23 +119,6 @@ class MQTTBridgeHandler:
         # Deduplication: track recent message IDs to avoid loops
         self._recent_ids: Dict[str, float] = {}
         self._dedup_window = 60  # seconds
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if connected to MQTT broker."""
-        return self._connected
-
-    def _truncate_if_needed(self, message: str) -> str:
-        """Truncate message to Meshtastic byte limit if needed."""
-        msg_bytes = message.encode('utf-8')
-        if len(msg_bytes) > MAX_MESHTASTIC_MSG_LENGTH:
-            logger.warning(
-                f"Message exceeds Meshtastic limit "
-                f"({len(msg_bytes)} > {MAX_MESHTASTIC_MSG_LENGTH} bytes), truncating"
-            )
-            truncated = msg_bytes[:MAX_MESHTASTIC_MSG_LENGTH - 3]
-            return truncated.decode('utf-8', errors='ignore') + '...'
-        return message
 
     def run_loop(self) -> None:
         """
@@ -170,6 +152,10 @@ class MQTTBridgeHandler:
                 self._connected = False
                 self.health.record_connection_event("meshtastic", "error", str(e))
                 self._stop_event.wait(5)
+
+    def connect(self) -> bool:
+        """Connect to MQTT broker (ABC contract)."""
+        return self._connect()
 
     def _connect(self) -> bool:
         """Connect to MQTT broker and subscribe to meshtasticd topics."""
@@ -404,12 +390,12 @@ class MQTTBridgeHandler:
             logger.debug(f"Could not store incoming message: {e}")
 
         # Queue for bridging if routing rules allow
-        if self._mesh_to_rns_queue is not None:
+        if self._message_queue is not None:
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug(f"Message from {sender} blocked by routing rules")
             else:
                 try:
-                    self._mesh_to_rns_queue.put_nowait(msg)
+                    self._message_queue.put_nowait(msg)
                 except Full:
                     logger.warning("Mesh->RNS queue full, dropping message")
                     with self._stats_lock:
@@ -768,10 +754,3 @@ class MQTTBridgeHandler:
             for k in expired:
                 del self._recent_ids[k]
 
-    def _notify_status(self, status: str) -> None:
-        """Notify status callback."""
-        if self._status_callback:
-            try:
-                self._status_callback(status)
-            except Exception as e:
-                logger.error(f"Status callback error: {e}")

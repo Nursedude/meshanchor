@@ -20,6 +20,7 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+from .base_handler import BaseMessageHandler
 from .config import GatewayConfig
 from .node_tracker import UnifiedNode
 from .reconnect import ReconnectStrategy
@@ -31,7 +32,6 @@ try:
 except ImportError:
     def broadcast_message(*args, **kwargs):
         pass
-from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
 from utils.safe_import import safe_import
 from utils.service_check import check_service
 
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
 
 
-class MeshtasticHandler:
+class MeshtasticHandler(BaseMessageHandler):
     """
     Handles Meshtastic connection and message processing.
 
@@ -80,21 +80,20 @@ class MeshtasticHandler:
         status_callback: Optional[Callable] = None,
         should_bridge: Optional[Callable] = None,
     ):
-        self.config = config
-        self.node_tracker = node_tracker
-        self.health = health
-        self._stop_event = stop_event
-        self.stats = stats
-        self._stats_lock = stats_lock
-        self._mesh_to_rns_queue = message_queue
+        super().__init__(
+            config=config,
+            node_tracker=node_tracker,
+            health=health,
+            stop_event=stop_event,
+            stats=stats,
+            stats_lock=stats_lock,
+            message_queue=message_queue,
+            message_callback=message_callback,
+            status_callback=status_callback,
+            should_bridge=should_bridge,
+        )
 
-        # Callbacks
-        self._message_callback = message_callback
-        self._status_callback = status_callback
-        self._should_bridge = should_bridge
-
-        # Connection state
-        self._connected = False
+        # Connection state (handler-specific)
         self._interface = None
         self._conn_manager = None
         self._pubsub_handler = None
@@ -106,11 +105,6 @@ class MeshtasticHandler:
         self._network_topology = None
 
     @property
-    def is_connected(self) -> bool:
-        """Check if connected to Meshtastic."""
-        return self._connected
-
-    @property
     def interface(self):
         """Get the Meshtastic interface."""
         return self._interface
@@ -118,18 +112,6 @@ class MeshtasticHandler:
     def set_network_topology(self, topology) -> None:
         """Set network topology reference for relay node tracking."""
         self._network_topology = topology
-
-    def _truncate_if_needed(self, message: str) -> str:
-        """Truncate message to Meshtastic byte limit if needed."""
-        msg_bytes = message.encode('utf-8')
-        if len(msg_bytes) > MAX_MESHTASTIC_MSG_LENGTH:
-            logger.warning(
-                f"Message exceeds Meshtastic limit "
-                f"({len(msg_bytes)} > {MAX_MESHTASTIC_MSG_LENGTH} bytes), truncating"
-            )
-            truncated = msg_bytes[:MAX_MESHTASTIC_MSG_LENGTH - 3]
-            return truncated.decode('utf-8', errors='ignore') + '...'
-        return message
 
     def run_loop(self) -> None:
         """
@@ -466,13 +448,13 @@ class MeshtasticHandler:
             logger.debug(f"Could not broadcast to WebSocket: {e}")
 
         # Queue for bridging if routing rules allow it (non-blocking to prevent deadlock)
-        if self._mesh_to_rns_queue is not None:
+        if self._message_queue is not None:
             # Check routing rules before queueing
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug(f"Message from {from_id} blocked by routing rules")
             else:
                 try:
-                    self._mesh_to_rns_queue.put_nowait(msg)
+                    self._message_queue.put_nowait(msg)
                 except Full:
                     logger.warning("Mesh→RNS queue full, dropping message")
                     with self._stats_lock:
@@ -641,10 +623,3 @@ class MeshtasticHandler:
             logger.error(f"CLI send failed: {e}")
             return False
 
-    def _notify_status(self, status: str) -> None:
-        """Notify status callback."""
-        if self._status_callback:
-            try:
-                self._status_callback(status)
-            except Exception as e:
-                logger.error(f"Status callback error: {e}")

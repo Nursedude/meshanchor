@@ -1,8 +1,14 @@
 """
 MeshForge Logging Configuration
 
-Provides centralized logging setup for consistent log formatting
-and configuration across the application.
+Unified logging module — consolidates logging_config + logging_utils.
+
+Provides:
+- Centralized setup for console, file, and journald logging
+- Sudo-safe log directory with ownership fix
+- Component-level log control (per-module verbosity)
+- Decorators and context managers for instrumented logging
+- UI callback forwarding for real-time log display
 
 Designed for Raspberry Pi deployments with journalctl integration:
     - Logs to journald when available (viewable via: journalctl -t meshforge)
@@ -18,20 +24,29 @@ Or for module-level configuration:
     from utils.logging_config import setup_logging
     setup_logging(level=logging.DEBUG, log_file="/var/log/meshforge.log")
 
+TUI mode (suppress console to avoid whiptail corruption):
+    setup_logging(log_level=logging.DEBUG, log_to_file=True, log_to_console=False)
+
 View logs on RPi:
     journalctl -t meshforge -f          # Follow live logs
     journalctl -t meshforge --since today
     journalctl -t meshforge -p err      # Errors only
 """
 
+import functools
 import logging
 import logging.handlers
-import sys
 import os
-from pathlib import Path
-from typing import Optional, List, Callable
+import sys
+import time
+import traceback
 import threading
 from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Callable, Any
+
+# Sudo-safe home directory (MF001 — never use Path.home() directly)
+from utils.paths import get_real_user_home
 
 # Thread-safe initialization
 _initialized = False
@@ -52,6 +67,84 @@ LEVEL_COLORS = {
 }
 RESET = '\033[0m'
 
+# Default log directory — uses real user's home even when running with sudo
+LOG_DIR = get_real_user_home() / ".config" / "meshforge" / "logs"
+
+# Global log level setting (can be changed at runtime)
+_global_log_level = logging.DEBUG
+
+# Component-specific log levels
+_component_levels = {
+    'hamclock': logging.DEBUG,
+    'rns': logging.DEBUG,
+    'meshtastic': logging.INFO,
+    'gateway': logging.DEBUG,
+}
+
+# Shared handler references for runtime level changes
+_file_handler: Optional[logging.Handler] = None
+_console_handler: Optional[logging.Handler] = None
+
+
+# ============================================================================
+# Sudo-safe path handling
+# ============================================================================
+
+def _get_sudo_user_ids():
+    """Get the UID and GID of the real user when running with sudo."""
+    import pwd
+
+    sudo_user = os.environ.get('SUDO_USER')
+    if not sudo_user or sudo_user == 'root':
+        return None, None
+
+    try:
+        pw = pwd.getpwnam(sudo_user)
+        return pw.pw_uid, pw.pw_gid
+    except KeyError:
+        return None, None
+
+
+def _fix_directory_ownership(path: Path) -> None:
+    """
+    Fix directory ownership when running with sudo.
+
+    When running with sudo, directories are created as root. This function
+    changes ownership back to the real user (SUDO_USER) so they can access
+    the logs without root privileges.
+    """
+    uid, gid = _get_sudo_user_ids()
+    if uid is None:
+        return
+
+    try:
+        current = path
+        while current != Path('/'):
+            if current.exists() and current.owner() == 'root':
+                os.chown(current, uid, gid)
+            if current.name == '.config':
+                break
+            current = current.parent
+    except (PermissionError, OSError):
+        pass  # Silently fail — logging should still work
+
+
+def _fix_file_ownership(path: Path) -> None:
+    """Fix file ownership when running with sudo."""
+    uid, gid = _get_sudo_user_ids()
+    if uid is None:
+        return
+
+    try:
+        if path.exists():
+            os.chown(path, uid, gid)
+    except (PermissionError, OSError):
+        pass
+
+
+# ============================================================================
+# Colored formatter
+# ============================================================================
 
 class ColoredFormatter(logging.Formatter):
     """Formatter that adds colors to log levels for terminal output."""
@@ -68,64 +161,102 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
+# ============================================================================
+# Core setup
+# ============================================================================
+
 def setup_logging(
     level: int = logging.INFO,
+    log_level: Optional[int] = None,
     log_file: Optional[str] = None,
     log_format: str = DEFAULT_FORMAT,
     use_colors: bool = True,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
     suppress_libs: bool = True,
+    log_to_file: bool = False,
+    log_to_console: bool = True,
+    max_file_size: Optional[int] = None,
 ) -> None:
     """
     Configure the root logger with consistent settings.
 
+    Supports two calling conventions:
+    - Gateway style: setup_logging(level=logging.DEBUG)
+    - TUI style: setup_logging(log_level=logging.DEBUG, log_to_file=True,
+                                log_to_console=False)
+
     Args:
         level: Logging level (default INFO)
-        log_file: Optional file path for logging
+        log_level: Alias for level (TUI convention, takes precedence)
+        log_file: Explicit file path for logging
         log_format: Log message format string
         use_colors: Enable colored output in terminal
         max_bytes: Max log file size before rotation
         backup_count: Number of backup files to keep
         suppress_libs: Suppress noisy third-party loggers
+        log_to_file: Auto-generate log file in LOG_DIR
+        log_to_console: Enable console output (False for TUI mode)
+        max_file_size: Alias for max_bytes (TUI convention)
     """
-    global _initialized
+    global _initialized, _file_handler, _console_handler, _global_log_level
+
+    # Parameter aliasing — TUI uses log_level=, gateway uses level=
+    if log_level is not None:
+        level = log_level
+    if max_file_size is not None:
+        max_bytes = max_file_size
 
     with _lock:
         if _initialized:
             return
 
+        _global_log_level = level
         root_logger = logging.getLogger()
-        root_logger.setLevel(level)
+        root_logger.setLevel(logging.DEBUG)  # Capture all, filter at handler level
 
         # Remove existing handlers
         root_logger.handlers.clear()
 
-        # Console handler with colors
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(level)
+        # Console handler (unless suppressed for TUI mode)
+        if log_to_console:
+            _console_handler = logging.StreamHandler(sys.stdout)
+            _console_handler.setLevel(level)
 
-        if use_colors:
-            console_formatter = ColoredFormatter(log_format)
-        else:
-            console_formatter = logging.Formatter(log_format)
+            if use_colors:
+                console_formatter = ColoredFormatter(log_format)
+            else:
+                console_formatter = logging.Formatter(log_format)
 
-        console_handler.setFormatter(console_formatter)
-        root_logger.addHandler(console_handler)
+            _console_handler.setFormatter(console_formatter)
+            root_logger.addHandler(_console_handler)
 
-        # File handler if specified
+        # File handler — explicit path or auto-generated
+        file_path = None
         if log_file:
-            log_path = Path(log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path = Path(log_file)
+        elif log_to_file:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            _fix_directory_ownership(LOG_DIR)
+            file_path = LOG_DIR / f"meshforge_{datetime.now().strftime('%Y%m%d')}.log"
 
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
+        if file_path:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            _file_handler = logging.handlers.RotatingFileHandler(
+                str(file_path),
                 maxBytes=max_bytes,
                 backupCount=backup_count,
             )
-            file_handler.setLevel(level)
-            file_handler.setFormatter(logging.Formatter(log_format))
-            root_logger.addHandler(file_handler)
+            _file_handler.setLevel(logging.DEBUG)  # Log everything to file
+            detailed_format = logging.Formatter(
+                '%(asctime)s | %(name)-30s | %(levelname)-8s | %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            _file_handler.setFormatter(detailed_format)
+            root_logger.addHandler(_file_handler)
+
+            # Fix ownership for sudo user
+            _fix_file_ownership(file_path)
 
         # Suppress noisy third-party loggers
         if suppress_libs:
@@ -142,11 +273,16 @@ def setup_logging(
         _initialized = True
 
 
+# ============================================================================
+# Logger retrieval with component-level support
+# ============================================================================
+
 def get_logger(name: str = None) -> logging.Logger:
     """
     Get a logger instance with the given name.
 
-    This ensures logging is configured before returning the logger.
+    Ensures logging is configured before returning the logger.
+    Applies component-specific log levels if configured.
 
     Args:
         name: Logger name (typically __name__)
@@ -158,7 +294,42 @@ def get_logger(name: str = None) -> logging.Logger:
     if not _initialized:
         setup_logging()
 
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+
+    # Apply component-specific log level
+    if name:
+        for component, comp_level in _component_levels.items():
+            if component in name.lower():
+                logger.setLevel(comp_level)
+                break
+
+    return logger
+
+
+# ============================================================================
+# Level management
+# ============================================================================
+
+def set_log_level(level: int, component: Optional[str] = None) -> None:
+    """
+    Set log level globally or for a specific component.
+
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        component: Optional component name to set level for
+    """
+    global _global_log_level
+
+    if component:
+        _component_levels[component.lower()] = level
+        # Update existing loggers matching this component
+        for name, lgr in logging.Logger.manager.loggerDict.items():
+            if isinstance(lgr, logging.Logger) and component.lower() in name.lower():
+                lgr.setLevel(level)
+    else:
+        _global_log_level = level
+        if _console_handler:
+            _console_handler.setLevel(level)
 
 
 def set_level(level: int, logger_name: str = None) -> None:
@@ -176,12 +347,12 @@ def set_level(level: int, logger_name: str = None) -> None:
 
 
 def enable_debug(logger_name: str = None) -> None:
-    """Enable debug logging"""
+    """Enable debug logging."""
     set_level(logging.DEBUG, logger_name)
 
 
 def suppress_logger(logger_name: str) -> None:
-    """Suppress a specific logger to WARNING level"""
+    """Suppress a specific logger to WARNING level."""
     logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
@@ -399,3 +570,155 @@ def format_log_record(record: logging.LogRecord) -> dict:
 def get_level_color(level: str) -> str:
     """Get ANSI color code for a log level."""
     return LEVEL_COLORS.get(level, '')
+
+
+# ============================================================================
+# Decorators and Context Managers (from logging_utils)
+# ============================================================================
+
+def log_button_click(func: Callable) -> Callable:
+    """
+    Decorator to log button click events with timing and error handling.
+
+    Usage:
+        @log_button_click
+        def _on_connect(self, button):
+            # handler code
+    """
+    @functools.wraps(func)
+    def wrapper(self, button, *args, **kwargs):
+        lgr = getattr(self, 'logger', None) or logging.getLogger(self.__class__.__name__)
+        func_name = func.__name__
+        button_label = button.get_label() if hasattr(button, 'get_label') else 'unknown'
+
+        lgr.debug(f"Button clicked: {func_name} (label: {button_label})")
+        start_time = time.time()
+
+        try:
+            result = func(self, button, *args, **kwargs)
+            elapsed = time.time() - start_time
+            lgr.debug(f"Button handler {func_name} completed in {elapsed:.3f}s")
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            lgr.error(f"Button handler {func_name} failed after {elapsed:.3f}s: {e}")
+            lgr.debug(f"Traceback:\n{traceback.format_exc()}")
+            raise
+
+    return wrapper
+
+
+def log_action(action_name: str) -> Callable:
+    """
+    Decorator to log any action with timing and error handling.
+
+    Usage:
+        @log_action("connecting to HamClock")
+        def _connect(self):
+            # action code
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            self = args[0] if args else None
+            lgr = getattr(self, 'logger', None) or logging.getLogger(func.__module__)
+
+            lgr.info(f"Starting: {action_name}")
+            start_time = time.time()
+
+            try:
+                result = func(*args, **kwargs)
+                elapsed = time.time() - start_time
+                lgr.info(f"Completed: {action_name} ({elapsed:.3f}s)")
+                return result
+            except Exception as e:
+                elapsed = time.time() - start_time
+                lgr.error(f"Failed: {action_name} ({elapsed:.3f}s) - {e}")
+                lgr.debug(f"Traceback:\n{traceback.format_exc()}")
+                raise
+
+        return wrapper
+    return decorator
+
+
+class LogContext:
+    """
+    Context manager for logging code blocks with timing and error handling.
+
+    Usage:
+        with LogContext(logger, "processing data"):
+            # Code that might fail
+            process_data()
+    """
+
+    def __init__(self, logger: logging.Logger, operation: str, level: int = logging.DEBUG):
+        self.logger = logger
+        self.operation = operation
+        self.level = level
+        self.start_time = None
+
+    def __enter__(self):
+        self.start_time = time.time()
+        self.logger.log(self.level, f"Starting: {self.operation}")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.time() - self.start_time
+
+        if exc_type:
+            self.logger.error(f"Failed: {self.operation} ({elapsed:.3f}s) - {exc_val}")
+            self.logger.debug(f"Traceback:\n{''.join(traceback.format_tb(exc_tb))}")
+            return False  # Don't suppress the exception
+        else:
+            self.logger.log(self.level, f"Completed: {self.operation} ({elapsed:.3f}s)")
+            return True
+
+
+class ThreadLogger:
+    """
+    Logger wrapper for background threads with thread ID tracking.
+
+    Usage:
+        thread_logger = ThreadLogger(logger, "network-fetch")
+        def fetch_data():
+            thread_logger.info("Fetching...")
+            thread_logger.debug("Received 100 bytes")
+    """
+
+    def __init__(self, logger: logging.Logger, thread_name: str):
+        self.logger = logger
+        self.thread_name = thread_name
+        self.thread_id = None
+
+    def _prefix(self) -> str:
+        tid = threading.get_ident()
+        return f"[{self.thread_name}:{tid}] "
+
+    def debug(self, msg: str, *args, **kwargs):
+        self.logger.debug(self._prefix() + msg, *args, **kwargs)
+
+    def info(self, msg: str, *args, **kwargs):
+        self.logger.info(self._prefix() + msg, *args, **kwargs)
+
+    def warning(self, msg: str, *args, **kwargs):
+        self.logger.warning(self._prefix() + msg, *args, **kwargs)
+
+    def error(self, msg: str, *args, **kwargs):
+        self.logger.error(self._prefix() + msg, *args, **kwargs)
+
+    def exception(self, msg: str, *args, **kwargs):
+        self.logger.exception(self._prefix() + msg, *args, **kwargs)
+
+
+def log_exception(logger: logging.Logger, msg: str = "Unexpected error") -> None:
+    """
+    Log an exception with full traceback.
+
+    Usage:
+        try:
+            risky_operation()
+        except Exception:
+            log_exception(logger, "Failed to perform risky operation")
+    """
+    logger.error(f"{msg}:")
+    logger.error(traceback.format_exc())

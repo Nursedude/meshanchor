@@ -175,7 +175,7 @@ from utils.paths import MeshForgePaths, ReticulumPaths
 from utils.common import SettingsManager, CONFIG_DIR
 
 # Logging
-from utils.logging_utils import get_logger
+from utils.logging_config import get_logger
 
 # Service availability checks - use before service-dependent operations
 from utils.service_check import check_service, check_port, ServiceState
