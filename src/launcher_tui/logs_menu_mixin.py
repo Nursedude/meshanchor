@@ -7,6 +7,7 @@ Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 import os
 import subprocess
 from pathlib import Path
+from typing import List
 from backend import clear_screen
 from utils.paths import get_real_user_home
 
@@ -58,41 +59,54 @@ class LogsMenuMixin:
             if entry:
                 self._safe_call(*entry)
 
-    def _view_live_meshtasticd(self):
-        """View live meshtasticd log stream."""
+    def _view_live_log(self, title: str, cmd: List[str]) -> None:
+        """View a live log stream with proper process cleanup.
+
+        Uses Popen instead of subprocess.run to ensure the journalctl
+        process is always terminated, even on unexpected exit or
+        terminal disconnect.
+
+        Args:
+            title: Display title for the log stream.
+            cmd: Command to execute (e.g., ['journalctl', '-u', ...]).
+        """
         clear_screen()
-        print("=== meshtasticd live log (Ctrl+C to stop) ===\n")
+        print(f"=== {title} (Ctrl+C to stop) ===\n")
+        proc = None
         try:
-            subprocess.run(
-                ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
-                timeout=None
-            )
+            proc = subprocess.Popen(cmd)
+            proc.wait()
         except KeyboardInterrupt:
             pass
+        finally:
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+    def _view_live_meshtasticd(self):
+        """View live meshtasticd log stream."""
+        self._view_live_log(
+            "meshtasticd live log",
+            ['journalctl', '-u', 'meshtasticd', '-f', '-n', '30', '--no-pager'],
+        )
 
     def _view_live_rnsd(self):
         """View live rnsd log stream."""
-        clear_screen()
-        print("=== rnsd live log (Ctrl+C to stop) ===\n")
-        try:
-            subprocess.run(
-                ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
-                timeout=None
-            )
-        except KeyboardInterrupt:
-            pass
+        self._view_live_log(
+            "rnsd live log",
+            ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
+        )
 
     def _view_live_all(self):
         """View live log stream for all mesh services."""
-        clear_screen()
-        print("=== Mesh services live log (Ctrl+C to stop) ===\n")
         cmd = ['journalctl', '-f', '-n', '30', '--no-pager']
         for unit in self.MESH_UNITS:
             cmd.extend(['-u', unit])
-        try:
-            subprocess.run(cmd, timeout=None)
-        except KeyboardInterrupt:
-            pass
+        self._view_live_log("Mesh services live log", cmd)
 
     def _view_error_logs(self):
         """View error-level logs from mesh services in the last hour."""

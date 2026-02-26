@@ -721,6 +721,8 @@ class MeshForgeLauncher(
                 self._stop_config_api_server()
                 self.dialog.msgbox("Stopped", "Config API Server stopped.")
 
+    _MAX_DIALOG_RETRIES = 3
+
     def _run_main_menu(self):
         """Display the main NOC menu.
 
@@ -728,7 +730,14 @@ class MeshForgeLauncher(
         - Max 10 items per menu (cognitive load)
         - Grouped by user task, not technical domain
         - 2-tap max for common operations
+
+        Includes retry logic: consecutive dialog failures (None returns)
+        are retried up to _MAX_DIALOG_RETRIES times before exiting.
+        This prevents transient dialog subprocess failures from killing
+        the TUI.
         """
+        consecutive_failures = 0
+
         while True:
             # Build status hint for menu subtitle
             status_hint = self._get_menu_status_hint()
@@ -760,9 +769,27 @@ class MeshForgeLauncher(
                 choices
             )
 
-            if choice is None or choice == "x":
+            if choice == "x":
                 break
 
+            if choice is None:
+                # Dialog returned None — could be user pressing Escape
+                # or the dialog subprocess dying unexpectedly.
+                consecutive_failures += 1
+                if consecutive_failures >= self._MAX_DIALOG_RETRIES:
+                    logger.error(
+                        "Main menu dialog failed %d consecutive times, exiting",
+                        consecutive_failures,
+                    )
+                    break
+                logger.warning(
+                    "Main menu returned None (attempt %d/%d), retrying",
+                    consecutive_failures, self._MAX_DIALOG_RETRIES,
+                )
+                continue
+
+            # Successful interaction resets the failure counter
+            consecutive_failures = 0
             self._handle_main_choice(choice)
 
     def _get_menu_status_hint(self) -> str:
@@ -1658,6 +1685,26 @@ def main():
         except Exception:
             pass
         sys.excepthook = _original_excepthook
+
+        # Restore terminal to clean state — prevents "prompt in middle of TUI"
+        # when whiptail/dialog dies mid-render (alternate screen buffer left
+        # active, cursor hidden, raw mode, etc.)
+        try:
+            # Exit alternate screen buffer + show cursor + reset attributes
+            sys.stdout.write('\033[?1049l\033[?25h\033[0m')
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            subprocess.run(
+                ['tput', 'reset'],
+                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
         sys.exit(exit_code)
 
 
