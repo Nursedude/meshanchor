@@ -217,8 +217,14 @@ class EventBus:
 
         Call during daemon or TUI cleanup to release thread pool resources.
         After shutdown, emit() calls are silently dropped (RuntimeError caught).
+
+        Clears subscribers first to prevent new work from being queued,
+        then waits for in-flight callbacks with cancel_futures=True
+        (Python 3.9+) to drop queued-but-not-started work.
         """
-        self._executor.shutdown(wait=False)
+        with self._lock:
+            self._subscribers.clear()
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
 
 # Global singleton instance
