@@ -236,13 +236,13 @@ class MQTTBridgeHandler(BaseMessageHandler):
             if mqtt_cfg.json_enabled:
                 json_topic = f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/json/{mqtt_cfg.channel}/#"
                 client.subscribe(json_topic)
-                logger.info(f"Subscribed to JSON topic: {json_topic}")
+                logger.debug(f"Subscribed to JSON topic: {json_topic}")
 
             # Also subscribe to protobuf topics for completeness
             # Topic format: msh/{REGION}/2/e/{CHANNEL}/{NODE_ID}
             proto_topic = f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/e/{mqtt_cfg.channel}/#"
             client.subscribe(proto_topic)
-            logger.info(f"Subscribed to protobuf topic: {proto_topic}")
+            logger.debug(f"Subscribed to protobuf topic: {proto_topic}")
 
             logger.info(f"MQTT bridge connected to {mqtt_cfg.broker}:{mqtt_cfg.port}")
         else:
@@ -666,7 +666,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
         Returns:
             True if sent successfully, False otherwise.
         """
-        message = payload.get('message', '')
+        message = self._truncate_if_needed(payload.get('message', ''))
         destination = payload.get('destination')
         channel = payload.get('channel', 0)
         return self.send_text(message, destination, channel)
