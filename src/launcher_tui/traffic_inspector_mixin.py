@@ -163,14 +163,37 @@ class TrafficInspectorMixin:
                     height=10, width=50
                 )
             else:
+                # Diagnose exactly what failed
+                diag_lines = ["Could not start packet capture.\n", "Diagnostics:"]
+                try:
+                    from utils.safe_import import safe_import
+                    _pub, has_pubsub = safe_import('pubsub', 'pub')
+                    if not has_pubsub:
+                        diag_lines.append("  [FAIL] pubsub module not installed")
+                        diag_lines.append("    Fix: pip install pypubsub")
+                    else:
+                        diag_lines.append("  [OK] pubsub module available")
+                except Exception:
+                    diag_lines.append("  [FAIL] pubsub check error")
+
+                try:
+                    from utils.service_check import check_service
+                    svc = check_service("meshtasticd")
+                    if svc.get("active"):
+                        diag_lines.append("  [OK] meshtasticd is running")
+                    else:
+                        diag_lines.append("  [FAIL] meshtasticd is not running")
+                        diag_lines.append("    Fix: sudo systemctl start meshtasticd")
+                except Exception:
+                    diag_lines.append("  [WARN] Could not check meshtasticd")
+
+                if is_capture_running and is_capture_running():
+                    diag_lines.append("  [INFO] Capture is already running")
+
                 self.dialog.msgbox(
                     "Capture Failed",
-                    "Could not start packet capture.\n\n"
-                    "Possible causes:\n"
-                    "- meshtasticd not connected\n"
-                    "- pubsub module not available\n"
-                    "- Capture already running",
-                    height=12, width=45
+                    "\n".join(diag_lines),
+                    height=16, width=55
                 )
 
     def _traffic_live_view(self) -> None:
@@ -218,10 +241,29 @@ class TrafficInspectorMixin:
                 info.append("No packets captured yet.")
                 if not capturing:
                     info.append("")
-                    info.append("Use 'Start Capture' from the menu to begin")
-                info.append("")
-                info.append("Traffic will appear here once the bridge is active")
-                info.append("or packets are captured from the mesh network.")
+                    info.append("Capture is NOT running.")
+                    info.append("  -> Use 'Start/Stop Capture' from the menu")
+                    info.append("")
+                    # Check prerequisites
+                    try:
+                        from utils.safe_import import safe_import
+                        _pub, has_pubsub = safe_import('pubsub', 'pub')
+                        if not has_pubsub:
+                            info.append("  [!] pypubsub not installed")
+                            info.append("      pip install pypubsub")
+                    except Exception:
+                        pass
+                    try:
+                        from utils.service_check import check_service
+                        svc = check_service("meshtasticd")
+                        if not svc.get("active"):
+                            info.append("  [!] meshtasticd not running")
+                    except Exception:
+                        pass
+                else:
+                    info.append("")
+                    info.append("Capture is running — waiting for packets...")
+                    info.append("Traffic will appear once mesh activity occurs.")
 
             self.dialog.msgbox(
                 "Live Traffic",
