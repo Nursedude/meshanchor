@@ -1,8 +1,17 @@
 """
 Settings Menu Mixin - Application settings handlers.
 
+Provides:
+- Meshtastic connection configuration
+- Propagation data source management (NOAA, HamClock, PSKReporter)
+- Log level configuration (per-component)
+- Deployment profile selection
+- Application preferences
+
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
+
+import logging
 
 from utils.safe_import import safe_import
 
@@ -16,17 +25,19 @@ class SettingsMenuMixin:
     """Mixin providing application settings functionality."""
 
     def _settings_menu(self):
-        """Settings menu."""
-        choices = [
-            ("connection", "Meshtastic Connection"),
-            ("propagation", "Propagation Data Sources"),
-            ("back", "Back"),
-        ]
-
+        """Settings menu - connection, sources, logging, profile."""
         while True:
+            choices = [
+                ("connection", "Meshtastic Connection   TCP, serial, remote"),
+                ("propagation", "Propagation Sources     NOAA, HamClock, PSK"),
+                ("loglevel", "Log Level               Adjust verbosity"),
+                ("profile", "Deployment Profile      Select feature set"),
+                ("back", "Back"),
+            ]
+
             choice = self.dialog.menu(
-                "Settings",
-                "Configure MeshForge:",
+                "MeshForge Settings",
+                "Application configuration:",
                 choices
             )
 
@@ -36,10 +47,100 @@ class SettingsMenuMixin:
             dispatch = {
                 "connection": ("Connection Settings", self._configure_connection),
                 "propagation": ("Propagation Sources", self._configure_propagation_sources),
+                "loglevel": ("Log Level", self._configure_log_level),
+                "profile": ("Deployment Profile", self._configure_deployment_profile),
             }
             entry = dispatch.get(choice)
             if entry:
                 self._safe_call(*entry)
+
+    def _configure_log_level(self):
+        """Configure application log verbosity."""
+        from utils.logging_utils import set_log_level, _component_levels, _global_log_level
+
+        current_name = logging.getLevelName(_global_log_level)
+
+        while True:
+            choices = [
+                ("global", f"Global Level            Currently: {current_name}"),
+                ("gateway", "Gateway Bridge          " + logging.getLevelName(_component_levels.get('gateway', logging.DEBUG))),
+                ("meshtastic", "Meshtastic              " + logging.getLevelName(_component_levels.get('meshtastic', logging.INFO))),
+                ("rns", "RNS / Reticulum         " + logging.getLevelName(_component_levels.get('rns', logging.DEBUG))),
+                ("hamclock", "HamClock                " + logging.getLevelName(_component_levels.get('hamclock', logging.DEBUG))),
+                ("back", "Back"),
+            ]
+
+            choice = self.dialog.menu(
+                "Log Level Configuration",
+                "Adjust logging verbosity.\nLogs are written to ~/.config/meshforge/logs/",
+                choices
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            level_choices = [
+                ("DEBUG", "Debug        Most verbose, all details"),
+                ("INFO", "Info         Normal operation messages"),
+                ("WARNING", "Warning      Potential issues only"),
+                ("ERROR", "Error        Errors only"),
+            ]
+
+            selected = self.dialog.menu(
+                f"Set {choice.title()} Log Level",
+                "Select verbosity level:",
+                level_choices
+            )
+
+            if selected and selected in ("DEBUG", "INFO", "WARNING", "ERROR"):
+                level = getattr(logging, selected)
+                if choice == "global":
+                    set_log_level(level)
+                    current_name = selected
+                else:
+                    set_log_level(level, component=choice)
+                self.dialog.msgbox(
+                    "Log Level Updated",
+                    f"{choice.title()} log level set to {selected}.\n\n"
+                    "Change takes effect immediately for this session."
+                )
+
+    def _configure_deployment_profile(self):
+        """Select deployment profile to enable/disable feature groups."""
+        profiles = [
+            ("full", "Full Install        All features enabled"),
+            ("gateway", "Gateway Bridge      Meshtastic + RNS bridge"),
+            ("monitor", "Monitor             MQTT monitoring only"),
+            ("radio_maps", "Radio + Maps        Radio config + coverage"),
+            ("meshcore", "MeshCore            Companion radio only"),
+        ]
+
+        current = "full"
+        if self._profile:
+            current = getattr(self._profile, 'name', 'full')
+
+        choice = self.dialog.menu(
+            "Deployment Profile",
+            f"Current profile: {current}\n"
+            "Profiles control which menu sections are visible.",
+            profiles
+        )
+
+        if choice and choice != current:
+            try:
+                from utils.deployment_profiles import get_profile, save_profile
+                profile = get_profile(choice)
+                save_profile(choice)
+                self._profile = profile
+                self._feature_flags = getattr(profile, 'feature_flags', {})
+                self.dialog.msgbox(
+                    "Profile Updated",
+                    f"Deployment profile set to: {choice}\n\n"
+                    "Menu sections will update on next navigation.\n"
+                    "Restart MeshForge for full effect."
+                )
+            except Exception as e:
+                self.dialog.msgbox("Error", f"Failed to set profile:\n{e}")
 
     def _configure_connection(self):
         """Configure Meshtastic connection."""
