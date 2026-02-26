@@ -430,6 +430,9 @@ class MeshForgeLauncher(
             self._maybe_auto_lock_port()
             self._start_health_monitor()
 
+        # Non-blocking update check — sets _updates_available for status hint
+        self._check_startup_updates()
+
         try:
             self._run_main_menu()
         finally:
@@ -458,6 +461,30 @@ class MeshForgeLauncher(
         if probe:
             probe.stop(timeout=3)
             logger.info("Health monitor stopped")
+
+    def _check_startup_updates(self) -> None:
+        """Non-blocking startup update check.
+
+        Queries the version checker for available updates and stores
+        the count in self._updates_available. This is displayed in the
+        main menu status hint. Completely best-effort — failures are
+        silently ignored so the TUI always starts.
+        """
+        self._updates_available = 0
+        try:
+            from utils.safe_import import safe_import
+            check_fn, _, has_checker = safe_import(
+                'updates.version_checker', 'check_all_versions', 'VersionInfo'
+            )
+            if not has_checker:
+                return
+            versions = check_fn()
+            count = sum(1 for v in versions.values() if v.update_available)
+            if count > 0:
+                self._updates_available = count
+                logger.info("Startup update check: %d update(s) available", count)
+        except Exception as e:
+            logger.debug("Startup update check failed (non-blocking): %s", e)
 
     def _run_startup_checks(self) -> bool:
         """
@@ -797,10 +824,20 @@ class MeshForgeLauncher(
 
         Uses plain text indicators (UP/FAIL/--) since whiptail/dialog
         don't render ANSI color escape codes.
+        Appends update count if updates were detected at startup.
         """
+        hint = ""
         if self._env_state:
-            return self._env_state.get_status_line(plain=True)
-        return "Network Operations Center"
+            hint = self._env_state.get_status_line(plain=True)
+        else:
+            hint = "Network Operations Center"
+
+        # Append update notification if available
+        update_count = getattr(self, '_updates_available', 0)
+        if update_count > 0:
+            hint += f"  |  {update_count} update(s) available"
+
+        return hint
 
     def _handle_main_choice(self, choice: str):
         """Handle main menu selection (v0.4.8 restructured).
@@ -829,10 +866,11 @@ class MeshForgeLauncher(
     # --- Submenu: Dashboard (1) ---
 
     def _dashboard_menu(self):
-        """Dashboard - Status, health, alerts."""
+        """Dashboard - Status, health, alerts, propagation."""
         while True:
             choices = [
                 ("status", "Service Status      All services with health"),
+                ("weather", "Space Weather       SFI, Kp, bands at a glance"),
                 ("network", "Network Status      Ports, interfaces, conflicts"),
                 ("nodes", "Node Count          Meshtastic + RNS nodes"),
                 ("health", "Node Health         Battery, signal, latency"),
@@ -857,6 +895,7 @@ class MeshForgeLauncher(
 
             dispatch = {
                 "status": ("Service Status", self._service_status_display),
+                "weather": ("Space Weather", self._dashboard_space_weather),
                 "network": ("Network Status", self._network_menu),
                 "nodes": ("Node Count", self._show_node_counts),
                 "health": ("Node Health", self._node_health_menu),
@@ -871,6 +910,52 @@ class MeshForgeLauncher(
             entry = dispatch.get(choice)
             if entry:
                 self._safe_call(*entry)
+
+    def _dashboard_space_weather(self):
+        """Quick-look space weather for the Dashboard.
+
+        Shows a compact summary with SFI, Kp, band conditions, and
+        a link to the full propagation suite under RF & SDR.
+        """
+        from commands import propagation as prop_mod
+
+        result = prop_mod.get_space_weather()
+        if not result.success:
+            self.dialog.msgbox(
+                "Space Weather",
+                f"Could not fetch space weather data:\n{result.message}\n\n"
+                "Ensure internet connectivity is available.\n"
+                "NOAA SWPC is the primary data source."
+            )
+            return
+
+        d = result.data
+        lines = [
+            "SPACE WEATHER SNAPSHOT",
+            "=" * 40,
+            "",
+            f"Solar Flux (SFI):  {d.get('solar_flux', 'N/A')} SFU",
+            f"Kp Index:          {d.get('k_index', 'N/A')}",
+            f"A Index:           {d.get('a_index', 'N/A')}",
+            f"X-ray Flux:        {d.get('xray_flux', 'N/A')}",
+            f"Geomagnetic:       {d.get('geomag_storm', 'Quiet')}",
+            "",
+        ]
+
+        # Band conditions
+        bands = d.get('band_conditions', {})
+        if bands:
+            lines.append("HF BAND CONDITIONS")
+            lines.append("-" * 40)
+            for band, cond in bands.items():
+                lines.append(f"  {band:<12s} {cond}")
+            lines.append("")
+
+        lines.append("-" * 40)
+        lines.append("Full propagation tools: RF & SDR > Space Weather")
+        lines.append(f"Source: {d.get('source', 'NOAA SWPC')}")
+
+        self.dialog.msgbox("Space Weather", "\n".join(lines), width=50, height=22)
 
     # --- Submenu: Mesh Networks (2) ---
 
@@ -1236,10 +1321,13 @@ class MeshForgeLauncher(
     # --- NEW Submenu: About (a) ---
 
     def _about_menu(self):
-        """About - Version, help, web client."""
+        """About - Version, help, web client, system info, changelog."""
         while True:
             choices = [
                 ("version", "Version Info        MeshForge version"),
+                ("changelog", "Changelog           Release history"),
+                ("sysinfo", "System Info         OS, Python, disk, uptime"),
+                ("deps", "Dependencies        Package status"),
                 ("web", "Web Client          Open web interface"),
                 ("help", "Help                Documentation"),
                 ("back", "Back"),
@@ -1247,7 +1335,7 @@ class MeshForgeLauncher(
 
             choice = self.dialog.menu(
                 "About MeshForge",
-                "Information and help:",
+                "Information, help, and diagnostics:",
                 choices
             )
 
@@ -1256,6 +1344,9 @@ class MeshForgeLauncher(
 
             dispatch = {
                 "version": ("Version Info", self._show_about),
+                "changelog": ("Changelog", self._show_changelog),
+                "sysinfo": ("System Info", self._show_system_info),
+                "deps": ("Dependencies", self._show_dependency_status),
                 "web": ("Web Client", self._open_web_client),
                 "help": ("Help", self._show_help),
             }
@@ -1530,6 +1621,141 @@ Made with aloha for the mesh community
 
         self.dialog.msgbox("About MeshForge", text)
 
+    def _show_changelog(self):
+        """Display release history from VERSION_HISTORY in __version__.py."""
+        from __version__ import VERSION_HISTORY
+
+        lines = ["MESHFORGE RELEASE HISTORY", "=" * 40, ""]
+
+        for release in VERSION_HISTORY[:8]:  # Show last 8 releases
+            version = release.get("version", "?")
+            date = release.get("date", "?")
+            status = release.get("status", "?")
+            branch = release.get("branch", "")
+            branch_info = f" ({branch})" if branch else ""
+
+            lines.append(f"v{version}  [{status}]  {date}{branch_info}")
+            lines.append("-" * 40)
+            for change in release.get("changes", []):
+                # Wrap long lines for whiptail
+                if len(change) > 55:
+                    lines.append(f"  {change[:55]}")
+                    lines.append(f"    {change[55:]}")
+                else:
+                    lines.append(f"  {change}")
+            lines.append("")
+
+        clear_screen()
+        print('\n'.join(lines))
+        self._wait_for_enter()
+
+    def _show_system_info(self):
+        """Display system information: OS, Python, hardware, uptime, disk."""
+        import platform
+
+        lines = ["SYSTEM INFORMATION", "=" * 40, ""]
+
+        # OS info
+        lines.append(f"Hostname:  {platform.node()}")
+        lines.append(f"OS:        {platform.system()} {platform.release()}")
+        try:
+            # Get distro info on Linux
+            result = subprocess.run(
+                ['lsb_release', '-ds'], capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines.append(f"Distro:    {result.stdout.strip()}")
+        except Exception:
+            pass
+        lines.append(f"Arch:      {platform.machine()}")
+        lines.append(f"Python:    {platform.python_version()}")
+        lines.append(f"MeshForge: v{__version__}")
+        lines.append("")
+
+        # Uptime
+        try:
+            with open('/proc/uptime', 'r') as f:
+                uptime_secs = float(f.read().split()[0])
+            days = int(uptime_secs // 86400)
+            hours = int((uptime_secs % 86400) // 3600)
+            mins = int((uptime_secs % 3600) // 60)
+            lines.append(f"Uptime:    {days}d {hours}h {mins}m")
+        except Exception:
+            pass
+
+        # Memory
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                meminfo = f.read()
+            for line in meminfo.split('\n'):
+                if line.startswith('MemTotal:'):
+                    total_kb = int(line.split()[1])
+                    lines.append(f"Memory:    {total_kb // 1024} MB total")
+                    break
+        except Exception:
+            pass
+
+        # Disk usage for relevant paths
+        lines.append("")
+        lines.append("DISK USAGE")
+        lines.append("-" * 40)
+        try:
+            statvfs = os.statvfs('/')
+            total_gb = (statvfs.f_frsize * statvfs.f_blocks) / (1024**3)
+            free_gb = (statvfs.f_frsize * statvfs.f_bavail) / (1024**3)
+            used_pct = ((total_gb - free_gb) / total_gb) * 100 if total_gb else 0
+            lines.append(f"Root (/):  {free_gb:.1f} GB free / {total_gb:.1f} GB ({used_pct:.0f}% used)")
+        except Exception:
+            pass
+
+        # Log directory size
+        try:
+            log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+            if log_dir.exists():
+                total_size = sum(f.stat().st_size for f in log_dir.rglob("*") if f.is_file())
+                lines.append(f"Logs:      {total_size / 1024:.1f} KB in {log_dir}")
+        except Exception:
+            pass
+
+        self.dialog.msgbox("System Information", "\n".join(lines), width=65, height=22)
+
+    def _show_dependency_status(self):
+        """Check and display status of key Python dependencies."""
+        deps = [
+            ("meshtastic", "Meshtastic Python API"),
+            ("RNS", "Reticulum Network Stack"),
+            ("paho.mqtt.client", "MQTT client (Paho)"),
+            ("folium", "Map generation"),
+            ("requests", "HTTP client"),
+            ("yaml", "YAML parser (PyYAML)"),
+            ("serial", "Serial port (pyserial)"),
+            ("flask", "Web server (Flask)"),
+            ("Cryptodome", "Cryptography"),
+        ]
+
+        lines = ["DEPENDENCY STATUS", "=" * 45, ""]
+        installed = 0
+        missing = 0
+
+        for module_name, description in deps:
+            try:
+                mod = __import__(module_name.split('.')[0])
+                ver = getattr(mod, '__version__', getattr(mod, 'VERSION', '?'))
+                lines.append(f"  [OK] {description:<28s} {ver}")
+                installed += 1
+            except ImportError:
+                lines.append(f"  [--] {description:<28s} not installed")
+                missing += 1
+
+        lines.append("")
+        lines.append("=" * 45)
+        lines.append(f"Installed: {installed}  |  Missing: {missing}")
+        if missing > 0:
+            lines.append("\nMissing packages can be installed via:")
+            lines.append("  pip install -r requirements.txt")
+
+        self.dialog.msgbox("Dependencies", "\n".join(lines), width=55, height=20)
+
     def _run_basic_launcher(self):
         """Fallback basic terminal launcher."""
         # Import and run the original launcher
@@ -1545,32 +1771,36 @@ Made with aloha for the mesh community
 
 def main():
     """Main entry point."""
-    # Suppress logging output that would corrupt the TUI display
-    # Redirect to file so errors can still be debugged
     import logging
     import os
     import datetime
 
-    # Suppress CONSOLE logging to prevent TUI corruption, but keep file
-    # handlers active so errors are still captured in log files.
+    # Initialize the MeshForge logging framework FIRST.
+    # This creates the RotatingFileHandler that writes to
+    # ~/.config/meshforge/logs/meshforge_YYYYMMDD.log
+    # Console output is disabled (log_to_console=False) to prevent
+    # whiptail/dialog TUI corruption.
+    try:
+        from utils.logging_utils import setup_logging
+        setup_logging(log_level=logging.DEBUG, log_to_file=True, log_to_console=False)
+    except Exception:
+        pass  # Logging is best-effort; don't block TUI startup
+
+    # Belt-and-suspenders: suppress any stray console handlers that
+    # third-party libraries may have registered before setup_logging().
     root = logging.getLogger()
     for handler in root.handlers:
         if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
             handler.setLevel(logging.CRITICAL)
-    for name in logging.root.manager.loggerDict:
-        lgr = logging.getLogger(name)
-        for handler in lgr.handlers:
-            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-                handler.setLevel(logging.CRITICAL)
 
-    # Redirect stderr to log file to prevent TUI corruption
+    # Redirect stderr to a crash-only log file to prevent TUI corruption
     log_dir = Path("/tmp")
     try:
-        from utils.paths import get_real_user_home
-        log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
+        from utils.paths import get_real_user_home as _get_home
+        log_dir = _get_home() / ".cache" / "meshforge" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
-        logger.debug("Could not create log dir, falling back to /tmp")
+        pass  # Fall back to /tmp
 
     stderr_log = log_dir / "tui_errors.log"
     _original_stderr = sys.stderr
@@ -1594,8 +1824,13 @@ def main():
 
     sys.excepthook = _crash_hook
 
-    # Show log path before stderr redirect so user knows where to look
-    print(f"  Log: {stderr_log}", file=_original_stderr)
+    # Show log paths before stderr redirect so user knows where to look
+    try:
+        from utils.logging_utils import LOG_DIR as _app_log_dir
+        print(f"  App log: {_app_log_dir}", file=_original_stderr)
+    except Exception:
+        pass
+    print(f"  Crash log: {stderr_log}", file=_original_stderr)
 
     _stderr_file = None
     try:
