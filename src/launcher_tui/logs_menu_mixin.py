@@ -1,6 +1,13 @@
 """
 Logs Menu Mixin - Log viewing functionality.
 
+Provides:
+- Live journalctl streaming for mesh services
+- Systemd unit log viewing (meshtasticd, rnsd, mosquitto, nomadnet)
+- MeshForge application log browser with file picker
+- Error-only and boot message views
+- Crash log viewer (stderr redirect file)
+
 Extracted from main.py to reduce file size per CLAUDE.md guidelines.
 """
 
@@ -23,15 +30,16 @@ class LogsMenuMixin:
         """Log viewer - all terminal-native."""
         while True:
             choices = [
-                ("live-mesh", "Live: meshtasticd (Ctrl+C to stop)"),
-                ("live-rns", "Live: rnsd (Ctrl+C to stop)"),
-                ("live-all", "Live: all services (Ctrl+C to stop)"),
-                ("errors", "Errors (last hour)"),
-                ("mesh-50", "meshtasticd (last 50 lines)"),
-                ("rns-50", "rnsd (last 50 lines)"),
-                ("boot", "Boot messages (this boot)"),
-                ("kernel", "Kernel messages (dmesg)"),
-                ("meshforge", "MeshForge app logs"),
+                ("live-mesh", "Live: meshtasticd      (Ctrl+C to stop)"),
+                ("live-rns", "Live: rnsd             (Ctrl+C to stop)"),
+                ("live-all", "Live: all services     (Ctrl+C to stop)"),
+                ("errors", "Errors                 Last hour, priority err+"),
+                ("mesh-50", "meshtasticd            Last 50 lines"),
+                ("rns-50", "rnsd                   Last 50 lines"),
+                ("boot", "Boot Messages          This boot"),
+                ("kernel", "Kernel Messages        dmesg"),
+                ("meshforge", "MeshForge App Logs     Browse log files"),
+                ("crash", "Crash Log              TUI error output"),
                 ("back", "Back"),
             ]
 
@@ -54,6 +62,7 @@ class LogsMenuMixin:
                 "boot": ("Boot Messages", self._view_boot_messages),
                 "kernel": ("Kernel Messages", self._view_kernel_messages),
                 "meshforge": ("MeshForge Logs", self._view_meshforge_logs),
+                "crash": ("Crash Log", self._view_crash_log),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -156,29 +165,111 @@ class LogsMenuMixin:
         self._wait_for_enter()
 
     def _view_meshforge_logs(self):
-        """View MeshForge application logs."""
-        log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+        """Browse and view MeshForge application log files.
 
-        if not log_dir.exists():
-            self.dialog.msgbox("Logs", "No MeshForge logs found yet.\n\nLogs are created when you use MeshForge.")
+        Scans both the config log directory (~/.config/meshforge/logs/)
+        and the cache crash directory (~/.cache/meshforge/logs/) for
+        log files, presenting them sorted by modification time.
+        """
+        home = get_real_user_home()
+        log_dirs = [
+            home / ".config" / "meshforge" / "logs",
+            home / ".cache" / "meshforge" / "logs",
+        ]
+
+        all_logs = []
+        for d in log_dirs:
+            if d.exists():
+                all_logs.extend(d.glob("meshforge_*.log"))
+                all_logs.extend(d.glob("meshforge_*.log.*"))  # Rotated files
+
+        if not all_logs:
+            self.dialog.msgbox(
+                "MeshForge Logs",
+                "No MeshForge application logs found.\n\n"
+                "Logs are written to:\n"
+                f"  {log_dirs[0]}\n\n"
+                "Logs are created automatically during each session."
+            )
             return
 
-        log_files = list(log_dir.glob("*.log"))
-        if not log_files:
-            self.dialog.msgbox("Logs", "No log files found in:\n" + str(log_dir))
+        # Sort newest first
+        all_logs.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+        if len(all_logs) == 1:
+            # Only one file, show it directly
+            self._display_log_file(all_logs[0])
             return
 
-        # Show most recent log
-        latest_log = max(log_files, key=lambda f: f.stat().st_mtime)
+        # Build file picker menu
+        choices = []
+        for i, log_file in enumerate(all_logs[:10]):  # Max 10 files
+            stat = log_file.stat()
+            size_kb = stat.st_size / 1024
+            from datetime import datetime
+            mtime = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+            label = f"{log_file.name:<30s} {size_kb:>6.1f}KB  {mtime}"
+            choices.append((str(i), label))
+        choices.append(("back", "Back"))
+
+        choice = self.dialog.menu(
+            "MeshForge Log Files",
+            f"Found {len(all_logs)} log file(s). Newest first:",
+            choices
+        )
+
+        if choice is None or choice == "back":
+            return
 
         try:
-            content = latest_log.read_text()
-            lines = content.strip().split('\n')[-50:]  # Last 50 lines
+            idx = int(choice)
+            self._display_log_file(all_logs[idx])
+        except (ValueError, IndexError):
+            pass
+
+    def _display_log_file(self, log_path: Path, tail_lines: int = 80) -> None:
+        """Display the tail of a log file in the terminal.
+
+        Args:
+            log_path: Path to the log file.
+            tail_lines: Number of lines to show from the end.
+        """
+        try:
+            content = log_path.read_text()
+            lines = content.strip().split('\n')
+            total = len(lines)
+            shown = lines[-tail_lines:]
 
             clear_screen()
-            print(f"=== MeshForge Log: {latest_log.name} ===\n")
-            print('\n'.join(lines))
-            print("\n" + "=" * 50)
+            print(f"=== {log_path.name} ({total} total lines, showing last {len(shown)}) ===\n")
+            print('\n'.join(shown))
+            print(f"\n{'=' * 60}")
+            print(f"Full path: {log_path}")
+            print(f"Size: {log_path.stat().st_size / 1024:.1f} KB")
             self._wait_for_enter()
         except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to read log: {e}")
+            self.dialog.msgbox("Error", f"Failed to read log file:\n{e}")
+
+    def _view_crash_log(self):
+        """View the TUI crash/error log (stderr redirect file)."""
+        crash_paths = [
+            get_real_user_home() / ".cache" / "meshforge" / "logs" / "tui_errors.log",
+            Path("/tmp") / "tui_errors.log",
+        ]
+
+        crash_log = None
+        for p in crash_paths:
+            if p.exists() and p.stat().st_size > 0:
+                crash_log = p
+                break
+
+        if not crash_log:
+            self.dialog.msgbox(
+                "Crash Log",
+                "No crash log found (good news!).\n\n"
+                "The crash log captures unhandled exceptions\n"
+                "and stderr output from the TUI process."
+            )
+            return
+
+        self._display_log_file(crash_log, tail_lines=50)

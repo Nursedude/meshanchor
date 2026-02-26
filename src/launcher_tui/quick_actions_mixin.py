@@ -6,6 +6,7 @@ operation, avoiding deep menu navigation for frequent tasks.
 
 Quick Actions:
     s - Service status (all services at a glance)
+    w - Space weather (SFI, Kp, bands)
     n - Node list (meshtastic --nodes)
     i - Node inventory (tracked nodes)
     G - GPS position / distance to nodes
@@ -16,6 +17,8 @@ Quick Actions:
     g - Generate status report
     d - Run diagnostics
     c - Channel activity scan
+    u - Check for updates
+    m - Generate coverage map
 """
 
 import sys
@@ -44,6 +47,7 @@ from utils.channel_scan import ChannelMonitor
 # Quick action definitions: (tag, description, method_name)
 QUICK_ACTIONS = [
     ('s', 'Service status overview', '_qa_service_status'),
+    ('w', 'Space weather (SFI, Kp, bands)', '_qa_space_weather'),
     ('n', 'Node list (meshtastic --nodes)', '_qa_node_list'),
     ('i', 'Node inventory (tracked nodes)', '_qa_node_inventory'),
     ('G', 'GPS position / distance to nodes', '_qa_gps_position'),
@@ -54,6 +58,8 @@ QUICK_ACTIONS = [
     ('g', 'Generate status report', '_qa_generate_report'),
     ('d', 'Run diagnostics', '_qa_run_diagnostics'),
     ('c', 'Channel activity scan', '_qa_channel_scan'),
+    ('u', 'Check for software updates', '_qa_check_updates'),
+    ('m', 'Generate coverage map', '_qa_coverage_map'),
 ]
 
 
@@ -435,6 +441,105 @@ class QuickActionsMixin:
 
         except Exception as e:
             logger.debug(f"Channel scan quick action failed: {e}")
+            print(f"Error: {e}")
+
+        print()
+        self._wait_for_enter("Press Enter to continue...")
+
+    def _qa_space_weather(self):
+        """Quick: show space weather snapshot."""
+        clear_screen()
+        print("=== Space Weather ===\n")
+
+        try:
+            from commands import propagation as prop_mod
+
+            result = prop_mod.get_space_weather()
+            if not result.success:
+                print(f"  Could not fetch data: {result.message}")
+                self._wait_for_enter("Press Enter to continue...")
+                return
+
+            d = result.data
+            print(f"  Solar Flux (SFI):  {d.get('solar_flux', 'N/A')} SFU")
+            print(f"  Kp Index:          {d.get('k_index', 'N/A')}")
+            print(f"  A Index:           {d.get('a_index', 'N/A')}")
+            print(f"  X-ray:             {d.get('xray_flux', 'N/A')}")
+            print(f"  Geomagnetic:       {d.get('geomag_storm', 'Quiet')}")
+
+            bands = d.get('band_conditions', {})
+            if bands:
+                print(f"\n  HF Band Conditions:")
+                for band, cond in bands.items():
+                    print(f"    {band:<12s} {cond}")
+
+            print(f"\n  Source: {d.get('source', 'NOAA SWPC')}")
+
+        except Exception as e:
+            logger.debug(f"Space weather quick action failed: {e}")
+            print(f"Error: {e}")
+
+        print()
+        self._wait_for_enter("Press Enter to continue...")
+
+    def _qa_check_updates(self):
+        """Quick: check for available software updates."""
+        clear_screen()
+        print("=== Software Update Check ===\n")
+
+        try:
+            from utils.safe_import import safe_import
+            _check_all_versions, _VersionInfo, _has = safe_import(
+                'updates.version_checker', 'check_all_versions', 'VersionInfo'
+            )
+            if not _has:
+                print("  Version checker not available.")
+                print("  Ensure updates/version_checker.py exists.")
+                self._wait_for_enter("Press Enter to continue...")
+                return
+
+            print("  Checking versions...\n")
+            versions = _check_all_versions()
+
+            updates_count = 0
+            for key, info in versions.items():
+                installed = info.installed or "Not installed"
+                latest = info.latest or "Unknown"
+                flag = ""
+                if info.update_available:
+                    flag = " << UPDATE AVAILABLE"
+                    updates_count += 1
+                print(f"  {info.name:<25s} {installed:<12s} -> {latest}{flag}")
+
+            print(f"\n  {'=' * 50}")
+            if updates_count:
+                print(f"  {updates_count} update(s) available!")
+                print("  Go to: Configuration > Software Updates")
+            else:
+                print("  All components up to date!")
+
+        except Exception as e:
+            logger.debug(f"Update check quick action failed: {e}")
+            print(f"Error: {e}")
+
+        print()
+        self._wait_for_enter("Press Enter to continue...")
+
+    def _qa_coverage_map(self):
+        """Quick: generate and open a coverage map."""
+        clear_screen()
+        print("=== Coverage Map ===\n")
+
+        try:
+            # Delegate to the coverage map method on the launcher
+            if hasattr(self, '_generate_coverage_map'):
+                self._generate_coverage_map()
+                return
+            else:
+                print("  Coverage map generation not available.")
+                print("  Ensure folium is installed: pip install folium")
+        except Exception as e:
+            logger.debug(f"Coverage map quick action failed: {e}")
             print(f"Error: {e}")
 
         print()
