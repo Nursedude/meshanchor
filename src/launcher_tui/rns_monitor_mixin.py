@@ -124,7 +124,9 @@ class RNSMonitorMixin:
                         f"Next refresh in {remaining}s{_RESET}  ",
                         end="", flush=True,
                     )
-                    time.sleep(1)
+                    # Sleep in 0.1s increments for faster Ctrl+C response
+                    for _ in range(10):
+                        time.sleep(0.1)
 
         except KeyboardInterrupt:
             pass

@@ -45,14 +45,15 @@ class TestEventBusShutdown:
         time.sleep(0.1)
         assert len(received) == 0
 
-    def test_emit_sync_after_shutdown_still_works(self):
-        """emit_sync() doesn't use executor, so it should still work."""
+    def test_emit_sync_after_shutdown_has_no_subscribers(self):
+        """After shutdown, subscribers are cleared so emit_sync delivers nothing."""
         bus = EventBus()
         received = []
         bus.subscribe('test', lambda e: received.append(e))
         bus.shutdown()
+        # Shutdown clears subscribers to prevent new work being queued
         bus.emit_sync('test', 'hello')
-        assert len(received) == 1
+        assert len(received) == 0
 
 
 class TestStatusBarThreadSafety:
