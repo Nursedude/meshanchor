@@ -331,3 +331,29 @@ class TestKnownServicesConsistency:
             )
         finally:
             sys.path.pop(0)
+
+
+class TestMessageLengthEnforcement:
+    """Enforce: Meshtastic-facing handlers must validate message length.
+
+    Meshtastic firmware silently truncates/drops oversized messages.
+    All TX paths must reference MAX_MESHTASTIC_MSG_LENGTH from utils.defaults.
+    """
+
+    HANDLER_FILES = [
+        'meshtastic_handler.py',
+        'mqtt_bridge_handler.py',
+    ]
+
+    def test_handlers_reference_length_constant(self):
+        """All Meshtastic-facing handlers must reference the length limit."""
+        for filename in self.HANDLER_FILES:
+            filepath = os.path.join(SRC_DIR, 'gateway', filename)
+            if not os.path.exists(filepath):
+                continue
+            with open(filepath, 'r') as f:
+                content = f.read()
+            assert 'MAX_MESHTASTIC_MSG_LENGTH' in content, (
+                f"{filename} must reference MAX_MESHTASTIC_MSG_LENGTH "
+                f"to enforce message length limits"
+            )

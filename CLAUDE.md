@@ -156,7 +156,7 @@ print(f'Issues: {report.total_issues}')
 
 ## Research Documents
 
-Deep documentation in `.claude/` (~48 active files after 2026-02-23 dedup audit):
+Deep documentation in `.claude/` (~53 active files after 2026-02-26 QA audit):
 - `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical)
 - `dude_ai_university.md` - Project vision, self-healing principles, plugin & Dude AI architecture
 - `foundations/domain_architecture.md` - **ARCHITECTURE: Core vs Plugin model**

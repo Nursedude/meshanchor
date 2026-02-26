@@ -479,7 +479,7 @@ class MQTTNodelessSubscriber:
             # Add jitter (0-25% of delay) to prevent thundering herd
             jitter = random.uniform(0, delay * 0.25)
             wait_time = delay + jitter
-            logger.info(f"Reconnecting in {wait_time:.1f}s...")
+            logger.debug(f"Reconnecting in {wait_time:.1f}s...")
             self._stop_event.wait(wait_time)
 
             if self._stop_event.is_set():

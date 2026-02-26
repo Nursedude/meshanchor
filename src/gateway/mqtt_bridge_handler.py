@@ -37,6 +37,7 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,18 @@ class MQTTBridgeHandler:
     def is_connected(self) -> bool:
         """Check if connected to MQTT broker."""
         return self._connected
+
+    def _truncate_if_needed(self, message: str) -> str:
+        """Truncate message to Meshtastic byte limit if needed."""
+        msg_bytes = message.encode('utf-8')
+        if len(msg_bytes) > MAX_MESHTASTIC_MSG_LENGTH:
+            logger.warning(
+                f"Message exceeds Meshtastic limit "
+                f"({len(msg_bytes)} > {MAX_MESHTASTIC_MSG_LENGTH} bytes), truncating"
+            )
+            truncated = msg_bytes[:MAX_MESHTASTIC_MSG_LENGTH - 3]
+            return truncated.decode('utf-8', errors='ignore') + '...'
+        return message
 
     def run_loop(self) -> None:
         """
@@ -529,6 +542,8 @@ class MQTTBridgeHandler:
         Returns:
             True if message sent successfully, False otherwise.
         """
+        message = self._truncate_if_needed(message)
+
         # Try HTTP protobuf first (preferred — no TCP contention, no subprocess)
         if self._send_via_http_protobuf(message, destination, channel):
             return True
