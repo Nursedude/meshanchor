@@ -56,7 +56,7 @@ class SettingsMenuMixin:
 
     def _configure_log_level(self):
         """Configure application log verbosity."""
-        from utils.logging_utils import set_log_level, _component_levels, _global_log_level
+        from utils.logging_config import set_log_level, _component_levels, _global_log_level
 
         current_name = logging.getLevelName(_global_log_level)
 
