@@ -104,9 +104,11 @@ from latency_mixin import LatencyMixin
 from dashboard_mixin import DashboardMixin
 from meshcore_mixin import MeshCoreMixin
 from tactical_ops_mixin import TacticalOpsMixin
+from propagation_mixin import PropagationMixin
 
 
 class MeshForgeLauncher(
+    PropagationMixin,
     RFToolsMixin,
     ChannelConfigMixin,
     AIToolsMixin,
@@ -903,6 +905,7 @@ class MeshForgeLauncher(
                 ("site", "Site Planner        Coverage estimation"),
                 ("freq", "Frequency Slots     Channel calculator"),
                 ("antenna", "Antenna Analysis    Compare antenna types"),
+                ("weather", "Space Weather       Propagation & HF bands"),
                 ("sdr", "SDR Monitor         RF awareness (Airspy)"),
                 ("back", "Back"),
             ]
@@ -921,6 +924,7 @@ class MeshForgeLauncher(
                 "site": ("Site Planner", self._site_planner_menu),
                 "freq": ("Frequency Slots", self._calc_frequency_slot),
                 "antenna": ("Antenna Analysis", self._antenna_comparison),
+                "weather": ("Space Weather", self._propagation_menu),
                 "sdr": ("SDR Monitor", self._rf_awareness_menu),
             }
             entry = dispatch.get(choice)
