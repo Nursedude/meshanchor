@@ -22,6 +22,7 @@ import time
 import subprocess
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,11 @@ class StatusBar:
         self._space_weather: Optional[str] = None
         self._space_weather_time: float = 0.0
         self._space_weather_fetching = False  # Guard against stacking fetch threads
+        # Single-worker executor for space weather fetches — prevents
+        # accumulation of dead Thread objects over extended uptime.
+        self._weather_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="statusbar-weather",
+        )
         # Enhanced startup checker (v0.4.8)
         self._startup_checker: Optional[StartupChecker] = None
         self._env_state: Optional[EnvironmentState] = None
@@ -214,20 +220,20 @@ class StatusBar:
             self._bridge_running = None
 
     def _fetch_space_weather_async(self) -> None:
-        """Launch a background thread to fetch space weather.
+        """Submit space weather fetch to the reusable worker thread.
 
-        Prevents the TUI main thread from blocking for up to 5s when
-        the network is slow or unreachable. If a fetch is already
-        in-flight, the call is skipped to avoid stacking threads.
+        Uses a single-thread executor instead of spawning a new Thread
+        each cycle. Prevents accumulation of dead Thread objects over
+        extended uptime (~288/day with the old approach).
         """
         if self._space_weather_fetching:
             return  # Previous fetch still in-flight
         self._space_weather_fetching = True
-        t = threading.Thread(
-            target=self._check_space_weather, daemon=True,
-            name="statusbar-weather",
-        )
-        t.start()
+        try:
+            self._weather_executor.submit(self._check_space_weather)
+        except RuntimeError:
+            # Executor shut down during cleanup — safe to ignore
+            self._space_weather_fetching = False
 
     def _check_space_weather(self) -> None:
         """Fetch space weather from NOAA SWPC.
@@ -444,6 +450,11 @@ class StatusBar:
             event_bus.unsubscribe('node', self._on_node_event)
             self._event_subscribed = False
             logger.debug("StatusBar unsubscribed from EventBus")
+        # Shut down the weather fetch executor
+        try:
+            self._weather_executor.shutdown(wait=False)
+        except Exception:
+            pass
 
     # =========================================================================
     # Enhanced Status Methods (v0.4.8)
