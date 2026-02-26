@@ -176,14 +176,33 @@ class TopologyMixin:
                 except (AttributeError, TypeError) as e:
                     logger.debug("Service stats lookup failed: %s", e)
 
-            # Show help if no data
+            # Show help if no data, with diagnostics
             if node_count == 0 and stats.get('edge_count', 0) == 0:
                 lines.append("No topology data available.")
                 lines.append("")
-                lines.append("Topology is populated when:")
+                lines.append("Diagnostics:")
+                # Check what services are available
+                try:
+                    from utils.service_check import check_service
+                    rnsd = check_service("rnsd")
+                    meshtd = check_service("meshtasticd")
+                    if rnsd.get("active"):
+                        lines.append("  [OK] rnsd is running")
+                    else:
+                        lines.append("  [--] rnsd not running (no RNS topology)")
+                    if meshtd.get("active"):
+                        lines.append("  [OK] meshtasticd is running")
+                    else:
+                        lines.append("  [--] meshtasticd not running")
+                except Exception:
+                    lines.append("  Could not check service status")
+                lines.append("")
+                lines.append("Topology populates when:")
                 lines.append("  - RNS discovers paths to destinations")
-                lines.append("  - Meshtastic nodes are seen")
-                lines.append("  - Gateway bridge is running")
+                lines.append("  - Meshtastic nodes are seen via radio")
+                lines.append("  - Gateway bridge routes traffic")
+                lines.append("")
+                lines.append("Try: Open the :5000 map for node visualization")
                 lines.append("")
 
             self.dialog.msgbox("Topology Statistics", "\n".join(lines))
