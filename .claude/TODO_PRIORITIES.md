@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-21
+> **Last Updated:** 2026-02-26
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -41,6 +41,14 @@
 - [ ] **NanoVNA plugin** — Antenna tuning integration
 - [ ] **Firmware flashing from TUI** — Flash meshtastic firmware
 
+### Code Quality (from PR #976 audit — deferred items)
+- [ ] **Merge hardware/radio config pairs** — `hardware.py`+`hardware_config.py`, `radio.py`+`radio_config.py` overlap
+- [ ] **Migrate 49 TUI mixins → command registry** — God-class pattern, 2-3 day effort (see `.claude/plans/deferred-issues.md`)
+- [ ] **Add actionable fix hints to error messages** — Replicate `cli/diagnose.py:192-197` pattern everywhere
+- [ ] **Add quick health-check CLI command** — One-liner system health check
+- [ ] **Clean `.claude/archive/`** — 200KB dead documentation weight
+- [ ] **Merge RNS docs (3 → 1)** — 15KB overlap across `rns_comprehensive`, `rns_complete`, `rns_integration`
+
 ### Documentation
 - [ ] Video tutorials
 - [ ] Deployment guides for Pi/SBC
@@ -49,6 +57,18 @@
 ---
 
 ## Recently Completed
+
+### 2026-02-26: Code Quality Audit & BaseHandler Extraction (PRs #969-#977)
+- [x] **PR #976**: Comprehensive code quality audit — 14 prioritized action items
+- [x] **PR #977**: `BaseMessageHandler` ABC extraction — shared constructor, `_truncate_if_needed`, `_notify_status`
+- [x] **PR #977**: Logging consolidation — `logging_utils.py` merged into `logging_config.py`
+- [x] **Message length validation**: `_truncate_if_needed` in `BaseMessageHandler` (228-byte Meshtastic limit)
+- [x] **Silent exception handlers**: All 3 cited locations now log at DEBUG level
+- [x] **Hot-path log levels**: `meshtastic_handler` and `mqtt_subscriber` already at DEBUG
+- [x] **launcher.py --help**: Full argparse already exists (`launcher.py:399-424`)
+- [x] **MQTT subscription log noise**: Downgraded reconnect subscription logs INFO→DEBUG
+- [x] **MQTTBridgeHandler.queue_send**: Explicit `_truncate_if_needed` for consistency
+- [x] **PRs #969-#975**: TUI stability, daemon mode, space weather, HF propagation, map reliability
 
 ### 2026-02-20: Code Quality Sprint (PR pending)
 - [x] **Issue #1**: Path.home() — RESOLVED (3 violations fixed, 0 remaining)
@@ -69,18 +89,21 @@
 
 ## Technical Debt
 
-**Threshold: 1,500 lines max per file**
+**Threshold: 1,500 lines max per file** (updated 2026-02-26)
 
 | File | Lines | Status |
 |------|-------|--------|
+| meshtasticd_config_mixin.py | 2,016 | OVER — extraction candidate (43 methods) |
 | knowledge_content.py | 1,993 | OK — content file by design |
-| service_menu_mixin.py | 1,575 | MONITOR — OpenHamClock/MQTT extraction candidates |
-| rns_bridge.py | 1,570 | MONITOR — MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
-| map_data_collector.py | 1,529 | Borderline, monitor |
-| nomadnet_client_mixin.py | 1,519 | MONITOR — new to tracking |
-| commands/rns.py | 1,516 | MONITOR — new to tracking |
-| launcher_tui/main.py | 1,507 | Borderline — 33 mixins, monitor |
-| prometheus_exporter.py | 1,505 | MONITOR — grew after metrics_export split |
+| launcher_tui/main.py | 1,949 | OVER — 49 mixins, command registry migration planned |
+| rns_bridge.py | 1,599 | OVER — MeshCoreBridgeMixin + MessageRouter + gateway_cli already extracted |
+| service_check.py | 1,573 | OVER — single source of truth, monitor |
+| map_data_collector.py | 1,568 | OVER — monitor |
+| map_http_handler.py | 1,557 | OVER — monitor |
+| prometheus_exporter.py | 1,521 | OVER — grew after metrics_export split |
+| nomadnet_client_mixin.py | 1,505 | BORDERLINE — monitor |
+| commands/rns.py | 1,505 | BORDERLINE — monitor |
+| service_menu_mixin.py | 1,467 | OK — under threshold |
 
 ---
 
