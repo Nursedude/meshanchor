@@ -593,7 +593,7 @@ class TestOnReceive:
         """Full queue drops message gracefully."""
         small_queue = Queue(maxsize=1)
         small_queue.put("filler")  # Fill the queue
-        handler._mesh_to_rns_queue = small_queue
+        handler._message_queue = small_queue
         handler._connected = True
 
         packet = {

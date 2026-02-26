@@ -1783,7 +1783,7 @@ def main():
     # Console output is disabled (log_to_console=False) to prevent
     # whiptail/dialog TUI corruption.
     try:
-        from utils.logging_utils import setup_logging
+        from utils.logging_config import setup_logging
         setup_logging(log_level=logging.DEBUG, log_to_file=True, log_to_console=False)
     except Exception:
         pass  # Logging is best-effort; don't block TUI startup
@@ -1828,7 +1828,7 @@ def main():
 
     # Show log paths before stderr redirect so user knows where to look
     try:
-        from utils.logging_utils import LOG_DIR as _app_log_dir
+        from utils.logging_config import LOG_DIR as _app_log_dir
         print(f"  App log: {_app_log_dir}", file=_original_stderr)
     except Exception:
         pass
