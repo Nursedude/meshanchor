@@ -1631,6 +1631,19 @@ def main():
                     launcher._map_server_process = None
             except Exception as e:
                 logger.warning(f"Cleanup failed for map server: {e}")
+            # Unsubscribe status bar before shutting down EventBus
+            try:
+                if hasattr(launcher, '_status_bar') and launcher._status_bar:
+                    launcher._status_bar.cleanup()
+            except Exception as e:
+                logger.warning(f"Cleanup failed for status bar: {e}")
+
+        # Shut down EventBus thread pool (prevents dangling worker threads)
+        try:
+            from utils.event_bus import event_bus
+            event_bus.shutdown()
+        except Exception as e:
+            logger.warning(f"Cleanup failed for event bus: {e}")
 
         # Restore stderr and close the log file handle
         try:
