@@ -373,6 +373,25 @@ class MeshForgeLauncher(
 
         return env
 
+    def _is_daemon_running(self) -> bool:
+        """Check if meshforged is running via PID file.
+
+        Used on TUI startup to avoid auto-starting services the
+        daemon already owns (Config API, health probe, etc.).
+        """
+        pid_file = Path("/run/meshforge/meshforged.pid")
+        if not pid_file.exists():
+            return False
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)  # Check if process exists (signal 0)
+            return True
+        except (ProcessLookupError, ValueError):
+            return False
+        except PermissionError:
+            # Process exists but owned by different user — daemon is running
+            return True
+
     def run(self):
         """Run the launcher."""
         if not self.dialog.available:
@@ -395,28 +414,26 @@ class MeshForgeLauncher(
         # Check for service misconfiguration (SPI HAT with USB config)
         self._check_service_misconfig()
 
-        # Auto-start map server if configured
-        self._maybe_auto_start_map()
-
-        # Auto-start MQTT subscriber and TelemetryPoller if configured
-        self._maybe_auto_start_mqtt_and_telemetry()
-
-        # Auto-start Config API Server on localhost
-        self._maybe_auto_start_config_api()
-
-        # Auto-lock port 9443 so meshtasticd web is only via MeshForge proxy
-        self._maybe_auto_lock_port()
-
-        # Start continuous health monitoring (Phase 1 — reliability)
-        # Background thread checks meshtasticd, rnsd, mosquitto every 30s.
-        # State changes push to EventBus → StatusBar updates automatically.
-        self._start_health_monitor()
+        # Detect if daemon is managing core services
+        self._daemon_active = self._is_daemon_running()
+        if self._daemon_active:
+            logger.info("Daemon detected — TUI running in tool-only mode")
+        else:
+            # Only auto-start services when daemon ISN'T running.
+            # If daemon owns these, starting them here would cause
+            # port conflicts (Config API :8081) or singleton clashes.
+            self._maybe_auto_start_map()
+            self._maybe_auto_start_mqtt_and_telemetry()
+            self._maybe_auto_start_config_api()
+            self._maybe_auto_lock_port()
+            self._start_health_monitor()
 
         try:
             self._run_main_menu()
         finally:
-            self._stop_health_monitor()
-            self._stop_config_api_server()
+            if not self._daemon_active:
+                self._stop_health_monitor()
+                self._stop_config_api_server()
 
     def _start_health_monitor(self) -> None:
         """Start the background health monitoring loop.
