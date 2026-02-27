@@ -1068,10 +1068,7 @@ class MeshForgeLauncher(
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
-                "aredn": ("AREDN Mesh", self._aredn_menu),
-                "messaging": ("Messaging", self._messaging_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
-                "favorites": ("Favorites", self._favorites_menu),
                 "services": ("Service Control", self._service_menu),
             }
             entry = dispatch.get(choice)
@@ -1156,7 +1153,7 @@ class MeshForgeLauncher(
 
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
-        _ORDERING = ["radio", "channels", "rns-config", "services", "backup",
+        _ORDERING = ["radio", "channels", "rns-config", "rnode", "services", "backup",
                       "updates", "webhooks", "meshforge", "config-api", "wizard"]
         while True:
             # Legacy items — removed automatically as handlers take over their tags
@@ -1193,7 +1190,6 @@ class MeshForgeLauncher(
                 "channels": ("Channel Config", self._channel_config_menu),
                 "rns-config": ("RNS Config", self._edit_rns_config),
                 "services": ("Service Config", self._service_menu),
-                "backup": ("Device Backup", self._device_backup_menu),
                 "updates": ("Software Updates", self._updates_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
                 "config-api": ("Config API Server", self._config_api_menu),
@@ -1207,7 +1203,7 @@ class MeshForgeLauncher(
 
     def _system_menu(self):
         """System - Hardware, logs, Linux tools."""
-        _ORDERING = ["hardware", "logs", "network", "diagnose", "daemon",
+        _ORDERING = ["hardware", "logs", "network", "discover", "diagnose", "daemon",
                       "review", "status", "shell", "reboot"]
         while True:
             # Legacy items — removed automatically as handlers take over their tags
@@ -1239,8 +1235,6 @@ class MeshForgeLauncher(
 
             # Legacy mixin dispatch (not yet converted)
             dispatch = {
-                "hardware": ("Hardware Detection", self._hardware_menu),
-                "logs": ("Log Viewer", self._logs_menu),
                 "diagnose": ("Diagnostics", self._run_diagnostics),
                 "daemon": ("Daemon Mode", self._daemon_menu),
                 "review": ("Code Review", self._auto_review_menu),
