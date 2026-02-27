@@ -75,16 +75,21 @@ def _make_context(**overrides) -> TUIContext:
 class TestHandlerDiscovery:
     """Test that get_all_handlers() returns all 5 pilot handlers."""
 
-    def test_get_all_handlers_returns_5(self):
+    def test_get_all_handlers_returns_expected_count(self):
         from handlers import get_all_handlers
         handlers = get_all_handlers()
-        assert len(handlers) == 5
+        assert len(handlers) >= 5  # Phase 1: 5, Batch 1: +8 = 13
 
     def test_get_all_handlers_classes_are_correct(self):
         from handlers import get_all_handlers
         handler_ids = {cls().handler_id for cls in get_all_handlers()}
-        expected = {"latency", "classifier", "amateur_radio", "analytics", "rf_tools"}
-        assert handler_ids == expected
+        # Phase 1 pilot handlers must always be present
+        phase1 = {"latency", "classifier", "amateur_radio", "analytics", "rf_tools"}
+        assert phase1.issubset(handler_ids)
+        # Batch 1 handlers
+        batch1 = {"node_health", "metrics", "propagation", "site_planner",
+                   "sdr", "link_quality", "webhooks", "network_tools"}
+        assert batch1.issubset(handler_ids)
 
 
 # ---------------------------------------------------------------------------
