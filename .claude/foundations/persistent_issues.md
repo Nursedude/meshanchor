@@ -50,9 +50,9 @@ Historical details in `persistent_issues_archive.md`.
 
 ---
 
-## Issue #3: Services Not Started/Verified — PARTIALLY RESOLVED (2026-02-20)
+## Issue #3: Services Not Started/Verified — MOSTLY RESOLVED (2026-02-27)
 
-### Status: **Gateway pre-flight checks done.** 34+ secondary locations remain.
+### Status: **Gateway + secondary pre-flight checks done.** Display-only systemctl calls remain (acceptable).
 
 ### Rule
 **Always call `check_service()` before connecting to services.**
@@ -83,15 +83,25 @@ if not status.available:
 - `rns_bridge.py` — Advisory `check_service('rnsd')` before RNS init
 - `meshtastic_connection.py` — Replaced raw `systemctl restart` with `restart_service()`
 
+### Completed (2026-02-27)
+- `device_controller.py` — Advisory meshtasticd pre-flight before TCPInterface
+- `connections.py` — Advisory meshtasticd pre-flight before TCPInterface
+- `rns_transport.py` — Advisory meshtasticd pre-flight before TCPInterface
+- `node_monitor.py` — Advisory meshtasticd pre-flight before TCPInterface
+- `mesh_bridge.py` — Advisory meshtasticd pre-flight (TCP) + mosquitto pre-flight (MQTT, localhost only)
+- `mqtt_bridge.py` (plugin) — Advisory mosquitto pre-flight for localhost brokers
+- `mqtt_subscriber.py` — Advisory mosquitto pre-flight for localhost brokers
+- `diagnose.py` — Converted `safe_import` to direct import, eliminated raw systemctl fallback
+- `handlers/metrics.py` — Replaced raw `systemctl is-active grafana-server` with `check_service()`
+
 **Note**: Gateway pre-flight checks are ADVISORY (warn + continue), not blocking.
 Services may run outside systemd (Docker, manual start). The actual connection
 attempt is the definitive test. Blocking checks caused "waiting for delivery"
 regression when mosquitto wasn't detectable via systemctl.
 
-### Remaining (34+ locations)
-- 8 files create `TCPInterface` without meshtasticd checks
-- 4 MQTT connections without mosquitto checks
-- 8 files with raw `subprocess.run(['systemctl', ...])` bypassing service_check
+### Remaining (display-only — acceptable)
+- `system_tools_mixin.py` — `systemctl list-units/status` for display to user (not state decisions)
+- `service_menu_mixin.py` — `systemctl status` for display to user (not state decisions)
 
 ### Known Services (in `utils/service_check.py`)
 | Service | Port | systemd name |
