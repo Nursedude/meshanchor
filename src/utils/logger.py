@@ -1,4 +1,13 @@
-"""Logging utilities for the installer"""
+"""Logging utilities for the installer.
+
+NOTE: This module is INSTALLER-ONLY (meshtasticd installer workflow).
+For all other MeshForge code, use the canonical logging module:
+
+    from utils.logging_config import setup_logging, get_logger
+    logger = get_logger(__name__)
+
+See also: utils/logging_config.py (centralized logging configuration).
+"""
 
 import logging
 import os
