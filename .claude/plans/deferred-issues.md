@@ -1,7 +1,7 @@
 # Deferred Issues — From Code Quality Review (2026-02-26)
 
 > Create these as GitHub issues manually. `gh` CLI not authenticated in this env.
-> **Updated**: 2026-02-27 — Issue 1 logging basicConfig cleanup done, Issue 2 completed (PR #977), Issue 3 Batch 3 registered
+> **Updated**: 2026-02-27 — Issue 1 DONE, Issue 2 DONE, Issue 3 IN PROGRESS, + reliability hardening (pre-flight, log levels)
 
 ---
 

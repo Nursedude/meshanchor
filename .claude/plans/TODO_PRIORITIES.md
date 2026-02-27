@@ -33,9 +33,11 @@
 - [ ] **Classifier MeshCore 3-way routing** — Verify `BRIDGE_MESHCORE` end-to-end
 - [ ] **Auto-review reliability triage** — Review 64 reliability issues: real vs false positive
 
-### Service Pre-flight Expansion (Issue #3)
-- [ ] **34+ locations** still create TCPInterface/MQTT connections without `check_service()` pre-flight
-- [ ] **8 files** use raw `subprocess.run(['systemctl', ...])` bypassing `service_check` module
+### Service Pre-flight Expansion (Issue #3) — MOSTLY COMPLETE (2026-02-27)
+- [x] **TCPInterface pre-flight**: device_controller, connections, rns_transport, node_monitor, mesh_bridge
+- [x] **MQTT pre-flight**: mqtt_bridge plugin, mqtt_subscriber, mesh_bridge (localhost only)
+- [x] **Raw systemctl migration**: diagnose.py (direct import), handlers/metrics.py (check_service)
+- [ ] **Display-only systemctl calls**: system_tools_mixin, service_menu_mixin (acceptable — showing info, not deciding state)
 
 ### Plugins
 - [ ] **NanoVNA plugin** — Antenna tuning integration
