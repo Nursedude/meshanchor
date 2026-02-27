@@ -106,6 +106,11 @@ from meshcore_mixin import MeshCoreMixin
 from tactical_ops_mixin import TacticalOpsMixin
 from propagation_mixin import PropagationMixin
 
+# Handler registry infrastructure (Phase 1 of mixin-to-registry migration)
+from handler_protocol import TUIContext
+from handler_registry import HandlerRegistry
+from handlers import get_all_handlers
+
 
 class MeshForgeLauncher(
     PropagationMixin,
@@ -170,6 +175,24 @@ class MeshForgeLauncher(
         # Deployment profile for menu filtering
         self._profile = profile
         self._feature_flags = getattr(profile, 'feature_flags', {}) if profile else {}
+
+        # Handler registry (Phase 1 of mixin-to-registry migration).
+        # Handlers are registered here and dispatched via _registry.dispatch()
+        # in submenu methods. Legacy mixin dispatch is the fallback.
+        self._tui_context = TUIContext(
+            dialog=self.dialog,
+            env_state=self._env_state,
+            startup_checker=self._startup_checker,
+            status_bar=getattr(self, '_status_bar', None),
+            feature_flags=self._feature_flags,
+            profile=self._profile,
+            src_dir=self.src_dir,
+            env=self.env,
+        )
+        self._registry = HandlerRegistry(self._tui_context)
+        self._tui_context.registry = self._registry
+        for handler_cls in get_all_handlers():
+            self._registry.register(handler_cls())
 
     def _feature_enabled(self, feature: str) -> bool:
         """Check if a feature is enabled in the current deployment profile.
@@ -504,6 +527,10 @@ class MeshForgeLauncher(
         # Update status bar with environment info
         if self._status_bar and hasattr(self._status_bar, '_env_state'):
             self._status_bar._env_state = self._env_state
+
+        # Sync env_state to handler registry context
+        if hasattr(self, '_tui_context'):
+            self._tui_context.env_state = self._env_state
 
         # Check for port conflicts
         if self._env_state.conflicts:
@@ -895,6 +922,11 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("dashboard", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
                 "status": ("Service Status", self._service_status_display),
                 "weather": ("Space Weather", self._dashboard_space_weather),
@@ -904,8 +936,6 @@ class MeshForgeLauncher(
                 "score": ("Health Score", self._health_score_display),
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
                 "metrics": ("Historical Trends", self._metrics_menu),
-                "analytics": ("Analytics", self._analytics_menu),
-                "latency": ("Latency Monitor", self._latency_menu),
                 "reports": ("Reports", self._reports_menu),
                 "alerts": ("View Alerts", self._show_alerts),
             }
@@ -992,6 +1022,11 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("mesh_networks", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
                 "meshtastic": ("Meshtastic Radio", self._radio_menu),
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
@@ -999,10 +1034,8 @@ class MeshForgeLauncher(
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
                 "aredn": ("AREDN Mesh", self._aredn_menu),
                 "messaging": ("Messaging", self._messaging_menu),
-                "traffic": ("Traffic Classifier", self._classifier_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
                 "favorites": ("Favorites", self._favorites_menu),
-                "ham": ("Ham Radio Tools", self._amateur_radio_menu),
                 "services": ("Service Control", self._service_menu),
             }
             entry = dispatch.get(choice)
@@ -1033,11 +1066,13 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("rf_sdr", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
-                "link": ("Link Budget", self._rf_tools_menu),
                 "site": ("Site Planner", self._site_planner_menu),
-                "freq": ("Frequency Slots", self._calc_frequency_slot),
-                "antenna": ("Antenna Analysis", self._antenna_comparison),
                 "weather": ("Space Weather", self._propagation_menu),
                 "sdr": ("SDR Monitor", self._rf_awareness_menu),
             }
