@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-26
+> **Last Updated:** 2026-02-27
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -43,7 +43,7 @@
 
 ### Code Quality (from PR #976 audit — deferred items)
 - [ ] **Merge hardware/radio config pairs** — `hardware.py`+`hardware_config.py`, `radio.py`+`radio_config.py` overlap
-- [ ] **Migrate 49 TUI mixins → command registry** — God-class pattern, 2-3 day effort (see `deferred-issues.md`)
+- [ ] **Migrate 46 TUI mixins → command registry** — God-class pattern, 2-3 day effort (see `deferred-issues.md`)
 - [ ] **Add actionable fix hints to error messages** — Replicate `cli/diagnose.py:192-197` pattern everywhere
 - [ ] **Add quick health-check CLI command** — One-liner system health check
 - [ ] **Clean `.claude/archive/`** — 200KB dead documentation weight
@@ -93,9 +93,9 @@
 
 | File | Lines | Status |
 |------|-------|--------|
+| launcher_tui/main.py | 2,022 | OVER — 46 mixins, command registry migration planned |
 | meshtasticd_config_mixin.py | 2,016 | OVER — extraction candidate (43 methods) |
 | knowledge_content.py | 1,993 | OK — content file by design |
-| launcher_tui/main.py | 1,949 | OVER — 49 mixins, command registry migration planned |
 | rns_bridge.py | 1,599 | OVER — MeshCoreBridgeMixin + MessageRouter + gateway_cli already extracted |
 | service_check.py | 1,573 | OVER — single source of truth, monitor |
 | map_data_collector.py | 1,568 | OVER — monitor |
@@ -103,6 +103,7 @@
 | prometheus_exporter.py | 1,521 | OVER — grew after metrics_export split |
 | nomadnet_client_mixin.py | 1,505 | BORDERLINE — monitor |
 | commands/rns.py | 1,505 | BORDERLINE — monitor |
+| rns_menu_mixin.py | 1,498 | BORDERLINE — monitor |
 | service_menu_mixin.py | 1,467 | OK — under threshold |
 
 ---
