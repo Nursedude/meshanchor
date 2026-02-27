@@ -35,4 +35,44 @@ def get_all_handlers() -> List[Type]:
         RFToolsHandler,
     ])
 
+    # Batch 1 handlers
+    from handlers.node_health import NodeHealthHandler
+    from handlers.metrics import MetricsHandler
+    from handlers.propagation import PropagationHandler
+    from handlers.site_planner import SitePlannerHandler
+    from handlers.sdr import SDRHandler
+    from handlers.link_quality import LinkQualityHandler
+    from handlers.webhooks import WebhooksHandler
+    from handlers.network_tools import NetworkToolsHandler
+    handlers.extend([
+        NodeHealthHandler,
+        MetricsHandler,
+        PropagationHandler,
+        SitePlannerHandler,
+        SDRHandler,
+        LinkQualityHandler,
+        WebhooksHandler,
+        NetworkToolsHandler,
+    ])
+
+    # Batch 2 handlers
+    from handlers.favorites import FavoritesHandler
+    from handlers.messaging import MessagingHandler
+    from handlers.aredn import AREDNHandler
+    from handlers.rnode import RNodeHandler
+    from handlers.device_backup import BackupHandler
+    from handlers.logs import LogsHandler
+    from handlers.hardware import HardwareHandler
+    from handlers.service_discovery import ServiceDiscoveryHandler
+    handlers.extend([
+        FavoritesHandler,
+        MessagingHandler,
+        AREDNHandler,
+        RNodeHandler,
+        BackupHandler,
+        LogsHandler,
+        HardwareHandler,
+        ServiceDiscoveryHandler,
+    ])
+
     return handlers

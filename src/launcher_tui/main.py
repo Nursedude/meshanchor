@@ -203,6 +203,42 @@ class MeshForgeLauncher(
             return True
         return self._feature_flags.get(feature, True)
 
+    def _build_section_menu(self, section, legacy_items, ordering=None):
+        """Build menu choices by merging registry + legacy items.
+
+        Registry items auto-replace legacy items with the same tag.
+        Ordering list controls display order when provided.
+
+        Args:
+            section: Menu section key (e.g., "dashboard", "rf_sdr").
+            legacy_items: List of (tag, description) for unconverted items.
+            ordering: Optional list of tags defining display order.
+
+        Returns:
+            List of (tag, description) tuples with "Back" appended.
+        """
+        registry_items = self._registry.get_menu_items(section)
+        registry_tags = {tag for tag, _ in registry_items}
+
+        # Filter legacy items already handled by registry
+        filtered_legacy = [(t, d) for t, d in legacy_items if t not in registry_tags]
+
+        all_map = {tag: desc for tag, desc in registry_items}
+        all_map.update({tag: desc for tag, desc in filtered_legacy})
+
+        if ordering:
+            result = [(t, all_map[t]) for t in ordering if t in all_map]
+            # Append items not in ordering
+            ordered_set = set(ordering)
+            for tag, desc in list(registry_items) + filtered_legacy:
+                if tag not in ordered_set and (tag, desc) not in result:
+                    result.append((tag, desc))
+        else:
+            result = list(registry_items) + filtered_legacy
+
+        result.append(("back", "Back"))
+        return result
+
     @staticmethod
     def _wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
         """Wait for user to press Enter, handling Ctrl+C gracefully.
@@ -896,8 +932,11 @@ class MeshForgeLauncher(
 
     def _dashboard_menu(self):
         """Dashboard - Status, health, alerts, propagation."""
+        _ORDERING = ["status", "weather", "network", "nodes", "health", "score",
+                      "datapath", "metrics", "analytics", "latency", "reports", "alerts"]
         while True:
-            choices = [
+            # Legacy items — removed automatically as handlers take over their tags
+            legacy = [
                 ("status", "Service Status      All services with health"),
                 ("weather", "Space Weather       SFI, Kp, bands at a glance"),
                 ("network", "Network Status      Ports, interfaces, conflicts"),
@@ -906,12 +945,10 @@ class MeshForgeLauncher(
                 ("score", "Health Score        Network health snapshot"),
                 ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
-                ("analytics", "Analytics           Coverage & link trends"),
-                ("latency", "Latency Monitor     Service response times"),
                 ("reports", "Reports             Generate status report"),
                 ("alerts", "View Alerts         Current warnings"),
-                ("back", "Back"),
             ]
+            choices = self._build_section_menu("dashboard", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "Dashboard",
@@ -932,10 +969,8 @@ class MeshForgeLauncher(
                 "weather": ("Space Weather", self._dashboard_space_weather),
                 "network": ("Network Status", self._network_menu),
                 "nodes": ("Node Count", self._show_node_counts),
-                "health": ("Node Health", self._node_health_menu),
                 "score": ("Health Score", self._health_score_display),
                 "datapath": ("Data Path Check", self._data_path_diagnostic),
-                "metrics": ("Historical Trends", self._metrics_menu),
                 "reports": ("Reports", self._reports_menu),
                 "alerts": ("View Alerts", self._show_alerts),
             }
@@ -993,25 +1028,26 @@ class MeshForgeLauncher(
 
     def _mesh_networks_menu(self):
         """Mesh Networks - Meshtastic, RNS, AREDN."""
+        _ORDERING = ["meshtastic", "meshcore", "rns", "gateway", "aredn",
+                      "messaging", "traffic", "mqtt", "favorites", "ham", "services"]
         while True:
-            choices = []
+            # Legacy items — feature-gated items built conditionally
+            legacy = []
             if self._feature_enabled("meshtastic"):
-                choices.append(("meshtastic", "Meshtastic          Radio, channels, CLI"))
+                legacy.append(("meshtastic", "Meshtastic          Radio, channels, CLI"))
             if self._feature_enabled("meshcore"):
-                choices.append(("meshcore", "MeshCore            Companion radio, config"))
+                legacy.append(("meshcore", "MeshCore            Companion radio, config"))
             if self._feature_enabled("rns"):
-                choices.append(("rns", "RNS / Reticulum     Status, gateway, messaging"))
+                legacy.append(("rns", "RNS / Reticulum     Status, gateway, messaging"))
             if self._feature_enabled("gateway"):
-                choices.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
-            choices.append(("aredn", "AREDN Mesh          AREDN integration"))
-            choices.append(("messaging", "Messaging           Send/receive messages"))
-            choices.append(("traffic", "Traffic Classifier  Routing & notification stats"))
+                legacy.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
+            legacy.append(("aredn", "AREDN Mesh          AREDN integration"))
+            legacy.append(("messaging", "Messaging           Send/receive messages"))
             if self._feature_enabled("mqtt"):
-                choices.append(("mqtt", "MQTT Monitor        Nodeless mesh observation"))
-            choices.append(("favorites", "Favorites           Manage favorite nodes"))
-            choices.append(("ham", "Ham Radio           Callsign, Part 97, ARES"))
-            choices.append(("services", "Service Control     Start/stop/restart"))
-            choices.append(("back", "Back"))
+                legacy.append(("mqtt", "MQTT Monitor        Nodeless mesh observation"))
+            legacy.append(("favorites", "Favorites           Manage favorite nodes"))
+            legacy.append(("services", "Service Control     Start/stop/restart"))
+            choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "Mesh Networks",
@@ -1032,10 +1068,7 @@ class MeshForgeLauncher(
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
-                "aredn": ("AREDN Mesh", self._aredn_menu),
-                "messaging": ("Messaging", self._messaging_menu),
                 "mqtt": ("MQTT Monitor", self._mqtt_menu),
-                "favorites": ("Favorites", self._favorites_menu),
                 "services": ("Service Control", self._service_menu),
             }
             entry = dispatch.get(choice)
@@ -1046,16 +1079,11 @@ class MeshForgeLauncher(
 
     def _rf_sdr_menu(self):
         """RF & SDR - Calculators, SDR monitoring."""
+        _ORDERING = ["link", "site", "freq", "antenna", "weather", "sdr"]
         while True:
-            choices = [
-                ("link", "Link Budget         FSPL, Fresnel, range"),
-                ("site", "Site Planner        Coverage estimation"),
-                ("freq", "Frequency Slots     Channel calculator"),
-                ("antenna", "Antenna Analysis    Compare antenna types"),
-                ("weather", "Space Weather       Propagation & HF bands"),
-                ("sdr", "SDR Monitor         RF awareness (Airspy)"),
-                ("back", "Back"),
-            ]
+            # All RF & SDR tags handled by registry — empty legacy list
+            legacy = []
+            choices = self._build_section_menu("rf_sdr", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "RF & SDR Tools",
@@ -1070,22 +1098,17 @@ class MeshForgeLauncher(
             if self._registry.dispatch("rf_sdr", choice):
                 continue
 
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-                "site": ("Site Planner", self._site_planner_menu),
-                "weather": ("Space Weather", self._propagation_menu),
-                "sdr": ("SDR Monitor", self._rf_awareness_menu),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
+            # RF & SDR section fully converted — no legacy dispatch remaining
 
     # --- NEW Submenu: Maps & Viz (4) ---
 
     def _maps_viz_menu(self):
         """Maps & Visualization - Coverage maps, topology."""
+        _ORDERING = ["livemap", "coverage", "heatmap", "tiles", "topology",
+                      "traffic", "quality", "export", "ai"]
         while True:
-            choices = [
+            # Legacy items — removed automatically as handlers take over their tags
+            legacy = [
                 ("livemap", "Live NOC Map        Real-time browser view"),
                 ("coverage", "Coverage Map        Generate coverage map"),
                 ("heatmap", "Heatmap             Node density heatmap"),
@@ -1095,8 +1118,8 @@ class MeshForgeLauncher(
                 ("quality", "Link Quality        Quality analysis"),
                 ("export", "Export Data         GeoJSON, CSV, GraphML"),
                 ("ai", "AI Diagnostics      Knowledge base, assistant"),
-                ("back", "Back"),
             ]
+            choices = self._build_section_menu("maps_viz", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "Maps & Visualization",
@@ -1107,6 +1130,11 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("maps_viz", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
                 "livemap": ("Live NOC Map", self._open_live_map),
                 "coverage": ("Coverage Map", self._generate_coverage_map),
@@ -1114,7 +1142,6 @@ class MeshForgeLauncher(
                 "tiles": ("Offline Tile Cache", self._tile_cache_menu),
                 "topology": ("Network Topology", self._topology_menu),
                 "traffic": ("Traffic Inspector", self.menu_traffic_inspector),
-                "quality": ("Link Quality", self._link_quality_menu),
                 "export": ("Export Data", self._export_data_menu),
                 "ai": ("AI Diagnostics", self._ai_tools_menu),
             }
@@ -1126,8 +1153,11 @@ class MeshForgeLauncher(
 
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
+        _ORDERING = ["radio", "channels", "rns-config", "rnode", "services", "backup",
+                      "updates", "webhooks", "meshforge", "config-api", "wizard"]
         while True:
-            choices = [
+            # Legacy items — removed automatically as handlers take over their tags
+            legacy = [
                 ("radio", "Radio Config        meshtasticd settings"),
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
@@ -1138,8 +1168,8 @@ class MeshForgeLauncher(
                 ("meshforge", "MeshForge Settings  App preferences"),
                 ("config-api", "Config API Server   REST config endpoint"),
                 ("wizard", "Setup Wizard        First-run wizard"),
-                ("back", "Back"),
             ]
+            choices = self._build_section_menu("configuration", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "Configuration",
@@ -1150,14 +1180,17 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("configuration", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
                 "radio": ("Radio Config", self._config_menu),
                 "channels": ("Channel Config", self._channel_config_menu),
                 "rns-config": ("RNS Config", self._edit_rns_config),
                 "services": ("Service Config", self._service_menu),
-                "backup": ("Device Backup", self._device_backup_menu),
                 "updates": ("Software Updates", self._updates_menu),
-                "webhooks": ("Webhooks", self._webhooks_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
                 "config-api": ("Config API Server", self._config_api_menu),
                 "wizard": ("Setup Wizard", self._run_first_run_wizard),
@@ -1170,8 +1203,11 @@ class MeshForgeLauncher(
 
     def _system_menu(self):
         """System - Hardware, logs, Linux tools."""
+        _ORDERING = ["hardware", "logs", "network", "discover", "diagnose", "daemon",
+                      "review", "status", "shell", "reboot"]
         while True:
-            choices = [
+            # Legacy items — removed automatically as handlers take over their tags
+            legacy = [
                 ("hardware", "Hardware            Detect SPI/I2C/USB"),
                 ("logs", "Logs                View/follow logs"),
                 ("network", "Network Tools       Ping, ports, interfaces"),
@@ -1181,8 +1217,8 @@ class MeshForgeLauncher(
                 ("status", "Quick Status        One-shot status display"),
                 ("shell", "Linux Shell         Drop to bash"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
-                ("back", "Back"),
             ]
+            choices = self._build_section_menu("system", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "System Tools",
@@ -1193,10 +1229,12 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("system", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
-                "hardware": ("Hardware Detection", self._hardware_menu),
-                "logs": ("Log Viewer", self._logs_menu),
-                "network": ("Network Tools", self._network_menu),
                 "diagnose": ("Diagnostics", self._run_diagnostics),
                 "daemon": ("Daemon Mode", self._daemon_menu),
                 "review": ("Code Review", self._auto_review_menu),
