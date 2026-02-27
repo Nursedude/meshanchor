@@ -855,10 +855,8 @@ Examples:
     # Set up logging based on verbosity
     if args.verbose:
         import logging
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-        )
+        from utils.logging_config import setup_logging
+        setup_logging(level=logging.DEBUG)
         print("Verbose mode enabled - debug logging active\n")
 
     if args.gateway:

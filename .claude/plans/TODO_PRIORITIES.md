@@ -43,7 +43,8 @@
 
 ### Code Quality (from PR #976 audit — deferred items)
 - [ ] **Merge hardware/radio config pairs** — `hardware.py`+`hardware_config.py`, `radio.py`+`radio_config.py` overlap
-- [ ] **Migrate 46 TUI mixins → command registry** — God-class pattern, 2-3 day effort (see `deferred-issues.md`)
+- [x] **Logging consolidation** — 9 `basicConfig()` calls replaced with `setup_logging()`, `logger.py` documented as installer-only
+- [ ] **Migrate TUI mixins → command registry** — 27/49 handlers registered; ~24 mixins remaining (see `deferred-issues.md`)
 - [ ] **Add actionable fix hints to error messages** — Replicate `cli/diagnose.py:192-197` pattern everywhere
 - [ ] **Add quick health-check CLI command** — One-liner system health check
 - [ ] **Clean `.claude/archive/`** — 200KB dead documentation weight
