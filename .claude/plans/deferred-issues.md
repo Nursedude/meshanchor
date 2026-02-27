@@ -1,19 +1,22 @@
 # Deferred Issues — From Code Quality Review (2026-02-26)
 
 > Create these as GitHub issues manually. `gh` CLI not authenticated in this env.
-> **Updated**: 2026-02-27 — Issue 2 completed (PR #977)
+> **Updated**: 2026-02-27 — Issue 1 logging basicConfig cleanup done, Issue 2 completed (PR #977), Issue 3 Batch 3 registered
 
 ---
 
-## Issue 1: Consolidate logging modules (logging_config.py + logging_utils.py)
+## Issue 1: Consolidate logging modules — MOSTLY COMPLETE
 
 **Labels**: refactor
 
-Four logging modules in `src/utils/` with overlapping `setup_logging()` and `get_logger()`.
+**Done**:
+- `logging_utils.py` merged into `logging_config.py` (PR #977, 2026-02-26)
+- All 9 `logging.basicConfig()` calls replaced with `setup_logging()` from canonical module (2026-02-27)
+  - Files: agent.py, diagnose.py, meshtasticd_config.py, orchestrator.py, bridge_cli.py, device_backup.py, map_data_service.py, space_weather.py, telemetry_poller.py
+- `logger.py` documented as installer-only (intentionally separate)
 
-**Approach**: Keep `logging_config.py` as canonical, merge component features from `logging_utils.py`, extract `LogContext`/decorators to `logging_helpers.py`. Leave `logger.py` (installer) and `logging_structured.py` (JSON) as-is. Update all 14 import sites.
-
-**Risk**: Medium — initialization order across TUI, daemon, installer entry points.
+**Remaining**: `logging_structured.py` and `log_parser.py` kept as-is (specialized, no overlap).
+**Status**: No further action needed — logging is consolidated around `logging_config.py`.
 
 ---
 
@@ -24,15 +27,28 @@ Four logging modules in `src/utils/` with overlapping `setup_logging()` and `get
 
 ---
 
-## Issue 3: Migrate 46 TUI mixins to command registry pattern
+## Issue 3: Migrate TUI mixins to command registry pattern — IN PROGRESS
 
 **Labels**: refactor, architecture
 
-`MeshForgeLauncher` inherits from 46 separate mixins (lines 115-161 in `launcher_tui/main.py`). Each is used exactly once. This is a god-class split by file, not true composition. Phase 1 handler registry infrastructure already exists (`handler_protocol.py`, `handler_registry.py`, `handlers/`).
+`MeshForgeLauncher` inherits from 46 separate mixins (lines 115-161 in `launcher_tui/main.py`). Each is used exactly once. This is a god-class split by file, not true composition.
 
-**Approach**: Migrate to plugin-based command registry where each mixin becomes a standalone handler registered with the launcher. Launcher dispatches by menu key, not method inheritance.
+**Infrastructure**: `handler_protocol.py`, `handler_registry.py`, `handlers/` — proven and stable.
 
-**Effort**: 2-3 days. Requires comprehensive test coverage first.
+**Progress** (2026-02-27):
+- Phase 1 pilot: 5 handlers (latency, classifier, amateur_radio, analytics, rf_tools)
+- Batch 1: 8 handlers (node_health, metrics, propagation, site_planner, sdr, link_quality, webhooks, network_tools)
+- Batch 2: 8 handlers (favorites, messaging, aredn, rnode, device_backup, logs, hardware, service_discovery)
+- Batch 3: 6 handlers registered (channel_config, gateway, radio_menu, settings, meshcore, updates)
+- **Total registered: 27 handlers**
+
+**Remaining**: ~24 mixins still in inheritance chain. Key blockers for full migration:
+- `meshtasticd_config_mixin.py` (2,016 lines) — needs splitting before conversion
+- `rns_menu_mixin.py` (1,498 lines) — composite of 4 sub-mixins, convert sub-mixins first
+
+**Approach**: Migrate to plugin-based command registry where each mixin becomes a standalone handler. Launcher dispatches by menu key, not method inheritance. Registry and mixins coexist during transition.
+
+**Effort**: ~2 days remaining for full migration.
 
 ---
 

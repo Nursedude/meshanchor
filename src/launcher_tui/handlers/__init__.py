@@ -75,4 +75,20 @@ def get_all_handlers() -> List[Type]:
         ServiceDiscoveryHandler,
     ])
 
+    # Batch 3 — previously converted handlers, now registered
+    from handlers.channel_config import ChannelConfigHandler
+    from handlers.gateway import GatewayHandler
+    from handlers.radio_menu import RadioMenuHandler
+    from handlers.settings import SettingsHandler
+    from handlers.meshcore import MeshCoreHandler
+    from handlers.updates import UpdatesHandler
+    handlers.extend([
+        ChannelConfigHandler,
+        GatewayHandler,
+        RadioMenuHandler,
+        SettingsHandler,
+        MeshCoreHandler,
+        UpdatesHandler,
+    ])
+
     return handlers
