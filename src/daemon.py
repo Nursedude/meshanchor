@@ -972,7 +972,7 @@ class DaemonController:
                 json.dump(data, f, indent=2, default=str)
             tmp_path.replace(status_path)
         except OSError as e:
-            logger.debug(f"Status file write failed: {e}")
+            logger.warning(f"Status file write failed: {e}")
 
     def _print_status(self, data: dict, pid: int) -> None:
         """Print formatted status to terminal."""

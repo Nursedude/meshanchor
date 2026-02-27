@@ -146,16 +146,17 @@ def _message_history_menu(self):
 
 ## Tracking
 
-| Feature | TUI Mixin | Status | Verified |
-|---------|-----------|--------|----------|
-| Device Backup | `device_backup_mixin.py` | TUI mixin exists | 2026-02-27 |
-| Message History | `messaging_mixin.py` | TUI mixin exists | 2026-02-27 |
-| Propagation Data | `propagation_mixin.py` | TUI mixin exists | 2026-02-27 |
-| RNode Config | `rnode_mixin.py` | TUI mixin exists | 2026-02-27 |
-| Advanced Diagnostics | `system_tools_mixin.py` | TUI mixin exists | 2026-02-27 |
-| Network Health | `dashboard_mixin.py` | TUI mixin exists | 2026-02-27 |
+| Feature | TUI Mixin | Handler | Menu Path | Verified |
+|---------|-----------|---------|-----------|----------|
+| Device Backup | `device_backup_mixin.py` | `handlers/device_backup.py` ✓ | Config → Device Backup | 2026-02-27 ✓ |
+| Message History | `messaging_mixin.py` | `handlers/messaging.py` ✓ | Mesh → Messaging | 2026-02-27 ✓ |
+| Propagation Data | `propagation_mixin.py` | `handlers/propagation.py` ✓ | RF & SDR → Space Weather | 2026-02-27 ✓ |
+| RNode Config | `rnode_mixin.py` | `handlers/rnode.py` ✓ | Config → RNode Setup | 2026-02-27 ✓ |
+| Advanced Diagnostics | `system_tools_mixin.py` | Not migrated (legacy OK) | System → Diagnostics | 2026-02-27 ✓ |
+| Network Health | `dashboard_mixin.py` | Not migrated (legacy OK) | Dashboard → Node Health | 2026-02-27 ✓ |
 
-**Next step**: QTH field testing to verify these menus work end-to-end with hardware.
+**All 6 features verified**: Wiring intact, menu paths reachable, command modules connected.
+**Next step**: QTH field testing to verify end-to-end with hardware.
 
 ---
 
