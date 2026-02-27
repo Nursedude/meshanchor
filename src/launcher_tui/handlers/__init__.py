@@ -55,4 +55,24 @@ def get_all_handlers() -> List[Type]:
         NetworkToolsHandler,
     ])
 
+    # Batch 2 handlers
+    from handlers.favorites import FavoritesHandler
+    from handlers.messaging import MessagingHandler
+    from handlers.aredn import AREDNHandler
+    from handlers.rnode import RNodeHandler
+    from handlers.device_backup import BackupHandler
+    from handlers.logs import LogsHandler
+    from handlers.hardware import HardwareHandler
+    from handlers.service_discovery import ServiceDiscoveryHandler
+    handlers.extend([
+        FavoritesHandler,
+        MessagingHandler,
+        AREDNHandler,
+        RNodeHandler,
+        BackupHandler,
+        LogsHandler,
+        HardwareHandler,
+        ServiceDiscoveryHandler,
+    ])
+
     return handlers
