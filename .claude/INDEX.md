@@ -24,8 +24,8 @@ Quick navigation for AI assistants. Load only what you need.
 ### Active Development
 | File | Purpose |
 |------|---------|
-| `TODO_PRIORITIES.md` | Current task priorities & branch strategy |
-| `foundations/missing_features.md` | TUI features gap tracker |
+| `plans/TODO_PRIORITIES.md` | Current task priorities & branch strategy |
+| `plans/missing_features.md` | TUI features gap tracker |
 
 ### RNS/Gateway Research
 | File | Purpose |
@@ -78,6 +78,9 @@ Quick navigation for AI assistants. Load only what you need.
 | `plans/strategic_improvements.md` | Strategic roadmap items |
 | `plans/noc_test_plan.md` | Lab infrastructure & testing |
 | `plans/qth_test_checklist.md` | Field testing checklist |
+| `plans/deferred-issues.md` | Deferred GitHub issues |
+| `plans/TODO_PRIORITIES.md` | Current task priorities & branch strategy |
+| `plans/missing_features.md` | TUI features gap tracker |
 
 ### Knowledge & Context
 | File | Purpose |
@@ -90,9 +93,9 @@ Quick navigation for AI assistants. Load only what you need.
 - **archive/** - Historical documents (postmortems, articles, session notes, old audits). Not loaded by default.
 - **commands/** - Slash command definitions (6 files)
 - **export/** - Integration guides (1 file)
-- **foundations/** - Core principles (8 files)
+- **foundations/** - Core principles (7 files)
 - **hardware/** - Device-specific docs (1 file)
-- **plans/** - Implementation plans (4 files)
+- **plans/** - Implementation plans (7 files)
 - **research/** - Technical research (21 files)
 - **rules/** - Security & testing rules (2 files)
 - **skills/** - Custom skill definitions (1 dir)
@@ -107,4 +110,4 @@ Quick navigation for AI assistants. Load only what you need.
 **safe_import rules?** -> `foundations/persistent_issues.md#issue-5`
 
 ---
-*Updated: 2026-02-23. ~48 active files after dedup audit. ~30 files archived.*
+*Updated: 2026-02-27. ~48 active files after dedup audit. ~30 files archived.*
