@@ -1,6 +1,7 @@
 # Deferred Issues — From Code Quality Review (2026-02-26)
 
 > Create these as GitHub issues manually. `gh` CLI not authenticated in this env.
+> **Updated**: 2026-02-27 — Issue 2 completed (PR #977)
 
 ---
 
@@ -16,23 +17,18 @@ Four logging modules in `src/utils/` with overlapping `setup_logging()` and `get
 
 ---
 
-## Issue 2: Extract BaseMessageHandler from gateway handlers
+## ~~Issue 2: Extract BaseMessageHandler from gateway handlers~~ COMPLETED
 
-**Labels**: refactor
-
-All 3 handlers (`meshtastic_handler.py`, `mqtt_bridge_handler.py`, `meshcore_handler.py`) share identical 10-parameter constructor and 4-method interface (`run_loop`, `send_text`, `disconnect`, `queue_send`).
-
-**Approach**: Create `gateway/base_handler.py` with ABC. Rename `_mesh_to_rns_queue`/`_outbound_queue` → `_message_queue`. Move `_truncate_if_needed` and `_notify_status` to base class.
-
-**Risk**: Medium — requires coordinated renames across 3 handler files + tests.
+**Status**: DONE — PR #977 (2026-02-26)
+**What was done**: `BaseMessageHandler` ABC extracted with shared constructor, `_truncate_if_needed`, and `_notify_status`. Logging consolidation (`logging_utils.py` merged into `logging_config.py`).
 
 ---
 
-## Issue 3: Migrate 49 TUI mixins to command registry pattern
+## Issue 3: Migrate 46 TUI mixins to command registry pattern
 
 **Labels**: refactor, architecture
 
-`MeshForgeLauncher` inherits from 49 separate mixins (lines 110-156 in `launcher_tui/main.py`). Each is used exactly once. This is a god-class split by file, not true composition.
+`MeshForgeLauncher` inherits from 46 separate mixins (lines 115-161 in `launcher_tui/main.py`). Each is used exactly once. This is a god-class split by file, not true composition. Phase 1 handler registry infrastructure already exists (`handler_protocol.py`, `handler_registry.py`, `handlers/`).
 
 **Approach**: Migrate to plugin-based command registry where each mixin becomes a standalone handler registered with the launcher. Launcher dispatches by menu key, not method inheritance.
 

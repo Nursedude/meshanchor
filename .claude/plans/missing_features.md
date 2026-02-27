@@ -2,8 +2,9 @@
 
 > **Purpose**: Track features that exist in code but aren't accessible via TUI
 > **Created**: 2026-01-30
-> **Last verified**: 2026-02-21
+> **Last verified**: 2026-02-27
 > **For**: Alpha release planning
+> **Note**: Most items now have TUI mixins — verify field functionality at QTH
 
 ---
 
@@ -145,14 +146,16 @@ def _message_history_menu(self):
 
 ## Tracking
 
-| Feature | PR | Session | Status | Verified |
-|---------|----|---------|---------|----------|
-| Device Backup | | | Not started | 2026-02-21 |
-| Message History | | | Not started | 2026-02-21 |
-| Propagation Data | | | Not started | 2026-02-21 |
-| RNode Config | | | Not started | 2026-02-21 |
-| Advanced Diagnostics | | | Not started | 2026-02-21 |
-| Network Health | | | Not started | 2026-02-21 |
+| Feature | TUI Mixin | Status | Verified |
+|---------|-----------|--------|----------|
+| Device Backup | `device_backup_mixin.py` | TUI mixin exists | 2026-02-27 |
+| Message History | `messaging_mixin.py` | TUI mixin exists | 2026-02-27 |
+| Propagation Data | `propagation_mixin.py` | TUI mixin exists | 2026-02-27 |
+| RNode Config | `rnode_mixin.py` | TUI mixin exists | 2026-02-27 |
+| Advanced Diagnostics | `system_tools_mixin.py` | TUI mixin exists | 2026-02-27 |
+| Network Health | `dashboard_mixin.py` | TUI mixin exists | 2026-02-27 |
+
+**Next step**: QTH field testing to verify these menus work end-to-end with hardware.
 
 ---
 

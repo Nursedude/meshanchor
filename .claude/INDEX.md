@@ -72,15 +72,15 @@ Quick navigation for AI assistants. Load only what you need.
 | `research/uconsole_portable_noc.md` | Portable NOC design |
 
 ### Plans
-| File | Purpose |
-|------|---------|
-| `plans/v1.0_roadmap.md` | v1.0 definition & criteria |
-| `plans/strategic_improvements.md` | Strategic roadmap items |
-| `plans/noc_test_plan.md` | Lab infrastructure & testing |
-| `plans/qth_test_checklist.md` | Field testing checklist |
-| `plans/deferred-issues.md` | Deferred GitHub issues |
-| `plans/TODO_PRIORITIES.md` | Current task priorities & branch strategy |
-| `plans/missing_features.md` | TUI features gap tracker |
+| File | Purpose | Status |
+|------|---------|--------|
+| `plans/TODO_PRIORITIES.md` | **Current task priorities & branch strategy** | Active — start here |
+| `plans/v1.0_roadmap.md` | v1.0 definition, criteria & phased roadmap | Active |
+| `plans/strategic_improvements.md` | Tiered improvement roadmap (Sprints A-C done) | Active |
+| `plans/missing_features.md` | TUI features gap tracker (most now have mixins) | Needs QTH testing |
+| `plans/noc_test_plan.md` | Lab infrastructure & testing procedures | Reference |
+| `plans/qth_test_checklist.md` | Field testing checklist (updated for TUI) | Reference |
+| `plans/deferred-issues.md` | Deferred GitHub issues (1 of 3 completed) | Active |
 
 ### Knowledge & Context
 | File | Purpose |
@@ -111,3 +111,4 @@ Quick navigation for AI assistants. Load only what you need.
 
 ---
 *Updated: 2026-02-27. ~48 active files after dedup audit. ~30 files archived.*
+*Plans organized: GTK refs removed, metrics synced, completed work marked.*
