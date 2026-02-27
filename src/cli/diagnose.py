@@ -25,11 +25,9 @@ if str(_src_dir) not in sys.path:
 from utils.paths import get_real_user_home, ReticulumPaths
 from utils.safe_import import safe_import
 
-# Module-level safe imports
-_check_service, _check_port, _ServiceState, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_service', 'check_port', 'ServiceState'
-)
-SERVICE_CHECK_AVAILABLE = _HAS_SERVICE_CHECK
+# Direct import — first-party module, always available (Issue #5)
+from utils.service_check import check_service as _check_service, check_port as _check_port, ServiceState as _ServiceState
+SERVICE_CHECK_AVAILABLE = True
 
 from utils.cli import find_meshtastic_cli
 
@@ -718,14 +716,8 @@ def check_sdr():
     openwebrx = shutil.which('openwebrx')
     if openwebrx:
         try:
-            if SERVICE_CHECK_AVAILABLE:
-                svc_status = _check_service('openwebrx')
-                print_status("OpenWebRX", svc_status.available, svc_status.state.value)
-            else:
-                result = subprocess.run(['systemctl', 'is-active', 'openwebrx'],
-                                       capture_output=True, text=True, timeout=5)
-                status = result.stdout.strip()
-                print_status("OpenWebRX", status == 'active', status)
+            svc_status = _check_service('openwebrx')
+            print_status("OpenWebRX", svc_status.available, svc_status.state.value)
         except Exception:
             print_status("OpenWebRX", True, "installed")
     else:

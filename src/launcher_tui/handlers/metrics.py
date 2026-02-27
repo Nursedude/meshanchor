@@ -402,9 +402,10 @@ class MetricsHandler(BaseHandler):
         grafana_running = False
         grafana_url = "http://localhost:3000"
         try:
-            result = subprocess.run(['systemctl', 'is-active', 'grafana-server'], capture_output=True, text=True, timeout=5)
-            grafana_running = result.stdout.strip() == 'active'
-        except (subprocess.SubprocessError, OSError) as e:
+            from utils.service_check import check_service
+            grafana_status = check_service('grafana-server')
+            grafana_running = grafana_status.available
+        except Exception as e:
             logger.debug("Grafana status check failed: %s", e)
         src_dir = Path(__file__).parent.parent.parent
         dashboards_dir = src_dir / "dashboards"
