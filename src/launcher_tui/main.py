@@ -79,18 +79,14 @@ from link_quality_mixin import LinkQualityMixin
 from rns_menu_mixin import RNSMenuMixin
 from aredn_mixin import AREDNMixin
 from radio_menu_mixin import RadioMenuMixin
-from service_menu_mixin import ServiceMenuMixin
 from hardware_menu_mixin import HardwareMenuMixin
 from settings_menu_mixin import SettingsMenuMixin
 from logs_menu_mixin import LogsMenuMixin
 from device_backup_mixin import DeviceBackupMixin
 from updates_mixin import UpdatesMixin
-from mqtt_mixin import MQTTMixin
-from broker_mixin import BrokerMixin
 from gateway_config_mixin import GatewayConfigMixin
 from favorites_mixin import FavoritesMixin
 from network_tools_mixin import NetworkToolsMixin
-from web_client_mixin import WebClientMixin
 from node_health_mixin import NodeHealthMixin
 from amateur_radio_mixin import AmateurRadioMixin
 from analytics_mixin import AnalyticsMixin
@@ -130,18 +126,14 @@ class MeshForgeLauncher(
     RNSMenuMixin,
     AREDNMixin,
     RadioMenuMixin,
-    ServiceMenuMixin,
     HardwareMenuMixin,
     SettingsMenuMixin,
     LogsMenuMixin,
     DeviceBackupMixin,
     UpdatesMixin,
-    MQTTMixin,
-    BrokerMixin,
     GatewayConfigMixin,
     FavoritesMixin,
     NetworkToolsMixin,
-    WebClientMixin,
     NodeHealthMixin,
     AmateurRadioMixin,
     AnalyticsMixin,
@@ -473,6 +465,7 @@ class MeshForgeLauncher(
 
         # Detect if daemon is managing core services
         self._daemon_active = self._is_daemon_running()
+        self._tui_context.daemon_active = self._daemon_active
         if self._daemon_active:
             logger.info("Daemon detected — TUI running in tool-only mode")
         else:
@@ -480,7 +473,7 @@ class MeshForgeLauncher(
             # If daemon owns these, starting them here would cause
             # port conflicts (Config API :8081) or singleton clashes.
             self._maybe_auto_start_map()
-            self._maybe_auto_start_mqtt_and_telemetry()
+            self._registry.startup_all()  # MQTTHandler.on_startup() etc.
             self._maybe_auto_start_config_api()
             self._maybe_auto_lock_port()
             self._start_health_monitor()
@@ -491,6 +484,7 @@ class MeshForgeLauncher(
         try:
             self._run_main_menu()
         finally:
+            self._registry.shutdown_all()  # MQTTHandler.on_shutdown() etc.
             if not self._daemon_active:
                 self._stop_health_monitor()
                 self._stop_config_api_server()
@@ -978,10 +972,7 @@ class MeshForgeLauncher(
                 legacy.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
             legacy.append(("aredn", "AREDN Mesh          AREDN integration"))
             legacy.append(("messaging", "Messaging           Send/receive messages"))
-            if self._feature_enabled("mqtt"):
-                legacy.append(("mqtt", "MQTT Monitor        Nodeless mesh observation"))
             legacy.append(("favorites", "Favorites           Manage favorite nodes"))
-            legacy.append(("services", "Service Control     Start/stop/restart"))
             choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
@@ -1003,8 +994,6 @@ class MeshForgeLauncher(
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
-                "mqtt": ("MQTT Monitor", self._mqtt_menu),
-                "services": ("Service Control", self._service_menu),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -1082,7 +1071,7 @@ class MeshForgeLauncher(
 
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
-        _ORDERING = ["radio", "channels", "rns-config", "rnode", "services", "backup",
+        _ORDERING = ["radio", "channels", "rns-config", "rnode", "backup",
                       "updates", "webhooks", "meshforge", "config-api", "wizard"]
         while True:
             # Legacy items — removed automatically as handlers take over their tags
@@ -1090,7 +1079,6 @@ class MeshForgeLauncher(
                 ("radio", "Radio Config        meshtasticd settings"),
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
-                ("services", "Service Config      systemd services"),
                 ("backup", "Device Backup       Backup/restore configs"),
                 ("updates", "Software Updates    One-click updates"),
                 ("webhooks", "Webhooks            External notifications"),
@@ -1118,7 +1106,6 @@ class MeshForgeLauncher(
                 "radio": ("Radio Config", self._config_menu),
                 "channels": ("Channel Config", self._channel_config_menu),
                 "rns-config": ("RNS Config", self._edit_rns_config),
-                "services": ("Service Config", self._service_menu),
                 "updates": ("Software Updates", self._updates_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
                 "config-api": ("Config API Server", self._config_api_menu),
@@ -1326,16 +1313,16 @@ class MeshForgeLauncher(
 
     def _about_menu(self):
         """About - Version, help, web client, system info, changelog."""
+        _ORDERING = ["version", "changelog", "sysinfo", "deps", "web", "help"]
         while True:
-            choices = [
+            legacy = [
                 ("version", "Version Info        MeshForge version"),
                 ("changelog", "Changelog           Release history"),
                 ("sysinfo", "System Info         OS, Python, disk, uptime"),
                 ("deps", "Dependencies        Package status"),
-                ("web", "Web Client          Open web interface"),
                 ("help", "Help                Documentation"),
-                ("back", "Back"),
             ]
+            choices = self._build_section_menu("about", legacy, _ORDERING)
 
             choice = self.dialog.menu(
                 "About MeshForge",
@@ -1346,12 +1333,16 @@ class MeshForgeLauncher(
             if choice is None or choice == "back":
                 break
 
+            # Try registry-based dispatch first (converted handlers)
+            if self._registry.dispatch("about", choice):
+                continue
+
+            # Legacy mixin dispatch (not yet converted)
             dispatch = {
                 "version": ("Version Info", self._show_about),
                 "changelog": ("Changelog", self._show_changelog),
                 "sysinfo": ("System Info", self._show_system_info),
                 "deps": ("Dependencies", self._show_dependency_status),
-                "web": ("Web Client", self._open_web_client),
                 "help": ("Help", self._show_help),
             }
             entry = dispatch.get(choice)
