@@ -167,4 +167,18 @@ def get_all_handlers() -> List[Type]:
         MeshtasticdNodeDBHandler,
     ])
 
+    # Batch 10 — QA cleanup: about, daemon, reboot, diagnostics, config API
+    from handlers.about import AboutHandler
+    from handlers.daemon import DaemonHandler
+    from handlers.reboot import RebootHandler
+    from handlers.diagnostics import DiagnosticsHandler
+    from handlers.config_api import ConfigAPIHandler
+    handlers.extend([
+        AboutHandler,
+        DaemonHandler,
+        RebootHandler,
+        DiagnosticsHandler,
+        ConfigAPIHandler,
+    ])
+
     return handlers
