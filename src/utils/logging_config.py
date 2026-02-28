@@ -1,10 +1,12 @@
 """
 MeshForge Logging Configuration
 
-Unified logging module — consolidates logging_config + logging_utils.
+Unified logging module — all logging setup in one place.
 
 Provides:
 - Centralized setup for console, file, and journald logging
+- Structured JSON logging (StructuredFormatter, setup_structured_logging)
+- Installer-compatible API (setup_installer_logger, log, log_command, log_exception)
 - Sudo-safe log directory with ownership fix
 - Component-level log control (per-module verbosity)
 - Decorators and context managers for instrumented logging
@@ -34,6 +36,7 @@ View logs on RPi:
 """
 
 import functools
+import json
 import logging
 import logging.handlers
 import os
@@ -41,7 +44,7 @@ import sys
 import time
 import traceback
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Callable, Any
 
@@ -722,3 +725,151 @@ def log_exception(logger: logging.Logger, msg: str = "Unexpected error") -> None
     """
     logger.error(f"{msg}:")
     logger.error(traceback.format_exc())
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Structured JSON Logging (merged from logging_structured.py)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class StructuredFormatter(logging.Formatter):
+    """JSON formatter producing one JSON object per log line (.jsonl format)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_obj = {
+            'ts': datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(timespec='microseconds'),
+            'level': record.levelname,
+            'logger': record.name,
+            'msg': record.getMessage(),
+            'module': record.module,
+            'line': record.lineno,
+            'thread': record.threadName,
+            'exc': None,
+        }
+
+        if record.exc_info and record.exc_info[0]:
+            log_obj['exc'] = traceback.format_exception(
+                record.exc_info[0],
+                record.exc_info[1],
+                record.exc_info[2],
+            )
+
+        return json.dumps(log_obj, ensure_ascii=False)
+
+
+def setup_structured_logging(
+    log_dir: Optional[Path] = None,
+    max_bytes: int = 10 * 1024 * 1024,  # 10MB
+    backup_count: int = 5,
+    min_level: int = logging.INFO,
+) -> logging.Handler:
+    """
+    Add structured JSON logging handler to root logger.
+
+    Args:
+        log_dir: Directory for log files (default: ~/.config/meshforge/logs/)
+        max_bytes: Max file size before rotation
+        backup_count: Number of rotated files to keep
+        min_level: Minimum log level to capture
+
+    Returns:
+        The configured handler (for testing/removal)
+    """
+    if log_dir is None:
+        log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "meshforge_structured.jsonl"
+
+    handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding='utf-8',
+    )
+    handler.setLevel(min_level)
+    handler.setFormatter(StructuredFormatter())
+
+    logging.getLogger().addHandler(handler)
+    return handler
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Installer Logger API (merged from logger.py)
+# ═══════════════════════════════════════════════════════════════════════
+
+_installer_logger = None
+
+
+def setup_installer_logger(debug=False, log_file='/var/log/meshtasticd-installer.log'):
+    """Setup installer-specific logger.
+
+    For main app logging, use get_logger(__name__) instead.
+    """
+    global _installer_logger
+
+    _installer_logger = logging.getLogger('meshtasticd_installer')
+    _installer_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    _installer_logger.handlers.clear()
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    try:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(file_formatter)
+        _installer_logger.addHandler(file_handler)
+    except PermissionError:
+        home_log = get_real_user_home() / '.meshtasticd-installer.log'
+        file_handler = logging.FileHandler(home_log)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(file_formatter)
+        _installer_logger.addHandler(file_handler)
+
+    _installer_logger.addHandler(console_handler)
+    return _installer_logger
+
+
+def _get_installer_logger():
+    """Get the installer logger (lazy init)."""
+    global _installer_logger
+    if _installer_logger is None:
+        _installer_logger = setup_installer_logger()
+    return _installer_logger
+
+
+def log(message, level='info'):
+    """Quick log function for installer code."""
+    lgr = _get_installer_logger()
+    getattr(lgr, level.lower(), lgr.info)(message)
+
+
+def log_command(command, result):
+    """Log command execution results."""
+    lgr = _get_installer_logger()
+    lgr.debug(f"Command: {command}")
+    lgr.debug(f"Return code: {result.get('returncode', 'N/A')}")
+    if result.get('stdout'):
+        lgr.debug(f"STDOUT: {result['stdout']}")
+    if result.get('stderr'):
+        lgr.debug(f"STDERR: {result['stderr']}")
+
+
+def log_installer_exception(exception, context=''):
+    """Log an exception with context (installer API)."""
+    lgr = _get_installer_logger()
+    if context:
+        lgr.error(f"{context}: {str(exception)}", exc_info=True)
+    else:
+        lgr.error(f"Exception occurred: {str(exception)}", exc_info=True)
