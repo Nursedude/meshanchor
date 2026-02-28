@@ -101,4 +101,14 @@ def get_all_handlers() -> List[Type]:
         EmergencyModeHandler,
     ])
 
+    # Batch 5 — topology, traffic inspector, tactical ops
+    from handlers.topology import TopologyHandler
+    from handlers.traffic_inspector import TrafficInspectorHandler
+    from handlers.tactical_ops import TacticalOpsHandler
+    handlers.extend([
+        TopologyHandler,
+        TrafficInspectorHandler,
+        TacticalOpsHandler,
+    ])
+
     return handlers
