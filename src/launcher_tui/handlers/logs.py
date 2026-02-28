@@ -77,7 +77,9 @@ class LogsHandler(BaseHandler):
         proc = None
         try:
             proc = subprocess.Popen(cmd)
-            proc.wait()
+            proc.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            print("\n[Log view timed out after 5 minutes]")
         except KeyboardInterrupt:
             pass
         finally:

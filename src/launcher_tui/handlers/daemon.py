@@ -125,12 +125,18 @@ class DaemonHandler(BaseHandler):
 
         try:
             daemon_script = self.ctx.src_dir / "daemon.py"
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [sys.executable, str(daemon_script), "start", "--foreground"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
+            # Verify daemon started successfully
+            import time
+            time.sleep(2)
+            if proc.poll() is not None:
+                self.ctx.dialog.msgbox("Error", f"Daemon exited immediately (rc={proc.returncode})")
+                return
             self.ctx.dialog.msgbox("Daemon Started", "Daemon launched in background.\nCheck status for details.")
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Failed to start daemon:\n{e}")
