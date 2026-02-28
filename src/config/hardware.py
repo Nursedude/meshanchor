@@ -12,12 +12,18 @@ import glob
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from rich.console import Console
+try:
+    from rich.console import Console
+    console = Console()
+except ImportError:
+    # Fallback when rich is not installed (e.g., minimal test environments)
+    class _FallbackConsole:
+        def print(self, *args, **kwargs):
+            print(*args)
+    console = _FallbackConsole()
 
 from utils.system import run_command
 from utils.logger import log
-
-console = Console()
 
 
 class HardwareDetector:
