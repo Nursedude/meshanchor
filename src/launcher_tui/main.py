@@ -73,7 +73,6 @@ from emergency_mode_mixin import EmergencyModeMixin
 from rns_interfaces_mixin import RNSInterfacesMixin
 from nomadnet_client_mixin import NomadNetClientMixin
 from meshchat_client_mixin import MeshChatClientMixin
-from topology_mixin import TopologyMixin
 from rf_awareness_mixin import RFAwarenessMixin
 from metrics_mixin import MetricsMixin
 from link_quality_mixin import LinkQualityMixin
@@ -85,7 +84,6 @@ from hardware_menu_mixin import HardwareMenuMixin
 from settings_menu_mixin import SettingsMenuMixin
 from logs_menu_mixin import LogsMenuMixin
 from device_backup_mixin import DeviceBackupMixin
-from traffic_inspector_mixin import TrafficInspectorMixin
 from updates_mixin import UpdatesMixin
 from mqtt_mixin import MQTTMixin
 from broker_mixin import BrokerMixin
@@ -103,7 +101,6 @@ from rnode_mixin import RNodeMixin
 from latency_mixin import LatencyMixin
 from dashboard_mixin import DashboardMixin
 from meshcore_mixin import MeshCoreMixin
-from tactical_ops_mixin import TacticalOpsMixin
 from propagation_mixin import PropagationMixin
 
 # Handler registry infrastructure (Phase 1 of mixin-to-registry migration)
@@ -127,7 +124,6 @@ class MeshForgeLauncher(
     RNSInterfacesMixin,
     NomadNetClientMixin,
     MeshChatClientMixin,
-    TopologyMixin,
     RFAwarenessMixin,
     MetricsMixin,
     LinkQualityMixin,
@@ -139,7 +135,6 @@ class MeshForgeLauncher(
     SettingsMenuMixin,
     LogsMenuMixin,
     DeviceBackupMixin,
-    TrafficInspectorMixin,
     UpdatesMixin,
     MQTTMixin,
     BrokerMixin,
@@ -157,7 +152,6 @@ class MeshForgeLauncher(
     LatencyMixin,
     DashboardMixin,
     MeshCoreMixin,
-    TacticalOpsMixin,
 ):
     """MeshForge launcher with raspi-config style interface."""
 
@@ -922,7 +916,6 @@ class MeshForgeLauncher(
             "4": ("Maps & Visualization", self._maps_viz_menu),
             "5": ("Configuration", self._configuration_menu),
             "6": ("System Tools", self._system_menu),
-            "t": ("Tactical Ops", self._tactical_ops_menu),
             "a": ("About", self._about_menu),
         }
         entry = dispatch.get(choice)
@@ -1055,10 +1048,7 @@ class MeshForgeLauncher(
                 ("coverage", "Coverage Map        Generate coverage map"),
                 ("heatmap", "Heatmap             Node density heatmap"),
                 ("tiles", "Offline Tiles       Cache map tiles"),
-                ("topology", "Network Topology    D3.js graph view"),
-                ("traffic", "Traffic Inspector   Packet capture & analysis"),
                 ("quality", "Link Quality        Quality analysis"),
-                ("export", "Export Data         GeoJSON, CSV, GraphML"),
                 ("ai", "AI Diagnostics      Knowledge base, assistant"),
             ]
             choices = self._build_section_menu("maps_viz", legacy, _ORDERING)
@@ -1082,9 +1072,6 @@ class MeshForgeLauncher(
                 "coverage": ("Coverage Map", self._generate_coverage_map),
                 "heatmap": ("Heatmap", self._generate_heatmap),
                 "tiles": ("Offline Tile Cache", self._tile_cache_menu),
-                "topology": ("Network Topology", self._topology_menu),
-                "traffic": ("Traffic Inspector", self.menu_traffic_inspector),
-                "export": ("Export Data", self._export_data_menu),
                 "ai": ("AI Diagnostics", self._ai_tools_menu),
             }
             entry = dispatch.get(choice)
