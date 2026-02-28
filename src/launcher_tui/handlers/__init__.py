@@ -139,4 +139,20 @@ def get_all_handlers() -> List[Type]:
         WebClientHandler,
     ])
 
+    # Batch 8 — AI tools, system tools, MeshChat, NomadNet, first run
+    from handlers.ai_tools import AIToolsHandler
+    from handlers.auto_review import AutoReviewHandler
+    from handlers.system_tools import SystemToolsHandler
+    from handlers.meshchat import MeshChatHandler
+    from handlers.nomadnet import NomadNetHandler
+    from handlers.first_run import FirstRunHandler
+    handlers.extend([
+        AIToolsHandler,
+        AutoReviewHandler,
+        SystemToolsHandler,
+        MeshChatHandler,
+        NomadNetHandler,
+        FirstRunHandler,
+    ])
+
     return handlers
