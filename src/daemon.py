@@ -279,6 +279,12 @@ class MapServerService(DaemonService):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # Verify process started successfully
+            import time
+            time.sleep(1)
+            if self._process.poll() is not None:
+                logger.warning(f"Map server exited immediately: rc={self._process.returncode}")
+                return False
             return True
         except Exception as e:
             logger.error(f"Map server start failed: {e}")

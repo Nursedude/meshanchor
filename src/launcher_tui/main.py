@@ -972,9 +972,29 @@ class MeshForgeLauncher:
 
 def main():
     """Main entry point."""
+    import argparse
     import logging
     import os
     import datetime
+
+    # Parse command-line arguments (--help, --version, etc.)
+    parser = argparse.ArgumentParser(
+        prog='meshforge-tui',
+        description='MeshForge TUI — Terminal interface for mesh network operations',
+        epilog='Config: ~/.config/meshforge/ | Docs: https://github.com/Nursedude/meshforge',
+    )
+    try:
+        from __version__ import __version__
+        parser.add_argument('--version', action='version',
+                            version=f'MeshForge TUI {__version__}')
+    except ImportError:
+        pass
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging to console')
+    parser.add_argument('--no-startup-checks', action='store_true',
+                        dest='no_startup_checks',
+                        help='Skip startup service health checks')
+    args, _ = parser.parse_known_args()
 
     # Initialize the MeshForge logging framework FIRST.
     # This creates the RotatingFileHandler that writes to
