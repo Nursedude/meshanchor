@@ -3,7 +3,7 @@
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
 >
-> **Last audited**: 2026-02-24 — Security & QA sweep (v0.5.4-beta): GTK4 remnant removed from plugin_base.py, raw systemctl bypasses fixed in orchestrator + installer, safe_import violation fixed, main.py trimmed below 1500 via export extraction to topology_mixin, line counts refreshed, H1 fully resolved
+> **Last audited**: 2026-02-28 — Code quality review: Handler registry migration confirmed complete (49 mixins → 60 handlers + Protocol + TUIContext), 2 broken tests fixed, CLAUDE.md architecture tree updated, test counts refreshed (2,547 tests / 73 files)
 
 ---
 
@@ -11,6 +11,18 @@
 
 C1-C5 and H1 from the 2026-01-24 code review are all FIXED/MITIGATED.
 Full details moved to `persistent_issues_archive.md` (2026-02-26).
+
+---
+
+## Handler Registry Migration — COMPLETE (2026-02-28)
+
+The 49-mixin inheritance chain on `MeshForgeLauncher` has been fully replaced with a
+handler registry pattern. See `handler_protocol.py` (Protocol + BaseHandler + TUIContext)
+and `handler_registry.py` (register/lookup/dispatch). Each handler is a self-contained
+class in `launcher_tui/handlers/` (60 files). `main.py` dropped from 1,947 to 1,148 lines.
+
+**Impact**: Resolves Feb 26 audit item #1 (Critical — mixin explosion). MRO is now trivial,
+state coupling eliminated, new handlers are straightforward to add.
 
 ---
 
