@@ -39,9 +39,8 @@ from __version__ import __version__
 # Import optional modules at module level
 from utils.cli import find_meshtastic_cli
 from utils.active_health_probe import get_health_probe
-from utils import config_api as config_api_mod
 from utils.service_check import lock_port_external
-# TopologyVisualizer imported in topology_mixin.py (export functions moved there)
+# TopologyVisualizer is in handlers/topology.py
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
@@ -50,7 +49,7 @@ from utils.paths import get_real_user_home, ReticulumPaths
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-from utils.service_check import check_service, check_port, apply_config_and_restart, ServiceState, _sudo_cmd
+from utils.service_check import check_service, check_port, apply_config_and_restart, ServiceState
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend, clear_screen
@@ -77,7 +76,6 @@ class MeshForgeLauncher:
         self._setup_status_bar()
         self._meshtastic_path = None  # Cached CLI path
         self._bridge_log_path = None  # Path to active bridge log file
-        self._config_api_server = None  # Config API HTTP server
         # Enhanced startup checker (v0.4.8)
         self._startup_checker = StartupChecker()
         self._env_state: Optional[EnvironmentState] = None
@@ -396,8 +394,7 @@ class MeshForgeLauncher:
             # Only auto-start services when daemon ISN'T running.
             # If daemon owns these, starting them here would cause
             # port conflicts (Config API :8081) or singleton clashes.
-            self._registry.startup_all()  # AIToolsHandler, MQTTHandler, etc.
-            self._maybe_auto_start_config_api()
+            self._registry.startup_all()  # AITools, MQTT, ConfigAPI, etc.
             self._maybe_auto_lock_port()
             self._start_health_monitor()
 
@@ -407,10 +404,9 @@ class MeshForgeLauncher:
         try:
             self._run_main_menu()
         finally:
-            self._registry.shutdown_all()  # MQTTHandler.on_shutdown() etc.
+            self._registry.shutdown_all()  # MQTT, ConfigAPI, etc.
             if not self._daemon_active:
                 self._stop_health_monitor()
-                self._stop_config_api_server()
 
     def _start_health_monitor(self) -> None:
         """Start the background health monitoring loop.
@@ -626,36 +622,6 @@ class MeshForgeLauncher:
         if self.dialog.yesno("Service Misconfiguration", msg):
             self._fix_spi_config(has_native)
 
-    def _maybe_auto_start_config_api(self):
-        """Auto-start Config API Server on TUI launch.
-
-        Provides RESTful configuration API on localhost:8081.
-        Silent operation - no dialogs on failure.
-        """
-        try:
-            create_gateway_config_api = config_api_mod.create_gateway_config_api
-            ConfigAPIServer = config_api_mod.ConfigAPIServer
-            api = create_gateway_config_api()
-            self._config_api_server = ConfigAPIServer(api, host="127.0.0.1", port=8081)
-            if self._config_api_server.start():
-                logger.info("Config API server started on 127.0.0.1:8081")
-            else:
-                logger.debug("Config API server failed to start")
-                self._config_api_server = None
-        except Exception as e:
-            logger.debug("Config API auto-start failed: %s", e)
-            self._config_api_server = None
-
-    def _stop_config_api_server(self):
-        """Stop the Config API Server on TUI exit."""
-        if self._config_api_server and self._config_api_server.is_running:
-            try:
-                self._config_api_server.stop()
-                logger.info("Config API server stopped")
-            except Exception as e:
-                logger.debug("Config API stop failed: %s", e)
-            self._config_api_server = None
-
     def _maybe_auto_lock_port(self):
         """Auto-lock port 9443 on startup so meshtasticd web is MeshForge-only.
 
@@ -669,60 +635,6 @@ class MeshForgeLauncher:
                 logger.warning("Startup port lock failed: %s", msg)
         except Exception as e:
             logger.debug("Auto port lock error: %s", e)
-
-    def _config_api_menu(self):
-        """Config API Server start/stop/status menu."""
-        while True:
-            running = self._config_api_server and self._config_api_server.is_running
-            status = "RUNNING on 127.0.0.1:8081" if running else "STOPPED"
-
-            choices = [
-                ("status", f"Status              {status}"),
-            ]
-            if running:
-                choices.append(("stop", "Stop Config API Server"))
-            else:
-                choices.append(("start", "Start Config API Server"))
-            choices.append(("back", "Back"))
-
-            choice = self.dialog.menu(
-                "Config API Server",
-                "RESTful configuration API for dynamic reconfiguration.\n\n"
-                f"Status: {status}",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "status":
-                if running:
-                    self.dialog.msgbox(
-                        "Config API Status",
-                        "Config API Server is RUNNING\n\n"
-                        "  Endpoint: http://127.0.0.1:8081/config\n"
-                        "  GET /config/<path> - Read config value\n"
-                        "  PUT /config/<path> - Set config value\n"
-                        "  DELETE /config/<path> - Remove value\n"
-                        "  GET /config/_paths - List all paths\n"
-                        "  GET /config/_audit - Audit log"
-                    )
-                else:
-                    self.dialog.msgbox(
-                        "Config API Status",
-                        "Config API Server is STOPPED\n\n"
-                        "Start it to enable dynamic reconfiguration\n"
-                        "via RESTful API."
-                    )
-            elif choice == "start":
-                self._maybe_auto_start_config_api()
-                if self._config_api_server and self._config_api_server.is_running:
-                    self.dialog.msgbox("Started", "Config API Server started on 127.0.0.1:8081")
-                else:
-                    self.dialog.msgbox("Error", "Failed to start Config API Server.\nCheck logs for details.")
-            elif choice == "stop":
-                self._stop_config_api_server()
-                self.dialog.msgbox("Stopped", "Config API Server stopped.")
 
     _MAX_DIALOG_RETRIES = 3
 
@@ -992,15 +904,13 @@ class MeshForgeLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Try registry-based dispatch first (converted handlers)
+            # Registry-based dispatch (all configuration items converted)
             if self._registry.dispatch("configuration", choice):
                 continue
 
-            # Remaining items not in configuration registry section
+            # Cross-section dispatch: RNS config is in the "rns" section
             if choice == "rns-config":
                 self._registry.dispatch("rns", "edit")
-            elif choice == "config-api":
-                self._safe_call("Config API Server", self._config_api_menu)
 
     # --- NEW Submenu: System (6) ---
 
@@ -1030,169 +940,10 @@ class MeshForgeLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Try registry-based dispatch first (converted handlers)
-            if self._registry.dispatch("system", choice):
-                continue
+            # Registry-based dispatch (all system items converted)
+            self._registry.dispatch("system", choice)
 
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-                "diagnose": ("Diagnostics", self._run_diagnostics),
-                "daemon": ("Daemon Mode", self._daemon_menu),
-                "status": ("Quick Status", self._run_terminal_status),
-                "reboot": ("Reboot/Shutdown", self._reboot_menu),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
-
-    def _daemon_menu(self):
-        """Daemon Mode - Start/stop headless NOC services."""
-        while True:
-            # Check if daemon is running
-            daemon_status = "unknown"
-            try:
-                status_file = get_real_user_home() / ".config" / "meshforge" / "daemon_status.json"
-                pid_file = Path("/run/meshforge/meshforged.pid")
-                if pid_file.exists():
-                    import signal as _sig
-                    pid = int(pid_file.read_text().strip())
-                    try:
-                        os.kill(pid, 0)
-                        daemon_status = f"running (PID {pid})"
-                    except ProcessLookupError:
-                        daemon_status = "stopped (stale PID)"
-                else:
-                    daemon_status = "stopped"
-            except Exception:
-                daemon_status = "unknown"
-
-            choices = [
-                ("status", f"Status              Daemon: {daemon_status}"),
-                ("start", "Start Daemon        Launch headless NOC"),
-                ("stop", "Stop Daemon         Stop headless NOC"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Daemon Mode",
-                "Headless NOC service manager:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "status":
-                self._daemon_show_status()
-            elif choice == "start":
-                self._daemon_start()
-            elif choice == "stop":
-                self._daemon_stop()
-
-    def _daemon_show_status(self):
-        """Show daemon status in a dialog."""
-        try:
-            status_file = get_real_user_home() / ".config" / "meshforge" / "daemon_status.json"
-            if not status_file.exists():
-                self.dialog.msgbox("Daemon Status", "No status file found.\nDaemon may not be running.")
-                return
-
-            import json
-            with open(status_file, 'r') as f:
-                data = json.load(f)
-
-            daemon = data.get("daemon", {})
-            services = data.get("services", {})
-            uptime = daemon.get("uptime_seconds", 0)
-            hours = uptime // 3600
-            minutes = (uptime % 3600) // 60
-
-            lines = [
-                f"Status:  {daemon.get('status', '?')}",
-                f"PID:     {daemon.get('pid', '?')}",
-                f"Profile: {daemon.get('profile', '?')}",
-                f"Uptime:  {hours}h {minutes}m",
-                "",
-                "Services:",
-            ]
-
-            for name, svc in services.items():
-                alive = svc.get("alive", False)
-                marker = "*" if alive else "-"
-                lines.append(f"  {marker} {name}")
-
-            self.dialog.msgbox("Daemon Status", "\n".join(lines))
-
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Could not read daemon status:\n{e}")
-
-    def _daemon_start(self):
-        """Start the daemon via subprocess."""
-        if not self.dialog.yesno(
-            "Start Daemon",
-            "Start MeshForge daemon (headless mode)?\n\n"
-            "This will run gateway bridge, health monitoring,\n"
-            "and other configured services in the background."
-        ):
-            return
-
-        try:
-            daemon_script = self.src_dir / "daemon.py"
-            subprocess.Popen(
-                [sys.executable, str(daemon_script), "start", "--foreground"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            self.dialog.msgbox("Daemon Started", "Daemon launched in background.\nCheck status for details.")
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to start daemon:\n{e}")
-
-    def _daemon_stop(self):
-        """Stop the daemon via subprocess."""
-        try:
-            daemon_script = self.src_dir / "daemon.py"
-            result = subprocess.run(
-                [sys.executable, str(daemon_script), "stop"],
-                capture_output=True, text=True, timeout=10
-            )
-            output = result.stdout.strip() or result.stderr.strip() or "Stop signal sent."
-            self.dialog.msgbox("Stop Daemon", output)
-        except Exception as e:
-            self.dialog.msgbox("Error", f"Failed to stop daemon:\n{e}")
-
-    def _drop_to_shell(self):
-        """Drop to a bash shell."""
-        clear_screen()
-        print("Dropping to shell. Type 'exit' to return to MeshForge.\n")
-        subprocess.run(['bash'], check=False)  # Interactive shell - no timeout
-
-    def _reboot_menu(self):
-        """Safe reboot/shutdown options."""
-        while True:
-            choices = [
-                ("reboot", "Reboot              Restart system"),
-                ("shutdown", "Shutdown            Power off"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Reboot / Shutdown",
-                "System power options:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            if choice == "reboot":
-                if self.dialog.yesno("Confirm Reboot", "Reboot the system now?"):
-                    subprocess.run(_sudo_cmd(['systemctl', 'reboot']), timeout=30)
-            elif choice == "shutdown":
-                if self.dialog.yesno("Confirm Shutdown", "Shutdown the system now?"):
-                    subprocess.run(_sudo_cmd(['systemctl', 'poweroff']), timeout=30)
-
-    # --- NEW Submenu: About (a) ---
+    # --- Submenu: About (a) ---
 
     def _about_menu(self):
         """About - Version, help, web client, system info, changelog."""
@@ -1216,265 +967,8 @@ class MeshForgeLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Try registry-based dispatch first (converted handlers)
-            if self._registry.dispatch("about", choice):
-                continue
-
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-                "version": ("Version Info", self._show_about),
-                "changelog": ("Changelog", self._show_changelog),
-                "sysinfo": ("System Info", self._show_system_info),
-                "deps": ("Dependencies", self._show_dependency_status),
-                "help": ("Help", self._show_help),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
-
-    def _show_help(self):
-        """Show help documentation."""
-        help_text = """
-MeshForge - Network Operations Center
-
-KEYBOARD SHORTCUTS:
-  1-6     Quick access to main sections
-  q       Quick Actions
-  e       Emergency Mode
-  a       About
-  x       Exit
-
-NAVIGATION:
-  Enter   Select item
-  Esc     Go back / Cancel
-  Tab     Move between buttons
-
-DOCUMENTATION:
-  https://github.com/Nursedude/meshforge
-
-SUPPORT:
-  Issues: github.com/Nursedude/meshforge/issues
-"""
-        clear_screen()
-        print(help_text)
-        self._wait_for_enter()
-
-    # Config menu and view methods moved to MeshtasticdConfigHandler (Batch 9)
-
-    # --- Terminal-native utilities ---
-
-    def _run_diagnostics(self):
-        """Run the MeshForge diagnostic tool."""
-        clear_screen()
-        try:
-            result = subprocess.run(
-                [sys.executable, str(self.src_dir / 'cli' / 'diagnose.py')],
-                timeout=30
-            )
-            if result.returncode != 0:
-                print("\nDiagnostics encountered an error.")
-        except subprocess.TimeoutExpired:
-            print("\n\nDiagnostics timed out (30s).")
-        except FileNotFoundError:
-            print("\nDiagnostic tool not found at: src/cli/diagnose.py")
-        except KeyboardInterrupt:
-            print("\n\nAborted.")
-
-        try:
-            self._wait_for_enter("\nPress Enter to return to menu...")
-        except KeyboardInterrupt:
-            print()
-
-    def _run_terminal_status(self):
-        """Run meshforge-status (terminal-native one-shot status)."""
-        clear_screen()
-        try:
-            # Run status script directly, showing output in real-time
-            result = subprocess.run(
-                [sys.executable, str(self.src_dir / 'cli' / 'status.py')],
-                timeout=20
-            )
-            if result.returncode != 0:
-                print("\nStatus check encountered an error.")
-        except subprocess.TimeoutExpired:
-            print("\n\nStatus check timed out (20s).")
-        except KeyboardInterrupt:
-            print("\n\nAborted.")
-
-        try:
-            self._wait_for_enter("\nPress Enter to return to menu...")
-        except KeyboardInterrupt:
-            print()
-
-    def _show_about(self):
-        """Show about information."""
-        text = f"""MeshForge v{__version__}
-Network Operations Center
-
-Bridges Meshtastic and Reticulum (RNS) mesh networks.
-
-Features:
-- Service management
-- Hardware detection
-- Space weather & propagation
-- Gateway bridge (Mesh ↔ RNS)
-- Node monitoring
-
-GitHub: github.com/Nursedude/meshforge
-License: GPL-3.0
-
-Made with aloha for the mesh community
-73 de WH6GXZ"""
-
-        self.dialog.msgbox("About MeshForge", text)
-
-    def _show_changelog(self):
-        """Display release history from VERSION_HISTORY in __version__.py."""
-        from __version__ import VERSION_HISTORY
-
-        lines = ["MESHFORGE RELEASE HISTORY", "=" * 40, ""]
-
-        for release in VERSION_HISTORY[:8]:  # Show last 8 releases
-            version = release.get("version", "?")
-            date = release.get("date", "?")
-            status = release.get("status", "?")
-            branch = release.get("branch", "")
-            branch_info = f" ({branch})" if branch else ""
-
-            lines.append(f"v{version}  [{status}]  {date}{branch_info}")
-            lines.append("-" * 40)
-            for change in release.get("changes", []):
-                # Wrap long lines for whiptail
-                if len(change) > 55:
-                    lines.append(f"  {change[:55]}")
-                    lines.append(f"    {change[55:]}")
-                else:
-                    lines.append(f"  {change}")
-            lines.append("")
-
-        clear_screen()
-        print('\n'.join(lines))
-        self._wait_for_enter()
-
-    def _show_system_info(self):
-        """Display system information: OS, Python, hardware, uptime, disk."""
-        import platform
-
-        lines = ["SYSTEM INFORMATION", "=" * 40, ""]
-
-        # OS info
-        lines.append(f"Hostname:  {platform.node()}")
-        lines.append(f"OS:        {platform.system()} {platform.release()}")
-        try:
-            # Get distro info on Linux
-            result = subprocess.run(
-                ['lsb_release', '-ds'], capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                lines.append(f"Distro:    {result.stdout.strip()}")
-        except Exception:
-            pass
-        lines.append(f"Arch:      {platform.machine()}")
-        lines.append(f"Python:    {platform.python_version()}")
-        lines.append(f"MeshForge: v{__version__}")
-        lines.append("")
-
-        # Uptime
-        try:
-            with open('/proc/uptime', 'r') as f:
-                uptime_secs = float(f.read().split()[0])
-            days = int(uptime_secs // 86400)
-            hours = int((uptime_secs % 86400) // 3600)
-            mins = int((uptime_secs % 3600) // 60)
-            lines.append(f"Uptime:    {days}d {hours}h {mins}m")
-        except Exception:
-            pass
-
-        # Memory
-        try:
-            with open('/proc/meminfo', 'r') as f:
-                meminfo = f.read()
-            for line in meminfo.split('\n'):
-                if line.startswith('MemTotal:'):
-                    total_kb = int(line.split()[1])
-                    lines.append(f"Memory:    {total_kb // 1024} MB total")
-                    break
-        except Exception:
-            pass
-
-        # Disk usage for relevant paths
-        lines.append("")
-        lines.append("DISK USAGE")
-        lines.append("-" * 40)
-        try:
-            statvfs = os.statvfs('/')
-            total_gb = (statvfs.f_frsize * statvfs.f_blocks) / (1024**3)
-            free_gb = (statvfs.f_frsize * statvfs.f_bavail) / (1024**3)
-            used_pct = ((total_gb - free_gb) / total_gb) * 100 if total_gb else 0
-            lines.append(f"Root (/):  {free_gb:.1f} GB free / {total_gb:.1f} GB ({used_pct:.0f}% used)")
-        except Exception:
-            pass
-
-        # Log directory size
-        try:
-            log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
-            if log_dir.exists():
-                total_size = sum(f.stat().st_size for f in log_dir.rglob("*") if f.is_file())
-                lines.append(f"Logs:      {total_size / 1024:.1f} KB in {log_dir}")
-        except Exception:
-            pass
-
-        self.dialog.msgbox("System Information", "\n".join(lines), width=65, height=22)
-
-    def _show_dependency_status(self):
-        """Check and display status of key Python dependencies."""
-        deps = [
-            ("meshtastic", "Meshtastic Python API"),
-            ("RNS", "Reticulum Network Stack"),
-            ("paho.mqtt.client", "MQTT client (Paho)"),
-            ("folium", "Map generation"),
-            ("requests", "HTTP client"),
-            ("yaml", "YAML parser (PyYAML)"),
-            ("serial", "Serial port (pyserial)"),
-            ("flask", "Web server (Flask)"),
-            ("Cryptodome", "Cryptography"),
-        ]
-
-        lines = ["DEPENDENCY STATUS", "=" * 45, ""]
-        installed = 0
-        missing = 0
-
-        for module_name, description in deps:
-            try:
-                mod = __import__(module_name.split('.')[0])
-                ver = getattr(mod, '__version__', getattr(mod, 'VERSION', '?'))
-                lines.append(f"  [OK] {description:<28s} {ver}")
-                installed += 1
-            except ImportError:
-                lines.append(f"  [--] {description:<28s} not installed")
-                missing += 1
-
-        lines.append("")
-        lines.append("=" * 45)
-        lines.append(f"Installed: {installed}  |  Missing: {missing}")
-        if missing > 0:
-            lines.append("\nMissing packages can be installed via:")
-            lines.append("  pip install -r requirements.txt")
-
-        self.dialog.msgbox("Dependencies", "\n".join(lines), width=55, height=20)
-
-    def _run_basic_launcher(self):
-        """Fallback basic terminal launcher."""
-        # Import and run the original launcher
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "launcher",
-            self.src_dir / "launcher.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        module.main()
-
+            # Registry-based dispatch (all about items converted)
+            self._registry.dispatch("about", choice)
 
 def main():
     """Main entry point."""
