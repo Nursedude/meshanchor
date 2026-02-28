@@ -127,4 +127,16 @@ def get_all_handlers() -> List[Type]:
         RNSMenuHandler,
     ])
 
+    # Batch 7 — service menu, MQTT, broker, web client
+    from handlers.service_menu import ServiceMenuHandler
+    from handlers.mqtt import MQTTHandler
+    from handlers.broker import BrokerHandler
+    from handlers.web_client import WebClientHandler
+    handlers.extend([
+        ServiceMenuHandler,
+        MQTTHandler,
+        BrokerHandler,
+        WebClientHandler,
+    ])
+
     return handlers

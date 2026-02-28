@@ -53,6 +53,7 @@ class TUIContext:
     src_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent)
     env: dict = field(default_factory=dict)
     registry: Optional[Any] = None  # HandlerRegistry — set after construction
+    daemon_active: bool = False  # True when meshforged owns services
 
     # Internal cached values
     _meshtastic_path: Optional[str] = field(default=None, repr=False)
