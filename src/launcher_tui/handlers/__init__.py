@@ -155,4 +155,16 @@ def get_all_handlers() -> List[Type]:
         FirstRunHandler,
     ])
 
+    # Batch 9 — meshtasticd config (split) + inheritance cleanup
+    from handlers.meshtasticd_config import MeshtasticdConfigHandler
+    from handlers.meshtasticd_lora import MeshtasticdLoRaHandler
+    from handlers.meshtasticd_mqtt import MeshtasticdDeviceMQTTHandler
+    from handlers.meshtasticd_nodedb import MeshtasticdNodeDBHandler
+    handlers.extend([
+        MeshtasticdConfigHandler,
+        MeshtasticdLoRaHandler,
+        MeshtasticdDeviceMQTTHandler,
+        MeshtasticdNodeDBHandler,
+    ])
+
     return handlers

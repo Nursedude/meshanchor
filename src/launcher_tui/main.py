@@ -59,40 +59,7 @@ from backend import DialogBackend, clear_screen
 from startup_checks import StartupChecker, EnvironmentState, ServiceRunState
 from conflict_resolver import check_and_resolve_conflicts
 
-# Import mixins to reduce file size
-from rf_tools_mixin import RFToolsMixin
-from channel_config_mixin import ChannelConfigMixin
-from meshtasticd_config_mixin import MeshtasticdConfigMixin
-from site_planner_mixin import SitePlannerMixin
-from service_discovery_mixin import ServiceDiscoveryMixin
-from quick_actions_mixin import QuickActionsMixin
-from emergency_mode_mixin import EmergencyModeMixin
-from rns_interfaces_mixin import RNSInterfacesMixin
-from rf_awareness_mixin import RFAwarenessMixin
-from metrics_mixin import MetricsMixin
-from link_quality_mixin import LinkQualityMixin
-from rns_menu_mixin import RNSMenuMixin
-from aredn_mixin import AREDNMixin
-from radio_menu_mixin import RadioMenuMixin
-from hardware_menu_mixin import HardwareMenuMixin
-from settings_menu_mixin import SettingsMenuMixin
-from logs_menu_mixin import LogsMenuMixin
-from device_backup_mixin import DeviceBackupMixin
-from updates_mixin import UpdatesMixin
-from gateway_config_mixin import GatewayConfigMixin
-from favorites_mixin import FavoritesMixin
-from network_tools_mixin import NetworkToolsMixin
-from node_health_mixin import NodeHealthMixin
-from amateur_radio_mixin import AmateurRadioMixin
-from analytics_mixin import AnalyticsMixin
-from webhooks_mixin import WebhooksMixin
-from messaging_mixin import MessagingMixin
-from classifier_mixin import ClassifierMixin
-from rnode_mixin import RNodeMixin
-from latency_mixin import LatencyMixin
-from dashboard_mixin import DashboardMixin
-from meshcore_mixin import MeshCoreMixin
-from propagation_mixin import PropagationMixin
+# Mixins removed — all functionality now in handler registry (Batch 9)
 
 # Handler registry infrastructure (Phase 1 of mixin-to-registry migration)
 from handler_protocol import TUIContext
@@ -100,41 +67,7 @@ from handler_registry import HandlerRegistry
 from handlers import get_all_handlers
 
 
-class MeshForgeLauncher(
-    PropagationMixin,
-    RFToolsMixin,
-    ChannelConfigMixin,
-    MeshtasticdConfigMixin,
-    SitePlannerMixin,
-    ServiceDiscoveryMixin,
-    QuickActionsMixin,
-    EmergencyModeMixin,
-    RNSInterfacesMixin,
-    RFAwarenessMixin,
-    MetricsMixin,
-    LinkQualityMixin,
-    RNSMenuMixin,
-    AREDNMixin,
-    RadioMenuMixin,
-    HardwareMenuMixin,
-    SettingsMenuMixin,
-    LogsMenuMixin,
-    DeviceBackupMixin,
-    UpdatesMixin,
-    GatewayConfigMixin,
-    FavoritesMixin,
-    NetworkToolsMixin,
-    NodeHealthMixin,
-    AmateurRadioMixin,
-    AnalyticsMixin,
-    WebhooksMixin,
-    MessagingMixin,
-    ClassifierMixin,
-    RNodeMixin,
-    LatencyMixin,
-    DashboardMixin,
-    MeshCoreMixin,
-):
+class MeshForgeLauncher:
     """MeshForge launcher with raspi-config style interface."""
 
     def __init__(self, profile=None):
@@ -935,13 +868,9 @@ class MeshForgeLauncher(
             if self._registry.dispatch("dashboard", choice):
                 continue
 
-            # Legacy mixin dispatch (network still routes via mixin)
-            dispatch = {
-                "network": ("Network Status", self._network_menu),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
+            # Cross-section dispatch (network handler is in "system" section)
+            if choice == "network":
+                self._registry.dispatch("system", "network")
 
     # --- Submenu: Mesh Networks (2) ---
 
@@ -979,16 +908,7 @@ class MeshForgeLauncher(
             if self._registry.dispatch("mesh_networks", choice):
                 continue
 
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-                "meshtastic": ("Meshtastic Radio", self._radio_menu),
-                "meshcore": ("MeshCore Radio", self._meshcore_menu),
-                "rns": ("RNS / Reticulum", self._rns_menu),
-                "gateway": ("Gateway Bridge", self._gateway_config_menu),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
+            # All mesh_networks items handled by registry (Batch 3-9)
 
     # --- NEW Submenu: RF & SDR (3) ---
 
@@ -1041,12 +961,7 @@ class MeshForgeLauncher(
             if self._registry.dispatch("maps_viz", choice):
                 continue
 
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
+            # All maps_viz items handled by registry
 
     # --- NEW Submenu: Configuration (5) ---
 
@@ -1081,18 +996,11 @@ class MeshForgeLauncher(
             if self._registry.dispatch("configuration", choice):
                 continue
 
-            # Legacy mixin dispatch (not yet converted)
-            dispatch = {
-                "radio": ("Radio Config", self._config_menu),
-                "channels": ("Channel Config", self._channel_config_menu),
-                "rns-config": ("RNS Config", self._edit_rns_config),
-                "updates": ("Software Updates", self._updates_menu),
-                "meshforge": ("MeshForge Settings", self._settings_menu),
-                "config-api": ("Config API Server", self._config_api_menu),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
+            # Remaining items not in configuration registry section
+            if choice == "rns-config":
+                self._registry.dispatch("rns", "edit")
+            elif choice == "config-api":
+                self._safe_call("Config API Server", self._config_api_menu)
 
     # --- NEW Submenu: System (6) ---
 
@@ -1351,178 +1259,7 @@ SUPPORT:
         print(help_text)
         self._wait_for_enter()
 
-    # --- Config Menu - meshtasticd config.d/ management ---
-
-    def _ensure_meshtasticd_config(self):
-        """Auto-create /etc/meshtasticd structure and templates if missing."""
-        try:
-            from core.meshtasticd_config import MeshtasticdConfig
-            MeshtasticdConfig().ensure_structure()
-        except PermissionError:
-            logger.debug("Cannot auto-create meshtasticd config (no root)")
-        except Exception as e:
-            logger.debug("meshtasticd config auto-create failed: %s", e)
-
-    def _config_menu(self):
-        """Configuration management for meshtasticd."""
-        # Auto-create /etc/meshtasticd structure if missing
-        self._ensure_meshtasticd_config()
-
-        while True:
-            choices = [
-                ("view", "View Active Config"),
-                ("overlays", "View config.d/ Overlays"),
-                ("available", "Available Hardware Configs"),
-                ("presets", "LoRa Presets"),
-                ("channels", "Channel Configuration"),
-                ("meshtasticd", "Advanced meshtasticd Config"),
-                ("settings", "MeshForge Settings"),
-                ("wizard", "Run Setup Wizard"),
-                ("back", "Back"),
-            ]
-
-            choice = self.dialog.menu(
-                "Configuration",
-                "meshtasticd & MeshForge configuration:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            dispatch = {
-                "view": ("View Active Config", self._view_active_config),
-                "overlays": ("Config Overlays", self._view_config_overlays),
-                "available": ("Available Hardware Configs", self._view_available_configs),
-                "presets": ("LoRa Presets", self._radio_presets_menu),
-                "channels": ("Channel Config", self._channel_config_menu),
-                "meshtasticd": ("Advanced Config", self._meshtasticd_menu),
-                "settings": ("MeshForge Settings", self._settings_menu),
-                "wizard": ("Setup Wizard", lambda: self._registry.dispatch("configuration", "wizard")),
-            }
-            entry = dispatch.get(choice)
-            if entry:
-                self._safe_call(*entry)
-
-    def _view_active_config(self):
-        """Show the active meshtasticd config.yaml."""
-        clear_screen()
-        print("=== meshtasticd config.yaml ===\n")
-
-        config_path = Path('/etc/meshtasticd/config.yaml')
-
-        # Auto-create if missing
-        if not config_path.exists():
-            self._ensure_meshtasticd_config()
-
-        if config_path.exists():
-            print(f"File: {config_path}\n")
-            try:
-                print(config_path.read_text())
-            except PermissionError:
-                print("Permission denied. Try: sudo cat /etc/meshtasticd/config.yaml")
-        else:
-            print("config.yaml not found!\n")
-            print("Run MeshForge with sudo to auto-create:")
-            print("  sudo python3 src/launcher_tui/main.py")
-            print("\nOr create manually:")
-            print("  sudo mkdir -p /etc/meshtasticd/{available.d,config.d}")
-            print("  sudo cp templates/config.yaml /etc/meshtasticd/")
-            print("  sudo cp templates/available.d/*.yaml /etc/meshtasticd/available.d/")
-
-        self._wait_for_enter()
-
-    def _view_config_overlays(self):
-        """Show config.d/ overlay files (active hardware configs)."""
-        clear_screen()
-        print("=== config.d/ Active Hardware Configs ===\n")
-
-        config_d = Path('/etc/meshtasticd/config.d')
-
-        # Auto-create if missing
-        if not config_d.exists():
-            self._ensure_meshtasticd_config()
-
-        if not config_d.exists():
-            print("config.d/ directory not found.")
-            print("\nRun with sudo to auto-create, or:")
-            print("  sudo mkdir -p /etc/meshtasticd/config.d")
-            self._wait_for_enter()
-            return
-
-        overlays = sorted(config_d.glob('*.yaml'))
-        if not overlays:
-            print("No active hardware configs in config.d/\n")
-            print("Select your hardware from:")
-            print("  Configuration > Available Hardware Configs")
-            print("  Configuration > Advanced meshtasticd Config > Hardware Config")
-        else:
-            print(f"Found {len(overlays)} active config(s):\n")
-            for f in overlays:
-                size = f.stat().st_size
-                print(f"  {f.name} ({size} bytes)")
-
-            # Show contents of each
-            print("\n" + "=" * 50)
-            for f in overlays:
-                print(f"\n--- {f.name} ---")
-                try:
-                    print(f.read_text())
-                except PermissionError:
-                    print("  (permission denied)")
-
-        self._wait_for_enter()
-
-    def _view_available_configs(self):
-        """Show available hardware configs (USB + SPI HATs)."""
-        clear_screen()
-        print("=== Available Hardware Configs ===\n")
-
-        available_d = Path('/etc/meshtasticd/available.d')
-
-        # Auto-create if missing
-        if not available_d.exists():
-            self._ensure_meshtasticd_config()
-
-        if not available_d.exists():
-            print("available.d/ not found.\n")
-            print("Run with sudo to auto-create, or:")
-            print("  sudo mkdir -p /etc/meshtasticd/available.d")
-            print("  sudo cp templates/available.d/*.yaml /etc/meshtasticd/available.d/")
-            self._wait_for_enter()
-            return
-
-        configs = sorted(available_d.glob('*.yaml'))
-        if not configs:
-            print("No hardware configs available.")
-        else:
-            # Categorize USB vs SPI
-            usb_configs = [f for f in configs if '-usb' in f.stem or f.stem.startswith('usb-')]
-            spi_configs = [f for f in configs if f not in usb_configs]
-
-            if usb_configs:
-                print(f"USB Radios ({len(usb_configs)}):")
-                for i, f in enumerate(usb_configs, 1):
-                    print(f"  {i:2d}. {f.stem}")
-
-            if spi_configs:
-                if usb_configs:
-                    print()
-                print(f"SPI HATs ({len(spi_configs)}):")
-                for i, f in enumerate(spi_configs, 1):
-                    print(f"  {i:2d}. {f.stem}")
-
-            # Show active
-            config_d = Path('/etc/meshtasticd/config.d')
-            if config_d.exists():
-                active = list(config_d.glob('*.yaml'))
-                if active:
-                    print(f"\nActive: {', '.join(f.stem for f in active)}")
-
-            print(f"\nTotal: {len(configs)} templates")
-            print("\nActivate via: Configuration > Advanced meshtasticd Config > Hardware Config")
-
-        self._wait_for_enter()
+    # Config menu and view methods moved to MeshtasticdConfigHandler (Batch 9)
 
     # --- Terminal-native utilities ---
 
