@@ -62,17 +62,12 @@ from conflict_resolver import check_and_resolve_conflicts
 # Import mixins to reduce file size
 from rf_tools_mixin import RFToolsMixin
 from channel_config_mixin import ChannelConfigMixin
-from ai_tools_mixin import AIToolsMixin
 from meshtasticd_config_mixin import MeshtasticdConfigMixin
 from site_planner_mixin import SitePlannerMixin
 from service_discovery_mixin import ServiceDiscoveryMixin
-from first_run_mixin import FirstRunMixin
-from system_tools_mixin import SystemToolsMixin
 from quick_actions_mixin import QuickActionsMixin
 from emergency_mode_mixin import EmergencyModeMixin
 from rns_interfaces_mixin import RNSInterfacesMixin
-from nomadnet_client_mixin import NomadNetClientMixin
-from meshchat_client_mixin import MeshChatClientMixin
 from rf_awareness_mixin import RFAwarenessMixin
 from metrics_mixin import MetricsMixin
 from link_quality_mixin import LinkQualityMixin
@@ -109,17 +104,12 @@ class MeshForgeLauncher(
     PropagationMixin,
     RFToolsMixin,
     ChannelConfigMixin,
-    AIToolsMixin,
     MeshtasticdConfigMixin,
     SitePlannerMixin,
     ServiceDiscoveryMixin,
-    FirstRunMixin,
-    SystemToolsMixin,
     QuickActionsMixin,
     EmergencyModeMixin,
     RNSInterfacesMixin,
-    NomadNetClientMixin,
-    MeshChatClientMixin,
     RFAwarenessMixin,
     MetricsMixin,
     LinkQualityMixin,
@@ -456,9 +446,10 @@ class MeshForgeLauncher(
         if not self._run_startup_checks():
             return  # User aborted due to conflicts
 
-        # Check for first run and offer setup wizard
-        if self._check_first_run():
-            self._run_first_run_wizard()
+        # Check for first run and offer setup wizard (Batch 8: via handler)
+        first_run_handler = self._registry.get_handler("first_run")
+        if first_run_handler:
+            first_run_handler.on_startup()
 
         # Check for service misconfiguration (SPI HAT with USB config)
         self._check_service_misconfig()
@@ -472,8 +463,7 @@ class MeshForgeLauncher(
             # Only auto-start services when daemon ISN'T running.
             # If daemon owns these, starting them here would cause
             # port conflicts (Config API :8081) or singleton clashes.
-            self._maybe_auto_start_map()
-            self._registry.startup_all()  # MQTTHandler.on_startup() etc.
+            self._registry.startup_all()  # AIToolsHandler, MQTTHandler, etc.
             self._maybe_auto_start_config_api()
             self._maybe_auto_lock_port()
             self._start_health_monitor()
@@ -974,9 +964,6 @@ class MeshForgeLauncher(
             legacy.append(("aredn", "AREDN Mesh          AREDN integration"))
             legacy.append(("messaging", "Messaging           Send/receive messages"))
             legacy.append(("favorites", "Favorites           Manage favorite nodes"))
-            if self._feature_enabled("rns"):
-                legacy.append(("nomadnet", "NomadNet Client     RNS messaging"))
-                legacy.append(("meshchat", "MeshChat Client     RNS messaging"))
             choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
@@ -998,8 +985,6 @@ class MeshForgeLauncher(
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
-                "nomadnet": ("NomadNet Client", self._nomadnet_menu),
-                "meshchat": ("MeshChat Client", self._meshchat_menu),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -1039,12 +1024,7 @@ class MeshForgeLauncher(
         while True:
             # Legacy items — removed automatically as handlers take over their tags
             legacy = [
-                ("livemap", "Live NOC Map        Real-time browser view"),
-                ("coverage", "Coverage Map        Generate coverage map"),
-                ("heatmap", "Heatmap             Node density heatmap"),
-                ("tiles", "Offline Tiles       Cache map tiles"),
                 ("quality", "Link Quality        Quality analysis"),
-                ("ai", "AI Diagnostics      Knowledge base, assistant"),
             ]
             choices = self._build_section_menu("maps_viz", legacy, _ORDERING)
 
@@ -1063,11 +1043,6 @@ class MeshForgeLauncher(
 
             # Legacy mixin dispatch (not yet converted)
             dispatch = {
-                "livemap": ("Live NOC Map", self._open_live_map),
-                "coverage": ("Coverage Map", self._generate_coverage_map),
-                "heatmap": ("Heatmap", self._generate_heatmap),
-                "tiles": ("Offline Tile Cache", self._tile_cache_menu),
-                "ai": ("AI Diagnostics", self._ai_tools_menu),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -1090,7 +1065,6 @@ class MeshForgeLauncher(
                 ("webhooks", "Webhooks            External notifications"),
                 ("meshforge", "MeshForge Settings  App preferences"),
                 ("config-api", "Config API Server   REST config endpoint"),
-                ("wizard", "Setup Wizard        First-run wizard"),
             ]
             choices = self._build_section_menu("configuration", legacy, _ORDERING)
 
@@ -1115,7 +1089,6 @@ class MeshForgeLauncher(
                 "updates": ("Software Updates", self._updates_menu),
                 "meshforge": ("MeshForge Settings", self._settings_menu),
                 "config-api": ("Config API Server", self._config_api_menu),
-                "wizard": ("Setup Wizard", self._run_first_run_wizard),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -1135,9 +1108,7 @@ class MeshForgeLauncher(
                 ("network", "Network Tools       Ping, ports, interfaces"),
                 ("diagnose", "Diagnostics         System health check"),
                 ("daemon", "Daemon Mode         Start/stop headless NOC"),
-                ("review", "Code Review         Auto-review codebase"),
                 ("status", "Quick Status        One-shot status display"),
-                ("shell", "Linux Shell         Drop to bash"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
             ]
             choices = self._build_section_menu("system", legacy, _ORDERING)
@@ -1159,9 +1130,7 @@ class MeshForgeLauncher(
             dispatch = {
                 "diagnose": ("Diagnostics", self._run_diagnostics),
                 "daemon": ("Daemon Mode", self._daemon_menu),
-                "review": ("Code Review", self._auto_review_menu),
                 "status": ("Quick Status", self._run_terminal_status),
-                "shell": ("Linux Shell", self._drop_to_shell),
                 "reboot": ("Reboot/Shutdown", self._reboot_menu),
             }
             entry = dispatch.get(choice)
@@ -1429,7 +1398,7 @@ SUPPORT:
                 "channels": ("Channel Config", self._channel_config_menu),
                 "meshtasticd": ("Advanced Config", self._meshtasticd_menu),
                 "settings": ("MeshForge Settings", self._settings_menu),
-                "wizard": ("Setup Wizard", self._run_first_run_wizard),
+                "wizard": ("Setup Wizard", lambda: self._registry.dispatch("configuration", "wizard")),
             }
             entry = dispatch.get(choice)
             if entry:
