@@ -62,11 +62,11 @@ self-contained handler in `handlers/` dispatched by `handler_registry.py`. See
 ```
 src/
 ├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
-│   ├── main.py        # NOC launcher + handler registration (1,148 lines)
+│   ├── main.py        # NOC launcher + handler registration (1,168 lines)
 │   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
 │   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
 │   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
-│   └── handlers/            # 60 self-contained command handlers
+│   └── handlers/            # 58 self-contained command handlers
 │       ├── dashboard.py     # Main dashboard
 │       ├── gateway.py       # Gateway bridge control
 │       ├── propagation.py   # Space weather & HF propagation
@@ -170,14 +170,14 @@ print(f'Issues: {report.total_issues}')
 
 ## Research Documents
 
-Deep documentation in `.claude/` (83 files, 822KB as of 2026-02-28 audit):
+Deep documentation in `.claude/` (84 files, 853KB as of 2026-02-28 audit):
 - `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical)
 - `dude_ai_university.md` - Project vision, self-healing principles, plugin & Dude AI architecture
 - `foundations/domain_architecture.md` - **ARCHITECTURE: Core vs Plugin model**
 - `foundations/ai_principles.md` - Human-centered design philosophy
 - `foundations/persistent_issues.md` - **CRITICAL: Known issues & fixes**
 - `INDEX.md` - Full documentation index with quick lookups
-- `research/README.md` - Index of 21 technical deep dives (RNS, AREDN, HamClock, RF, etc.)
+- `research/README.md` - Index of 22 technical deep dives (RNS, AREDN, HamClock, RF, etc.)
 
 ## Architecture Model
 
