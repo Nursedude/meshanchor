@@ -325,5 +325,5 @@ class TestRegistryDispatchIntegration:
 
     def test_unknown_tag_falls_through(self):
         registry = self._make_registry()
-        # "status" is NOT a registry handler yet — it's still a mixin
-        assert registry.dispatch("dashboard", "status") is False
+        # "nonexistent" is not registered anywhere — should fall through
+        assert registry.dispatch("dashboard", "nonexistent") is False

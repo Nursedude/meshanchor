@@ -911,6 +911,10 @@ class MeshForgeLauncher(
         exceptions in any mixin show a user-friendly error dialog
         instead of crashing the TUI.
         """
+        # Try registry-based dispatch for main-menu handlers (Batch 4+)
+        if self._registry.dispatch("main", choice):
+            return
+
         dispatch = {
             "1": ("Dashboard", self._dashboard_menu),
             "2": ("Mesh Networks", self._mesh_networks_menu),
@@ -919,8 +923,6 @@ class MeshForgeLauncher(
             "5": ("Configuration", self._configuration_menu),
             "6": ("System Tools", self._system_menu),
             "t": ("Tactical Ops", self._tactical_ops_menu),
-            "q": ("Quick Actions", self._quick_actions_menu),
-            "e": ("Emergency Mode", self._emergency_mode),
             "a": ("About", self._about_menu),
         }
         entry = dispatch.get(choice)
@@ -935,18 +937,11 @@ class MeshForgeLauncher(
         _ORDERING = ["status", "weather", "network", "nodes", "health", "score",
                       "datapath", "metrics", "analytics", "latency", "reports", "alerts"]
         while True:
-            # Legacy items — removed automatically as handlers take over their tags
+            # Legacy items — most now handled by DashboardHandler (Batch 4)
             legacy = [
-                ("status", "Service Status      All services with health"),
-                ("weather", "Space Weather       SFI, Kp, bands at a glance"),
                 ("network", "Network Status      Ports, interfaces, conflicts"),
-                ("nodes", "Node Count          Meshtastic + RNS nodes"),
                 ("health", "Node Health         Battery, signal, latency"),
-                ("score", "Health Score        Network health snapshot"),
-                ("datapath", "Data Path Check     Test all data sources"),
                 ("metrics", "Historical Trends   Metrics over time"),
-                ("reports", "Reports             Generate status report"),
-                ("alerts", "View Alerts         Current warnings"),
             ]
             choices = self._build_section_menu("dashboard", legacy, _ORDERING)
 
@@ -963,66 +958,13 @@ class MeshForgeLauncher(
             if self._registry.dispatch("dashboard", choice):
                 continue
 
-            # Legacy mixin dispatch (not yet converted)
+            # Legacy mixin dispatch (network still routes via mixin)
             dispatch = {
-                "status": ("Service Status", self._service_status_display),
-                "weather": ("Space Weather", self._dashboard_space_weather),
                 "network": ("Network Status", self._network_menu),
-                "nodes": ("Node Count", self._show_node_counts),
-                "score": ("Health Score", self._health_score_display),
-                "datapath": ("Data Path Check", self._data_path_diagnostic),
-                "reports": ("Reports", self._reports_menu),
-                "alerts": ("View Alerts", self._show_alerts),
             }
             entry = dispatch.get(choice)
             if entry:
                 self._safe_call(*entry)
-
-    def _dashboard_space_weather(self):
-        """Quick-look space weather for the Dashboard.
-
-        Shows a compact summary with SFI, Kp, band conditions, and
-        a link to the full propagation suite under RF & SDR.
-        """
-        from commands import propagation as prop_mod
-
-        result = prop_mod.get_space_weather()
-        if not result.success:
-            self.dialog.msgbox(
-                "Space Weather",
-                f"Could not fetch space weather data:\n{result.message}\n\n"
-                "Ensure internet connectivity is available.\n"
-                "NOAA SWPC is the primary data source."
-            )
-            return
-
-        d = result.data
-        lines = [
-            "SPACE WEATHER SNAPSHOT",
-            "=" * 40,
-            "",
-            f"Solar Flux (SFI):  {d.get('solar_flux', 'N/A')} SFU",
-            f"Kp Index:          {d.get('k_index', 'N/A')}",
-            f"A Index:           {d.get('a_index', 'N/A')}",
-            f"X-ray Flux:        {d.get('xray_flux', 'N/A')}",
-            f"Geomagnetic:       {d.get('geomag_storm', 'Quiet')}",
-            "",
-        ]
-
-        # Band conditions
-        bands = d.get('band_conditions', {})
-        if bands:
-            lines.append("HF BAND CONDITIONS")
-            lines.append("-" * 40)
-            for band, cond in bands.items():
-                lines.append(f"  {band:<12s} {cond}")
-            lines.append("")
-
-        lines.append("-" * 40)
-        lines.append("Full propagation tools: RF & SDR > Space Weather")
-        lines.append(f"Source: {d.get('source', 'NOAA SWPC')}")
-
-        self.dialog.msgbox("Space Weather", "\n".join(lines), width=50, height=22)
 
     # --- Submenu: Mesh Networks (2) ---
 

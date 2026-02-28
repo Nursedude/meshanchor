@@ -91,4 +91,14 @@ def get_all_handlers() -> List[Type]:
         UpdatesHandler,
     ])
 
+    # Batch 4 — dashboard, quick actions, emergency mode
+    from handlers.dashboard import DashboardHandler
+    from handlers.quick_actions import QuickActionsHandler
+    from handlers.emergency_mode import EmergencyModeHandler
+    handlers.extend([
+        DashboardHandler,
+        QuickActionsHandler,
+        EmergencyModeHandler,
+    ])
+
     return handlers
