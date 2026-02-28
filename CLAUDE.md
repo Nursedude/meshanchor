@@ -16,8 +16,8 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 
 - **main** is the production-ready line. All PRs targeting stable features merge here.
   Includes tactical ops (XTOC interop, ATAK/KML/CoT), MQTT bridge, security hardening.
-- **alpha/meshcore-bridge** has diverged significantly from main (~2,200 commits ahead,
-  ~100 behind as of 2026-02-22). Contains MeshCore 3-way routing and handler but lacks
+- **alpha/meshcore-bridge** has diverged significantly from main (~2,260 commits ahead,
+  0 behind as of 2026-02-25). Contains MeshCore 3-way routing and handler but lacks
   main's tactical module, contact mapping, and several utilities. These are parallel
   development tracks; convergence requires a dedicated reconciliation effort.
 - Feature branches use `claude/` prefix and merge via PR to the appropriate target branch.
@@ -99,13 +99,14 @@ src/
 
 ## Deployment Profiles
 
-MeshForge supports 5 deployment scenarios. Dependencies don't block your choice.
+MeshForge supports 6 deployment profiles. Dependencies don't block your choice.
 
 | Profile | Services Needed | Install | Use Case |
 |---------|----------------|---------|----------|
 | `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
 | `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
 | `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
+| `meshchat` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt` + MeshChat | LXMF messaging with web UI |
 | `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
 | `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
 

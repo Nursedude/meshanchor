@@ -20,11 +20,11 @@ Usage:
 
     # In UI panel (subscriber):
     def _on_message(event):
-        GLib.idle_add(self._add_to_message_list, event)
+        self._add_to_message_list(event)
 
     event_bus.subscribe('message', _on_message)
 
-    # Cleanup on panel destroy:
+    # Cleanup:
     event_bus.unsubscribe('message', _on_message)
 """
 
@@ -101,7 +101,6 @@ class EventBus:
     Thread-safe event bus for pub/sub messaging.
 
     Subscribers are called in a separate thread to avoid blocking the publisher.
-    For GTK UI updates, subscribers should use GLib.idle_add().
     """
 
     def __init__(self):
