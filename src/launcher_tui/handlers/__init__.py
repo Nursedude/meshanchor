@@ -101,7 +101,17 @@ def get_all_handlers() -> List[Type]:
         EmergencyModeHandler,
     ])
 
-    # Batch 5 — RNS handlers (5 sub-handlers + thin dispatcher)
+    # Batch 5 — topology, traffic inspector, tactical ops
+    from handlers.topology import TopologyHandler
+    from handlers.traffic_inspector import TrafficInspectorHandler
+    from handlers.tactical_ops import TacticalOpsHandler
+    handlers.extend([
+        TopologyHandler,
+        TrafficInspectorHandler,
+        TacticalOpsHandler,
+    ])
+
+    # Batch 6 — RNS handlers (5 sub-handlers + thin dispatcher)
     from handlers.rns_config import RNSConfigHandler
     from handlers.rns_diagnostics import RNSDiagnosticsHandler
     from handlers.rns_interfaces import RNSInterfacesHandler
