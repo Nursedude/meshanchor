@@ -958,7 +958,8 @@ class MeshForgeLauncher(
     def _mesh_networks_menu(self):
         """Mesh Networks - Meshtastic, RNS, AREDN."""
         _ORDERING = ["meshtastic", "meshcore", "rns", "gateway", "aredn",
-                      "messaging", "traffic", "mqtt", "favorites", "ham", "services"]
+                      "messaging", "traffic", "mqtt", "favorites", "ham", "services",
+                      "nomadnet", "meshchat"]
         while True:
             # Legacy items — feature-gated items built conditionally
             legacy = []
@@ -973,6 +974,9 @@ class MeshForgeLauncher(
             legacy.append(("aredn", "AREDN Mesh          AREDN integration"))
             legacy.append(("messaging", "Messaging           Send/receive messages"))
             legacy.append(("favorites", "Favorites           Manage favorite nodes"))
+            if self._feature_enabled("rns"):
+                legacy.append(("nomadnet", "NomadNet Client     RNS messaging"))
+                legacy.append(("meshchat", "MeshChat Client     RNS messaging"))
             choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
@@ -994,6 +998,8 @@ class MeshForgeLauncher(
                 "meshcore": ("MeshCore Radio", self._meshcore_menu),
                 "rns": ("RNS / Reticulum", self._rns_menu),
                 "gateway": ("Gateway Bridge", self._gateway_config_menu),
+                "nomadnet": ("NomadNet Client", self._nomadnet_menu),
+                "meshchat": ("MeshChat Client", self._meshchat_menu),
             }
             entry = dispatch.get(choice)
             if entry:
