@@ -89,7 +89,7 @@ class LogsHandler(BaseHandler):
                     proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                    proc.wait()
+                    proc.wait(timeout=5)
 
     def _view_live_meshtasticd(self):
         self._view_live_log(

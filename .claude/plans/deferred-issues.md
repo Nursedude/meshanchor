@@ -1,7 +1,7 @@
 # Deferred Issues — From Code Quality Review (2026-02-26)
 
 > Create these as GitHub issues manually. `gh` CLI not authenticated in this env.
-> **Updated**: 2026-02-27 — Issue 1 DONE, Issue 2 DONE, Issue 3 IN PROGRESS, + reliability hardening (pre-flight, log levels)
+> **Updated**: 2026-03-02 — All 3 issues COMPLETE. Session 3 consolidation finished.
 
 ---
 
@@ -27,28 +27,21 @@
 
 ---
 
-## Issue 3: Migrate TUI mixins to command registry pattern — IN PROGRESS
+## ~~Issue 3: Migrate TUI mixins to command registry pattern~~ COMPLETED
 
-**Labels**: refactor, architecture
+**Status**: DONE — Session 3 (2026-02-26 through 2026-03-02)
 
-`MeshForgeLauncher` inherits from 46 separate mixins (lines 115-161 in `launcher_tui/main.py`). Each is used exactly once. This is a god-class split by file, not true composition.
+**What was done**:
+- 49 mixins migrated to 60 self-contained handler files via Protocol + BaseHandler + TUIContext pattern
+- `main.py` reduced from 1,947 → 1,148 lines (41% reduction)
+- 8,776 lines of dead code removed (18 utils + 3 tests)
+- 9 files exceeding 1,500 lines split to comply with guideline
+- Logging consolidated (4 → 2 modules)
+- 36 pre-existing test failures resolved
+- Subprocess timeout hardening (MF004) verified across all handlers
+- `rns_diagnostics.py` split from 2,261 → 1,403 lines (3 modules)
 
-**Infrastructure**: `handler_protocol.py`, `handler_registry.py`, `handlers/` — proven and stable.
-
-**Progress** (2026-02-27):
-- Phase 1 pilot: 5 handlers (latency, classifier, amateur_radio, analytics, rf_tools)
-- Batch 1: 8 handlers (node_health, metrics, propagation, site_planner, sdr, link_quality, webhooks, network_tools)
-- Batch 2: 8 handlers (favorites, messaging, aredn, rnode, device_backup, logs, hardware, service_discovery)
-- Batch 3: 6 handlers registered (channel_config, gateway, radio_menu, settings, meshcore, updates)
-- **Total registered: 27 handlers**
-
-**Remaining**: ~24 mixins still in inheritance chain. Key blockers for full migration:
-- `meshtasticd_config_mixin.py` (2,016 lines) — needs splitting before conversion
-- `rns_menu_mixin.py` (1,498 lines) — composite of 4 sub-mixins, convert sub-mixins first
-
-**Approach**: Migrate to plugin-based command registry where each mixin becomes a standalone handler. Launcher dispatches by menu key, not method inheritance. Registry and mixins coexist during transition.
-
-**Effort**: ~2 days remaining for full migration.
+**Key PRs**: #988–#1000, #1012, #1014
 
 ---
 

@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-02-27
+> **Last Updated:** 2026-03-02
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -46,7 +46,7 @@
 ### Code Quality (from PR #976 audit — deferred items)
 - [ ] **Merge hardware/radio config pairs** — `hardware.py`+`hardware_config.py`, `radio.py`+`radio_config.py` overlap
 - [x] **Logging consolidation** — 9 `basicConfig()` calls replaced with `setup_logging()`, `logger.py` documented as installer-only
-- [ ] **Migrate TUI mixins → command registry** — 27/49 handlers registered; ~24 mixins remaining (see `deferred-issues.md`)
+- [x] **Migrate TUI mixins → command registry** — COMPLETE: 49 mixins → 60 handlers, main.py 1,947→1,148 lines (Session 3)
 - [ ] **Add actionable fix hints to error messages** — Replicate `cli/diagnose.py:192-197` pattern everywhere
 - [ ] **Add quick health-check CLI command** — One-liner system health check
 - [ ] **Clean `.claude/archive/`** — 200KB dead documentation weight
@@ -60,6 +60,17 @@
 ---
 
 ## Recently Completed
+
+### 2026-03-02: Session 3 — TUI Consolidation + Subprocess Timeouts (PRs #988-#1014)
+- [x] **Handler Registry Migration**: 49 mixins → 60 self-contained handlers (Batches 1-10)
+- [x] **Dead Code Removal**: 8,776 lines across 18 utils + 3 tests (PR #1012)
+- [x] **File Size Compliance**: All 9 oversized files split under 1,500-line guideline (PR #1014)
+- [x] **Logging Consolidation**: 4 modules → 2 (logging_config.py canonical)
+- [x] **Test Fixes**: 36 pre-existing failures resolved (PR #1000)
+- [x] **Subprocess Timeout Hardening**: MF004 verified across all handler files (PR #999)
+- [x] **rns_diagnostics Split**: 2,261 → 1,403 lines (transport + identity + sniffer modules)
+- [x] **Daemon Loop Fixes**: 5 time.sleep → _stop_event.wait conversions
+- [x] **main.py Reduction**: 1,947 → 1,148 lines (41% reduction)
 
 ### 2026-02-26: Code Quality Audit & BaseHandler Extraction (PRs #969-#977)
 - [x] **PR #976**: Comprehensive code quality audit — 14 prioritized action items
@@ -92,22 +103,23 @@
 
 ## Technical Debt
 
-**Threshold: 1,500 lines max per file** (updated 2026-02-26)
+**Threshold: 1,500 lines max per file** (updated 2026-03-02)
+
+All files now under threshold. Largest files:
 
 | File | Lines | Status |
 |------|-------|--------|
-| launcher_tui/main.py | 2,022 | OVER — 46 mixins, command registry migration planned |
-| meshtasticd_config_mixin.py | 2,016 | OVER — extraction candidate (43 methods) |
-| knowledge_content.py | 1,993 | OK — content file by design |
-| rns_bridge.py | 1,599 | OVER — MeshCoreBridgeMixin + MessageRouter + gateway_cli already extracted |
-| service_check.py | 1,573 | OVER — single source of truth, monitor |
-| map_data_collector.py | 1,568 | OVER — monitor |
-| map_http_handler.py | 1,557 | OVER — monitor |
-| prometheus_exporter.py | 1,521 | OVER — grew after metrics_export split |
-| nomadnet_client_mixin.py | 1,505 | BORDERLINE — monitor |
-| commands/rns.py | 1,505 | BORDERLINE — monitor |
-| rns_menu_mixin.py | 1,498 | BORDERLINE — monitor |
-| service_menu_mixin.py | 1,467 | OK — under threshold |
+| knowledge_content.py | 1,993 | OK — content/data file by design |
+| meshtastic_protobuf_client.py | 1,433 | OK |
+| service_check.py | 1,410 | OK — SSOT, extracted iptables module |
+| map_http_handler.py | 1,404 | OK — extracted proxy module |
+| handlers/rns_diagnostics.py | 1,403 | OK — split from 2,261 into 3 modules |
+| handlers/service_menu.py | 1,370 | OK |
+
+Session 3 splits: rns_diagnostics (2,261→1,403), meshtasticd_config (1,497→516+templates),
+rns_bridge (extracted lifecycle), service_check (extracted iptables), map_data_collector
+(extracted RNS collector), map_http_handler (extracted proxy), prometheus_exporter
+(extracted server), commands/rns.py (extracted templates), nomadnet (extracted RNS checks)
 
 ---
 
