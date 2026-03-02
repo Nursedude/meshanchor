@@ -189,6 +189,37 @@ def get_meshtastic_cli_version() -> Optional[str]:
     return None
 
 
+def get_meshtastic_lib_version() -> Optional[str]:
+    """Get installed meshtastic Python library version.
+
+    This checks the pip-installed library (used for protobuf definitions),
+    which is separate from the meshtastic CLI (typically installed via pipx).
+    """
+    try:
+        import importlib.metadata
+        return importlib.metadata.version('meshtastic')
+    except Exception:
+        pass
+
+    # Fallback: check via pip show
+    try:
+        import sys
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'show', 'meshtastic'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if line.startswith('Version:'):
+                    return line.split(':', 1)[1].strip()
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        logger.debug(f"Error getting meshtastic library version: {e}")
+
+    return None
+
+
 def get_node_firmware_version() -> Optional[str]:
     """Get firmware version from connected node via meshtastic CLI"""
     try:
@@ -343,6 +374,16 @@ def check_all_versions() -> Dict[str, VersionInfo]:
     cli.update_command = 'pipx upgrade meshtastic'
     cli.install_command = 'pipx install meshtastic'
     results['cli'] = cli
+
+    # Meshtastic Python Library (protobuf definitions)
+    lib = VersionInfo(name='Meshtastic Library')
+    lib.installed = get_meshtastic_lib_version()
+    lib.latest = get_latest_meshtastic_cli_version()  # Same PyPI package
+    if lib.installed and lib.latest:
+        lib.update_available = compare_versions(lib.installed, lib.latest)
+    lib.update_command = 'pip3 install --upgrade meshtastic'
+    lib.install_command = 'pip3 install meshtastic'
+    results['meshtastic_lib'] = lib
 
     # Node Firmware
     firmware = VersionInfo(name='Node Firmware')
