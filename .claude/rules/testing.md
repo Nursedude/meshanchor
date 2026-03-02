@@ -22,7 +22,7 @@ python3 -m py_compile src/**/*.py
 ## Test Locations
 
 ```
-tests/                             # 2,547 tests across 70 files
+tests/                             # 2,459 tests across 67 files
 ├── conftest.py                    # Shared fixtures (mock_meshtastic, mock_rns, no_network)
 ├── test_rns_bridge.py             # Gateway bridge (140 tests)
 ├── test_rf.py                     # RF calculations (107 tests)

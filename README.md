@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2196%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2459%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -258,7 +258,7 @@ Main Menu (MeshForge NOC)
 |---------|--------|-------|
 | MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
 | Defense-in-depth TUI | Done (v0.5.2) | 46 mixin `_safe_call` protection |
-| Gateway-essential test suite | Done (v0.5.3) | 2,196 tests across 70 files |
+| Gateway-essential test suite | Done (v0.5.3) | 2,459 tests across 67 files |
 | First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
 | Network topology visualization | Done | D3.js + ASCII modes |
 | Node health & predictive maintenance | Done | Battery forecasting, signal trending |
@@ -830,7 +830,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**2,196 tests** across 70 test files:
+**2,459 tests** across 67 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -851,7 +851,7 @@ connection (port 4403):
 | `test_startup_health.py` | 20 | Startup health checks, service verification |
 | `test_compliance.py` | 13 | HAM compliance validation, encryption modes |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,196 across 70 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection, RF engineering, deployment profiles, handler registry, service pre-flight) were added with test coverage.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,459 across 67 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection, RF engineering, deployment profiles, handler registry, service pre-flight, contact mapping, tactical models) were added with test coverage.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -861,7 +861,7 @@ python3 -m pytest tests/test_rns_bridge.py -v  # Gateway bridge tests only
 
 ### Auto-Review
 
-Auto-review system scans 243 files for security, reliability, and performance issues:
+Auto-review system scans 285 files for security, reliability, and performance issues:
 
 ```bash
 cd src && python3 -c "
@@ -880,7 +880,7 @@ print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanne
 | MF002 | No `shell=True` in subprocess calls | Active monitoring |
 | MF003 | No bare `except:` — specify exception types | Active monitoring |
 | MF004 | All subprocess calls need `timeout` parameter | Active monitoring |
-| MF005 | GLib.idle_add for thread-safe UI updates | Active monitoring |
+| MF005 | *(Removed)* — was GLib.idle_add for GTK4 thread safety (GTK4 removed in v0.5.x) | Retired |
 | MF006 | No `safe_import` for first-party modules — use direct imports | Active monitoring |
 | MF007 | No direct `TCPInterface()` — use connection manager | Active monitoring |
 | MF008 | No raw `systemctl` for service state — use `service_check` | Active monitoring |
