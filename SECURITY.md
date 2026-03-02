@@ -25,7 +25,7 @@ MeshForge implements the following security measures as of v0.5.4-beta:
 
 ### Coding Standards (Linter-Enforced)
 
-MeshForge's custom linter (`scripts/lint.py`) enforces six security rules:
+MeshForge's custom linter (`scripts/lint.py`) enforces ten security rules (MF001-MF010):
 
 | Rule | Description | Severity |
 |------|-------------|----------|
@@ -33,8 +33,12 @@ MeshForge's custom linter (`scripts/lint.py`) enforces six security rules:
 | **MF002** | No `shell=True` in subprocess calls — use argument lists | Error |
 | **MF003** | No bare `except:` — always specify exception type | Warning |
 | **MF004** | All `subprocess.run()`/`call()` must include `timeout` | Warning |
-| **MF005** | UI updates from threads must use proper dispatch | Info |
+| **MF005** | *(Removed)* — was GTK4 thread dispatch (GTK4 removed in v0.5.x) | Retired |
 | **MF006** | No `safe_import()` for first-party modules — use direct imports | Error |
+| **MF007** | No direct `TCPInterface()` — use connection manager or acquire lock | Error |
+| **MF008** | No raw `systemctl` for service state — use `service_check` helpers | Warning |
+| **MF009** | `RNS.Reticulum()` must include `configdir=` parameter | Error |
+| **MF010** | No `time.sleep()` in daemon loops — use `_stop_event.wait()` | Warning |
 
 ### Command Injection Prevention
 
@@ -81,6 +85,27 @@ All user input is validated before use:
 
 ## Security Audit History
 
+### v0.5.4-beta (2026-03-02) - Routine Security Review
+
+Full codebase audit (285 Python files) using automated linter (`scripts/lint.py --all`), test suite, and manual analysis.
+
+| Category | Result |
+|----------|--------|
+| Linter errors | 0 |
+| Linter warnings | 7 (all MF010 — `time.sleep()` in daemon loops) |
+| Tests passing | 2,459 of 2,474 (17 skipped) across 67 files |
+| `shell=True` / `eval()` / `exec()` | None |
+| Hardcoded secrets | None |
+| SQL injection vectors | None (parameterized queries throughout) |
+| `Path.home()` violations | None |
+| Installation paths | All 6 deployment profiles verified |
+
+**MF010 locations** (non-critical, graceful shutdown improvement):
+- `src/launcher_tui/handlers/rns_diagnostics.py` (4 instances)
+- `src/launcher_tui/handlers/rns_monitor.py` (1 instance)
+- `src/utils/message_listener.py` (1 instance)
+- `src/utils/telemetry_poller.py` (1 instance)
+
 ### v0.5.4-beta (2026-02-21) - Comprehensive Security Review
 
 Full codebase audit (274 Python files, 153K lines) using automated linter, auto-review system, and manual grep analysis across all OWASP categories.
@@ -92,7 +117,7 @@ Full codebase audit (274 Python files, 153K lines) using automated linter, auto-
 | SECURITY.md version/feature drift | High (docs) | Fixed |
 
 **Clean audit results:**
-- 0 linter violations (MF001-MF006)
+- 0 linter violations (MF001-MF006; MF007-MF010 not yet implemented at time of audit)
 - No `shell=True`, `os.system()`, `eval()`, `exec()`, `pickle.loads()`
 - No hardcoded secrets or API keys
 - All YAML uses `safe_load`, all SQL uses parameterized queries
