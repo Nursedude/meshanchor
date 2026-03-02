@@ -88,6 +88,7 @@ class KnowledgeBase:
 
         # Import and load knowledge content
         from . import knowledge_content as content
+        from . import knowledge_content_extended as extended
 
         content.load_rf_knowledge(self)
         content.load_meshtastic_knowledge(self)
@@ -96,9 +97,9 @@ class KnowledgeBase:
         content.load_troubleshooting_guides(self)
         content.load_best_practices(self)
         content.load_rns_troubleshooting(self)
-        content.load_aredn_knowledge(self)
-        content.load_rf_fundamentals_extended(self)
-        content.load_mqtt_knowledge(self)
+        extended.load_aredn_knowledge(self)
+        extended.load_rf_fundamentals_extended(self)
+        extended.load_mqtt_knowledge(self)
 
         # Build index
         self._build_keyword_index()
