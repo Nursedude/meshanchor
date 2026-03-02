@@ -15,9 +15,8 @@
 -r requirements/mqtt.txt
 -r requirements/monitoring.txt
 
-# Meshtastic CLI is used for radio configuration (installed via pipx)
-# The meshtastic Python library is only needed for legacy TCP bridge mode
-# meshtastic>=2.3.0  # Optional: only for bridge_mode="message_bridge"
+# Meshtastic CLI for radio configuration is installed separately via pipx.
+# The meshtastic Python library (protobuf definitions) is in requirements/core.txt.
 
 # MeshCore companion radio support (optional, Python 3.10+)
 # Required for MeshCore bridge mode (meshcore_bridge / tri_bridge)

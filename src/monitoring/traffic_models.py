@@ -65,19 +65,26 @@ class HopState(Enum):
     FAILED = "failed"        # Relay failed
 
 
-# Meshtastic port numbers (from protobufs)
+# Meshtastic port numbers (from portnums_pb2, synced with meshtastic 2.7.x)
 MESHTASTIC_PORTS = {
     0: "UNKNOWN",
     1: "TEXT_MESSAGE",
-    3: "REMOTE_HARDWARE",
-    4: "POSITION",
-    5: "NODEINFO",
-    6: "ROUTING",
-    7: "ADMIN",
-    8: "TEXT_MESSAGE_COMPRESSED",
+    2: "REMOTE_HARDWARE",
+    3: "POSITION",
+    4: "NODEINFO",
+    5: "ROUTING",
+    6: "ADMIN",
+    7: "TEXT_MESSAGE_COMPRESSED",
+    8: "WAYPOINT",
+    9: "AUDIO",
+    10: "DETECTION_SENSOR",
+    11: "ALERT",
+    12: "KEY_VERIFICATION",
     32: "REPLY",
     33: "IP_TUNNEL",
     34: "PAXCOUNTER",
+    35: "STORE_FORWARD_PLUSPLUS",
+    36: "NODE_STATUS",
     64: "SERIAL",
     65: "STORE_FORWARD",
     66: "RANGE_TEST",
@@ -88,6 +95,9 @@ MESHTASTIC_PORTS = {
     71: "NEIGHBORINFO",
     72: "ATAK",
     73: "MAP_REPORT",
+    74: "POWERSTRESS",
+    76: "RETICULUM_TUNNEL",
+    77: "CAYENNE",
     256: "PRIVATE",
     257: "ATAK_FORWARDER",
 }
