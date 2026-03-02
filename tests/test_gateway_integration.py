@@ -876,7 +876,7 @@ class TestRNSConnectionStability:
 
         bridge = RNSMeshtasticBridge(config=config)
 
-        with patch('gateway.rns_bridge._HAS_RNS', False):
+        with patch('gateway._rns_bridge_connection._HAS_RNS', False):
             bridge._connect_rns()
 
         assert bridge._connected_rns is False
@@ -895,11 +895,13 @@ class TestRNSConnectionStability:
         mock_rns = MagicMock()
         mock_lxmf = MagicMock()
 
-        with patch('gateway.rns_bridge._HAS_RNS', True), \
-             patch('gateway.rns_bridge._HAS_LXMF', True), \
-             patch('gateway.rns_bridge._RNS_mod', mock_rns), \
-             patch('gateway.rns_bridge._LXMF_mod', mock_lxmf):
+        with patch('gateway._rns_bridge_connection._HAS_RNS', True), \
+             patch('gateway._rns_bridge_connection._HAS_LXMF', True), \
+             patch('gateway._rns_bridge_connection._RNS_mod', mock_rns), \
+             patch('gateway._rns_bridge_connection._LXMF_mod', mock_lxmf), \
+             patch('gateway._rns_bridge_connection.check_service') as mock_svc:
 
+            mock_svc.return_value = MagicMock(available=True)
             bridge._connect_rns()
 
         assert mock_lxmf.LXMRouter.called
@@ -921,10 +923,10 @@ class TestRNSConnectionStability:
         mock_rns = MagicMock()
         mock_rns.Reticulum.return_value = MagicMock()
 
-        with patch('gateway.rns_bridge._HAS_RNS', True), \
-             patch('gateway.rns_bridge._RNS_mod', mock_rns), \
-             patch('gateway.rns_bridge.ReticulumPaths') as mock_paths, \
-             patch('gateway.rns_bridge.detect_rnsd_config_drift') as mock_drift, \
+        with patch('gateway._rns_bridge_connection._HAS_RNS', True), \
+             patch('gateway._rns_bridge_connection._RNS_mod', mock_rns), \
+             patch('gateway._rns_bridge_connection.ReticulumPaths') as mock_paths, \
+             patch('gateway._rns_bridge_connection.detect_rnsd_config_drift') as mock_drift, \
              patch('os.geteuid', return_value=0):
 
             mock_paths.ensure_system_dirs.return_value = True

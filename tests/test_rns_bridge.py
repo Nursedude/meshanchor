@@ -1226,10 +1226,11 @@ class TestRNSConnectionFlow:
 
         mock_lxmf.LXMRouter = lxmf_router_init
 
-        with patch('gateway.rns_bridge._RNS_mod', mock_rns), \
-             patch('gateway.rns_bridge._LXMF_mod', mock_lxmf), \
-             patch('gateway.rns_bridge._HAS_RNS', True), \
-             patch('gateway.rns_bridge._HAS_LXMF', True):
+        with patch('gateway._rns_bridge_connection._RNS_mod', mock_rns), \
+             patch('gateway._rns_bridge_connection._LXMF_mod', mock_lxmf), \
+             patch('gateway._rns_bridge_connection._HAS_RNS', True), \
+             patch('gateway._rns_bridge_connection._HAS_LXMF', True), \
+             patch('gateway._rns_bridge_connection.check_service', return_value=MagicMock(available=True)):
             # Run from background thread to trigger suppression
             errors = []
             def _run():
