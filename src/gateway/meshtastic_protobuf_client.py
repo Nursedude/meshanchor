@@ -720,6 +720,15 @@ class MeshtasticProtobufClient:
                 'portnum': 'ADMIN_APP',
             })
 
+        elif hasattr(portnums_pb2.PortNum, 'RETICULUM_TUNNEL_APP') and \
+                portnum == portnums_pb2.PortNum.RETICULUM_TUNNEL_APP:
+            self._notify(ProtobufEventType.PACKET_RECEIVED, {
+                'packet': packet,
+                'portnum': 'RETICULUM_TUNNEL_APP',
+                'from_node': from_node,
+                'is_rns_tunnel': True,
+            })
+
         else:
             self._notify(ProtobufEventType.PACKET_RECEIVED, {
                 'packet': packet,

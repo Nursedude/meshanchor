@@ -54,6 +54,7 @@ class UpdatesHandler(BaseHandler):
                 ("meshforge", "Update MeshForge"),
                 ("meshtasticd", "Update meshtasticd"),
                 ("cli", "Update Meshtastic CLI"),
+                ("meshtastic-lib", "Update Meshtastic Library"),
                 ("firmware", "Update Node Firmware (Info)"),
                 ("back", "Back"),
             ]
@@ -73,6 +74,7 @@ class UpdatesHandler(BaseHandler):
                 "meshforge": ("Update MeshForge", self._update_meshforge),
                 "meshtasticd": ("Update meshtasticd", self._update_meshtasticd),
                 "cli": ("Update CLI", self._update_cli),
+                "meshtastic-lib": ("Update Meshtastic Lib", self._update_meshtastic_lib),
                 "firmware": ("Firmware Info", self._firmware_info),
             }
             entry = dispatch.get(choice)
@@ -278,6 +280,147 @@ class UpdatesHandler(BaseHandler):
             self.ctx.dialog.msgbox("Update Complete", "Meshtastic CLI updated successfully!")
         else:
             self.ctx.dialog.msgbox("Update Failed", f"Failed to update CLI.\n\n{msg}")
+
+    def _update_meshtastic_lib(self):
+        """Update Meshtastic Python library (protobuf definitions)."""
+        try:
+            versions = _check_all_versions()
+            info = versions.get('meshtastic_lib')
+        except Exception as e:
+            self.ctx.dialog.msgbox("Error", f"Failed to check version:\n{e}")
+            return
+
+        if not info:
+            self.ctx.dialog.msgbox("Error", "Could not get library version info.")
+            return
+
+        if not info.installed:
+            if self.ctx.dialog.yesno(
+                "Install Meshtastic Library",
+                "Meshtastic Python library is not installed.\n\n"
+                "This is required for the protobuf gateway client.\n\n"
+                "Install now?"
+            ):
+                self.ctx.dialog.infobox(
+                    "Installing",
+                    "Installing Meshtastic Python library..."
+                )
+                success, msg = self._pip_install_meshtastic()
+                if success:
+                    self.ctx.dialog.msgbox(
+                        "Installed",
+                        "Meshtastic library installed successfully!"
+                    )
+                else:
+                    self.ctx.dialog.msgbox("Failed", f"Installation failed:\n{msg}")
+            return
+
+        if not info.update_available:
+            self.ctx.dialog.msgbox(
+                "No Update",
+                f"Meshtastic library is at the latest version.\n\n"
+                f"Installed: {info.installed}\n"
+                f"Latest: {info.latest}"
+            )
+            return
+
+        # Check for rnsd dual-install scenario
+        from pathlib import Path
+        install_note = ""
+        rnsd_interface = Path('/etc/reticulum/interfaces/Meshtastic_Interface.py')
+        if rnsd_interface.exists():
+            install_note = (
+                "\n\nNote: Meshtastic_Interface.py detected.\n"
+                "Will also install system-wide for rnsd compatibility."
+            )
+
+        if not self.ctx.dialog.yesno(
+            "Update Meshtastic Library",
+            f"Update library from {info.installed} to {info.latest}?\n\n"
+            f"This updates the protobuf definitions used by\n"
+            f"the gateway bridge.{install_note}"
+        ):
+            return
+
+        self.ctx.dialog.infobox(
+            "Updating Library",
+            "Upgrading Meshtastic Python library..."
+        )
+        success, msg = self._pip_install_meshtastic(upgrade=True)
+
+        if success:
+            self.ctx.dialog.msgbox(
+                "Update Complete",
+                "Meshtastic library updated successfully!\n\n"
+                "New protobuf definitions are now available.\n"
+                "Restart the gateway bridge to use them."
+            )
+        else:
+            self.ctx.dialog.msgbox(
+                "Update Failed",
+                f"Failed to update library.\n\n{msg}"
+            )
+
+    def _pip_install_meshtastic(self, upgrade: bool = False) -> Tuple[bool, str]:
+        """Install or upgrade the meshtastic Python library.
+
+        Handles venv vs system pip and dual-install for rnsd (Issue #24).
+        """
+        from pathlib import Path
+
+        meshforge_dir = Path(__file__).parent.parent.parent.parent
+        venv_pip = meshforge_dir / 'venv' / 'bin' / 'pip'
+        no_venv_marker = meshforge_dir / '.no-venv'
+
+        if venv_pip.exists() and not no_venv_marker.exists():
+            pip_cmd = [str(venv_pip), 'install']
+        else:
+            pip_cmd = ['pip3', 'install', '--break-system-packages']
+
+        if upgrade:
+            pip_cmd.append('--upgrade')
+        pip_cmd.append('meshtastic')
+
+        try:
+            result = subprocess.run(
+                pip_cmd,
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+
+            if result.returncode != 0:
+                return False, result.stderr or result.stdout or f"Exit code: {result.returncode}"
+
+            # Dual-install for rnsd (Issue #24)
+            rnsd_interface = Path('/etc/reticulum/interfaces/Meshtastic_Interface.py')
+            if rnsd_interface.exists():
+                self.ctx.dialog.infobox(
+                    "System Install",
+                    "Also installing system-wide for rnsd..."
+                )
+                sudo_cmd = ['sudo', 'pip3', 'install',
+                            '--break-system-packages', '--ignore-installed']
+                if upgrade:
+                    sudo_cmd.append('--upgrade')
+                sudo_cmd.append('meshtastic')
+
+                try:
+                    subprocess.run(
+                        sudo_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                except Exception as e:
+                    logger.warning("System-wide meshtastic install error: %s", e)
+
+            return True, result.stdout
+
+        except subprocess.TimeoutExpired:
+            return False, "Installation timed out after 2 minutes"
+        except Exception as e:
+            return False, str(e)
 
     def _firmware_info(self):
         """Show firmware update information."""
