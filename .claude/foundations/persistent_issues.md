@@ -236,34 +236,41 @@ def test_rns(self): ...  # Now _HAS_RNS is True
 ### Symptom
 Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
 
-### Current Status (2026-02-24, refreshed)
+### Current Status (2026-03-02, refreshed)
 
 **Python files over 1,500 lines:**
 
 | File | Lines | Status | Notes |
 |------|-------|--------|-------|
 | `src/utils/knowledge_content.py` | 1,993 | OK | Content file by design - no split needed |
-| `src/gateway/rns_bridge.py` | 1,599 | MONITOR | MeshCoreBridgeMixin + MessageRouter + gateway_cli extracted |
-| `src/utils/prometheus_exporter.py` | 1,521 | MONITOR | Grew after metrics_export split |
-| `src/utils/service_check.py` | 1,515 | MONITOR | Growing — watch for extraction candidates |
-| `src/launcher_tui/nomadnet_client_mixin.py` | 1,505 | MONITOR | Stable |
-| `src/commands/rns.py` | 1,505 | MONITOR | Stable |
 
-**Under threshold (previously tracked):**
+All other Python files are under 1,500 lines.
+
+**Top files by line count (all under 1,500):**
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `src/launcher_tui/rns_menu_mixin.py` | 1,498 | Grew slightly but still under 1,500 |
-| `src/launcher_tui/service_menu_mixin.py` | 1,487 | Dropped below threshold |
-| `src/utils/map_http_handler.py` | 1,475 | Under threshold |
-| `src/utils/map_data_collector.py` | 1,475 | Under threshold |
-| `src/launcher_tui/main.py` | 1,463 | Trimmed 2026-02-24: export functions → topology_mixin |
-| `src/utils/config_api.py` | 1,316 | Well under threshold |
+| `src/gateway/meshtastic_protobuf_client.py` | 1,433 | Monitor |
+| `src/utils/service_check.py` | 1,410 | Extracted _service_iptables.py |
+| `src/utils/map_http_handler.py` | 1,404 | Extracted _map_meshtastic_proxy.py |
+| `src/utils/prometheus_exporter.py` | 1,399 | Extracted metrics_server.py |
+| `src/gateway/rns_bridge.py` | 1,349 | Extracted _rns_bridge_connection.py |
+| `src/utils/map_data_collector.py` | 1,320 | Extracted _map_collector_rns.py |
+| `src/launcher_tui/handlers/nomadnet.py` | 1,315 | Extracted _nomadnet_rns_checks.py |
+| `src/commands/rns.py` | 1,306 | Extracted rns_templates.py |
 
 **Previously over threshold (NOW RESOLVED):**
 
 | File | Was | Now | Resolution |
 |------|-----|-----|------------|
+| `src/launcher_tui/handlers/nomadnet.py` | 1,610 | 1,315 | Extracted _nomadnet_rns_checks.py (2026-03-02) |
+| `src/gateway/rns_bridge.py` | 1,599 | 1,349 | Extracted _rns_bridge_connection.py (2026-03-02) |
+| `src/utils/service_check.py` | 1,573 | 1,410 | Extracted _service_iptables.py (2026-03-02) |
+| `src/utils/map_data_collector.py` | 1,568 | 1,320 | Extracted _map_collector_rns.py (2026-03-02) |
+| `src/utils/map_http_handler.py` | 1,557 | 1,404 | Extracted _map_meshtastic_proxy.py (2026-03-02) |
+| `src/utils/prometheus_exporter.py` | 1,523 | 1,399 | Extracted metrics_server.py (2026-03-02) |
+| `src/commands/rns.py` | 1,505 | 1,306 | Extracted rns_templates.py (2026-03-02) |
+| `src/core/meshtasticd_config.py` | 1,497 | 516 | Extracted meshtasticd_templates.py (2026-03-02) |
 | `src/monitoring/traffic_inspector.py` | 2,194 | 442 | Extracted to packet_dissectors, traffic_models, traffic_storage |
 | `src/gateway/node_tracker.py` | 1,808 | 989 | Extracted to node_models.py |
 | `src/launcher_tui/main.py` | 1,799 | 1,489 | Extracted network_tools, web_client, data_path mixins; removed dead code |
@@ -283,17 +290,21 @@ Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to n
 
 ### Remaining Extraction Candidates
 
-1. **rns_bridge.py** (1,599 lines) - Over threshold
-   - Potential: Extract `meshtastic_handler.py` (Meshtastic connection/send/receive) ~400 lines
-   - Only split if file grows further
-2. **prometheus_exporter.py** (1,521 lines) - Over threshold after metrics_export split
-   - Monitor for now; split if it grows
-3. **service_check.py** (1,515 lines) - Growing, new to tracking
-   - Monitor for now
+No files currently over the 1,500-line threshold. Monitor files approaching 1,400 lines.
 
-### Completed Extractions (2026-02-06)
+### Completed Extractions (2026-03-02)
 
-All previously tracked files are now under 1,500 lines:
+8 files split in Session 2 (2026-03-02):
+- meshtasticd_config.py: 1,497 → 516 (meshtasticd_templates.py — RadioType, RadioConfig, RADIO_TEMPLATES)
+- rns.py: 1,505 → 1,306 (rns_templates.py — interface template functions)
+- prometheus_exporter.py: 1,523 → 1,399 (metrics_server.py — MetricsServer class)
+- map_http_handler.py: 1,557 → 1,404 (_map_meshtastic_proxy.py — MeshtasticProxyMixin)
+- map_data_collector.py: 1,568 → 1,320 (_map_collector_rns.py — RNSDataCollectorMixin)
+- service_check.py: 1,573 → 1,410 (_service_iptables.py — iptables functions)
+- rns_bridge.py: 1,599 → 1,349 (_rns_bridge_connection.py — RNSConnectionMixin)
+- nomadnet.py: 1,610 → 1,315 (_nomadnet_rns_checks.py — NomadNetRNSChecksMixin)
+
+Previous extractions (2026-02-06):
 - traffic_inspector.py: 2,194 → 442 (split to 4 modules)
 - main.py: 1,799 → 1,489 (43 mixins extracted, dead code removed)
 - node_tracker.py: 1,808 → 989 (node_models.py extracted)
