@@ -260,7 +260,8 @@ class MessageListener:
             else:
                 # Wait for async connection
                 for _ in range(10):
-                    time.sleep(0.5)
+                    if self._stop_event.wait(0.5):
+                        return  # Shutdown requested
                     if self._mqtt_subscriber.is_connected():
                         self._status.state = CONNECTED
                         self._status.connected_since = datetime.now()
