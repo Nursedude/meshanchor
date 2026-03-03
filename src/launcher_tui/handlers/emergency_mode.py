@@ -326,7 +326,9 @@ class EmergencyModeHandler(BaseHandler):
                     print("TIMEOUT")
 
                 print(f"  Next beacon in 60s (Ctrl+C to stop)...")
-                time.sleep(60)
+                # Poll every 1s so Ctrl+C is responsive (was 60s sleep)
+                for _ in range(60):
+                    time.sleep(1)
 
         except KeyboardInterrupt:
             print(f"\n\nSOS Beacon stopped after {count} transmission(s).")
