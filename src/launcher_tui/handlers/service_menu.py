@@ -188,9 +188,14 @@ class ServiceMenuHandler(BaseHandler):
                     print("  rnsd started via systemctl.")
                 else:
                     start_service('rnsd')
-                time.sleep(2)
-                status = check_service('rnsd')
-                if status.available:
+                # Poll for rnsd readiness instead of fixed 2s sleep
+                status = None
+                for _ in range(10):
+                    time.sleep(0.5)
+                    status = check_service('rnsd')
+                    if status.available:
+                        break
+                if status and status.available:
                     print("  rnsd is now running.\n")
                 else:
                     print(f"  Warning: {status.message}\n")
@@ -261,10 +266,16 @@ class ServiceMenuHandler(BaseHandler):
             )
             log_file.close()
 
+            # Poll for bridge startup instead of fixed 3s sleep
             import time
-            time.sleep(3)
+            bridge_up = False
+            for _ in range(6):
+                time.sleep(0.5)
+                if self._is_bridge_running():
+                    bridge_up = True
+                    break
 
-            if self._is_bridge_running():
+            if bridge_up:
                 self.ctx.dialog.msgbox("Started",
                     "Gateway bridge started in background.\n\n"
                     f"Logs: {log_path}\n\n"
