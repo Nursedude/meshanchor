@@ -137,6 +137,73 @@ def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[Confi
         )
     return None
 
+
+def validate_log_level(level: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate that log_level is a standard Python logging level."""
+    valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    if level.upper() not in valid_levels:
+        return ConfigValidationError(
+            field_name, f"Invalid log level '{level}'. Valid: {valid_levels}")
+    return None
+
+
+def validate_channel(channel: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate Meshtastic channel index (0-7)."""
+    if not 0 <= channel <= 7:
+        return ConfigValidationError(
+            field_name, f"Channel {channel} out of range (0-7)")
+    return None
+
+
+def validate_baud_rate(baud: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate serial baud rate is a standard value."""
+    standard_rates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+    if baud not in standard_rates:
+        return ConfigValidationError(
+            field_name,
+            f"Non-standard baud rate {baud}. Standard: {standard_rates}",
+            severity="warning"
+        )
+    return None
+
+
+def validate_position_precision(precision: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate telemetry position precision (decimal places)."""
+    if not 0 <= precision <= 10:
+        return ConfigValidationError(
+            field_name, f"Position precision {precision} out of range (0-10)")
+    return None
+
+
+def validate_update_interval(interval: int, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate telemetry update interval is reasonable."""
+    if interval < 10:
+        return ConfigValidationError(
+            field_name,
+            f"Update interval {interval}s is very short (min recommended: 10s)",
+            severity="warning"
+        )
+    if interval > 86400:
+        return ConfigValidationError(
+            field_name,
+            f"Update interval {interval}s exceeds 24 hours",
+            severity="warning"
+        )
+    return None
+
+
+def validate_hostname_config(host: str, field_name: str) -> Optional[ConfigValidationError]:
+    """Validate hostname using shared validator from utils.validation."""
+    from utils.validation import validate_hostname as _validate_host
+    if not host:
+        return ConfigValidationError(
+            field_name, "Hostname is empty", severity="warning")
+    if not _validate_host(host):
+        return ConfigValidationError(
+            field_name, f"Invalid hostname/IP: '{host}'")
+    return None
+
+
 @dataclass
 class MeshtasticConfig:
     """Meshtastic connection configuration"""
@@ -625,6 +692,32 @@ class GatewayConfig:
         if err:
             errors.append(err)
 
+        err = validate_channel(self.meshtastic.channel, "meshtastic.channel")
+        if err:
+            errors.append(err)
+
+        # Validate meshtastic MQTT sub-config when enabled
+        if self.meshtastic.use_mqtt:
+            err = validate_port(self.meshtastic.mqtt_port, "meshtastic.mqtt_port")
+            if err:
+                errors.append(err)
+
+        # Validate log level
+        err = validate_log_level(self.log_level, "log_level")
+        if err:
+            errors.append(err)
+
+        # Validate telemetry config
+        err = validate_position_precision(
+            self.telemetry.position_precision, "telemetry.position_precision")
+        if err:
+            errors.append(err)
+
+        err = validate_update_interval(
+            self.telemetry.update_interval, "telemetry.update_interval")
+        if err:
+            errors.append(err)
+
         # Validate RNS transport config
         err = validate_data_speed(self.rns_transport.data_speed, "rns_transport.data_speed")
         if err:
@@ -675,6 +768,35 @@ class GatewayConfig:
             err = validate_regex(self.mesh_bridge.exclude_filter, "mesh_bridge.exclude_filter")
             if err:
                 errors.append(err)
+
+        # Mode-specific: mqtt_bridge
+        if self.bridge_mode == "mqtt_bridge":
+            err = validate_port(self.mqtt_bridge.port, "mqtt_bridge.port")
+            if err:
+                errors.append(err)
+
+            err = validate_hostname_config(
+                self.mqtt_bridge.broker, "mqtt_bridge.broker")
+            if err:
+                errors.append(err)
+
+        # Mode-specific: meshcore_bridge or tri_bridge
+        if self.bridge_mode in ("meshcore_bridge", "tri_bridge"):
+            err = validate_meshcore_connection(
+                self.meshcore.connection_type, "meshcore.connection_type")
+            if err:
+                errors.append(err)
+
+            if self.meshcore.connection_type == "tcp":
+                err = validate_port(self.meshcore.tcp_port, "meshcore.tcp_port")
+                if err:
+                    errors.append(err)
+
+            if self.meshcore.connection_type == "serial":
+                err = validate_baud_rate(
+                    self.meshcore.baud_rate, "meshcore.baud_rate")
+                if err:
+                    errors.append(err)
 
         # Validate routing rules
         for i, rule in enumerate(self.routing_rules):
