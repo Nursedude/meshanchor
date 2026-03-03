@@ -49,7 +49,12 @@ from .meshtastic_protobuf_ops import (
     parse_traceroute,
 )
 
+from .circuit_breaker import create_service_registry as _create_cb_registry
+
 logger = logging.getLogger(__name__)
+
+# Per-host:port circuit breaker for stateless TX
+_protobuf_circuit = _create_cb_registry("meshtastic_protobuf", failure_threshold=5, recovery_timeout=60.0)
 
 # Protobuf imports are deferred to avoid hard dependency at module level
 _admin_pb2, _config_pb2, _mesh_pb2, _module_config_pb2, _portnums_pb2, _HAS_PB2 = safe_import(
@@ -135,6 +140,12 @@ def send_text_direct(
         logger.debug("send_text_direct: protobuf not available")
         return False
 
+    # Circuit breaker — stop hammering a downed meshtasticd
+    cb_dest = f"{host}:{port}"
+    if not _protobuf_circuit.can_send(cb_dest):
+        logger.debug(f"Circuit open for {cb_dest}, skipping send_text_direct")
+        return False
+
     dest = destination if destination is not None else 0xFFFFFFFF
     packet_id = _next_stateless_packet_id()
 
@@ -173,14 +184,18 @@ def send_text_direct(
                     f"(id={packet_id}, dest={'broadcast' if dest == 0xFFFFFFFF else f'!{dest:08x}'})"
                 )
                 logger.debug(f"Message content: {text[:50]}")
+                _protobuf_circuit.record_success(cb_dest)
                 return True
             logger.warning(f"send_text_direct: unexpected status {resp.status}")
+            _protobuf_circuit.record_failure(cb_dest, f"HTTP {resp.status}")
             return False
     except urllib.error.HTTPError as e:
         logger.warning(f"send_text_direct: HTTP {e.code}: {e.reason}")
+        _protobuf_circuit.record_failure(cb_dest, f"HTTP {e.code}")
         return False
     except Exception as e:
         logger.debug(f"send_text_direct: {e}")
+        _protobuf_circuit.record_failure(cb_dest, str(e))
         return False
 
 

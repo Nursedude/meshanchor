@@ -8,6 +8,7 @@ import logging
 
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
+from gateway.circuit_breaker import get_all_registries
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,22 @@ class GatewayHandler(BaseHandler):
             f"  Battery:    {config.telemetry.share_battery}",
             f"  Interval:   {config.telemetry.update_interval}s",
         ])
+
+        # Circuit breaker status for gateway-related services
+        try:
+            registries = get_all_registries()
+            gw_services = ["meshtastic_http", "meshtastic_protobuf", "mqtt_subscriber"]
+            open_found = False
+            for svc_name in gw_services:
+                reg = registries.get(svc_name)
+                if reg:
+                    for dest, info in reg.get_open_circuits().items():
+                        if not open_found:
+                            lines.extend(["", "CIRCUIT BREAKERS:"])
+                            open_found = True
+                        lines.append(f"  ⚡ {svc_name}/{dest}: {info.get('state', 'open')}")
+        except Exception:
+            pass
 
         self.ctx.dialog.msgbox("Gateway Status", "\n".join(lines), width=50, height=25)
 

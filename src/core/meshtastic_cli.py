@@ -32,6 +32,7 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 
 from utils.cli import find_meshtastic_cli
+from utils.timeouts import SUBPROCESS_DEFAULT as _CLI_DEFAULT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class MeshtasticCLI:
 
     MAX_RETRIES = 3
     RETRY_DELAYS = [1, 2, 3]  # seconds between retries
-    DEFAULT_TIMEOUT = 30  # seconds
+    DEFAULT_TIMEOUT = _CLI_DEFAULT_TIMEOUT
 
     def __init__(
         self,

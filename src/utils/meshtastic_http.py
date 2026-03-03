@@ -36,9 +36,14 @@ DEFAULT_HTTP_PORT = 9443
 # Ports to probe during auto-detection
 PROBE_PORTS = [9443, 443, 80, 4403]
 
-# Connection timeouts
-CONNECT_TIMEOUT = 5.0
-READ_TIMEOUT = 10.0
+# Connection timeouts — canonical source: utils.timeouts
+from utils.timeouts import HTTP_CONNECT as CONNECT_TIMEOUT  # noqa: E402
+from utils.timeouts import HTTP_READ as READ_TIMEOUT  # noqa: E402
+
+# Per-host circuit breaker — stops hammering meshtasticd when it's down
+from gateway.circuit_breaker import create_service_registry as _create_cb_registry
+
+_http_circuit = _create_cb_registry("meshtastic_http", failure_threshold=3, recovery_timeout=30.0)
 
 
 @dataclass
@@ -293,6 +298,12 @@ class MeshtasticHTTPClient:
         if not self._base_url:
             return None
 
+        # Circuit breaker — skip request if meshtasticd is known-down
+        dest = self._base_url
+        if not _http_circuit.can_send(dest):
+            logger.debug(f"Circuit open for {dest}, skipping {path}")
+            return None
+
         url = f"{self._base_url}{path}"
         try:
             req = urllib.request.Request(
@@ -304,15 +315,20 @@ class MeshtasticHTTPClient:
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 if resp.status == 200:
                     data = resp.read()
-                    return json.loads(data)
+                    result = json.loads(data)
+                    _http_circuit.record_success(dest)
+                    return result
                 else:
                     logger.warning(f"HTTP {resp.status} from {url}")
+                    _http_circuit.record_failure(dest, f"HTTP {resp.status}")
                     return None
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid JSON from {url}: {e}")
+            # JSON decode errors are not connection failures — don't trip breaker
             return None
         except Exception as e:
             logger.debug(f"HTTP request failed: {url} → {e}")
+            _http_circuit.record_failure(dest, str(e))
             self._available = False
             return None
 
