@@ -31,6 +31,7 @@ from contextlib import contextmanager
 
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
+from utils.timeouts import MESSAGE_STALE as _MESSAGE_STALE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -405,8 +406,8 @@ class PersistentMessageQueue:
     # Auto-cleanup interval (seconds) — purge old delivered/dead_letter
     AUTO_CLEANUP_INTERVAL = 3600  # 1 hour
 
-    # Stale in_progress timeout (seconds) — messages stuck in processing
-    STALE_TIMEOUT = 300  # 5 minutes
+    # Stale in_progress timeout — canonical source: utils.timeouts
+    STALE_TIMEOUT = _MESSAGE_STALE_TIMEOUT
 
     def __init__(self, db_path: Optional[str] = None,
                  max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,

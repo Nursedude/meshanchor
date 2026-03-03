@@ -64,7 +64,7 @@ MAX_QUEUE_SIZE = 10000          # Maximum queued records before shedding
 MAX_RETRIES = 5                 # Attempts before dead-letter
 BATCH_SIZE = 50                 # Records per sync cycle
 CLEANUP_AGE_HOURS = 72          # Remove synced/dead records older than this
-CONNECTIVITY_TIMEOUT = 3.0      # Seconds for connectivity check
+from utils.timeouts import CONNECTIVITY_CHECK as CONNECTIVITY_TIMEOUT  # noqa: E402
 CONNECTIVITY_CHECK_INTERVAL = 30.0  # Seconds between connectivity checks
 STALE_IN_PROGRESS_SEC = 300     # 5 min: reset stuck in_progress records
 

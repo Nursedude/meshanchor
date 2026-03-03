@@ -34,11 +34,9 @@ from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 
-# Node is "online" if seen within this window
-ONLINE_TIMEOUT_SEC = 900  # 15 minutes
-
-# Node is "stale" (candidate for pruning) if not seen for this long
-STALE_TIMEOUT_SEC = 7 * 24 * 3600  # 7 days
+# Node status thresholds — canonical source: utils.timeouts
+from utils.timeouts import NODE_ONLINE as ONLINE_TIMEOUT_SEC  # noqa: E402
+from utils.timeouts import NODE_STALE as STALE_TIMEOUT_SEC  # noqa: E402
 
 # Minimum save interval (debounce rapid updates)
 SAVE_DEBOUNCE_SEC = 5.0

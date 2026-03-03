@@ -11,7 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from gateway.circuit_breaker import (
-    CircuitBreaker, CircuitBreakerRegistry, CircuitState
+    CircuitBreaker, CircuitBreakerRegistry, CircuitState,
+    circuit_protected, create_service_registry,
+    register_service_breaker, get_all_registries,
+    _active_registries, _registries_lock,
 )
 
 
@@ -267,6 +270,135 @@ class TestBridgeHealthIntegration:
 
         reason = health.get_degraded_reason()
         assert "RNS disconnected" in reason
+
+
+class TestCircuitProtectedDecorator:
+    """Test the @circuit_protected decorator."""
+
+    def test_success_records_success(self):
+        registry = CircuitBreakerRegistry(failure_threshold=3)
+
+        @circuit_protected(registry, destination_key=lambda host: host)
+        def call_api(host):
+            return "ok"
+
+        result = call_api("host1")
+        assert result == "ok"
+        stats = registry.get_circuit_stats("host1")
+        assert stats is not None
+        assert stats["success_count"] == 1
+
+    def test_failure_records_failure_and_reraises(self):
+        registry = CircuitBreakerRegistry(failure_threshold=3)
+
+        @circuit_protected(registry, destination_key=lambda host: host)
+        def call_api(host):
+            raise ConnectionError("refused")
+
+        with pytest.raises(ConnectionError):
+            call_api("host2")
+
+        stats = registry.get_circuit_stats("host2")
+        assert stats["failure_count"] == 1
+
+    def test_circuit_open_returns_none(self):
+        registry = CircuitBreakerRegistry(failure_threshold=1)
+        call_count = 0
+
+        @circuit_protected(registry, destination_key=lambda host: host)
+        def call_api(host):
+            nonlocal call_count
+            call_count += 1
+            raise ConnectionError("down")
+
+        # Trip the circuit
+        with pytest.raises(ConnectionError):
+            call_api("host3")
+        assert call_count == 1
+
+        # Now circuit is open — should return None without calling function
+        result = call_api("host3")
+        assert result is None
+        assert call_count == 1  # Function was not called again
+
+    def test_circuit_open_uses_fallback(self):
+        registry = CircuitBreakerRegistry(failure_threshold=1)
+
+        def my_fallback(host):
+            return f"fallback for {host}"
+
+        @circuit_protected(registry, destination_key=lambda host: host, fallback=my_fallback)
+        def call_api(host):
+            raise ConnectionError("down")
+
+        with pytest.raises(ConnectionError):
+            call_api("host4")
+
+        result = call_api("host4")
+        assert result == "fallback for host4"
+
+    def test_default_destination_key_uses_first_arg(self):
+        registry = CircuitBreakerRegistry(failure_threshold=3)
+
+        @circuit_protected(registry)
+        def call_api(host, path):
+            return f"{host}{path}"
+
+        result = call_api("myhost", "/api")
+        assert result == "myhost/api"
+        assert registry.get_circuit_stats("myhost") is not None
+
+    def test_decorator_preserves_registry_reference(self):
+        registry = CircuitBreakerRegistry()
+
+        @circuit_protected(registry)
+        def call_api(host):
+            return "ok"
+
+        assert call_api._circuit_registry is registry
+
+
+class TestServiceRegistryFactory:
+    """Test create_service_registry and global registry tracker."""
+
+    def setup_method(self):
+        """Clean global registries before each test."""
+        with _registries_lock:
+            # Save and clear
+            self._saved = dict(_active_registries)
+            _active_registries.clear()
+
+    def teardown_method(self):
+        """Restore global registries after each test."""
+        with _registries_lock:
+            _active_registries.clear()
+            _active_registries.update(self._saved)
+
+    def test_create_service_registry_returns_registry(self):
+        reg = create_service_registry("test_svc", failure_threshold=3, recovery_timeout=10.0)
+        assert isinstance(reg, CircuitBreakerRegistry)
+
+    def test_create_service_registry_auto_registers(self):
+        reg = create_service_registry("test_auto")
+        all_regs = get_all_registries()
+        assert "test_auto" in all_regs
+        assert all_regs["test_auto"] is reg
+
+    def test_register_and_get_all(self):
+        reg1 = CircuitBreakerRegistry()
+        reg2 = CircuitBreakerRegistry()
+        register_service_breaker("svc_a", reg1)
+        register_service_breaker("svc_b", reg2)
+
+        all_regs = get_all_registries()
+        assert all_regs["svc_a"] is reg1
+        assert all_regs["svc_b"] is reg2
+
+    def test_get_all_registries_returns_copy(self):
+        reg = create_service_registry("test_copy")
+        all_regs = get_all_registries()
+        all_regs["injected"] = "should not affect original"
+        assert "injected" not in get_all_registries()
 
 
 if __name__ == "__main__":

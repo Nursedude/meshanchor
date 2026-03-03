@@ -52,14 +52,10 @@ MAX_PAYLOAD_BYTES = 65_536
 MAX_MESHTASTIC_MSG_LENGTH = 228
 
 # =============================================================================
-# Timeouts
+# Timeouts — canonical source is utils.timeouts
+# Re-exports for backward compatibility
 # =============================================================================
 
-# Default TCP connection timeout (seconds)
-TCP_CONNECT_TIMEOUT_SEC = 10
-
-# Default subprocess timeout (seconds)
-SUBPROCESS_DEFAULT_TIMEOUT_SEC = 30
-
-# MQTT connection timeout (seconds)
-MQTT_CONNECT_TIMEOUT_SEC = 10
+from utils.timeouts import TCP_CONNECT as TCP_CONNECT_TIMEOUT_SEC  # noqa: F401
+from utils.timeouts import SUBPROCESS_DEFAULT as SUBPROCESS_DEFAULT_TIMEOUT_SEC  # noqa: F401
+from utils.timeouts import MQTT_CONNECT as MQTT_CONNECT_TIMEOUT_SEC  # noqa: F401
