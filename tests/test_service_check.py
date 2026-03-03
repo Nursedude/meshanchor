@@ -547,7 +547,7 @@ class TestCheckRNSSharedInstance:
     def test_falls_back_to_tcp(self):
         """Test TCP fallback when /proc/net/unix has no RNS socket."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=True):
+            with patch('utils._port_detection.check_port', return_value=True):
                 result = check_rns_shared_instance()
 
                 assert result is True
@@ -555,8 +555,8 @@ class TestCheckRNSSharedInstance:
     def test_falls_back_to_udp(self):
         """Test UDP fallback when /proc/net/unix and TCP both fail."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=False):
-                with patch('src.utils.service_check.check_udp_port', return_value=True) as mock_udp:
+            with patch('utils._port_detection.check_port', return_value=False):
+                with patch('utils._port_detection.check_udp_port', return_value=True) as mock_udp:
                     result = check_rns_shared_instance()
 
                     assert result is True
@@ -565,8 +565,8 @@ class TestCheckRNSSharedInstance:
     def test_all_methods_fail(self):
         """Test returns False when no detection method works."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=False):
-                with patch('src.utils.service_check.check_udp_port', return_value=False):
+            with patch('utils._port_detection.check_port', return_value=False):
+                with patch('utils._port_detection.check_udp_port', return_value=False):
                     result = check_rns_shared_instance()
 
                     assert result is False
@@ -585,8 +585,8 @@ class TestCheckRNSSharedInstance:
     def test_custom_port(self):
         """Test custom port for TCP/UDP fallback."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=False):
-                with patch('src.utils.service_check.check_udp_port', return_value=False) as mock_udp:
+            with patch('utils._port_detection.check_port', return_value=False):
+                with patch('utils._port_detection.check_udp_port', return_value=False) as mock_udp:
                     check_rns_shared_instance(port=9999)
 
                     mock_udp.assert_called_once_with(9999)
@@ -594,7 +594,7 @@ class TestCheckRNSSharedInstance:
     def test_proc_net_unix_unreadable(self):
         """Test graceful handling when /proc/net/unix can't be read."""
         with patch('builtins.open', side_effect=OSError("Permission denied")):
-            with patch('src.utils.service_check.check_port', return_value=True):
+            with patch('utils._port_detection.check_port', return_value=True):
                 result = check_rns_shared_instance()
 
                 assert result is True  # Falls through to TCP
@@ -634,7 +634,7 @@ class TestGetRNSSharedInstanceInfo:
     def test_tcp_info(self):
         """Test info dict when detected via TCP port."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=True):
+            with patch('utils._port_detection.check_port', return_value=True):
                 info = get_rns_shared_instance_info()
 
                 assert info['available'] is True
@@ -645,8 +645,8 @@ class TestGetRNSSharedInstanceInfo:
     def test_udp_info(self):
         """Test info dict when detected via UDP."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=False):
-                with patch('src.utils.service_check.check_udp_port', return_value=True):
+            with patch('utils._port_detection.check_port', return_value=False):
+                with patch('utils._port_detection.check_udp_port', return_value=True):
                     info = get_rns_shared_instance_info()
 
                     assert info['available'] is True
@@ -656,8 +656,8 @@ class TestGetRNSSharedInstanceInfo:
     def test_unavailable_info(self):
         """Test info dict when no method works."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=False):
-                with patch('src.utils.service_check.check_udp_port', return_value=False):
+            with patch('utils._port_detection.check_port', return_value=False):
+                with patch('utils._port_detection.check_udp_port', return_value=False):
                     info = get_rns_shared_instance_info()
 
                     assert info['available'] is False
@@ -692,7 +692,7 @@ class TestGetRNSSharedInstanceInfo:
     def test_custom_port_in_tcp_detail(self):
         """Test custom port appears in TCP fallback detail."""
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
-            with patch('src.utils.service_check.check_port', return_value=True):
+            with patch('utils._port_detection.check_port', return_value=True):
                 info = get_rns_shared_instance_info(port=9999)
 
                 assert info['available'] is True
