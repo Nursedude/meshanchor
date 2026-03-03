@@ -9,17 +9,23 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 
 ## Branch Strategy
 
-| Branch | Version | Purpose |
-|--------|---------|---------|
-| `main` | `0.5.4-beta` | Stable beta — gateway bridge, TUI, monitoring, RF tools |
-| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore integration — 3-way routing, MeshCore handler, companion radio management |
+| Branch | Version | Purpose | Field-Tested |
+|--------|---------|---------|--------------|
+| `main` | `0.5.4-beta` | Stable beta — TUI, meshtasticd, RNS, RF tools | TUI, radio config, RNS, NomadNet |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing + structural refactoring | Not yet |
 
 - **main** is the production-ready line. All PRs targeting stable features merge here.
   Includes tactical ops (XTOC interop, ATAK/KML/CoT), MQTT bridge, security hardening.
-- **alpha/meshcore-bridge** has diverged significantly from main (~2,260 commits ahead,
-  0 behind as of 2026-02-25). Contains MeshCore 3-way routing and handler but lacks
-  main's tactical module, contact mapping, and several utilities. These are parallel
-  development tracks; convergence requires a dedicated reconciliation effort.
+  Gateway bridge, coverage maps, and live NOC map have unit tests but need field validation.
+- **alpha/meshcore-bridge** diverged at PR #1000 (139 commits ahead, 18 behind as of
+  2026-03-03). Contains MeshCore 3-way routing, RadioMode abstraction, and major
+  structural refactoring (src/core/rf/, src/core/services/, src/mapping/). Also lacks
+  main's recent Meshtastic 2.7.x upgrade and dead code cleanup.
+- **Convergence plan**: After field testing, rebase main's 18 unique commits onto alpha.
+  See `.claude/plans/branch_convergence_guide.md` for the full technical plan.
+- **Architecture decision**: MeshCore stays IN MeshForge (not a separate project).
+  MeshCore is a protocol (like Meshtastic/RNS), not a plugin. The CanonicalMessage
+  format requires all protocol handlers in one codebase.
 - Feature branches use `claude/` prefix and merge via PR to the appropriate target branch.
 
 ## Development Principles
@@ -66,15 +72,15 @@ src/
 │   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
 │   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
 │   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
-│   └── handlers/            # 58 self-contained command handlers
+│   └── handlers/            # 64 self-contained command handlers
 │       ├── dashboard.py     # Main dashboard
 │       ├── gateway.py       # Gateway bridge control
 │       ├── propagation.py   # Space weather & HF propagation
 │       ├── rns_diagnostics.py  # RNS diagnostics & transport testing
 │       ├── service_menu.py  # Service management
 │       ├── mqtt.py          # MQTT monitoring & bridge
-│       ├── meshcore.py      # MeshCore TUI menu (alpha branch)
-│       └── ...              # 52 more handlers (rf_tools, settings, etc.)
+│       ├── meshcore.py      # MeshCore TUI menu
+│       └── ...              # 57 more handlers (rf_tools, settings, etc.)
 ├── commands/          # Command modules
 │   ├── propagation.py # Space weather & HF propagation (NOAA primary)
 │   ├── hamclock.py    # HamClock client (optional/legacy)
@@ -82,10 +88,10 @@ src/
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway bridge
 │   ├── gateway_cli.py # Headless CLI helpers (extracted)
-│   ├── meshcore_handler.py    # MeshCore protocol handler (alpha branch)
-│   ├── canonical_message.py   # Multi-protocol message format (alpha branch)
-│   ├── meshcore_bridge_mixin.py # MeshCore bridge mixin (alpha branch)
-│   ├── message_routing.py     # 3-way routing classifier (alpha branch)
+│   ├── meshcore_handler.py    # MeshCore protocol handler (not field-tested)
+│   ├── canonical_message.py   # Multi-protocol message format
+│   ├── meshcore_bridge_mixin.py # MeshCore bridge mixin
+│   ├── message_routing.py     # 3-way routing classifier
 │   └── message_queue.py # Persistent message queue (SQLite)
 ├── monitoring/        # Network monitoring
 │   ├── mqtt_subscriber.py # Nodeless MQTT monitoring
@@ -93,7 +99,7 @@ src/
 │   ├── traffic_inspector.py # Packet capture & analysis
 │   └── packet_dissectors.py # Protocol-specific packet parsing
 ├── plugins/           # Protocol plugins
-│   └── meshcore.py    # MeshCore plugin (alpha branch)
+│   └── meshcore.py    # MeshCore plugin wrapper
 ├── utils/             # RF tools, common utilities
 │   ├── rf.py          # RF calculations (tested)
 │   ├── rf_fast.pyx    # Cython optimization
@@ -178,6 +184,8 @@ Deep documentation in `.claude/` (84 files, 853KB as of 2026-02-28 audit):
 - `foundations/persistent_issues.md` - **CRITICAL: Known issues & fixes**
 - `INDEX.md` - Full documentation index with quick lookups
 - `research/README.md` - Index of 22 technical deep dives (RNS, AREDN, HamClock, RF, etc.)
+- `plans/qa_field_testing_plan.md` - **QA: Gateway, maps, MeshCore field-test protocol**
+- `plans/branch_convergence_guide.md` - **CONVERGENCE: main ↔ alpha merge strategy**
 
 ## Architecture Model
 
