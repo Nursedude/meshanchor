@@ -48,8 +48,8 @@ TRANSPORT_LIMITS: Dict[str, int] = {
 # Maximum chunks per message (prevent resource exhaustion)
 MAX_CHUNKS = 32
 
-# Default reassembly timeout (seconds)
-DEFAULT_TIMEOUT = 120
+# Default reassembly timeout — canonical source: utils.timeouts
+from utils.timeouts import TACTICAL_CHUNK as DEFAULT_TIMEOUT  # noqa: E402
 
 
 def chunk(x1_string: str, transport: str) -> List[str]:

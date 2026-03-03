@@ -30,12 +30,15 @@ Reference:
     https://martinfowler.com/bliki/CircuitBreaker.html
 """
 
+import functools
 import logging
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional, Any
+from typing import Callable, Dict, Optional, Any
+
+from utils.timeouts import CIRCUIT_RECOVERY as _CIRCUIT_RECOVERY_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +235,7 @@ class CircuitBreakerRegistry:
 
     # Default settings
     DEFAULT_FAILURE_THRESHOLD = 5
-    DEFAULT_RECOVERY_TIMEOUT = 60.0
+    DEFAULT_RECOVERY_TIMEOUT = _CIRCUIT_RECOVERY_TIMEOUT
     DEFAULT_HALF_OPEN_MAX_CALLS = 1
 
     # Maximum tracked destinations (prevent unbounded growth)
@@ -389,3 +392,102 @@ class CircuitBreakerRegistry:
             if destination in self._circuits:
                 return self._circuits[destination].get_stats()
             return None
+
+
+# =============================================================================
+# Global Registry Tracker — allows TUI to discover all active registries
+# =============================================================================
+
+_active_registries: Dict[str, CircuitBreakerRegistry] = {}
+_registries_lock = threading.Lock()
+
+
+def register_service_breaker(name: str, registry: CircuitBreakerRegistry) -> None:
+    """Register a circuit breaker registry for TUI visibility."""
+    with _registries_lock:
+        _active_registries[name] = registry
+
+
+def get_all_registries() -> Dict[str, CircuitBreakerRegistry]:
+    """Get all registered circuit breaker registries."""
+    with _registries_lock:
+        return dict(_active_registries)
+
+
+def create_service_registry(
+    service_name: str,
+    failure_threshold: int = 5,
+    recovery_timeout: float = _CIRCUIT_RECOVERY_TIMEOUT,
+) -> CircuitBreakerRegistry:
+    """Factory for creating per-service circuit breaker registries.
+
+    Creates a registry and auto-registers it for TUI discovery.
+
+    Args:
+        service_name: Human-readable name (for logging/TUI display)
+        failure_threshold: Failures before opening circuit
+        recovery_timeout: Seconds before testing recovery
+
+    Returns:
+        A configured CircuitBreakerRegistry instance
+    """
+    registry = CircuitBreakerRegistry(
+        failure_threshold=failure_threshold,
+        recovery_timeout=recovery_timeout,
+    )
+    register_service_breaker(service_name, registry)
+    return registry
+
+
+# =============================================================================
+# Decorator — @circuit_protected for easy adoption
+# =============================================================================
+
+def circuit_protected(
+    registry: CircuitBreakerRegistry,
+    destination_key: Optional[Callable] = None,
+    fallback: Optional[Callable] = None,
+):
+    """Decorator that wraps a function with circuit breaker protection.
+
+    Args:
+        registry: The CircuitBreakerRegistry to use
+        destination_key: Callable that extracts the destination from args.
+                        If None, uses str(first argument).
+        fallback: Optional fallback called when circuit is open.
+                 Receives same arguments. Returns None if not provided.
+
+    Usage:
+        registry = CircuitBreakerRegistry()
+
+        @circuit_protected(registry, destination_key=lambda host, **kw: host)
+        def send_http_request(host, path, data):
+            ...
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if destination_key:
+                dest = destination_key(*args, **kwargs)
+            elif args:
+                dest = str(args[0])
+            else:
+                dest = "default"
+
+            if not registry.can_send(dest):
+                logger.debug(f"Circuit open for {dest}, skipping {func.__name__}")
+                if fallback:
+                    return fallback(*args, **kwargs)
+                return None
+
+            try:
+                result = func(*args, **kwargs)
+                registry.record_success(dest)
+                return result
+            except Exception as e:
+                registry.record_failure(dest, str(e))
+                raise
+
+        wrapper._circuit_registry = registry
+        return wrapper
+    return decorator

@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from utils.timeouts import AGENT_HEARTBEAT as _AGENT_HEARTBEAT_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 
@@ -264,7 +266,7 @@ class AgentProtocol:
     MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB
     HEADER_SIZE = 4  # 4-byte length prefix
     HEARTBEAT_INTERVAL = 30.0  # seconds
-    HEARTBEAT_TIMEOUT = 90.0  # seconds (3 missed heartbeats)
+    HEARTBEAT_TIMEOUT = _AGENT_HEARTBEAT_TIMEOUT
     MAX_RECONNECT_DELAY = 300.0  # 5 minutes max backoff
 
     def __init__(

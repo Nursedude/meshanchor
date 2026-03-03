@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from utils.timeouts import DELIVERY_CONFIRMATION as _DELIVERY_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 
@@ -610,8 +612,8 @@ class DeliveryTracker:
     # Maximum tracked deliveries (prevent unbounded growth)
     MAX_HISTORY = 500
 
-    # Delivery timeout (seconds) — consider failed if no confirmation
-    DELIVERY_TIMEOUT = 300  # 5 minutes
+    # Delivery timeout (seconds) — canonical source: utils.timeouts
+    DELIVERY_TIMEOUT = _DELIVERY_TIMEOUT
 
     def __init__(self):
         self._lock = threading.RLock()

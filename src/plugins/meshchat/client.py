@@ -13,6 +13,7 @@ from typing import Optional, List, Dict, Any
 from urllib.parse import urljoin
 
 from utils.safe_import import safe_import
+from utils.timeouts import HTTP_CONNECT as _MESHCHAT_DEFAULT_TIMEOUT
 
 # Module-level safe imports for optional dependencies
 _requests, _HAS_REQUESTS = safe_import('requests')
@@ -126,7 +127,7 @@ class MeshChatClient:
 
     DEFAULT_HOST = '127.0.0.1'
     DEFAULT_PORT = 8000
-    DEFAULT_TIMEOUT = 5  # seconds
+    DEFAULT_TIMEOUT = _MESHCHAT_DEFAULT_TIMEOUT
 
     def __init__(
         self,

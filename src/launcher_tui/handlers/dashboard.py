@@ -11,6 +11,7 @@ import subprocess
 from backend import clear_screen
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
+from gateway.circuit_breaker import get_all_registries
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,21 @@ class DashboardHandler(BaseHandler):
                         print(f"  \033[2m○\033[0m {svc:<18} {status}")
                 except Exception:
                     print(f"  ? {svc:<18} unknown")
+
+        # Circuit breaker status — show any open circuits
+        try:
+            registries = get_all_registries()
+            open_circuits = []
+            for svc_name, registry in registries.items():
+                for dest, info in registry.get_open_circuits().items():
+                    open_circuits.append((svc_name, dest, info.get("state", "open")))
+            if open_circuits:
+                print("  CIRCUIT BREAKERS")
+                for svc, dest, state in open_circuits:
+                    print(f"  \033[0;33m⚡\033[0m {svc}/{dest}: {state}")
+                print()
+        except Exception:
+            pass  # Circuit breaker info is advisory, never block status display
 
         print()
         self.ctx.wait_for_enter()
