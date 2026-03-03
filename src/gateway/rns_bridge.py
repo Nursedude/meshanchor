@@ -283,6 +283,14 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 "meshtastic", self._mesh_handler.queue_send
             )
 
+            # Register MQTT sender for persistent queue (mqtt_bridge mode)
+            if (self.config.bridge_mode == "mqtt_bridge"
+                    and hasattr(self._mesh_handler, 'publish_to_mqtt')):
+                self._persistent_queue.register_sender(
+                    "mqtt", self._mesh_handler.publish_to_mqtt
+                )
+                logger.info("Registered 'mqtt' sender for persistent queue")
+
         # Initialize MeshCore handler if configured and available
         meshcore_config = getattr(self.config, 'meshcore', None)
         if HAS_MESHCORE and meshcore_config and meshcore_config.enabled:
@@ -1212,12 +1220,36 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
     def _process_rns_to_mesh(self, msg: BridgedMessage):
         """Process message from RNS to Meshtastic.
 
-        On send failure, persists to persistent queue for later retry.
+        In mqtt_bridge mode, routes through the persistent queue for
+        reliable delivery with retry. Otherwise sends directly and
+        persists to queue on failure.
         """
         try:
             prefix = f"[RNS:{msg.source_id[:4]}] "
             content = prefix + msg.content
 
+            # In mqtt_bridge mode, use persistent queue for reliable delivery
+            if (self._persistent_queue
+                    and self.config.bridge_mode == "mqtt_bridge"
+                    and HAS_PERSISTENT_QUEUE):
+                payload = {
+                    'message': content,
+                    'channel': self.config.meshtastic.channel,
+                    'source_id': msg.source_id,
+                }
+                msg_id = self._persistent_queue.enqueue(
+                    payload=payload,
+                    destination="mqtt",
+                    priority=MessagePriority.NORMAL,
+                )
+                if msg_id:
+                    logger.info(f"Bridge RNS→Mesh (queued): {content[:50]}...")
+                    with self._stats_lock:
+                        self.stats['messages_rns_to_mesh'] += 1
+                    self.health.record_message_sent("rns_to_mesh")
+                    return
+
+            # Direct send (non-MQTT mode or queue unavailable)
             if self.send_to_meshtastic(content, channel=self.config.meshtastic.channel):
                 logger.info(f"Bridge RNS→Mesh: {content[:50]}...")
                 with self._stats_lock:

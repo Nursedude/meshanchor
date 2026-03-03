@@ -708,3 +708,62 @@ class TestLifecycleTracking:
         results = queue.get_failed_messages_with_reason(hours=1)
         assert len(results) == 1
         assert results[0]["error_message"] == "radio timeout"
+
+
+# ---------------------------------------------------------------------------
+# MQTT retry policy and destination
+# ---------------------------------------------------------------------------
+
+class TestMQTTRetryPolicy:
+    """Tests for MQTT-specific retry policy and destination support."""
+
+    def test_for_mqtt_defaults(self):
+        """RetryPolicy.for_mqtt() returns expected configuration."""
+        p = RetryPolicy.for_mqtt()
+        assert p.max_tries == 5
+        assert p.base_delay == 1.0
+        assert p.max_delay == 15.0
+
+    def test_mqtt_not_connected_retriable(self):
+        """MQTT 'not connected' error should be retriable."""
+        policy = RetryPolicy()
+        d = policy.should_retry("not connected", attempt=1)
+        assert d.retry is True
+
+    def test_mqtt_queue_full_retriable(self):
+        """MQTT 'queue full' error should be retriable."""
+        policy = RetryPolicy()
+        d = policy.should_retry("queue full", attempt=1)
+        assert d.retry is True
+
+    def test_mqtt_not_authorised_non_retriable(self):
+        """MQTT 'not authorised' error should not be retriable."""
+        policy = RetryPolicy()
+        d = policy.should_retry("not authorised", attempt=1)
+        assert d.retry is False
+        assert "permanent_error" in d.reason
+
+    def test_mqtt_topic_invalid_non_retriable(self):
+        """MQTT 'topic invalid' error should not be retriable."""
+        policy = RetryPolicy()
+        d = policy.should_retry("topic invalid", attempt=1)
+        assert d.retry is False
+
+    def test_mqtt_destination_enqueue(self, queue):
+        """Enqueue with destination='mqtt' should succeed."""
+        msg_id = queue.enqueue({"text": "hello mqtt"}, "mqtt")
+        assert msg_id is not None
+
+        pending = queue.get_pending(destination="mqtt")
+        assert len(pending) == 1
+        assert pending[0].destination == "mqtt"
+
+    def test_mqtt_sender_callback(self, queue):
+        """Mock sender registered for 'mqtt' should be called during processing."""
+        sender = MagicMock(return_value=True)
+        queue.register_sender("mqtt", sender)
+        queue.enqueue({"text": "test"}, "mqtt")
+
+        processed = queue.process_once()
+        assert processed == 1
+        sender.assert_called_once()

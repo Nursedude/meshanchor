@@ -168,6 +168,10 @@ class RetryPolicy:
         "econnreset",
         "econnrefused",
         "etimedout",
+        # MQTT-specific transient errors
+        "not connected",
+        "mqtt err",
+        "queue full",
     })
 
     # Errors that should NOT retry (permanent failures)
@@ -189,6 +193,11 @@ class RetryPolicy:
         "eperm",
         "eacces",
         "einval",
+        # MQTT-specific permanent errors
+        "not authorised",
+        "not authorized",
+        "topic invalid",
+        "payload too large",
     })
 
     def __init__(
@@ -327,6 +336,21 @@ class RetryPolicy:
             timeout=30.0,
             base_delay=2.0,
             max_delay=30.0,
+        )
+
+    @classmethod
+    def for_mqtt(cls) -> 'RetryPolicy':
+        """
+        Create retry policy optimized for MQTT broker delivery.
+
+        MQTT brokers are typically local with low latency and support QoS.
+        Uses fast retries with short delays since broker responses are quick.
+        """
+        return cls(
+            max_tries=5,
+            timeout=15.0,
+            base_delay=1.0,
+            max_delay=15.0,
         )
 
 
