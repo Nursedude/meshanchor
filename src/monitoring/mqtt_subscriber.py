@@ -35,6 +35,16 @@ from collections import deque
 # Import centralized path utility for sudo compatibility
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
+from utils.timeouts import (
+    MQTT_RECONNECT_INITIAL,
+    MQTT_RECONNECT_MAX,
+    MQTT_LOCAL_RECONNECT_INITIAL,
+    MQTT_LOCAL_RECONNECT_MAX,
+)
+from gateway.circuit_breaker import create_service_registry as _create_cb_registry
+
+# Per-broker circuit breaker — prevents hammering a downed MQTT broker
+_mqtt_circuit = _create_cb_registry("mqtt_subscriber", failure_threshold=5, recovery_timeout=60.0)
 
 # Module-level safe imports
 _mqtt, _HAS_PAHO_MQTT = safe_import('paho.mqtt.client')
@@ -239,8 +249,8 @@ class MQTTNodelessSubscriber:
             "use_tls": True,
             "regions": ["US"],  # Subscribe to these regions
             "auto_reconnect": True,
-            "reconnect_delay": 5,
-            "max_reconnect_delay": 60,
+            "reconnect_delay": MQTT_RECONNECT_INITIAL,
+            "max_reconnect_delay": MQTT_RECONNECT_MAX,
         }
 
     def save_config(self) -> bool:
@@ -484,8 +494,19 @@ class MQTTNodelessSubscriber:
         """Reconnection loop with exponential backoff and jitter."""
         delay = self._config.get("reconnect_delay", 5)
         max_delay = self._config.get("max_reconnect_delay", 60)
+        broker = self._config.get("broker", DEFAULT_BROKER)
+        port = self._config.get("port", DEFAULT_PORT_TLS)
+        cb_dest = f"{broker}:{port}"
 
         while not self._stop_event.is_set():
+            # Circuit breaker — don't hammer a broker that's known-down
+            if not _mqtt_circuit.can_send(cb_dest):
+                logger.debug(f"Circuit open for {cb_dest}, waiting for recovery window")
+                self._stop_event.wait(delay)
+                if self._stop_event.is_set():
+                    break
+                continue
+
             # Add jitter (0-25% of delay) to prevent thundering herd
             jitter = random.uniform(0, delay * 0.25)
             wait_time = delay + jitter
@@ -499,9 +520,11 @@ class MQTTNodelessSubscriber:
                 self._stats["reconnect_attempts"] += 1
 
             if self._connect():
+                _mqtt_circuit.record_success(cb_dest)
                 logger.info("Reconnection successful")
                 break
 
+            _mqtt_circuit.record_failure(cb_dest, "reconnect_failed")
             delay = min(delay * 1.5, max_delay)
 
     def _on_message(self, client, userdata, msg):
@@ -1318,8 +1341,8 @@ def create_local_subscriber(
         "use_tls": False,  # Local brokers typically don't use TLS
         "regions": ["US"],
         "auto_reconnect": True,
-        "reconnect_delay": 2,  # Faster reconnect for local
-        "max_reconnect_delay": 30,
+        "reconnect_delay": MQTT_LOCAL_RECONNECT_INITIAL,
+        "max_reconnect_delay": MQTT_LOCAL_RECONNECT_MAX,
     }
     return MQTTNodelessSubscriber(config=config)
 
@@ -1351,8 +1374,8 @@ def create_public_subscriber(
         "use_tls": True,
         "regions": [region],
         "auto_reconnect": True,
-        "reconnect_delay": 5,
-        "max_reconnect_delay": 60,
+        "reconnect_delay": MQTT_RECONNECT_INITIAL,
+        "max_reconnect_delay": MQTT_RECONNECT_MAX,
     }
     return MQTTNodelessSubscriber(config=config)
 

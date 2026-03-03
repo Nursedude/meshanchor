@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # gpsd connection settings
 GPSD_HOST = "localhost"
 GPSD_PORT = 2947
-GPSD_TIMEOUT = 3.0
+from utils.timeouts import GPSD_CONNECT as GPSD_TIMEOUT  # noqa: E402
 
 # Position cache TTL (seconds)
 POSITION_CACHE_TTL = 10.0

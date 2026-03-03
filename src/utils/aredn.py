@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 
 from utils.safe_import import safe_import
+from utils.timeouts import HTTP_CONNECT as _AREDN_DEFAULT_TIMEOUT
 
 _urllib_mod, _HAS_URLLIB = safe_import('urllib.request')
 if _HAS_URLLIB:
@@ -168,7 +169,7 @@ class AREDNClient:
         neighbors = client.get_neighbors()
     """
 
-    DEFAULT_TIMEOUT = 5
+    DEFAULT_TIMEOUT = int(_AREDN_DEFAULT_TIMEOUT)
     DEFAULT_PORT = 8080  # AREDN nodes serve HTTP on port 8080, not 80
 
     def __init__(self, hostname_or_ip: str, timeout: int = DEFAULT_TIMEOUT,
