@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2459%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2607%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -108,12 +108,13 @@ The alpha branch (`0.6.0-alpha`, released 2026-02-25) includes:
 - **NanoVNA plugin** — antenna analysis, sweep storage, RF integration (proper plugin structure)
 
 > **Note:** The `main` and `alpha/meshcore-bridge` branches have diverged into
-> parallel development tracks (2,260 commits ahead, 0 behind as of 2026-02-25).
-> Alpha now contains all of main (merge-base is current main HEAD) plus MeshCore
-> integration work. Main includes tactical ops (XTOC/ATAK interop), MQTT bridge
-> enhancements, and security hardening. Alpha adds RadioMode abstraction, MeshCore
-> 3-way routing, NanoVNA plugin, and AREDN topology. Convergence will require a
-> dedicated reconciliation effort.
+> parallel development tracks (139 commits ahead as of 2026-03-03).
+> Alpha shares the same foundation (merge-base at PR #1000) plus MeshCore
+> integration and structural refactoring. Main includes recent stability work
+> (Meshtastic API 2.7.x, security hardening, dead code cleanup). Alpha adds
+> RadioMode abstraction, MeshCore 3-way routing, NanoVNA, and AREDN topology.
+> Neither branch has been field-tested for gateway/maps/MeshCore features.
+> See [Branch Strategy](#branch-strategy) for details.
 > Report issues on the [alpha/meshcore-bridge](https://github.com/Nursedude/meshforge/issues) tracker.
 
 ### Deployment Profiles
@@ -208,111 +209,162 @@ Main Menu (MeshForge NOC)
 
 ## What Works (v0.5.4-beta)
 
-| Category | Capabilities | Status |
-|----------|-------------|--------|
-| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics | Stable |
-| **TUI Reliability** | Defense-in-depth error handling — 49 mixin dispatch loops protected with `_safe_call`, 27 handlers migrated to command registry | Stable |
-| **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect | Stable |
-| **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather | Stable |
-| **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting | Stable |
-| **NomadNet/RNS** | Config editor, interface templates, rnstatus/rnpath, identity create/manage, shared instance detection (domain socket + TCP + UDP), pre-flight checks | Stable |
-| **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS — accessible from Emergency Mode | Beta |
-| **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device, filter by favorites | Beta |
-| **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Beta |
-| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | Beta |
-| **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | Beta |
-| **Network Monitoring** | MQTT node tracking, live logs, port inspection, service health | Beta |
-| **Multi-Mesh Gateway** | Meshtastic ↔ RNS bridge via MQTT (zero interference), CLI send, persistent queue, circuit breaker | Beta |
-| **Traffic Inspector** | Packet capture from meshtastic callbacks, protocol tree, display filters, path tracing | Beta |
-| **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Beta |
-| **Grafana Dashboards** | Pre-built JSON dashboards, manual import required | Dashboards Ready |
-| **AREDN** | Node discovery, link quality, service enumeration (correct API, needs hardware) | Code Ready |
-| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Beta (requires API key) |
-| **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs, channels, traceroute, neighbor info) | Beta |
-| **Config API** | RESTful configuration management with NGINX reliability patterns | Beta |
-| **Network Topology** | D3.js force-directed graphs, path tracing, ASCII display, topology events | Beta |
-| **Node Health** | Predictive maintenance, battery forecasting, signal trending, latency probes | Beta |
-| **Link Quality** | Link scoring, degradation alerts, best/worst link identification | Beta |
-| **RNS Packet Sniffer** | Live RNS capture, announce tracking, destination filtering, path discovery | Beta |
-| **Device Backup** | Configuration backup/restore, versioned snapshots, scheduled backups | Beta |
-| **First-Run Wizard** | Hardware auto-detect templates, region selection, service verification | Stable |
-| **MeshChat** | Automated install, LXMF messaging, web UI (:8000), HTTP API, peer discovery, LXMF announce, systemd service | Beta |
-| **Messaging** | Broadcast/direct messaging, LXMF routing, message history | Beta |
-| **Amateur Radio** | Callsign management, Part 97 reference, ARES/RACES info | Beta |
-| **Webhooks** | Event routing, external system integration | Beta |
-| **Analytics** | Network usage statistics, traffic analysis, performance metrics | Beta |
-| **Service Discovery** | Auto-detect available services, port scanning | Beta |
-| **Latency Monitoring** | Service latency probing, response time tracking | Beta |
-| **Broker Profiles** | MQTT broker profile management, health monitoring | Beta |
-| **MeshCore** | RadioMode abstraction, meshcore_primary bridge mode, config manager, companion radio management, 3-way bridge routing, TUI menus (Radio Mode, MeshCore Config) | Alpha (`alpha/meshcore-bridge` branch) |
-| **NanoVNA** | Antenna analysis, S11/VSWR measurement, sweep storage, RF integration | Alpha (`alpha/meshcore-bridge` branch) |
-| **uConsole AIO V2** | Hardware detection, GPIO power control, meshtasticd auto-config | Code Ready (hardware Q2 2026) |
+### Status Definitions
 
-**Status key:** Stable = tested in the field | Beta = works but needs soak time | Alpha = architecture solid, needs testing | Code Ready = implemented, no hardware to validate
+| Status | Meaning |
+|--------|---------|
+| **Field-Tested** | Validated in real deployments with actual hardware and services |
+| **Beta** | Code works in automated tests, needs real-world soak time |
+| **Code-Ready** | Implemented and unit-tested, not yet validated with hardware/services |
+| **Alpha** | Architecture solid, on `alpha/meshcore-bridge` branch, needs QA |
+
+### Field-Tested (Real-World Validated)
+
+These features have been used in actual mesh deployments with physical radios and running services:
+
+| Category | Capabilities |
+|----------|-------------|
+| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics — 64 handlers via registry pattern |
+| **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect |
+| **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather (NOAA), Cython-optimized |
+| **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting, confidence scoring |
+| **RNS/Reticulum** | Config editor, interface templates, rnstatus/rnpath, identity management, shared instance detection (domain socket + TCP + UDP), pre-flight checks |
+| **NomadNet** | Install/launch/configure via TUI, LXMF messaging |
+| **meshtasticd** | Full lifecycle management, SPI HAT and USB radio auto-detection |
+| **Service Management** | systemd integration via `service_check.py` (single source of truth), health monitoring |
+| **First-Run Wizard** | Hardware auto-detect templates, region selection, service verification |
+| **Standalone RF Tools** | Zero-dependency RF calculator, works without sudo or radio hardware |
+
+### Beta (Automated Tests Pass, Needs Field Validation)
+
+Code works in testing but hasn't been validated in real-world deployments with actual traffic:
+
+| Category | Capabilities | Notes |
+|----------|-------------|-------|
+| **Multi-Mesh Gateway** | Meshtastic <> RNS bridge via MQTT, persistent SQLite queue, circuit breaker | **Priority QA target** — core mission feature |
+| **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Needs real MQTT traffic |
+| **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | **Priority QA target** — needs GPS position data |
+| **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | **Priority QA target** — needs running bridge |
+| **Traffic Inspector** | Packet capture, protocol tree, display filters, path tracing | Needs real packet flow |
+| **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS | API-dependent |
+| **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device | Needs 2.7+ firmware |
+| **MeshChat** | Automated install, LXMF messaging, web UI (:8000), systemd service | Needs RNS + MeshChat running |
+| **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs) | Needs meshtasticd 9443 |
+| **Config API** | RESTful configuration management with NGINX reliability patterns | Needs integration test |
+| **Network Topology** | D3.js force-directed graphs, path tracing, ASCII display | Needs live node data |
+| **Node Health** | Predictive maintenance, battery forecasting, signal trending | Needs historical data |
+| **RNS Packet Sniffer** | Live RNS capture, announce tracking, destination filtering | Needs RNS traffic |
+| **Device Backup** | Configuration backup/restore, versioned snapshots | Needs real device |
+| **Prometheus Metrics** | HTTP endpoint on port 9090, metrics exporter | Ready for Grafana |
+| **Tactical Ops** | XTOC interop, 8 templates, X1 codec, KML/CoT/ATAK export | Implemented v0.5.4 |
+| **AI PRO Mode** | Claude API integration, log analysis, predictive diagnostics | Requires API key |
+| **Messaging** | Broadcast/direct messaging, LXMF routing, message history | Needs bridge running |
+
+### Code-Ready (Implemented, Awaiting Hardware/Services)
+
+| Category | Capabilities | Blocker |
+|----------|-------------|---------|
+| **AREDN** | Node discovery, link quality, service enumeration | Needs AREDN hardware |
+| **Grafana Dashboards** | Pre-built JSON dashboards for Prometheus | Needs Grafana + Prometheus setup |
+| **uConsole AIO V2** | Hardware detection, GPIO power control, auto-config | Hardware ships Q2 2026 |
+
+### Alpha Branch Only (`alpha/meshcore-bridge`, v0.6.0-alpha)
+
+These features exist on the alpha branch and have **not been tested with real hardware**:
+
+| Category | Capabilities | Notes |
+|----------|-------------|-------|
+| **MeshCore 3-Way Bridge** | Meshtastic <> RNS <> MeshCore routing, CanonicalMessage format | Needs companion radio |
+| **RadioMode** | Select primary radio (Meshtastic / MeshCore / Dual), meshcore_primary mode | Config abstraction |
+| **MeshCore Config** | `/etc/meshcore/` config management, device detection, TUI menus | Mirrors meshtasticd pattern |
+| **MeshCore Diagnostics** | MeshCore-specific diagnostic checks | Part of modular diagnostic engine |
+| **NanoVNA** | Antenna analysis, S11/VSWR measurement, sweep storage | Needs NanoVNA hardware |
+| **AREDN Topology** | Network topology inspection from gateway | Needs AREDN mesh |
+
+> **Note:** Alpha also contains significant structural refactoring (src/core/rf/, src/core/services/,
+> src/mapping/, modular diagnostics, plugin event bus) that will benefit main when branches converge.
+> See [Branch Strategy](#branch-strategy) below.
 
 ### Roadmap
 
-**Current Phase: Stability & Reliability (v0.5.x)**
+**Completed (v0.5.x — Stability & Reliability)**
+
+| Feature | Version | Notes |
+|---------|---------|-------|
+| MQTT bridge architecture | v0.5.4 | Zero-interference gateway |
+| Gateway-essential test suite | v0.5.3 | 2,459 tests across 71 files |
+| First-run setup wizard | v0.5.1 | Hardware auto-detect templates |
+| Network topology visualization | v0.5.3 | D3.js + ASCII modes |
+| Tactical messaging (XTOC interop) | v0.5.4 | 8 templates, X1 codec, KML/CoT/ATAK export |
+| Handler registry migration | v0.5.4 | All 49 mixins replaced with 64 handler registry modules |
+| Service pre-flight expansion | v0.5.4 | Advisory `check_service()` on all TCP/MQTT connections |
+| Logging consolidation | v0.5.4 | 9 `basicConfig()` calls → canonical `setup_logging()` |
+| Meshtastic API 2.7.x upgrade | v0.5.4 | Latest meshtastic library support |
+
+**Current Priority: Field Validation (v0.5.x → v0.6.0)**
+
+These features exist on main but need real-world testing before the v0.6.0 release:
+
+| Feature | What Needs Testing | Priority |
+|---------|-------------------|----------|
+| Gateway bridge (MQTT mode) | End-to-end Meshtastic ↔ RNS message delivery with real radios | High |
+| Coverage maps | Folium generation with real GPS position data | High |
+| Live NOC map | WebSocket updates with live node data in browser | High |
+| MQTT monitoring | Real mesh traffic observation and telemetry decode | Medium |
+| Traffic inspector | Packet capture with actual mesh packets | Medium |
+| Circuit breaker | Failure recovery under real disconnect conditions | Medium |
+
+**Alpha Track: MeshCore Integration (v0.6.0-alpha)**
+
+Active on `alpha/meshcore-bridge`. Needs QA with companion radio hardware:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| MQTT bridge architecture | Done (v0.5.4) | Zero-interference gateway |
-| Defense-in-depth TUI | Done (v0.5.2) | 46 mixin `_safe_call` protection |
-| Gateway-essential test suite | Done (v0.5.3) | 2,459 tests across 67 files |
-| First-run setup wizard | Done (v0.5.1) | Hardware auto-detect templates |
-| Network topology visualization | Done | D3.js + ASCII modes |
-| Node health & predictive maintenance | Done | Battery forecasting, signal trending |
-| Tactical messaging (XTOC interop) | Done (v0.5.4) | 8 templates, X1 codec, KML/CoT/ATAK export |
-| BaseMessageHandler ABC | Done (v0.5.4) | Shared constructor, truncation, status notification |
-| Logging consolidation | Done (v0.5.4) | 9 `basicConfig()` calls → canonical `setup_logging()` |
-| Handler registry migration | Done (v0.5.4) | 27 of 49 mixins migrated to plugin-based dispatch |
-| Service pre-flight expansion | Done (v0.5.4) | Advisory `check_service()` on all TCP/MQTT connections |
-| Error visibility hardening | Done (v0.5.4) | Connection failures upgraded DEBUG → WARNING |
+| MeshCore 3-way bridge | Implemented | Meshtastic ↔ RNS ↔ MeshCore routing via CanonicalMessage |
+| RadioMode abstraction | Implemented | Meshtastic / MeshCore / Dual mode selection |
+| MeshCore config manager | Implemented | `/etc/meshcore/` mirroring meshtasticd pattern |
+| MeshCore diagnostics | Implemented | Library, device, config, bridge status checks |
+| Structural refactoring | Implemented | src/core/rf/ (13 modules), src/core/services/ (8), src/mapping/ (12) |
 
-**Next Phase: Hardening & Hardware (v0.6.x - v0.8.x)**
+**Future Releases (v0.7.x+)**
 
 | Feature | Target | Status |
 |---------|--------|--------|
-| MeshCore 3-way bridge + RadioMode | v0.6.0 | Alpha (`alpha/meshcore-bridge`, 2026-02-25) |
+| Branch convergence (alpha → main) | v0.7.0 | After both tracks pass field testing |
 | Historical playback (Live Map) | v0.7.0 | Planned |
-| Packet decode (protobuf + RNS frames) | v0.7.0 | Planned |
-| SDR spectrum analysis (RTL-SDR) | v0.7.0 | Planned |
-| Hardware support matrix (RAK, Heltec, uConsole) | v0.8.0 | In progress |
+| SDR spectrum analysis (RTL-SDR) | v0.7.0 | Planned — hardware dependent |
+| Hardware support matrix | v0.8.0 | RAK, Heltec, uConsole AIO V2 |
 | GPS tracking + GPX export | v0.8.0 | Planned |
-
-**Future: Intelligence & v1.0 (v0.9.x+)**
-
-| Feature | Target | Status |
-|---------|--------|--------|
-| AI predictive analytics enhancement | v0.9.0 | Planned |
-| NanoVNA antenna integration | v0.6.0 | Alpha (`alpha/meshcore-bridge` — plugin with sweep store, RF integration) |
-| Firmware flashing | v1.0.0 | Alpha (high risk) |
-| v1.0 stable release | -- | See `.claude/plans/v1.0_roadmap.md` |
-
-**Future Alpha Candidates**
-
-Features under research that would require alpha-branch development before
-merging to stable main:
-
-| Feature | Risk | Notes |
-|---------|------|-------|
-| MeshCore merge to main | High | Alpha is 2,260 commits ahead (0 behind); merge-base is current main HEAD; needs dedicated reconciliation |
-| Full ATAK plugin bridge | Medium | Bidirectional CoT ↔ mesh relay, protocol complexity |
-| SDR spectrum analysis (RTL-SDR) | Medium | Hardware dependency, driver integration |
-| MANET/LAN bridging | Medium | New transport layer (XTOC-style IP mesh networking) |
-| Firmware flashing | High | Brick risk, device-specific, needs extensive testing |
-| Satellite tracking (TLE/SATCOM) | Low | Isolated feature, XTOC reference implementation exists |
+| NanoVNA antenna integration | v0.7.0 | Alpha branch — needs NanoVNA hardware |
+| Firmware flashing | v1.0.0 | High risk — needs extensive testing |
+| v1.0 stable release | -- | After field-validated gateway + MeshCore convergence |
 
 ### Known Limitations
 
 | Feature | Limitation | Workaround |
 |---------|-----------|------------|
+| **Gateway Bridge** | Not yet field-tested with real radio traffic | Unit tests pass (140+); field QA planned |
+| **Coverage Maps** | Not yet validated with real GPS position data | Requires MQTT subscriber collecting positions |
 | **Live NOC Map** | Node trails require historical data | Enable MQTT subscriber for data collection |
+| **MeshCore** | Alpha branch only, no real hardware testing yet | Needs companion radio for validation |
 | **Grafana** | Dashboards require manual import | See `dashboards/README.md` for instructions |
-| **TCP:4403** | Only one client can connect | Gateway now uses MQTT (v0.5.4+), TCP free for CLI |
-| **Desktop Icon** | Taskbar may show terminal icon instead of MeshForge shaka | Install xterm (`sudo apt install xterm`) for proper WM_CLASS support. The `meshforge-terminal.sh` launcher prefers xterm for this reason. |
+| **TCP:4403** | Only one client can connect | Gateway uses MQTT (v0.5.4+), TCP free for CLI |
+| **AREDN** | Correct API implemented, needs AREDN hardware | Code-ready, awaiting hardware |
 
-*Goal: Complete network operations visibility with historical analysis.*
+### Testing Reality Check
+
+MeshForge has **2,459 automated tests** across 71 files. However, automated tests
+validate code paths with mocks — they do not replace field testing. The following
+features have strong unit test coverage but have **not been run with real services
+and radios** in a live deployment:
+
+- Gateway bridge (140 tests — mocked MQTT/RNS/Meshtastic)
+- Coverage maps (tested with synthetic position data)
+- MeshCore handler (602 tests — mocked meshcore_py)
+- Tri-bridge routing (684 tests — all three protocols mocked)
+
+**Field-validated features** (tested with real hardware): TUI, meshtasticd config,
+RF tools, RNS/rnsd integration, NomadNet, service management, standalone tools.
 
 ---
 
@@ -474,7 +526,7 @@ Meshtastic Node → meshtasticd → MeshForge Gateway → LXMF → rnsd → Mesh
 - **Standard Linux tools** — `systemctl`, `journalctl`, `meshtastic`, `rnstatus`
 - **Config overlays** — writes to `config.d/`, never overwrites defaults
 - **Graceful degradation** — missing dependencies disable features, don't crash
-- **Defense-in-depth** — every mixin dispatch uses `_safe_call` to catch exceptions and return to menu
+- **Defense-in-depth** — handler registry dispatches with exception isolation per handler
 
 ---
 
@@ -629,13 +681,13 @@ sudo python3 src/utils/map_data_service.py
 ```
 src/
 ├── launcher_tui/          # Terminal UI (primary interface)
-│   ├── main.py            # NOC dispatcher + menus (1,482 lines)
+│   ├── main.py            # NOC dispatcher + handler registration
+│   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
+│   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   ├── meshchat_client_mixin.py  # MeshChat install/manage/monitor (automated)
-│   ├── nomadnet_client_mixin.py # NomadNet install/launch/configure
-│   └── *_mixin.py         # 47 feature modules (RF, channels, AI, MeshCore, topology, emergency, etc.)
+│   └── handlers/          # 64 self-contained command handlers
 ├── commands/              # Command modules
 │   ├── propagation.py     # Space weather & HF propagation (NOAA primary)
 │   ├── rns.py             # RNS/Reticulum commands
@@ -830,7 +882,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**2,459 tests** across 67 test files:
+**2,607 tests** across 71 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -851,7 +903,7 @@ connection (port 4403):
 | `test_startup_health.py` | 20 | Startup health checks, service verification |
 | `test_compliance.py` | 13 | HAM compliance validation, encryption modes |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,459 across 67 files as new features (topology, node health, MQTT robustness, protobuf client, tactical ops, RNS shared instance detection, RF engineering, deployment profiles, handler registry, service pre-flight, contact mapping, tactical models) were added with test coverage.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,607 across 71 files as new features were added with test coverage. All tests use mocked external services — field validation with real hardware is a separate QA track.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -898,7 +950,7 @@ print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanne
 - Shared connection manager prevents TCP:4403 client contention
 - Exponential backoff reconnection (1s → 2s → 4s → ... → 30s max)
 - Canonical logging via `setup_logging()` — all 9 `basicConfig()` calls consolidated
-- Handler registry pattern: 27 TUI handlers migrated from mixin inheritance to plugin dispatch
+- Handler registry pattern: all 64 TUI handlers use registry dispatch (mixin inheritance fully replaced)
 - Connection failure logs upgraded to WARNING level for visibility (cleanup errors stay DEBUG)
 
 ---
@@ -918,13 +970,49 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 ## Development
 
-Active development on `main` (stable beta). MeshCore work on `alpha/meshcore-bridge` (experimental).
-Feature branches via `claude/` prefix, merged by PR.
+<a id="branch-strategy"></a>
 
-| Branch | Version | Purpose |
-|--------|---------|---------|
-| `main` | `0.5.4-beta` | Stable — gateway, TUI, monitoring, RF tools |
-| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing, RadioMode abstraction, NanoVNA plugin, AREDN topology |
+### Branch Strategy
+
+MeshForge maintains two parallel development tracks. This is a deliberate
+architectural decision, not accidental drift.
+
+| Branch | Version | Focus | Real-World Tested |
+|--------|---------|-------|-------------------|
+| `main` | `0.5.4-beta` | Stability, field validation, production use | TUI, meshtasticd, RNS, NomadNet |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore integration, structural refactoring | Not yet |
+
+**Divergence** (as of 2026-03-03): Alpha is 139 commits ahead of main. The
+merge-base is at PR #1000. Both branches share the same foundation but have
+evolved independently:
+
+**Main has (that alpha doesn't):**
+- Gateway config schema validation + MQTT message queue persistence
+- Meshtastic API 2.7.x upgrade
+- 3,457 lines of dead diagnostic code removed
+- TUI security hardening (input validation, shell dispatch elimination)
+- Timeout module + TUI handler tests + circuit breaker extension
+
+**Alpha has (that main doesn't):**
+- MeshCore 3-way routing (Meshtastic ↔ RNS ↔ MeshCore)
+- RadioMode abstraction (Meshtastic / MeshCore / Dual)
+- MeshCore config manager (`/etc/meshcore/`)
+- Structural refactoring: `src/core/rf/` (13 modules), `src/core/services/` (8),
+  `src/mapping/` (12), `src/core/diagnostics/` (12)
+- Plugin system modernization (event bus, auto-discovery)
+- Viewer mode (TUI works without sudo)
+- AREDN topology viewer, transport registry
+
+**Which branch should you run?**
+- **`main`** if you want stability and proven Meshtastic + RNS operation
+- **`alpha/meshcore-bridge`** if you have a MeshCore companion radio and want
+  to help test 3-way bridging
+
+**Convergence plan**: After both branches pass field testing, alpha's
+improvements will be rebased onto main for a unified v0.7.0 release.
+See `.claude/plans/branch_convergence_guide.md` for technical details.
+
+Feature branches use `claude/` prefix, merged via PR to the appropriate target.
 
 ```bash
 git clone https://github.com/Nursedude/meshforge.git
