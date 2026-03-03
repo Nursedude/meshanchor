@@ -6,6 +6,7 @@ Converted from rns_monitor_mixin.py as part of the mixin-to-registry migration.
 
 import logging
 import subprocess
+import threading
 import time
 
 from handler_protocol import BaseHandler
@@ -131,7 +132,7 @@ class RNSMonitorHandler(BaseHandler):
                         end="", flush=True,
                     )
                     for _ in range(10):
-                        time.sleep(0.1)
+                        threading.Event().wait(0.1)
 
         except KeyboardInterrupt:
             pass

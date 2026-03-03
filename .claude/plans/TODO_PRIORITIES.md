@@ -1,6 +1,6 @@
 # MeshForge Development Priorities
 
-> **Last Updated:** 2026-03-02
+> **Last Updated:** 2026-03-03
 > **Maintainer:** WH6GXZ / Dude AI
 
 ---
@@ -61,6 +61,16 @@
 
 ## Recently Completed
 
+### 2026-03-03: Session 4 — v0.5.5 Medium-Term Completions (PRs #1036-#1037)
+- [x] **File Splits (1400-line threshold)**: 3 files split (PR #1036)
+  - `meshtastic_protobuf_client.py` 1,457→915 (extracted `_protobuf_admin.py`)
+  - `service_check.py` 1,410→941 (extracted `_port_detection.py`)
+  - `handlers/rns_diagnostics.py` 1,403→859 (extracted `_rns_diagnostics_engine.py`)
+- [x] **Gateway Config Schema Validation** (PR #1037): 6 new validators, mode-specific conditional validation, 27 tests
+- [x] **MQTT Message Queue Persistence** (PR #1037): `RetryPolicy.for_mqtt()`, `publish_to_mqtt()` callback, SQLite-backed queue for MQTT path, 7 tests
+- [x] **File Splits (new threshold breakers)**: `mqtt_subscriber.py` and `map_http_handler.py` split
+- [x] **MF010 Lint Fixes**: 7 `time.sleep()` → `_stop_event.wait()` conversions
+
 ### 2026-03-02: Session 3 — TUI Consolidation + Subprocess Timeouts (PRs #988-#1014)
 - [x] **Handler Registry Migration**: 49 mixins → 60 self-contained handlers (Batches 1-10)
 - [x] **Dead Code Removal**: 8,776 lines across 18 utils + 3 tests (PR #1012)
@@ -103,18 +113,24 @@
 
 ## Technical Debt
 
-**Threshold: 1,500 lines max per file** (updated 2026-03-02)
+**Threshold: 1,400 lines proactive split / 1,500 hard max** (updated 2026-03-03)
 
-All files now under threshold. Largest files:
+All files now under threshold. Largest files after Session 4 splits:
 
 | File | Lines | Status |
 |------|-------|--------|
-| knowledge_content.py | 1,993 | OK — content/data file by design |
-| meshtastic_protobuf_client.py | 1,433 | OK |
-| service_check.py | 1,410 | OK — SSOT, extracted iptables module |
-| map_http_handler.py | 1,404 | OK — extracted proxy module |
-| handlers/rns_diagnostics.py | 1,403 | OK — split from 2,261 into 3 modules |
-| handlers/service_menu.py | 1,370 | OK |
+| knowledge_content.py | 1,281 | OK — content/data file by design |
+| handlers/service_menu.py | 1,381 | OK — monitor |
+| rns_bridge.py | 1,381 | OK — monitor |
+| message_queue.py | 1,324 | OK |
+| meshtastic_protobuf_client.py | 915 | Split in Session 4 |
+| service_check.py | 941 | Split in Session 4 |
+| handlers/rns_diagnostics.py | 859 | Split in Session 4 |
+
+Session 4 splits: meshtastic_protobuf_client (1,457→915, extracted `_protobuf_admin.py`),
+service_check (1,410→941, extracted `_port_detection.py`),
+rns_diagnostics (1,403→859, extracted `_rns_diagnostics_engine.py`),
+mqtt_subscriber (split), map_http_handler (split)
 
 Session 3 splits: rns_diagnostics (2,261→1,403), meshtasticd_config (1,497→516+templates),
 rns_bridge (extracted lifecycle), service_check (extracted iptables), map_data_collector
