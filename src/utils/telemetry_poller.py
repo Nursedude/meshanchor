@@ -269,8 +269,9 @@ class TelemetryPoller:
             if self._request_telemetry(node_id):
                 polled += 1
 
-            # Wait between requests
-            time.sleep(MIN_POLL_INTERVAL_SECONDS)
+            # Wait between requests (interruptible for clean shutdown)
+            if self._stop_event.wait(MIN_POLL_INTERVAL_SECONDS):
+                return  # Shutdown requested
 
         with self._stats_lock:
             self._stats["nodes_polled"] += polled

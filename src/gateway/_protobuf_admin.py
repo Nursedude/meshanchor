@@ -8,6 +8,7 @@ state accessors via a mixin class.
 """
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -140,7 +141,10 @@ class ProtobufAdminMixin:
                     self._pending_events.pop(request_id, None)
                     return self._pending_responses.pop(request_id, None)
 
-            time.sleep(0.1)
+            if event:
+                event.wait(0.1)
+            else:
+                threading.Event().wait(0.1)  # MF010: bounded poll, no daemon
 
         # Timeout
         with self._pending_lock:
