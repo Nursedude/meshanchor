@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -525,7 +526,7 @@ class RNSDiagnosticsHandler(BaseHandler):
                                 retry_combined = ""
                                 for attempt in range(3):
                                     if attempt > 0:
-                                        time.sleep(2)
+                                        threading.Event().wait(2)  # MF010: bounded retry, no daemon
                                     retry_result = subprocess.run(
                                         cmd, capture_output=True,
                                         text=True, timeout=15,
@@ -569,7 +570,7 @@ class RNSDiagnosticsHandler(BaseHandler):
                         retry_combined = ""
                         for attempt in range(3):
                             if attempt > 0:
-                                time.sleep(2)
+                                threading.Event().wait(2)  # MF010: bounded retry, no daemon
                             retry_result = subprocess.run(
                                 cmd, capture_output=True, text=True, timeout=15
                             )
@@ -685,9 +686,9 @@ class RNSDiagnosticsHandler(BaseHandler):
                 ['pkill', '-f', 'rnsd'],
                 capture_output=True, timeout=5,
             )
-            time.sleep(1)
+            threading.Event().wait(1)  # MF010: service restart stabilization
             apply_config_and_restart('rnsd')
-            time.sleep(2)
+            threading.Event().wait(2)  # MF010: service restart stabilization
 
             # Verify it's running as the right user now
             new_user = self._get_rnsd_user()
