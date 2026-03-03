@@ -13,9 +13,17 @@ from unittest.mock import patch, MagicMock
 from src.gateway.config import (
     GatewayConfig,
     MeshtasticConfig,
+    MQTTBridgeConfig,
+    MeshCoreConfig,
     RNSConfig,
     RoutingRule,
     TelemetryConfig,
+    validate_log_level,
+    validate_channel,
+    validate_baud_rate,
+    validate_position_precision,
+    validate_update_interval,
+    validate_hostname_config,
 )
 
 
@@ -331,3 +339,218 @@ class TestTelemetryRoundTrip:
             assert loaded.telemetry.share_position is False
             assert loaded.telemetry.position_precision == 3
             assert loaded.telemetry.update_interval == 120
+
+
+class TestConfigValidation:
+    """Tests for GatewayConfig.validate() schema validation.
+
+    Config drift detection is mocked out because it checks for running
+    rnsd processes and RNS config files that don't exist in CI/test.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_config_drift(self):
+        """Disable config drift detection for validation tests."""
+        with patch('src.gateway.config._HAS_CONFIG_DRIFT', False):
+            yield
+
+    def test_default_config_validates(self):
+        """Default config should pass validation."""
+        config = GatewayConfig()
+        is_valid, errors = config.validate()
+        # Filter only severity="error" items
+        error_items = [e for e in errors if e.severity == "error"]
+        assert is_valid is True, f"Default config invalid: {[str(e) for e in error_items]}"
+
+    def test_invalid_bridge_mode(self):
+        """Invalid bridge_mode should return error."""
+        config = GatewayConfig(bridge_mode="nonexistent_mode")
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("bridge_mode" in e.field for e in errors)
+
+    def test_invalid_meshtastic_port(self):
+        """Out-of-range meshtastic port should return error."""
+        config = GatewayConfig()
+        config.meshtastic.port = 0
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("meshtastic.port" in e.field for e in errors)
+
+    def test_invalid_meshtastic_port_too_high(self):
+        """Port above 65535 should return error."""
+        config = GatewayConfig()
+        config.meshtastic.port = 99999
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("meshtastic.port" in e.field for e in errors)
+
+    def test_invalid_channel(self):
+        """Channel 8 should return error (valid range 0-7)."""
+        config = GatewayConfig()
+        config.meshtastic.channel = 8
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("meshtastic.channel" in e.field for e in errors)
+
+    def test_valid_channel_range(self):
+        """Channels 0-7 should all pass."""
+        for ch in range(8):
+            config = GatewayConfig()
+            config.meshtastic.channel = ch
+            is_valid, errors = config.validate()
+            error_items = [e for e in errors if e.severity == "error"]
+            assert is_valid is True, f"Channel {ch} failed: {error_items}"
+
+    def test_invalid_log_level(self):
+        """Invalid log level should return error."""
+        config = GatewayConfig(log_level="VERBOSE")
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("log_level" in e.field for e in errors)
+
+    def test_valid_log_levels(self):
+        """All standard Python log levels should pass."""
+        for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+            config = GatewayConfig(log_level=level)
+            is_valid, errors = config.validate()
+            level_errors = [e for e in errors if "log_level" in e.field]
+            assert not level_errors, f"Log level {level} failed: {level_errors}"
+
+    def test_invalid_position_precision(self):
+        """Position precision out of range should return error."""
+        config = GatewayConfig()
+        config.telemetry.position_precision = 11
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("position_precision" in e.field for e in errors)
+
+    def test_valid_position_precision(self):
+        """Position precision 0-10 should pass."""
+        config = GatewayConfig()
+        config.telemetry.position_precision = 5
+        is_valid, errors = config.validate()
+        precision_errors = [e for e in errors
+                           if "position_precision" in e.field and e.severity == "error"]
+        assert not precision_errors
+
+    def test_update_interval_too_short_warning(self):
+        """Very short update interval should give warning (not error)."""
+        config = GatewayConfig()
+        config.telemetry.update_interval = 5
+        is_valid, errors = config.validate()
+        # Warnings don't make config invalid
+        assert is_valid is True
+        warnings = [e for e in errors
+                    if "update_interval" in e.field and e.severity == "warning"]
+        assert len(warnings) == 1
+
+    def test_mqtt_port_validated_in_mqtt_mode(self):
+        """MQTT bridge port should be validated when in mqtt_bridge mode."""
+        config = GatewayConfig(bridge_mode="mqtt_bridge")
+        config.mqtt_bridge.port = 0
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("mqtt_bridge.port" in e.field for e in errors)
+
+    def test_mqtt_broker_empty_warning(self):
+        """Empty MQTT broker in mqtt_bridge mode should give warning."""
+        config = GatewayConfig(bridge_mode="mqtt_bridge")
+        config.mqtt_bridge.broker = ""
+        is_valid, errors = config.validate()
+        broker_issues = [e for e in errors if "mqtt_bridge.broker" in e.field]
+        assert len(broker_issues) >= 1
+
+    def test_meshcore_tcp_port_validated(self):
+        """MeshCore TCP port should be validated in meshcore_bridge mode."""
+        config = GatewayConfig(bridge_mode="meshcore_bridge")
+        config.meshcore.connection_type = "tcp"
+        config.meshcore.tcp_port = 0
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("meshcore.tcp_port" in e.field for e in errors)
+
+    def test_meshcore_baud_rate_warning(self):
+        """Non-standard baud rate should give warning."""
+        config = GatewayConfig(bridge_mode="meshcore_bridge")
+        config.meshcore.connection_type = "serial"
+        config.meshcore.baud_rate = 12345
+        is_valid, errors = config.validate()
+        # Warning, not error — config is still valid
+        assert is_valid is True
+        baud_warnings = [e for e in errors
+                         if "baud_rate" in e.field and e.severity == "warning"]
+        assert len(baud_warnings) == 1
+
+    def test_meshtastic_mqtt_port_validated_when_enabled(self):
+        """Meshtastic MQTT port should be validated when use_mqtt=True."""
+        config = GatewayConfig()
+        config.meshtastic.use_mqtt = True
+        config.meshtastic.mqtt_port = 99999
+        is_valid, errors = config.validate()
+        assert is_valid is False
+        assert any("meshtastic.mqtt_port" in e.field for e in errors)
+
+    def test_warnings_dont_fail_validation(self):
+        """Config with only warnings should still be valid."""
+        config = GatewayConfig()
+        config.telemetry.update_interval = 5  # Warning: too short
+        is_valid, errors = config.validate()
+        assert is_valid is True
+        assert any(e.severity == "warning" for e in errors)
+
+    # --- Standalone validator function tests ---
+
+    def test_validate_log_level_accepts_valid(self):
+        assert validate_log_level("INFO", "test") is None
+        assert validate_log_level("debug", "test") is None  # Case-insensitive
+
+    def test_validate_log_level_rejects_invalid(self):
+        err = validate_log_level("VERBOSE", "test")
+        assert err is not None
+        assert err.severity == "error"
+
+    def test_validate_channel_accepts_valid(self):
+        assert validate_channel(0, "test") is None
+        assert validate_channel(7, "test") is None
+
+    def test_validate_channel_rejects_invalid(self):
+        assert validate_channel(-1, "test") is not None
+        assert validate_channel(8, "test") is not None
+
+    def test_validate_baud_rate_accepts_standard(self):
+        assert validate_baud_rate(115200, "test") is None
+        assert validate_baud_rate(9600, "test") is None
+
+    def test_validate_baud_rate_warns_nonstandard(self):
+        err = validate_baud_rate(12345, "test")
+        assert err is not None
+        assert err.severity == "warning"
+
+    def test_validate_position_precision_bounds(self):
+        assert validate_position_precision(0, "test") is None
+        assert validate_position_precision(10, "test") is None
+        assert validate_position_precision(11, "test") is not None
+        assert validate_position_precision(-1, "test") is not None
+
+    def test_validate_update_interval_bounds(self):
+        assert validate_update_interval(60, "test") is None
+        err = validate_update_interval(5, "test")
+        assert err is not None and err.severity == "warning"
+        err = validate_update_interval(100000, "test")
+        assert err is not None and err.severity == "warning"
+
+    def test_validate_hostname_accepts_valid(self):
+        assert validate_hostname_config("localhost", "test") is None
+        assert validate_hostname_config("192.168.1.1", "test") is None
+        assert validate_hostname_config("mesh.local", "test") is None
+
+    def test_validate_hostname_warns_empty(self):
+        err = validate_hostname_config("", "test")
+        assert err is not None
+        assert err.severity == "warning"
+
+    def test_validate_hostname_rejects_invalid(self):
+        err = validate_hostname_config("-invalid", "test")
+        assert err is not None
+        assert err.severity == "error"
