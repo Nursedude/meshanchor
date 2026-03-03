@@ -671,6 +671,58 @@ class MQTTBridgeHandler(BaseMessageHandler):
         channel = payload.get('channel', 0)
         return self.send_text(message, destination, channel)
 
+    def publish_to_mqtt(self, payload: Dict) -> bool:
+        """
+        Publish a message to the MQTT broker.
+
+        Used as persistent queue sender callback for destination="mqtt".
+        Publishes bridged messages (from RNS) to the Meshtastic MQTT
+        topic so meshtasticd picks them up for radio transmission.
+
+        Args:
+            payload: Dictionary with 'message', 'channel', 'source_id' keys
+
+        Returns:
+            True if published successfully, False otherwise.
+        """
+        if not self._connected or not self._client:
+            return False
+
+        message = payload.get('message', '')
+        channel = payload.get('channel', 0)
+        source_id = payload.get('source_id', 'meshforge')
+
+        if not message:
+            return False
+
+        mqtt_cfg = self.config.mqtt_bridge
+
+        # Build JSON payload matching meshtasticd format
+        mqtt_payload = json.dumps({
+            "from": 0,
+            "payload": {"text": message},
+            "sender": source_id,
+            "type": "text",
+            "channel": channel,
+        })
+
+        # Publish to the JSON topic
+        topic = (f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/json/"
+                 f"{mqtt_cfg.channel}/meshforge")
+
+        try:
+            with self._mqtt_lock:
+                result = self._client.publish(topic, mqtt_payload, qos=1)
+            if result.rc == 0:
+                logger.info(f"Published to MQTT: {message[:50]}...")
+                return True
+            else:
+                logger.warning(f"MQTT publish failed with rc={result.rc}")
+                return False
+        except Exception as e:
+            logger.error(f"MQTT publish error: {e}")
+            return False
+
     def test_connection(self) -> bool:
         """Test MQTT broker connectivity."""
         import socket
