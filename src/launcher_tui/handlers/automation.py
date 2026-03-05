@@ -2,12 +2,16 @@
 Automation Handler - TUI menu for auto-ping, auto-traceroute, auto-welcome.
 
 Provides configuration and control for the AutomationEngine's periodic
-network monitoring and node greeting tasks.
+network monitoring and node greeting tasks. Includes traceroute history
+viewing and log access.
 """
 
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
+from backend import clear_screen
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
 
@@ -16,6 +20,9 @@ _AutomationEngine, _HAS_ENGINE = safe_import(
 )
 _get_automation_engine, _HAS_GET_ENGINE = safe_import(
     'utils.automation_engine', 'get_automation_engine'
+)
+_get_traceroute_log_path, _HAS_LOG_PATH = safe_import(
+    'utils.automation_engine', 'get_traceroute_log_path'
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +72,10 @@ class AutomationHandler(BaseHandler):
             status = engine.get_status()
             running = status.get("running", False)
             active = status.get("active_threads", [])
-            state_str = f"RUNNING ({', '.join(active)})" if running and active else "STOPPED"
+            state_str = (
+                f"RUNNING ({', '.join(active)})"
+                if running and active else "STOPPED"
+            )
 
             choice = self.ctx.dialog.menu(
                 "Automation",
@@ -78,8 +88,10 @@ class AutomationHandler(BaseHandler):
                     ("4", "Configure Welcome     - Greet new nodes"),
                     ("5", "Start Automation      - Launch enabled tasks"),
                     ("6", "Stop Automation       - Stop all tasks"),
+                    ("7", "Traceroute History    - View past results"),
+                    ("8", "Traceroute Logs       - View log file"),
                 ],
-                height=16, width=62
+                height=18, width=62
             )
 
             if not choice:
@@ -92,6 +104,8 @@ class AutomationHandler(BaseHandler):
                 "4": ("Auto-Welcome Config", self._configure_welcome),
                 "5": ("Start Automation", self._start_automation),
                 "6": ("Stop Automation", self._stop_automation),
+                "7": ("Traceroute History", self._view_traceroute_history),
+                "8": ("Traceroute Logs", self._view_traceroute_logs),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -111,6 +125,14 @@ class AutomationHandler(BaseHandler):
         trace_cfg = config.get("auto_traceroute", {})
         welcome_cfg = config.get("auto_welcome", {})
 
+        auto_disc = trace_cfg.get("auto_discover", True)
+        targets_desc = (
+            "auto-discover active nodes"
+            if auto_disc and not trace_cfg.get("targets")
+            else f"{len(trace_cfg.get('targets', []))} static"
+            + (" + auto-discover" if auto_disc else "")
+        )
+
         lines = [
             f"Engine: {'RUNNING' if status.get('running') else 'STOPPED'}",
             f"Active: {', '.join(status.get('active_threads', [])) or 'none'}",
@@ -126,7 +148,7 @@ class AutomationHandler(BaseHandler):
             "",
             "=== Auto-Traceroute ===",
             f"  Enabled:  {trace_cfg.get('enabled', False)}",
-            f"  Targets:  {len(trace_cfg.get('targets', []))}",
+            f"  Targets:  {targets_desc}",
             f"  Interval: {trace_cfg.get('interval_minutes', 60)} min",
             f"  Sent:     {stats.get('traceroutes_sent', 0)} "
             f"(OK: {stats.get('traceroutes_success', 0)}, "
@@ -144,7 +166,7 @@ class AutomationHandler(BaseHandler):
         self.ctx.dialog.msgbox(
             "Automation Status",
             "\n".join(lines),
-            height=28, width=60
+            height=30, width=62
         )
 
     def _configure_ping(self) -> None:
@@ -172,7 +194,9 @@ class AutomationHandler(BaseHandler):
             settings.set("auto_ping", ping_cfg)
             settings.save()
             state = "enabled" if ping_cfg["enabled"] else "disabled"
-            self.ctx.dialog.msgbox("Auto-Ping", f"Auto-ping {state}.", height=6, width=35)
+            self.ctx.dialog.msgbox(
+                "Auto-Ping", f"Auto-ping {state}.", height=6, width=35
+            )
 
         elif choice == "2":
             val = self.ctx.dialog.inputbox(
@@ -188,7 +212,9 @@ class AutomationHandler(BaseHandler):
                     settings.set("auto_ping", ping_cfg)
                     settings.save()
                 except ValueError:
-                    self.ctx.dialog.msgbox("Error", "Invalid number.", height=6, width=30)
+                    self.ctx.dialog.msgbox(
+                        "Error", "Invalid number.", height=6, width=30
+                    )
 
         elif choice == "3":
             self._edit_targets("auto_ping", "Ping")
@@ -201,16 +227,19 @@ class AutomationHandler(BaseHandler):
 
         settings = engine.get_settings()
         trace_cfg = settings.get("auto_traceroute", {})
+        auto_disc = trace_cfg.get("auto_discover", True)
 
         choice = self.ctx.dialog.menu(
             "Auto-Traceroute Configuration",
-            f"Currently: {'ENABLED' if trace_cfg.get('enabled') else 'DISABLED'}",
+            f"Currently: {'ENABLED' if trace_cfg.get('enabled') else 'DISABLED'}\n"
+            f"Auto-discover: {'ON' if auto_disc else 'OFF'}",
             choices=[
                 ("1", f"Toggle    - {'Disable' if trace_cfg.get('enabled') else 'Enable'} auto-traceroute"),
                 ("2", f"Interval  - Currently {trace_cfg.get('interval_minutes', 60)} min"),
                 ("3", f"Targets   - {len(trace_cfg.get('targets', []))} nodes configured"),
+                ("4", f"Auto-Discover - {'Disable' if auto_disc else 'Enable'} active node discovery"),
             ],
-            height=12, width=58
+            height=14, width=64
         )
 
         if choice == "1":
@@ -218,7 +247,11 @@ class AutomationHandler(BaseHandler):
             settings.set("auto_traceroute", trace_cfg)
             settings.save()
             state = "enabled" if trace_cfg["enabled"] else "disabled"
-            self.ctx.dialog.msgbox("Auto-Traceroute", f"Auto-traceroute {state}.", height=6, width=40)
+            self.ctx.dialog.msgbox(
+                "Auto-Traceroute",
+                f"Auto-traceroute {state}.",
+                height=6, width=40,
+            )
 
         elif choice == "2":
             val = self.ctx.dialog.inputbox(
@@ -234,10 +267,30 @@ class AutomationHandler(BaseHandler):
                     settings.set("auto_traceroute", trace_cfg)
                     settings.save()
                 except ValueError:
-                    self.ctx.dialog.msgbox("Error", "Invalid number.", height=6, width=30)
+                    self.ctx.dialog.msgbox(
+                        "Error", "Invalid number.", height=6, width=30
+                    )
 
         elif choice == "3":
             self._edit_targets("auto_traceroute", "Traceroute")
+
+        elif choice == "4":
+            trace_cfg["auto_discover"] = not auto_disc
+            settings.set("auto_traceroute", trace_cfg)
+            settings.save()
+            new_state = "enabled" if trace_cfg["auto_discover"] else "disabled"
+            desc = (
+                "All online nodes from the node inventory will be\n"
+                "automatically traced each cycle (in addition to\n"
+                "any static targets)."
+                if trace_cfg["auto_discover"]
+                else "Only statically configured targets will be traced."
+            )
+            self.ctx.dialog.msgbox(
+                "Auto-Discover",
+                f"Auto-discovery {new_state}.\n\n{desc}",
+                height=10, width=55,
+            )
 
     def _configure_welcome(self) -> None:
         """Configure auto-welcome settings."""
@@ -264,7 +317,11 @@ class AutomationHandler(BaseHandler):
             settings.set("auto_welcome", welcome_cfg)
             settings.save()
             state = "enabled" if welcome_cfg["enabled"] else "disabled"
-            self.ctx.dialog.msgbox("Auto-Welcome", f"Auto-welcome {state}.", height=6, width=38)
+            self.ctx.dialog.msgbox(
+                "Auto-Welcome",
+                f"Auto-welcome {state}.",
+                height=6, width=38,
+            )
 
         elif choice == "2":
             val = self.ctx.dialog.inputbox(
@@ -292,7 +349,9 @@ class AutomationHandler(BaseHandler):
                     settings.set("auto_welcome", welcome_cfg)
                     settings.save()
                 except ValueError:
-                    self.ctx.dialog.msgbox("Error", "Invalid number.", height=6, width=30)
+                    self.ctx.dialog.msgbox(
+                        "Error", "Invalid number.", height=6, width=30
+                    )
 
     def _edit_targets(self, config_key: str, label: str) -> None:
         """Edit target node list for ping or traceroute."""
@@ -378,3 +437,174 @@ class AutomationHandler(BaseHandler):
             "All automation tasks have been stopped.",
             height=6, width=44
         )
+
+    def _view_traceroute_history(self) -> None:
+        """View persistent traceroute history from SQLite."""
+        engine = self._get_engine()
+        if not engine:
+            return
+
+        store = engine.get_traceroute_store()
+
+        choice = self.ctx.dialog.menu(
+            "Traceroute History",
+            "View traceroute results from persistent storage",
+            choices=[
+                ("recent", "Recent Results     - Last 40 traceroutes"),
+                ("summary", "Node Summary       - Per-node success rates"),
+            ],
+            height=10, width=58,
+        )
+
+        if choice == "recent":
+            self._show_recent_traceroutes(store)
+        elif choice == "summary":
+            self._show_traceroute_summary(store)
+
+    def _show_recent_traceroutes(self, store) -> None:
+        """Display recent traceroute results."""
+        results = store.get_recent(limit=40)
+        if not results:
+            self.ctx.dialog.msgbox(
+                "No History",
+                "No traceroute results recorded yet.\n"
+                "Enable auto-traceroute or run an on-demand\n"
+                "traceroute from Network Tools.",
+                height=8, width=50,
+            )
+            return
+
+        clear_screen()
+        print("=== Traceroute History (Most Recent) ===\n")
+        print(f"{'Time':<20} {'Node':<14} {'Status':<8} {'Hops':<6} {'Route'}")
+        print("-" * 78)
+
+        for r in results:
+            ts = r.get("timestamp_dt", "")[:19]
+            node = r.get("node_id", "?")[:13]
+            name = r.get("node_name", "")
+            if name:
+                node = f"{name[:10]}"
+            ok = r.get("success", False)
+            status = "\033[0;32mOK\033[0m    " if ok else "\033[0;31mFAIL\033[0m  "
+            hops = str(r.get("hops", 0)) if ok else "-"
+
+            route_hops = r.get("route_json", [])
+            if route_hops:
+                route_str = " -> ".join(f"!{h:08x}" if isinstance(h, int) else str(h) for h in route_hops[:5])
+                if len(route_hops) > 5:
+                    route_str += " ..."
+            elif ok and r.get("raw_output"):
+                route_str = r["raw_output"][:30]
+            elif not ok:
+                route_str = r.get("error", "")[:30]
+            else:
+                route_str = ""
+
+            print(f"{ts:<20} {node:<14} {status} {hops:<6} {route_str}")
+
+        print(f"\nTotal: {len(results)} results shown")
+        self.ctx.wait_for_enter()
+
+    def _show_traceroute_summary(self, store) -> None:
+        """Display per-node traceroute summary."""
+        summary = store.get_summary()
+        if not summary:
+            self.ctx.dialog.msgbox(
+                "No Data",
+                "No traceroute data available yet.",
+                height=6, width=40,
+            )
+            return
+
+        clear_screen()
+        print("=== Traceroute Summary (Per Node) ===\n")
+        print(
+            f"{'Node':<14} {'Name':<12} {'Total':<7} {'OK%':<7} "
+            f"{'Avg Hops':<10} {'Last Seen'}"
+        )
+        print("-" * 72)
+
+        for s in summary:
+            node = s["node_id"][:13]
+            name = s.get("node_name", "")[:11]
+            total = s["total"]
+            rate = f"{s['success_rate']:.0f}%"
+            avg_hops = str(s["avg_hops"]) if s["avg_hops"] else "-"
+            last = s.get("last_seen", "never")
+
+            # Color-code success rate
+            pct = s["success_rate"]
+            if pct >= 80:
+                rate_str = f"\033[0;32m{rate:<7}\033[0m"
+            elif pct >= 50:
+                rate_str = f"\033[0;33m{rate:<7}\033[0m"
+            else:
+                rate_str = f"\033[0;31m{rate:<7}\033[0m"
+
+            print(
+                f"{node:<14} {name:<12} {total:<7} {rate_str} "
+                f"{avg_hops:<10} {last}"
+            )
+
+        print(f"\nNodes tracked: {len(summary)}")
+        self.ctx.wait_for_enter()
+
+    def _view_traceroute_logs(self) -> None:
+        """View the traceroute log file."""
+        if not _HAS_LOG_PATH or _get_traceroute_log_path is None:
+            self.ctx.dialog.msgbox(
+                "Not Available",
+                "Traceroute log path not available.",
+                height=6, width=40,
+            )
+            return
+
+        try:
+            log_path = _get_traceroute_log_path()
+        except Exception as e:
+            self.ctx.dialog.msgbox(
+                "Error", f"Could not determine log path:\n{e}",
+                height=7, width=50,
+            )
+            return
+
+        if not log_path.exists():
+            self.ctx.dialog.msgbox(
+                "No Log File",
+                f"Traceroute log not yet created.\n\n"
+                f"Expected at:\n{log_path}\n\n"
+                f"Run a traceroute to generate log entries.",
+                height=10, width=55,
+            )
+            return
+
+        try:
+            with open(log_path, "r") as f:
+                lines = f.readlines()
+        except OSError as e:
+            self.ctx.dialog.msgbox(
+                "Read Error", f"Could not read log file:\n{e}",
+                height=7, width=50,
+            )
+            return
+
+        # Show last 50 lines
+        tail_lines = lines[-50:]
+
+        clear_screen()
+        print(f"=== Traceroute Log ({log_path.name}) ===")
+        print(f"Showing last {len(tail_lines)} of {len(lines)} lines\n")
+
+        for line in tail_lines:
+            line = line.rstrip()
+            # Color-code OK/FAIL
+            if " OK" in line:
+                print(f"\033[0;32m{line}\033[0m")
+            elif "FAIL" in line:
+                print(f"\033[0;31m{line}\033[0m")
+            else:
+                print(line)
+
+        print(f"\nLog file: {log_path}")
+        self.ctx.wait_for_enter()
