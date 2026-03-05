@@ -215,21 +215,27 @@ Expected test count after convergence: ~3,000+ (main's 2,459 + alpha's unique te
 
 ---
 
-## Decision: NOT Separate Projects
+## Decision: REVISED — MeshAnchor Split (2026-03-05)
 
-This guide documents the convergence path because the architectural decision has
-been made: **MeshCore stays in MeshForge**. The reasons:
+> **Previous decision** (2026-03-03): MeshCore stays in MeshForge, converge branches.
+>
+> **New decision** (2026-03-05): Alpha branch will become **MeshAnchor** (`Nursedude/meshanchor`),
+> a standalone sister app where MeshCore is the primary radio. MeshForge main continues with
+> Meshtastic as primary. The convergence described above is **superseded** by the split plan.
 
-1. CanonicalMessage format requires all protocol handlers in one codebase
-2. MessageRouter classifies across all 3 networks simultaneously
-3. BaseMessageHandler ABC provides shared contract for all handlers
-4. Gateway infrastructure (health, circuit breaker, message queue) spans all protocols
-5. Creating a separate project would duplicate ~70% of shared infrastructure
-6. Deployment profiles already gate MeshCore as optional
+**Why the change**: The `RadioMode` abstraction on alpha already models two distinct apps —
+one Meshtastic-primary, one MeshCore-primary. Rather than forcing them into one codebase,
+the split lets each app optimize for its primary radio while sharing the gateway protocol
+for interop.
 
-MeshCore is a **protocol** (like Meshtastic, RNS), not a **plugin** (like HamClock, AREDN).
-Protocols live in `src/gateway/`. Plugins live in `src/plugins/`.
+**New plan**: See `.claude/plans/meshanchor_split_plan.md` for the full analysis.
+
+**Sequence**:
+1. Field test alpha with real MeshCore hardware (validate before split)
+2. Create `Nursedude/meshanchor` from alpha (clean history)
+3. Archive `alpha/meshcore-bridge` branch on MeshForge
+4. Both repos maintain independent copies (fork-and-diverge), cherry-pick critical fixes
 
 ---
 
-*Reference for future convergence session — WH6GXZ + Claude Code*
+*Reference for future sessions — WH6GXZ + Claude Code*
