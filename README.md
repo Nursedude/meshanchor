@@ -237,6 +237,7 @@ Code works in testing but hasn't been validated in real-world deployments with a
 | Category | Capabilities | Notes |
 |----------|-------------|-------|
 | **Multi-Mesh Gateway** | Meshtastic <> RNS bridge via MQTT, persistent SQLite queue, circuit breaker | **Priority QA target** — core mission feature |
+| **Radio Failover** | Dual-radio state machine, automatic TX switchover at >25% channel utilization, anti-flap, HTTP health polling | Needs dual meshtasticd |
 | **MQTT Monitoring** | Nodeless mesh observation, protobuf decode, telemetry tracking, congestion alerts | Needs real MQTT traffic |
 | **Coverage Maps** | Interactive Folium maps, SNR-based link quality, offline tile caching | **Priority QA target** — needs GPS position data |
 | **Live NOC Map** | Browser view with WebSocket updates, node markers, signal heatmap | **Priority QA target** — needs running bridge |
@@ -493,6 +494,27 @@ sudo apt install mosquitto                     # MQTT broker
 - Gateway Bridge: `Mesh Networks → Gateway Config → Templates → mqtt_bridge`
 - MQTT Monitor: `Mesh Networks → MQTT Monitor → Configure → Use Local Broker`
 - MQTT Settings: `Gateway Config → MQTT Bridge Settings → Run Setup Guide`
+
+### Dual-Radio Failover
+
+Meshtastic firmware silently drops position and telemetry sends when channel utilization
+exceeds 25%. MeshForge addresses this with a dual-radio failover state machine
+(`gateway/radio_failover.py`) that monitors two meshtasticd instances and automatically
+switches the active TX path:
+
+```
+PRIMARY_ACTIVE → FAILOVER_PENDING → SECONDARY_ACTIVE
+       ↑                                    |
+       └──── RECOVERY_PENDING ──────────────┘
+```
+
+- **Health polling**: HTTP `/json/report` every 5 seconds (no TCP contention)
+- **Trigger**: Sustained >25% channel utilization for 30 seconds
+- **Recovery**: Primary drops below 15% and holds stable for 60 seconds
+- **Safety**: Max 6 failovers/hour, 30-second cooldown, anti-flap stabilization
+
+Requires two meshtasticd instances on ports 4403 (primary) and 4404 (secondary) with
+HTTP APIs enabled. Enable via TUI or `failover.enabled: true` in gateway config.
 
 ### MeshChat (LXMF Messaging)
 
