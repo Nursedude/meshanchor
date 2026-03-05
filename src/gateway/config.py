@@ -479,6 +479,14 @@ class GatewayConfig:
     log_level: str = "INFO"
     log_messages: bool = True
 
+    # Dual-radio failover (requires two meshtasticd instances)
+    failover_enabled: bool = False
+    failover_utilization_threshold: float = 25.0   # % channel utilization trigger
+    failover_utilization_duration: int = 30         # Seconds sustained above threshold
+    failover_recovery_threshold: float = 15.0      # % utilization for switchback
+    failover_recovery_duration: int = 60            # Seconds stable below threshold
+    failover_health_poll_interval: float = 5.0     # Seconds between health checks
+
     # AI Diagnostics
     ai_diagnostics_enabled: bool = False
     snr_analysis: bool = True

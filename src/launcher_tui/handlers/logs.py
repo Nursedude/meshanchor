@@ -4,6 +4,7 @@ Logs Handler — Log viewing functionality.
 Converted from logs_menu_mixin.py as part of the mixin-to-registry migration.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import List
@@ -11,6 +12,16 @@ from typing import List
 from backend import clear_screen
 from handler_protocol import BaseHandler
 from utils.paths import get_real_user_home
+
+try:
+    from utils.logging_config import set_log_level, get_current_log_level, cleanup_old_logs
+    _HAS_LOG_LEVEL = True
+    _HAS_GET_LEVEL = True
+    _HAS_CLEANUP = True
+except ImportError:
+    _HAS_LOG_LEVEL = False
+    _HAS_GET_LEVEL = False
+    _HAS_CLEANUP = False
 
 
 class LogsHandler(BaseHandler):
@@ -43,6 +54,8 @@ class LogsHandler(BaseHandler):
                 ("kernel", "Kernel Messages        dmesg"),
                 ("meshforge", "MeshForge App Logs     Browse log files"),
                 ("crash", "Crash Log              TUI error output"),
+                ("level", "Log Level              Change runtime verbosity"),
+                ("cleanup", "Log Cleanup            Remove old log files"),
                 ("back", "Back"),
             ]
 
@@ -66,6 +79,8 @@ class LogsHandler(BaseHandler):
                 "kernel": ("Kernel Messages", self._view_kernel_messages),
                 "meshforge": ("MeshForge Logs", self._view_meshforge_logs),
                 "crash": ("Crash Log", self._view_crash_log),
+                "level": ("Log Level", self._change_log_level),
+                "cleanup": ("Log Cleanup", self._cleanup_logs),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -244,3 +259,55 @@ class LogsHandler(BaseHandler):
             return
 
         self._display_log_file(crash_log, tail_lines=50)
+
+    def _change_log_level(self):
+        """Change the runtime log level."""
+        if not _HAS_LOG_LEVEL:
+            self.ctx.dialog.msgbox("Error", "Log level control unavailable.")
+            return
+
+        current = get_current_log_level() if _HAS_GET_LEVEL else "UNKNOWN"
+
+        choices = [
+            ("DEBUG", f"DEBUG          {'(current)' if current == 'DEBUG' else 'Verbose'}"),
+            ("INFO", f"INFO           {'(current)' if current == 'INFO' else 'Normal'}"),
+            ("WARNING", f"WARNING        {'(current)' if current == 'WARNING' else 'Quiet'}"),
+            ("ERROR", f"ERROR          {'(current)' if current == 'ERROR' else 'Errors only'}"),
+        ]
+
+        choice = self.ctx.dialog.menu(
+            "Log Level",
+            f"Current level: {current}\nChange runtime log verbosity:",
+            choices
+        )
+
+        if choice and choice in ("DEBUG", "INFO", "WARNING", "ERROR"):
+            level = getattr(logging, choice)
+            set_log_level(level)
+            self.ctx.dialog.msgbox(
+                "Log Level Changed",
+                f"Log level set to {choice}.\n\n"
+                "This affects the current session only.\n"
+                "File logging always captures DEBUG level."
+            )
+
+    def _cleanup_logs(self):
+        """Remove old log files."""
+        if not _HAS_CLEANUP:
+            self.ctx.dialog.msgbox("Error", "Log cleanup unavailable.")
+            return
+
+        choice = self.ctx.dialog.yesno(
+            "Log Cleanup",
+            "Remove log files older than 30 days?\n\n"
+            "This frees disk space on long-running deployments.\n"
+            "Current session logs will not be affected."
+        )
+
+        if choice:
+            deleted = cleanup_old_logs(max_age_days=30)
+            self.ctx.dialog.msgbox(
+                "Log Cleanup Complete",
+                f"Removed {deleted} old log file(s)." if deleted
+                else "No old log files found."
+            )

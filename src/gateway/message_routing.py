@@ -115,6 +115,7 @@ class MessageRouter:
         - Medium confidence: Route with logging
         """
         if not self.config.enabled:
+            logger.debug("Routing: bridge disabled, dropping message")
             return False
 
         # Use classifier if available
@@ -252,9 +253,19 @@ class MessageRouter:
                     continue
 
             # All filters passed - this rule matches
+            source_id = getattr(msg, 'source_id', '') or getattr(msg, 'source_address', '')
+            logger.debug(
+                "Routing legacy: rule '%s' matched for %s from %s",
+                rule.name, source_id[:16], source
+            )
             return True
 
-        return self.config.default_route in ("bidirectional", "all_to_all")
+        default_bridge = self.config.default_route in ("bidirectional", "all_to_all")
+        logger.debug(
+            "Routing legacy: no rule matched, default_route=%s -> bridge=%s",
+            self.config.default_route, default_bridge
+        )
+        return default_bridge
 
     def _direction_allows(self, direction: str, source_network: str) -> bool:
         """

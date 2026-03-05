@@ -13,12 +13,11 @@ Falls back to basic terminal menu if neither available.
 import os
 import re
 import sys
-import shutil
 import subprocess
 import logging
 import traceback
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +44,11 @@ from utils.service_check import lock_port_external
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
 # See: utils/paths.py (ReticulumPaths, get_real_user_home)
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
-from utils.paths import get_real_user_home, ReticulumPaths
+from utils.paths import get_real_user_home
 
 # Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
 # See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-from utils.service_check import check_service, check_port, apply_config_and_restart, ServiceState
+from utils.service_check import apply_config_and_restart
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend, clear_screen
