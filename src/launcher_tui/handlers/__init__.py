@@ -185,4 +185,8 @@ def get_all_handlers() -> List[Type]:
     from handlers.automation import AutomationHandler
     handlers.append(AutomationHandler)
 
+    # Batch 12 — TX load balancer (dual-radio)
+    from handlers.load_balancer import LoadBalancerHandler
+    handlers.append(LoadBalancerHandler)
+
     return handlers

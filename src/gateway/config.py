@@ -495,6 +495,7 @@ class GatewayConfig:
     load_balancer_tx_threshold: float = 10.0       # % TX airtime to start splitting
     load_balancer_tx_max: float = 20.0             # % TX airtime for full offload
     load_balancer_health_poll_interval: float = 5.0  # Seconds between health checks
+    load_balancer_recovery_margin: float = 2.0     # Hysteresis margin for IDLE recovery
 
     # AI Diagnostics
     ai_diagnostics_enabled: bool = False

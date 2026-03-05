@@ -457,3 +457,185 @@ class TestEdgeCases:
         """Calling stop multiple times should not error."""
         lb.stop()
         lb.stop()  # Second call should be fine
+
+
+# ── Hysteresis Tests ────────────────────────────────────────────────
+
+
+class TestHysteresis:
+    """Test IDLE↔BALANCING hysteresis to prevent boundary flapping."""
+
+    @pytest.fixture
+    def lb_hysteresis(self):
+        """Load balancer with recovery_margin for hysteresis testing."""
+        config = LoadBalancerConfig(
+            enabled=True,
+            tx_threshold=10.0,
+            tx_max=20.0,
+            weight_change_rate=100.0,
+            min_primary_weight=10.0,
+            recovery_margin=2.0,
+        )
+        balancer = RadioLoadBalancer(config)
+        yield balancer
+        balancer.stop()
+
+    def test_enter_balancing_at_threshold(self, lb_hysteresis):
+        """Should enter BALANCING when primary TX >= threshold."""
+        lb = lb_hysteresis
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+        lb._primary.tx_utilization = 10.5
+        lb._secondary.tx_utilization = 0.0
+
+        lb._recalculate_weights()
+
+        assert lb.state == LoadBalancerState.BALANCING
+
+    def test_stay_balancing_above_recovery_band(self, lb_hysteresis):
+        """Should stay BALANCING when TX drops but stays above recovery band."""
+        lb = lb_hysteresis
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # Enter BALANCING
+        lb._primary.tx_utilization = 12.0
+        lb._recalculate_weights()
+        assert lb.state == LoadBalancerState.BALANCING
+
+        # Drop to 9.0% — above recovery threshold (10.0 - 2.0 = 8.0)
+        lb._primary.tx_utilization = 9.0
+        lb._recalculate_weights()
+        assert lb.state == LoadBalancerState.BALANCING
+
+    def test_return_to_idle_below_recovery_band(self, lb_hysteresis):
+        """Should return to IDLE only when TX drops below recovery band."""
+        lb = lb_hysteresis
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # Enter BALANCING
+        lb._primary.tx_utilization = 12.0
+        lb._recalculate_weights()
+        assert lb.state == LoadBalancerState.BALANCING
+
+        # Drop below recovery threshold (10.0 - 2.0 = 8.0)
+        lb._primary.tx_utilization = 7.0
+        lb._recalculate_weights()
+        assert lb.state == LoadBalancerState.IDLE
+
+    def test_idle_enters_at_threshold_not_recovery(self, lb_hysteresis):
+        """When IDLE, should enter BALANCING at threshold, not recovery band."""
+        lb = lb_hysteresis
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # 9.0% is above recovery band but below threshold — should stay IDLE
+        lb._primary.tx_utilization = 9.0
+        lb._recalculate_weights()
+        assert lb.state == LoadBalancerState.IDLE
+
+
+# ── Secondary TX Awareness Tests ───────────────────────────────────
+
+
+class TestSecondaryTXAwareness:
+    """Test that weight calculation accounts for secondary TX load."""
+
+    @pytest.fixture
+    def lb_secondary(self):
+        config = LoadBalancerConfig(
+            enabled=True,
+            tx_threshold=10.0,
+            tx_max=20.0,
+            weight_change_rate=100.0,
+            min_primary_weight=10.0,
+        )
+        balancer = RadioLoadBalancer(config)
+        yield balancer
+        balancer.stop()
+
+    def test_secondary_hot_reduces_offload(self, lb_secondary):
+        """When secondary is hot, offload ratio should be reduced."""
+        lb = lb_secondary
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # First: secondary cold — full offload ratio
+        lb._primary.tx_utilization = 15.0
+        lb._secondary.tx_utilization = 0.0
+        lb._recalculate_weights()
+        weight_cold = lb.primary_weight
+
+        # Reset weights
+        lb._set_weights(100.0, "reset")
+
+        # Second: secondary hot — reduced offload
+        lb._primary.tx_utilization = 15.0
+        lb._secondary.tx_utilization = 18.0  # Near tx_max
+        lb._recalculate_weights()
+        weight_hot = lb.primary_weight
+
+        # With hot secondary, primary should keep more weight
+        assert weight_hot > weight_cold
+
+    def test_secondary_below_threshold_no_effect(self, lb_secondary):
+        """Secondary below threshold should not affect weight calc."""
+        lb = lb_secondary
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # Secondary at 5% (below threshold) — no adjustment
+        lb._primary.tx_utilization = 15.0
+        lb._secondary.tx_utilization = 5.0
+        lb._recalculate_weights()
+        weight_low = lb.primary_weight
+
+        # Reset and test with secondary at 0%
+        lb._set_weights(100.0, "reset")
+        lb._primary.tx_utilization = 15.0
+        lb._secondary.tx_utilization = 0.0
+        lb._recalculate_weights()
+        weight_zero = lb.primary_weight
+
+        # Both should be approximately the same
+        assert weight_low == pytest.approx(weight_zero, abs=1.0)
+
+
+# ── Counter Reset Tests ────────────────────────────────────────────
+
+
+class TestCounterReset:
+    """Test TX counter reset functionality."""
+
+    def test_reset_counters(self):
+        """reset_counters() should zero both counters."""
+        config = LoadBalancerConfig(enabled=True)
+        lb = RadioLoadBalancer(config)
+        lb._set_weights(50.0, "test")
+
+        # Generate some counts
+        for _ in range(50):
+            lb.get_tx_port()
+
+        assert lb._tx_count_primary + lb._tx_count_secondary == 50
+
+        lb.reset_counters()
+
+        assert lb._tx_count_primary == 0
+        assert lb._tx_count_secondary == 0
+
+    def test_reset_counters_reflected_in_status(self):
+        """Status should reflect reset counters."""
+        config = LoadBalancerConfig(enabled=True)
+        lb = RadioLoadBalancer(config)
+        lb._set_weights(50.0, "test")
+
+        for _ in range(20):
+            lb.get_tx_port()
+
+        lb.reset_counters()
+        status = lb.get_status()
+
+        assert status['tx_counts']['primary'] == 0
+        assert status['tx_counts']['secondary'] == 0
