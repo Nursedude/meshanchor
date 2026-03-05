@@ -368,6 +368,61 @@ CRITICAL = logging.CRITICAL
 
 
 # ============================================================================
+# Log file cleanup
+# ============================================================================
+
+def cleanup_old_logs(max_age_days: int = 30) -> int:
+    """
+    Remove log files older than max_age_days from the MeshForge log directory.
+
+    Prevents disk exhaustion on long-running deployments (RPi, gateways).
+
+    Args:
+        max_age_days: Delete logs older than this (default 30 days)
+
+    Returns:
+        Number of files deleted
+    """
+    import glob as glob_mod
+
+    deleted = 0
+    now = time.time()
+    cutoff = now - (max_age_days * 86400)
+
+    log_dirs = [
+        LOG_DIR,
+        get_real_user_home() / ".cache" / "meshforge" / "logs",
+    ]
+
+    for log_dir in log_dirs:
+        if not log_dir.exists():
+            continue
+        for log_file in log_dir.iterdir():
+            if not log_file.is_file():
+                continue
+            if not (log_file.suffix == '.log' or '.log.' in log_file.name):
+                continue
+            try:
+                if log_file.stat().st_mtime < cutoff:
+                    log_file.unlink()
+                    deleted += 1
+            except OSError:
+                pass
+
+    if deleted:
+        logging.getLogger(__name__).info(
+            "Log cleanup: removed %d log file(s) older than %d days",
+            deleted, max_age_days
+        )
+    return deleted
+
+
+def get_current_log_level() -> str:
+    """Return the current global log level name for TUI display."""
+    return logging.getLevelName(_global_log_level)
+
+
+# ============================================================================
 # Journald Integration (for RPi/systemd deployments)
 # ============================================================================
 

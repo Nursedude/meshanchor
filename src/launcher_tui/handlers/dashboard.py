@@ -27,6 +27,11 @@ generate_report, generate_and_save, _HAS_REPORT_GEN = safe_import(
 from utils.health_score import get_health_scorer
 from plugins.eas_alerts import EASAlertsPlugin
 pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+try:
+    from gateway.radio_failover import FailoverManager
+    _HAS_FAILOVER = True
+except ImportError:
+    _HAS_FAILOVER = False
 
 
 class DashboardHandler(BaseHandler):
@@ -125,6 +130,37 @@ class DashboardHandler(BaseHandler):
                 print()
         except Exception:
             pass  # Circuit breaker info is advisory, never block status display
+
+        # Dual-radio failover status
+        if _HAS_FAILOVER and hasattr(self.ctx, 'failover_manager') and self.ctx.failover_manager:
+            try:
+                status = self.ctx.failover_manager.get_status()
+                if status.get('enabled'):
+                    state = status['state']
+                    active = status['active_port']
+                    p = status['primary']
+                    s = status['secondary']
+
+                    state_colors = {
+                        'primary_active': '\033[0;32m',     # Green
+                        'secondary_active': '\033[0;33m',   # Yellow
+                        'failover_pending': '\033[0;33m',   # Yellow
+                        'recovery_pending': '\033[0;36m',   # Cyan
+                        'disabled': '\033[2m',              # Dim
+                    }
+                    color = state_colors.get(state, '')
+                    reset = '\033[0m'
+
+                    print(f"\n  DUAL-RADIO FAILOVER")
+                    print(f"  {color}State: {state}{reset}  |  Active TX: port {active}")
+                    p_icon = '\033[0;32m●\033[0m' if p['reachable'] else '\033[0;31m●\033[0m'
+                    s_icon = '\033[0;32m●\033[0m' if s['reachable'] else '\033[0;31m●\033[0m'
+                    print(f"  {p_icon} Primary  :{p['port']}  ch_util={p['channel_utilization']:.1f}%  tx={p['tx_utilization']:.1f}%")
+                    print(f"  {s_icon} Secondary:{s['port']}  ch_util={s['channel_utilization']:.1f}%  tx={s['tx_utilization']:.1f}%")
+                    if status.get('last_event'):
+                        print(f"  Last event: {status['last_event']}")
+            except Exception:
+                pass  # Failover info is advisory
 
         print()
         self.ctx.wait_for_enter()
