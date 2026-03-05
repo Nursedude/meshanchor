@@ -95,6 +95,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
         message_callback: Optional[Callable] = None,
         status_callback: Optional[Callable] = None,
         should_bridge: Optional[Callable] = None,
+        load_balancer=None,
     ):
         super().__init__(
             config=config,
@@ -108,6 +109,9 @@ class MQTTBridgeHandler(BaseMessageHandler):
             status_callback=status_callback,
             should_bridge=should_bridge,
         )
+
+        # TX load balancer (optional, for dual-radio setups)
+        self._load_balancer = load_balancer
 
         # MQTT client (handler-specific)
         self._client = None
@@ -559,7 +563,14 @@ class MQTTBridgeHandler(BaseMessageHandler):
         try:
             from .meshtastic_protobuf_client import send_text_direct
             host = self.config.meshtastic.host
-            http_port = getattr(self.config.meshtastic, 'http_port', 9443) or 9443
+
+            # Use load balancer for port selection if available
+            if self._load_balancer and self._load_balancer.state.value != "disabled":
+                http_port = self._load_balancer.get_tx_port()
+                logger.debug("TX load balancer selected port %d", http_port)
+            else:
+                http_port = getattr(self.config.meshtastic, 'http_port', 9443) or 9443
+
             if send_text_direct(text=message, host=host, port=http_port,
                                 destination=dest_num, channel_index=channel):
                 return True
