@@ -41,6 +41,7 @@ Usage:
     print(manager.get_status()) # Dict with full status
 """
 
+import collections
 import logging
 import random
 import threading
@@ -534,6 +535,7 @@ class LoadBalancerConfig:
     # Safety
     weight_change_rate: float = 10.0   # Max weight shift per poll cycle (%)
     min_primary_weight: float = 10.0   # Primary always keeps at least this %
+    recovery_margin: float = 2.0       # Hysteresis: return to IDLE at threshold - margin
 
 
 class RadioLoadBalancer:
@@ -588,10 +590,10 @@ class RadioLoadBalancer:
         # TX counters (per poll cycle, for status display)
         self._tx_count_primary: int = 0
         self._tx_count_secondary: int = 0
+        self._counter_lock = threading.Lock()
 
         # Event history
-        self._events: List[FailoverEvent] = []
-        self._max_events = 100
+        self._events: collections.deque = collections.deque(maxlen=100)
         self._last_state_change: float = 0.0
 
         # Polling thread
@@ -643,10 +645,12 @@ class RadioLoadBalancer:
             weight = self._primary_weight
 
         if random.random() * 100.0 < weight:
-            self._tx_count_primary += 1
+            with self._counter_lock:
+                self._tx_count_primary += 1
             return self._config.primary_http_port
         else:
-            self._tx_count_secondary += 1
+            with self._counter_lock:
+                self._tx_count_secondary += 1
             return self._config.secondary_http_port
 
     def start(self) -> None:
@@ -686,12 +690,22 @@ class RadioLoadBalancer:
             self._thread = None
         logger.info("TX load balancer stopped")
 
+    def reset_counters(self) -> None:
+        """Reset TX counters for per-session stats."""
+        with self._counter_lock:
+            self._tx_count_primary = 0
+            self._tx_count_secondary = 0
+
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive load balancer status for TUI dashboard."""
         with self._state_lock:
             state = self._state
         with self._weight_lock:
             p_weight = self._primary_weight
+
+        with self._counter_lock:
+            tx_primary = self._tx_count_primary
+            tx_secondary = self._tx_count_secondary
 
         status = {
             'state': state.value,
@@ -713,8 +727,8 @@ class RadioLoadBalancer:
                 'tx_utilization': round(self._secondary.tx_utilization, 1),
             },
             'tx_counts': {
-                'primary': self._tx_count_primary,
-                'secondary': self._tx_count_secondary,
+                'primary': tx_primary,
+                'secondary': tx_secondary,
             },
             'last_event': self._events[-1].reason if self._events else None,
             'thresholds': {
@@ -806,8 +820,17 @@ class RadioLoadBalancer:
             )
             return
 
+        # Hysteresis: enter BALANCING at tx_threshold, return to IDLE
+        # at tx_threshold - recovery_margin to prevent boundary flapping
+        with self._state_lock:
+            current_state = self._state
+        if current_state == LoadBalancerState.BALANCING:
+            idle_threshold = threshold - self._config.recovery_margin
+        else:
+            idle_threshold = threshold
+
         # Primary below threshold — all traffic to primary
-        if p_tx < threshold:
+        if p_tx < idle_threshold:
             target = 100.0
             new_state = LoadBalancerState.IDLE
         else:
@@ -819,6 +842,12 @@ class RadioLoadBalancer:
                 ratio = min(1.0, (p_tx - threshold) / range_size)
 
             min_w = self._config.min_primary_weight
+
+            # Factor secondary TX: reduce offload as secondary approaches tx_max
+            if s_tx > threshold and s_tx < tx_max:
+                secondary_headroom = (tx_max - s_tx) / (tx_max - threshold)
+                ratio = ratio * secondary_headroom
+
             target = max(min_w, 100.0 - (ratio * (100.0 - min_w)))
             new_state = LoadBalancerState.BALANCING
 
@@ -871,8 +900,6 @@ class RadioLoadBalancer:
             secondary_utilization=self._secondary.tx_utilization,
         )
         self._events.append(event)
-        if len(self._events) > self._max_events:
-            self._events = self._events[-self._max_events:]
 
         logger.warning(
             "LOAD BALANCER: %s -> %s | primary_tx=%.1f%% secondary_tx=%.1f%% | "
