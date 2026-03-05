@@ -33,6 +33,12 @@ try:
 except ImportError:
     _HAS_FAILOVER = False
 
+try:
+    from gateway.radio_failover import RadioLoadBalancer
+    _HAS_LOAD_BALANCER = True
+except ImportError:
+    _HAS_LOAD_BALANCER = False
+
 
 class DashboardHandler(BaseHandler):
     """TUI handler for dashboard display methods."""
@@ -161,6 +167,49 @@ class DashboardHandler(BaseHandler):
                         print(f"  Last event: {status['last_event']}")
             except Exception:
                 pass  # Failover info is advisory
+
+        # TX load balancer status
+        if _HAS_LOAD_BALANCER and hasattr(self.ctx, 'load_balancer') and self.ctx.load_balancer:
+            try:
+                status = self.ctx.load_balancer.get_status()
+                if status.get('enabled'):
+                    state = status['state']
+                    p = status['primary']
+                    s = status['secondary']
+                    p_w = status['primary_weight']
+                    s_w = status['secondary_weight']
+                    tx_counts = status.get('tx_counts', {})
+
+                    state_colors = {
+                        'idle': '\033[0;32m',        # Green
+                        'balancing': '\033[0;33m',   # Yellow
+                        'saturated': '\033[0;31m',   # Red
+                        'disabled': '\033[2m',       # Dim
+                    }
+                    color = state_colors.get(state, '')
+                    reset = '\033[0m'
+
+                    print(f"\n  TX LOAD BALANCER")
+                    print(f"  {color}State: {state}{reset}")
+                    p_icon = '\033[0;32m●\033[0m' if p['reachable'] else '\033[0;31m●\033[0m'
+                    s_icon = '\033[0;32m●\033[0m' if s['reachable'] else '\033[0;31m●\033[0m'
+                    print(f"  {p_icon} Primary  :{p['port']}  tx={p['tx_utilization']:.1f}%  weight={p_w:.0f}%  sent={tx_counts.get('primary', 0)}")
+                    print(f"  {s_icon} Secondary:{s['port']}  tx={s['tx_utilization']:.1f}%  weight={s_w:.0f}%  sent={tx_counts.get('secondary', 0)}")
+
+                    # Congested nodes — top talkers causing utilization
+                    congested = status.get('congested_nodes', [])
+                    if congested:
+                        print(f"  \033[0;33mCongested nodes:\033[0m")
+                        for node in congested[:5]:
+                            name = node.get('name', node.get('id', '?'))
+                            ch = node.get('channel_util', 0)
+                            tx = node.get('tx_airtime', 0)
+                            print(f"    {name}: ch_util={ch:.1f}% tx={tx:.1f}%")
+
+                    if status.get('last_event'):
+                        print(f"  Last: {status['last_event']}")
+            except Exception:
+                pass  # Load balancer info is advisory
 
         print()
         self.ctx.wait_for_enter()

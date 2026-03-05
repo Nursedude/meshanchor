@@ -487,6 +487,15 @@ class GatewayConfig:
     failover_recovery_duration: int = 60            # Seconds stable below threshold
     failover_health_poll_interval: float = 5.0     # Seconds between health checks
 
+    # TX load balancing (requires two meshtasticd instances)
+    # Uses tx_utilization (our TX contribution) instead of channel_utilization
+    # (identical on same-channel radios). Splits outbound traffic across two
+    # radios to keep each radio's TX duty cycle below firmware throttle limits.
+    load_balancer_enabled: bool = False
+    load_balancer_tx_threshold: float = 10.0       # % TX airtime to start splitting
+    load_balancer_tx_max: float = 20.0             # % TX airtime for full offload
+    load_balancer_health_poll_interval: float = 5.0  # Seconds between health checks
+
     # AI Diagnostics
     ai_diagnostics_enabled: bool = False
     snr_analysis: bool = True
