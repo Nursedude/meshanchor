@@ -13,33 +13,61 @@ Usage:
     # Check status
     print(engine.get_status())
 
+    # On-demand traceroute
+    result = engine.run_single_traceroute("!abc12345")
+
+    # View persistent history
+    history = engine.get_traceroute_store().get_recent(limit=20)
+
     # Later
     engine.stop()
 
 Configuration persisted at ~/.config/meshforge/automation.json
+Traceroute history persisted at ~/.local/share/meshforge/traceroute_history.db
+Traceroute log at ~/.cache/meshforge/logs/traceroute.log
 """
 
+import json
 import logging
+import logging.handlers
+import re
+import sqlite3
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from utils.safe_import import safe_import
 from utils.common import SettingsManager
+from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
 
 _get_node_tracker, _HAS_NODE_TRACKER = safe_import(
     'gateway.node_tracker', 'get_node_tracker'
 )
+_NodeInventory, _HAS_NODE_INVENTORY = safe_import(
+    'utils.node_inventory', 'NodeInventory'
+)
+_MeshtasticProtobufClient, _HAS_PROTOBUF_CLIENT = safe_import(
+    'gateway.meshtastic_protobuf_client', 'MeshtasticProtobufClient'
+)
 
 # Rate limiting constants
 MAX_PINGS_PER_MINUTE = 2
 MAX_TRACEROUTES_PER_MINUTE = 1
 MIN_REQUEST_INTERVAL_SECONDS = 5
+
+# Traceroute history retention
+TRACEROUTE_RETENTION_DAYS = 30
+TRACEROUTE_LOG_MAX_BYTES = 1_048_576  # 1 MB
+TRACEROUTE_LOG_BACKUP_COUNT = 3
+
+# Node ID validation pattern: !hex_chars (8 hex digits)
+_NODE_ID_PATTERN = re.compile(r'^![0-9a-fA-F]{1,8}$')
 
 # Default configuration
 AUTOMATION_DEFAULTS = {
@@ -54,6 +82,7 @@ AUTOMATION_DEFAULTS = {
         "interval_minutes": 60,
         "targets": [],
         "timeout_seconds": 60,
+        "auto_discover": True,
     },
     "auto_welcome": {
         "enabled": False,
@@ -61,6 +90,59 @@ AUTOMATION_DEFAULTS = {
         "cooldown_hours": 24,
     },
 }
+
+
+def _get_traceroute_log_path() -> Path:
+    """Get path for the traceroute log file."""
+    log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "traceroute.log"
+
+
+def _get_traceroute_db_path() -> Path:
+    """Get path for the traceroute SQLite database."""
+    db_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "traceroute_history.db"
+
+
+def get_traceroute_log_path() -> Path:
+    """Public accessor for traceroute log file path."""
+    return _get_traceroute_log_path()
+
+
+def _setup_traceroute_logger() -> logging.Logger:
+    """Create a dedicated logger for traceroute results."""
+    tr_logger = logging.getLogger("meshforge.traceroute")
+    if tr_logger.handlers:
+        return tr_logger
+    tr_logger.setLevel(logging.INFO)
+    try:
+        handler = logging.handlers.RotatingFileHandler(
+            str(_get_traceroute_log_path()),
+            maxBytes=TRACEROUTE_LOG_MAX_BYTES,
+            backupCount=TRACEROUTE_LOG_BACKUP_COUNT,
+        )
+        handler.setFormatter(logging.Formatter(
+            "[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        tr_logger.addHandler(handler)
+    except OSError as e:
+        logger.warning(f"Could not set up traceroute log file: {e}")
+    return tr_logger
+
+
+def validate_node_id(node_id: str) -> bool:
+    """Validate a Meshtastic node ID format."""
+    return bool(_NODE_ID_PATTERN.match(node_id))
+
+
+def _node_id_to_int(node_id: str) -> Optional[int]:
+    """Convert a !hex node ID string to an integer for protobuf API."""
+    try:
+        return int(node_id.lstrip("!"), 16)
+    except (ValueError, AttributeError):
+        return None
 
 
 @dataclass
@@ -82,6 +164,253 @@ class TracerouteResult:
     hops: int = 0
     output: str = ""
     error: Optional[str] = None
+    node_name: str = ""
+    route: List[int] = field(default_factory=list)
+    snr_towards: List[float] = field(default_factory=list)
+    route_back: List[int] = field(default_factory=list)
+    snr_back: List[float] = field(default_factory=list)
+
+    def format_route(self) -> str:
+        """Format the route as a human-readable string."""
+        if not self.route:
+            return self.output or "(no route data)"
+        parts = []
+        parts.append("Local")
+        for i, hop in enumerate(self.route):
+            snr = ""
+            if i < len(self.snr_towards):
+                snr = f" ({self.snr_towards[i]:+.1f}dB)"
+            parts.append(f"!{hop:08x}{snr}")
+        return " -> ".join(parts)
+
+    def format_return_route(self) -> str:
+        """Format the return route as a human-readable string."""
+        if not self.route_back:
+            return "(no return route)"
+        parts = []
+        for i, hop in enumerate(self.route_back):
+            snr = ""
+            if i < len(self.snr_back):
+                snr = f" ({self.snr_back[i]:+.1f}dB)"
+            parts.append(f"!{hop:08x}{snr}")
+        parts.append("Local")
+        return " -> ".join(parts)
+
+    def format_log_line(self) -> str:
+        """Format as a single log line for the traceroute log file."""
+        name = f" ({self.node_name})" if self.node_name else ""
+        if self.success:
+            route_str = ""
+            if self.route:
+                hops = [f"!{h:08x}" for h in self.route]
+                route_str = f" [{' -> '.join(hops)}]"
+            snr_str = ""
+            if self.snr_towards:
+                snr_str = f" SNR: {self.snr_towards}"
+            return (
+                f"TRACEROUTE {self.node_id}{name} -> "
+                f"{self.hops} hops{route_str}{snr_str} OK"
+            )
+        return (
+            f"TRACEROUTE {self.node_id}{name} -> "
+            f"FAIL: {self.error or 'unknown'}"
+        )
+
+
+class TracerouteStore:
+    """SQLite-backed persistent storage for traceroute results."""
+
+    def __init__(self, db_path: Optional[Path] = None):
+        self._db_path = str(db_path or _get_traceroute_db_path())
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self) -> None:
+        """Initialize database schema and prune old entries."""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self._db_path, timeout=5)
+                try:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS traceroute_results (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            node_id TEXT NOT NULL,
+                            node_name TEXT DEFAULT '',
+                            timestamp REAL NOT NULL,
+                            success INTEGER NOT NULL,
+                            hops INTEGER DEFAULT 0,
+                            route_json TEXT DEFAULT '[]',
+                            snr_towards_json TEXT DEFAULT '[]',
+                            route_back_json TEXT DEFAULT '[]',
+                            snr_back_json TEXT DEFAULT '[]',
+                            raw_output TEXT DEFAULT '',
+                            error TEXT DEFAULT ''
+                        )
+                    """)
+                    conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_tr_node
+                        ON traceroute_results(node_id)
+                    """)
+                    conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_tr_time
+                        ON traceroute_results(timestamp)
+                    """)
+                    conn.commit()
+                finally:
+                    conn.close()
+                self.prune()
+            except sqlite3.Error as e:
+                logger.warning(f"TracerouteStore init failed: {e}")
+
+    def store(self, result: TracerouteResult) -> None:
+        """Persist a traceroute result."""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self._db_path, timeout=5)
+                try:
+                    conn.execute(
+                        """INSERT INTO traceroute_results
+                           (node_id, node_name, timestamp, success, hops,
+                            route_json, snr_towards_json, route_back_json,
+                            snr_back_json, raw_output, error)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            result.node_id,
+                            result.node_name,
+                            result.timestamp.timestamp(),
+                            1 if result.success else 0,
+                            result.hops,
+                            json.dumps(result.route),
+                            json.dumps(result.snr_towards),
+                            json.dumps(result.route_back),
+                            json.dumps(result.snr_back),
+                            result.output,
+                            result.error or "",
+                        ),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                logger.warning(f"TracerouteStore.store failed: {e}")
+
+    def get_recent(self, limit: int = 50) -> List[dict]:
+        """Get most recent traceroute results."""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self._db_path, timeout=5)
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(
+                        """SELECT * FROM traceroute_results
+                           ORDER BY timestamp DESC LIMIT ?""",
+                        (limit,),
+                    ).fetchall()
+                    return [self._row_to_dict(r) for r in rows]
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                logger.warning(f"TracerouteStore.get_recent failed: {e}")
+                return []
+
+    def get_for_node(self, node_id: str, limit: int = 20) -> List[dict]:
+        """Get traceroute history for a specific node."""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self._db_path, timeout=5)
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(
+                        """SELECT * FROM traceroute_results
+                           WHERE node_id = ?
+                           ORDER BY timestamp DESC LIMIT ?""",
+                        (node_id, limit),
+                    ).fetchall()
+                    return [self._row_to_dict(r) for r in rows]
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                logger.warning(f"TracerouteStore.get_for_node failed: {e}")
+                return []
+
+    def get_summary(self) -> List[dict]:
+        """Get per-node summary: success rate, avg hops, last seen."""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self._db_path, timeout=5)
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute("""
+                        SELECT
+                            node_id,
+                            node_name,
+                            COUNT(*) as total,
+                            SUM(success) as successes,
+                            AVG(CASE WHEN success = 1 THEN hops END) as avg_hops,
+                            MAX(timestamp) as last_seen
+                        FROM traceroute_results
+                        GROUP BY node_id
+                        ORDER BY last_seen DESC
+                    """).fetchall()
+                    return [
+                        {
+                            "node_id": r["node_id"],
+                            "node_name": r["node_name"] or "",
+                            "total": r["total"],
+                            "successes": r["successes"] or 0,
+                            "success_rate": (
+                                (r["successes"] or 0) / r["total"] * 100
+                                if r["total"] > 0 else 0
+                            ),
+                            "avg_hops": round(r["avg_hops"], 1) if r["avg_hops"] else 0,
+                            "last_seen": datetime.fromtimestamp(
+                                r["last_seen"]
+                            ).strftime("%Y-%m-%d %H:%M") if r["last_seen"] else "never",
+                        }
+                        for r in rows
+                    ]
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                logger.warning(f"TracerouteStore.get_summary failed: {e}")
+                return []
+
+    def prune(self, days: int = TRACEROUTE_RETENTION_DAYS) -> int:
+        """Remove entries older than N days. Returns count removed."""
+        cutoff = (datetime.now() - timedelta(days=days)).timestamp()
+        try:
+            conn = sqlite3.connect(self._db_path, timeout=5)
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM traceroute_results WHERE timestamp < ?",
+                    (cutoff,),
+                )
+                conn.commit()
+                removed = cursor.rowcount
+                if removed > 0:
+                    logger.info(f"Pruned {removed} traceroute entries older than {days}d")
+                return removed
+            finally:
+                conn.close()
+        except sqlite3.Error as e:
+            logger.warning(f"TracerouteStore.prune failed: {e}")
+            return 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict:
+        """Convert a database row to a dict with parsed JSON fields."""
+        d = dict(row)
+        d["success"] = bool(d.get("success"))
+        d["timestamp_dt"] = datetime.fromtimestamp(
+            d["timestamp"]
+        ).strftime("%Y-%m-%d %H:%M:%S") if d.get("timestamp") else ""
+        for json_field in ("route_json", "snr_towards_json",
+                           "route_back_json", "snr_back_json"):
+            try:
+                d[json_field] = json.loads(d.get(json_field, "[]"))
+            except (json.JSONDecodeError, TypeError):
+                d[json_field] = []
+        return d
 
 
 class AutomationEngine:
@@ -116,9 +445,11 @@ class AutomationEngine:
         self._ping_history: Dict[str, List[PingResult]] = {}
         self._ping_lock = threading.Lock()
 
-        # Traceroute history
+        # Traceroute history (in-memory + persistent SQLite)
         self._traceroute_history: Dict[str, List[TracerouteResult]] = {}
         self._traceroute_lock = threading.Lock()
+        self._traceroute_store = TracerouteStore()
+        self._traceroute_logger = _setup_traceroute_logger()
 
         # Welcome tracking (nodes we've already greeted)
         self._welcomed_nodes: Set[str] = set()
@@ -224,6 +555,46 @@ class AutomationEngine:
             if node_id:
                 return {node_id: list(self._traceroute_history.get(node_id, []))}
             return {k: list(v) for k, v in self._traceroute_history.items()}
+
+    def get_traceroute_store(self) -> TracerouteStore:
+        """Get the persistent traceroute store for history queries."""
+        return self._traceroute_store
+
+    def run_single_traceroute(
+        self, node_id: str, timeout: int = 60
+    ) -> TracerouteResult:
+        """Run a single on-demand traceroute (not part of the periodic loop).
+
+        Args:
+            node_id: Target node ID (e.g. "!abc12345")
+            timeout: Seconds to wait for response
+
+        Returns:
+            TracerouteResult with route data
+        """
+        if not validate_node_id(node_id):
+            return TracerouteResult(
+                node_id=node_id,
+                timestamp=datetime.now(),
+                success=False,
+                error="Invalid node ID format (expected !hex)",
+            )
+
+        result = self._send_traceroute(node_id, timeout)
+        self._record_traceroute(result)
+        return result
+
+    def _discover_active_nodes(self) -> List[str]:
+        """Discover active mesh nodes via NodeInventory."""
+        if not _HAS_NODE_INVENTORY or _NodeInventory is None:
+            return []
+        try:
+            inv = _NodeInventory()
+            online = inv.get_online_nodes()
+            return [n.node_id for n in online if n.node_id]
+        except Exception as e:
+            logger.debug(f"Node auto-discovery failed: {e}")
+            return []
 
     # --- Internal helpers ---
 
@@ -349,18 +720,35 @@ class AutomationEngine:
     # --- Traceroute loop ---
 
     def _traceroute_loop(self) -> None:
-        """Periodically trace routes to configured target nodes."""
+        """Periodically trace routes to target nodes (or all active)."""
         config = self._settings.get("auto_traceroute", {})
         interval = config.get("interval_minutes", 60) * 60
-        targets = config.get("targets", [])
+        static_targets = config.get("targets", [])
         timeout = config.get("timeout_seconds", 60)
+        auto_discover = config.get("auto_discover", True)
 
         logger.info(
-            f"Auto-traceroute started: {len(targets)} targets, "
+            f"Auto-traceroute started: "
+            f"{'auto-discover' if auto_discover else f'{len(static_targets)} targets'}, "
             f"interval {interval // 60}min"
         )
 
         while self._running:
+            # Build target list: static targets + auto-discovered nodes
+            targets = list(static_targets)
+            if auto_discover or not targets:
+                discovered = self._discover_active_nodes()
+                for nid in discovered:
+                    if nid not in targets:
+                        targets.append(nid)
+
+            if not targets:
+                logger.debug("Auto-traceroute: no targets found, waiting...")
+            else:
+                logger.info(
+                    f"Auto-traceroute cycle: {len(targets)} target(s)"
+                )
+
             for node_id in targets:
                 if not self._running:
                     break
@@ -379,7 +767,66 @@ class AutomationEngine:
                 return
 
     def _send_traceroute(self, node_id: str, timeout: int = 60) -> TracerouteResult:
-        """Send a traceroute to a node via meshtastic CLI."""
+        """Send a traceroute — protobuf API first, CLI fallback."""
+        result = self._send_traceroute_protobuf(node_id, timeout)
+        if result is not None:
+            return result
+        return self._send_traceroute_cli(node_id, timeout)
+
+    def _send_traceroute_protobuf(
+        self, node_id: str, timeout: int = 60
+    ) -> Optional[TracerouteResult]:
+        """Traceroute via HTTP protobuf API (richer data, no TCP lock)."""
+        if not _HAS_PROTOBUF_CLIENT or _MeshtasticProtobufClient is None:
+            return None
+
+        dest_num = _node_id_to_int(node_id)
+        if dest_num is None:
+            return None
+
+        try:
+            client = _MeshtasticProtobufClient(
+                host=self._meshtastic_host
+            )
+            if not client.connect():
+                return None
+
+            try:
+                pb_result = client.send_traceroute(
+                    dest_num=dest_num,
+                    timeout=float(timeout),
+                )
+            finally:
+                client.disconnect()
+
+            if pb_result is None:
+                return None
+
+            with self._stats_lock:
+                self._stats["traceroutes_sent"] += 1
+                if pb_result.completed:
+                    self._stats["traceroutes_success"] += 1
+                else:
+                    self._stats["traceroutes_failed"] += 1
+
+            return TracerouteResult(
+                node_id=node_id,
+                timestamp=datetime.now(),
+                success=pb_result.completed,
+                hops=len(pb_result.route),
+                route=list(pb_result.route),
+                snr_towards=list(pb_result.snr_towards),
+                route_back=list(pb_result.route_back),
+                snr_back=list(pb_result.snr_back),
+            )
+        except Exception as e:
+            logger.debug(f"Protobuf traceroute to {node_id} failed: {e}")
+            return None
+
+    def _send_traceroute_cli(
+        self, node_id: str, timeout: int = 60
+    ) -> TracerouteResult:
+        """Traceroute via meshtastic CLI (fallback)."""
         try:
             result = subprocess.run(
                 [
@@ -438,7 +885,8 @@ class AutomationEngine:
             )
 
     def _record_traceroute(self, result: TracerouteResult) -> None:
-        """Record a traceroute result, keeping last 50 per node."""
+        """Record traceroute to in-memory cache, SQLite, and log file."""
+        # In-memory history (kept for backward compatibility)
         with self._traceroute_lock:
             if result.node_id not in self._traceroute_history:
                 self._traceroute_history[result.node_id] = []
@@ -447,6 +895,13 @@ class AutomationEngine:
             if len(history) > 50:
                 self._traceroute_history[result.node_id] = history[-50:]
 
+        # Persistent SQLite storage
+        self._traceroute_store.store(result)
+
+        # Dedicated log file
+        self._traceroute_logger.info(result.format_log_line())
+
+        # Standard logger
         status = f"{result.hops} hops" if result.success else f"FAIL: {result.error}"
         logger.debug(f"Auto-traceroute {result.node_id}: {status}")
 
