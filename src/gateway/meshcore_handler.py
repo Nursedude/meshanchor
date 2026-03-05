@@ -41,7 +41,7 @@ from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from .base_handler import BaseMessageHandler
-from .canonical_message import CanonicalMessage, MessageType, Protocol
+from .canonical_message import CanonicalMessage, Protocol
 from .config import GatewayConfig
 from .reconnect import ReconnectConfig, ReconnectStrategy
 from utils.safe_import import safe_import

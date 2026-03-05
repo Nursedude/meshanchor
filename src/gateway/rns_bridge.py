@@ -9,18 +9,16 @@ RNS/LXMF connection lifecycle extracted to _rns_bridge_connection.py.
 import threading
 import time
 import logging
-import subprocess
 from queue import Queue, Empty, Full
 from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
-from pathlib import Path
 
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
 from .bridge_health import (
-    BridgeHealthMonitor, DeliveryTracker, classify_error,
+    BridgeHealthMonitor, DeliveryTracker,
     BridgeStatus, SubsystemState, MessageOrigin
 )
 from utils.safe_import import safe_import
@@ -50,7 +48,7 @@ PersistentMessageQueue, MessagePriority, HAS_PERSISTENT_QUEUE = safe_import(
     '.message_queue', 'PersistentMessageQueue', 'MessagePriority', package=__package__
 )
 
-from .message_routing import MessageRouter, CLASSIFIER_AVAILABLE
+from .message_routing import MessageRouter
 from .meshcore_bridge_mixin import MeshCoreBridgeMixin
 from ._rns_bridge_connection import RNSConnectionMixin
 

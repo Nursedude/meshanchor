@@ -557,3 +557,37 @@ class MeshtasticHTTPClient:
     def __repr__(self) -> str:
         status = "available" if self._available else "unavailable"
         return f"MeshtasticHTTPClient({self._base_url}, {status})"
+
+
+def get_dual_radio_reports(
+    primary_port: int = DEFAULT_HTTP_PORT,
+    secondary_port: int = 9444,
+    host: str = 'localhost',
+) -> Dict[str, Optional['DeviceReport']]:
+    """
+    Poll both radios' health reports simultaneously for failover monitoring.
+
+    Uses separate HTTP client instances (not the singleton) to avoid
+    interfering with the primary client's state.
+
+    Args:
+        primary_port: HTTP port for primary meshtasticd (default 9443)
+        secondary_port: HTTP port for secondary meshtasticd (default 9444)
+        host: Hostname for both instances (default localhost)
+
+    Returns:
+        Dict with 'primary' and 'secondary' DeviceReport objects (or None if unreachable)
+    """
+    reports: Dict[str, Optional[DeviceReport]] = {
+        'primary': None,
+        'secondary': None,
+    }
+
+    for key, port in [('primary', primary_port), ('secondary', secondary_port)]:
+        try:
+            client = MeshtasticHTTPClient(host=host, port=port, auto_detect=False)
+            reports[key] = client.get_report()
+        except Exception as e:
+            logger.debug("Failed to get %s radio report (port %d): %s", key, port, e)
+
+    return reports
