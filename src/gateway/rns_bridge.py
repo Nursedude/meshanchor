@@ -43,6 +43,11 @@ CircuitBreakerRegistry, HAS_CIRCUIT_BREAKER = safe_import(
     '.circuit_breaker', 'CircuitBreakerRegistry', package=__package__
 )
 
+# TX load balancer for dual-radio gateways
+RadioLoadBalancer, LoadBalancerConfig, HAS_LOAD_BALANCER = safe_import(
+    '.radio_failover', 'RadioLoadBalancer', 'LoadBalancerConfig', package=__package__
+)
+
 # Import persistent message queue for reliable delivery
 PersistentMessageQueue, MessagePriority, HAS_PERSISTENT_QUEUE = safe_import(
     '.message_queue', 'PersistentMessageQueue', 'MessagePriority', package=__package__
@@ -238,6 +243,24 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # Initialize Meshtastic handler based on bridge mode
         # MQTT bridge (recommended): zero interference with web client
         # TCP bridge (legacy): holds persistent connection, blocks web client
+        # Initialize TX load balancer if configured for dual-radio
+        self._load_balancer = None
+        if HAS_LOAD_BALANCER and getattr(self.config.meshtastic, 'load_balancer_enabled', False):
+            lb_config = LoadBalancerConfig(
+                enabled=True,
+                tx_threshold=getattr(self.config.meshtastic, 'load_balancer_tx_threshold', 10.0),
+                tx_max=getattr(self.config.meshtastic, 'load_balancer_tx_max', 20.0),
+                health_poll_interval=getattr(
+                    self.config.meshtastic, 'load_balancer_health_poll_interval', 5.0
+                ),
+                recovery_margin=getattr(
+                    self.config.meshtastic, 'load_balancer_recovery_margin', 2.0
+                ),
+            )
+            self._load_balancer = RadioLoadBalancer(lb_config)
+            self._load_balancer.start()
+            logger.info("TX load balancer enabled for dual-radio gateway")
+
         if self.config.bridge_mode == "mqtt_bridge" and HAS_MQTT_BRIDGE:
             logger.info("Using MQTT bridge handler (zero-interference mode)")
             self._mesh_handler = MQTTBridgeHandler(
@@ -251,6 +274,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 message_callback=self._notify_message,
                 status_callback=lambda status: self._notify_status(status),
                 should_bridge=self._router.should_bridge,
+                load_balancer=self._load_balancer,
             )
         elif HAS_MESHTASTIC_LIB:
             if self.config.bridge_mode == "mqtt_bridge" and not HAS_MQTT_BRIDGE:
@@ -527,6 +551,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
         # Stop WebSocket server
         self._stop_websocket_server()
+
+        # Stop TX load balancer
+        if self._load_balancer:
+            self._load_balancer.stop()
 
         # Stop RNS sniffer
         if HAS_RNS_SNIFFER:

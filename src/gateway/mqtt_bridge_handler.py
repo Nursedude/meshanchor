@@ -578,6 +578,17 @@ class MQTTBridgeHandler(BaseMessageHandler):
             logger.debug(f"Stateless HTTP protobuf TX failed: {e}")
 
         # Fallback: session-based send (reads fromradio during connect)
+        # Skip fallback when load balancer selected a non-primary port — the
+        # session client only connects to the primary radio and would bypass
+        # the load balancer's port selection.
+        if self._load_balancer and http_port != getattr(
+            self.config.meshtastic, 'http_port', 9443
+        ):
+            logger.debug(
+                "Skipping session fallback: load balancer selected port %d", http_port
+            )
+            return False
+
         if not _HAS_PROTOBUF_CLIENT:
             return False
 
