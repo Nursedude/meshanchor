@@ -156,7 +156,6 @@ def bridge():
          patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", True), \
          patch("gateway.rns_bridge.CircuitBreakerRegistry") as MockCB, \
          patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
-         patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
          patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
@@ -192,7 +191,6 @@ def bridge_no_cb():
          patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", False), \
          patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
          patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
-         patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
          patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
          patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
@@ -515,7 +513,6 @@ class TestRoutingLegacy:
              patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", False), \
              patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
              patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
-             patch("gateway.rns_bridge.CLASSIFIER_AVAILABLE", False), \
              patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
              patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
              patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \

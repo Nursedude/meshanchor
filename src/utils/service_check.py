@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from enum import Enum
 
-from utils.ports import MESHTASTICD_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
+from utils.ports import MESHTASTICD_PORT, MESHTASTICD_ALT_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,13 @@ KNOWN_SERVICES = {
         'is_systemd': False,  # NomadNet is a user-space app, NOT a systemd service
         'description': 'NomadNet mesh messaging client',
         'fix_hint': 'Start with: nomadnetwork (run as user, not root)',
+    },
+    'meshtasticd-alt': {
+        'port': MESHTASTICD_ALT_PORT,
+        'systemd_name': 'meshtasticd-alt',
+        'is_systemd': True,
+        'description': 'Meshtastic daemon (secondary/failover)',
+        'fix_hint': 'Start with: sudo systemctl start meshtasticd-alt',
     },
 }
 
