@@ -63,6 +63,7 @@ from .packet_dissectors import (
 
 # Re-export storage classes
 from .traffic_storage import (
+    PacketArchive,
     TrafficAnalyzer,
     TrafficCapture,
     TrafficLogger,
@@ -98,6 +99,7 @@ __all__ = [
     'TrafficAnalyzer',
     'TrafficCapture',
     'TrafficLogger',
+    'PacketArchive',
     # Main interface
     'TrafficInspector',
     # Global functions
@@ -142,6 +144,9 @@ class TrafficInspector:
         self._analyzer = TrafficAnalyzer(self._capture)
         self._running = False
 
+        # Long-term raw packet archive (Meshstellar-inspired)
+        self._archive = PacketArchive()
+
         # Traffic logging to human-readable file
         self._logger: Optional[TrafficLogger] = None
         if enable_logging:
@@ -153,6 +158,10 @@ class TrafficInspector:
         """Internal callback to log packets."""
         if self._logger:
             self._logger.log_packet(packet)
+
+    def _archive_packet(self, packet: MeshPacket) -> None:
+        """Internal callback to archive packets."""
+        self._archive.archive(packet)
 
     def capture(self, data: bytes, metadata: Dict[str, Any]) -> Optional[MeshPacket]:
         """Capture and dissect a packet."""
@@ -230,6 +239,33 @@ class TrafficInspector:
     def is_logging_enabled(self) -> bool:
         """Check if traffic logging is enabled."""
         return self._logger is not None and self._logger.is_enabled()
+
+    # --- Packet archival (Meshstellar-inspired) ---
+
+    def enable_archival(self) -> None:
+        """Enable long-term raw packet archival."""
+        self._archive.enable()
+        self._capture.register_callback(self._archive_packet)
+
+    def disable_archival(self) -> None:
+        """Disable packet archival."""
+        self._archive.disable()
+
+    def is_archival_enabled(self) -> bool:
+        """Check if packet archival is enabled."""
+        return self._archive.enabled
+
+    def get_archive_stats(self) -> Dict[str, Any]:
+        """Get archive statistics."""
+        return self._archive.get_stats()
+
+    def compact_archive(self) -> int:
+        """Compact the packet archive (remove old packets)."""
+        return self._archive.compact()
+
+    def query_archive(self, **kwargs) -> List[Dict[str, Any]]:
+        """Query the packet archive. See PacketArchive.query() for parameters."""
+        return self._archive.query(**kwargs)
 
     @staticmethod
     def get_filter_fields() -> Dict[str, str]:

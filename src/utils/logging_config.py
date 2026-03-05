@@ -88,6 +88,26 @@ _component_levels = {
 _file_handler: Optional[logging.Handler] = None
 _console_handler: Optional[logging.Handler] = None
 
+# Lazy-init settings manager for log level persistence
+_log_settings = None
+
+
+def _get_log_settings():
+    """Get or create the logging SettingsManager (lazy to avoid circular imports)."""
+    global _log_settings
+    if _log_settings is None:
+        from utils.common import SettingsManager
+        _log_settings = SettingsManager("logging", defaults={
+            "global_level": "DEBUG",
+            "component_levels": {
+                "hamclock": "DEBUG",
+                "rns": "DEBUG",
+                "meshtastic": "INFO",
+                "gateway": "DEBUG",
+            }
+        })
+    return _log_settings
+
 
 # ============================================================================
 # Sudo-safe path handling
@@ -275,6 +295,31 @@ def setup_logging(
 
         _initialized = True
 
+        # Restore persisted log levels from previous session
+        _load_persisted_levels()
+
+
+def _load_persisted_levels() -> None:
+    """Load log levels saved from a previous session."""
+    try:
+        settings = _get_log_settings()
+        saved_global = settings.get("global_level", "DEBUG")
+        set_log_level(
+            getattr(logging, saved_global, logging.DEBUG),
+            persist=False,
+        )
+        for comp, level_name in settings.get("component_levels", {}).items():
+            set_log_level(
+                getattr(logging, level_name, logging.DEBUG),
+                component=comp,
+                persist=False,
+            )
+    except Exception as e:
+        # Non-critical: fall back to defaults if persistence is broken
+        logging.getLogger(__name__).debug(
+            f"Failed to load persisted log levels: {e}"
+        )
+
 
 # ============================================================================
 # Logger retrieval with component-level support
@@ -313,13 +358,18 @@ def get_logger(name: str = None) -> logging.Logger:
 # Level management
 # ============================================================================
 
-def set_log_level(level: int, component: Optional[str] = None) -> None:
+def set_log_level(
+    level: int,
+    component: Optional[str] = None,
+    persist: bool = True,
+) -> None:
     """
     Set log level globally or for a specific component.
 
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         component: Optional component name to set level for
+        persist: Save to disk for next session (default True)
     """
     global _global_log_level
 
@@ -333,6 +383,24 @@ def set_log_level(level: int, component: Optional[str] = None) -> None:
         _global_log_level = level
         if _console_handler:
             _console_handler.setLevel(level)
+
+    # Persist to disk so levels survive restarts
+    if persist:
+        try:
+            settings = _get_log_settings()
+            level_name = logging.getLevelName(level)
+            if component:
+                comp_levels = settings.get("component_levels", {})
+                comp_levels[component.lower()] = level_name
+                settings.set("component_levels", comp_levels)
+            else:
+                settings.set("global_level", level_name)
+            settings.save()
+        except Exception as e:
+            # Non-critical: don't break logging over persistence failure
+            logging.getLogger(__name__).debug(
+                f"Failed to persist log level: {e}"
+            )
 
 
 def set_level(level: int, logger_name: str = None) -> None:
@@ -633,38 +701,6 @@ def get_level_color(level: str) -> str:
 # ============================================================================
 # Decorators and Context Managers (from logging_utils)
 # ============================================================================
-
-def log_button_click(func: Callable) -> Callable:
-    """
-    Decorator to log button click events with timing and error handling.
-
-    Usage:
-        @log_button_click
-        def _on_connect(self, button):
-            # handler code
-    """
-    @functools.wraps(func)
-    def wrapper(self, button, *args, **kwargs):
-        lgr = getattr(self, 'logger', None) or logging.getLogger(self.__class__.__name__)
-        func_name = func.__name__
-        button_label = button.get_label() if hasattr(button, 'get_label') else 'unknown'
-
-        lgr.debug(f"Button clicked: {func_name} (label: {button_label})")
-        start_time = time.time()
-
-        try:
-            result = func(self, button, *args, **kwargs)
-            elapsed = time.time() - start_time
-            lgr.debug(f"Button handler {func_name} completed in {elapsed:.3f}s")
-            return result
-        except Exception as e:
-            elapsed = time.time() - start_time
-            lgr.error(f"Button handler {func_name} failed after {elapsed:.3f}s: {e}")
-            lgr.debug(f"Traceback:\n{traceback.format_exc()}")
-            raise
-
-    return wrapper
-
 
 def log_action(action_name: str) -> Callable:
     """
