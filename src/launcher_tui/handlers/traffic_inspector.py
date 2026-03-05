@@ -105,8 +105,11 @@ class TrafficInspectorHandler(BaseHandler):
                     ("8", "Filter Reference       - Available filter fields"),
                     ("9", "Export Data            - Export captures/paths"),
                     ("0", "Clear Capture          - Clear captured data"),
+                    ("a", "Toggle Archival        - Long-term packet archive"),
+                    ("b", "Archive Statistics     - Archive size & counts"),
+                    ("c", "Compact Archive        - Remove old archived packets"),
                 ],
-                height=20, width=68
+                height=23, width=68
             )
 
             if not choice:
@@ -124,6 +127,9 @@ class TrafficInspectorHandler(BaseHandler):
                 "8": ("Filter Reference", self._traffic_filter_reference),
                 "9": ("Export Data", self._traffic_export),
                 "0": ("Clear Capture", self._traffic_clear),
+                "a": ("Toggle Archival", self._toggle_archival),
+                "b": ("Archive Statistics", self._archive_stats),
+                "c": ("Compact Archive", self._compact_archive),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -920,4 +926,97 @@ class TrafficInspectorHandler(BaseHandler):
                 "Error",
                 f"Failed to clear capture data:\n{e}",
                 height=8, width=50
+            )
+
+    # --- Packet Archive (Meshstellar-inspired) ---
+
+    def _toggle_archival(self) -> None:
+        """Toggle long-term packet archival on/off."""
+        inspector = self._get_inspector()
+        if not inspector:
+            return
+
+        if inspector.is_archival_enabled():
+            inspector.disable_archival()
+            self.ctx.dialog.msgbox(
+                "Archival Disabled",
+                "Packet archival has been disabled.\n"
+                "Existing archived data is preserved.",
+                height=8, width=50
+            )
+        else:
+            inspector.enable_archival()
+            self.ctx.dialog.msgbox(
+                "Archival Enabled",
+                "Long-term packet archival is now active.\n\n"
+                "Raw packets will be stored in a separate archive\n"
+                "database for historical analysis.",
+                height=10, width=55
+            )
+
+    def _archive_stats(self) -> None:
+        """Display packet archive statistics."""
+        inspector = self._get_inspector()
+        if not inspector:
+            return
+
+        stats = inspector.get_archive_stats()
+        if "error" in stats:
+            self.ctx.dialog.msgbox(
+                "Archive Error",
+                f"Failed to read archive stats:\n{stats['error']}",
+                height=8, width=50
+            )
+            return
+
+        status = "ENABLED" if inspector.is_archival_enabled() else "DISABLED"
+        lines = [
+            f"Status:           {status}",
+            f"Total packets:    {stats.get('total_packets', 0):,}",
+            f"Total bytes:      {stats.get('total_bytes', 0):,}",
+            f"Database size:    {stats.get('db_size_mb', 0):.1f} MB",
+            f"Retention:        {stats.get('max_age_days', 30)} days",
+            f"Session archived: {stats.get('session_archived', 0):,}",
+            "",
+            f"Oldest packet:    {stats.get('oldest_packet', 'N/A')}",
+            f"Newest packet:    {stats.get('newest_packet', 'N/A')}",
+        ]
+
+        protocols = stats.get("protocols", {})
+        if protocols:
+            lines.append("")
+            lines.append("By protocol:")
+            for proto, count in sorted(protocols.items()):
+                lines.append(f"  {proto}: {count:,}")
+
+        self.ctx.dialog.msgbox(
+            "Packet Archive Statistics",
+            "\n".join(lines),
+            height=20, width=55
+        )
+
+    def _compact_archive(self) -> None:
+        """Compact the packet archive by removing old packets."""
+        inspector = self._get_inspector()
+        if not inspector:
+            return
+
+        stats = inspector.get_archive_stats()
+        total = stats.get("total_packets", 0)
+
+        confirm = self.ctx.dialog.yesno(
+            "Compact Archive",
+            f"Remove archived packets older than "
+            f"{stats.get('max_age_days', 30)} days?\n\n"
+            f"Current archive: {total:,} packets, "
+            f"{stats.get('db_size_mb', 0):.1f} MB",
+            height=10, width=55
+        )
+
+        if confirm:
+            removed = inspector.compact_archive()
+            self.ctx.dialog.msgbox(
+                "Compaction Complete",
+                f"Removed {removed:,} old packets from archive.",
+                height=7, width=45
             )

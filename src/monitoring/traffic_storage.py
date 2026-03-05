@@ -726,3 +726,298 @@ class TrafficLogger:
         """Clear the log file."""
         self._packet_count = 0
         self._write_header()
+
+
+# =============================================================================
+# PACKET ARCHIVE (LONG-TERM RAW PACKET STORAGE)
+# =============================================================================
+
+class PacketArchive:
+    """
+    Long-term raw packet archival inspired by Meshstellar.
+
+    Separate from TrafficCapture's rolling 10K buffer.  Stores raw packet
+    bytes as SQLite BLOBs with time-based rotation and compaction.
+
+    Usage:
+        archive = PacketArchive()
+        archive.archive(packet)
+
+        # Query last 24 hours of Meshtastic packets
+        packets = archive.query(
+            since=datetime.now() - timedelta(hours=24),
+            protocol="meshtastic",
+        )
+
+        # Compact old data
+        archive.compact()
+    """
+
+    DEFAULT_MAX_AGE_DAYS = 30
+    DEFAULT_MAX_SIZE_MB = 500
+
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+        max_size_mb: int = DEFAULT_MAX_SIZE_MB,
+    ):
+        """
+        Initialize the packet archive.
+
+        Args:
+            db_path: Path to SQLite database (default: ~/.config/meshforge/packet_archive.db)
+            max_age_days: Auto-compact packets older than this (default 30)
+            max_size_mb: Warn when database exceeds this size (default 500)
+        """
+        if db_path is None:
+            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(config_dir / "packet_archive.db")
+
+        self._db_path = db_path
+        self._max_age_days = max_age_days
+        self._max_size_mb = max_size_mb
+        self._lock = threading.Lock()
+        self._enabled = False
+        self._archived_count = 0
+
+        self._init_db()
+
+    @contextmanager
+    def _get_connection(self):
+        """Get database connection with context management."""
+        conn = sqlite3.connect(self._db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _init_db(self) -> None:
+        """Initialize archive database schema."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS archived_packets (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    source TEXT,
+                    destination TEXT,
+                    port_name TEXT,
+                    raw_data BLOB,
+                    size INTEGER,
+                    metadata TEXT
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_archive_timestamp
+                ON archived_packets(timestamp DESC)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_archive_protocol
+                ON archived_packets(protocol)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_archive_source
+                ON archived_packets(source)
+            """)
+
+    def enable(self) -> None:
+        """Enable packet archival."""
+        self._enabled = True
+
+    def disable(self) -> None:
+        """Disable packet archival."""
+        self._enabled = False
+
+    @property
+    def enabled(self) -> bool:
+        """Check if archival is enabled."""
+        return self._enabled
+
+    def archive(self, packet: MeshPacket) -> bool:
+        """
+        Archive a single packet with its raw bytes.
+
+        Args:
+            packet: MeshPacket to archive
+
+        Returns:
+            True if archived successfully
+        """
+        if not self._enabled:
+            return False
+
+        metadata = {}
+        if packet.snr is not None:
+            metadata["snr"] = packet.snr
+        if packet.rssi is not None:
+            metadata["rssi"] = packet.rssi
+        if packet.channel is not None:
+            metadata["channel"] = packet.channel
+        if packet.hop_limit is not None:
+            metadata["hop_limit"] = packet.hop_limit
+        if packet.hops_taken is not None:
+            metadata["hops_taken"] = packet.hops_taken
+        if packet.decoded_payload:
+            metadata["decoded_payload"] = packet.decoded_payload
+
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO archived_packets
+                           (id, timestamp, protocol, direction, source,
+                            destination, port_name, raw_data, size, metadata)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            packet.id,
+                            packet.timestamp.isoformat(),
+                            packet.protocol.value if hasattr(packet.protocol, 'value') else str(packet.protocol),
+                            packet.direction.value if hasattr(packet.direction, 'value') else str(packet.direction),
+                            packet.source,
+                            packet.destination,
+                            packet.port_name,
+                            packet.raw_bytes,
+                            packet.size,
+                            json.dumps(metadata) if metadata else None,
+                        ),
+                    )
+                self._archived_count += 1
+                return True
+            except Exception as e:
+                logger.error(f"Failed to archive packet {packet.id}: {e}")
+                return False
+
+    def query(
+        self,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        protocol: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query archived packets with optional filters.
+
+        Args:
+            since: Start time filter
+            until: End time filter
+            protocol: Protocol filter (meshtastic, rns, etc.)
+            source: Source node filter
+            limit: Maximum results (default 1000)
+
+        Returns:
+            List of archived packet dicts
+        """
+        conditions = []
+        params: list = []
+
+        if since:
+            conditions.append("timestamp >= ?")
+            params.append(since.isoformat())
+        if until:
+            conditions.append("timestamp <= ?")
+            params.append(until.isoformat())
+        if protocol:
+            conditions.append("protocol = ?")
+            params.append(protocol.upper())
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    rows = conn.execute(
+                        f"SELECT * FROM archived_packets{where} ORDER BY timestamp DESC LIMIT ?",
+                        params,
+                    ).fetchall()
+                    return [dict(row) for row in rows]
+            except Exception as e:
+                logger.error(f"Archive query failed: {e}")
+                return []
+
+    def compact(self) -> int:
+        """
+        Remove packets older than max_age_days.
+
+        Returns:
+            Number of packets removed
+        """
+        cutoff = datetime.now() - timedelta(days=self._max_age_days)
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.execute(
+                        "DELETE FROM archived_packets WHERE timestamp < ?",
+                        (cutoff.isoformat(),),
+                    )
+                    removed = cursor.rowcount
+                    if removed > 0:
+                        conn.execute("VACUUM")
+                        logger.info(
+                            f"Compacted archive: removed {removed} packets "
+                            f"older than {self._max_age_days} days"
+                        )
+                    return removed
+            except Exception as e:
+                logger.error(f"Archive compaction failed: {e}")
+                return 0
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get archive statistics.
+
+        Returns:
+            Dict with count, size, oldest/newest timestamps, protocol breakdown
+        """
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    row = conn.execute(
+                        """SELECT
+                            COUNT(*) as total,
+                            COALESCE(SUM(size), 0) as total_bytes,
+                            MIN(timestamp) as oldest,
+                            MAX(timestamp) as newest
+                        FROM archived_packets"""
+                    ).fetchone()
+
+                    protocols = {}
+                    for prow in conn.execute(
+                        "SELECT protocol, COUNT(*) as cnt FROM archived_packets GROUP BY protocol"
+                    ).fetchall():
+                        protocols[prow["protocol"]] = prow["cnt"]
+
+                    db_size_mb = 0.0
+                    try:
+                        db_size_mb = os.path.getsize(self._db_path) / (1024 * 1024)
+                    except OSError:
+                        pass
+
+                    return {
+                        "total_packets": row["total"],
+                        "total_bytes": row["total_bytes"],
+                        "oldest_packet": row["oldest"],
+                        "newest_packet": row["newest"],
+                        "protocols": protocols,
+                        "db_size_mb": round(db_size_mb, 2),
+                        "max_age_days": self._max_age_days,
+                        "session_archived": self._archived_count,
+                    }
+            except Exception as e:
+                logger.error(f"Failed to get archive stats: {e}")
+                return {"error": str(e)}

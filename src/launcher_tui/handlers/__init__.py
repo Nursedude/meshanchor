@@ -181,4 +181,8 @@ def get_all_handlers() -> List[Type]:
         ConfigAPIHandler,
     ])
 
+    # Batch 11 — automation (auto-ping, auto-traceroute, auto-welcome)
+    from handlers.automation import AutomationHandler
+    handlers.append(AutomationHandler)
+
     return handlers
