@@ -43,9 +43,17 @@ CircuitBreakerRegistry, HAS_CIRCUIT_BREAKER = safe_import(
     '.circuit_breaker', 'CircuitBreakerRegistry', package=__package__
 )
 
-# TX load balancer for dual-radio gateways
+# TX load balancer and failover manager for dual-radio gateways
 RadioLoadBalancer, LoadBalancerConfig, HAS_LOAD_BALANCER = safe_import(
     '.radio_failover', 'RadioLoadBalancer', 'LoadBalancerConfig', package=__package__
+)
+FailoverManager, FailoverConfig, HAS_FAILOVER = safe_import(
+    '.radio_failover', 'FailoverManager', 'FailoverConfig', package=__package__
+)
+
+# Cross-gateway failover via MQTT heartbeat
+GatewayHeartbeat, HeartbeatConfig, HAS_HEARTBEAT = safe_import(
+    '.gateway_heartbeat', 'GatewayHeartbeat', 'HeartbeatConfig', package=__package__
 )
 
 # Import persistent message queue for reliable delivery
@@ -243,7 +251,53 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # Initialize Meshtastic handler based on bridge mode
         # MQTT bridge (recommended): zero interference with web client
         # TCP bridge (legacy): holds persistent connection, blocks web client
+
+        # Initialize failover manager for dual-radio (crash detection + watchdog)
+        self._failover_manager = None
+        if HAS_FAILOVER and getattr(self.config.meshtastic, 'failover_enabled', False):
+            fo_config = FailoverConfig(
+                enabled=True,
+                utilization_threshold=getattr(
+                    self.config.meshtastic, 'failover_utilization_threshold', 25.0
+                ),
+                utilization_duration=getattr(
+                    self.config.meshtastic, 'failover_utilization_duration', 30
+                ),
+                recovery_threshold=getattr(
+                    self.config.meshtastic, 'failover_recovery_threshold', 15.0
+                ),
+                recovery_duration=getattr(
+                    self.config.meshtastic, 'failover_recovery_duration', 60
+                ),
+                health_poll_interval=getattr(
+                    self.config.meshtastic, 'failover_health_poll_interval', 5.0
+                ),
+                watchdog_enabled=getattr(
+                    self.config.meshtastic, 'failover_watchdog_enabled', True
+                ),
+                restart_after_failures=getattr(
+                    self.config.meshtastic, 'failover_restart_after_failures', 5
+                ),
+                max_restarts_per_hour=getattr(
+                    self.config.meshtastic, 'failover_max_restarts_per_hour', 3
+                ),
+                restart_cooldown=getattr(
+                    self.config.meshtastic, 'failover_restart_cooldown', 60
+                ),
+                primary_service=getattr(
+                    self.config.meshtastic, 'failover_primary_service', 'meshtasticd'
+                ),
+                secondary_service=getattr(
+                    self.config.meshtastic, 'failover_secondary_service', 'meshtasticd-alt'
+                ),
+            )
+            self._failover_manager = FailoverManager(fo_config)
+            self._failover_manager.start()
+            logger.info("Radio failover manager enabled (watchdog=%s)",
+                       "on" if fo_config.watchdog_enabled else "off")
+
         # Initialize TX load balancer if configured for dual-radio
+        # Pass failover_manager so LB defers to failover state
         self._load_balancer = None
         if HAS_LOAD_BALANCER and getattr(self.config.meshtastic, 'load_balancer_enabled', False):
             lb_config = LoadBalancerConfig(
@@ -257,9 +311,33 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                     self.config.meshtastic, 'load_balancer_recovery_margin', 2.0
                 ),
             )
-            self._load_balancer = RadioLoadBalancer(lb_config)
+            self._load_balancer = RadioLoadBalancer(
+                lb_config,
+                failover_manager=self._failover_manager,
+            )
             self._load_balancer.start()
-            logger.info("TX load balancer enabled for dual-radio gateway")
+            logger.info("TX load balancer enabled (failover_aware=%s)",
+                       "yes" if self._failover_manager else "no")
+
+        # Initialize cross-gateway heartbeat if configured
+        self._heartbeat = None
+        if HAS_HEARTBEAT and getattr(self.config.meshtastic, 'gateway_heartbeat_enabled', False):
+            hb_config = HeartbeatConfig(
+                enabled=True,
+                mqtt_broker=getattr(self.config.meshtastic, 'gateway_heartbeat_broker', 'localhost'),
+                mqtt_port=getattr(self.config.meshtastic, 'gateway_heartbeat_port', 1883),
+                heartbeat_interval=getattr(
+                    self.config.meshtastic, 'gateway_heartbeat_interval', 15.0
+                ),
+                missed_heartbeats_threshold=getattr(
+                    self.config.meshtastic, 'gateway_heartbeat_missed_threshold', 4
+                ),
+                role=getattr(self.config.meshtastic, 'gateway_role', 'primary'),
+                gateway_id=getattr(self.config.meshtastic, 'gateway_id', ''),
+            )
+            self._heartbeat = GatewayHeartbeat(config=hb_config)
+            self._heartbeat.start()
+            logger.info("Cross-gateway heartbeat enabled (role=%s)", hb_config.role)
 
         if self.config.bridge_mode == "mqtt_bridge" and HAS_MQTT_BRIDGE:
             logger.info("Using MQTT bridge handler (zero-interference mode)")
@@ -555,6 +633,14 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # Stop TX load balancer
         if self._load_balancer:
             self._load_balancer.stop()
+
+        # Stop failover manager
+        if self._failover_manager:
+            self._failover_manager.stop()
+
+        # Stop cross-gateway heartbeat
+        if self._heartbeat:
+            self._heartbeat.stop()
 
         # Stop RNS sniffer
         if HAS_RNS_SNIFFER:

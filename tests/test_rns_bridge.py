@@ -141,6 +141,10 @@ def _mock_gateway_config(**overrides):
     config.meshtastic.connection_type = "tcp"
     config.meshtastic.host = "localhost"
     config.meshtastic.port = 4403
+    # Disable dual-radio features by default in unit tests
+    config.meshtastic.failover_enabled = False
+    config.meshtastic.load_balancer_enabled = False
+    config.meshtastic.gateway_heartbeat_enabled = False
     return config
 
 
