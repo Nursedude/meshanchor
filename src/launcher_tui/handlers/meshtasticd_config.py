@@ -810,6 +810,8 @@ class MeshtasticdConfigHandler(BaseHandler):
         active = set()
         if config_d.exists():
             active = {f.name for f in config_d.glob('*.yaml')}
+        active_names_set = {n.replace('.yaml', '') for n in active
+                           if n != 'meshforge-overrides.yaml'}
 
         usb_configs = []
         spi_configs = []
@@ -831,11 +833,11 @@ class MeshtasticdConfigHandler(BaseHandler):
             choices.append((cfg.name, f"  {cfg.stem}{status}"))
 
         choices.append(("view", "View Config Details"))
+        if active_names_set:
+            choices.append(("remove", "Remove Active Config(s)"))
         choices.append(("back", "Back"))
 
-        active_names = [n.replace('.yaml', '') for n in active
-                        if n != 'meshforge-overrides.yaml']
-        active_display = ', '.join(active_names) if active_names else 'none'
+        active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
 
         choice = self.ctx.dialog.menu(
             "Hardware Config",
@@ -851,6 +853,8 @@ class MeshtasticdConfigHandler(BaseHandler):
             self._hardware_config_menu()
         elif choice == "view":
             self._view_hardware_config(available)
+        elif choice == "remove":
+            self._remove_active_hardware_config(config_d, active_names_set)
         else:
             self._activate_hardware_config(choice, available_dir, config_d)
 
@@ -899,6 +903,75 @@ class MeshtasticdConfigHandler(BaseHandler):
                 "Service restarted.")
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Activation failed:\n{e}")
+
+    def _remove_active_hardware_config(self, config_d: Path, active_names: set):
+        """Remove active hardware config(s) from config.d/."""
+        hw_files = sorted(
+            f for f in config_d.glob('*.yaml')
+            if f.name != 'meshforge-overrides.yaml'
+        )
+        if not hw_files:
+            self.ctx.dialog.msgbox("Info", "No active hardware configs to remove.")
+            return
+
+        if len(hw_files) == 1:
+            target = hw_files[0]
+            confirm = self.ctx.dialog.yesno(
+                "Remove Config",
+                f"Remove active hardware config?\n\n"
+                f"  {target.name}\n\n"
+                "meshtasticd will not start without a hardware config.\n"
+                "You can re-activate one from the Hardware Config menu.",
+            )
+            if confirm:
+                try:
+                    target.unlink()
+                    logger.info("Removed hardware config: %s", target.name)
+                    self.ctx.dialog.msgbox(
+                        "Removed",
+                        f"Removed: {target.name}\n\n"
+                        "meshtasticd needs a hardware config to start.\n"
+                        "Select a new one from this menu when ready."
+                    )
+                except Exception as e:
+                    self.ctx.dialog.msgbox("Error", f"Failed to remove:\n{e}")
+        else:
+            # Multiple active configs — let user pick which to remove
+            choices = [(f.name, f.stem) for f in hw_files]
+            choices.append(("all", "Remove ALL hardware configs"))
+            choices.append(("back", "Back"))
+
+            choice = self.ctx.dialog.menu(
+                "Remove Config",
+                f"{len(hw_files)} active hardware configs found.\n"
+                "meshtasticd merges all YAML in config.d/ — multiple\n"
+                "configs can conflict (especially with Module: auto).\n\n"
+                "Select config to remove:",
+                choices
+            )
+
+            if not choice or choice == "back":
+                return
+
+            try:
+                if choice == "all":
+                    for f in hw_files:
+                        f.unlink()
+                        logger.info("Removed hardware config: %s", f.name)
+                    self.ctx.dialog.msgbox(
+                        "Removed",
+                        f"Removed {len(hw_files)} hardware configs.\n\n"
+                        "Select a new one from this menu when ready."
+                    )
+                else:
+                    target = config_d / choice
+                    target.unlink()
+                    logger.info("Removed hardware config: %s", choice)
+                    self.ctx.dialog.msgbox(
+                        "Removed", f"Removed: {choice}"
+                    )
+            except Exception as e:
+                self.ctx.dialog.msgbox("Error", f"Failed to remove:\n{e}")
 
     def _view_hardware_config(self, configs: list):
         """View details of a hardware config."""
