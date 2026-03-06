@@ -1093,14 +1093,17 @@ class MeshtasticdConfigHandler(BaseHandler):
             return
 
         choices = [(str(cfg), cfg.name) for cfg in sorted(configs)]
+        choices.append(("remove", "Remove a config from config.d/"))
 
         choice = self.ctx.dialog.menu(
             "Active Configs",
-            "Select config to edit (Cancel to go back):",
+            "Select config to edit or remove (Cancel to go back):",
             choices
         )
 
-        if choice:
+        if choice == "remove":
+            self._remove_active_hardware_config(config_d, set())
+        elif choice:
             self._edit_file(choice)
 
     def _edit_available_d(self):
