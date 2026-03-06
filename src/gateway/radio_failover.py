@@ -1,5 +1,5 @@
 """
-Dual-Radio Failover State Machine for MeshForge Gateway.
+Dual-Radio Failover & Load Balancing for MeshForge Gateway.
 
 Monitors two meshtasticd instances and automatically switches the active
 transmitter when channel utilization exceeds safe thresholds. Designed to
@@ -22,6 +22,15 @@ Thresholds:
     - Pure ALOHA theoretical max is ~18.4% before collision dominance
     - SENSOR/TRACKER roles bypass the 25% throttle
 
+Features:
+    - Utilization-based failover (channel >25% sustained)
+    - Service watchdog: auto-restart crashed meshtasticd instances
+    - Crash-based failover: immediate failover when service unreachable
+    - Reachability-based recovery: detect service restart and switchback
+    - EventBus integration: emit service events on state changes
+    - Persistent events: write transitions to SharedHealthState (SQLite)
+    - LB coordination: RadioLoadBalancer defers to failover state
+
 Requires:
     - Two meshtasticd instances on ports 4403 and 4404
     - HTTP API enabled on both (Webserver.Port in config.yaml)
@@ -42,8 +51,10 @@ Usage:
 """
 
 import collections
+import json
 import logging
 import random
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -59,6 +70,27 @@ try:
     _HAS_HTTP = True
 except ImportError:
     _HAS_HTTP = False
+
+# EventBus for broadcasting failover state changes
+try:
+    from utils.event_bus import emit_service_status
+    _HAS_EVENT_BUS = True
+except ImportError:
+    _HAS_EVENT_BUS = False
+
+# SharedHealthState for persistent event storage (SQLite)
+try:
+    from utils.shared_health_state import get_shared_health_state
+    _HAS_SHARED_STATE = True
+except ImportError:
+    _HAS_SHARED_STATE = False
+
+# Service management for watchdog restarts
+try:
+    from utils.service_check import restart_service, check_service
+    _HAS_SERVICE_CHECK = True
+except ImportError:
+    _HAS_SERVICE_CHECK = False
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +133,14 @@ class FailoverConfig:
     # Safety
     max_failovers_per_hour: int = 6    # Prevent flapping
     cooldown_after_failover: int = 30  # Minimum seconds between state changes
+
+    # Service watchdog — auto-restart crashed meshtasticd
+    watchdog_enabled: bool = True
+    restart_after_failures: int = 5     # Consecutive poll failures before restart
+    max_restarts_per_hour: int = 3      # Prevent restart loops
+    restart_cooldown: int = 60          # Seconds between restart attempts
+    primary_service: str = "meshtasticd"       # systemd service name (primary)
+    secondary_service: str = "meshtasticd-alt"  # systemd service name (secondary)
 
 
 @dataclass
@@ -145,6 +185,13 @@ class FailoverManager:
 
     Polls both radios via HTTP /json/report (non-blocking, no TCP lock)
     and transitions between states based on channel utilization thresholds.
+
+    Includes:
+    - Service watchdog: detects crashed meshtasticd and auto-restarts
+    - Crash-based failover: immediate failover on service unreachable
+    - Reachability-based recovery: switches back when crashed service recovers
+    - EventBus integration: emits service status on state changes
+    - Persistent events: writes to SharedHealthState (SQLite) for post-incident analysis
     """
 
     def __init__(
@@ -175,6 +222,22 @@ class FailoverManager:
         self._last_state_change: float = 0.0
         self._failover_count_window: List[float] = []  # Timestamps of recent failovers
 
+        # Crash tracking — detect when primary was unreachable and comes back
+        self._primary_was_down: bool = False
+        self._primary_down_since: Optional[float] = None
+        self._secondary_was_down: bool = False
+        self._secondary_down_since: Optional[float] = None
+
+        # Service watchdog — restart tracking per radio
+        self._restart_timestamps: Dict[str, List[float]] = {
+            'primary': [],
+            'secondary': [],
+        }
+        self._last_restart_attempt: Dict[str, float] = {
+            'primary': 0.0,
+            'secondary': 0.0,
+        }
+
         # Event history
         self._events: List[FailoverEvent] = []
         self._max_events = 100
@@ -196,6 +259,14 @@ class FailoverManager:
             if self._state in (FailoverState.SECONDARY_ACTIVE, FailoverState.RECOVERY_PENDING):
                 return self._config.secondary_port
             return self._config.primary_port
+
+    @property
+    def active_http_port(self) -> int:
+        """HTTP API port of the currently active radio for TX."""
+        with self._state_lock:
+            if self._state in (FailoverState.SECONDARY_ACTIVE, FailoverState.RECOVERY_PENDING):
+                return self._config.secondary_http_port
+            return self._config.primary_http_port
 
     @property
     def primary_health(self) -> RadioHealth:
@@ -235,9 +306,11 @@ class FailoverManager:
         )
         self._thread.start()
         logger.info(
-            "Radio failover started: primary=%d, secondary=%d, threshold=%.0f%%",
+            "Radio failover started: primary=%d, secondary=%d, threshold=%.0f%%, "
+            "watchdog=%s",
             self._config.primary_port, self._config.secondary_port,
             self._config.utilization_threshold,
+            "enabled" if self._config.watchdog_enabled else "disabled",
         )
 
     def stop(self) -> None:
@@ -273,6 +346,13 @@ class FailoverManager:
             },
             'last_event': self._events[-1].reason if self._events else None,
             'failover_count_1h': len(self._failover_count_window),
+            'watchdog': {
+                'enabled': self._config.watchdog_enabled,
+                'primary_restarts_1h': len(self._restart_timestamps.get('primary', [])),
+                'secondary_restarts_1h': len(self._restart_timestamps.get('secondary', [])),
+                'primary_down': self._primary_was_down,
+                'secondary_down': self._secondary_was_down,
+            },
             'thresholds': {
                 'utilization': self._config.utilization_threshold,
                 'recovery': self._config.recovery_threshold,
@@ -283,11 +363,13 @@ class FailoverManager:
     # ── Internal polling loop ──────────────────────────────────────────
 
     def _poll_loop(self) -> None:
-        """Background loop: poll both radios and evaluate state transitions."""
+        """Background loop: poll both radios, run watchdog, evaluate state."""
         while not self._stop_event.is_set():
             try:
                 self._poll_radio_health(self._primary)
                 self._poll_radio_health(self._secondary)
+                self._track_reachability()
+                self._run_watchdog()
                 self._evaluate_state()
             except Exception as e:
                 logger.error("Failover poll error: %s", e)
@@ -321,6 +403,111 @@ class FailoverManager:
             if radio.consecutive_failures >= 3:
                 radio.reachable = False
 
+    # ── Crash tracking ─────────────────────────────────────────────────
+
+    def _track_reachability(self) -> None:
+        """Track when radios go down and come back for crash-based failover."""
+        now = time.time()
+
+        # Primary tracking
+        if not self._primary.reachable and not self._primary_was_down:
+            self._primary_was_down = True
+            self._primary_down_since = now
+            logger.warning("Primary radio became unreachable at %s",
+                         datetime.now().strftime("%H:%M:%S"))
+        elif self._primary.reachable and self._primary_was_down:
+            downtime = now - (self._primary_down_since or now)
+            logger.info("Primary radio recovered after %.0fs downtime", downtime)
+            # Don't clear _primary_was_down here — _evaluate_secondary_active uses it
+
+        # Secondary tracking
+        if not self._secondary.reachable and not self._secondary_was_down:
+            self._secondary_was_down = True
+            self._secondary_down_since = now
+            logger.warning("Secondary radio became unreachable at %s",
+                         datetime.now().strftime("%H:%M:%S"))
+        elif self._secondary.reachable and self._secondary_was_down:
+            downtime = now - (self._secondary_down_since or now)
+            logger.info("Secondary radio recovered after %.0fs downtime", downtime)
+            self._secondary_was_down = False
+            self._secondary_down_since = None
+
+    # ── Service watchdog ───────────────────────────────────────────────
+
+    def _run_watchdog(self) -> None:
+        """Detect crashed meshtasticd services and attempt restart."""
+        if not self._config.watchdog_enabled or not _HAS_SERVICE_CHECK:
+            return
+
+        now = time.time()
+
+        # Check primary
+        if (self._primary.consecutive_failures >= self._config.restart_after_failures
+                and not self._primary.reachable):
+            self._attempt_restart('primary', self._config.primary_service, now)
+
+        # Check secondary
+        if (self._secondary.consecutive_failures >= self._config.restart_after_failures
+                and not self._secondary.reachable):
+            self._attempt_restart('secondary', self._config.secondary_service, now)
+
+    def _attempt_restart(self, label: str, service_name: str, now: float) -> None:
+        """Attempt to restart a crashed meshtasticd service."""
+        # Cooldown check
+        if now - self._last_restart_attempt[label] < self._config.restart_cooldown:
+            return
+
+        # Rate limit — max restarts per hour
+        self._restart_timestamps[label] = [
+            t for t in self._restart_timestamps[label] if now - t < 3600
+        ]
+        if len(self._restart_timestamps[label]) >= self._config.max_restarts_per_hour:
+            logger.warning(
+                "WATCHDOG: max restarts/hour (%d) reached for %s — skipping",
+                self._config.max_restarts_per_hour, label,
+            )
+            return
+
+        logger.warning(
+            "WATCHDOG: %s meshtasticd (%s) unreachable for %d consecutive checks — "
+            "attempting restart",
+            label, service_name,
+            self._primary.consecutive_failures if label == 'primary'
+            else self._secondary.consecutive_failures,
+        )
+
+        self._last_restart_attempt[label] = now
+
+        try:
+            success, msg = restart_service(service_name, timeout=30)
+            self._restart_timestamps[label].append(now)
+
+            if success:
+                logger.info("WATCHDOG: %s service %s restarted successfully: %s",
+                           label, service_name, msg)
+                self._emit_event(
+                    f"watchdog_{label}",
+                    True,
+                    f"Service {service_name} restarted successfully",
+                )
+            else:
+                logger.error("WATCHDOG: %s service %s restart failed: %s",
+                            label, service_name, msg)
+                self._emit_event(
+                    f"watchdog_{label}",
+                    False,
+                    f"Service {service_name} restart failed: {msg}",
+                )
+        except Exception as e:
+            logger.error("WATCHDOG: %s restart error: %s", label, e)
+            self._emit_event(
+                f"watchdog_{label}",
+                False,
+                f"Restart error: {e}",
+            )
+
+    # ── State machine ──────────────────────────────────────────────────
+
     def _evaluate_state(self) -> None:
         """Evaluate whether a state transition should occur."""
         with self._state_lock:
@@ -350,7 +537,7 @@ class FailoverManager:
             self._evaluate_recovery_pending(now)
 
     def _evaluate_primary_active(self, now: float) -> None:
-        """Check if primary needs failover."""
+        """Check if primary needs failover (utilization OR crash)."""
         if not self._primary.reachable:
             # Primary unreachable — immediate failover if secondary is up
             if self._secondary.reachable:
@@ -419,11 +606,24 @@ class FailoverManager:
         )
 
     def _evaluate_secondary_active(self, now: float) -> None:
-        """Check if primary has recovered enough to switch back."""
+        """Check if primary has recovered (utilization-based OR crash recovery)."""
         if not self._primary.reachable:
             self._recovery_start = None
             return
 
+        # Crash recovery: primary was down and has come back online
+        if self._primary_was_down and self._primary.reachable:
+            downtime = now - (self._primary_down_since or now)
+            self._transition(
+                FailoverState.RECOVERY_PENDING,
+                f"Primary service recovered after {downtime:.0f}s downtime"
+            )
+            self._primary_was_down = False
+            self._primary_down_since = None
+            self._recovery_start = None
+            return
+
+        # Utilization-based recovery
         if self._primary.channel_utilization < self._config.recovery_threshold:
             if self._recovery_start is None:
                 self._recovery_start = now
@@ -456,8 +656,10 @@ class FailoverManager:
             f"Recovery complete: primary at {self._primary.channel_utilization:.1f}%"
         )
 
+    # ── State transition with event bus + persistence ──────────────────
+
     def _transition(self, new_state: FailoverState, reason: str) -> None:
-        """Execute a state transition with logging and event recording."""
+        """Execute a state transition with logging, events, and persistence."""
         with self._state_lock:
             old_state = self._state
             if old_state == new_state:
@@ -484,11 +686,43 @@ class FailoverManager:
             self._primary.channel_utilization, self._secondary.channel_utilization,
         )
 
+        # Emit EventBus service status
+        self._emit_event(
+            "radio_failover",
+            new_state != FailoverState.DISABLED,
+            f"{old_state.value} -> {new_state.value}: {reason}",
+        )
+
+        # Persist to SharedHealthState (SQLite)
+        self._persist_event(new_state, reason)
+
+        # User callback
         if self._on_state_change:
             try:
                 self._on_state_change(old_state, new_state, reason)
             except Exception as e:
                 logger.error("Failover callback error: %s", e)
+
+    def _emit_event(self, service_name: str, available: bool, message: str) -> None:
+        """Emit a service status event via EventBus."""
+        if _HAS_EVENT_BUS:
+            try:
+                emit_service_status(service_name, available, message)
+            except Exception as e:
+                logger.debug("EventBus emit error: %s", e)
+
+    def _persist_event(self, state: FailoverState, reason: str) -> None:
+        """Persist failover state to SharedHealthState (SQLite)."""
+        if _HAS_SHARED_STATE:
+            try:
+                shs = get_shared_health_state()
+                shs.update_service(
+                    "radio_failover",
+                    state=state.value,
+                    reason=reason,
+                )
+            except Exception as e:
+                logger.debug("SharedHealthState persist error: %s", e)
 
 
 # ── TX Load Balancer ────────────────────────────────────────────────────
@@ -501,6 +735,11 @@ class FailoverManager:
 #   Primary TX < threshold  → 100% primary (IDLE)
 #   Primary TX >= threshold → split across both radios (BALANCING)
 #   Both radios high TX     → hold weights, warn (SATURATED)
+#
+# Failover coordination:
+#   When a FailoverManager reference is provided, the load balancer defers
+#   to its state — e.g., routes 100% to secondary when failover is active,
+#   and does not interfere during recovery.
 
 
 class LoadBalancerState(Enum):
@@ -549,9 +788,15 @@ class RadioLoadBalancer:
     same-channel radios), this uses tx_utilization — the metric that
     actually differs between two radios sharing a channel.
 
+    Failover coordination:
+        When failover_manager is provided, the load balancer defers to its
+        state. If failover has switched to secondary, the load balancer
+        routes 100% to secondary instead of using its own weight calculation.
+        During recovery, the load balancer does not interfere.
+
     Usage:
         config = LoadBalancerConfig(enabled=True)
-        lb = RadioLoadBalancer(config)
+        lb = RadioLoadBalancer(config, failover_manager=fm)
         lb.start()
 
         # In TX path — call per message:
@@ -564,10 +809,12 @@ class RadioLoadBalancer:
         config: Optional[LoadBalancerConfig] = None,
         on_state_change: Optional[Callable[[LoadBalancerState, LoadBalancerState, str], None]] = None,
         congested_node_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+        failover_manager: Optional['FailoverManager'] = None,
     ):
         self._config = config or LoadBalancerConfig()
         self._on_state_change = on_state_change
         self._congested_node_provider = congested_node_provider
+        self._failover_manager = failover_manager
 
         # State
         self._state = LoadBalancerState.DISABLED if not self._config.enabled else LoadBalancerState.IDLE
@@ -586,6 +833,11 @@ class RadioLoadBalancer:
             port=self._config.secondary_port,
             http_port=self._config.secondary_http_port,
         )
+
+        # Track reachability transitions for slow start
+        self._primary_was_unreachable: bool = False
+        self._secondary_was_unreachable: bool = False
+        self._recovery_weight_target: Optional[float] = None
 
         # TX counters (per poll cycle, for status display)
         self._tx_count_primary: int = 0
@@ -634,11 +886,17 @@ class RadioLoadBalancer:
         Called per outbound message. Uses weighted random selection so that
         over many calls, the distribution matches the current weight ratio.
 
+        If a FailoverManager is active and has switched to secondary, this
+        routes 100% to the secondary radio's HTTP port.
+
         Returns:
             HTTP port (e.g. 9443 or 9444) for the selected radio.
         """
         with self._state_lock:
             if self._state == LoadBalancerState.DISABLED:
+                # Even when disabled, check if failover has a preference
+                if self._failover_manager:
+                    return self._failover_manager.active_http_port
                 return self._config.primary_http_port
 
         with self._weight_lock:
@@ -677,9 +935,10 @@ class RadioLoadBalancer:
         self._thread.start()
         logger.info(
             "TX load balancer started: primary=%d, secondary=%d, "
-            "tx_threshold=%.0f%%, tx_max=%.0f%%",
+            "tx_threshold=%.0f%%, tx_max=%.0f%%, failover_aware=%s",
             self._config.primary_port, self._config.secondary_port,
             self._config.tx_threshold, self._config.tx_max,
+            "yes" if self._failover_manager else "no",
         )
 
     def stop(self) -> None:
@@ -730,6 +989,11 @@ class RadioLoadBalancer:
                 'primary': tx_primary,
                 'secondary': tx_secondary,
             },
+            'failover_aware': self._failover_manager is not None,
+            'failover_state': (
+                self._failover_manager.state.value
+                if self._failover_manager else None
+            ),
             'last_event': self._events[-1].reason if self._events else None,
             'thresholds': {
                 'tx_threshold': self._config.tx_threshold,
@@ -791,7 +1055,25 @@ class RadioLoadBalancer:
                 radio.reachable = False
 
     def _recalculate_weights(self) -> None:
-        """Recalculate TX weights based on both radios' tx_utilization."""
+        """Recalculate TX weights based on failover state and tx_utilization."""
+        # Phase 2: Defer to failover manager if active
+        if self._failover_manager:
+            fo_state = self._failover_manager.state
+            if fo_state == FailoverState.SECONDARY_ACTIVE:
+                # Failover active — route 100% to secondary
+                self._set_weights(0.0, "Failover: secondary active")
+                self._set_state(LoadBalancerState.BALANCING)
+                return
+            elif fo_state == FailoverState.RECOVERY_PENDING:
+                # Recovery in progress — don't interfere with failover
+                return
+
+        # Track reachability transitions for gradual recovery
+        if not self._primary.reachable:
+            self._primary_was_unreachable = True
+        if not self._secondary.reachable:
+            self._secondary_was_unreachable = True
+
         # If secondary is unreachable, all traffic goes to primary
         if not self._secondary.reachable:
             self._set_weights(100.0, "Secondary unreachable")
@@ -803,6 +1085,19 @@ class RadioLoadBalancer:
             self._set_weights(self._config.min_primary_weight, "Primary unreachable")
             self._set_state(LoadBalancerState.BALANCING)
             return
+
+        # Gradual reintroduction after radio recovery
+        if self._primary_was_unreachable and self._primary.reachable:
+            self._primary_was_unreachable = False
+            # Start with low primary weight and ramp up gradually
+            with self._weight_lock:
+                if self._primary_weight < 30.0:
+                    logger.info("Primary recovered — gradual weight ramp-up from %.0f%%",
+                               self._primary_weight)
+
+        if self._secondary_was_unreachable and self._secondary.reachable:
+            self._secondary_was_unreachable = False
+            logger.info("Secondary recovered — available for load balancing")
 
         p_tx = self._primary.tx_utilization
         s_tx = self._secondary.tx_utilization
