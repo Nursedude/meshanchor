@@ -435,21 +435,43 @@ class FailoverManager:
     # ── Service watchdog ───────────────────────────────────────────────
 
     def _run_watchdog(self) -> None:
-        """Detect crashed meshtasticd services and attempt restart."""
+        """Detect crashed meshtasticd services and attempt restart.
+
+        Promotes the surviving radio IMMEDIATELY on crash detection,
+        then attempts restart in background. Recovery follows the normal
+        RECOVERY_PENDING path once the restarted service becomes reachable.
+        """
         if not self._config.watchdog_enabled or not _HAS_SERVICE_CHECK:
             return
 
         now = time.time()
 
-        # Check primary
-        if (self._primary.consecutive_failures >= self._config.restart_after_failures
-                and not self._primary.reachable):
-            self._attempt_restart('primary', self._config.primary_service, now)
+        for label, radio, service, peer_radio in [
+            ('primary', self._primary, self._config.primary_service, self._secondary),
+            ('secondary', self._secondary, self._config.secondary_service, self._primary),
+        ]:
+            if not (radio.consecutive_failures >= self._config.restart_after_failures
+                    and not radio.reachable):
+                continue
 
-        # Check secondary
-        if (self._secondary.consecutive_failures >= self._config.restart_after_failures
-                and not self._secondary.reachable):
-            self._attempt_restart('secondary', self._config.secondary_service, now)
+            # Immediate failover: promote surviving radio before restart
+            # Note: _transition handles its own locking, so read state first
+            current_state = self.state  # property acquires/releases lock
+            if label == 'primary' and peer_radio.reachable:
+                if current_state == FailoverState.PRIMARY_ACTIVE:
+                    self._transition(
+                        FailoverState.SECONDARY_ACTIVE,
+                        "Watchdog: primary crashed, promoting secondary",
+                    )
+            elif label == 'secondary' and peer_radio.reachable:
+                if current_state == FailoverState.SECONDARY_ACTIVE:
+                    self._transition(
+                        FailoverState.RECOVERY_PENDING,
+                        "Watchdog: secondary crashed, recovering to primary",
+                    )
+
+            # Attempt restart — service recovers via normal RECOVERY_PENDING path
+            self._attempt_restart(label, service, now)
 
     def _attempt_restart(self, label: str, service_name: str, now: float) -> None:
         """Attempt to restart a crashed meshtasticd service."""
@@ -839,6 +861,11 @@ class RadioLoadBalancer:
         self._secondary_was_unreachable: bool = False
         self._recovery_weight_target: Optional[float] = None
 
+        # Slow start after failover recovery — ramp primary weight gradually
+        self._failover_recovery_at: Optional[float] = None
+        self._slow_start_duration: float = 30.0  # seconds to ramp from min to 100%
+        self._prev_failover_state: Optional[FailoverState] = None
+
         # TX counters (per poll cycle, for status display)
         self._tx_count_primary: int = 0
         self._tx_count_secondary: int = 0
@@ -1059,14 +1086,37 @@ class RadioLoadBalancer:
         # Phase 2: Defer to failover manager if active
         if self._failover_manager:
             fo_state = self._failover_manager.state
+
+            # Detect failover recovery completion → start slow ramp
+            if (self._prev_failover_state in (
+                    FailoverState.RECOVERY_PENDING, FailoverState.SECONDARY_ACTIVE)
+                    and fo_state == FailoverState.PRIMARY_ACTIVE):
+                self._failover_recovery_at = time.time()
+                logger.info("LB slow start: failover recovery detected, ramping primary weight")
+            self._prev_failover_state = fo_state
+
             if fo_state == FailoverState.SECONDARY_ACTIVE:
                 # Failover active — route 100% to secondary
+                self._failover_recovery_at = None  # Cancel any pending slow start
                 self._set_weights(0.0, "Failover: secondary active")
                 self._set_state(LoadBalancerState.BALANCING)
                 return
             elif fo_state == FailoverState.RECOVERY_PENDING:
                 # Recovery in progress — don't interfere with failover
                 return
+
+            # Slow start after failover recovery
+            if (fo_state == FailoverState.PRIMARY_ACTIVE
+                    and self._failover_recovery_at is not None):
+                elapsed = time.time() - self._failover_recovery_at
+                if elapsed < self._slow_start_duration:
+                    min_w = self._config.min_primary_weight
+                    ramp = min_w + (100.0 - min_w) * (elapsed / self._slow_start_duration)
+                    self._set_weights(ramp, f"Slow start: {elapsed:.0f}s/{self._slow_start_duration:.0f}s")
+                    self._set_state(LoadBalancerState.BALANCING)
+                    return
+                else:
+                    self._failover_recovery_at = None  # Slow start complete
 
         # Track reachability transitions for gradual recovery
         if not self._primary.reachable:
