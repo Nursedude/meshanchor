@@ -85,6 +85,50 @@ def write_overlay(data: dict, dialog=None) -> bool:
         return False
 
 
+def activate_hardware_config(config_name: str,
+                             available_dir: Path = None,
+                             config_d: Path = None) -> bool:
+    """Activate a hardware config: remove old configs, copy new one, restart.
+
+    Standalone function usable from both the TUI handler and startup recovery.
+
+    Args:
+        config_name: Filename (e.g. 'meshtoad-spi.yaml') in available.d/
+        available_dir: Path to available.d/ (default: /etc/meshtasticd/available.d)
+        config_d: Path to config.d/ (default: /etc/meshtasticd/config.d)
+
+    Returns:
+        True if activation succeeded.
+
+    Raises:
+        FileNotFoundError: If source template doesn't exist.
+        PermissionError: If lacking write access.
+    """
+    if available_dir is None:
+        available_dir = Path('/etc/meshtasticd/available.d')
+    if config_d is None:
+        config_d = Path('/etc/meshtasticd/config.d')
+
+    src = available_dir / config_name
+    if not src.exists():
+        raise FileNotFoundError(f"Template not found: {src}")
+
+    config_d.mkdir(parents=True, exist_ok=True)
+
+    # Remove old hardware configs (preserve meshforge-overrides.yaml)
+    for old in config_d.glob('*.yaml'):
+        if old.name != 'meshforge-overrides.yaml':
+            old.unlink()
+            logger.info("Removed old hardware config: %s", old.name)
+
+    dst = config_d / config_name
+    shutil.copy(src, dst)
+    logger.info("Activated hardware config: %s", config_name)
+
+    apply_config_and_restart('meshtasticd')
+    return True
+
+
 def ensure_meshtasticd_config():
     """Auto-create /etc/meshtasticd structure and templates if missing."""
     try:
@@ -818,13 +862,27 @@ class MeshtasticdConfigHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", f"Config not found: {src}")
             return
 
+        # Show which configs will be replaced
+        old_configs = []
+        if config_d.exists():
+            old_configs = [f.name for f in config_d.glob('*.yaml')
+                          if f.name != 'meshforge-overrides.yaml']
+
+        replace_msg = ""
+        if old_configs:
+            replace_msg = (
+                f"\nReplaces: {', '.join(old_configs)}\n"
+            )
+
         confirm = self.ctx.dialog.yesno(
             "Activate Config",
             f"Activate hardware config?\n\n"
-            f"Template: {config_name}\n\n"
+            f"Template: {config_name}\n"
+            f"{replace_msg}\n"
             "This will:\n"
-            f"1. Copy to {config_d}/\n"
-            "2. Restart meshtasticd service",
+            "1. Remove old hardware configs from config.d/\n"
+            f"2. Copy {config_name} to {config_d}/\n"
+            "3. Restart meshtasticd service",
             default_no=True
         )
 
@@ -833,13 +891,11 @@ class MeshtasticdConfigHandler(BaseHandler):
 
         try:
             self.ctx.dialog.infobox("Activating", f"Activating {config_name}...")
-            config_d.mkdir(parents=True, exist_ok=True)
-            dst = config_d / config_name
-            shutil.copy(src, dst)
-            apply_config_and_restart('meshtasticd')
+            activate_hardware_config(config_name, available_dir, config_d)
             self.ctx.dialog.msgbox("Success",
                 f"Hardware config activated!\n\n"
-                f"Config: {dst}\n\n"
+                f"Config: {config_d / config_name}\n\n"
+                "Old hardware configs removed.\n"
                 "Service restarted.")
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Activation failed:\n{e}")
