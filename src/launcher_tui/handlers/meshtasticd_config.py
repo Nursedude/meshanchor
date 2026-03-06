@@ -35,6 +35,26 @@ from utils.broker_profiles import get_active_profile as _get_active_profile
 # --- Shared overlay utilities (imported by sub-handlers) ---
 
 OVERLAY_PATH = Path('/etc/meshtasticd/config.d/meshforge-overrides.yaml')
+OVERRIDES_NAMES = {'meshforge-overrides.yaml', 'meshforge-overrides.yml'}
+
+
+def _glob_yaml(directory: Path) -> list:
+    """Glob both .yaml and .yml files from a directory."""
+    files = list(directory.glob('*.yaml')) + list(directory.glob('*.yml'))
+    # Deduplicate by resolved path, preserve order
+    seen = set()
+    result = []
+    for f in files:
+        key = f.resolve()
+        if key not in seen:
+            seen.add(key)
+            result.append(f)
+    return result
+
+
+def _is_overrides(path: Path) -> bool:
+    """Check if a path is the meshforge overrides file."""
+    return path.name in OVERRIDES_NAMES
 OVERLAY_HEADER = (
     "# MeshForge configuration overrides\n"
     "# These settings override /etc/meshtasticd/config.yaml\n"
@@ -115,9 +135,9 @@ def activate_hardware_config(config_name: str,
 
     config_d.mkdir(parents=True, exist_ok=True)
 
-    # Remove old hardware configs (preserve meshforge-overrides.yaml)
-    for old in config_d.glob('*.yaml'):
-        if old.name != 'meshforge-overrides.yaml':
+    # Remove old hardware configs (preserve meshforge-overrides)
+    for old in _glob_yaml(config_d):
+        if not _is_overrides(old):
             old.unlink()
             logger.info("Removed old hardware config: %s", old.name)
 
@@ -266,7 +286,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             self.ctx.wait_for_enter()
             return
 
-        overlays = sorted(config_d.glob('*.yaml'))
+        overlays = sorted(_glob_yaml(config_d))
         if not overlays:
             print("No active hardware configs in config.d/\n")
             print("Select your hardware from:")
@@ -306,7 +326,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             self.ctx.wait_for_enter()
             return
 
-        configs = sorted(available_d.glob('*.yaml'))
+        configs = sorted(_glob_yaml(available_d))
         if not configs:
             print("No hardware configs available.")
         else:
@@ -327,7 +347,7 @@ class MeshtasticdConfigHandler(BaseHandler):
 
             config_d = Path('/etc/meshtasticd/config.d')
             if config_d.exists():
-                active = list(config_d.glob('*.yaml'))
+                active = _glob_yaml(config_d)
                 if active:
                     print(f"\nActive: {', '.join(f.stem for f in active)}")
 
@@ -491,10 +511,10 @@ class MeshtasticdConfigHandler(BaseHandler):
                 config_exists = config_path.exists()
 
             config_d = Path('/etc/meshtasticd/config.d')
-            active_configs = list(config_d.glob('*.yaml')) if config_d.exists() else []
+            active_configs = _glob_yaml(config_d) if config_d.exists() else []
 
             available_d = Path('/etc/meshtasticd/available.d')
-            available_count = len(list(available_d.glob('*.yaml'))) if available_d.exists() else 0
+            available_count = len(_glob_yaml(available_d)) if available_d.exists() else 0
 
             text = "Meshtasticd Service Status:\n"
             if is_running:
@@ -800,7 +820,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 "Run with sudo to auto-create, or run the installer.")
             return
 
-        available = list(available_dir.glob('*.yaml'))
+        available = _glob_yaml(available_dir)
         if not available:
             self.ctx.dialog.msgbox("Error",
                 "No hardware templates found.\n\n"
@@ -809,9 +829,9 @@ class MeshtasticdConfigHandler(BaseHandler):
 
         active = set()
         if config_d.exists():
-            active = {f.name for f in config_d.glob('*.yaml')}
-        active_names_set = {n.replace('.yaml', '') for n in active
-                           if n != 'meshforge-overrides.yaml'}
+            active = {f.name for f in _glob_yaml(config_d)}
+        active_names_set = {f.stem for f in _glob_yaml(config_d)
+                           if not _is_overrides(f)} if config_d.exists() else set()
 
         usb_configs = []
         spi_configs = []
@@ -833,8 +853,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             choices.append((cfg.name, f"  {cfg.stem}{status}"))
 
         choices.append(("view", "View Config Details"))
-        if active_names_set:
-            choices.append(("remove", "Remove Active Config(s)"))
+        choices.append(("remove", "Remove Active Config(s)"))
         choices.append(("back", "Back"))
 
         active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
@@ -869,8 +888,8 @@ class MeshtasticdConfigHandler(BaseHandler):
         # Show which configs will be replaced
         old_configs = []
         if config_d.exists():
-            old_configs = [f.name for f in config_d.glob('*.yaml')
-                          if f.name != 'meshforge-overrides.yaml']
+            old_configs = [f.name for f in _glob_yaml(config_d)
+                          if not _is_overrides(f)]
 
         replace_msg = ""
         if old_configs:
@@ -907,8 +926,8 @@ class MeshtasticdConfigHandler(BaseHandler):
     def _remove_active_hardware_config(self, config_d: Path, active_names: set):
         """Remove active hardware config(s) from config.d/."""
         hw_files = sorted(
-            f for f in config_d.glob('*.yaml')
-            if f.name != 'meshforge-overrides.yaml'
+            f for f in _glob_yaml(config_d)
+            if not _is_overrides(f)
         )
         if not hw_files:
             self.ctx.dialog.msgbox("Info", "No active hardware configs to remove.")
@@ -1068,7 +1087,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", f"Directory not found:\n{config_d}")
             return
 
-        configs = list(config_d.glob('*.yaml'))
+        configs = _glob_yaml(config_d)
         if not configs:
             self.ctx.dialog.msgbox("Info", "No active configs in config.d/")
             return
@@ -1091,7 +1110,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", f"Directory not found:\n{available_d}")
             return
 
-        configs = list(available_d.glob('*.yaml'))
+        configs = _glob_yaml(available_d)
         if not configs:
             self.ctx.dialog.msgbox("Info", "No templates in available.d/")
             return
