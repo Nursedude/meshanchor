@@ -833,8 +833,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             choices.append((cfg.name, f"  {cfg.stem}{status}"))
 
         choices.append(("view", "View Config Details"))
-        if active_names_set:
-            choices.append(("remove", "Remove Active Config(s)"))
+        choices.append(("remove", "Remove Active Config(s)"))
         choices.append(("back", "Back"))
 
         active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
