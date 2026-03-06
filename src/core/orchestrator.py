@@ -149,6 +149,10 @@ class ServiceOrchestrator:
             'service_failed': [],
             'all_ready': [],
         }
+        # Optional recovery callback: called when meshtasticd fails due to
+        # wrong hardware config.  Should return True if user selected a new
+        # config and startup should be retried.
+        self._config_recovery_cb: Optional[Callable[[], bool]] = None
 
         # Load configuration
         self._load_config()
@@ -811,6 +815,34 @@ class ServiceOrchestrator:
                             f"{service_name} failed to start after restart"
                         )
                         self._log_journal_tail(service_name, lines=8)
+
+                        # Offer interactive config recovery
+                        if (service_name == 'meshtasticd'
+                                and self._config_recovery_cb
+                                and not getattr(
+                                    self, '_recovery_attempted', False
+                                )):
+                            logger.info(
+                                "Offering interactive hardware config "
+                                "selection..."
+                            )
+                            try:
+                                self._recovery_attempted = True
+                                if self._config_recovery_cb():
+                                    logger.info(
+                                        "Hardware config changed — "
+                                        "retrying meshtasticd startup..."
+                                    )
+                                    return self.start_service(
+                                        service_name, wait=wait
+                                    )
+                            except Exception as e:
+                                logger.error(
+                                    f"Config recovery failed: {e}"
+                                )
+                            finally:
+                                self._recovery_attempted = False
+
                         self._emit('service_failed', service_name)
                         return False
                     break
@@ -853,6 +885,31 @@ class ServiceOrchestrator:
                             "the radio config matches your hardware "
                             "(correct GPIO pins, Module type, etc.)."
                         )
+
+                        # Offer interactive config recovery if callback registered
+                        if (service_name == 'meshtasticd'
+                                and self._config_recovery_cb
+                                and not getattr(self, '_recovery_attempted', False)):
+                            logger.info(
+                                "Offering interactive hardware config selection..."
+                            )
+                            try:
+                                self._recovery_attempted = True
+                                if self._config_recovery_cb():
+                                    logger.info(
+                                        "Hardware config changed — retrying "
+                                        "meshtasticd startup..."
+                                    )
+                                    return self.start_service(
+                                        service_name, wait=wait
+                                    )
+                            except Exception as e:
+                                logger.error(
+                                    f"Config recovery failed: {e}"
+                                )
+                            finally:
+                                self._recovery_attempted = False
+
                         self._emit('service_failed', service_name)
                         return False
 
@@ -1124,6 +1181,16 @@ class ServiceOrchestrator:
                 callback(*args)
             except Exception as e:
                 logger.error(f"Callback error for {event}: {e}")
+
+    def register_config_recovery(self, callback: Callable[[], bool]):
+        """Register a callback for interactive hardware config recovery.
+
+        Called when meshtasticd fails to start due to wrong/missing hardware
+        config.  The callback should present a UI for the user to select the
+        correct config, apply it, and return True if a new config was
+        activated (so startup can be retried).
+        """
+        self._config_recovery_cb = callback
 
     # ─────────────────────────────────────────────────────────────
     # Installation

@@ -353,6 +353,54 @@ def launch_gateway_bridge(src_dir):
         print(f"{Colors.RED}Error starting bridge: {e}{Colors.NC}")
 
 
+def _make_config_recovery_callback():
+    """Create a callback for interactive hardware config recovery on startup.
+
+    Returns a callable that shows a whiptail menu listing available hardware
+    configs from /etc/meshtasticd/available.d/, lets the user pick one,
+    activates it (replacing any old configs in config.d/), and returns True
+    so the orchestrator retries meshtasticd startup.
+    """
+    def _recover() -> bool:
+        try:
+            from launcher_tui.backend import DialogBackend
+            from launcher_tui.handlers.meshtasticd_config import (
+                activate_hardware_config,
+            )
+        except ImportError:
+            return False
+
+        available_dir = Path('/etc/meshtasticd/available.d')
+        if not available_dir.exists():
+            return False
+
+        available = sorted(available_dir.glob('*.yaml'))
+        if not available:
+            return False
+
+        dialog = DialogBackend()
+        choices = [(cfg.name, cfg.stem) for cfg in available]
+        choices.append(("skip", "Skip — do not change config"))
+
+        choice = dialog.menu(
+            "Hardware Config Recovery",
+            "meshtasticd failed to start — wrong hardware config?\n\n"
+            "Select the correct radio hardware template:",
+            choices,
+        )
+
+        if not choice or choice == "skip":
+            return False
+
+        try:
+            activate_hardware_config(choice, available_dir)
+            return True
+        except Exception:
+            return False
+
+    return _recover
+
+
 def start_noc_services():
     """Start NOC managed services (meshtasticd, rnsd) if in local mode."""
     if not _HAS_ORCHESTRATOR:
@@ -376,6 +424,11 @@ def start_noc_services():
     print(f"{Colors.CYAN}Starting NOC services...{Colors.NC}")
 
     orch = ServiceOrchestrator()
+
+    # Register interactive config recovery so the user gets a hardware
+    # selection dialog if meshtasticd crashes due to wrong config.
+    orch.register_config_recovery(_make_config_recovery_callback())
+
     statuses = orch.get_all_status()
 
     for name, status in statuses.items():
