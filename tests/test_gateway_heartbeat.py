@@ -1,0 +1,358 @@
+"""
+Tests for GatewayHeartbeat cross-gateway failover via MQTT.
+
+Covers:
+- Heartbeat configuration and initialization
+- Gateway ID auto-generation
+- State management (active, standby, promoting, demoting)
+- Peer tracking (heartbeat received, missed, recovery)
+- Promotion logic (secondary promotes when primary goes down)
+- Demotion logic (secondary demotes when primary recovers)
+- Status report generation
+- Event history tracking
+- LWT handling
+"""
+
+import json
+import time
+from datetime import datetime
+from unittest.mock import MagicMock, patch, PropertyMock
+
+import pytest
+
+from gateway.gateway_heartbeat import (
+    GatewayHeartbeat,
+    HeartbeatConfig,
+    GatewayRole,
+    GatewayState,
+    PeerInfo,
+    HeartbeatEvent,
+)
+
+
+@pytest.fixture
+def primary_config():
+    """Config for a primary gateway."""
+    return HeartbeatConfig(
+        enabled=True,
+        mqtt_broker="localhost",
+        mqtt_port=1883,
+        heartbeat_interval=1.0,
+        missed_heartbeats_threshold=3,
+        gateway_id="gw-primary",
+        role="primary",
+    )
+
+
+@pytest.fixture
+def secondary_config():
+    """Config for a secondary gateway."""
+    return HeartbeatConfig(
+        enabled=True,
+        mqtt_broker="localhost",
+        mqtt_port=1883,
+        heartbeat_interval=1.0,
+        missed_heartbeats_threshold=3,
+        gateway_id="gw-secondary",
+        role="secondary",
+    )
+
+
+class TestHeartbeatInit:
+    """Tests for GatewayHeartbeat initialization."""
+
+    def test_primary_starts_active(self, primary_config):
+        """Primary gateway should start in ACTIVE state."""
+        hb = GatewayHeartbeat(config=primary_config)
+        assert hb.state == GatewayState.ACTIVE
+        assert hb.role == GatewayRole.PRIMARY
+        assert hb.is_active is True
+
+    def test_secondary_starts_standby(self, secondary_config):
+        """Secondary gateway should start in STANDBY state."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        assert hb.state == GatewayState.STANDBY
+        assert hb.role == GatewayRole.SECONDARY
+        assert hb.is_active is False
+
+    def test_disabled_starts_disabled(self):
+        """Disabled config should result in DISABLED state."""
+        config = HeartbeatConfig(enabled=False)
+        hb = GatewayHeartbeat(config=config)
+        assert hb.state == GatewayState.DISABLED
+
+    @patch('gateway.gateway_heartbeat.platform')
+    def test_auto_generates_gateway_id(self, mock_platform):
+        """Should auto-generate gateway ID from hostname when not set."""
+        mock_platform.node.return_value = "rpi4-mesh.local"
+        config = HeartbeatConfig(enabled=True, gateway_id="")
+        hb = GatewayHeartbeat(config=config)
+        assert hb.gateway_id == "gw-rpi4-mesh"
+
+
+class TestPeerTracking:
+    """Tests for tracking peer heartbeats."""
+
+    def test_handles_peer_heartbeat(self, secondary_config):
+        """Should track peer info from heartbeat message."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        payload = json.dumps({
+            'id': 'gw-primary',
+            'role': 'primary',
+            'state': 'active',
+            'uptime': 3600,
+            'health_score': 85,
+            'timestamp': time.time(),
+        }).encode()
+
+        hb._handle_peer_heartbeat('gw-primary', payload)
+
+        assert 'gw-primary' in hb._peers
+        peer = hb._peers['gw-primary']
+        assert peer.role == 'primary'
+        assert peer.alive is True
+        assert peer.health_score == 85
+        assert peer.missed_count == 0
+
+    def test_ignores_invalid_payload(self, secondary_config):
+        """Should handle invalid JSON gracefully."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._handle_peer_heartbeat('gw-bad', b'not-json')
+        assert 'gw-bad' not in hb._peers
+
+    def test_updates_existing_peer(self, secondary_config):
+        """Should update existing peer info on subsequent heartbeats."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        payload1 = json.dumps({'role': 'primary', 'state': 'active',
+                               'health_score': 80}).encode()
+        hb._handle_peer_heartbeat('gw-primary', payload1)
+
+        payload2 = json.dumps({'role': 'primary', 'state': 'active',
+                               'health_score': 95}).encode()
+        hb._handle_peer_heartbeat('gw-primary', payload2)
+
+        assert hb._peers['gw-primary'].health_score == 95
+
+
+class TestPromotion:
+    """Tests for secondary promoting to active."""
+
+    def test_secondary_promotes_on_primary_down(self, secondary_config):
+        """Secondary should promote when primary goes down."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        assert hb.state == GatewayState.STANDBY
+
+        # Register primary as a known peer
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time(),
+        )
+
+        # Primary goes down
+        hb._peers['gw-primary'].alive = False
+        hb._handle_peer_down('gw-primary')
+
+        assert hb.state == GatewayState.ACTIVE
+        assert hb.is_active is True
+
+    def test_primary_does_not_promote(self, primary_config):
+        """Primary should not change state when secondary goes down."""
+        hb = GatewayHeartbeat(config=primary_config)
+        assert hb.state == GatewayState.ACTIVE
+
+        hb._peers['gw-secondary'] = PeerInfo(
+            gateway_id='gw-secondary',
+            role='secondary',
+            alive=False,
+        )
+        hb._handle_peer_down('gw-secondary')
+
+        # Primary stays active (it already is)
+        assert hb.state == GatewayState.ACTIVE
+
+    def test_promotion_records_event(self, secondary_config):
+        """Promotion should be recorded in event history."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary', role='primary', alive=False,
+        )
+
+        hb._handle_peer_down('gw-primary')
+
+        assert len(hb._events) >= 1
+        # Find the promoted event
+        promoted = [e for e in hb._events if e.event_type == 'promoted']
+        assert len(promoted) == 1
+
+
+class TestDemotion:
+    """Tests for secondary demoting back to standby."""
+
+    def test_secondary_demotes_on_primary_recovery(self, secondary_config):
+        """Promoted secondary should demote when primary recovers."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        # Simulate promotion
+        hb._state = GatewayState.ACTIVE
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary', role='primary', alive=False,
+        )
+
+        # Primary recovers (heartbeat arrives)
+        payload = json.dumps({
+            'role': 'primary', 'state': 'active', 'health_score': 90
+        }).encode()
+        hb._handle_peer_heartbeat('gw-primary', payload)
+
+        assert hb.state == GatewayState.STANDBY
+        assert hb.is_active is False
+
+    def test_demotion_records_event(self, secondary_config):
+        """Demotion should be recorded in event history."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._state = GatewayState.ACTIVE
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary', role='primary', alive=False,
+        )
+
+        payload = json.dumps({'role': 'primary', 'state': 'active'}).encode()
+        hb._handle_peer_heartbeat('gw-primary', payload)
+
+        demoted = [e for e in hb._events if e.event_type == 'demoted']
+        assert len(demoted) == 1
+
+
+class TestPeerChecker:
+    """Tests for missed heartbeat detection."""
+
+    def test_detects_missed_heartbeats(self, secondary_config):
+        """Should detect when peer has missed too many heartbeats."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        # Peer with old heartbeat
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time() - 100,  # 100s ago
+        )
+
+        hb._check_peers()
+
+        peer = hb._peers['gw-primary']
+        assert peer.alive is False
+
+    def test_does_not_flag_recent_heartbeat(self, secondary_config):
+        """Should not flag peer with recent heartbeat."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time(),  # Just now
+        )
+
+        hb._check_peers()
+
+        assert hb._peers['gw-primary'].alive is True
+
+
+class TestLWTHandling:
+    """Tests for MQTT Last Will and Testament handling."""
+
+    def test_lwt_offline_marks_peer_down(self, secondary_config):
+        """Receiving LWT offline should mark peer as down."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary', role='primary', alive=True,
+        )
+
+        hb._handle_peer_status('gw-primary', b'offline')
+
+        assert hb._peers['gw-primary'].alive is False
+
+
+class TestStatusReport:
+    """Tests for get_status() output."""
+
+    def test_status_includes_all_sections(self, primary_config):
+        """Status should include all expected sections."""
+        hb = GatewayHeartbeat(config=primary_config)
+        status = hb.get_status()
+
+        assert 'enabled' in status
+        assert 'gateway_id' in status
+        assert 'role' in status
+        assert 'state' in status
+        assert 'mqtt_connected' in status
+        assert 'peers' in status
+        assert 'events' in status
+
+    def test_status_shows_peer_info(self, secondary_config):
+        """Status should include peer information."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            state='active',
+            alive=True,
+            health_score=90,
+            uptime=3600,
+            last_heartbeat=time.time(),
+        )
+
+        status = hb.get_status()
+        assert 'gw-primary' in status['peers']
+        assert status['peers']['gw-primary']['alive'] is True
+        assert status['peers']['gw-primary']['health_score'] == 90
+
+
+class TestMQTTMessageHandling:
+    """Tests for MQTT message routing."""
+
+    def test_ignores_own_messages(self, primary_config):
+        """Should ignore heartbeats from self."""
+        hb = GatewayHeartbeat(config=primary_config)
+
+        msg = MagicMock()
+        msg.topic = f"meshforge/gateway/{primary_config.gateway_id}/heartbeat"
+        msg.payload = json.dumps({'role': 'primary'}).encode()
+
+        hb._on_mqtt_message(None, None, msg)
+
+        # Should not track self as peer
+        assert primary_config.gateway_id not in hb._peers
+
+    def test_routes_heartbeat_messages(self, secondary_config):
+        """Should route heartbeat messages to _handle_peer_heartbeat."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        msg = MagicMock()
+        msg.topic = "meshforge/gateway/gw-primary/heartbeat"
+        msg.payload = json.dumps({
+            'role': 'primary', 'state': 'active', 'health_score': 85,
+        }).encode()
+
+        hb._on_mqtt_message(None, None, msg)
+
+        assert 'gw-primary' in hb._peers
+
+    def test_routes_status_messages(self, secondary_config):
+        """Should route status (LWT) messages to _handle_peer_status."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary', role='primary', alive=True,
+        )
+
+        msg = MagicMock()
+        msg.topic = "meshforge/gateway/gw-primary/status"
+        msg.payload = b"offline"
+
+        hb._on_mqtt_message(None, None, msg)
+
+        assert hb._peers['gw-primary'].alive is False

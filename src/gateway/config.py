@@ -487,6 +487,23 @@ class GatewayConfig:
     failover_recovery_duration: int = 60            # Seconds stable below threshold
     failover_health_poll_interval: float = 5.0     # Seconds between health checks
 
+    # Service watchdog — auto-restart crashed meshtasticd (requires failover_enabled)
+    failover_watchdog_enabled: bool = True          # Enable service watchdog
+    failover_restart_after_failures: int = 5        # Poll failures before restart attempt
+    failover_max_restarts_per_hour: int = 3         # Prevent restart loops
+    failover_restart_cooldown: int = 60             # Seconds between restart attempts
+    failover_primary_service: str = "meshtasticd"   # systemd service name (primary)
+    failover_secondary_service: str = "meshtasticd-alt"  # systemd service name (secondary)
+
+    # Cross-gateway failover (requires MQTT broker)
+    gateway_heartbeat_enabled: bool = False
+    gateway_heartbeat_broker: str = "localhost"
+    gateway_heartbeat_port: int = 1883
+    gateway_heartbeat_interval: float = 15.0        # Seconds between heartbeats
+    gateway_heartbeat_missed_threshold: int = 4     # Misses before declaring peer dead
+    gateway_role: str = "primary"                   # "primary" or "secondary"
+    gateway_id: str = ""                            # Auto-generated from hostname if empty
+
     # TX load balancing (requires two meshtasticd instances)
     # Uses tx_utilization (our TX contribution) instead of channel_utilization
     # (identical on same-channel radios). Splits outbound traffic across two
