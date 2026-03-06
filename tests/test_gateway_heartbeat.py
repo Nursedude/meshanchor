@@ -356,3 +356,103 @@ class TestMQTTMessageHandling:
         hb._on_mqtt_message(None, None, msg)
 
         assert hb._peers['gw-primary'].alive is False
+
+
+class TestReconnectGracePeriod:
+    """Tests for grace period after MQTT reconnect."""
+
+    def test_grace_period_after_reconnect(self, secondary_config):
+        """Peers should not be marked down during grace window after reconnect."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        # Simulate MQTT reconnect just happened
+        hb._last_mqtt_connect = time.time()
+
+        # Peer with old heartbeat (would normally be declared down)
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time() - 100,
+        )
+
+        hb._check_peers()
+
+        # Should still be alive — grace period active
+        assert hb._peers['gw-primary'].alive is True
+
+    def test_no_grace_period_when_connected_long_ago(self, secondary_config):
+        """After grace period expires, normal peer checking resumes."""
+        hb = GatewayHeartbeat(config=secondary_config)
+
+        # MQTT connected long ago
+        hb._last_mqtt_connect = time.time() - 100
+
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time() - 100,
+        )
+
+        hb._check_peers()
+
+        # Should be declared down — grace period expired
+        assert hb._peers['gw-primary'].alive is False
+
+
+class TestDuplicatePeerDownGuard:
+    """Tests for preventing duplicate peer-down thread spawns."""
+
+    def test_no_duplicate_peer_down_threads(self, secondary_config):
+        """Should not spawn another thread if peer-down already pending."""
+        hb = GatewayHeartbeat(config=secondary_config)
+        hb._last_mqtt_connect = 0  # No grace period
+
+        hb._peers['gw-primary'] = PeerInfo(
+            gateway_id='gw-primary',
+            role='primary',
+            alive=True,
+            last_heartbeat=time.time() - 100,
+        )
+
+        # Simulate a peer-down already pending
+        hb._pending_peer_down.add('gw-primary')
+
+        hb._check_peers()
+
+        # Peer marked dead but no new thread spawned (stays in pending set)
+        assert hb._peers['gw-primary'].alive is False
+        assert 'gw-primary' in hb._pending_peer_down
+
+
+class TestFailoverStateInPayload:
+    """Tests for including failover_state in heartbeat payload."""
+
+    def test_heartbeat_includes_failover_state(self, primary_config):
+        """Heartbeat payload should include failover_state when manager available."""
+        mock_fm = MagicMock()
+        mock_fm.state.value = "secondary_active"
+
+        hb = GatewayHeartbeat(config=primary_config, failover_manager=mock_fm)
+        hb._mqtt_client = MagicMock()
+        hb._mqtt_connected = True
+
+        hb._publish_heartbeat()
+
+        # Check the published payload
+        call_args = hb._mqtt_client.publish.call_args
+        payload = json.loads(call_args[0][1])
+        assert payload['failover_state'] == 'secondary_active'
+
+    def test_heartbeat_without_failover_manager(self, primary_config):
+        """Heartbeat should work fine without failover_manager."""
+        hb = GatewayHeartbeat(config=primary_config)
+        hb._mqtt_client = MagicMock()
+        hb._mqtt_connected = True
+
+        hb._publish_heartbeat()
+
+        call_args = hb._mqtt_client.publish.call_args
+        payload = json.loads(call_args[0][1])
+        assert 'failover_state' not in payload

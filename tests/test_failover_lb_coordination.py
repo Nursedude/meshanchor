@@ -250,3 +250,93 @@ class TestLBFailoverIntegration:
 
         assert lb.state == LoadBalancerState.IDLE
         assert lb.primary_weight == 100.0
+
+
+class TestLBSlowStartAfterRecovery:
+    """Tests for slow-start weight ramp after failover recovery."""
+
+    def test_lb_slow_start_after_recovery(self, lb_config):
+        """LB should ramp primary weight gradually after failover recovery."""
+        fm = MagicMock(spec=FailoverManager)
+        lb = RadioLoadBalancer(config=lb_config, failover_manager=fm)
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+        lb._primary.tx_utilization = 5.0
+        lb._secondary.tx_utilization = 5.0
+
+        # Simulate: was SECONDARY_ACTIVE, now PRIMARY_ACTIVE (recovery complete)
+        lb._prev_failover_state = FailoverState.RECOVERY_PENDING
+        fm.state = FailoverState.PRIMARY_ACTIVE
+
+        lb._recalculate_weights()
+
+        # Should be in slow start — not yet at 100%
+        assert lb._failover_recovery_at is not None
+        assert lb.state == LoadBalancerState.BALANCING
+        assert lb.primary_weight < 100.0
+
+    def test_lb_slow_start_completes(self, lb_config):
+        """After slow_start_duration, LB should return to normal operation."""
+        fm = MagicMock(spec=FailoverManager)
+        lb = RadioLoadBalancer(config=lb_config, failover_manager=fm)
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+        lb._primary.tx_utilization = 5.0
+        lb._secondary.tx_utilization = 5.0
+
+        # Simulate slow start that started 60s ago (longer than default 30s)
+        fm.state = FailoverState.PRIMARY_ACTIVE
+        lb._prev_failover_state = FailoverState.PRIMARY_ACTIVE  # Already tracked
+        lb._failover_recovery_at = time.time() - 60.0
+
+        lb._recalculate_weights()
+
+        # Slow start should be complete
+        assert lb._failover_recovery_at is None
+        # Normal operation — low TX should result in IDLE with 100% primary
+        assert lb.primary_weight == 100.0
+        assert lb.state == LoadBalancerState.IDLE
+
+    def test_lb_slow_start_aborted_on_new_failover(self, lb_config):
+        """If failover triggers again during slow start, abort slow start."""
+        fm = MagicMock(spec=FailoverManager)
+        lb = RadioLoadBalancer(config=lb_config, failover_manager=fm)
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+
+        # In slow start
+        lb._failover_recovery_at = time.time() - 5.0
+        lb._prev_failover_state = FailoverState.PRIMARY_ACTIVE
+
+        # New failover to secondary
+        fm.state = FailoverState.SECONDARY_ACTIVE
+
+        lb._recalculate_weights()
+
+        # Slow start should be cancelled
+        assert lb._failover_recovery_at is None
+        assert lb.primary_weight == 0.0
+
+    def test_lb_slow_start_ramp_increases(self, lb_config):
+        """Weight should increase as slow start progresses."""
+        fm = MagicMock(spec=FailoverManager)
+        lb = RadioLoadBalancer(config=lb_config, failover_manager=fm)
+        lb._primary.reachable = True
+        lb._secondary.reachable = True
+        lb._primary.tx_utilization = 5.0
+        lb._secondary.tx_utilization = 5.0
+
+        fm.state = FailoverState.PRIMARY_ACTIVE
+        lb._prev_failover_state = FailoverState.PRIMARY_ACTIVE
+
+        # Early in slow start (5s of 30s)
+        lb._failover_recovery_at = time.time() - 5.0
+        lb._recalculate_weights()
+        early_weight = lb.primary_weight
+
+        # Later in slow start (25s of 30s)
+        lb._failover_recovery_at = time.time() - 25.0
+        lb._recalculate_weights()
+        late_weight = lb.primary_weight
+
+        assert late_weight > early_weight

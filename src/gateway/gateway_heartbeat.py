@@ -167,10 +167,12 @@ class GatewayHeartbeat:
         config: Optional[HeartbeatConfig] = None,
         on_peer_down: Optional[Callable[[], None]] = None,
         on_peer_recovered: Optional[Callable[[], None]] = None,
+        failover_manager: Optional[Any] = None,
     ):
         self._config = config or HeartbeatConfig()
         self._on_peer_down = on_peer_down
         self._on_peer_recovered = on_peer_recovered
+        self._failover_manager = failover_manager
 
         # Auto-generate gateway ID from hostname if not set
         if not self._config.gateway_id:
@@ -198,6 +200,15 @@ class GatewayHeartbeat:
         self._mqtt_client = None
         self._mqtt_connected = False
         self._start_time = time.time()
+        self._last_mqtt_connect: float = 0.0
+
+        # Guard against duplicate peer-down thread spawns
+        self._pending_peer_down: set = set()
+        self._pending_peer_down_lock = threading.Lock()
+
+        # MQTT alert deduplication — suppress same (service:event) within 60s
+        self._alert_dedup: Dict[str, float] = {}
+        self._alert_dedup_window: float = 60.0
 
         # Threads
         self._stop_event = threading.Event()
@@ -314,6 +325,64 @@ class GatewayHeartbeat:
             ],
         }
 
+    # ── MQTT alerting ─────────────────────────────────────────────────
+
+    def publish_alert(
+        self,
+        severity: str,
+        service: str,
+        event: str,
+        reason: str,
+    ) -> None:
+        """Publish an alert to MQTT for remote NOC visibility.
+
+        Alerts are deduplicated: the same (service, event) pair is suppressed
+        for ``_alert_dedup_window`` seconds (default 60s).
+
+        Args:
+            severity: "critical", "warning", or "info"
+            service: Service name (e.g., "radio_failover")
+            event: Event type (e.g., "secondary_active", "down", "up")
+            reason: Human-readable explanation
+        """
+        if not self._mqtt_connected or not self._mqtt_client:
+            return
+
+        # Dedup — suppress same (service, event) within window
+        key = f"{service}:{event}"
+        now = time.time()
+        if key in self._alert_dedup and now - self._alert_dedup[key] < self._alert_dedup_window:
+            return
+        self._alert_dedup[key] = now
+
+        topic = (f"{self._config.mqtt_topic_prefix}/"
+                f"{self._config.gateway_id}/alerts")
+        payload = json.dumps({
+            'severity': severity,
+            'service': service,
+            'event': event,
+            'reason': reason,
+            'gateway_id': self._config.gateway_id,
+            'timestamp': now,
+        })
+        try:
+            self._mqtt_client.publish(topic, payload, qos=1)
+        except Exception as e:
+            logger.debug("Alert publish error: %s", e)
+
+    def _classify_alert_severity(self, available: bool, message: str) -> str:
+        """Classify alert severity from service event context.
+
+        Returns:
+            "critical", "warning", or "info"
+        """
+        if not available:
+            return "critical"
+        msg_lower = message.lower()
+        if any(k in msg_lower for k in ("recovery", "pending", "rate limit", "saturated")):
+            return "warning"
+        return "info"
+
     # ── MQTT connection ────────────────────────────────────────────────
 
     def _connect_mqtt(self) -> None:
@@ -355,6 +424,7 @@ class GatewayHeartbeat:
         """Handle MQTT connection established."""
         if rc == 0:
             self._mqtt_connected = True
+            self._last_mqtt_connect = time.time()
             logger.info("Gateway heartbeat MQTT connected to %s:%d",
                        self._config.mqtt_broker, self._config.mqtt_port)
 
@@ -618,6 +688,13 @@ class GatewayHeartbeat:
             'timestamp': time.time(),
         }
 
+        # Include failover state if FailoverManager available
+        if self._failover_manager is not None:
+            try:
+                payload['failover_state'] = self._failover_manager.state.value
+            except Exception:
+                pass
+
         # Include health score if available
         if _HAS_HEALTH_SCORER:
             try:
@@ -644,6 +721,11 @@ class GatewayHeartbeat:
     def _check_peers(self) -> None:
         """Check all tracked peers for missed heartbeats."""
         now = time.time()
+
+        # Grace period after MQTT reconnect — skip checks while catching up
+        if now - self._last_mqtt_connect < self._config.heartbeat_interval * 2:
+            return
+
         timeout = self._config.heartbeat_interval * self._config.missed_heartbeats_threshold
 
         with self._peers_lock:
@@ -661,9 +743,21 @@ class GatewayHeartbeat:
                         "Peer %s missed %d heartbeats (%.0fs) — declaring down",
                         peer_id, peer.missed_count, elapsed,
                     )
-                    # Must release lock before calling _handle_peer_down
+                    # Guard against duplicate peer-down threads
+                    with self._pending_peer_down_lock:
+                        if peer_id in self._pending_peer_down:
+                            continue
+                        self._pending_peer_down.add(peer_id)
                     threading.Thread(
-                        target=self._handle_peer_down,
+                        target=self._handle_peer_down_safe,
                         args=(peer_id,),
                         daemon=True,
                     ).start()
+
+    def _handle_peer_down_safe(self, peer_id: str) -> None:
+        """Wrapper for _handle_peer_down that cleans up pending tracking."""
+        try:
+            self._handle_peer_down(peer_id)
+        finally:
+            with self._pending_peer_down_lock:
+                self._pending_peer_down.discard(peer_id)

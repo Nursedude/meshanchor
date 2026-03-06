@@ -170,6 +170,83 @@ class TestServiceWatchdog:
         assert len(fm._restart_timestamps['primary']) == 1
 
 
+class TestWatchdogFailoverPromotion:
+    """Tests for watchdog promoting surviving radio before restart."""
+
+    @patch('gateway.radio_failover._HAS_SERVICE_CHECK', True)
+    @patch('gateway.radio_failover.restart_service')
+    def test_watchdog_failover_before_restart(self, mock_restart, watchdog_config):
+        """Watchdog should transition to SECONDARY_ACTIVE before attempting restart."""
+        mock_restart.return_value = (True, "Service started")
+        fm = FailoverManager(config=watchdog_config)
+        assert fm.state == FailoverState.PRIMARY_ACTIVE
+
+        # Primary crashed, secondary healthy
+        fm._primary.consecutive_failures = 5
+        fm._primary.reachable = False
+        fm._secondary.reachable = True
+
+        fm._run_watchdog()
+
+        # Should have promoted secondary BEFORE restart
+        assert fm.state == FailoverState.SECONDARY_ACTIVE
+        mock_restart.assert_called_once_with("meshtasticd", timeout=30)
+
+    @patch('gateway.radio_failover._HAS_SERVICE_CHECK', True)
+    @patch('gateway.radio_failover.restart_service')
+    def test_watchdog_no_failover_when_secondary_also_down(self, mock_restart, watchdog_config):
+        """Watchdog should not promote if secondary is also down."""
+        mock_restart.return_value = (True, "Service started")
+        fm = FailoverManager(config=watchdog_config)
+
+        fm._primary.consecutive_failures = 5
+        fm._primary.reachable = False
+        fm._secondary.reachable = False
+
+        fm._run_watchdog()
+
+        # Should stay PRIMARY_ACTIVE — no viable failover target
+        assert fm.state == FailoverState.PRIMARY_ACTIVE
+        # Should still attempt restart
+        mock_restart.assert_called()
+
+    @patch('gateway.radio_failover._HAS_SERVICE_CHECK', True)
+    @patch('gateway.radio_failover.restart_service')
+    def test_watchdog_secondary_crash_promotes_primary(self, mock_restart, watchdog_config):
+        """When secondary crashes during SECONDARY_ACTIVE, should recover to primary."""
+        mock_restart.return_value = (True, "Service started")
+        fm = FailoverManager(config=watchdog_config)
+
+        # Already on secondary
+        fm._state = FailoverState.SECONDARY_ACTIVE
+        fm._secondary.consecutive_failures = 5
+        fm._secondary.reachable = False
+        fm._primary.reachable = True
+
+        fm._run_watchdog()
+
+        assert fm.state == FailoverState.RECOVERY_PENDING
+        mock_restart.assert_called_once_with("meshtasticd-alt", timeout=30)
+
+    @patch('gateway.radio_failover._HAS_SERVICE_CHECK', True)
+    @patch('gateway.radio_failover.restart_service')
+    def test_watchdog_no_double_failover(self, mock_restart, watchdog_config):
+        """Watchdog should not re-transition if already on secondary."""
+        mock_restart.return_value = (True, "Service started")
+        fm = FailoverManager(config=watchdog_config)
+
+        # Already failed over
+        fm._state = FailoverState.SECONDARY_ACTIVE
+        fm._primary.consecutive_failures = 10
+        fm._primary.reachable = False
+        fm._secondary.reachable = True
+
+        fm._run_watchdog()
+
+        # Should stay SECONDARY_ACTIVE (not transition again)
+        assert fm.state == FailoverState.SECONDARY_ACTIVE
+
+
 class TestCrashBasedFailover:
     """Tests for crash-based failover and recovery."""
 
