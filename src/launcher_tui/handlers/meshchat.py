@@ -23,6 +23,7 @@ LXMF exclusivity:
 Converted from meshchat_client_mixin.py as part of the mixin-to-registry migration (Batch 8).
 """
 
+import importlib
 import logging
 import os
 import shutil
@@ -192,7 +193,7 @@ class MeshChatHandler(BaseHandler):
             "The LXMF Python module is not installed.\n\n"
             "LXMF is required for MeshChat messaging.\n\n"
             "Install it now?\n"
-            "  (runs: pip install lxmf)",
+            "  (runs: pip install -r requirements/rns.txt)",
         )
         if not choice:
             return False
@@ -200,9 +201,11 @@ class MeshChatHandler(BaseHandler):
         clear_screen()
         print("=== Installing LXMF Module ===\n")
 
-        success = self._install_lxmf_package()
+        success, error_detail = self._install_lxmf_package()
 
         if success:
+            # Invalidate import caches so Python finds newly-installed packages
+            importlib.invalidate_caches()
             # Re-check import after install
             _, _HAS_LXMF = safe_import('LXMF')
             if _HAS_LXMF:
@@ -213,29 +216,45 @@ class MeshChatHandler(BaseHandler):
                 )
                 return True
 
-        self.ctx.dialog.msgbox(
-            "Installation Failed",
+        error_msg = (
             "Failed to install the LXMF module.\n\n"
             "Try installing manually:\n"
-            "  pip install lxmf\n\n"
-            "Or install all RNS dependencies:\n"
-            "  pip install -r requirements/rns.txt",
+            "  pip install -r requirements/rns.txt\n\n"
+            "Or:\n"
+            "  pip install lxmf"
         )
+        if error_detail:
+            error_msg += f"\n\nError details:\n{error_detail[:300]}"
+
+        self.ctx.dialog.msgbox("Installation Failed", error_msg)
         return False
 
-    def _install_lxmf_package(self) -> bool:
+    def _install_lxmf_package(self) -> tuple:
         """Install the LXMF Python package via pip.
 
-        Returns True on success, False on failure.
+        Returns (success: bool, error_detail: str).
         """
         pip_cmd = self._get_pip_command()
 
-        # Build the install command
+        # Build the base install command
         if 'install' in pip_cmd:
-            # _get_pip_command already includes 'install' for PEP 668
-            cmd = pip_cmd + ['lxmf']
+            base_cmd = pip_cmd
         else:
-            cmd = pip_cmd + ['install', 'lxmf']
+            base_cmd = pip_cmd + ['install']
+
+        # Prefer requirements/rns.txt for correct dependency pins
+        project_root = Path(__file__).resolve().parents[3]
+        rns_req = project_root / 'requirements' / 'rns.txt'
+
+        if rns_req.exists():
+            cmd = base_cmd + ['-r', str(rns_req)]
+        else:
+            # Inline critical pins when requirements file unavailable
+            cmd = base_cmd + [
+                'lxmf',
+                'cryptography>=45.0.7,<47',
+                'pyopenssl>=25.3.0',
+            ]
 
         print(f"  Running: {' '.join(cmd)}\n")
 
@@ -250,21 +269,26 @@ class MeshChatHandler(BaseHandler):
                 for line in result.stdout.strip().split('\n')[-5:]:
                     print(f"  {line}")
             if result.returncode != 0:
+                error_lines = ''
                 print(f"\n  pip error (exit {result.returncode}):")
                 if result.stderr:
-                    for line in result.stderr.strip().split('\n')[-5:]:
+                    tail = result.stderr.strip().split('\n')[-5:]
+                    for line in tail:
                         print(f"  {line}")
-                return False
+                    error_lines = '\n'.join(tail)
+                return False, error_lines
 
             print("\n  LXMF installed successfully.")
-            return True
+            return True, ''
 
         except subprocess.TimeoutExpired:
-            print("\n  Installation timed out after 120 seconds.")
-            return False
+            msg = 'Installation timed out after 120 seconds.'
+            print(f"\n  {msg}")
+            return False, msg
         except (subprocess.SubprocessError, OSError) as e:
-            print(f"\n  Installation error: {e}")
-            return False
+            msg = str(e)
+            print(f"\n  Installation error: {msg}")
+            return False, msg
 
     # ------------------------------------------------------------------
     # Top-level submenu
@@ -363,7 +387,7 @@ class MeshChatHandler(BaseHandler):
             except Exception:
                 print("  LXMF:       Installed")
         else:
-            print("  LXMF:       NOT INSTALLED (pip install lxmf)")
+            print("  LXMF:       NOT INSTALLED (pip install -r requirements/rns.txt)")
 
         # Service details via plugin
         if _HAS_MESHCHAT_SERVICE:
