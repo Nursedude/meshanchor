@@ -173,6 +173,27 @@ class DialogBackend:
         w = width if width is not None else self.width
         lh = list_height if list_height is not None else self.list_height
 
+        # Auto-fit: shrink list_height/height to fit within terminal.
+        # Without this, menus with multi-line text overflow height=22
+        # on 24-row terminals when backtitle is active (2 lines overhead).
+        try:
+            term_rows = os.get_terminal_size().lines
+        except (ValueError, OSError):
+            term_rows = 24
+        backtitle_overhead = 2 if self._status_bar else 0
+        max_h = term_rows - backtitle_overhead
+        # Estimate text lines (account for \n and line wrapping)
+        inner_w = max(w - 4, 20)
+        text_lines = sum(
+            max(1, (len(line) + inner_w - 1) // inner_w)
+            for line in text.split('\n')
+        )
+        # Chrome: border(2) + title(1) + padding(2) + button(1) = 6
+        chrome = 6
+        if chrome + text_lines + lh > max_h or h > max_h:
+            lh = max(4, max_h - chrome - text_lines)
+            h = min(h, max_h)
+
         args = [
             '--title', title,
             '--menu', text,

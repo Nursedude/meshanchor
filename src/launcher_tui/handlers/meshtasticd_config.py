@@ -259,8 +259,7 @@ class MeshtasticdConfigHandler(BaseHandler):
 
             choice = self.ctx.dialog.menu(
                 "meshtasticd",
-                "Configure meshtasticd daemon:\n"
-                "(Quick access: Mesh Networks > Meshtastic)",
+                "Configure meshtasticd daemon:",
                 result
             )
 
