@@ -4,8 +4,8 @@ Meshtasticd MQTT Device Handler — Configure radio MQTT uplink/downlink.
 Converted from meshtasticd_config_mixin.py (lines 1681-2016) as part of
 the mixin-to-registry migration (Batch 9).
 
-Sub-handler registered in section "meshtasticd_radio", dispatched from
-MeshtasticdRadioHandler's radio config menu.
+Sub-handler registered in section "meshtasticd", dispatched from
+MeshtasticdConfigHandler's unified meshtasticd menu.
 """
 
 import logging
@@ -22,7 +22,7 @@ class MeshtasticdDeviceMQTTHandler(BaseHandler):
     """TUI handler for Meshtastic radio MQTT uplink/downlink configuration."""
 
     handler_id = "meshtasticd_device_mqtt"
-    menu_section = "meshtasticd_radio"
+    menu_section = "meshtasticd"
 
     def menu_items(self):
         return [
