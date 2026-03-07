@@ -4,8 +4,8 @@ Meshtasticd Node DB Cleanup Handler — Phantom node detection and removal.
 Converted from meshtasticd_config_mixin.py (lines 697-1045) as part of
 the mixin-to-registry migration (Batch 9).
 
-Sub-handler registered in section "meshtasticd_radio", dispatched from
-MeshtasticdRadioHandler's radio config menu.
+Sub-handler registered in section "meshtasticd", dispatched from
+MeshtasticdConfigHandler's unified meshtasticd menu.
 """
 
 import logging
@@ -25,7 +25,7 @@ class MeshtasticdNodeDBHandler(BaseHandler):
     """TUI handler for node database cleanup operations."""
 
     handler_id = "meshtasticd_nodedb"
-    menu_section = "meshtasticd_radio"
+    menu_section = "meshtasticd"
 
     def menu_items(self):
         return [
