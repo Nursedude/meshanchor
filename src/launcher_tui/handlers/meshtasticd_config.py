@@ -204,7 +204,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 ("restart", "Restart Service"),
                 ("logs", "Service Logs"),
                 ("_radio_", "--- Radio ---"),
-                ("_hw_", "--- Hardware ---"),
+                ("_hw_", "--- Radio Hardware ---"),
                 ("_dev_", "--- Device Config ---"),
                 ("_cfg_", "--- Config Files ---"),
                 ("view", "View Active Config"),
@@ -226,21 +226,41 @@ class MeshtasticdConfigHandler(BaseHandler):
             all_map = {**own_map, **reg_map}
 
             # Apply ordering
-            result = []
+            ordered = []
             for tag in _MESHTASTICD_ORDERING:
                 if tag in all_map:
-                    result.append((tag, all_map[tag]))
+                    ordered.append((tag, all_map[tag]))
             # Append any unordered items
             ordered_set = set(_MESHTASTICD_ORDERING)
             for tag, desc in list(own_items) + list(registry_items):
-                if tag not in ordered_set and (tag, desc) not in result:
+                if tag not in ordered_set and (tag, desc) not in ordered:
+                    ordered.append((tag, desc))
+
+            # Filter out section headers with no items after them
+            # (prevents empty groups when sub-handlers fail to register)
+            result = []
+            for i, (tag, desc) in enumerate(ordered):
+                if tag.startswith("_") and tag.endswith("_"):
+                    # Look ahead: is there at least one non-header item
+                    # before the next header or end of list?
+                    has_items = False
+                    for j in range(i + 1, len(ordered)):
+                        next_tag = ordered[j][0]
+                        if next_tag.startswith("_") and next_tag.endswith("_"):
+                            break
+                        has_items = True
+                        break
+                    if has_items:
+                        result.append((tag, desc))
+                else:
                     result.append((tag, desc))
 
             result.append(("back", "Back"))
 
             choice = self.ctx.dialog.menu(
                 "meshtasticd",
-                "Configure meshtasticd daemon:",
+                "Configure meshtasticd daemon:\n"
+                "(Quick access: Mesh Networks > Meshtastic)",
                 result
             )
 

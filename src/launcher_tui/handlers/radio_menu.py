@@ -51,16 +51,31 @@ class RadioMenuHandler(BaseHandler):
             choices = []
             if not cli_works:
                 choices.append(("install-cli", "** Install meshtastic CLI **"))
+
+            # --- Radio Config ---
+            choices.append(("_cfg_", "--- Radio Config ---"))
             choices.extend([
-                ("info", "Radio Info (meshtastic --info)"),
-                ("nodes", "Node List (meshtastic --nodes)"),
-                ("favorites", "Favorites (BaseUI 2.7+)"),
-                ("channels", "Channel Info"),
-                ("send", "Send Message"),
-                ("position", "Position (view/set)"),
+                ("hw-config", "Select Radio Hardware"),
+                ("presets", "Radio Presets (LoRa)"),
                 ("set-region", "Set Region"),
                 ("set-txpower", "Set TX Power"),
                 ("set-name", "Set Node Name"),
+            ])
+
+            # --- Radio Info ---
+            choices.append(("_info_", "--- Radio Info ---"))
+            choices.extend([
+                ("info", "Radio Info"),
+                ("nodes", "Node List"),
+                ("favorites", "Favorites (BaseUI 2.7+)"),
+                ("channels", "Channel Info"),
+            ])
+
+            # --- Radio Control ---
+            choices.append(("_ctrl_", "--- Radio Control ---"))
+            choices.extend([
+                ("send", "Send Message"),
+                ("position", "Position (view/set)"),
                 ("reboot", "Reboot Radio"),
                 ("reinstall-cli", "Reinstall/Update CLI"),
                 ("back", "Back"),
@@ -82,8 +97,17 @@ class RadioMenuHandler(BaseHandler):
             if choice is None or choice == "back":
                 break
 
+            # Section headers — just re-display menu
+            if choice.startswith("_") and choice.endswith("_"):
+                continue
+
             if choice in ("install-cli", "reinstall-cli"):
                 self.ctx.safe_call("Install CLI", self._install_meshtastic_cli)
+                continue
+
+            # Delegate to meshtasticd sub-handlers for hardware/presets
+            if choice in ("hw-config", "presets"):
+                self._delegate_to_meshtasticd(choice)
                 continue
 
             if choice == "favorites":
@@ -123,6 +147,30 @@ class RadioMenuHandler(BaseHandler):
                     f"Check that meshtasticd is running:\n"
                     f"  sudo systemctl status meshtasticd"
                 )
+
+    def _delegate_to_meshtasticd(self, action: str):
+        """Delegate hardware config / presets to meshtasticd sub-handlers."""
+        tag_map = {
+            "hw-config": ("meshtasticd_radio", "hardware"),
+            "presets": ("meshtasticd_radio", "presets"),
+        }
+        handler_id, handler_action = tag_map.get(action, (None, None))
+        if not handler_id:
+            return
+
+        # Look up handler via registry
+        if self.ctx.registry:
+            dispatched = self.ctx.registry.dispatch("meshtasticd", handler_action)
+            if dispatched:
+                return
+
+        # Fallback: handler not registered
+        self.ctx.dialog.msgbox(
+            "Not Available",
+            "This feature requires meshtasticd.\n\n"
+            "Go to: Configuration > meshtasticd\n"
+            "to set up the meshtasticd service first."
+        )
 
     def _favorites_submenu(self):
         """Delegate to FavoritesHandler."""
