@@ -1,17 +1,15 @@
 """
-Meshtasticd Config Handler — Thin dispatcher for meshtasticd configuration.
+Meshtasticd Service Handler — Daemon lifecycle, config files, logs.
 
-Converted from meshtasticd_config_mixin.py and _config_menu in main.py as part
-of the mixin-to-registry migration (Batch 9).
+Split from the former combined "Daemon & radio config" handler. Radio
+configuration (presets, hardware, owner) moved to meshtasticd_radio.py.
 
-Routes to sub-handlers (meshtasticd_lora, meshtasticd_mqtt, meshtasticd_nodedb)
-via the handler registry, and handles its own inline items (view, overlays,
-presets, hardware, status, owner, web client, edit, restart).
+Shared module-level utilities (read_overlay, write_overlay, _glob_yaml, etc.)
+remain here since sub-handlers import them.
 """
 
 import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -28,9 +26,7 @@ from utils.service_check import (
 logger = logging.getLogger(__name__)
 
 # Direct imports for first-party modules (MF006: no safe_import for first-party)
-from core.meshtastic_cli import get_cli as _get_cli
 from utils.meshtastic_http import get_http_client as _get_http_client
-from utils.broker_profiles import get_active_profile as _get_active_profile
 
 # --- Shared overlay utilities (imported by sub-handlers) ---
 
@@ -160,45 +156,99 @@ def ensure_meshtasticd_config():
         logger.debug("meshtasticd config auto-create failed: %s", e)
 
 
-# Desired menu order for the meshtasticd submenu (with section separators).
-_MESHTASTICD_ORDERING = [
+# Desired menu order for the service submenu.
+_SERVICE_ORDERING = [
     "_svc_", "web", "status", "test", "restart", "logs",
-    "_radio_", "owner", "presets", "channels", "lora",
-    "_cfg_", "hardware", "view", "overlays", "edit",
-    "_adv_", "mqtt", "gateway", "failover", "cleanup", "wizard",
+    "_cfg_", "view", "overlays", "edit",
+    "_adv_", "wizard",
 ]
 
 
 class MeshtasticdConfigHandler(BaseHandler):
-    """TUI handler for meshtasticd configuration (thin dispatcher + core)."""
+    """TUI handler for meshtasticd service lifecycle and config files."""
 
     handler_id = "meshtasticd_config"
     menu_section = "configuration"
 
     def menu_items(self):
         return [
-            ("radio", "meshtasticd         Radio & service config", "meshtastic"),
+            ("mtd-service", "meshtasticd Service  Status, logs, config files", "meshtastic"),
         ]
 
     def execute(self, action):
-        if action == "radio":
-            self._config_menu()
+        if action == "mtd-service":
+            self._service_menu()
 
     # ------------------------------------------------------------------
-    # Top-level config menu (moved from main.py)
+    # Service submenu
     # ------------------------------------------------------------------
 
-    def _config_menu(self):
-        """Unified meshtasticd configuration menu.
-
-        Merged from the former two-layer _config_menu + _meshtasticd_menu
-        to reduce navigation depth (was 5 levels to hardware config, now 4).
-        """
+    def _service_menu(self):
+        """meshtasticd service management menu."""
         ensure_meshtasticd_config()
-        self._meshtasticd_menu()
+
+        while True:
+            own_items = [
+                ("_svc_", "--- Service ---"),
+                ("web", "Web Client (Full Config)"),
+                ("status", "Service Status"),
+                ("test", "Connection Test"),
+                ("restart", "Restart Service"),
+                ("logs", "Service Logs"),
+                ("_cfg_", "--- Config Files ---"),
+                ("view", "View Active Config"),
+                ("overlays", "View config.d/ Overlays"),
+                ("edit", "Edit Config Files"),
+                ("_adv_", "--- Advanced ---"),
+                ("wizard", "Run Setup Wizard"),
+            ]
+
+            own_map = {tag: desc for tag, desc in own_items}
+
+            # Apply ordering
+            result = []
+            for tag in _SERVICE_ORDERING:
+                if tag in own_map:
+                    result.append((tag, own_map[tag]))
+
+            result.append(("back", "Back"))
+
+            choice = self.ctx.dialog.menu(
+                "meshtasticd Service",
+                "Service lifecycle and config files:",
+                result
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            # Section headers — just re-display menu
+            if choice.startswith("_") and choice.endswith("_"):
+                continue
+
+            # Own inline dispatch
+            own_dispatch = {
+                "web": ("Web Client", self._show_web_client_info),
+                "status": ("Service Status", self._meshtasticd_status),
+                "test": ("Connection Test", self._connection_test),
+                "restart": ("Restart Service", self._restart_meshtasticd),
+                "logs": ("Service Logs", self._meshtasticd_logs),
+                "view": ("View Active Config", self._view_active_config),
+                "overlays": ("Config Overlays", self._view_config_overlays),
+                "edit": ("Edit Config Files", self._edit_config_menu),
+            }
+            entry = own_dispatch.get(choice)
+            if entry:
+                self.ctx.safe_call(*entry)
+                continue
+
+            # Cross-handler dispatch
+            if choice == "wizard":
+                if self.ctx.registry:
+                    self.ctx.registry.dispatch("configuration", "wizard")
 
     # ------------------------------------------------------------------
-    # View methods (moved from main.py)
+    # View methods
     # ------------------------------------------------------------------
 
     def _view_active_config(self):
@@ -249,7 +299,7 @@ class MeshtasticdConfigHandler(BaseHandler):
         if not overlays:
             print("No active hardware configs in config.d/\n")
             print("Select your hardware from:")
-            print("  Configuration > meshtasticd > Device Templates")
+            print("  Configuration > Radio Config > Device Templates")
         else:
             print(f"Found {len(overlays)} active config(s):\n")
             for f in overlays:
@@ -265,165 +315,6 @@ class MeshtasticdConfigHandler(BaseHandler):
                     print("  (permission denied)")
 
         self.ctx.wait_for_enter()
-
-    def _view_available_configs(self):
-        """Show available hardware configs (USB + SPI HATs)."""
-        clear_screen()
-        print("=== Available Hardware Configs ===\n")
-
-        available_d = Path('/etc/meshtasticd/available.d')
-
-        if not available_d.exists():
-            ensure_meshtasticd_config()
-
-        if not available_d.exists():
-            print("available.d/ not found.\n")
-            print("Run with sudo to auto-create, or:")
-            print("  sudo mkdir -p /etc/meshtasticd/available.d")
-            print("  sudo cp templates/available.d/*.yaml /etc/meshtasticd/available.d/")
-            self.ctx.wait_for_enter()
-            return
-
-        configs = sorted(_glob_yaml(available_d))
-        if not configs:
-            print("No hardware configs available.")
-        else:
-            usb_configs = [f for f in configs if '-usb' in f.stem or f.stem.startswith('usb-')]
-            spi_configs = [f for f in configs if f not in usb_configs]
-
-            if usb_configs:
-                print(f"USB Radios ({len(usb_configs)}):")
-                for i, f in enumerate(usb_configs, 1):
-                    print(f"  {i:2d}. {f.stem}")
-
-            if spi_configs:
-                if usb_configs:
-                    print()
-                print(f"SPI HATs ({len(spi_configs)}):")
-                for i, f in enumerate(spi_configs, 1):
-                    print(f"  {i:2d}. {f.stem}")
-
-            config_d = Path('/etc/meshtasticd/config.d')
-            if config_d.exists():
-                active = _glob_yaml(config_d)
-                if active:
-                    print(f"\nActive: {', '.join(f.stem for f in active)}")
-
-            print(f"\nTotal: {len(configs)} templates")
-            print("\nActivate via: Configuration > meshtasticd > Device Templates")
-
-        self.ctx.wait_for_enter()
-
-    # ------------------------------------------------------------------
-    # Meshtasticd submenu (thin dispatcher)
-    # ------------------------------------------------------------------
-
-    def _meshtasticd_menu(self):
-        """Unified meshtasticd configuration menu (thin dispatcher).
-
-        Merges the former _config_menu and _meshtasticd_menu into one
-        flat menu. Reduces navigation depth by 1 level.
-        """
-        ensure_meshtasticd_config()
-
-        while True:
-            # Own inline items
-            own_items = [
-                ("_svc_", "--- Service ---"),
-                ("web", "Web Client (Full Config)"),
-                ("status", "Service Status"),
-                ("test", "Connection Test"),
-                ("restart", "Restart Service"),
-                ("logs", "Service Logs"),
-                ("_radio_", "--- Radio ---"),
-                ("owner", "Set Owner/Node Name"),
-                ("presets", "Radio Presets (LoRa)"),
-                ("channels", "Channel Config"),
-                ("_cfg_", "--- Config ---"),
-                ("hardware", "Device Templates"),
-                ("view", "View Active Config"),
-                ("overlays", "View config.d/ Overlays"),
-                ("edit", "Edit Config Files"),
-                ("_adv_", "--- Advanced ---"),
-                ("failover", "TX Load Balancer"),
-                ("wizard", "Run Setup Wizard"),
-            ]
-
-            # Merge with registry sub-handler items (lora, mqtt, cleanup)
-            registry_items = []
-            if self.ctx.registry:
-                registry_items = self.ctx.registry.get_menu_items("meshtasticd")
-
-            registry_tags = {tag for tag, _ in registry_items}
-            own_map = {tag: desc for tag, desc in own_items}
-            reg_map = {tag: desc for tag, desc in registry_items}
-            all_map = {**own_map, **reg_map}
-
-            # Apply ordering
-            result = []
-            for tag in _MESHTASTICD_ORDERING:
-                if tag in all_map:
-                    result.append((tag, all_map[tag]))
-            # Append any unordered items
-            ordered_set = set(_MESHTASTICD_ORDERING)
-            for tag, desc in list(own_items) + list(registry_items):
-                if tag not in ordered_set and (tag, desc) not in result:
-                    result.append((tag, desc))
-
-            result.append(("back", "Back"))
-
-            choice = self.ctx.dialog.menu(
-                "meshtasticd",
-                "Configure meshtasticd daemon:",
-                result
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            # Section headers — just re-display menu
-            if choice.startswith("_") and choice.endswith("_"):
-                continue
-
-            # Try registry sub-handlers first (lora, mqtt, cleanup)
-            if choice in registry_tags:
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("meshtasticd", choice)
-                continue
-
-            # Own inline dispatch
-            own_dispatch = {
-                "web": ("Web Client", self._show_web_client_info),
-                "status": ("Service Status", self._meshtasticd_status),
-                "test": ("Connection Test", self._connection_test),
-                "owner": ("Set Owner Name", self._set_owner_name),
-                "presets": ("Radio Presets", self._radio_presets_menu),
-                "hardware": ("Device Templates", self._hardware_config_menu),
-                "view": ("View Active Config", self._view_active_config),
-                "overlays": ("Config Overlays", self._view_config_overlays),
-                "edit": ("Edit Config Files", self._edit_config_menu),
-                "restart": ("Restart Service", self._restart_meshtasticd),
-                "logs": ("Service Logs", self._meshtasticd_logs),
-            }
-            entry = own_dispatch.get(choice)
-            if entry:
-                self.ctx.safe_call(*entry)
-                continue
-
-            # Cross-handler dispatch
-            if choice == "channels":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("configuration", "channels")
-            elif choice == "gateway":
-                handler = self.ctx.registry.get_handler("channel_config") if self.ctx.registry else None
-                if handler and hasattr(handler, '_gateway_template_menu'):
-                    self.ctx.safe_call("Gateway Template", handler._gateway_template_menu)
-            elif choice == "failover":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("mesh_networks", "load_balancer")
-            elif choice == "wizard":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("configuration", "wizard")
 
     # ------------------------------------------------------------------
     # General operations
@@ -447,16 +338,14 @@ class MeshtasticdConfigHandler(BaseHandler):
                 s.settimeout(2)
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
-                s.close()
-        except OSError as e:
-            logger.debug("Local IP detection failed: %s", e)
-            local_ip = "YOUR_PI_IP"
+        except Exception:
+            local_ip = "localhost"
 
         self.ctx.dialog.msgbox(
-            "Meshtastic Web Client",
-            f"Full radio configuration via browser:\n\n"
-            f"  URL: https://{local_ip}:9443\n\n"
-            f"Set these to join your mesh network:\n"
+            "Web Client",
+            f"meshtasticd Web Client\n\n"
+            f"URL: https://{local_ip}:9443\n\n"
+            f"The web client provides full configuration:\n"
             f"  Config > LoRa > Region  (US, EU_868, etc.)\n"
             f"  Config > LoRa > Preset  (LONG_FAST, etc.)\n"
             f"  Config > Channels       (PSK, name)\n\n"
@@ -528,557 +417,16 @@ class MeshtasticdConfigHandler(BaseHandler):
                 text += f"\n  ... and {len(active_configs) - 5} more"
 
             if not active_configs and available_count > 0:
-                text += "\n  (none — select hardware from Device Templates)"
+                text += "\n  (none — select hardware from Radio Config > Device Templates)"
 
             self.ctx.dialog.msgbox("Meshtasticd Status", text)
 
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Failed to get status:\n{e}")
 
-    def _set_owner_name(self):
-        """Set node owner name (long name and short name)."""
-        self.ctx.dialog.infobox("Owner", "Getting current owner info...")
-
-        try:
-            sys.path.insert(0, str(self.ctx.src_dir))
-            from commands import meshtastic as mesh_cmd
-
-            result = mesh_cmd.get_node_info()
-            current_long = ""
-            current_short = ""
-
-            if result.success and result.raw:
-                for line in result.raw.split('\n'):
-                    if 'longName' in line or 'long_name' in line:
-                        parts = line.split(':')
-                        if len(parts) > 1:
-                            current_long = parts[1].strip().strip('"')
-                    elif 'shortName' in line or 'short_name' in line:
-                        parts = line.split(':')
-                        if len(parts) > 1:
-                            current_short = parts[1].strip().strip('"')
-
-            long_name = self.ctx.dialog.inputbox(
-                "Set Long Name",
-                f"Enter node name (current: {current_long or 'none'}):",
-                current_long or ""
-            )
-
-            if long_name is None:
-                return
-
-            short_name = self.ctx.dialog.inputbox(
-                "Set Short Name",
-                f"Enter 4-char short name (current: {current_short or 'none'}):",
-                current_short or ""
-            )
-
-            if short_name is None:
-                return
-
-            if long_name:
-                long_name = long_name[:40]
-            if short_name:
-                short_name = short_name[:4].upper()
-
-            changes_made = []
-
-            if long_name:
-                self.ctx.dialog.infobox("Setting", f"Setting long name to: {long_name}")
-                result = mesh_cmd.set_owner(long_name)
-                if result.success:
-                    changes_made.append(f"Long name: {long_name}")
-                else:
-                    self.ctx.dialog.msgbox("Error", f"Failed to set long name:\n{result.message}")
-                    return
-
-            if short_name:
-                self.ctx.dialog.infobox("Setting", f"Setting short name to: {short_name}")
-                result = mesh_cmd.set_owner_short(short_name)
-                if result.success:
-                    changes_made.append(f"Short name: {short_name}")
-                else:
-                    self.ctx.dialog.msgbox("Error", f"Failed to set short name:\n{result.message}")
-                    return
-
-            if changes_made:
-                from utils.device_config_store import save_device_settings
-                owner_data = {}
-                if long_name:
-                    owner_data['long_name'] = long_name
-                if short_name:
-                    owner_data['short_name'] = short_name
-                save_device_settings({'owner': owner_data})
-
-                self.ctx.dialog.msgbox("Success",
-                    f"Owner settings updated:\n\n"
-                    + "\n".join(changes_made)
-                    + "\n\nSaved for restart persistence.")
-            else:
-                self.ctx.dialog.msgbox("Info", "No changes made.")
-
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Failed to set owner name:\n{e}")
-
-    # ------------------------------------------------------------------
-    # Radio presets
-    # ------------------------------------------------------------------
-
-    def _radio_presets_menu(self):
-        """Radio/LoRa preset selection via meshtastic CLI."""
-        current_preset = None
-        try:
-            from utils.lora_presets import detect_meshtastic_settings
-            detection = detect_meshtastic_settings()
-            if detection and detection.get('preset'):
-                current_preset = detection['preset']
-        except Exception:
-            pass
-
-        presets = [
-            ("SHORT_TURBO", "500kHz SF7  - Max speed, <1km"),
-            ("SHORT_FAST", "250kHz SF7  - Urban, 1-5km"),
-            ("SHORT_SLOW", "125kHz SF7  - Reliable short"),
-            ("MEDIUM_FAST", "250kHz SF10 - MtnMesh std, 5-20km"),
-            ("MEDIUM_SLOW", "125kHz SF10 - Alt medium"),
-            ("LONG_FAST", "250kHz SF11 - Default, 10-30km"),
-            ("LONG_MODERATE", "125kHz SF11 - Extended, 15-40km"),
-            ("LONG_SLOW", "125kHz SF12 - Max range, 20-50km"),
-            ("back", "Back"),
-        ]
-
-        if current_preset:
-            presets = [
-                (tag, f"{desc} [ACTIVE]" if tag == current_preset else desc)
-                for tag, desc in presets
-            ]
-
-        current_info = f"\nCurrent: {current_preset}" if current_preset else "\nCurrent: Unknown"
-
-        choice = self.ctx.dialog.menu(
-            "Radio Presets",
-            f"Select LoRa modem preset:{current_info}\n\n"
-            "Higher speed = shorter range\n"
-            "Lower speed = longer range",
-            presets
-        )
-
-        if choice and choice != "back":
-            self._apply_radio_preset(choice)
-
-    def _apply_radio_preset(self, preset: str):
-        """Apply a radio preset via meshtastic CLI."""
-        preset_info = {
-            "SHORT_TURBO": {"bw": 500, "sf": 7, "cr": 8},
-            "SHORT_FAST": {"bw": 250, "sf": 7, "cr": 8},
-            "SHORT_SLOW": {"bw": 125, "sf": 7, "cr": 8},
-            "MEDIUM_FAST": {"bw": 250, "sf": 10, "cr": 8},
-            "MEDIUM_SLOW": {"bw": 125, "sf": 10, "cr": 8},
-            "LONG_FAST": {"bw": 250, "sf": 11, "cr": 8},
-            "LONG_MODERATE": {"bw": 125, "sf": 11, "cr": 8},
-            "LONG_SLOW": {"bw": 125, "sf": 12, "cr": 8},
-        }
-
-        info = preset_info.get(preset, {})
-        if not info:
-            return
-
-        slot_input = self.ctx.dialog.inputbox(
-            "Frequency Slot",
-            f"Set frequency slot (channel_num) for {preset}:\n\n"
-            "Slot determines the center frequency.\n"
-            "US: 0=903.875 MHz (default), 12=903.625 (Regional)\n"
-            "Must match your mesh network's slot.\n\n"
-            "Leave empty or 0 for default:",
-            "0"
-        )
-
-        if slot_input is None:
-            return
-
-        try:
-            freq_slot = int(slot_input) if slot_input.strip() else 0
-        except ValueError:
-            freq_slot = 0
-
-        confirm_text = (
-            f"Apply {preset} preset?\n\n"
-            f"Bandwidth: {info['bw']} kHz\n"
-            f"Spreading Factor: SF{info['sf']}\n"
-            f"Coding Rate: 4/{info['cr']}\n"
-            f"Frequency Slot: {freq_slot}\n\n"
-            "Applied via meshtastic CLI (--set lora.modem_preset).\n"
-            "Region must already be set (use Web Client)."
-        )
-
-        confirm = self.ctx.dialog.yesno(
-            "Apply Preset",
-            confirm_text,
-            default_no=True
-        )
-
-        if not confirm:
-            return
-
-        self.ctx.dialog.infobox("Applying", f"Applying {preset} preset...")
-
-        try:
-            cli = _get_cli()
-
-            result = cli.set_lora_preset(preset)
-            if not result.success:
-                self.ctx.dialog.msgbox("Error",
-                    f"Failed to set modem preset:\n{result.error}\n\n"
-                    "Ensure meshtastic CLI is installed and\n"
-                    "meshtasticd is running with region set.")
-                return
-
-            verified = '[verified]' in (result.output or '')
-
-            slot_result = cli.set_channel_num(freq_slot)
-            slot_msg = ""
-            if not slot_result.success:
-                slot_msg = f"\nFrequency slot: FAILED ({slot_result.error})"
-            else:
-                slot_msg = f"\nFrequency slot: {freq_slot}"
-
-            from utils.device_config_store import save_device_settings
-            save_device_settings({
-                'lora': {
-                    'modem_preset': preset,
-                    'channel_num': freq_slot,
-                }
-            })
-
-            verify_note = " (verified)" if verified else ""
-            self.ctx.dialog.msgbox("Success",
-                f"{preset} preset applied!{verify_note}\n\n"
-                f"Modem preset: {preset}{slot_msg}\n\n"
-                "Settings saved for restart persistence.\n"
-                "Will be re-applied if meshtasticd restarts.")
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Failed to apply preset:\n{e}")
-
-    # ------------------------------------------------------------------
-    # Hardware config
-    # ------------------------------------------------------------------
-
-    def _classify_hardware_config(self, config_path: Path) -> str:
-        """Classify a hardware config as 'usb' or 'spi'."""
-        try:
-            from core.meshtasticd_config import RADIO_TEMPLATES, RadioType
-            template = RADIO_TEMPLATES.get(config_path.stem, {})
-            if template:
-                rtype = template.get("radio_type")
-                if rtype == RadioType.USB_SERIAL:
-                    return "usb"
-                return "spi"
-        except ImportError:
-            pass
-
-        try:
-            content = config_path.read_text(errors='replace')[:500]
-            if 'Serial:' in content and 'spidev' not in content.lower():
-                return "usb"
-        except Exception:
-            pass
-        return "spi"
-
-    def _hardware_config_menu(self):
-        """Hardware configuration selection with USB/SPI categorization."""
-        try:
-            from core.meshtasticd_config import MeshtasticdConfig
-            config_mgr = MeshtasticdConfig()
-            config_mgr.ensure_structure()
-        except PermissionError:
-            logger.debug("Cannot auto-create templates (no root), using existing")
-        except Exception as e:
-            logger.debug("Template auto-creation failed: %s", e)
-
-        available_dir = Path('/etc/meshtasticd/available.d')
-        config_d = Path('/etc/meshtasticd/config.d')
-
-        if not available_dir.exists():
-            self.ctx.dialog.msgbox("Error",
-                "Hardware templates not found.\n\n"
-                f"Expected: {available_dir}\n\n"
-                "Run with sudo to auto-create, or run the installer.")
-            return
-
-        while True:
-            available = _glob_yaml(available_dir)
-            if not available:
-                self.ctx.dialog.msgbox("Error",
-                    "No hardware templates found.\n\n"
-                    "Run with sudo to auto-create, or run the installer.")
-                return
-
-            active = set()
-            if config_d.exists():
-                active = {f.name for f in _glob_yaml(config_d)}
-            active_names_set = {f.stem for f in _glob_yaml(config_d)
-                               if not _is_overrides(f)} if config_d.exists() else set()
-
-            usb_configs = []
-            spi_configs = []
-            for cfg in sorted(available):
-                if self._classify_hardware_config(cfg) == "usb":
-                    usb_configs.append(cfg)
-                else:
-                    spi_configs.append(cfg)
-
-            choices = []
-            choices.append(("--usb--", f"--- USB Radios ({len(usb_configs)}) ---"))
-            for cfg in usb_configs:
-                status = " [ACTIVE]" if cfg.name in active else ""
-                choices.append((cfg.name, f"  {cfg.stem}{status}"))
-
-            choices.append(("--spi--", f"--- SPI HATs ({len(spi_configs)}) ---"))
-            for cfg in spi_configs:
-                status = " [ACTIVE]" if cfg.name in active else ""
-                choices.append((cfg.name, f"  {cfg.stem}{status}"))
-
-            choices.append(("view", "View Config Details"))
-            choices.append(("remove", "Remove Active Config(s)"))
-            choices.append(("back", "Back"))
-
-            active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
-
-            choice = self.ctx.dialog.menu(
-                "Device Templates",
-                f"Total: {len(available)} templates | "
-                f"Active: {active_display}\n\n"
-                "Select hardware configuration to activate:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-            elif choice in ("--usb--", "--spi--"):
-                continue  # Section headers — just re-display menu
-            elif choice == "view":
-                self._view_hardware_config(available)
-            elif choice == "remove":
-                self._remove_active_hardware_config(config_d, active_names_set)
-            else:
-                self._activate_hardware_config(choice, available_dir, config_d)
-
-    def _activate_hardware_config(self, config_name: str, available_dir: Path, config_d: Path):
-        """Activate a hardware configuration."""
-        src = available_dir / config_name
-
-        if not src.exists():
-            self.ctx.dialog.msgbox("Error", f"Config not found: {src}")
-            return
-
-        # Show which configs will be replaced
-        old_configs = []
-        if config_d.exists():
-            old_configs = [f.name for f in _glob_yaml(config_d)
-                          if not _is_overrides(f)]
-
-        replace_msg = ""
-        if old_configs:
-            replace_msg = (
-                f"\nReplaces: {', '.join(old_configs)}\n"
-            )
-
-        confirm = self.ctx.dialog.yesno(
-            "Activate Config",
-            f"Activate hardware config?\n\n"
-            f"Template: {config_name}\n"
-            f"{replace_msg}\n"
-            "This will:\n"
-            "1. Remove old hardware configs from config.d/\n"
-            f"2. Copy {config_name} to {config_d}/\n"
-            "3. Restart meshtasticd service",
-            default_no=True
-        )
-
-        if not confirm:
-            return
-
-        try:
-            self.ctx.dialog.infobox("Activating", f"Activating {config_name}...")
-            activate_hardware_config(config_name, available_dir, config_d)
-            self.ctx.dialog.msgbox("Success",
-                f"Hardware config activated!\n\n"
-                f"Config: {config_d / config_name}\n\n"
-                "Old hardware configs removed.\n"
-                "Service restarted.")
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Activation failed:\n{e}")
-
-    def _remove_active_hardware_config(self, config_d: Path, active_names: set):
-        """Remove active hardware config(s) from config.d/."""
-        hw_files = sorted(
-            f for f in _glob_yaml(config_d)
-            if not _is_overrides(f)
-        )
-        if not hw_files:
-            self.ctx.dialog.msgbox("Info", "No active hardware configs to remove.")
-            return
-
-        if len(hw_files) == 1:
-            target = hw_files[0]
-            confirm = self.ctx.dialog.yesno(
-                "Remove Config",
-                f"Remove active hardware config?\n\n"
-                f"  {target.name}\n\n"
-                "meshtasticd will not start without a hardware config.\n"
-                "You can re-activate one from the Device Templates menu.",
-            )
-            if confirm:
-                try:
-                    target.unlink()
-                    logger.info("Removed hardware config: %s", target.name)
-                    self.ctx.dialog.msgbox(
-                        "Removed",
-                        f"Removed: {target.name}\n\n"
-                        "meshtasticd needs a hardware config to start.\n"
-                        "Select a new one from this menu when ready."
-                    )
-                except Exception as e:
-                    self.ctx.dialog.msgbox("Error", f"Failed to remove:\n{e}")
-        else:
-            # Multiple active configs — let user pick which to remove
-            choices = [(f.name, f.stem) for f in hw_files]
-            choices.append(("all", "Remove ALL hardware configs"))
-            choices.append(("back", "Back"))
-
-            choice = self.ctx.dialog.menu(
-                "Remove Config",
-                f"{len(hw_files)} active hardware configs found.\n"
-                "meshtasticd merges all YAML in config.d/ — multiple\n"
-                "configs can conflict (especially with Module: auto).\n\n"
-                "Select config to remove:",
-                choices
-            )
-
-            if not choice or choice == "back":
-                return
-
-            try:
-                if choice == "all":
-                    for f in hw_files:
-                        f.unlink()
-                        logger.info("Removed hardware config: %s", f.name)
-                    self.ctx.dialog.msgbox(
-                        "Removed",
-                        f"Removed {len(hw_files)} hardware configs.\n\n"
-                        "Select a new one from this menu when ready."
-                    )
-                else:
-                    target = config_d / choice
-                    target.unlink()
-                    logger.info("Removed hardware config: %s", choice)
-                    self.ctx.dialog.msgbox(
-                        "Removed", f"Removed: {choice}"
-                    )
-            except Exception as e:
-                self.ctx.dialog.msgbox("Error", f"Failed to remove:\n{e}")
-
-    def _view_hardware_config(self, configs: list):
-        """View details of a hardware config."""
-        choices = [(cfg.name, cfg.stem[:30]) for cfg in sorted(configs)]
-        choices.append(("back", "Back"))
-
-        choice = self.ctx.dialog.menu(
-            "View Config",
-            "Select config to view:",
-            choices
-        )
-
-        if choice and choice != "back":
-            config_path = Path('/etc/meshtasticd/available.d') / choice
-            if config_path.exists():
-                try:
-                    content = config_path.read_text()[:1500]
-                    self.ctx.dialog.msgbox(f"Config: {choice}", content)
-                except Exception as e:
-                    self.ctx.dialog.msgbox("Error", str(e))
-
     # ------------------------------------------------------------------
     # Edit / restart
     # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Connection test & logs
-    # ------------------------------------------------------------------
-
-    def _connection_test(self):
-        """Quick connectivity test for meshtasticd (service, TCP, HTTP)."""
-        import socket
-
-        clear_screen()
-        print("=== meshtasticd Connection Test ===\n")
-
-        # 1. Service status
-        status = check_service('meshtasticd')
-        if status.available:
-            print("  [OK]   Service: running")
-        else:
-            print(f"  [FAIL] Service: {status.message}")
-            if status.fix_hint:
-                print(f"         Hint: {status.fix_hint}")
-
-        # 2. TCP port 4403
-        tcp_ok = False
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(3)
-                sock.connect(('127.0.0.1', 4403))
-            tcp_ok = True
-            print("  [OK]   TCP port 4403: reachable")
-        except OSError as e:
-            print(f"  [FAIL] TCP port 4403: {e}")
-
-        # 3. HTTP API
-        if tcp_ok:
-            try:
-                http = _get_http_client()
-                info = http.get_device_info()
-                if info:
-                    print("  [OK]   HTTP API: responsive")
-                    fw = info.get('firmwareVersion', 'unknown')
-                    hw = info.get('hwModel', 'unknown')
-                    print(f"         Firmware: {fw} | Hardware: {hw}")
-                else:
-                    print("  [WARN] HTTP API: no data returned")
-            except Exception as e:
-                print(f"  [FAIL] HTTP API: {e}")
-        else:
-            print("  [SKIP] HTTP API: TCP not available")
-
-        print()
-        self.ctx.wait_for_enter()
-
-    def _meshtasticd_logs(self):
-        """Show recent meshtasticd service logs via journalctl."""
-        clear_screen()
-        print("=== meshtasticd Service Logs (last 100 lines) ===\n")
-
-        try:
-            result = subprocess.run(
-                ['journalctl', '-u', 'meshtasticd', '-n', '100',
-                 '--no-pager', '--output=short-iso'],
-                capture_output=True, text=True, timeout=10
-            )
-            output = result.stdout.strip()
-            if output:
-                print(output)
-            else:
-                print("No log entries found for meshtasticd.")
-                print("Service may not have started yet.")
-        except FileNotFoundError:
-            print("journalctl not available (not a systemd system).")
-        except subprocess.TimeoutExpired:
-            print("Timed out reading logs.")
-        except Exception as e:
-            print(f"Failed to read logs: {e}")
-
-        print()
-        self.ctx.wait_for_enter()
 
     def _offer_restart(self, message: str):
         """Offer to restart meshtasticd after a config change."""
@@ -1170,6 +518,36 @@ class MeshtasticdConfigHandler(BaseHandler):
         elif choice:
             self._edit_file(choice)
 
+    def _remove_active_hardware_config(self, config_d: Path, active_names: set):
+        """Remove active hardware config(s) from config.d/ (edit menu context)."""
+        hw_files = sorted(
+            f for f in _glob_yaml(config_d)
+            if not _is_overrides(f)
+        )
+        if not hw_files:
+            self.ctx.dialog.msgbox("Info", "No active hardware configs to remove.")
+            return
+
+        choices = [(f.name, f.stem) for f in hw_files]
+        choices.append(("back", "Back"))
+
+        choice = self.ctx.dialog.menu(
+            "Remove Config",
+            "Select config to remove from config.d/:",
+            choices
+        )
+
+        if not choice or choice == "back":
+            return
+
+        try:
+            target = config_d / choice
+            target.unlink()
+            logger.info("Removed hardware config: %s", choice)
+            self.ctx.dialog.msgbox("Removed", f"Removed: {choice}")
+        except Exception as e:
+            self.ctx.dialog.msgbox("Error", f"Failed to remove:\n{e}")
+
     def _edit_available_d(self):
         """Edit files in available.d."""
         available_d = Path('/etc/meshtasticd/available.d')
@@ -1192,6 +570,84 @@ class MeshtasticdConfigHandler(BaseHandler):
 
         if choice:
             self._edit_file(choice)
+
+    # ------------------------------------------------------------------
+    # Connection test & logs
+    # ------------------------------------------------------------------
+
+    def _connection_test(self):
+        """Quick connectivity test for meshtasticd (service, TCP, HTTP)."""
+        import socket
+
+        clear_screen()
+        print("=== meshtasticd Connection Test ===\n")
+
+        # 1. Service status
+        status = check_service('meshtasticd')
+        if status.available:
+            print("  [OK]   Service: running")
+        else:
+            print(f"  [FAIL] Service: {status.message}")
+            if status.fix_hint:
+                print(f"         Hint: {status.fix_hint}")
+
+        # 2. TCP port 4403
+        tcp_ok = False
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(3)
+                sock.connect(('127.0.0.1', 4403))
+            tcp_ok = True
+            print("  [OK]   TCP port 4403: reachable")
+        except OSError as e:
+            print(f"  [FAIL] TCP port 4403: {e}")
+
+        # 3. HTTP API
+        if tcp_ok:
+            try:
+                http = _get_http_client()
+                info = http.get_device_info()
+                if info:
+                    print("  [OK]   HTTP API: responsive")
+                    fw = info.get('firmwareVersion', 'unknown')
+                    hw = info.get('hwModel', 'unknown')
+                    print(f"         Firmware: {fw} | Hardware: {hw}")
+                else:
+                    print("  [WARN] HTTP API: no data returned")
+            except Exception as e:
+                print(f"  [FAIL] HTTP API: {e}")
+        else:
+            print("  [SKIP] HTTP API: TCP not available")
+
+        print()
+        self.ctx.wait_for_enter()
+
+    def _meshtasticd_logs(self):
+        """Show recent meshtasticd service logs via journalctl."""
+        clear_screen()
+        print("=== meshtasticd Service Logs (last 100 lines) ===\n")
+
+        try:
+            result = subprocess.run(
+                ['journalctl', '-u', 'meshtasticd', '-n', '100',
+                 '--no-pager', '--output=short-iso'],
+                capture_output=True, text=True, timeout=10
+            )
+            output = result.stdout.strip()
+            if output:
+                print(output)
+            else:
+                print("No log entries found for meshtasticd.")
+                print("Service may not have started yet.")
+        except FileNotFoundError:
+            print("journalctl not available (not a systemd system).")
+        except subprocess.TimeoutExpired:
+            print("Timed out reading logs.")
+        except Exception as e:
+            print(f"Failed to read logs: {e}")
+
+        print()
+        self.ctx.wait_for_enter()
 
     def _restart_meshtasticd(self):
         """Restart meshtasticd service and re-apply saved device settings."""
@@ -1243,11 +699,12 @@ class MeshtasticdConfigHandler(BaseHandler):
                 self.ctx.dialog.msgbox("Info",
                     "Settings NOT re-applied.\n\n"
                     "You can re-apply manually via the\n"
-                    "Radio Presets or Owner Name menus.")
+                    "Radio Config > Radio Presets or Owner Name menus.")
                 return
 
             self.ctx.dialog.infobox("Applying", "Re-applying saved device settings...")
 
+            from core.meshtastic_cli import get_cli as _get_cli
             cli = _get_cli()
             all_ok, results = apply_saved_config(cli)
 
