@@ -852,6 +852,18 @@ class MeshChatHandler(BaseHandler):
 
         return ['pip3']
 
+    def _get_service_python(self) -> str:
+        """Return the Python interpreter matching where pip installs packages.
+
+        If the MeshForge venv exists, return its python3 so that systemd
+        services can find venv-installed packages (LXMF, RNS, cryptography).
+        Falls back to system python3.
+        """
+        venv_python = Path('/opt/meshforge/venv/bin/python3')
+        if venv_python.is_file():
+            return str(venv_python)
+        return shutil.which('python3') or '/usr/bin/python3'
+
     def _install_meshchat(self):
         """Automated MeshChat installation.
 
@@ -1090,7 +1102,7 @@ class MeshChatHandler(BaseHandler):
         """Create systemd service for MeshChat. Returns True on success."""
         service_user = run_as_user or 'root'
         user_home = get_real_user_home()
-        python_path = shutil.which('python3') or '/usr/bin/python3'
+        python_path = self._get_service_python()
         meshchat_py = install_dir / 'meshchat.py'
 
         service_content = (
