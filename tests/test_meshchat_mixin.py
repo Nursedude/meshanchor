@@ -552,6 +552,18 @@ class TestMeshChatCreateService:
                 result = handler._has_meshchat_systemd_service()
                 assert result is False
 
+    def test_launch_blocked_when_lxmf_missing(self):
+        """_launch_meshchat shows error when LXMF module is not installed."""
+        handler = _make_handler()
+        handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
+        handler._check_rns_for_meshchat = MagicMock(return_value=True)
+
+        with patch('launcher_tui.handlers.meshchat._HAS_LXMF', False):
+            handler._launch_meshchat()
+            handler.ctx.dialog.msgbox.assert_called_once()
+            call_args = str(handler.ctx.dialog.msgbox.call_args)
+            assert 'Missing LXMF' in call_args or 'LXMF' in call_args
+
     def test_launch_offers_create_when_no_service(self):
         """_launch_meshchat offers to create service when none exists."""
         handler = _make_handler()
@@ -563,13 +575,14 @@ class TestMeshChatCreateService:
         mock_status.running = False
         mock_status.service_name = None
 
-        with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
-            with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
-                MockSvc.return_value.check_status.return_value = mock_status
-                # User accepts to create service
-                handler.ctx.dialog.yesno.return_value = True
-                handler._launch_meshchat()
-                handler._create_meshchat_service.assert_called_once()
+        with patch('launcher_tui.handlers.meshchat._HAS_LXMF', True):
+            with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
+                with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
+                    MockSvc.return_value.check_status.return_value = mock_status
+                    # User accepts to create service
+                    handler.ctx.dialog.yesno.return_value = True
+                    handler._launch_meshchat()
+                    handler._create_meshchat_service.assert_called_once()
 
     def test_launch_shows_manual_when_declined(self):
         """_launch_meshchat shows manual start when user declines service creation."""
@@ -581,14 +594,15 @@ class TestMeshChatCreateService:
         mock_status.running = False
         mock_status.service_name = None
 
-        with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
-            with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
-                MockSvc.return_value.check_status.return_value = mock_status
-                # User declines
-                handler.ctx.dialog.yesno.return_value = False
-                handler._launch_meshchat()
-                handler.ctx.dialog.msgbox.assert_called_once()
-                assert 'Manual Start' in str(handler.ctx.dialog.msgbox.call_args)
+        with patch('launcher_tui.handlers.meshchat._HAS_LXMF', True):
+            with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
+                with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
+                    MockSvc.return_value.check_status.return_value = mock_status
+                    # User declines
+                    handler.ctx.dialog.yesno.return_value = False
+                    handler._launch_meshchat()
+                    handler.ctx.dialog.msgbox.assert_called_once()
+                    assert 'Manual Start' in str(handler.ctx.dialog.msgbox.call_args)
 
 
 # ============================================================================
