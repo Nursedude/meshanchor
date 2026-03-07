@@ -553,16 +553,19 @@ class TestMeshChatCreateService:
                 assert result is False
 
     def test_launch_blocked_when_lxmf_missing(self):
-        """_launch_meshchat shows error when LXMF module is not installed."""
+        """_launch_meshchat offers to install LXMF when module is missing."""
         handler = _make_handler()
         handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
         handler._check_rns_for_meshchat = MagicMock(return_value=True)
+        # User declines the install prompt
+        handler.ctx.dialog.yesno.return_value = False
 
         with patch('launcher_tui.handlers.meshchat._HAS_LXMF', False):
             handler._launch_meshchat()
-            handler.ctx.dialog.msgbox.assert_called_once()
-            call_args = str(handler.ctx.dialog.msgbox.call_args)
-            assert 'Missing LXMF' in call_args or 'LXMF' in call_args
+            # Should have been offered to install via yesno
+            yesno_calls = handler.ctx.dialog.yesno.call_args_list
+            lxmf_prompt = any('LXMF' in str(c) for c in yesno_calls)
+            assert lxmf_prompt, f"Expected LXMF install prompt, got: {yesno_calls}"
 
     def test_launch_offers_create_when_no_service(self):
         """_launch_meshchat offers to create service when none exists."""

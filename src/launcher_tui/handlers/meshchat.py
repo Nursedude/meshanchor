@@ -176,6 +176,97 @@ class MeshChatHandler(BaseHandler):
         )
 
     # ------------------------------------------------------------------
+    # LXMF installation helper
+    # ------------------------------------------------------------------
+
+    def _offer_install_lxmf(self) -> bool:
+        """Offer to install the LXMF module when it is missing.
+
+        Returns True if LXMF is now available (was installed or was already
+        present), False if the user declined or installation failed.
+        """
+        global _HAS_LXMF
+
+        choice = self.ctx.dialog.yesno(
+            "Missing LXMF Module",
+            "The LXMF Python module is not installed.\n\n"
+            "LXMF is required for MeshChat messaging.\n\n"
+            "Install it now?\n"
+            "  (runs: pip install lxmf)",
+        )
+        if not choice:
+            return False
+
+        clear_screen()
+        print("=== Installing LXMF Module ===\n")
+
+        success = self._install_lxmf_package()
+
+        if success:
+            # Re-check import after install
+            _, _HAS_LXMF = safe_import('LXMF')
+            if _HAS_LXMF:
+                self.ctx.dialog.msgbox(
+                    "LXMF Installed",
+                    "LXMF module installed successfully.\n\n"
+                    "Continuing with MeshChat startup...",
+                )
+                return True
+
+        self.ctx.dialog.msgbox(
+            "Installation Failed",
+            "Failed to install the LXMF module.\n\n"
+            "Try installing manually:\n"
+            "  pip install lxmf\n\n"
+            "Or install all RNS dependencies:\n"
+            "  pip install -r requirements/rns.txt",
+        )
+        return False
+
+    def _install_lxmf_package(self) -> bool:
+        """Install the LXMF Python package via pip.
+
+        Returns True on success, False on failure.
+        """
+        pip_cmd = self._get_pip_command()
+
+        # Build the install command
+        if 'install' in pip_cmd:
+            # _get_pip_command already includes 'install' for PEP 668
+            cmd = pip_cmd + ['lxmf']
+        else:
+            cmd = pip_cmd + ['install', 'lxmf']
+
+        print(f"  Running: {' '.join(cmd)}\n")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.stdout:
+                for line in result.stdout.strip().split('\n')[-5:]:
+                    print(f"  {line}")
+            if result.returncode != 0:
+                print(f"\n  pip error (exit {result.returncode}):")
+                if result.stderr:
+                    for line in result.stderr.strip().split('\n')[-5:]:
+                        print(f"  {line}")
+                return False
+
+            print("\n  LXMF installed successfully.")
+            return True
+
+        except subprocess.TimeoutExpired:
+            print("\n  Installation timed out after 120 seconds.")
+            return False
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"\n  Installation error: {e}")
+            return False
+
+    # ------------------------------------------------------------------
     # Top-level submenu
     # ------------------------------------------------------------------
 
@@ -263,6 +354,17 @@ class MeshChatHandler(BaseHandler):
         print(f"  Installed:  Yes")
         print(f"  Running:    {'Yes' if running else 'No'}")
 
+        # LXMF module status
+        if _HAS_LXMF:
+            try:
+                import LXMF
+                lxmf_ver = getattr(LXMF, '__version__', 'unknown')
+                print(f"  LXMF:       {lxmf_ver}")
+            except Exception:
+                print("  LXMF:       Installed")
+        else:
+            print("  LXMF:       NOT INSTALLED (pip install lxmf)")
+
         # Service details via plugin
         if _HAS_MESHCHAT_SERVICE:
             try:
@@ -327,15 +429,8 @@ class MeshChatHandler(BaseHandler):
 
         # Preflight: check LXMF availability
         if not _HAS_LXMF:
-            self.ctx.dialog.msgbox(
-                "Missing LXMF Module",
-                "The LXMF Python module is not installed.\n\n"
-                "Install it with:\n"
-                "  pip install lxmf\n\n"
-                "Or install all RNS dependencies:\n"
-                "  pip install -r requirements/rns.txt",
-            )
-            return
+            if not self._offer_install_lxmf():
+                return
 
         if _HAS_MESHCHAT_SERVICE:
             svc = MeshChatService()
