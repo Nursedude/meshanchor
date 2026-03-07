@@ -160,11 +160,12 @@ def ensure_meshtasticd_config():
         logger.debug("meshtasticd config auto-create failed: %s", e)
 
 
-# Desired menu order for the meshtasticd submenu.
+# Desired menu order for the meshtasticd submenu (with section separators).
 _MESHTASTICD_ORDERING = [
-    "web", "status", "test", "owner", "lora", "presets", "hardware",
-    "channels", "mqtt", "gateway", "cleanup", "view", "overlays",
-    "edit", "restart", "logs", "failover", "settings", "wizard",
+    "--svc--", "web", "status", "test", "restart", "logs",
+    "--radio--", "owner", "presets", "channels", "lora",
+    "--cfg--", "hardware", "view", "overlays", "edit",
+    "--adv--", "mqtt", "gateway", "failover", "cleanup", "wizard",
 ]
 
 
@@ -176,7 +177,7 @@ class MeshtasticdConfigHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("radio", "Radio Config        meshtasticd settings", "meshtastic"),
+            ("radio", "meshtasticd         Daemon & radio config", "meshtastic"),
         ]
 
     def execute(self, action):
@@ -248,7 +249,7 @@ class MeshtasticdConfigHandler(BaseHandler):
         if not overlays:
             print("No active hardware configs in config.d/\n")
             print("Select your hardware from:")
-            print("  Configuration > Radio Config > Hardware Config")
+            print("  Configuration > meshtasticd > Device Templates")
         else:
             print(f"Found {len(overlays)} active config(s):\n")
             for f in overlays:
@@ -309,7 +310,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                     print(f"\nActive: {', '.join(f.stem for f in active)}")
 
             print(f"\nTotal: {len(configs)} templates")
-            print("\nActivate via: Configuration > Radio Config > Hardware Config")
+            print("\nActivate via: Configuration > meshtasticd > Device Templates")
 
         self.ctx.wait_for_enter()
 
@@ -328,20 +329,23 @@ class MeshtasticdConfigHandler(BaseHandler):
         while True:
             # Own inline items
             own_items = [
+                ("--svc--", "--- Service ---"),
                 ("web", "Web Client (Full Config)"),
                 ("status", "Service Status"),
                 ("test", "Connection Test"),
+                ("restart", "Restart Service"),
+                ("logs", "Service Logs"),
+                ("--radio--", "--- Radio ---"),
                 ("owner", "Set Owner/Node Name"),
                 ("presets", "Radio Presets (LoRa)"),
-                ("hardware", "Hardware Config"),
                 ("channels", "Channel Config"),
+                ("--cfg--", "--- Config ---"),
+                ("hardware", "Device Templates"),
                 ("view", "View Active Config"),
                 ("overlays", "View config.d/ Overlays"),
                 ("edit", "Edit Config Files"),
-                ("restart", "Restart Service"),
-                ("logs", "Service Logs"),
+                ("--adv--", "--- Advanced ---"),
                 ("failover", "TX Load Balancer"),
-                ("settings", "MeshForge Settings"),
                 ("wizard", "Run Setup Wizard"),
             ]
 
@@ -369,13 +373,17 @@ class MeshtasticdConfigHandler(BaseHandler):
             result.append(("back", "Back"))
 
             choice = self.ctx.dialog.menu(
-                "Radio Config",
-                "Configure meshtasticd radio daemon:",
+                "meshtasticd",
+                "Configure meshtasticd daemon:",
                 result
             )
 
             if choice is None or choice == "back":
                 break
+
+            # Section headers — just re-display menu
+            if choice.startswith("--") and choice.endswith("--"):
+                continue
 
             # Try registry sub-handlers first (lora, mqtt, cleanup)
             if choice in registry_tags:
@@ -390,7 +398,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 "test": ("Connection Test", self._connection_test),
                 "owner": ("Set Owner Name", self._set_owner_name),
                 "presets": ("Radio Presets", self._radio_presets_menu),
-                "hardware": ("Hardware Config", self._hardware_config_menu),
+                "hardware": ("Device Templates", self._hardware_config_menu),
                 "view": ("View Active Config", self._view_active_config),
                 "overlays": ("Config Overlays", self._view_config_overlays),
                 "edit": ("Edit Config Files", self._edit_config_menu),
@@ -413,9 +421,6 @@ class MeshtasticdConfigHandler(BaseHandler):
             elif choice == "failover":
                 if self.ctx.registry:
                     self.ctx.registry.dispatch("mesh_networks", "load_balancer")
-            elif choice == "settings":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("configuration", "meshforge")
             elif choice == "wizard":
                 if self.ctx.registry:
                     self.ctx.registry.dispatch("configuration", "wizard")
@@ -523,7 +528,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 text += f"\n  ... and {len(active_configs) - 5} more"
 
             if not active_configs and available_count > 0:
-                text += "\n  (none — select hardware from Hardware Config)"
+                text += "\n  (none — select hardware from Device Templates)"
 
             self.ctx.dialog.msgbox("Meshtasticd Status", text)
 
@@ -840,7 +845,7 @@ class MeshtasticdConfigHandler(BaseHandler):
             active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
 
             choice = self.ctx.dialog.menu(
-                "Hardware Config",
+                "Device Templates",
                 f"Total: {len(available)} templates | "
                 f"Active: {active_display}\n\n"
                 "Select hardware configuration to activate:",
@@ -921,7 +926,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 f"Remove active hardware config?\n\n"
                 f"  {target.name}\n\n"
                 "meshtasticd will not start without a hardware config.\n"
-                "You can re-activate one from the Hardware Config menu.",
+                "You can re-activate one from the Device Templates menu.",
             )
             if confirm:
                 try:
