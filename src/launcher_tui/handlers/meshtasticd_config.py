@@ -162,10 +162,10 @@ def ensure_meshtasticd_config():
 
 # Desired menu order for the meshtasticd submenu (with section separators).
 _MESHTASTICD_ORDERING = [
-    "--svc--", "web", "status", "test", "restart", "logs",
-    "--radio--", "owner", "presets", "channels", "lora",
-    "--cfg--", "hardware", "view", "overlays", "edit",
-    "--adv--", "mqtt", "gateway", "failover", "cleanup", "wizard",
+    "_svc_", "web", "status", "test", "restart", "logs",
+    "_radio_", "owner", "presets", "channels", "lora",
+    "_cfg_", "hardware", "view", "overlays", "edit",
+    "_adv_", "mqtt", "gateway", "failover", "cleanup", "wizard",
 ]
 
 
@@ -177,7 +177,7 @@ class MeshtasticdConfigHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("radio", "meshtasticd         Daemon & radio config", "meshtastic"),
+            ("radio", "meshtasticd         Radio & service config", "meshtastic"),
         ]
 
     def execute(self, action):
@@ -329,22 +329,22 @@ class MeshtasticdConfigHandler(BaseHandler):
         while True:
             # Own inline items
             own_items = [
-                ("--svc--", "--- Service ---"),
+                ("_svc_", "--- Service ---"),
                 ("web", "Web Client (Full Config)"),
                 ("status", "Service Status"),
                 ("test", "Connection Test"),
                 ("restart", "Restart Service"),
                 ("logs", "Service Logs"),
-                ("--radio--", "--- Radio ---"),
+                ("_radio_", "--- Radio ---"),
                 ("owner", "Set Owner/Node Name"),
                 ("presets", "Radio Presets (LoRa)"),
                 ("channels", "Channel Config"),
-                ("--cfg--", "--- Config ---"),
+                ("_cfg_", "--- Config ---"),
                 ("hardware", "Device Templates"),
                 ("view", "View Active Config"),
                 ("overlays", "View config.d/ Overlays"),
                 ("edit", "Edit Config Files"),
-                ("--adv--", "--- Advanced ---"),
+                ("_adv_", "--- Advanced ---"),
                 ("failover", "TX Load Balancer"),
                 ("wizard", "Run Setup Wizard"),
             ]
@@ -382,7 +382,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 break
 
             # Section headers — just re-display menu
-            if choice.startswith("--") and choice.endswith("--"):
+            if choice.startswith("_") and choice.endswith("_"):
                 continue
 
             # Try registry sub-handlers first (lora, mqtt, cleanup)
