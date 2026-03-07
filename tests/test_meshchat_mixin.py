@@ -398,7 +398,7 @@ class TestMeshChatInstaller:
             assert 'pull' in pull_call[0][0]
 
     def test_install_service_creates_unit_file(self):
-        """Service creation writes a valid systemd unit file."""
+        """Service creation writes a valid systemd unit file via _sudo_write."""
         handler = _make_handler()
 
         import tempfile
@@ -407,16 +407,19 @@ class TestMeshChatInstaller:
 
             with patch('launcher_tui.handlers.meshchat.get_real_user_home',
                        return_value=__import__('pathlib').Path('/home/testuser')):
-                with patch('subprocess.run', return_value=MagicMock(returncode=0)):
-                    with patch('builtins.open', create=True) as mock_open:
-                        mock_open.return_value.__enter__ = lambda s: s
-                        mock_open.return_value.__exit__ = MagicMock(return_value=False)
-                        mock_open.return_value.write = MagicMock()
-
-                        result = handler._install_meshchat_service(install_dir, 'testuser')
-                        # Verify write was called with unit file content
-                        if mock_open.return_value.write.called:
-                            content = mock_open.return_value.write.call_args[0][0]
+                with patch('launcher_tui.handlers.meshchat._HAS_SUDO_WRITE', True):
+                    with patch('launcher_tui.handlers.meshchat._sudo_write',
+                               return_value=(True, 'ok')) as mock_write:
+                        with patch('launcher_tui.handlers.meshchat.enable_service',
+                                   return_value=(True, 'ok')):
+                            result = handler._install_meshchat_service(
+                                install_dir, 'testuser')
+                            assert result is True
+                            # Verify _sudo_write was called with unit file content
+                            assert mock_write.called
+                            path_arg = mock_write.call_args[0][0]
+                            content = mock_write.call_args[0][1]
+                            assert 'reticulum-meshchat' in path_arg
                             assert 'User=testuser' in content
                             assert 'meshchat.py' in content
                             assert 'rnsd.service' in content
@@ -430,6 +433,162 @@ class TestMeshChatInstaller:
         """MESHCHAT_SERVICE_NAME is correct."""
         from launcher_tui.handlers.meshchat import MeshChatHandler
         assert MeshChatHandler.MESHCHAT_SERVICE_NAME == "reticulum-meshchat"
+
+
+# ============================================================================
+# Create Systemd Service Tests
+# ============================================================================
+
+class TestMeshChatCreateService:
+    """Test the standalone Create Service flow."""
+
+    def test_create_service_uses_sudo_write(self):
+        """_install_meshchat_service uses _sudo_write for privileged write."""
+        handler = _make_handler()
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=__import__('pathlib').Path('/home/testuser')):
+                with patch('launcher_tui.handlers.meshchat._HAS_SUDO_WRITE', True):
+                    with patch('launcher_tui.handlers.meshchat._sudo_write',
+                               return_value=(True, 'ok')) as mock_write:
+                        with patch('launcher_tui.handlers.meshchat.enable_service',
+                                   return_value=(True, 'ok')):
+                            result = handler._install_meshchat_service(
+                                install_dir, 'testuser')
+                            assert result is True
+                            assert mock_write.called
+                            path_arg = mock_write.call_args[0][0]
+                            assert path_arg == \
+                                '/etc/systemd/system/reticulum-meshchat.service'
+
+    def test_create_service_sudo_write_failure(self):
+        """Returns False when _sudo_write fails."""
+        handler = _make_handler()
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=__import__('pathlib').Path('/home/testuser')):
+                with patch('launcher_tui.handlers.meshchat._HAS_SUDO_WRITE', True):
+                    with patch('launcher_tui.handlers.meshchat._sudo_write',
+                               return_value=(False, 'permission denied')):
+                        result = handler._install_meshchat_service(
+                            install_dir, 'testuser')
+                        assert result is False
+
+    def test_create_service_enable_failure(self):
+        """Returns False when enable_service fails."""
+        handler = _make_handler()
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=__import__('pathlib').Path('/home/testuser')):
+                with patch('launcher_tui.handlers.meshchat._HAS_SUDO_WRITE', True):
+                    with patch('launcher_tui.handlers.meshchat._sudo_write',
+                               return_value=(True, 'ok')):
+                        with patch('launcher_tui.handlers.meshchat.enable_service',
+                                   return_value=(False, 'enable failed')):
+                            result = handler._install_meshchat_service(
+                                install_dir, 'testuser')
+                            assert result is False
+
+    def test_create_service_dialog_cancelled(self):
+        """No service created when user declines."""
+        handler = _make_handler()
+        handler.ctx.dialog.yesno.return_value = False
+        with patch.object(handler, '_install_meshchat_service') as mock_install:
+            handler._create_meshchat_service()
+            mock_install.assert_not_called()
+
+    def test_create_service_dialog_confirmed(self):
+        """Service created when user confirms."""
+        handler = _make_handler()
+        handler.ctx.dialog.yesno.side_effect = [True, False]  # Create=yes, Start=no
+        with patch.object(handler, '_get_meshchat_install_dir') as mock_dir:
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmpdir:
+                install_dir = __import__('pathlib').Path(tmpdir)
+                # Create meshchat.py so the check passes
+                (install_dir / 'meshchat.py').write_text('# meshchat')
+                mock_dir.return_value = install_dir
+                with patch.object(handler, '_install_meshchat_service',
+                                  return_value=True):
+                    handler._create_meshchat_service()
+                    # Should have called yesno twice (create + start)
+                    assert handler.ctx.dialog.yesno.call_count == 2
+
+    def test_create_service_install_dir_missing(self):
+        """Shows error when meshchat.py not found."""
+        handler = _make_handler()
+        handler.ctx.dialog.yesno.return_value = True
+        with patch.object(handler, '_get_meshchat_install_dir',
+                          return_value=__import__('pathlib').Path('/nonexistent')):
+            handler._create_meshchat_service()
+            handler.ctx.dialog.msgbox.assert_called_once()
+            assert 'Not Found' in str(handler.ctx.dialog.msgbox.call_args)
+
+    def test_has_meshchat_systemd_service_true(self):
+        """Detection returns True when service file exists."""
+        handler = _make_handler()
+        with patch('launcher_tui.handlers.meshchat.Path') as MockPath:
+            mock_path = MagicMock()
+            mock_path.exists.return_value = True
+            MockPath.return_value = mock_path
+            result = handler._has_meshchat_systemd_service()
+            assert result is True
+
+    def test_has_meshchat_systemd_service_false(self):
+        """Detection returns False when no service file and no plugin."""
+        handler = _make_handler()
+        with patch('launcher_tui.handlers.meshchat.Path') as MockPath:
+            mock_path = MagicMock()
+            mock_path.exists.return_value = False
+            MockPath.return_value = mock_path
+            with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE',
+                       False):
+                result = handler._has_meshchat_systemd_service()
+                assert result is False
+
+    def test_launch_offers_create_when_no_service(self):
+        """_launch_meshchat offers to create service when none exists."""
+        handler = _make_handler()
+        handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
+        handler._check_rns_for_meshchat = MagicMock(return_value=True)
+        handler._create_meshchat_service = MagicMock()
+
+        mock_status = MagicMock()
+        mock_status.running = False
+        mock_status.service_name = None
+
+        with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
+            with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
+                MockSvc.return_value.check_status.return_value = mock_status
+                # User accepts to create service
+                handler.ctx.dialog.yesno.return_value = True
+                handler._launch_meshchat()
+                handler._create_meshchat_service.assert_called_once()
+
+    def test_launch_shows_manual_when_declined(self):
+        """_launch_meshchat shows manual start when user declines service creation."""
+        handler = _make_handler()
+        handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
+        handler._check_rns_for_meshchat = MagicMock(return_value=True)
+
+        mock_status = MagicMock()
+        mock_status.running = False
+        mock_status.service_name = None
+
+        with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', True):
+            with patch('launcher_tui.handlers.meshchat.MeshChatService') as MockSvc:
+                MockSvc.return_value.check_status.return_value = mock_status
+                # User declines
+                handler.ctx.dialog.yesno.return_value = False
+                handler._launch_meshchat()
+                handler.ctx.dialog.msgbox.assert_called_once()
+                assert 'Manual Start' in str(handler.ctx.dialog.msgbox.call_args)
 
 
 # ============================================================================
