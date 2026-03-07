@@ -48,6 +48,11 @@ check_rns_shared_instance, _HAS_RNS_CHECK = safe_import(
     'utils.service_check', 'check_rns_shared_instance'
 )
 
+# Import privilege-elevation helpers for systemd service creation
+_sudo_write, enable_service, _HAS_SUDO_WRITE = safe_import(
+    'utils.service_check', '_sudo_write', 'enable_service'
+)
+
 # Import MeshChat plugin components (optional external dependency)
 MeshChatService, ServiceState, _HAS_MESHCHAT_SERVICE = safe_import(
     'plugins.meshchat.service', 'MeshChatService', 'ServiceState'
@@ -137,6 +142,23 @@ class MeshChatHandler(BaseHandler):
 
         return False
 
+    def _has_meshchat_systemd_service(self) -> bool:
+        """Check if a systemd service file exists for MeshChat."""
+        service_path = Path(
+            f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
+        )
+        if service_path.exists():
+            return True
+        # Also check via plugin if available
+        if _HAS_MESHCHAT_SERVICE:
+            try:
+                svc = MeshChatService()
+                status = svc.check_status(blocking=True)
+                return status.service_name is not None
+            except Exception:
+                pass
+        return False
+
     # ------------------------------------------------------------------
     # LXMF exclusivity (delegates to shared utility)
     # ------------------------------------------------------------------
@@ -181,6 +203,8 @@ class MeshChatHandler(BaseHandler):
                     choices.append(("web", "Web UI (show URL)"))
                 else:
                     choices.append(("start", "Start MeshChat"))
+                if not self._has_meshchat_systemd_service():
+                    choices.append(("create_service", "Create Systemd Service"))
                 choices.append(("logs", "View Logs"))
                 choices.append(("uninstall", "Disable MeshChat"))
             else:
@@ -208,6 +232,7 @@ class MeshChatHandler(BaseHandler):
                 "web": ("MeshChat Web UI", self._meshchat_web_ui),
                 "logs": ("View MeshChat Logs", self._meshchat_logs),
                 "install": ("Install MeshChat", self._install_meshchat),
+                "create_service": ("Create Service", self._create_meshchat_service),
                 "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
             entry = dispatch.get(choice)
@@ -336,15 +361,91 @@ class MeshChatHandler(BaseHandler):
                     )
                 return
 
-        # No systemd service — show manual start instructions
-        self.ctx.dialog.msgbox(
-            "Manual Start Required",
+        # No systemd service — offer to create one
+        if self.ctx.dialog.yesno(
+            "No Service Found",
             "No systemd service found for MeshChat.\n\n"
-            "Start manually:\n"
-            "  cd ~/reticulum-meshchat\n"
-            "  python meshchat.py\n\n"
-            "Or create a systemd service for automatic startup.",
-        )
+            "Would you like to create a systemd service?\n"
+            "This enables automatic startup at boot.",
+        ):
+            self._create_meshchat_service()
+        else:
+            self.ctx.dialog.msgbox(
+                "Manual Start",
+                "Start manually:\n"
+                "  cd ~/reticulum-meshchat\n"
+                "  python meshchat.py\n\n"
+                "Or use 'Create Service' from the MeshChat menu.",
+            )
+
+    def _create_meshchat_service(self):
+        """Create systemd service for an already-installed MeshChat."""
+        if not self.ctx.dialog.yesno(
+            "Create Service",
+            "Create a systemd service for MeshChat?\n\n"
+            "This enables automatic startup at boot\n"
+            "and management via systemctl.",
+        ):
+            return
+
+        install_dir = self._get_meshchat_install_dir()
+        meshchat_py = install_dir / 'meshchat.py'
+
+        if not meshchat_py.exists():
+            self.ctx.dialog.msgbox(
+                "Not Found",
+                f"MeshChat not found at:\n"
+                f"  {meshchat_py}\n\n"
+                "Install MeshChat first from the menu.",
+            )
+            return
+
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
+        clear_screen()
+        print("=== Creating MeshChat Service ===\n")
+
+        if not self._install_meshchat_service(install_dir, run_as_user):
+            self.ctx.dialog.msgbox(
+                "Service Creation Failed",
+                "Failed to create the systemd service.\n\n"
+                "Check permissions and try running with sudo.",
+            )
+            return
+
+        # Offer to start the service now
+        if self.ctx.dialog.yesno(
+            "Service Created",
+            "Systemd service created and enabled.\n\n"
+            "Start MeshChat now?",
+        ):
+            if _HAS_SERVICE_CHECK and start_service:
+                start_service(self.MESHCHAT_SERVICE_NAME)
+            else:
+                try:
+                    subprocess.run(
+                        ['systemctl', 'start', self.MESHCHAT_SERVICE_NAME],
+                        capture_output=True, timeout=15,
+                    )
+                except (subprocess.SubprocessError, OSError) as e:
+                    logger.debug("Service start failed: %s", e)
+
+            time.sleep(3)
+
+            if self._is_meshchat_running():
+                self.ctx.dialog.msgbox(
+                    "MeshChat Started",
+                    "MeshChat is running.\n\n"
+                    "Web UI: http://127.0.0.1:8000",
+                )
+            else:
+                self.ctx.dialog.msgbox(
+                    "Start May Have Failed",
+                    "MeshChat does not appear to be running.\n\n"
+                    f"Check: systemctl status {self.MESHCHAT_SERVICE_NAME}\n"
+                    f"       journalctl -u {self.MESHCHAT_SERVICE_NAME} -n 20",
+                )
 
     def _stop_meshchat(self):
         """Stop MeshChat service."""
@@ -884,19 +985,34 @@ class MeshChatHandler(BaseHandler):
         print(f"Creating systemd service: {service_path}")
 
         try:
-            # Write service file
-            with open(service_path, 'w') as f:
-                f.write(service_content)
+            # Write service file with privilege elevation
+            if _HAS_SUDO_WRITE and _sudo_write:
+                write_ok, write_msg = _sudo_write(service_path, service_content)
+                if not write_ok:
+                    print(f"Failed to write service file: {write_msg}")
+                    return False
+            else:
+                logger.warning("_sudo_write unavailable, falling back to direct write")
+                with open(service_path, 'w') as f:
+                    f.write(service_content)
 
-            # Reload systemd and enable
-            subprocess.run(
-                ['systemctl', 'daemon-reload'],
-                capture_output=True, timeout=15,
-            )
-            subprocess.run(
-                ['systemctl', 'enable', self.MESHCHAT_SERVICE_NAME],
-                capture_output=True, timeout=15,
-            )
+            # Reload systemd daemon and enable service
+            # enable_service() calls daemon_reload() internally
+            if _HAS_SUDO_WRITE and enable_service:
+                ok, msg = enable_service(self.MESHCHAT_SERVICE_NAME)
+                if not ok:
+                    print(f"Failed to enable service: {msg}")
+                    return False
+            else:
+                subprocess.run(
+                    ['systemctl', 'daemon-reload'],
+                    capture_output=True, timeout=15,
+                )
+                subprocess.run(
+                    ['systemctl', 'enable', self.MESHCHAT_SERVICE_NAME],
+                    capture_output=True, timeout=15,
+                )
+
             print("Service created and enabled.\n")
             return True
 
