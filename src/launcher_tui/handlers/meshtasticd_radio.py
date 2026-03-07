@@ -1,11 +1,8 @@
 """
-Meshtasticd Radio Config Handler — Radio presets, hardware, owner settings.
+Meshtasticd Radio Config Sub-handler — Radio presets, hardware, owner settings.
 
-Split from meshtasticd_config.py to separate radio configuration from
-daemon/service lifecycle management.
-
-Routes to sub-handlers (meshtasticd_lora, meshtasticd_mqtt, meshtasticd_nodedb)
-via the handler registry.
+Sub-handler registered in section "meshtasticd", dispatched from
+MeshtasticdConfigHandler's unified meshtasticd menu.
 """
 
 import logging
@@ -13,7 +10,6 @@ import sys
 from pathlib import Path
 
 from handler_protocol import BaseHandler
-from backend import clear_screen
 from handlers.meshtasticd_config import (
     _glob_yaml, _is_overrides, activate_hardware_config,
     ensure_meshtasticd_config,
@@ -24,109 +20,27 @@ from core.meshtastic_cli import get_cli as _get_cli
 
 logger = logging.getLogger(__name__)
 
-# Desired menu order for the radio submenu.
-_RADIO_ORDERING = [
-    "_radio_", "owner", "presets", "channels", "lora",
-    "_hw_", "hardware",
-    "_adv_", "mqtt", "failover", "cleanup",
-]
-
 
 class MeshtasticdRadioHandler(BaseHandler):
-    """TUI handler for meshtasticd radio configuration."""
+    """TUI sub-handler for meshtasticd radio configuration."""
 
     handler_id = "meshtasticd_radio"
-    menu_section = "configuration"
+    menu_section = "meshtasticd"
 
     def menu_items(self):
         return [
-            ("mtd-radio", "Radio Config        Presets, hardware, LoRa", "meshtastic"),
+            ("owner", "Set Owner/Node Name", "meshtastic"),
+            ("presets", "Radio Presets (LoRa)", "meshtastic"),
+            ("hardware", "Device Templates", "meshtastic"),
         ]
 
     def execute(self, action):
-        if action == "mtd-radio":
-            self._radio_menu()
-
-    # ------------------------------------------------------------------
-    # Radio submenu
-    # ------------------------------------------------------------------
-
-    def _radio_menu(self):
-        """Radio configuration menu."""
-        ensure_meshtasticd_config()
-
-        while True:
-            own_items = [
-                ("_radio_", "--- Radio ---"),
-                ("owner", "Set Owner/Node Name"),
-                ("presets", "Radio Presets (LoRa)"),
-                ("channels", "Channel Config"),
-                ("_hw_", "--- Hardware ---"),
-                ("hardware", "Device Templates"),
-                ("_adv_", "--- Advanced ---"),
-                ("failover", "TX Load Balancer"),
-            ]
-
-            # Merge with registry sub-handler items (lora, mqtt, cleanup)
-            registry_items = []
-            if self.ctx.registry:
-                registry_items = self.ctx.registry.get_menu_items("meshtasticd_radio")
-
-            registry_tags = {tag for tag, _ in registry_items}
-            own_map = {tag: desc for tag, desc in own_items}
-            reg_map = {tag: desc for tag, desc in registry_items}
-            all_map = {**own_map, **reg_map}
-
-            # Apply ordering
-            result = []
-            for tag in _RADIO_ORDERING:
-                if tag in all_map:
-                    result.append((tag, all_map[tag]))
-            # Append any unordered items
-            ordered_set = set(_RADIO_ORDERING)
-            for tag, desc in list(own_items) + list(registry_items):
-                if tag not in ordered_set and (tag, desc) not in result:
-                    result.append((tag, desc))
-
-            result.append(("back", "Back"))
-
-            choice = self.ctx.dialog.menu(
-                "Radio Config",
-                "Configure radio settings:",
-                result
-            )
-
-            if choice is None or choice == "back":
-                break
-
-            # Section headers — just re-display menu
-            if choice.startswith("_") and choice.endswith("_"):
-                continue
-
-            # Try registry sub-handlers first (lora, mqtt, cleanup)
-            if choice in registry_tags:
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("meshtasticd_radio", choice)
-                continue
-
-            # Own inline dispatch
-            own_dispatch = {
-                "owner": ("Set Owner Name", self._set_owner_name),
-                "presets": ("Radio Presets", self._radio_presets_menu),
-                "hardware": ("Device Templates", self._hardware_config_menu),
-            }
-            entry = own_dispatch.get(choice)
-            if entry:
-                self.ctx.safe_call(*entry)
-                continue
-
-            # Cross-handler dispatch
-            if choice == "channels":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("configuration", "channels")
-            elif choice == "failover":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("mesh_networks", "load_balancer")
+        if action == "owner":
+            self._set_owner_name()
+        elif action == "presets":
+            self._radio_presets_menu()
+        elif action == "hardware":
+            self._hardware_config_menu()
 
     # ------------------------------------------------------------------
     # Owner name
