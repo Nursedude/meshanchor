@@ -424,6 +424,51 @@ class TestMeshChatInstaller:
                             assert 'meshchat.py' in content
                             assert 'rnsd.service' in content
 
+    @patch('pathlib.Path.is_file', return_value=True)
+    def test_get_service_python_prefers_venv(self, mock_is_file):
+        """_get_service_python returns venv python when venv exists."""
+        handler = _make_handler()
+        result = handler._get_service_python()
+        assert result == '/opt/meshforge/venv/bin/python3'
+
+    @patch('pathlib.Path.is_file', return_value=False)
+    @patch('shutil.which', return_value='/usr/bin/python3')
+    def test_get_service_python_fallback(self, mock_which, mock_is_file):
+        """_get_service_python falls back to system python without venv."""
+        handler = _make_handler()
+        result = handler._get_service_python()
+        assert result == '/usr/bin/python3'
+
+    @patch('pathlib.Path.is_file', return_value=False)
+    @patch('shutil.which', return_value=None)
+    def test_get_service_python_ultimate_fallback(self, mock_which, mock_is_file):
+        """_get_service_python returns /usr/bin/python3 as last resort."""
+        handler = _make_handler()
+        result = handler._get_service_python()
+        assert result == '/usr/bin/python3'
+
+    def test_service_uses_venv_python_in_unit_file(self):
+        """Service unit file references venv python when venv exists."""
+        handler = _make_handler()
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=__import__('pathlib').Path('/home/testuser')):
+                with patch.object(handler, '_get_service_python',
+                                  return_value='/opt/meshforge/venv/bin/python3'):
+                    with patch('launcher_tui.handlers.meshchat._HAS_SUDO_WRITE', True):
+                        with patch('launcher_tui.handlers.meshchat._sudo_write',
+                                   return_value=(True, 'ok')) as mock_write:
+                            with patch('launcher_tui.handlers.meshchat.enable_service',
+                                       return_value=(True, 'ok')):
+                                handler._install_meshchat_service(
+                                    install_dir, 'testuser')
+                                content = mock_write.call_args[0][1]
+                                assert '/opt/meshforge/venv/bin/python3' in content
+
     def test_meshchat_repo_url(self):
         """MESHCHAT_REPO constant points to correct URL."""
         from launcher_tui.handlers.meshchat import MeshChatHandler
