@@ -76,7 +76,7 @@ EOF
 # Option 2: Install with --break-system-packages (simpler for dedicated Pi)
 setup_system() {
     echo -e "${CYAN}Installing dependencies system-wide...${NC}"
-    pip3 install --user --break-system-packages --timeout 60 -r requirements.txt
+    pip3 install --break-system-packages --timeout 60 -r requirements.txt
 
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
@@ -100,7 +100,7 @@ if check_externally_managed; then
     echo ""
     echo "  2) System packages with --break-system-packages"
     echo "     - Simpler for dedicated MeshForge Pi"
-    echo "     - Installs to ~/.local/lib/python*"
+    echo "     - Installs to system Python packages"
     echo "     - Run directly with python3"
     echo ""
     read -p "Choose [1/2] (default: 1): " choice
@@ -116,7 +116,7 @@ if check_externally_managed; then
 else
     # Standard pip install works
     echo -e "${CYAN}Installing dependencies...${NC}"
-    pip3 install --user -r requirements.txt
+    pip3 install -r requirements.txt
 
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
