@@ -248,8 +248,7 @@ class MeshtasticdConfigHandler(BaseHandler):
         if not overlays:
             print("No active hardware configs in config.d/\n")
             print("Select your hardware from:")
-            print("  Configuration > Available Hardware Configs")
-            print("  Configuration > Advanced meshtasticd Config > Hardware Config")
+            print("  Configuration > Radio Config > Hardware Config")
         else:
             print(f"Found {len(overlays)} active config(s):\n")
             for f in overlays:
@@ -310,7 +309,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                     print(f"\nActive: {', '.join(f.stem for f in active)}")
 
             print(f"\nTotal: {len(configs)} templates")
-            print("\nActivate via: Configuration > Advanced meshtasticd Config > Hardware Config")
+            print("\nActivate via: Configuration > Radio Config > Hardware Config")
 
         self.ctx.wait_for_enter()
 
