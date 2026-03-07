@@ -37,6 +37,8 @@ from handlers._lxmf_utils import ensure_lxmf_exclusive
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
 
+_, _HAS_LXMF = safe_import('LXMF')
+
 logger = logging.getLogger(__name__)
 
 # Import centralized service checking
@@ -321,6 +323,18 @@ class MeshChatHandler(BaseHandler):
 
         # Preflight: check RNS availability
         if not self._check_rns_for_meshchat():
+            return
+
+        # Preflight: check LXMF availability
+        if not _HAS_LXMF:
+            self.ctx.dialog.msgbox(
+                "Missing LXMF Module",
+                "The LXMF Python module is not installed.\n\n"
+                "Install it with:\n"
+                "  pip install lxmf\n\n"
+                "Or install all RNS dependencies:\n"
+                "  pip install -r requirements/rns.txt",
+            )
             return
 
         if _HAS_MESHCHAT_SERVICE:
