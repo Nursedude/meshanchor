@@ -332,7 +332,7 @@ class ServiceOrchestrator:
             "  1. TUI: sudo python3 src/launcher_tui/main.py"
         )
         logger.error(
-            "     → Meshtasticd Config → Hardware Config"
+            "     → meshtasticd → Device Templates"
         )
         logger.error("")
         logger.error(
