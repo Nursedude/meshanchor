@@ -4,8 +4,8 @@ Meshtasticd LoRa Module Handler — SPI/GPIO configuration for LoRa radios.
 Converted from meshtasticd_config_mixin.py (lines 1047-1491) as part of
 the mixin-to-registry migration (Batch 9).
 
-Sub-handler registered in section "meshtasticd", dispatched from
-MeshtasticdConfigHandler's thin dispatcher menu.
+Sub-handler registered in section "meshtasticd_radio", dispatched from
+MeshtasticdRadioHandler's radio config menu.
 """
 
 import logging
@@ -34,7 +34,7 @@ class MeshtasticdLoRaHandler(BaseHandler):
     """TUI handler for LoRa module SPI/GPIO configuration."""
 
     handler_id = "meshtasticd_lora"
-    menu_section = "meshtasticd"
+    menu_section = "meshtasticd_radio"
 
     def menu_items(self):
         return [
