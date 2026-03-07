@@ -45,7 +45,8 @@ class RadioMenuHandler(BaseHandler):
                 try:
                     result = subprocess.run(
                         [cli_path, '--version'],
-                        capture_output=True, timeout=5
+                        capture_output=True, timeout=5,
+                        stdin=subprocess.DEVNULL,
                     )
                     cli_works = result.returncode == 0
                 except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
