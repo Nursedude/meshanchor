@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import termios
 from pathlib import Path
 from typing import Tuple, Optional, List
 
@@ -98,6 +99,15 @@ class DialogBackend:
             # Build command as list args (safe, no shell needed)
             cmd_parts = [self.backend] + [str(a) for a in full_args]
 
+            # Flush stale input from terminal before launching dialog.
+            # Without this, leftover keystrokes (Enter, ESC sequences) from
+            # the previous menu interaction can be read by the new whiptail
+            # instance, causing it to immediately exit or select an item.
+            try:
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+            except (termios.error, ValueError, OSError):
+                pass  # Not a terminal or already closed
+
             # Clear screen before launching dialog so whiptail saves a clean
             # main buffer. Without this, whiptail saves whatever print() output
             # was on the main buffer and restores it on exit — causing the
@@ -116,6 +126,20 @@ class DialogBackend:
             # Read the captured selection
             with open(tmp_path, 'r') as f:
                 output = f.read().strip()
+
+            if result.returncode != 0:
+                try:
+                    term_size = os.get_terminal_size()
+                    term_info = f"{term_size.lines}x{term_size.columns}"
+                except (ValueError, OSError):
+                    term_info = "unknown"
+                logger.warning(
+                    "Dialog exited %d (cmd=%s, term=%s, output=%r)",
+                    result.returncode,
+                    ' '.join(cmd_parts[:6]),
+                    term_info,
+                    output[:80] if output else '',
+                )
 
             return result.returncode, output
 
@@ -202,6 +226,15 @@ class DialogBackend:
         for tag, desc in choices:
             args.extend([tag, desc])
 
+        code, output = self._run(args)
+        if code == 0:
+            return output
+
+        # Retry once on failure — the main menu already has retry logic for
+        # transient dialog failures, but submenus silently return None.
+        # A single retry with a fresh input flush (in _run) catches cases
+        # where stale terminal input caused whiptail to exit immediately.
+        logger.debug("Menu '%s' failed (code=%d), retrying once", title, code)
         code, output = self._run(args)
         if code == 0:
             return output
