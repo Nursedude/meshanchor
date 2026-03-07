@@ -4,6 +4,7 @@ Radio Menu Handler — Meshtastic radio control via CLI.
 Converted from radio_menu_mixin.py as part of the mixin-to-registry migration.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -12,6 +13,8 @@ from pathlib import Path
 from backend import clear_screen
 from handler_protocol import BaseHandler
 from utils.paths import get_real_user_home
+
+logger = logging.getLogger(__name__)
 
 
 class RadioMenuHandler(BaseHandler):
@@ -82,11 +85,11 @@ class RadioMenuHandler(BaseHandler):
             ])
 
             if cli_works:
-                status = f"\n[CLI: {cli_location}]"
+                status = f" [CLI: {cli_location}]"
             elif has_cli:
-                status = f"\n[CLI found but not working: {cli_location}]"
+                status = f" [CLI found but not working: {cli_location}]"
             else:
-                status = "\n[CLI not installed]"
+                status = " [CLI not installed]"
 
             choice = self.ctx.dialog.menu(
                 "Radio Tools",
@@ -95,6 +98,11 @@ class RadioMenuHandler(BaseHandler):
             )
 
             if choice is None or choice == "back":
+                if choice is None:
+                    logger.debug(
+                        "Radio menu returned None (cancel or render failure), items=%d",
+                        len(choices),
+                    )
                 break
 
             # Section headers — just re-display menu
