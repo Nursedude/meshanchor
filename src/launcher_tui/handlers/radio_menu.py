@@ -93,7 +93,7 @@ class RadioMenuHandler(BaseHandler):
 
             choice = self.ctx.dialog.menu(
                 "Radio Tools",
-                f"Meshtastic radio control (terminal-native):{status}",
+                f"Meshtastic radio control:{status}",
                 choices
             )
 
