@@ -782,7 +782,7 @@ WantedBy=multi-user.target
                 "Success",
                 "Native meshtasticd installed!\n\n"
                 "NEXT STEP: Select your HAT config:\n"
-                "  meshtasticd → Hardware Config\n\n"
+                "  meshtasticd → Device Templates\n\n"
                 "Or manually:\n"
                 "  ls /etc/meshtasticd/available.d/\n"
                 "  sudo cp /etc/meshtasticd/available.d/<your-hat>.yaml \\\n"
