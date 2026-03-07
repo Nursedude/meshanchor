@@ -572,17 +572,33 @@ class DashboardHandler(BaseHandler):
         print()
         self.ctx.wait_for_enter()
 
+    # Known alert patterns mapped to remediation guidance.
+    _REMEDIATION_HINTS = {
+        "meshtasticd": "Configuration > Radio Config > Restart Service",
+        "rnsd": "Mesh Networks > RNS > RNS Diagnostics (auto-repair)",
+        "port": "System > Network Tools > Port Listening",
+        "mqtt": "Mesh Networks > MQTT > Broker Profiles",
+        "bridge": "Mesh Networks > Gateway Bridge > Configure",
+        "connection": "Configuration > Radio Config > Connection Test",
+        "identity": "Mesh Networks > Gateway Bridge > Configure",
+    }
+
     def _show_alerts(self):
         """Show current alerts from environment state and EAS."""
         clear_screen()
         print("=== Current Alerts ===\n")
 
+        has_system_alerts = False
+        alert_texts = []
+
         if self.ctx.env_state:
             alerts = self.ctx.env_state.get_alerts()
             if alerts:
+                has_system_alerts = True
                 print("SYSTEM ALERTS:")
                 for alert in alerts:
                     print(f"  \033[0;33m!\033[0m {alert}")
+                    alert_texts.append(alert.lower())
             else:
                 print("  System: No alerts - healthy")
         else:
@@ -604,6 +620,18 @@ class DashboardHandler(BaseHandler):
                 print("  Weather: No active alerts")
         except Exception as e:
             logger.debug("EAS alert check failed: %s", e)
+
+        # Show remediation hints for system alerts
+        if has_system_alerts:
+            combined = " ".join(alert_texts)
+            hints = []
+            for keyword, action in self._REMEDIATION_HINTS.items():
+                if keyword in combined:
+                    hints.append(f"  -> {action}")
+            if hints:
+                print("\nSUGGESTED ACTIONS:")
+                for hint in dict.fromkeys(hints):  # deduplicate, preserve order
+                    print(hint)
 
         print()
         self.ctx.wait_for_enter()
