@@ -883,7 +883,7 @@ class MeshForgeLauncher:
         while True:
             # Legacy items — removed automatically as handlers take over their tags
             legacy = [
-                ("radio", "meshtasticd         Daemon & radio config"),
+                ("radio", "meshtasticd         Radio & service config"),
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
                 ("backup", "Device Backup       Backup/restore configs"),
@@ -924,7 +924,7 @@ class MeshForgeLauncher:
                 ("logs", "Logs                View/follow logs"),
                 ("network", "Network Tools       Ping, ports, interfaces"),
                 ("diagnose", "Diagnostics         System health check"),
-                ("daemon", "Daemon Mode         Start/stop headless NOC"),
+                ("daemon", "MeshForge Daemon    Headless NOC (maps, RNS, chat)"),
                 ("status", "Quick Status        One-shot status display"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
             ]
