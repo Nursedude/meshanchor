@@ -253,6 +253,75 @@ class MeshChatHandler(BaseHandler):
         self.ctx.dialog.msgbox("Installation Failed", error_msg)
         return False
 
+    def _offer_install_meshchat_deps(self, missing: list) -> bool:
+        """Offer to install missing MeshChat Python dependencies.
+
+        Returns True if deps are now available, False if declined or failed.
+        """
+        missing_str = ', '.join(missing)
+        install_dir = self._get_meshchat_install_dir()
+        req_file = install_dir / 'requirements.txt'
+
+        if req_file.exists():
+            install_hint = f"pip install -r {req_file}"
+        else:
+            install_hint = f"pip install {' '.join(missing)}"
+
+        choice = self.ctx.dialog.yesno(
+            "Missing MeshChat Dependencies",
+            f"MeshChat requires Python modules that are not installed:\n"
+            f"  {missing_str}\n\n"
+            f"Without these, the service will crash-loop.\n\n"
+            f"Install now?\n"
+            f"  (runs: {install_hint})",
+        )
+        if not choice:
+            return False
+
+        # Stop crash-looping service before install
+        if self._has_meshchat_systemd_service():
+            if _HAS_SERVICE_CHECK and stop_service:
+                ok, msg = stop_service(self.MESHCHAT_SERVICE_NAME)
+                if ok:
+                    logger.info("Stopped %s before dep install",
+                                self.MESHCHAT_SERVICE_NAME)
+            else:
+                try:
+                    subprocess.run(
+                        ['systemctl', 'stop', self.MESHCHAT_SERVICE_NAME],
+                        capture_output=True, timeout=15,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+        clear_screen()
+        print("=== Installing MeshChat Dependencies ===\n")
+
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
+        success = self._install_meshchat_pip(install_dir, run_as_user)
+
+        if success:
+            service_python = self._get_service_python()
+            still_missing = self._check_meshchat_deps(service_python)
+            if not still_missing:
+                self.ctx.dialog.msgbox(
+                    "Dependencies Installed",
+                    "MeshChat dependencies installed successfully.\n\n"
+                    "Continuing with MeshChat startup...",
+                )
+                return True
+
+        self.ctx.dialog.msgbox(
+            "Installation Failed",
+            f"Failed to install MeshChat dependencies.\n\n"
+            f"Try manually:\n"
+            f"  cd {install_dir}\n"
+            f"  pip install -r requirements.txt",
+        )
+        return False
+
     def _install_lxmf_package(self, run_as_user: str = None) -> tuple:
         """Install the LXMF Python package via pip.
 
@@ -427,6 +496,20 @@ class MeshChatHandler(BaseHandler):
                 print("  WARNING:    Service is crash-looping without LXMF!")
                 print("              Stop service and install LXMF first.")
 
+        # MeshChat Python dependencies status
+        if installed:
+            service_python = self._get_service_python()
+            missing_deps = self._check_meshchat_deps(service_python)
+            if missing_deps:
+                missing_str = ', '.join(missing_deps)
+                print(f"  MeshChat deps: MISSING ({missing_str})")
+                if running:
+                    print("  WARNING:    Service is crash-looping without dependencies!")
+                    install_dir = self._get_meshchat_install_dir()
+                    print(f"              cd {install_dir} && pip install -r requirements.txt")
+            else:
+                print("  MeshChat deps: OK")
+
         # Service details via plugin
         if _HAS_MESHCHAT_SERVICE:
             try:
@@ -494,6 +577,13 @@ class MeshChatHandler(BaseHandler):
             if not self._offer_install_lxmf():
                 return
 
+        # Preflight: check MeshChat's own Python dependencies (aiohttp, etc.)
+        if self._is_meshchat_installed():
+            missing_deps = self._check_meshchat_deps(self._get_service_python())
+            if missing_deps:
+                if not self._offer_install_meshchat_deps(missing_deps):
+                    return
+
         if _HAS_MESHCHAT_SERVICE:
             svc = MeshChatService()
             status = svc.check_status(blocking=True)
@@ -524,12 +614,8 @@ class MeshChatHandler(BaseHandler):
                         f"Web UI: http://127.0.0.1:8000",
                     )
                 else:
-                    self.ctx.dialog.msgbox(
-                        "Start May Have Failed",
-                        f"MeshChat does not appear to be running.\n\n"
-                        f"Check: systemctl status {status.service_name}\n"
-                        f"       journalctl -u {status.service_name} -n 20",
-                    )
+                    # Check journalctl for ModuleNotFoundError
+                    self._handle_start_failure(status.service_name)
                 return
 
         # No systemd service — offer to create one
@@ -611,12 +697,47 @@ class MeshChatHandler(BaseHandler):
                     "Web UI: http://127.0.0.1:8000",
                 )
             else:
-                self.ctx.dialog.msgbox(
-                    "Start May Have Failed",
-                    "MeshChat does not appear to be running.\n\n"
-                    f"Check: systemctl status {self.MESHCHAT_SERVICE_NAME}\n"
-                    f"       journalctl -u {self.MESHCHAT_SERVICE_NAME} -n 20",
+                self._handle_start_failure(self.MESHCHAT_SERVICE_NAME)
+
+    def _handle_start_failure(self, service_name: str):
+        """Inspect journalctl after a failed start and offer to fix.
+
+        Checks for ModuleNotFoundError in recent logs and offers to
+        install missing dependencies automatically.
+        """
+        import re
+
+        try:
+            result = subprocess.run(
+                ['journalctl', '-u', service_name, '-n', '20',
+                 '--no-pager', '-o', 'cat'],
+                capture_output=True, text=True, timeout=10,
+            )
+            if 'ModuleNotFoundError' in result.stdout:
+                match = re.search(
+                    r"No module named '(\w+)'", result.stdout,
                 )
+                mod_name = match.group(1) if match else 'unknown'
+
+                if self.ctx.dialog.yesno(
+                    "Missing Python Module",
+                    f"MeshChat crashed because '{mod_name}' is not installed.\n\n"
+                    f"Install MeshChat dependencies now?",
+                ):
+                    missing = self._check_meshchat_deps()
+                    if not missing:
+                        missing = [mod_name]
+                    self._offer_install_meshchat_deps(missing)
+                return
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        self.ctx.dialog.msgbox(
+            "Start May Have Failed",
+            f"MeshChat does not appear to be running.\n\n"
+            f"Check: systemctl status {service_name}\n"
+            f"       journalctl -u {service_name} -n 20",
+        )
 
     def _stop_meshchat(self):
         """Stop MeshChat service."""
@@ -901,6 +1022,32 @@ class MeshChatHandler(BaseHandler):
         if venv_python.is_file():
             return str(venv_python)
         return shutil.which('python3') or '/usr/bin/python3'
+
+    def _check_meshchat_deps(self, python_path: str = None) -> list:
+        """Check if MeshChat's key Python deps are importable by service Python.
+
+        Returns a list of missing module names (empty = all OK).
+        """
+        if python_path is None:
+            python_path = self._get_service_python()
+
+        # Key deps from MeshChat's requirements.txt that cause crash-loops
+        required_modules = ['aiohttp', 'cryptography']
+        missing = []
+
+        for mod in required_modules:
+            try:
+                result = subprocess.run(
+                    [python_path, '-c', f'import {mod}'],
+                    capture_output=True,
+                    timeout=10,
+                )
+                if result.returncode != 0:
+                    missing.append(mod)
+            except (subprocess.SubprocessError, OSError):
+                missing.append(mod)
+
+        return missing
 
     def _check_lxmf_with_python(self, python_path: str = None) -> bool:
         """Check if LXMF is importable by the service's Python interpreter.
