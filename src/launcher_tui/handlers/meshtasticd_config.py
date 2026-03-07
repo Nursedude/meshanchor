@@ -1,8 +1,9 @@
 """
-Meshtasticd Service Handler — Daemon lifecycle, config files, logs.
+Meshtasticd Handler — Unified menu for radio, service, and config management.
 
-Split from the former combined "Daemon & radio config" handler. Radio
-configuration (presets, hardware, owner) moved to meshtasticd_radio.py.
+Single entry point in the Configuration menu. Merges own inline items
+(service lifecycle, config files) with sub-handler items (radio, lora,
+mqtt, nodedb) from the "meshtasticd" registry section.
 
 Shared module-level utilities (read_overlay, write_overlay, _glob_yaml, etc.)
 remain here since sub-handlers import them.
@@ -51,6 +52,8 @@ def _glob_yaml(directory: Path) -> list:
 def _is_overrides(path: Path) -> bool:
     """Check if a path is the meshforge overrides file."""
     return path.name in OVERRIDES_NAMES
+
+
 OVERLAY_HEADER = (
     "# MeshForge configuration overrides\n"
     "# These settings override /etc/meshtasticd/config.yaml\n"
@@ -156,66 +159,88 @@ def ensure_meshtasticd_config():
         logger.debug("meshtasticd config auto-create failed: %s", e)
 
 
-# Desired menu order for the service submenu.
-_SERVICE_ORDERING = [
-    "_svc_", "web", "status", "test", "restart", "logs",
+# Desired display order for the unified meshtasticd submenu.
+# Section headers (_xxx_) and own items are defined inline;
+# sub-handler items (owner, presets, hardware, lora, mqtt, cleanup)
+# come from the "meshtasticd" registry section.
+_MESHTASTICD_ORDERING = [
+    "_svc_", "status", "test", "restart", "logs",
+    "_radio_", "owner", "presets", "lora",
+    "_hw_", "hardware",
+    "_dev_", "mqtt", "cleanup",
     "_cfg_", "view", "overlays", "edit",
-    "_adv_", "wizard",
 ]
 
 
 class MeshtasticdConfigHandler(BaseHandler):
-    """TUI handler for meshtasticd service lifecycle and config files."""
+    """TUI handler for meshtasticd — unified radio, service, and config menu."""
 
     handler_id = "meshtasticd_config"
     menu_section = "configuration"
 
     def menu_items(self):
         return [
-            ("mtd-service", "meshtasticd Service  Status, logs, config files", "meshtastic"),
+            ("meshtasticd", "meshtasticd          Radio, service, config", "meshtastic"),
         ]
 
     def execute(self, action):
-        if action == "mtd-service":
-            self._service_menu()
+        if action == "meshtasticd":
+            self._meshtasticd_menu()
 
     # ------------------------------------------------------------------
-    # Service submenu
+    # Unified meshtasticd submenu
     # ------------------------------------------------------------------
 
-    def _service_menu(self):
-        """meshtasticd service management menu."""
+    def _meshtasticd_menu(self):
+        """Unified meshtasticd menu: service, radio, hardware, config files."""
         ensure_meshtasticd_config()
 
         while True:
+            # Own inline items (service lifecycle + config files)
             own_items = [
                 ("_svc_", "--- Service ---"),
-                ("web", "Web Client (Full Config)"),
                 ("status", "Service Status"),
                 ("test", "Connection Test"),
                 ("restart", "Restart Service"),
                 ("logs", "Service Logs"),
+                ("_radio_", "--- Radio ---"),
+                ("_hw_", "--- Hardware ---"),
+                ("_dev_", "--- Device Config ---"),
                 ("_cfg_", "--- Config Files ---"),
                 ("view", "View Active Config"),
                 ("overlays", "View config.d/ Overlays"),
                 ("edit", "Edit Config Files"),
-                ("_adv_", "--- Advanced ---"),
-                ("wizard", "Run Setup Wizard"),
             ]
 
+            # Merge with registry sub-handler items
+            # (owner, presets, hardware from meshtasticd_radio;
+            #  lora from meshtasticd_lora; mqtt from meshtasticd_device_mqtt;
+            #  cleanup from meshtasticd_nodedb)
+            registry_items = []
+            if self.ctx.registry:
+                registry_items = self.ctx.registry.get_menu_items("meshtasticd")
+
+            registry_tags = {tag for tag, _ in registry_items}
             own_map = {tag: desc for tag, desc in own_items}
+            reg_map = {tag: desc for tag, desc in registry_items}
+            all_map = {**own_map, **reg_map}
 
             # Apply ordering
             result = []
-            for tag in _SERVICE_ORDERING:
-                if tag in own_map:
-                    result.append((tag, own_map[tag]))
+            for tag in _MESHTASTICD_ORDERING:
+                if tag in all_map:
+                    result.append((tag, all_map[tag]))
+            # Append any unordered items
+            ordered_set = set(_MESHTASTICD_ORDERING)
+            for tag, desc in list(own_items) + list(registry_items):
+                if tag not in ordered_set and (tag, desc) not in result:
+                    result.append((tag, desc))
 
             result.append(("back", "Back"))
 
             choice = self.ctx.dialog.menu(
-                "meshtasticd Service",
-                "Service lifecycle and config files:",
+                "meshtasticd",
+                "Configure meshtasticd daemon:",
                 result
             )
 
@@ -226,9 +251,15 @@ class MeshtasticdConfigHandler(BaseHandler):
             if choice.startswith("_") and choice.endswith("_"):
                 continue
 
+            # Try registry sub-handlers first (owner, presets, hardware,
+            # lora, mqtt, cleanup)
+            if choice in registry_tags:
+                if self.ctx.registry:
+                    self.ctx.registry.dispatch("meshtasticd", choice)
+                continue
+
             # Own inline dispatch
             own_dispatch = {
-                "web": ("Web Client", self._show_web_client_info),
                 "status": ("Service Status", self._meshtasticd_status),
                 "test": ("Connection Test", self._connection_test),
                 "restart": ("Restart Service", self._restart_meshtasticd),
@@ -240,12 +271,6 @@ class MeshtasticdConfigHandler(BaseHandler):
             entry = own_dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
-                continue
-
-            # Cross-handler dispatch
-            if choice == "wizard":
-                if self.ctx.registry:
-                    self.ctx.registry.dispatch("configuration", "wizard")
 
     # ------------------------------------------------------------------
     # View methods
@@ -298,8 +323,7 @@ class MeshtasticdConfigHandler(BaseHandler):
         overlays = sorted(_glob_yaml(config_d))
         if not overlays:
             print("No active hardware configs in config.d/\n")
-            print("Select your hardware from:")
-            print("  Configuration > Radio Config > Device Templates")
+            print("Select your hardware from Device Templates.")
         else:
             print(f"Found {len(overlays)} active config(s):\n")
             for f in overlays:
@@ -317,41 +341,8 @@ class MeshtasticdConfigHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     # ------------------------------------------------------------------
-    # General operations
+    # Service operations
     # ------------------------------------------------------------------
-
-    def _show_web_client_info(self):
-        """Show meshtasticd web client info with URL."""
-        # Try WebClientHandler first
-        if self.ctx.registry:
-            handler = self.ctx.registry.get_handler("web_client")
-            if handler:
-                handler.execute("web")
-                return
-
-        # Fallback: show URL info
-        import socket
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-            if local_ip.startswith('127.'):
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(2)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-        except Exception:
-            local_ip = "localhost"
-
-        self.ctx.dialog.msgbox(
-            "Web Client",
-            f"meshtasticd Web Client\n\n"
-            f"URL: https://{local_ip}:9443\n\n"
-            f"The web client provides full configuration:\n"
-            f"  Config > LoRa > Region  (US, EU_868, etc.)\n"
-            f"  Config > LoRa > Preset  (LONG_FAST, etc.)\n"
-            f"  Config > Channels       (PSK, name)\n\n"
-            f"The web client gives full access to all\n"
-            f"meshtasticd settings, maps, and messaging."
-        )
 
     def _meshtasticd_status(self):
         """Show meshtasticd service status."""
@@ -417,7 +408,7 @@ class MeshtasticdConfigHandler(BaseHandler):
                 text += f"\n  ... and {len(active_configs) - 5} more"
 
             if not active_configs and available_count > 0:
-                text += "\n  (none — select hardware from Radio Config > Device Templates)"
+                text += "\n  (none — select from Device Templates)"
 
             self.ctx.dialog.msgbox("Meshtasticd Status", text)
 
@@ -698,8 +689,8 @@ class MeshtasticdConfigHandler(BaseHandler):
             if not reapply:
                 self.ctx.dialog.msgbox("Info",
                     "Settings NOT re-applied.\n\n"
-                    "You can re-apply manually via the\n"
-                    "Radio Config > Radio Presets or Owner Name menus.")
+                    "You can re-apply manually via\n"
+                    "Radio Presets or Owner Name.")
                 return
 
             self.ctx.dialog.infobox("Applying", "Re-applying saved device settings...")

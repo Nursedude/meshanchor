@@ -878,13 +878,12 @@ class MeshForgeLauncher:
 
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
-        _ORDERING = ["mtd-service", "mtd-radio", "channels", "rns-config", "rnode",
+        _ORDERING = ["meshtasticd", "channels", "rns-config", "rnode",
                       "backup", "updates", "webhooks", "meshforge", "config-api", "wizard"]
         while True:
             # Legacy items — removed automatically as handlers take over their tags
             legacy = [
-                ("mtd-service", "meshtasticd Service  Status, logs, config files"),
-                ("mtd-radio", "Radio Config        Presets, hardware, LoRa"),
+                ("meshtasticd", "meshtasticd          Radio, service, config"),
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
                 ("backup", "Device Backup       Backup/restore configs"),
