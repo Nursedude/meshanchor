@@ -221,7 +221,8 @@ class DialogBackend:
         args = [
             '--title', title,
             '--menu', text,
-            str(h), str(w), str(lh)
+            str(h), str(w), str(lh),
+            '--',  # End of options — menu items are positional args
         ]
         for tag, desc in choices:
             args.extend([tag, desc])
@@ -305,7 +306,8 @@ class DialogBackend:
         args = [
             '--title', title,
             '--checklist', text,
-            str(h), str(w), str(lh)
+            str(h), str(w), str(lh),
+            '--',  # End of options — checklist items are positional args
         ]
         for tag, desc, selected in choices:
             status = 'ON' if selected else 'OFF'
