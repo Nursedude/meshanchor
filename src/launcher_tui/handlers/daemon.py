@@ -1,6 +1,9 @@
 """
 Daemon mode handler — start/stop/status for headless NOC services.
 
+The MeshForge daemon runs gateway bridge, maps, RNS, NomadNet, MeshChat
+and other services in the background without the TUI.
+
 Batch 10b: Extracted from MeshForgeLauncher._daemon_menu() in main.py.
 """
 
@@ -12,19 +15,20 @@ import sys
 from pathlib import Path
 
 from handler_protocol import BaseHandler
+from backend import clear_screen
 
 logger = logging.getLogger(__name__)
 
 
 class DaemonHandler(BaseHandler):
-    """Daemon Mode — start/stop headless NOC services."""
+    """MeshForge Daemon — headless NOC services."""
 
     handler_id = "daemon"
     menu_section = "system"
 
     def menu_items(self):
         return [
-            ("daemon", "Daemon Mode         Start/stop headless NOC", None),
+            ("daemon", "MeshForge Daemon    Headless NOC (maps, RNS, chat)", None),
         ]
 
     def execute(self, action):
@@ -32,9 +36,7 @@ class DaemonHandler(BaseHandler):
             self._daemon_menu()
 
     def _daemon_menu(self):
-        """Daemon Mode - Start/stop headless NOC services."""
-        from utils.paths import get_real_user_home
-
+        """MeshForge Daemon - headless NOC service manager."""
         while True:
             # Check if daemon is running
             daemon_status = "unknown"
@@ -56,12 +58,15 @@ class DaemonHandler(BaseHandler):
                 ("status", f"Status              Daemon: {daemon_status}"),
                 ("start", "Start Daemon        Launch headless NOC"),
                 ("stop", "Stop Daemon         Stop headless NOC"),
+                ("config", "View Config         Enabled services & settings"),
+                ("logs", "Daemon Logs         View daemon output"),
                 ("back", "Back"),
             ]
 
             choice = self.ctx.dialog.menu(
-                "Daemon Mode",
-                "Headless NOC service manager:",
+                "MeshForge Daemon",
+                "Headless NOC — runs services without the TUI:\n"
+                "  Gateway bridge, maps, RNS, NomadNet, MeshChat",
                 choices
             )
 
@@ -74,6 +79,10 @@ class DaemonHandler(BaseHandler):
                 self._daemon_start()
             elif choice == "stop":
                 self._daemon_stop()
+            elif choice == "config":
+                self._daemon_view_config()
+            elif choice == "logs":
+                self._daemon_logs()
 
     def _daemon_show_status(self):
         """Show daemon status in a dialog."""
@@ -153,3 +162,96 @@ class DaemonHandler(BaseHandler):
             self.ctx.dialog.msgbox("Stop Daemon", output)
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Failed to stop daemon:\n{e}")
+
+    def _daemon_view_config(self):
+        """Show daemon configuration — which services are enabled."""
+        from utils.paths import get_real_user_home
+
+        try:
+            from daemon_config import DaemonConfig, SYSTEM_CONFIG, USER_CONFIG_RELATIVE
+            config = DaemonConfig.load()
+
+            user_config = get_real_user_home() / USER_CONFIG_RELATIVE
+
+            # Show which config file is active
+            config_source = "defaults"
+            if user_config.exists():
+                config_source = str(user_config)
+            elif SYSTEM_CONFIG.exists():
+                config_source = str(SYSTEM_CONFIG)
+
+            services = [
+                ("Gateway Bridge", config.gateway_enabled, ""),
+                ("Health Probe", config.health_probe_enabled,
+                 f" (every {config.health_probe_interval}s)"),
+                ("MQTT Monitor", config.mqtt_enabled,
+                 f" ({config.mqtt_broker}:{config.mqtt_port})"),
+                ("Config API", config.config_api_enabled,
+                 f" (port {config.config_api_port})"),
+                ("Map Server", config.map_server_enabled,
+                 f" (port {config.map_server_port})"),
+                ("Telemetry", config.telemetry_enabled,
+                 f" (every {config.telemetry_poll_interval_minutes}min)"),
+                ("Node Tracker", config.node_tracker_enabled, ""),
+            ]
+
+            lines = [f"Config: {config_source}", ""]
+            lines.append("Services:")
+            for name, enabled, detail in services:
+                marker = "[ON] " if enabled else "[OFF]"
+                lines.append(f"  {marker} {name}{detail}")
+
+            lines.append("")
+            lines.append(f"Watchdog: every {config.watchdog_interval}s, "
+                         f"max {config.max_restarts} restarts")
+            lines.append(f"Log level: {config.log_level}")
+
+            if config_source == "defaults":
+                lines.append("")
+                lines.append("No config file found. Using defaults.")
+                lines.append(f"Create: {user_config}")
+
+            self.ctx.dialog.msgbox("Daemon Config", "\n".join(lines))
+
+        except Exception as e:
+            self.ctx.dialog.msgbox("Error", f"Could not load daemon config:\n{e}")
+
+    def _daemon_logs(self):
+        """Show daemon logs."""
+        clear_screen()
+        print("=== MeshForge Daemon Logs (last 100 lines) ===\n")
+
+        try:
+            # Try journalctl first (systemd)
+            result = subprocess.run(
+                ['journalctl', '-u', 'meshforge', '-n', '100',
+                 '--no-pager', '--output=short-iso'],
+                capture_output=True, text=True, timeout=10
+            )
+            output = result.stdout.strip()
+            if output and "No entries" not in output:
+                print(output)
+            else:
+                # Fall back to daemon log file
+                from utils.paths import get_real_user_home
+                log_file = get_real_user_home() / ".local" / "share" / "meshforge" / "daemon.log"
+                if log_file.exists():
+                    lines = log_file.read_text().splitlines()
+                    for line in lines[-100:]:
+                        print(line)
+                else:
+                    print("No daemon logs found.")
+                    print("")
+                    print("The daemon writes logs to journald (if running as")
+                    print("a systemd service) or to stderr (foreground mode).")
+                    print("")
+                    print(f"Log file path: {log_file}")
+        except FileNotFoundError:
+            print("journalctl not available (not a systemd system).")
+        except subprocess.TimeoutExpired:
+            print("Timed out reading logs.")
+        except Exception as e:
+            print(f"Failed to read logs: {e}")
+
+        print()
+        self.ctx.wait_for_enter()
