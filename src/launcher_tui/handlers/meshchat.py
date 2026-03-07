@@ -198,17 +198,41 @@ class MeshChatHandler(BaseHandler):
         if not choice:
             return False
 
+        # Stop crash-looping service before install attempt
+        if self._has_meshchat_systemd_service():
+            if _HAS_SERVICE_CHECK and stop_service:
+                ok, msg = stop_service(self.MESHCHAT_SERVICE_NAME)
+                if ok:
+                    logger.info("Stopped %s before LXMF install",
+                                self.MESHCHAT_SERVICE_NAME)
+            else:
+                try:
+                    subprocess.run(
+                        ['systemctl', 'stop', self.MESHCHAT_SERVICE_NAME],
+                        capture_output=True, timeout=15,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
         clear_screen()
         print("=== Installing LXMF Module ===\n")
 
-        success, error_detail = self._install_lxmf_package()
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+        success, error_detail = self._install_lxmf_package(
+            run_as_user=run_as_user,
+        )
 
         if success:
-            # Invalidate import caches so Python finds newly-installed packages
-            importlib.invalidate_caches()
-            # Re-check import after install
-            _, _HAS_LXMF = safe_import('LXMF')
-            if _HAS_LXMF:
+            # Verify using the SERVICE python, not the current process.
+            # The current process may not have the venv on sys.path.
+            service_python = self._get_service_python()
+            if self._check_lxmf_with_python(service_python):
+                # Best-effort update of in-process flag for this session
+                importlib.invalidate_caches()
+                _, _HAS_LXMF = safe_import('LXMF')
+                # Ensure systemd service uses the correct Python
+                self._verify_service_python_path()
                 self.ctx.dialog.msgbox(
                     "LXMF Installed",
                     "LXMF module installed successfully.\n\n"
@@ -229,12 +253,18 @@ class MeshChatHandler(BaseHandler):
         self.ctx.dialog.msgbox("Installation Failed", error_msg)
         return False
 
-    def _install_lxmf_package(self) -> tuple:
+    def _install_lxmf_package(self, run_as_user: str = None) -> tuple:
         """Install the LXMF Python package via pip.
+
+        Args:
+            run_as_user: If set and not using venv, run pip as this user
+                so packages land in the correct site-packages.
 
         Returns (success: bool, error_detail: str).
         """
         pip_cmd = self._get_pip_command()
+        venv_pip = Path('/opt/meshforge/venv/bin/pip')
+        using_venv = venv_pip.exists()
 
         # Build the base install command
         if 'install' in pip_cmd:
@@ -255,6 +285,11 @@ class MeshChatHandler(BaseHandler):
                 'cryptography>=45.0.7,<47',
                 'pyopenssl>=25.3.0',
             ]
+
+        # When NOT using venv and running as root via sudo, install as the
+        # service user so packages are visible to the systemd service.
+        if run_as_user and not using_venv:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
 
         print(f"  Running: {' '.join(cmd)}\n")
 
@@ -388,6 +423,9 @@ class MeshChatHandler(BaseHandler):
                 print("  LXMF:       Installed")
         else:
             print("  LXMF:       NOT INSTALLED (pip install -r requirements/rns.txt)")
+            if running:
+                print("  WARNING:    Service is crash-looping without LXMF!")
+                print("              Stop service and install LXMF first.")
 
         # Service details via plugin
         if _HAS_MESHCHAT_SERVICE:
@@ -863,6 +901,60 @@ class MeshChatHandler(BaseHandler):
         if venv_python.is_file():
             return str(venv_python)
         return shutil.which('python3') or '/usr/bin/python3'
+
+    def _check_lxmf_with_python(self, python_path: str = None) -> bool:
+        """Check if LXMF is importable by the service's Python interpreter.
+
+        Uses subprocess to test the import in the correct Python environment,
+        avoiding false negatives when the current process's sys.path differs
+        from the service's (e.g., sudo python3 vs venv python3).
+        """
+        if python_path is None:
+            python_path = self._get_service_python()
+        try:
+            result = subprocess.run(
+                [python_path, '-c', 'import LXMF'],
+                capture_output=True,
+                timeout=10,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("LXMF import check failed for %s: %s", python_path, e)
+            return False
+
+    def _verify_service_python_path(self):
+        """Check if the systemd service file uses the correct Python.
+
+        If ExecStart uses a different Python than _get_service_python(),
+        regenerate the service file so the service can find LXMF.
+        """
+        service_path = Path(
+            f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
+        )
+        if not service_path.exists():
+            return
+
+        try:
+            content = service_path.read_text()
+        except (IOError, OSError):
+            return
+
+        expected_python = self._get_service_python()
+
+        for line in content.splitlines():
+            if line.strip().startswith('ExecStart='):
+                exec_start = line.strip().split('=', 1)[1]
+                current_python = exec_start.split()[0] if exec_start else ''
+                if current_python != expected_python:
+                    logger.warning(
+                        "Service uses %s but pip target is %s",
+                        current_python, expected_python,
+                    )
+                    install_dir = self._get_meshchat_install_dir()
+                    sudo_user = os.environ.get('SUDO_USER')
+                    run_as = sudo_user if sudo_user and sudo_user != 'root' else None
+                    self._install_meshchat_service(install_dir, run_as)
+                break
 
     def _install_meshchat(self):
         """Automated MeshChat installation.
