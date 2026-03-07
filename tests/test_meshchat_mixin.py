@@ -617,6 +617,8 @@ class TestMeshChatCreateService:
         handler = _make_handler()
         handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
         handler._check_rns_for_meshchat = MagicMock(return_value=True)
+        handler._check_meshchat_deps = MagicMock(return_value=[])
+        handler._is_meshchat_installed = MagicMock(return_value=True)
         handler._create_meshchat_service = MagicMock()
 
         mock_status = MagicMock()
@@ -637,6 +639,8 @@ class TestMeshChatCreateService:
         handler = _make_handler()
         handler._ensure_lxmf_exclusive = MagicMock(return_value=True)
         handler._check_rns_for_meshchat = MagicMock(return_value=True)
+        handler._check_meshchat_deps = MagicMock(return_value=[])
+        handler._is_meshchat_installed = MagicMock(return_value=True)
 
         mock_status = MagicMock()
         mock_status.running = False
