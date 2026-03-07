@@ -31,7 +31,7 @@ class MeshtasticdRadioHandler(BaseHandler):
         return [
             ("owner", "Set Owner/Node Name", "meshtastic"),
             ("presets", "Radio Presets (LoRa)", "meshtastic"),
-            ("hardware", "Device Templates", "meshtastic"),
+            ("hardware", "Select Radio Hardware", "meshtastic"),
         ]
 
     def execute(self, action):
@@ -342,12 +342,16 @@ class MeshtasticdRadioHandler(BaseHandler):
             choices.append(("_usb_", f"--- USB Radios ({len(usb_configs)}) ---"))
             for cfg in usb_configs:
                 status = " [ACTIVE]" if cfg.name in active else ""
-                choices.append((cfg.name, f"  {cfg.stem}{status}"))
+                # Sanitize tag: prefix with 'f:' if name starts with '-'
+                # to prevent whiptail interpreting it as a flag
+                tag = f"f:{cfg.name}" if cfg.name.startswith("-") else cfg.name
+                choices.append((tag, f"  {cfg.stem}{status}"))
 
             choices.append(("_spi_", f"--- SPI HATs ({len(spi_configs)}) ---"))
             for cfg in spi_configs:
                 status = " [ACTIVE]" if cfg.name in active else ""
-                choices.append((cfg.name, f"  {cfg.stem}{status}"))
+                tag = f"f:{cfg.name}" if cfg.name.startswith("-") else cfg.name
+                choices.append((tag, f"  {cfg.stem}{status}"))
 
             choices.append(("view", "View Config Details"))
             choices.append(("remove", "Remove Active Config(s)"))
@@ -356,7 +360,7 @@ class MeshtasticdRadioHandler(BaseHandler):
             active_display = ', '.join(sorted(active_names_set)) if active_names_set else 'none'
 
             choice = self.ctx.dialog.menu(
-                "Device Templates",
+                "Select Radio Hardware",
                 f"Total: {len(available)} templates | "
                 f"Active: {active_display}\n\n"
                 "Select hardware configuration to activate:",
@@ -372,7 +376,9 @@ class MeshtasticdRadioHandler(BaseHandler):
             elif choice == "remove":
                 self._remove_active_hardware_config(config_d, active_names_set)
             else:
-                self._activate_hardware_config(choice, available_dir, config_d)
+                # Restore sanitized tag (remove 'f:' prefix if present)
+                config_name = choice[2:] if choice.startswith("f:") else choice
+                self._activate_hardware_config(config_name, available_dir, config_d)
 
     def _activate_hardware_config(self, config_name: str, available_dir: Path, config_d: Path):
         """Activate a hardware configuration."""
