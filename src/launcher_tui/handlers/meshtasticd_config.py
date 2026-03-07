@@ -1020,10 +1020,9 @@ class MeshtasticdConfigHandler(BaseHandler):
         # 2. TCP port 4403
         tcp_ok = False
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect(('127.0.0.1', 4403))
-            sock.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(3)
+                sock.connect(('127.0.0.1', 4403))
             tcp_ok = True
             print("  [OK]   TCP port 4403: reachable")
         except OSError as e:

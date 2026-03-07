@@ -180,6 +180,7 @@ class BackupHandler(BaseHandler):
             backup_dir.mkdir(parents=True, exist_ok=True)
             with tarfile.open(archive_path, "w:gz") as tar:
                 tar.add(str(config_dir), arcname="meshforge")
+            archive_path.chmod(0o600)  # May contain credentials
             self.ctx.dialog.msgbox(
                 "Backup Created",
                 f"Full config backup saved!\n\n"
