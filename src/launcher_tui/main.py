@@ -883,7 +883,7 @@ class MeshForgeLauncher:
         while True:
             # Legacy items — removed automatically as handlers take over their tags
             legacy = [
-                ("radio", "Radio Config        meshtasticd settings"),
+                ("radio", "meshtasticd         Daemon & radio config"),
                 ("channels", "Channel Config      Meshtastic channels"),
                 ("rns-config", "RNS Config          Reticulum settings"),
                 ("backup", "Device Backup       Backup/restore configs"),
