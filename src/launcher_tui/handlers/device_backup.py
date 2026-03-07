@@ -4,10 +4,18 @@ Device Backup Handler — Backup and restore device configurations.
 Converted from device_backup_mixin.py as part of the mixin-to-registry migration.
 """
 
+import datetime
+import logging
+import tarfile
+from pathlib import Path
+
 from backend import clear_screen
 from handler_protocol import BaseHandler
 from commands.device_backup import create_backup, list_backups, get_backup_dir
 from commands.device_backup import restore_backup, delete_backup
+from utils.paths import get_real_user_home
+
+logger = logging.getLogger(__name__)
 
 
 class BackupHandler(BaseHandler):
@@ -29,6 +37,7 @@ class BackupHandler(BaseHandler):
         while True:
             choices = [
                 ("create", "Create Backup       Backup current device"),
+                ("full", "Full Config Backup  MeshForge + device configs"),
                 ("list", "List Backups        View saved backups"),
                 ("restore", "Restore Backup      Restore from backup"),
                 ("delete", "Delete Backup       Remove old backups"),
@@ -46,6 +55,7 @@ class BackupHandler(BaseHandler):
 
             dispatch = {
                 "create": ("Create Backup", self._create_device_backup),
+                "full": ("Full Config Backup", self._full_config_backup),
                 "list": ("List Backups", self._list_device_backups),
                 "restore": ("Restore Backup", self._restore_device_backup),
                 "delete": ("Delete Backup", self._delete_device_backup),
@@ -129,6 +139,55 @@ class BackupHandler(BaseHandler):
                 "Backup Failed",
                 f"Could not create backup:\n\n{result['error']}"
             )
+
+    def _full_config_backup(self):
+        """Archive all MeshForge configs (~/.config/meshforge/) to backup dir."""
+        config_dir = get_real_user_home() / ".config" / "meshforge"
+        backup_dir = get_backup_dir()
+
+        if not config_dir.exists():
+            self.ctx.dialog.msgbox(
+                "No Config",
+                f"MeshForge config directory not found:\n{config_dir}\n\n"
+                "Nothing to back up.")
+            return
+
+        # Count files to back up
+        config_files = list(config_dir.rglob("*"))
+        file_count = sum(1 for f in config_files if f.is_file())
+        if file_count == 0:
+            self.ctx.dialog.msgbox("Empty", "Config directory exists but has no files.")
+            return
+
+        confirm = self.ctx.dialog.yesno(
+            "Full Config Backup",
+            f"Back up all MeshForge configuration?\n\n"
+            f"Source: {config_dir}\n"
+            f"Files:  {file_count}\n\n"
+            "Includes: gateway config, broker profiles,\n"
+            "MQTT settings, deployment profile, app settings.\n\n"
+            f"Saved to: {backup_dir}/",
+        )
+
+        if not confirm:
+            return
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"meshforge-config-{timestamp}.tar.gz"
+        archive_path = backup_dir / archive_name
+
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(archive_path, "w:gz") as tar:
+                tar.add(str(config_dir), arcname="meshforge")
+            self.ctx.dialog.msgbox(
+                "Backup Created",
+                f"Full config backup saved!\n\n"
+                f"Archive: {archive_path}\n"
+                f"Files:   {file_count}\n\n"
+                "Restore: extract to ~/.config/meshforge/")
+        except Exception as e:
+            self.ctx.dialog.msgbox("Error", f"Backup failed:\n{e}")
 
     def _list_device_backups(self):
         backups = list_backups()

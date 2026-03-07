@@ -150,6 +150,24 @@ class ServiceMenuHandler(BaseHandler):
         if not gw_id.exists():
             issues.append("Gateway identity not created yet")
 
+        # 4. Validate gateway config
+        try:
+            from gateway.config import GatewayConfig
+            gw_config = GatewayConfig.load()
+            is_valid, errors = gw_config.validate()
+            if not is_valid:
+                first_err = errors[0].message if errors else "unknown error"
+                issues.append(f"Gateway config invalid: {first_err}")
+        except FileNotFoundError:
+            issues.append("Gateway config not found (run Gateway > Configure first)")
+        except Exception as e:
+            logger.debug("Gateway config validation failed: %s", e)
+
+        # 5. Check meshtasticd is reachable
+        mt_status = check_service('meshtasticd')
+        if not mt_status.available:
+            issues.append("meshtasticd is not running (required for Meshtastic connectivity)")
+
         if not issues:
             return True
 
