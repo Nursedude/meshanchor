@@ -46,6 +46,24 @@ def get_interface_templates() -> CommandResult:
                 'target_port': '4242'
             }
         },
+        'tcp_rns_amsterdam': {
+            'name': 'RNS Testnet Amsterdam',
+            'description': 'Official RNS testnet (Amsterdam, NL)',
+            'type': 'TCPClientInterface',
+            'settings': {
+                'target_host': 'amsterdam.connect.reticulum.network',
+                'target_port': '4965'
+            }
+        },
+        'tcp_rns_betweentheborders': {
+            'name': 'RNS BetweenTheBorders',
+            'description': 'Community RNS node (USA)',
+            'type': 'TCPClientInterface',
+            'settings': {
+                'target_host': 'reticulum.betweentheborders.com',
+                'target_port': '4242'
+            }
+        },
         'serial': {
             'name': 'Serial Link',
             'description': 'Direct serial/USB connection',
