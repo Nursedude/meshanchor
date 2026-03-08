@@ -1910,11 +1910,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 6  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 7  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 6
+# meshforge_wrapper_version: 7
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1924,8 +1924,8 @@ Fixes applied:
    (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
 3. Monkey-patches RNS RPC methods to catch ConnectionRefusedError at runtime
    (returns safe empty values instead of crashing the web UI)
-4. Monkey-patches datetime.strptime to handle Peewee datetime objects
-   (prevents TypeError when meshchat.py passes datetime to strptime)
+4. Monkey-patches datetime.strptime and datetime.fromisoformat to handle
+   Peewee datetime objects (prevents TypeError in meshchat.py)
 
 Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
@@ -2012,9 +2012,9 @@ except ImportError:
     pass  # RNS not installed — meshchat.py will fail on its own
 
 
-# --- Fix 4: Resilient datetime.strptime (handles Peewee datetime objects) ---
+# --- Fix 4: Resilient datetime parsing (handles Peewee datetime objects) ---
 # datetime.datetime is a C type — can't set attributes on it directly.
-# Instead, replace it in the module with a subclass that overrides strptime.
+# Instead, replace it in the module with a subclass that overrides parsing methods.
 # meshchat.py's "from datetime import datetime" picks up the patched version.
 class _PatchedDatetime(datetime.datetime):
     @classmethod
@@ -2026,6 +2026,16 @@ class _PatchedDatetime(datetime.datetime):
                 date_string.year, date_string.month, date_string.day
             )
         return super().strptime(date_string, format_str)
+
+    @classmethod
+    def fromisoformat(cls, date_string):
+        if isinstance(date_string, datetime.datetime):
+            return date_string
+        if isinstance(date_string, datetime.date):
+            return datetime.datetime(
+                date_string.year, date_string.month, date_string.day
+            )
+        return super().fromisoformat(date_string)
 
 
 datetime.datetime = _PatchedDatetime
