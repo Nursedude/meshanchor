@@ -1,8 +1,11 @@
 """
 MeshChat HTTP Client
 
-Provides Python interface to MeshChat's HTTP/WebSocket API.
+Provides Python interface to MeshChat's REST + WebSocket API (v1).
 All network operations have timeouts and proper error handling.
+
+API reference: github.com/liamcottle/reticulum-meshchat
+Endpoints use /api/v1/ prefix.
 """
 
 import json
@@ -38,29 +41,61 @@ class MeshChatAPIError(MeshChatError):
 
 @dataclass
 class MeshChatPeer:
-    """Represents a peer discovered by MeshChat."""
+    """Represents a peer discovered by MeshChat (from /api/v1/announces)."""
     destination_hash: str
     display_name: Optional[str] = None
     last_announce: Optional[datetime] = None
     is_online: bool = False
     app_data: Optional[Dict[str, Any]] = None
+    identity_hash: Optional[str] = None
+    aspect: Optional[str] = None
+    snr: Optional[float] = None
+    rssi: Optional[float] = None
+    quality: Optional[float] = None
 
     @classmethod
     def from_api(cls, data: Dict[str, Any]) -> 'MeshChatPeer':
-        """Create peer from API response."""
+        """Create peer from MeshChat announce API response.
+
+        MeshChat announces contain: destination_hash, identity_hash,
+        aspect, app_data, snr, rssi, quality, created_at, updated_at.
+        """
+        # Parse timestamp from updated_at/created_at (Unix timestamp or ISO string)
         last_announce = None
-        if data.get('last_announce'):
+        ts_field = (data.get('updated_at') or data.get('created_at')
+                    or data.get('last_announce'))
+        if ts_field is not None:
             try:
-                last_announce = datetime.fromisoformat(data['last_announce'])
-            except (ValueError, TypeError):
+                if isinstance(ts_field, (int, float)):
+                    last_announce = datetime.fromtimestamp(ts_field)
+                else:
+                    last_announce = datetime.fromisoformat(str(ts_field))
+            except (ValueError, TypeError, OSError):
                 pass
+
+        # Extract display_name: explicit field, or app_data string (LXMF convention)
+        app_data_raw = data.get('app_data')
+        display_name = data.get('display_name', data.get('name'))
+        if display_name is None and isinstance(app_data_raw, str) and app_data_raw:
+            display_name = app_data_raw
+
+        # Derive is_online heuristically from announce recency
+        is_online = False
+        if last_announce:
+            age = (datetime.now() - last_announce).total_seconds()
+            is_online = age < 900  # 15 minutes
 
         return cls(
             destination_hash=data.get('destination_hash', data.get('hash', '')),
-            display_name=data.get('display_name', data.get('name')),
+            display_name=display_name,
             last_announce=last_announce,
-            is_online=data.get('is_online', False),
-            app_data=data.get('app_data')
+            is_online=data.get('is_online', is_online),
+            app_data=app_data_raw if isinstance(app_data_raw, dict) else None,
+            identity_hash=data.get('identity_hash'),
+            aspect=data.get('aspect'),
+            snr=data.get('snr'),
+            rssi=data.get('rssi'),
+            quality=data.get('quality'),
         )
 
 
@@ -82,12 +117,16 @@ class MeshChatMessage:
         timestamp = datetime.now()
         if data.get('timestamp'):
             try:
-                timestamp = datetime.fromisoformat(data['timestamp'])
-            except (ValueError, TypeError):
+                ts = data['timestamp']
+                if isinstance(ts, (int, float)):
+                    timestamp = datetime.fromtimestamp(ts)
+                else:
+                    timestamp = datetime.fromisoformat(str(ts))
+            except (ValueError, TypeError, OSError):
                 pass
 
         return cls(
-            message_id=data.get('id', ''),
+            message_id=data.get('id', data.get('hash', '')),
             source_hash=data.get('source_hash', data.get('from', '')),
             destination_hash=data.get('destination_hash', data.get('to', '')),
             content=data.get('content', data.get('message', '')),
@@ -100,7 +139,7 @@ class MeshChatMessage:
 
 @dataclass
 class MeshChatStatus:
-    """MeshChat service status."""
+    """MeshChat service status (assembled from /api/v1/app/info + /api/v1/config)."""
     version: Optional[str] = None
     identity_hash: Optional[str] = None
     display_name: Optional[str] = None
@@ -113,10 +152,10 @@ class MeshChatStatus:
 
 class MeshChatClient:
     """
-    HTTP client for MeshChat API.
+    HTTP client for MeshChat API (v1).
 
-    MeshChat exposes a REST API and WebSocket for real-time updates.
-    This client provides read/write access to peers, messages, and status.
+    MeshChat exposes a REST API at /api/v1/ and WebSocket for real-time updates.
+    This client provides read/write access to announces, messages, and status.
 
     Usage:
         client = MeshChatClient()
@@ -195,24 +234,37 @@ class MeshChatClient:
     def is_available(self) -> bool:
         """Check if MeshChat service is reachable."""
         try:
-            self._request('GET', '/api/status')
+            self._request('GET', '/api/v1/status')
             return True
         except MeshChatError:
             return False
 
     def get_status(self) -> MeshChatStatus:
-        """Get MeshChat service status."""
+        """Get MeshChat service status from /api/v1/app/info."""
         try:
-            data = self._request('GET', '/api/status')
+            data = self._request('GET', '/api/v1/app/info')
+            app_info = data.get('app_info', data)
+
+            # Fetch announce count for peer_count
+            peer_count = 0
+            try:
+                announces_data = self._request(
+                    'GET', '/api/v1/announces', params={'limit': 1000}
+                )
+                announces = announces_data.get('announces', [])
+                peer_count = len(announces)
+            except MeshChatError:
+                pass
+
             return MeshChatStatus(
-                version=data.get('version'),
-                identity_hash=data.get('identity_hash', data.get('identity')),
-                display_name=data.get('display_name', data.get('name')),
-                peer_count=data.get('peer_count', 0),
-                message_count=data.get('message_count', 0),
-                propagation_node=data.get('propagation_node', False),
-                rns_connected=data.get('rns_connected', True),
-                uptime_seconds=data.get('uptime', 0)
+                version=app_info.get('version'),
+                identity_hash=app_info.get('identity_hash', app_info.get('identity')),
+                display_name=app_info.get('display_name', app_info.get('name')),
+                peer_count=peer_count,
+                rns_connected=app_info.get(
+                    'is_connected_to_shared_instance',
+                    app_info.get('rns_connected', True)
+                ),
             )
         except MeshChatConnectionError:
             raise
@@ -221,15 +273,28 @@ class MeshChatClient:
             return MeshChatStatus()
 
     def get_peers(self) -> List[MeshChatPeer]:
-        """Get list of discovered peers."""
+        """Get list of discovered peers (announces) from /api/v1/announces."""
         try:
-            data = self._request('GET', '/api/peers')
-            peers = data if isinstance(data, list) else data.get('peers', [])
-            return [MeshChatPeer.from_api(p) for p in peers]
+            data = self._request('GET', '/api/v1/announces')
+            announces = data.get('announces', []) if isinstance(data, dict) else data
+            return [MeshChatPeer.from_api(a) for a in announces]
         except MeshChatError:
             raise
         except Exception as e:
             logger.debug(f"Failed to get peers: {e}")
+            return []
+
+    def get_conversations(self) -> List[Dict[str, Any]]:
+        """Get list of LXMF conversations from /api/v1/lxmf/conversations."""
+        try:
+            data = self._request('GET', '/api/v1/lxmf/conversations')
+            if isinstance(data, list):
+                return data
+            return data.get('conversations', [])
+        except MeshChatError:
+            raise
+        except Exception as e:
+            logger.debug(f"Failed to get conversations: {e}")
             return []
 
     def get_messages(
@@ -237,15 +302,44 @@ class MeshChatClient:
         destination_hash: Optional[str] = None,
         limit: int = 50
     ) -> List[MeshChatMessage]:
-        """Get messages, optionally filtered by conversation."""
-        try:
-            params = {'limit': limit}
-            if destination_hash:
-                params['destination'] = destination_hash
+        """Get messages from MeshChat.
 
-            data = self._request('GET', '/api/messages', params=params)
-            messages = data if isinstance(data, list) else data.get('messages', [])
-            return [MeshChatMessage.from_api(m) for m in messages]
+        If destination_hash is provided, fetches messages for that conversation.
+        Otherwise, fetches recent messages across all conversations.
+        """
+        try:
+            if destination_hash:
+                endpoint = f'/api/v1/lxmf-messages/conversation/{destination_hash}'
+                data = self._request('GET', endpoint)
+            else:
+                # Fetch conversations and aggregate recent messages
+                conversations = self.get_conversations()
+                all_messages = []
+                for conv in conversations[:10]:  # Limit to 10 most recent convos
+                    conv_hash = conv.get('destination_hash', conv.get('hash', ''))
+                    if not conv_hash:
+                        continue
+                    try:
+                        endpoint = f'/api/v1/lxmf-messages/conversation/{conv_hash}'
+                        conv_data = self._request('GET', endpoint)
+                        msgs = (conv_data.get('messages', conv_data)
+                                if isinstance(conv_data, dict) else conv_data)
+                        if isinstance(msgs, list):
+                            all_messages.extend(msgs)
+                    except MeshChatError:
+                        continue
+                # Sort by timestamp descending and limit
+                all_messages.sort(
+                    key=lambda m: m.get('timestamp', 0), reverse=True
+                )
+                return [
+                    MeshChatMessage.from_api(m) for m in all_messages[:limit]
+                ]
+
+            messages = data.get('messages', data) if isinstance(data, dict) else data
+            if not isinstance(messages, list):
+                messages = []
+            return [MeshChatMessage.from_api(m) for m in messages[:limit]]
         except MeshChatError:
             raise
         except Exception as e:
@@ -264,9 +358,11 @@ class MeshChatClient:
             True if message was queued for delivery
         """
         try:
-            self._request('POST', '/api/messages', data={
-                'destination': destination_hash,
-                'content': content
+            self._request('POST', '/api/v1/lxmf-messages/send', data={
+                'lxmf_message': {
+                    'destination_hash': destination_hash,
+                    'content': content
+                }
             })
             logger.info(f"Message queued to {destination_hash[:16]}...")
             return True
@@ -275,9 +371,9 @@ class MeshChatClient:
             return False
 
     def send_announce(self) -> bool:
-        """Send LXMF announce to network."""
+        """Send LXMF announce to network via GET /api/v1/announce."""
         try:
-            self._request('POST', '/api/announce')
+            self._request('GET', '/api/v1/announce')
             logger.info("Announce sent via MeshChat")
             return True
         except MeshChatError as e:
