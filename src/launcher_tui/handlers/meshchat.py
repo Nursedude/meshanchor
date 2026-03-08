@@ -64,8 +64,8 @@ _HAS_LXMF = _detect_lxmf_available()
 logger = logging.getLogger(__name__)
 
 # Import centralized service checking
-check_process_running, start_service, stop_service, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'check_process_running', 'start_service', 'stop_service'
+check_process_running, start_service, stop_service, restart_service, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'check_process_running', 'start_service', 'stop_service', 'restart_service'
 )
 
 check_rns_shared_instance, _HAS_RNS_CHECK = safe_import(
@@ -481,6 +481,7 @@ class MeshChatHandler(BaseHandler):
             if installed:
                 if running:
                     choices.append(("stop", "Stop MeshChat"))
+                    choices.append(("restart", "Restart MeshChat"))
                     choices.append(("peers", "View LXMF Peers"))
                     choices.append(("messages", "Recent Messages"))
                     choices.append(("announce", "Send LXMF Announce"))
@@ -512,6 +513,7 @@ class MeshChatHandler(BaseHandler):
                 "status": ("MeshChat Status", self._meshchat_status),
                 "start": ("Start MeshChat", self._launch_meshchat),
                 "stop": ("Stop MeshChat", self._stop_meshchat),
+                "restart": ("Restart MeshChat", self._restart_meshchat),
                 "peers": ("View LXMF Peers", self._meshchat_peers),
                 "messages": ("Recent Messages", self._meshchat_messages),
                 "announce": ("Send LXMF Announce", self._meshchat_announce),
@@ -907,15 +909,8 @@ class MeshChatHandler(BaseHandler):
                 f"  npm run build-frontend",
             )
 
-    def _stop_meshchat(self):
-        """Stop MeshChat service."""
-        if not self.ctx.dialog.yesno(
-            "Stop MeshChat",
-            "Stop the MeshChat service?\n\n"
-            "LXMF messaging will be unavailable until restarted.",
-        ):
-            return
-
+    def _stop_meshchat_process(self) -> bool:
+        """Stop MeshChat process. Returns True if stopped successfully."""
         stopped = False
 
         if _HAS_MESHCHAT_SERVICE:
@@ -938,7 +933,18 @@ class MeshChatHandler(BaseHandler):
             except (subprocess.SubprocessError, OSError):
                 pass
 
-        if stopped and not self._is_meshchat_running():
+        return stopped and not self._is_meshchat_running()
+
+    def _stop_meshchat(self):
+        """Stop MeshChat service."""
+        if not self.ctx.dialog.yesno(
+            "Stop MeshChat",
+            "Stop the MeshChat service?\n\n"
+            "LXMF messaging will be unavailable until restarted.",
+        ):
+            return
+
+        if self._stop_meshchat_process():
             self.ctx.dialog.msgbox(
                 "MeshChat Stopped",
                 "MeshChat has been stopped.",
@@ -949,6 +955,38 @@ class MeshChatHandler(BaseHandler):
                 "MeshChat may still be running.\n\n"
                 "Try: pkill -f meshchat.py",
             )
+
+    def _restart_meshchat(self):
+        """Restart MeshChat service to apply config changes."""
+        self.ctx.dialog.infobox("Restarting", "Restarting MeshChat...")
+
+        restarted = False
+
+        if _HAS_MESHCHAT_SERVICE:
+            svc = MeshChatService()
+            status = svc.check_status(blocking=True)
+            if status.service_name:
+                success, msg = restart_service(status.service_name)
+                if success:
+                    time.sleep(3)
+                    restarted = True
+
+        if not restarted:
+            # Fallback: manual stop/start cycle
+            self._stop_meshchat_process()
+            time.sleep(2)
+            self._launch_meshchat()
+            return  # _launch_meshchat shows its own result dialogs
+
+        # Verify
+        if self._is_meshchat_running():
+            self.ctx.dialog.msgbox(
+                "MeshChat Restarted",
+                f"MeshChat has been restarted.\n\n"
+                f"Web UI: {self._get_meshchat_url()}",
+            )
+        else:
+            self._handle_start_failure("reticulum-meshchat")
 
     # ------------------------------------------------------------------
     # Peers, Messages, Announce
@@ -1268,7 +1306,7 @@ class MeshChatHandler(BaseHandler):
 
             # Restart if running
             if self._is_meshchat_running():
-                self._stop_meshchat()
+                self._stop_meshchat_process()
                 time.sleep(1)
                 self._launch_meshchat()
                 self.ctx.dialog.msgbox(
