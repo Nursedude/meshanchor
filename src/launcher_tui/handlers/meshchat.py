@@ -26,6 +26,7 @@ Converted from meshchat_client_mixin.py as part of the mixin-to-registry migrati
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -468,7 +469,7 @@ class MeshChatHandler(BaseHandler):
             if not installed:
                 subtitle = "MeshChat is NOT INSTALLED"
             elif running:
-                subtitle = "MeshChat is RUNNING (http://127.0.0.1:8000)"
+                subtitle = f"MeshChat is RUNNING ({self._get_meshchat_url()})"
             else:
                 subtitle = "MeshChat is installed (not running)"
 
@@ -594,6 +595,8 @@ class MeshChatHandler(BaseHandler):
                 if status.pid:
                     print(f"  PID:        {status.pid}")
                 print(f"  Port 8000:  {'Open' if status.port_open else 'Closed'}")
+                if status.port_open:
+                    print(f"  Web UI:     {self._get_meshchat_url()}")
             except Exception as e:
                 logger.debug("MeshChat service check failed: %s", e)
 
@@ -666,7 +669,7 @@ class MeshChatHandler(BaseHandler):
                 self.ctx.dialog.msgbox(
                     "Already Running",
                     "MeshChat is already running.\n\n"
-                    f"Web UI: http://127.0.0.1:8000",
+                    f"Web UI: {self._get_meshchat_url()}",
                 )
                 return
 
@@ -685,7 +688,7 @@ class MeshChatHandler(BaseHandler):
                     self.ctx.dialog.msgbox(
                         "MeshChat Started",
                         f"MeshChat is running.\n\n"
-                        f"Web UI: http://127.0.0.1:8000",
+                        f"Web UI: {self._get_meshchat_url()}",
                     )
                 else:
                     # Check journalctl for ModuleNotFoundError
@@ -768,7 +771,7 @@ class MeshChatHandler(BaseHandler):
                 self.ctx.dialog.msgbox(
                     "MeshChat Started",
                     "MeshChat is running.\n\n"
-                    "Web UI: http://127.0.0.1:8000",
+                    f"Web UI: {self._get_meshchat_url()}",
                 )
             else:
                 self._handle_start_failure(self.MESHCHAT_SERVICE_NAME)
@@ -1042,14 +1045,13 @@ class MeshChatHandler(BaseHandler):
 
     def _meshchat_web_ui(self):
         """Show MeshChat web UI URL."""
+        url = self._get_meshchat_url()
         self.ctx.dialog.msgbox(
             "MeshChat Web UI",
-            "MeshChat web interface is available at:\n\n"
-            "  http://127.0.0.1:8000\n\n"
-            "Access from the same machine in a browser,\n"
-            "or via SSH tunnel:\n\n"
-            "  ssh -L 8000:127.0.0.1:8000 user@host\n"
-            "  Then open: http://127.0.0.1:8000",
+            f"MeshChat web interface is available at:\n\n"
+            f"  {url}\n\n"
+            f"Accessible from any device on the network.\n"
+            f"Local access: http://127.0.0.1:8000",
         )
 
     # ------------------------------------------------------------------
@@ -1129,6 +1131,14 @@ class MeshChatHandler(BaseHandler):
     def _get_meshchat_install_dir(self) -> Path:
         """Return the MeshChat install directory under user home."""
         return get_real_user_home() / 'reticulum-meshchat'
+
+    def _get_meshchat_url(self) -> str:
+        """Get MeshChat web UI URL using hostname for display."""
+        try:
+            hostname = socket.gethostname()
+            return f"http://{hostname}:8000"
+        except Exception:
+            return "http://localhost:8000"
 
     def _get_pip_command(self) -> list:
         """Return the pip command appropriate for this install.
@@ -1269,7 +1279,7 @@ class MeshChatHandler(BaseHandler):
             "  4. Build the web frontend (npm)\n"
             "  5. Create a systemd service\n\n"
             "MeshChat provides LXMF messaging with a\n"
-            "web UI at http://127.0.0.1:8000\n\n"
+            "web UI on port 8000\n\n"
             "Source: github.com/liamcottle/reticulum-meshchat\n\n"
             "Install now?",
         ):
@@ -1327,7 +1337,7 @@ class MeshChatHandler(BaseHandler):
             # Verify
             if self._is_meshchat_running():
                 print("\nMeshChat is running!")
-                print("Web UI: http://127.0.0.1:8000")
+                print(f"Web UI: {self._get_meshchat_url()}")
             else:
                 print("\nMeshChat installed but may not be running yet.")
                 print(f"Check: systemctl status {self.MESHCHAT_SERVICE_NAME}")
@@ -1531,7 +1541,8 @@ class MeshChatHandler(BaseHandler):
             f"for i in 1 2 3 4 5; do "
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
-            f"ExecStart={python_path} {meshchat_py}\n"
+            f"ExecStart={python_path} {meshchat_py}"
+            f" --headless --host 0.0.0.0\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
