@@ -693,6 +693,9 @@ class MeshChatHandler(BaseHandler):
         self._apply_upstream_fixes()
         self._verify_service_file()
 
+        # Preflight: wait for RNS shared instance socket if rnsd is running
+        self._wait_for_rns_shared_instance()
+
         if _HAS_MESHCHAT_SERVICE:
             svc = MeshChatService()
             status = svc.check_status(blocking=True)
@@ -864,6 +867,58 @@ class MeshChatHandler(BaseHandler):
                                     f"Web UI: {self._get_meshchat_url()}",
                                 )
                                 return
+                return
+
+            if 'ConnectionRefusedError' in result.stdout:
+                # RNS RPC socket not reachable
+                rnsd_user = self._get_rnsd_user()
+                rns_ready = (
+                    _HAS_RNS_CHECK
+                    and check_rns_shared_instance
+                    and check_rns_shared_instance()
+                )
+
+                if not rnsd_user:
+                    diag = (
+                        "rnsd is NOT running.\n\n"
+                        "MeshChat needs rnsd for RNS interface stats.\n"
+                        "Start rnsd first, then retry MeshChat."
+                    )
+                elif not rns_ready:
+                    diag = (
+                        f"rnsd is running (as {rnsd_user}) but\n"
+                        "the shared instance socket is not ready.\n\n"
+                        "This usually means rnsd just restarted.\n"
+                        "Retry MeshChat start?"
+                    )
+                else:
+                    diag = (
+                        f"rnsd is running (as {rnsd_user}) and the\n"
+                        "shared instance socket is available now.\n\n"
+                        "The error may have been transient.\n"
+                        "Retry MeshChat start?"
+                    )
+
+                if self.ctx.dialog.yesno(
+                    "RNS Connection Refused",
+                    "MeshChat crashed: ConnectionRefusedError\n"
+                    "on RNS RPC (get_interface_stats).\n\n"
+                    f"{diag}",
+                ):
+                    if not rnsd_user and _HAS_SERVICE_CHECK and start_service:
+                        start_service('rnsd')
+                        time.sleep(3)
+                    self._wait_for_rns_shared_instance()
+                    if _HAS_SERVICE_CHECK and start_service:
+                        start_service(service_name)
+                        time.sleep(3)
+                        if self._is_meshchat_running():
+                            self.ctx.dialog.msgbox(
+                                "MeshChat Started",
+                                f"MeshChat is running.\n\n"
+                                f"Web UI: {self._get_meshchat_url()}",
+                            )
+                            return
                 return
 
             if 'does not exist' in result.stdout and 'public' in result.stdout:
@@ -1837,17 +1892,15 @@ class MeshChatHandler(BaseHandler):
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-"""MeshForge wrapper - patches datetime JSON serialization before MeshChat starts.
+"""MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
-Upstream MeshChat passes datetime objects to aiohttp's web.json_response()
-which calls json.dumps() without a default handler, causing:
-  TypeError: Object of type datetime is not JSON serializable
+Fixes applied:
+1. Monkey-patches json.JSONEncoder.default to handle datetime objects
+   (upstream MeshChat passes datetime to aiohttp json_response without handler)
+2. Waits for RNS shared instance socket before starting MeshChat
+   (prevents ConnectionRefusedError on get_interface_stats RPC calls)
 
-This wrapper monkey-patches json.JSONEncoder.default to handle datetime
-objects by converting them to ISO 8601 strings. It then executes the
-real meshchat.py in the same process via runpy.
-
-Safe to remove once upstream fixes the issue.
+Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
 """
 import datetime
@@ -1855,7 +1908,9 @@ import json
 import os
 import runpy
 import sys
+import time
 
+# --- Fix 1: datetime JSON serialization ---
 _original_default = json.JSONEncoder.default
 
 
@@ -1866,6 +1921,40 @@ def _patched_default(self, obj):
 
 
 json.JSONEncoder.default = _patched_default
+
+
+# --- Fix 2: Wait for RNS shared instance (best-effort, 10s max) ---
+def _rns_shared_instance_ready():
+    """Check /proc/net/unix for @rns/default abstract socket."""
+    try:
+        with open('/proc/net/unix', 'r') as f:
+            return any('@rns/default' in line for line in f)
+    except OSError:
+        return False
+
+
+# Only wait if rnsd appears to be running (don't block standalone mode)
+def _rnsd_running():
+    """Quick check if rnsd process exists."""
+    try:
+        for entry in os.listdir('/proc'):
+            if entry.isdigit():
+                try:
+                    cmdline = open(f'/proc/{entry}/cmdline', 'rb').read()
+                    if b'rnsd' in cmdline:
+                        return True
+                except (OSError, PermissionError):
+                    pass
+    except OSError:
+        pass
+    return False
+
+
+if _rnsd_running() and not _rns_shared_instance_ready():
+    for _i in range(10):
+        if _rns_shared_instance_ready():
+            break
+        time.sleep(1)
 
 # Run meshchat.py in this process, preserving __main__ semantics
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2482,3 +2571,41 @@ runpy.run_path(_meshchat_path, run_name="__main__")
             # "continue" falls through
 
         return True
+
+    def _wait_for_rns_shared_instance(self, timeout: int = 10):
+        """Wait for the RNS shared instance socket to become available.
+
+        When rnsd is running but just started (or restarted), there's a
+        race window where the process exists but the RPC socket isn't
+        ready yet.  This causes ConnectionRefusedError in MeshChat when
+        it tries to call get_interface_stats().
+
+        Polls passively (reads /proc/net/unix) for up to *timeout* seconds.
+        If rnsd isn't running at all, returns immediately (MeshChat can
+        start its own RNS instance).
+        """
+        if not self._get_rnsd_user():
+            return  # rnsd not running — nothing to wait for
+
+        if not (_HAS_RNS_CHECK and check_rns_shared_instance):
+            return  # can't check — skip
+
+        if check_rns_shared_instance():
+            return  # already ready
+
+        self.ctx.dialog.infobox(
+            "Waiting for RNS",
+            "rnsd is starting up — waiting for shared instance...",
+        )
+
+        for _ in range(timeout):
+            time.sleep(1)
+            if check_rns_shared_instance():
+                return
+
+        # Timed out — proceed anyway (MeshChat may still work or
+        # _handle_start_failure will catch the error)
+        logger.warning(
+            "RNS shared instance not ready after %ds, proceeding anyway",
+            timeout,
+        )
