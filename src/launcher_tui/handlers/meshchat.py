@@ -35,6 +35,7 @@ from backend import clear_screen
 from handler_protocol import BaseHandler
 from handlers._lxmf_utils import ensure_lxmf_exclusive
 
+from utils.common import SettingsManager
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
 
@@ -488,6 +489,7 @@ class MeshChatHandler(BaseHandler):
                     choices.append(("start", "Start MeshChat"))
                 if not self._has_meshchat_systemd_service():
                     choices.append(("create_service", "Create Systemd Service"))
+                choices.append(("network", "Network Access (LAN/Local)"))
                 choices.append(("rebuild", "Rebuild Frontend"))
                 choices.append(("logs", "View Logs"))
                 choices.append(("uninstall", "Disable MeshChat"))
@@ -517,6 +519,7 @@ class MeshChatHandler(BaseHandler):
                 "logs": ("View MeshChat Logs", self._meshchat_logs),
                 "install": ("Install MeshChat", self._install_meshchat),
                 "create_service": ("Create Service", self._create_meshchat_service),
+                "network": ("Network Access", self._configure_network_access),
                 "rebuild": ("Rebuild Frontend", self._rebuild_frontend),
                 "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
@@ -543,8 +546,12 @@ class MeshChatHandler(BaseHandler):
             self.ctx.wait_for_enter()
             return
 
+        bind_host = self._get_meshchat_bind_host()
+        bind_label = "LAN (0.0.0.0)" if bind_host == "0.0.0.0" else "Local (127.0.0.1)"
+
         print(f"  Installed:  Yes")
         print(f"  Running:    {'Yes' if running else 'No'}")
+        print(f"  Network:    {bind_label}")
 
         # LXMF module status
         if _HAS_LXMF:
@@ -742,6 +749,11 @@ class MeshChatHandler(BaseHandler):
 
         clear_screen()
         print("=== Creating MeshChat Service ===\n")
+
+        # Ask about network access if not yet configured
+        settings = self._get_meshchat_settings()
+        if not settings.file_path.exists():
+            self._prompt_network_access_during_install()
 
         if not self._install_meshchat_service(install_dir, run_as_user):
             self.ctx.dialog.msgbox(
@@ -1137,13 +1149,124 @@ class MeshChatHandler(BaseHandler):
         """Return the MeshChat install directory under user home."""
         return get_real_user_home() / 'reticulum-meshchat'
 
+    def _get_meshchat_settings(self) -> SettingsManager:
+        """Return SettingsManager for MeshChat configuration."""
+        if not hasattr(self, '_meshchat_settings'):
+            self._meshchat_settings = SettingsManager(
+                "meshchat",
+                defaults={"bind_host": "127.0.0.1"},
+            )
+        return self._meshchat_settings
+
+    def _get_meshchat_bind_host(self) -> str:
+        """Return configured bind host, default 127.0.0.1."""
+        return self._get_meshchat_settings().get("bind_host") or "127.0.0.1"
+
     def _get_meshchat_url(self) -> str:
         """Get MeshChat web UI URL using hostname for display."""
+        bind_host = self._get_meshchat_bind_host()
+        if bind_host == "127.0.0.1":
+            return "http://localhost:8000"
         try:
             hostname = socket.gethostname()
             return f"http://{hostname}:8000"
         except Exception:
             return "http://localhost:8000"
+
+    def _configure_network_access(self):
+        """Configure MeshChat bind address (LAN vs local-only)."""
+        current = self._get_meshchat_bind_host()
+        current_label = "LAN (0.0.0.0)" if current == "0.0.0.0" else "Local (127.0.0.1)"
+
+        choices = [
+            ("local", "Local only (127.0.0.1)  — secure, this machine only"),
+            ("lan", "LAN accessible (0.0.0.0) — access from other devices"),
+        ]
+
+        choice = self.ctx.dialog.menu(
+            "Network Access",
+            f"Current: {current_label}\n\n"
+            "Choose how MeshChat binds its web UI port (8000).\n"
+            "'LAN accessible' lets you reach it from other devices\n"
+            "on your network (e.g. 192.168.x.x:8000).",
+            choices,
+        )
+
+        if choice is None:
+            return
+
+        new_host = "127.0.0.1" if choice == "local" else "0.0.0.0"
+        if new_host == current:
+            self.ctx.dialog.msgbox("No Change", f"Already set to {current_label}.")
+            return
+
+        # Save setting
+        settings = self._get_meshchat_settings()
+        settings.set("bind_host", new_host)
+        settings.save()
+
+        new_label = "LAN (0.0.0.0)" if new_host == "0.0.0.0" else "Local (127.0.0.1)"
+
+        # Regenerate service file if it exists
+        if self._has_meshchat_systemd_service():
+            install_dir = self._get_meshchat_install_dir()
+            run_as = self._get_service_user()
+            self._install_meshchat_service(install_dir, run_as)
+
+            # Restart if running
+            if self._is_meshchat_running():
+                self._stop_meshchat()
+                time.sleep(1)
+                self._launch_meshchat()
+                self.ctx.dialog.msgbox(
+                    "Updated",
+                    f"Bind changed to {new_label}.\n"
+                    f"Service restarted.\n\n"
+                    f"URL: {self._get_meshchat_url()}",
+                )
+            else:
+                self.ctx.dialog.msgbox(
+                    "Updated",
+                    f"Bind changed to {new_label}.\n"
+                    "Start MeshChat to apply.",
+                )
+        else:
+            self.ctx.dialog.msgbox(
+                "Updated",
+                f"Bind set to {new_label}.\n"
+                "Create a systemd service to apply.",
+            )
+
+    def _prompt_network_access_during_install(self):
+        """Ask user about network access during initial install.
+
+        Presents a simple choice and persists the setting so the
+        service file is generated with the correct bind host.
+        """
+        choices = [
+            ("lan", "LAN accessible (0.0.0.0) — access from any device"),
+            ("local", "Local only (127.0.0.1)  — this machine only"),
+        ]
+
+        choice = self.ctx.dialog.menu(
+            "Network Access",
+            "How should the MeshChat web UI be accessible?\n\n"
+            "LAN: Access from other devices (e.g. 192.168.x.x:8000)\n"
+            "Local: Only from this machine (localhost:8000)",
+            choices,
+        )
+
+        if choice is None:
+            # Default to LAN — most common use case for mesh setups
+            choice = "lan"
+
+        new_host = "127.0.0.1" if choice == "local" else "0.0.0.0"
+        settings = self._get_meshchat_settings()
+        settings.set("bind_host", new_host)
+        settings.save()
+
+        label = "LAN (0.0.0.0)" if new_host == "0.0.0.0" else "Local (127.0.0.1)"
+        print(f"Network access: {label}\n")
 
     def _get_pip_command(self) -> list:
         """Return the pip command appropriate for this install.
@@ -1268,7 +1391,7 @@ class MeshChatHandler(BaseHandler):
         Detects and fixes:
         - Wrong Python path in ExecStart
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
-        - --host 0.0.0.0 instead of 127.0.0.1 (security fix)
+        - Bind host mismatch vs configured setting
 
         Regenerates the service file if any issues are found.
         """
@@ -1313,9 +1436,14 @@ class MeshChatHandler(BaseHandler):
                 needs_regen = True
                 break
 
-        # Check for --host 0.0.0.0 (should be 127.0.0.1)
-        if '--host 0.0.0.0' in content:
-            logger.warning("Service binds to 0.0.0.0 — updating to 127.0.0.1")
+        # Check bind host matches configured setting
+        configured_host = self._get_meshchat_bind_host()
+        other_host = "0.0.0.0" if configured_host == "127.0.0.1" else "127.0.0.1"
+        if f'--host {other_host}' in content:
+            logger.warning(
+                "Service binds to %s — updating to %s",
+                other_host, configured_host,
+            )
             needs_regen = True
 
         if needs_regen:
@@ -1332,8 +1460,9 @@ class MeshChatHandler(BaseHandler):
         3. git clone reticulum-meshchat
         4. pip install -r requirements.txt
         5. npm install && npm run build-frontend
-        6. Create systemd service
-        7. Enable + start service
+        6. Choose network access (LAN/Local)
+        7. Create systemd service
+        8. Enable + start service
         """
         if self._is_meshchat_installed():
             self.ctx.dialog.msgbox(
@@ -1351,7 +1480,8 @@ class MeshChatHandler(BaseHandler):
             "  2. Clone the MeshChat repository\n"
             "  3. Install Python dependencies\n"
             "  4. Build the web frontend (npm)\n"
-            "  5. Create a systemd service\n\n"
+            "  5. Choose network access (LAN/Local)\n"
+            "  6. Create a systemd service\n\n"
             "MeshChat provides LXMF messaging with a\n"
             "web UI on port 8000\n\n"
             "Source: github.com/liamcottle/reticulum-meshchat\n\n"
@@ -1391,13 +1521,16 @@ class MeshChatHandler(BaseHandler):
                 self.ctx.wait_for_enter()
                 return
 
-            # Step 5: systemd service
+            # Step 5: Network access choice (before service creation)
+            self._prompt_network_access_during_install()
+
+            # Step 6: systemd service
             if not self._install_meshchat_service(install_dir, run_as_user):
                 print("\nSystemd service creation failed.")
                 print("You can still run MeshChat manually:")
                 print(f"  cd {install_dir} && python3 meshchat.py")
 
-            # Step 6: Start service
+            # Step 7: Start service
             print("\nStarting MeshChat service...")
             try:
                 subprocess.run(
@@ -1597,6 +1730,7 @@ class MeshChatHandler(BaseHandler):
         user_home = get_real_user_home()
         python_path = self._get_service_python()
         meshchat_py = install_dir / 'meshchat.py'
+        bind_host = self._get_meshchat_bind_host()
 
         service_content = (
             f"[Unit]\n"
@@ -1616,7 +1750,7 @@ class MeshChatHandler(BaseHandler):
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
             f"ExecStart={python_path} {meshchat_py}"
-            f" --headless --host 127.0.0.1\n"
+            f" --headless --host {bind_host}\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
