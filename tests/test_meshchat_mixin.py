@@ -1511,6 +1511,24 @@ class TestUpstreamFixes:
         assert '/proc/net/unix' in content
         assert 'time.sleep(1)' in content
 
+    def test_wrapper_includes_rns_rpc_patches(self):
+        """Wrapper patches RNS RPC methods for runtime resilience."""
+        handler = _make_handler()
+        content = handler._WRAPPER_CONTENT
+        assert '_safe_get_interface_stats' in content
+        assert '_safe_get_path_table' in content
+        assert 'ConnectionRefusedError' in content
+        assert '_original_get_interface_stats' in content
+        assert '_original_get_path_table' in content
+        # Returns None (same as RNS standalone mode)
+        assert 'return None' in content
+
+    def test_wrapper_rpc_patches_handle_import_error(self):
+        """Wrapper RPC patches gracefully skip if RNS not importable."""
+        handler = _make_handler()
+        content = handler._WRAPPER_CONTENT
+        assert 'except ImportError' in content
+
     @patch('subprocess.run')
     def test_handle_start_failure_detects_connection_refused(self, mock_run):
         """_handle_start_failure detects RNS ConnectionRefusedError."""
