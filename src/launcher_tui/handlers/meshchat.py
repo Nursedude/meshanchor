@@ -1567,6 +1567,12 @@ class MeshChatHandler(BaseHandler):
             logger.warning("Service missing --reticulum-config-dir — adding")
             needs_regen = True
 
+        # Check if ExecStart uses the wrapper (datetime serialization fix)
+        wrapper_path = self._get_meshchat_install_dir() / self.WRAPPER_FILENAME
+        if wrapper_path.exists() and self.WRAPPER_FILENAME not in content:
+            logger.warning("Service uses meshchat.py directly — updating to wrapper")
+            needs_regen = True
+
         if needs_regen:
             install_dir = self._get_meshchat_install_dir()
             run_as = self._get_service_user()
@@ -1831,12 +1837,15 @@ which calls json.dumps() without a default handler, causing:
 
 This wrapper monkey-patches json.JSONEncoder.default to handle datetime
 objects by converting them to ISO 8601 strings. It then executes the
-real meshchat.py in the same process.
+real meshchat.py in the same process via runpy.
 
 Safe to remove once upstream fixes the issue.
+Created by MeshForge. Do not edit — it will be regenerated on update.
 """
 import datetime
 import json
+import os
+import runpy
 import sys
 
 _original_default = json.JSONEncoder.default
@@ -1850,11 +1859,11 @@ def _patched_default(self, obj):
 
 json.JSONEncoder.default = _patched_default
 
-# Execute the real meshchat.py in this process
-_meshchat_path = str(__import__("pathlib").Path(__file__).parent / "meshchat.py")
+# Run meshchat.py in this process, preserving __main__ semantics
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_meshchat_path = os.path.join(_script_dir, "meshchat.py")
 sys.argv[0] = _meshchat_path
-with open(_meshchat_path) as _f:
-    exec(compile(_f.read(), _meshchat_path, "exec"))
+runpy.run_path(_meshchat_path, run_name="__main__")
 '''
 
     def _create_meshchat_wrapper(self, install_dir: Path = None) -> Path:
