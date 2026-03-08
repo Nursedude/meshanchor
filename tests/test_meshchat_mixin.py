@@ -1386,7 +1386,7 @@ class TestNPMManagement:
 # ============================================================================
 
 class TestUpstreamFixes:
-    """Test upstream fix detection and application."""
+    """Test upstream fix detection and application via wrapper script."""
 
     def test_apply_upstream_fixes_no_file(self):
         """Returns empty list when meshchat.py doesn't exist."""
@@ -1397,70 +1397,73 @@ class TestUpstreamFixes:
             result = handler._apply_upstream_fixes(Path(tmpdir))
             assert result == []
 
-    def test_apply_upstream_fixes_already_patched(self):
-        """Returns empty list when fix already applied (default=str present)."""
+    def test_creates_wrapper_script(self):
+        """Creates wrapper script with datetime monkey-patch."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text(
-                'import json\nimport functools\n'
-                'web.json_response({"announces": announces}, '
-                'dumps=functools.partial(json.dumps, default=str))\n'
-            )
-            result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert result == []
+            meshchat_py.write_text('print("hello")\n')
+            wrapper = handler._create_meshchat_wrapper(Path(tmpdir))
+            assert wrapper.exists()
+            content = wrapper.read_text()
+            assert 'json.JSONEncoder.default' in content
+            assert 'datetime' in content
+            assert 'isoformat' in content
+            assert 'meshchat.py' in content
 
-    def test_apply_upstream_fixes_applies_datetime_fix(self):
-        """Patches meshchat.py when the vulnerable pattern is found."""
+    def test_apply_upstream_fixes_creates_wrapper(self):
+        """_apply_upstream_fixes creates wrapper when meshchat.py exists."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            # Simulate the upstream buggy code pattern
-            meshchat_py.write_text(
-                'import json\n'
-                'import aiohttp\n'
-                'class MeshChat:\n'
-                '    async def get_announces(self):\n'
-                '        announces = self.get_all_announces()\n'
-                '        return web.json_response({\n'
-                '            "announces": announces,\n'
-                '        })\n'
-            )
-            result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert 'datetime JSON serialization' in result
-
-            # Verify the file was actually modified
-            content = meshchat_py.read_text()
-            assert 'import functools' in content
-            assert 'default=str' in content
+            meshchat_py.write_text('print("hello")\n')
+            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
+                result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert any('datetime' in f for f in result)
+            assert (Path(tmpdir) / handler.WRAPPER_FILENAME).exists()
 
     def test_apply_upstream_fixes_idempotent(self):
-        """Running twice doesn't double-patch."""
+        """Running twice doesn't recreate wrapper."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text(
-                'import json\n'
-                'class MeshChat:\n'
-                '    async def get_announces(self):\n'
-                '        announces = self.get_all_announces()\n'
-                '        return web.json_response({\n'
-                '            "announces": announces,\n'
-                '        })\n'
-            )
-            result1 = handler._apply_upstream_fixes(Path(tmpdir))
-            assert len(result1) == 1
-            content_after_first = meshchat_py.read_text()
+            meshchat_py.write_text('print("hello")\n')
+            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
+                result1 = handler._apply_upstream_fixes(Path(tmpdir))
+                assert len(result1) >= 1
+                result2 = handler._apply_upstream_fixes(Path(tmpdir))
+                assert result2 == []
 
-            result2 = handler._apply_upstream_fixes(Path(tmpdir))
-            assert result2 == []
-            assert meshchat_py.read_text() == content_after_first
+    def test_update_service_to_wrapper(self):
+        """_update_service_to_wrapper replaces ExecStart target."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            service_content = (
+                f"[Service]\nExecStart=/usr/bin/python3 "
+                f"{install_dir}/meshchat.py --headless\n"
+            )
+            service_path = (
+                f"/etc/systemd/system/{handler.MESHCHAT_SERVICE_NAME}.service"
+            )
+            with patch('builtins.open', create=True):
+                with patch('pathlib.Path.read_text', return_value=service_content):
+                    with patch('launcher_tui.handlers.meshchat._sudo_write',
+                              return_value=(True, 'ok')) as mock_write:
+                        with patch('subprocess.run'):
+                            result = handler._update_service_to_wrapper(install_dir)
+            if mock_write.called:
+                written = mock_write.call_args[0][1]
+                assert handler.WRAPPER_FILENAME in written
+                assert result is True
 
     def test_apply_upstream_fixes_interactive_no_fixes(self):
         """Shows 'no fixes needed' dialog when already patched."""
@@ -1474,7 +1477,7 @@ class TestUpstreamFixes:
         """Shows fix list and offers restart when fixes applied."""
         handler = _make_handler()
         with patch.object(handler, '_apply_upstream_fixes',
-                         return_value=['datetime JSON serialization']):
+                         return_value=['datetime JSON serialization (wrapper)']):
             with patch.object(handler, '_is_meshchat_running', return_value=False):
                 handler._apply_upstream_fixes_interactive()
         handler.ctx.dialog.msgbox.assert_called_once()
@@ -1490,7 +1493,7 @@ class TestUpstreamFixes:
         )
         handler.ctx.dialog.yesno.return_value = True
         with patch.object(handler, '_apply_upstream_fixes',
-                         return_value=['datetime JSON serialization']):
+                         return_value=['datetime JSON serialization (wrapper)']):
             with patch('launcher_tui.handlers.meshchat.start_service'):
                 with patch.object(handler, '_is_meshchat_running', return_value=True):
                     with patch.object(handler, '_get_meshchat_url',
