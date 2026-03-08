@@ -302,8 +302,48 @@ class MeshChatHandler(BaseHandler):
 
         success = self._install_meshchat_pip(install_dir, run_as_user)
 
-        if success:
-            service_python = self._get_service_python()
+        service_python = self._get_service_python()
+        still_missing = self._check_meshchat_deps(service_python)
+
+        if success and not still_missing:
+            self.ctx.dialog.msgbox(
+                "Dependencies Installed",
+                "MeshChat dependencies installed successfully.\n\n"
+                "Continuing with MeshChat startup...",
+            )
+            return True
+
+        # Fallback: install individual missing packages directly
+        if still_missing:
+            print(f"\nPackages still missing: {', '.join(still_missing)}")
+            print("Attempting individual package install...\n")
+            pip_cmd = self._get_pip_command()
+            venv_pip = Path('/opt/meshforge/venv/bin/pip')
+            using_venv = venv_pip.exists()
+
+            if 'install' in pip_cmd:
+                base_cmd = pip_cmd
+            else:
+                base_cmd = pip_cmd + ['install']
+
+            for mod in still_missing:
+                cmd = base_cmd + ['--timeout', '60', mod]
+                if run_as_user and not using_venv:
+                    if '--user' not in cmd:
+                        cmd.append('--user')
+                    cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+                try:
+                    r = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=120,
+                    )
+                    if r.returncode == 0:
+                        print(f"  Installed {mod}")
+                    else:
+                        print(f"  Failed to install {mod}")
+                except (subprocess.SubprocessError, OSError) as e:
+                    print(f"  Error installing {mod}: {e}")
+
+            # Re-check after fallback
             still_missing = self._check_meshchat_deps(service_python)
             if not still_missing:
                 self.ctx.dialog.msgbox(
@@ -313,13 +353,16 @@ class MeshChatHandler(BaseHandler):
                 )
                 return True
 
-        self.ctx.dialog.msgbox(
-            "Installation Failed",
+        error_detail = getattr(self, '_last_pip_error', '')
+        error_msg = (
             f"Failed to install MeshChat dependencies.\n\n"
             f"Try manually:\n"
             f"  cd {install_dir}\n"
-            f"  pip install -r requirements.txt",
+            f"  pip install -r requirements.txt"
         )
+        if error_detail:
+            error_msg += f"\n\nError:\n{error_detail[:300]}"
+        self.ctx.dialog.msgbox("Installation Failed", error_msg)
         return False
 
     def _install_lxmf_package(self, run_as_user: str = None) -> tuple:
@@ -1285,24 +1328,51 @@ class MeshChatHandler(BaseHandler):
 
         print("Installing Python dependencies...")
         pip_cmd = self._get_pip_command()
+        venv_pip = Path('/opt/meshforge/venv/bin/pip')
+        using_venv = venv_pip.exists()
 
         # Build install command
-        if len(pip_cmd) > 1 and pip_cmd[1] == 'install':
-            # pip3 install --break-system-packages case
+        if 'install' in pip_cmd:
             cmd = pip_cmd + ['--timeout', '60', '-r', str(req_file)]
         else:
             cmd = pip_cmd + ['install', '--timeout', '60', '-r', str(req_file)]
 
-        if run_as_user:
+        # When NOT using venv and running as root via sudo, install as the
+        # service user so packages are visible to the systemd service.
+        # When using venv, skip sudo -u: the venv is root-owned and the
+        # TUI already runs as root; the service reads from the venv.
+        if run_as_user and not using_venv:
+            if '--user' not in cmd:
+                cmd.insert(cmd.index('-r'), '--user')
             cmd = ['sudo', '-H', '-u', run_as_user] + cmd
 
-        result = subprocess.run(cmd, timeout=300)
-        if result.returncode != 0:
-            print("pip install failed.")
-            print(f"Try: pip3 install -r {req_file}")
+        print(f"  Running: {' '.join(cmd)}\n")
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300,
+            )
+            if result.stdout:
+                for line in result.stdout.strip().split('\n')[-10:]:
+                    print(f"  {line}")
+            if result.returncode != 0:
+                print(f"\n  pip install failed (exit {result.returncode}):")
+                if result.stderr:
+                    tail = result.stderr.strip().split('\n')[-5:]
+                    for line in tail:
+                        print(f"  {line}")
+                    self._last_pip_error = '\n'.join(tail)
+                return False
+        except subprocess.TimeoutExpired:
+            print("\n  pip install timed out after 300 seconds.")
+            self._last_pip_error = 'Installation timed out after 300 seconds.'
+            return False
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"\n  pip install error: {e}")
+            self._last_pip_error = str(e)
             return False
 
-        print("Python dependencies installed.\n")
+        print("\nPython dependencies installed.\n")
         return True
 
     def _install_meshchat_npm(self, install_dir: Path, run_as_user: str = None) -> bool:
