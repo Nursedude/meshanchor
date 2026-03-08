@@ -469,6 +469,7 @@ class MeshChatHandler(BaseHandler):
                     choices.append(("start", "Start MeshChat"))
                 if not self._has_meshchat_systemd_service():
                     choices.append(("create_service", "Create Systemd Service"))
+                choices.append(("rebuild", "Rebuild Frontend"))
                 choices.append(("logs", "View Logs"))
                 choices.append(("uninstall", "Disable MeshChat"))
             else:
@@ -497,6 +498,7 @@ class MeshChatHandler(BaseHandler):
                 "logs": ("View MeshChat Logs", self._meshchat_logs),
                 "install": ("Install MeshChat", self._install_meshchat),
                 "create_service": ("Create Service", self._create_meshchat_service),
+                "rebuild": ("Rebuild Frontend", self._rebuild_frontend),
                 "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
             entry = dispatch.get(choice)
@@ -552,6 +554,17 @@ class MeshChatHandler(BaseHandler):
                     print(f"              cd {install_dir} && pip install -r requirements.txt")
             else:
                 print("  MeshChat deps: OK")
+
+        # Frontend build status
+        if installed:
+            install_dir = self._get_meshchat_install_dir()
+            public_dir = install_dir / 'public'
+            if public_dir.is_dir():
+                print("  Frontend:   Built")
+            else:
+                print("  Frontend:   NOT BUILT (use 'Rebuild Frontend' from menu)")
+                if running:
+                    print("  WARNING:    Service will crash without frontend!")
 
         # Service details via plugin
         if _HAS_MESHCHAT_SERVICE:
@@ -745,8 +758,8 @@ class MeshChatHandler(BaseHandler):
     def _handle_start_failure(self, service_name: str):
         """Inspect journalctl after a failed start and offer to fix.
 
-        Checks for ModuleNotFoundError in recent logs and offers to
-        install missing dependencies automatically.
+        Checks for ModuleNotFoundError and missing frontend directory
+        in recent logs and offers automatic remediation.
         """
         import re
 
@@ -772,6 +785,16 @@ class MeshChatHandler(BaseHandler):
                         missing = [mod_name]
                     self._offer_install_meshchat_deps(missing)
                 return
+
+            if 'does not exist' in result.stdout and 'public' in result.stdout:
+                if self.ctx.dialog.yesno(
+                    "Frontend Not Built",
+                    "MeshChat crashed because the web frontend is missing.\n\n"
+                    "The 'public/' directory was not created by npm build.\n\n"
+                    "Rebuild the frontend now?",
+                ):
+                    self._rebuild_frontend()
+                return
         except (subprocess.SubprocessError, OSError):
             pass
 
@@ -781,6 +804,58 @@ class MeshChatHandler(BaseHandler):
             f"Check: systemctl status {service_name}\n"
             f"       journalctl -u {service_name} -n 20",
         )
+
+    def _rebuild_frontend(self):
+        """Rebuild the MeshChat web frontend (npm build).
+
+        Stops the service if crash-looping, runs npm build, validates
+        that public/ was created, and offers to restart.
+        """
+        install_dir = self._get_meshchat_install_dir()
+        if not (install_dir / 'package.json').exists():
+            self.ctx.dialog.msgbox(
+                "Not Found",
+                f"No package.json in {install_dir}.\n\n"
+                f"MeshChat may not be installed correctly.",
+            )
+            return
+
+        # Stop crash-looping service first
+        if self._is_meshchat_running():
+            if _HAS_SERVICE_CHECK and stop_service:
+                stop_service(self.MESHCHAT_SERVICE_NAME)
+            else:
+                try:
+                    subprocess.run(
+                        ['systemctl', 'stop', self.MESHCHAT_SERVICE_NAME],
+                        capture_output=True, timeout=15,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    pass
+
+        clear_screen()
+        print("=== Rebuilding MeshChat Frontend ===\n")
+
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
+        success = self._install_meshchat_npm(install_dir, run_as_user)
+
+        if success:
+            self.ctx.dialog.msgbox(
+                "Frontend Built",
+                "MeshChat web frontend rebuilt successfully.\n\n"
+                "You can now start MeshChat from the menu.",
+            )
+        else:
+            self.ctx.dialog.msgbox(
+                "Build Failed",
+                f"Frontend build failed.\n\n"
+                f"Try manually:\n"
+                f"  cd {install_dir}\n"
+                f"  npm install --omit=dev\n"
+                f"  npm run build-frontend",
+            )
 
     def _stop_meshchat(self):
         """Stop MeshChat service."""
@@ -1401,6 +1476,13 @@ class MeshChatHandler(BaseHandler):
         result = subprocess.run(cmd, cwd=str(install_dir), timeout=300)
         if result.returncode != 0:
             print("npm build failed.")
+            print(f"Try: cd {install_dir} && npm run build-frontend")
+            return False
+
+        # Validate that public/ was actually created
+        public_dir = install_dir / 'public'
+        if not public_dir.is_dir():
+            print("WARNING: npm build succeeded but public/ directory not found.")
             print(f"Try: cd {install_dir} && npm run build-frontend")
             return False
 
