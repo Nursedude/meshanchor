@@ -1212,3 +1212,170 @@ class TestMeshChatClientEndpoints:
             assert status.version == '2.3.0'
             assert status.rns_connected is True
             assert status.peer_count == 2
+
+
+# ============================================================================
+# NPM Management Tests
+# ============================================================================
+
+class TestNPMManagement:
+    """Test NPM management submenu and helper methods."""
+
+    def test_has_npm_management_menu(self):
+        """Handler has _npm_management_menu method."""
+        handler = _make_handler()
+        assert hasattr(handler, '_npm_management_menu')
+        assert callable(handler._npm_management_menu)
+
+    def test_has_run_npm_command(self):
+        """Handler has _run_npm_command helper."""
+        handler = _make_handler()
+        assert hasattr(handler, '_run_npm_command')
+        assert callable(handler._run_npm_command)
+
+    @patch('subprocess.run')
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_run_npm_command_basic(self, mock_home, mock_run):
+        """_run_npm_command runs npm with correct args and cwd."""
+        from pathlib import Path
+        mock_home.return_value = Path('/home/testuser')
+        mock_run.return_value = MagicMock(returncode=0)
+
+        handler = _make_handler()
+        with patch.dict(os.environ, {}, clear=True):
+            result = handler._run_npm_command(['audit'])
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args[0][0] == ['npm', 'audit']
+        assert call_args[1]['cwd'] == '/home/testuser/reticulum-meshchat'
+        assert call_args[1]['timeout'] == 300
+
+    @patch('subprocess.run')
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_run_npm_command_with_sudo_user(self, mock_home, mock_run):
+        """_run_npm_command prepends sudo when SUDO_USER is set."""
+        from pathlib import Path
+        mock_home.return_value = Path('/home/testuser')
+        mock_run.return_value = MagicMock(returncode=0)
+
+        handler = _make_handler()
+        with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+            handler._run_npm_command(['outdated'])
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ['sudo', '-H', '-u', 'testuser', 'npm', 'outdated']
+
+    @patch('subprocess.run')
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_run_npm_command_no_sudo_for_root(self, mock_home, mock_run):
+        """_run_npm_command does not prepend sudo when SUDO_USER is root."""
+        from pathlib import Path
+        mock_home.return_value = Path('/root')
+        mock_run.return_value = MagicMock(returncode=0)
+
+        handler = _make_handler()
+        with patch.dict(os.environ, {'SUDO_USER': 'root'}):
+            handler._run_npm_command(['audit'])
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ['npm', 'audit']
+
+    def test_npm_check_installed_missing(self):
+        """_npm_check_installed shows dialog when no package.json."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=Path(tmpdir)):
+                result = handler._npm_check_installed()
+                assert result is False
+                handler.ctx.dialog.msgbox.assert_called_once()
+
+    def test_npm_check_installed_present(self):
+        """_npm_check_installed returns True when package.json exists."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / 'reticulum-meshchat'
+            pkg.mkdir()
+            (pkg / 'package.json').write_text('{}')
+            with patch('launcher_tui.handlers.meshchat.get_real_user_home',
+                       return_value=Path(tmpdir)):
+                result = handler._npm_check_installed()
+                assert result is True
+
+    @patch('subprocess.run')
+    @patch('launcher_tui.handlers.meshchat.clear_screen')
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_npm_audit_runs_command(self, mock_home, mock_clear, mock_run):
+        """_npm_audit runs npm audit and waits for enter."""
+        from pathlib import Path
+        mock_home.return_value = Path('/home/testuser')
+        mock_run.return_value = MagicMock(returncode=0)
+
+        handler = _make_handler()
+        with patch.dict(os.environ, {}, clear=True):
+            handler._npm_audit()
+
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0] == ['npm', 'audit']
+        handler.ctx.wait_for_enter.assert_called_once()
+
+    @patch('subprocess.run')
+    @patch('launcher_tui.handlers.meshchat.clear_screen')
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_npm_outdated_handles_exit_code_1(self, mock_home, mock_clear, mock_run):
+        """_npm_outdated treats exit code 1 as normal (outdated packages found)."""
+        from pathlib import Path
+        mock_home.return_value = Path('/home/testuser')
+        # npm outdated returns 1 when outdated packages exist
+        mock_run.return_value = MagicMock(returncode=1)
+
+        handler = _make_handler()
+        with patch.dict(os.environ, {}, clear=True):
+            handler._npm_outdated()
+
+        handler.ctx.wait_for_enter.assert_called_once()
+
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_npm_view_logs_no_directory(self, mock_home):
+        """_npm_view_logs handles missing log directory gracefully."""
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+            handler = _make_handler()
+            with patch('launcher_tui.handlers.meshchat.clear_screen'):
+                handler._npm_view_logs()
+            handler.ctx.wait_for_enter.assert_called()
+
+    @patch('launcher_tui.handlers.meshchat.get_real_user_home')
+    def test_npm_view_logs_empty_directory(self, mock_home):
+        """_npm_view_logs handles empty log directory."""
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+            (Path(tmpdir) / '.npm' / '_logs').mkdir(parents=True)
+            handler = _make_handler()
+            with patch('launcher_tui.handlers.meshchat.clear_screen'):
+                handler._npm_view_logs()
+            handler.ctx.wait_for_enter.assert_called()
+
+    def test_npm_menu_back_exits(self):
+        """_npm_management_menu exits on back selection."""
+        handler = _make_handler()
+        handler.ctx.dialog.menu.return_value = "back"
+        with patch.object(handler, '_npm_check_installed', return_value=True):
+            handler._npm_management_menu()
+        # Should not raise, just return
+
+    def test_npm_menu_not_installed(self):
+        """_npm_management_menu shows error when not installed."""
+        handler = _make_handler()
+        with patch.object(handler, '_npm_check_installed', return_value=False):
+            handler._npm_management_menu()
+        # Should show msgbox via _npm_check_installed and return
