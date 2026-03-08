@@ -1910,11 +1910,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 5  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 6  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 5
+# meshforge_wrapper_version: 6
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -2013,21 +2013,22 @@ except ImportError:
 
 
 # --- Fix 4: Resilient datetime.strptime (handles Peewee datetime objects) ---
-# Upstream meshchat.py calls datetime.strptime() on Peewee DateTimeField values
-# which are already datetime objects -> TypeError. Monkey-patch survives updates.
-_original_strptime = datetime.datetime.strptime
+# datetime.datetime is a C type — can't set attributes on it directly.
+# Instead, replace it in the module with a subclass that overrides strptime.
+# meshchat.py's "from datetime import datetime" picks up the patched version.
+class _PatchedDatetime(datetime.datetime):
+    @classmethod
+    def strptime(cls, date_string, format_str):
+        if isinstance(date_string, datetime.datetime):
+            return date_string
+        if isinstance(date_string, datetime.date):
+            return datetime.datetime(
+                date_string.year, date_string.month, date_string.day
+            )
+        return super().strptime(date_string, format_str)
 
 
-@classmethod
-def _safe_strptime(cls, date_string, format_str):
-    if isinstance(date_string, datetime.datetime):
-        return date_string
-    if isinstance(date_string, datetime.date):
-        return datetime.datetime(date_string.year, date_string.month, date_string.day)
-    return _original_strptime(date_string, format_str)
-
-
-datetime.datetime.strptime = _safe_strptime
+datetime.datetime = _PatchedDatetime
 
 # Run meshchat.py in this process, preserving __main__ semantics
 _script_dir = os.path.dirname(os.path.abspath(__file__))
