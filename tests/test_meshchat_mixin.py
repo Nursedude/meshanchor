@@ -1379,3 +1379,122 @@ class TestNPMManagement:
         with patch.object(handler, '_npm_check_installed', return_value=False):
             handler._npm_management_menu()
         # Should show msgbox via _npm_check_installed and return
+
+
+# ============================================================================
+# Upstream Fixes Tests
+# ============================================================================
+
+class TestUpstreamFixes:
+    """Test upstream fix detection and application."""
+
+    def test_apply_upstream_fixes_no_file(self):
+        """Returns empty list when meshchat.py doesn't exist."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert result == []
+
+    def test_apply_upstream_fixes_already_patched(self):
+        """Returns empty list when fix already applied (default=str present)."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text(
+                'import json\nimport functools\n'
+                'web.json_response({"announces": announces}, '
+                'dumps=functools.partial(json.dumps, default=str))\n'
+            )
+            result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert result == []
+
+    def test_apply_upstream_fixes_applies_datetime_fix(self):
+        """Patches meshchat.py when the vulnerable pattern is found."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            # Simulate the upstream buggy code pattern
+            meshchat_py.write_text(
+                'import json\n'
+                'import aiohttp\n'
+                'class MeshChat:\n'
+                '    async def get_announces(self):\n'
+                '        announces = self.get_all_announces()\n'
+                '        return web.json_response({\n'
+                '            "announces": announces,\n'
+                '        })\n'
+            )
+            result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert 'datetime JSON serialization' in result
+
+            # Verify the file was actually modified
+            content = meshchat_py.read_text()
+            assert 'import functools' in content
+            assert 'default=str' in content
+
+    def test_apply_upstream_fixes_idempotent(self):
+        """Running twice doesn't double-patch."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text(
+                'import json\n'
+                'class MeshChat:\n'
+                '    async def get_announces(self):\n'
+                '        announces = self.get_all_announces()\n'
+                '        return web.json_response({\n'
+                '            "announces": announces,\n'
+                '        })\n'
+            )
+            result1 = handler._apply_upstream_fixes(Path(tmpdir))
+            assert len(result1) == 1
+            content_after_first = meshchat_py.read_text()
+
+            result2 = handler._apply_upstream_fixes(Path(tmpdir))
+            assert result2 == []
+            assert meshchat_py.read_text() == content_after_first
+
+    def test_apply_upstream_fixes_interactive_no_fixes(self):
+        """Shows 'no fixes needed' dialog when already patched."""
+        handler = _make_handler()
+        with patch.object(handler, '_apply_upstream_fixes', return_value=[]):
+            handler._apply_upstream_fixes_interactive()
+        handler.ctx.dialog.msgbox.assert_called_once()
+        assert 'No Fixes' in handler.ctx.dialog.msgbox.call_args[0][0]
+
+    def test_apply_upstream_fixes_interactive_with_fixes(self):
+        """Shows fix list and offers restart when fixes applied."""
+        handler = _make_handler()
+        with patch.object(handler, '_apply_upstream_fixes',
+                         return_value=['datetime JSON serialization']):
+            with patch.object(handler, '_is_meshchat_running', return_value=False):
+                handler._apply_upstream_fixes_interactive()
+        handler.ctx.dialog.msgbox.assert_called_once()
+        assert 'Applied' in handler.ctx.dialog.msgbox.call_args[0][0]
+
+    @patch('subprocess.run')
+    def test_handle_start_failure_detects_datetime_error(self, mock_run):
+        """_handle_start_failure detects datetime JSON serialization error."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            stdout='TypeError: Object of type datetime is not JSON serializable',
+            returncode=0,
+        )
+        handler.ctx.dialog.yesno.return_value = True
+        with patch.object(handler, '_apply_upstream_fixes',
+                         return_value=['datetime JSON serialization']):
+            with patch('launcher_tui.handlers.meshchat.start_service'):
+                with patch.object(handler, '_is_meshchat_running', return_value=True):
+                    with patch.object(handler, '_get_meshchat_url',
+                                     return_value='http://127.0.0.1:8000'):
+                        handler._handle_start_failure('reticulum-meshchat')
+        handler.ctx.dialog.yesno.assert_called_once()
+        assert 'JSON' in handler.ctx.dialog.yesno.call_args[0][0]
