@@ -104,6 +104,22 @@ def _build_strptime_replacement(match: re.Match) -> str:
     )
 
 
+# Regex for upstream meshchat.py fromisoformat bug (same Peewee issue)
+_FROMISOFORMAT_ASSIGNMENT_RE = re.compile(
+    r'^( +)(\w+) = datetime\.fromisoformat\((\w+\.\w+)\)$',
+    re.MULTILINE,
+)
+
+
+def _build_fromisoformat_replacement(match: re.Match) -> str:
+    """Build isinstance-guarded replacement for a fromisoformat assignment."""
+    indent, var, field_expr = match.group(1, 2, 3)
+    return (
+        f"{indent}{var} = {field_expr} if isinstance({field_expr}, datetime) "
+        f"else datetime.fromisoformat({field_expr})"
+    )
+
+
 class MeshChatHandler(BaseHandler):
     """TUI handler for MeshChat client management."""
 
@@ -1910,11 +1926,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 7  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 8  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 7
+# meshforge_wrapper_version: 8
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1984,10 +2000,11 @@ if _rnsd_running() and not _rns_shared_instance_ready():
         time.sleep(1)
 
 
-# --- Fix 3: Resilient RNS RPC calls (runtime ConnectionRefusedError) ---
+# --- Fix 3: Resilient RNS RPC calls (runtime failures) ---
 # MeshChat calls get_interface_stats() on every web request (index handler).
-# If rnsd drops or restarts at runtime, this crashes the entire web UI.
-# Patch to return safe empty values instead of crashing.
+# If rnsd drops, restarts (new auth key), or is unreachable, the RPC call
+# crashes the entire web UI. Catch all exceptions from RPC calls and return
+# safe empty values. KeyboardInterrupt/SystemExit are not Exception subclasses.
 try:
     import RNS
 
@@ -1997,13 +2014,13 @@ try:
     def _safe_get_interface_stats(self):
         try:
             return _original_get_interface_stats(self)
-        except (ConnectionRefusedError, OSError):
+        except Exception:
             return {"interfaces": []}
 
     def _safe_get_path_table(self):
         try:
             return _original_get_path_table(self)
-        except (ConnectionRefusedError, OSError):
+        except Exception:
             return []
 
     RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
@@ -2149,6 +2166,10 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         if self._apply_strptime_patch(install_dir):
             fixes.append('strptime datetime fix applied')
 
+        # Patch fromisoformat calls in meshchat.py source (idempotent)
+        if self._apply_fromisoformat_patch(install_dir):
+            fixes.append('fromisoformat datetime fix applied')
+
         # Ensure systemd service points to wrapper
         if self._update_service_to_wrapper(install_dir):
             fixes.append('systemd service updated')
@@ -2176,6 +2197,34 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         )
         if patched == source:
             return False  # No changes (already patched or no matches)
+
+        try:
+            meshchat_py.write_text(patched, encoding='utf-8')
+        except OSError:
+            return False
+        return True
+
+    def _apply_fromisoformat_patch(self, install_dir: Path) -> bool:
+        """Patch meshchat.py fromisoformat calls to handle datetime objects.
+
+        Same upstream bug as strptime: Peewee DateTimeField returns datetime,
+        but meshchat.py calls datetime.fromisoformat() on them -> TypeError.
+        Idempotent -- regex won't match already-patched lines.
+        """
+        meshchat_py = install_dir / 'meshchat.py'
+        if not meshchat_py.exists():
+            return False
+
+        try:
+            source = meshchat_py.read_text(encoding='utf-8')
+        except OSError:
+            return False
+
+        patched = _FROMISOFORMAT_ASSIGNMENT_RE.sub(
+            _build_fromisoformat_replacement, source
+        )
+        if patched == source:
+            return False
 
         try:
             meshchat_py.write_text(patched, encoding='utf-8')
