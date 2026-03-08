@@ -943,3 +943,131 @@ class TestMeshChatPipInstall:
             assert result is False
             assert hasattr(handler, '_last_pip_error')
             assert 'Permission denied' in handler._last_pip_error
+
+
+# ============================================================================
+# Frontend Build Validation Tests
+# ============================================================================
+
+class TestMeshChatFrontend:
+    """Test frontend (public/) validation and rebuild functionality."""
+
+    @patch('subprocess.run')
+    def test_npm_build_validates_public_dir_exists(self, mock_run):
+        """_install_meshchat_npm returns True when public/ exists after build."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(returncode=0)
+
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            (install_dir / 'package.json').write_text('{}')
+            (install_dir / 'public').mkdir()  # Frontend exists
+            result = handler._install_meshchat_npm(install_dir)
+            assert result is True
+
+    @patch('subprocess.run')
+    def test_npm_build_fails_when_public_missing(self, mock_run):
+        """_install_meshchat_npm returns False when public/ not created."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(returncode=0)
+
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            (install_dir / 'package.json').write_text('{}')
+            # No public/ directory created
+            result = handler._install_meshchat_npm(install_dir)
+            assert result is False
+
+    @patch('subprocess.run')
+    def test_handle_start_failure_detects_missing_frontend(self, mock_run):
+        """_handle_start_failure offers rebuild when public/ error in logs."""
+        handler = _make_handler()
+        handler.ctx.dialog.yesno.return_value = False  # Decline rebuild
+
+        log_output = (
+            "ValueError: '/home/wh6gxz/reticulum-meshchat/public/' "
+            "does not exist"
+        )
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=log_output, stderr='',
+        )
+
+        handler._handle_start_failure('reticulum-meshchat')
+
+        # Should have offered to rebuild frontend
+        yesno_calls = handler.ctx.dialog.yesno.call_args_list
+        assert len(yesno_calls) == 1
+        assert 'Frontend Not Built' in str(yesno_calls[0])
+
+    @patch('subprocess.run')
+    def test_handle_start_failure_still_detects_module_errors(self, mock_run):
+        """_handle_start_failure still detects ModuleNotFoundError first."""
+        handler = _make_handler()
+        handler.ctx.dialog.yesno.return_value = False
+
+        log_output = "ModuleNotFoundError: No module named 'aiohttp'"
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=log_output, stderr='',
+        )
+
+        handler._handle_start_failure('reticulum-meshchat')
+
+        yesno_calls = handler.ctx.dialog.yesno.call_args_list
+        assert len(yesno_calls) == 1
+        assert 'Missing Python Module' in str(yesno_calls[0])
+
+    def test_status_shows_frontend_built(self):
+        """Status display shows 'Built' when public/ exists."""
+        handler = _make_handler()
+        handler._is_meshchat_installed = MagicMock(return_value=True)
+        handler._is_meshchat_running = MagicMock(return_value=False)
+        handler._get_service_python = MagicMock(return_value='/usr/bin/python3')
+        handler._check_meshchat_deps = MagicMock(return_value=[])
+
+        import tempfile, io, contextlib
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            (install_dir / 'public').mkdir()
+            handler._get_meshchat_install_dir = MagicMock(return_value=install_dir)
+
+            with patch('launcher_tui.handlers.meshchat._HAS_LXMF', True):
+                with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', False):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        handler._meshchat_status()
+
+            assert 'Frontend:   Built' in output.getvalue()
+
+    def test_status_shows_frontend_missing(self):
+        """Status display shows 'NOT BUILT' when public/ missing."""
+        handler = _make_handler()
+        handler._is_meshchat_installed = MagicMock(return_value=True)
+        handler._is_meshchat_running = MagicMock(return_value=False)
+        handler._get_service_python = MagicMock(return_value='/usr/bin/python3')
+        handler._check_meshchat_deps = MagicMock(return_value=[])
+
+        import tempfile, io, contextlib
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            # No public/ directory
+            handler._get_meshchat_install_dir = MagicMock(return_value=install_dir)
+
+            with patch('launcher_tui.handlers.meshchat._HAS_LXMF', True):
+                with patch('launcher_tui.handlers.meshchat._HAS_MESHCHAT_SERVICE', False):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        handler._meshchat_status()
+
+            assert 'Frontend:   NOT BUILT' in output.getvalue()
+
+    def test_rebuild_frontend_method_exists(self):
+        """Handler has _rebuild_frontend method."""
+        handler = _make_handler()
+        assert hasattr(handler, '_rebuild_frontend')
+        assert callable(handler._rebuild_frontend)
