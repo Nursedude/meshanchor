@@ -1071,3 +1071,144 @@ class TestMeshChatFrontend:
         handler = _make_handler()
         assert hasattr(handler, '_rebuild_frontend')
         assert callable(handler._rebuild_frontend)
+
+
+# ============================================================================
+# MeshChat Client API v1 Tests
+# ============================================================================
+
+class TestMeshChatPeerFromAPI:
+    """Test MeshChatPeer.from_api() with real MeshChat announce format."""
+
+    def test_from_meshchat_announce_format(self):
+        """Parse real MeshChat /api/v1/announces response."""
+        from plugins.meshchat.client import MeshChatPeer
+        import time
+
+        now_ts = time.time()
+        data = {
+            'destination_hash': 'abcdef1234567890',
+            'identity_hash': 'fedcba0987654321',
+            'aspect': 'lxmf.delivery',
+            'app_data': 'TestNode',
+            'snr': 8.5,
+            'rssi': -95,
+            'quality': 0.8,
+            'created_at': now_ts - 3600,
+            'updated_at': now_ts - 60,
+        }
+        peer = MeshChatPeer.from_api(data)
+        assert peer.destination_hash == 'abcdef1234567890'
+        assert peer.identity_hash == 'fedcba0987654321'
+        assert peer.display_name == 'TestNode'
+        assert peer.is_online is True  # updated_at was 60s ago
+        assert peer.snr == 8.5
+        assert peer.rssi == -95
+        assert peer.last_announce is not None
+
+    def test_from_meshchat_announce_stale(self):
+        """Peer with old announce is marked offline."""
+        from plugins.meshchat.client import MeshChatPeer
+        import time
+
+        data = {
+            'destination_hash': 'abcdef1234567890',
+            'updated_at': time.time() - 7200,  # 2 hours ago
+        }
+        peer = MeshChatPeer.from_api(data)
+        assert peer.is_online is False
+
+    def test_from_legacy_format_still_works(self):
+        """Backward compat with old field names."""
+        from plugins.meshchat.client import MeshChatPeer
+
+        data = {
+            'hash': 'abc123',
+            'name': 'LegacyNode',
+            'last_announce': '2026-01-01T12:00:00',
+            'is_online': True,
+        }
+        peer = MeshChatPeer.from_api(data)
+        assert peer.destination_hash == 'abc123'
+        assert peer.display_name == 'LegacyNode'
+        assert peer.is_online is True
+
+
+class TestMeshChatClientEndpoints:
+    """Test that MeshChatClient uses correct /api/v1/ endpoints."""
+
+    def test_is_available_uses_v1_status(self):
+        """is_available() calls /api/v1/status."""
+        from plugins.meshchat.client import MeshChatClient
+
+        client = MeshChatClient()
+        with patch.object(client, '_request', return_value={'status': 'ok'}) as mock_req:
+            result = client.is_available()
+            assert result is True
+            mock_req.assert_called_once_with('GET', '/api/v1/status')
+
+    def test_get_peers_uses_v1_announces(self):
+        """get_peers() calls /api/v1/announces."""
+        from plugins.meshchat.client import MeshChatPeer, MeshChatClient
+
+        client = MeshChatClient()
+        mock_response = {'announces': [
+            {'destination_hash': 'abc123', 'app_data': 'Node1'}
+        ]}
+        with patch.object(client, '_request', return_value=mock_response) as mock_req:
+            peers = client.get_peers()
+            mock_req.assert_called_once_with('GET', '/api/v1/announces')
+            assert len(peers) == 1
+            assert peers[0].destination_hash == 'abc123'
+
+    def test_send_announce_uses_get(self):
+        """send_announce() uses GET /api/v1/announce."""
+        from plugins.meshchat.client import MeshChatClient
+
+        client = MeshChatClient()
+        with patch.object(client, '_request', return_value={}) as mock_req:
+            result = client.send_announce()
+            assert result is True
+            mock_req.assert_called_once_with('GET', '/api/v1/announce')
+
+    def test_send_message_uses_v1_endpoint(self):
+        """send_message() calls /api/v1/lxmf-messages/send with correct payload."""
+        from plugins.meshchat.client import MeshChatClient
+
+        client = MeshChatClient()
+        with patch.object(client, '_request', return_value={}) as mock_req:
+            result = client.send_message('dest_hash_123', 'Hello')
+            assert result is True
+            mock_req.assert_called_once_with(
+                'POST', '/api/v1/lxmf-messages/send',
+                data={'lxmf_message': {
+                    'destination_hash': 'dest_hash_123',
+                    'content': 'Hello'
+                }}
+            )
+
+    def test_get_status_uses_app_info(self):
+        """get_status() calls /api/v1/app/info."""
+        from plugins.meshchat.client import MeshChatClient
+
+        client = MeshChatClient()
+        app_info_resp = {'app_info': {
+            'version': '2.3.0',
+            'is_connected_to_shared_instance': True,
+        }}
+        announces_resp = {'announces': [{'destination_hash': 'a'}, {'destination_hash': 'b'}]}
+
+        call_count = [0]
+        def mock_request(method, endpoint, **kwargs):
+            call_count[0] += 1
+            if '/api/v1/app/info' in endpoint:
+                return app_info_resp
+            if '/api/v1/announces' in endpoint:
+                return announces_resp
+            return {}
+
+        with patch.object(client, '_request', side_effect=mock_request):
+            status = client.get_status()
+            assert status.version == '2.3.0'
+            assert status.rns_connected is True
+            assert status.peer_count == 2
