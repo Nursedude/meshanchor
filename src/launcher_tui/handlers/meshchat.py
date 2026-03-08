@@ -689,6 +689,10 @@ class MeshChatHandler(BaseHandler):
                 if not self._offer_install_meshchat_deps(missing_deps):
                     return
 
+        # Preflight: deploy upstream fixes (wrapper) and verify service file
+        self._apply_upstream_fixes()
+        self._verify_service_file()
+
         if _HAS_MESHCHAT_SERVICE:
             svc = MeshChatService()
             status = svc.check_status(blocking=True)
@@ -982,6 +986,10 @@ class MeshChatHandler(BaseHandler):
 
     def _restart_meshchat(self):
         """Restart MeshChat service to apply config changes."""
+        # Deploy upstream fixes before restart so the wrapper is in place
+        self._apply_upstream_fixes()
+        self._verify_service_file()
+
         self.ctx.dialog.infobox("Restarting", "Restarting MeshChat...")
 
         restarted = False
