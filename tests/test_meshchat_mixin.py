@@ -9,6 +9,8 @@ mixin-to-registry migration (Batch 8).
 
 import os
 import sys
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
 
@@ -1617,3 +1619,74 @@ class TestUpstreamFixes:
                       return_value=True):
                 handler._wait_for_rns_shared_instance(timeout=1)
         handler.ctx.dialog.infobox.assert_not_called()
+
+    def test_apply_strptime_patch_fixes_upstream_code(self):
+        """strptime patch transforms bare strptime calls to isinstance-guarded."""
+        handler = _make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text(
+                '    x = datetime.strptime(obj.field, '
+                '"%Y-%m-%d %H:%M:%S.%f%z")\n'
+            )
+            result = handler._apply_strptime_patch(Path(tmpdir))
+            assert result is True
+            patched = meshchat_py.read_text()
+            assert 'isinstance' in patched
+            assert 'datetime.strptime' in patched  # Still there as fallback
+
+    def test_apply_strptime_patch_idempotent(self):
+        """strptime patch is a no-op on already-patched code."""
+        handler = _make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text(
+                '    x = obj.field if isinstance(obj.field, datetime) '
+                'else datetime.strptime(obj.field, "%Y-%m-%d")\n'
+            )
+            result = handler._apply_strptime_patch(Path(tmpdir))
+            assert result is False  # No changes needed
+
+    def test_apply_strptime_patch_no_file(self):
+        """strptime patch returns False when meshchat.py doesn't exist."""
+        handler = _make_handler()
+        result = handler._apply_strptime_patch(Path('/nonexistent'))
+        assert result is False
+
+    def test_apply_strptime_patch_multiple_calls(self):
+        """strptime patch handles multiple strptime calls in one file."""
+        handler = _make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text(
+                '    a = datetime.strptime(x.created_at, "%Y-%m-%d")\n'
+                '    b = datetime.strptime(y.updated_at, "%Y-%m-%d")\n'
+            )
+            result = handler._apply_strptime_patch(Path(tmpdir))
+            assert result is True
+            patched = meshchat_py.read_text()
+            assert patched.count('isinstance') == 2
+
+    def test_verify_service_checks_wrapper_usage(self):
+        """_verify_service_file detects when service doesn't use wrapper."""
+        handler = _make_handler()
+        service_content = (
+            '[Service]\n'
+            'ExecStart=/usr/bin/python3 /home/user/meshchat.py '
+            '--headless --host 0.0.0.0\n'
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wrapper = Path(tmpdir) / handler.WRAPPER_FILENAME
+            wrapper.write_text('# wrapper')
+            with patch.object(
+                handler, '_get_meshchat_install_dir',
+                return_value=Path(tmpdir),
+            ):
+                with patch('pathlib.Path.exists', return_value=True):
+                    with patch('pathlib.Path.read_text',
+                               return_value=service_content):
+                        with patch.object(
+                            handler, '_install_meshchat_service'
+                        ) as mock_install:
+                            handler._verify_service_file()
+            mock_install.assert_called_once()
