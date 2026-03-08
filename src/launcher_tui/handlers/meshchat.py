@@ -23,7 +23,6 @@ LXMF exclusivity:
 Converted from meshchat_client_mixin.py as part of the mixin-to-registry migration (Batch 8).
 """
 
-import importlib
 import logging
 import os
 import shutil
@@ -38,7 +37,27 @@ from handlers._lxmf_utils import ensure_lxmf_exclusive
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
 
-_, _HAS_LXMF = safe_import('LXMF')
+def _detect_lxmf_available() -> bool:
+    """Check if LXMF is importable, trying venv python if direct import fails."""
+    _, has_it = safe_import('LXMF')
+    if has_it:
+        return True
+    # Current process may not see venv packages (e.g. sudo python3);
+    # check the venv python that the service actually uses.
+    venv_python = Path('/opt/meshforge/venv/bin/python3')
+    if venv_python.is_file():
+        try:
+            result = subprocess.run(
+                [str(venv_python), '-c', 'import LXMF'],
+                capture_output=True, timeout=10,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            pass
+    return False
+
+
+_HAS_LXMF = _detect_lxmf_available()
 
 logger = logging.getLogger(__name__)
 
@@ -228,9 +247,8 @@ class MeshChatHandler(BaseHandler):
             # The current process may not have the venv on sys.path.
             service_python = self._get_service_python()
             if self._check_lxmf_with_python(service_python):
-                # Best-effort update of in-process flag for this session
-                importlib.invalidate_caches()
-                _, _HAS_LXMF = safe_import('LXMF')
+                # Service python confirmed LXMF is importable — set the flag
+                _HAS_LXMF = True
                 # Ensure systemd service uses the correct Python
                 self._verify_service_python_path()
                 self.ctx.dialog.msgbox(
