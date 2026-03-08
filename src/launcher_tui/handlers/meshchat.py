@@ -1819,62 +1819,129 @@ class MeshChatHandler(BaseHandler):
     # Upstream Fixes
     # ------------------------------------------------------------------
 
-    def _apply_upstream_fixes(self, install_dir: Path = None) -> list:
-        """Apply known upstream fixes to MeshChat. Returns list of fixes applied.
+    WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-        Safe and idempotent — skips fixes already applied or patterns not found.
+    _WRAPPER_CONTENT = '''\
+#!/usr/bin/env python3
+"""MeshForge wrapper - patches datetime JSON serialization before MeshChat starts.
+
+Upstream MeshChat passes datetime objects to aiohttp's web.json_response()
+which calls json.dumps() without a default handler, causing:
+  TypeError: Object of type datetime is not JSON serializable
+
+This wrapper monkey-patches json.JSONEncoder.default to handle datetime
+objects by converting them to ISO 8601 strings. It then executes the
+real meshchat.py in the same process.
+
+Safe to remove once upstream fixes the issue.
+"""
+import datetime
+import json
+import sys
+
+_original_default = json.JSONEncoder.default
+
+
+def _patched_default(self, obj):
+    if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+        return obj.isoformat()
+    return _original_default(self, obj)
+
+
+json.JSONEncoder.default = _patched_default
+
+# Execute the real meshchat.py in this process
+_meshchat_path = str(__import__("pathlib").Path(__file__).parent / "meshchat.py")
+sys.argv[0] = _meshchat_path
+with open(_meshchat_path) as _f:
+    exec(compile(_f.read(), _meshchat_path, "exec"))
+'''
+
+    def _create_meshchat_wrapper(self, install_dir: Path = None) -> Path:
+        """Create a wrapper script that patches datetime serialization.
+
+        The wrapper monkey-patches json.JSONEncoder.default before
+        executing meshchat.py, so datetime objects serialize to ISO strings.
         """
         if install_dir is None:
             install_dir = self._get_meshchat_install_dir()
 
+        wrapper_path = install_dir / self.WRAPPER_FILENAME
+        wrapper_path.write_text(self._WRAPPER_CONTENT)
+        wrapper_path.chmod(0o755)
+
+        # Preserve ownership to match meshchat.py
         meshchat_py = install_dir / 'meshchat.py'
-        if not meshchat_py.exists():
+        if meshchat_py.exists():
+            stat_info = meshchat_py.stat()
+            try:
+                os.chown(wrapper_path, stat_info.st_uid, stat_info.st_gid)
+            except OSError:
+                pass
+        return wrapper_path
+
+    def _update_service_to_wrapper(self, install_dir: Path = None) -> bool:
+        """Update systemd ExecStart to use the wrapper script.
+
+        Reads the existing service file, replaces meshchat.py with
+        meshforge_wrapper.py in ExecStart, writes back, and reloads.
+        """
+        if install_dir is None:
+            install_dir = self._get_meshchat_install_dir()
+
+        service_path = (
+            f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
+        )
+        try:
+            content = Path(service_path).read_text()
+        except OSError:
+            return False
+
+        meshchat_py = str(install_dir / 'meshchat.py')
+        wrapper_str = str(install_dir / self.WRAPPER_FILENAME)
+
+        if wrapper_str in content:
+            return False  # Already using wrapper
+
+        if meshchat_py not in content:
+            return False  # Can't find target to replace
+
+        new_content = content.replace(meshchat_py, wrapper_str)
+        if _HAS_SUDO_WRITE and _sudo_write:
+            ok, msg = _sudo_write(service_path, new_content)
+            if ok:
+                subprocess.run(
+                    ['systemctl', 'daemon-reload'],
+                    capture_output=True, timeout=15,
+                )
+                return True
+        return False
+
+    def _apply_upstream_fixes(self, install_dir: Path = None) -> list:
+        """Apply known upstream fixes to MeshChat. Returns list of fixes applied.
+
+        Creates a wrapper script that monkey-patches datetime serialization
+        and updates the systemd service to use it. Safe and idempotent.
+        """
+        if install_dir is None:
+            install_dir = self._get_meshchat_install_dir()
+
+        if not (install_dir / 'meshchat.py').exists():
             return []
 
-        fixes_applied = []
-        try:
-            content = meshchat_py.read_text()
-            original = content
+        fixes = []
 
-            # Fix 1: datetime JSON serialization (upstream meshchat.py ~line 1235)
-            # The announces endpoint passes datetime objects to web.json_response()
-            # which calls json.dumps() without a default handler, causing:
-            #   TypeError: Object of type datetime is not JSON serializable
-            if ('json_response' in content
-                    and 'announces' in content
-                    and 'default=str' not in content):
-                # Add functools import if missing
-                if 'import functools' not in content:
-                    content = content.replace(
-                        'import json\n',
-                        'import json\nimport functools\n',
-                        1,
-                    )
-                # Patch: add dumps= with default=str to the announces response
-                content = content.replace(
-                    'return web.json_response({\n'
-                    '            "announces": announces,\n'
-                    '        })',
-                    'return web.json_response({\n'
-                    '            "announces": announces,\n'
-                    '        }, dumps=functools.partial(json.dumps, default=str))',
-                )
-                if content != original:
-                    fixes_applied.append('datetime JSON serialization')
+        # Fix 1: Create wrapper for datetime JSON serialization
+        wrapper = install_dir / self.WRAPPER_FILENAME
+        if not wrapper.exists():
+            self._create_meshchat_wrapper(install_dir)
+            fixes.append('datetime JSON serialization (wrapper)')
 
-            if fixes_applied:
-                # Preserve file ownership when running as root/sudo
-                stat_info = meshchat_py.stat()
-                meshchat_py.write_text(content)
-                try:
-                    os.chown(meshchat_py, stat_info.st_uid, stat_info.st_gid)
-                except OSError:
-                    pass  # Non-critical if chown fails
+        # Fix 2: Update systemd service to use wrapper
+        if fixes and self._update_service_to_wrapper(install_dir):
+            fixes.append('systemd service updated')
 
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Failed to apply upstream fixes: %s", e)
-
-        return fixes_applied
+        return fixes
 
     def _apply_upstream_fixes_interactive(self):
         """Apply known upstream fixes with user feedback."""
@@ -2185,6 +2252,10 @@ class MeshChatHandler(BaseHandler):
         bind_host = self._get_meshchat_bind_host()
         rns_config_dir = self._ensure_meshchat_rns_config()
 
+        # Use wrapper if available (patches datetime serialization)
+        wrapper_path = install_dir / self.WRAPPER_FILENAME
+        exec_target = wrapper_path if wrapper_path.exists() else meshchat_py
+
         service_content = (
             f"[Unit]\n"
             f"Description=Reticulum MeshChat LXMF Client\n"
@@ -2202,7 +2273,7 @@ class MeshChatHandler(BaseHandler):
             f"for i in 1 2 3 4 5; do "
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
-            f"ExecStart={python_path} {meshchat_py}"
+            f"ExecStart={python_path} {exec_target}"
             f" --headless --host {bind_host}"
             f" --reticulum-config-dir {rns_config_dir}\n"
             f"Restart=on-failure\n"
