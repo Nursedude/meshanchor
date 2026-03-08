@@ -25,6 +25,7 @@ Converted from meshchat_client_mixin.py as part of the mixin-to-registry migrati
 
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -85,6 +86,22 @@ MeshChatService, ServiceState, _HAS_MESHCHAT_SERVICE = safe_import(
 MeshChatClient, MeshChatError, _HAS_MESHCHAT_CLIENT = safe_import(
     'plugins.meshchat.client', 'MeshChatClient', 'MeshChatError'
 )
+
+
+# Regex for upstream meshchat.py strptime bug (Peewee returns datetime, not str)
+_STRPTIME_ASSIGNMENT_RE = re.compile(
+    r'^( +)(\w+) = datetime\.strptime\((\w+\.\w+), (".*?")\)$',
+    re.MULTILINE,
+)
+
+
+def _build_strptime_replacement(match: re.Match) -> str:
+    """Build isinstance-guarded replacement for a strptime assignment."""
+    indent, var, field_expr, fmt = match.group(1, 2, 3, 4)
+    return (
+        f"{indent}{var} = {field_expr} if isinstance({field_expr}, datetime) "
+        f"else datetime.strptime({field_expr}, {fmt})"
+    )
 
 
 class MeshChatHandler(BaseHandler):
@@ -1567,6 +1584,7 @@ class MeshChatHandler(BaseHandler):
         - Wrong Python path in ExecStart
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
         - Bind host mismatch vs configured setting
+        - ExecStart not using wrapper (datetime/RPC fixes)
 
         Regenerates the service file if any issues are found.
         """
@@ -1618,6 +1636,14 @@ class MeshChatHandler(BaseHandler):
             logger.warning(
                 "Service binds to %s — updating to %s",
                 other_host, configured_host,
+            )
+            needs_regen = True
+
+        # Check if ExecStart uses the wrapper (datetime/RPC resilience fixes)
+        wrapper_path = self._get_meshchat_install_dir() / self.WRAPPER_FILENAME
+        if wrapper_path.exists() and self.WRAPPER_FILENAME not in content:
+            logger.warning(
+                "Service uses meshchat.py directly — updating to wrapper"
             )
             needs_regen = True
 
@@ -2079,11 +2105,43 @@ runpy.run_path(_meshchat_path, run_name="__main__")
             self._create_meshchat_wrapper(install_dir)
             fixes.append('upstream fixes (wrapper updated)')
 
+        # Patch strptime calls in meshchat.py source (idempotent)
+        if self._apply_strptime_patch(install_dir):
+            fixes.append('strptime datetime fix applied')
+
         # Ensure systemd service points to wrapper
         if self._update_service_to_wrapper(install_dir):
             fixes.append('systemd service updated')
 
         return fixes
+
+    def _apply_strptime_patch(self, install_dir: Path) -> bool:
+        """Patch meshchat.py strptime calls to handle datetime objects.
+
+        Upstream bug: Peewee DateTimeField returns datetime objects, but
+        meshchat.py calls datetime.strptime() on them -> TypeError.
+        Idempotent -- regex won't match already-patched lines.
+        """
+        meshchat_py = install_dir / 'meshchat.py'
+        if not meshchat_py.exists():
+            return False
+
+        try:
+            source = meshchat_py.read_text(encoding='utf-8')
+        except OSError:
+            return False
+
+        patched = _STRPTIME_ASSIGNMENT_RE.sub(
+            _build_strptime_replacement, source
+        )
+        if patched == source:
+            return False  # No changes (already patched or no matches)
+
+        try:
+            meshchat_py.write_text(patched, encoding='utf-8')
+        except OSError:
+            return False
+        return True
 
     def _apply_upstream_fixes_interactive(self):
         """Apply known upstream fixes with user feedback."""
