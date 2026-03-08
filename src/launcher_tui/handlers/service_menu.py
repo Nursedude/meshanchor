@@ -416,6 +416,7 @@ class ServiceMenuHandler(BaseHandler):
                 ("status", "Service Status (all)"),
                 ("meshtasticd", "Manage meshtasticd"),
                 ("rnsd", "Manage rnsd"),
+                ("meshchat", "Manage MeshChat"),
                 ("restart-mesh", "Restart meshtasticd"),
                 ("start-rns", "Start rnsd"),
                 ("restart-rns", "Restart rnsd"),
@@ -445,6 +446,7 @@ class ServiceMenuHandler(BaseHandler):
                 "restart-rns": ("Restart rnsd", self._restart_rnsd_service),
                 "meshtasticd": ("Manage meshtasticd", lambda: self._manage_service("meshtasticd")),
                 "rnsd": ("Manage rnsd", lambda: self._manage_service("rnsd")),
+                "meshchat": ("Manage MeshChat", lambda: self._manage_service("reticulum-meshchat")),
                 "lock-9443": ("Port 9443 Lockdown", self._manage_port_lockdown),
             }
             entry = dispatch.get(choice)
@@ -459,7 +461,7 @@ class ServiceMenuHandler(BaseHandler):
         failed_services = []
         use_direct_rnsd = not self._has_systemd_unit('rnsd')
 
-        for svc in ['meshtasticd', 'rnsd', 'meshforge']:
+        for svc in ['meshtasticd', 'rnsd', 'reticulum-meshchat', 'meshforge']:
             if svc == 'meshforge':
                 is_systemd = False
                 try:
