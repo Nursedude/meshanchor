@@ -1423,11 +1423,11 @@ class TestUpstreamFixes:
             meshchat_py.write_text('print("hello")\n')
             with patch.object(handler, '_update_service_to_wrapper', return_value=False):
                 result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert any('datetime' in f for f in result)
+            assert any('wrapper' in f for f in result)
             assert (Path(tmpdir) / handler.WRAPPER_FILENAME).exists()
 
     def test_apply_upstream_fixes_idempotent(self):
-        """Running twice doesn't recreate wrapper."""
+        """Running twice with same version doesn't recreate wrapper."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
@@ -1439,6 +1439,38 @@ class TestUpstreamFixes:
                 assert len(result1) >= 1
                 result2 = handler._apply_upstream_fixes(Path(tmpdir))
                 assert result2 == []
+
+    def test_apply_upstream_fixes_regenerates_outdated_wrapper(self):
+        """Regenerates wrapper when version is outdated."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text('print("hello")\n')
+            # Create old wrapper with version 1
+            wrapper = Path(tmpdir) / handler.WRAPPER_FILENAME
+            wrapper.write_text('# meshforge_wrapper_version: 1\nold content\n')
+            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
+                result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert any('updated' in f for f in result)
+            content = wrapper.read_text()
+            assert f'meshforge_wrapper_version: {handler._WRAPPER_VERSION}' in content
+
+    def test_apply_upstream_fixes_regenerates_unversioned_wrapper(self):
+        """Regenerates wrapper that has no version marker."""
+        handler = _make_handler()
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meshchat_py = Path(tmpdir) / 'meshchat.py'
+            meshchat_py.write_text('print("hello")\n')
+            # Create old wrapper WITHOUT version marker
+            wrapper = Path(tmpdir) / handler.WRAPPER_FILENAME
+            wrapper.write_text('#!/usr/bin/env python3\n# old wrapper\n')
+            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
+                result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert any('updated' in f for f in result)
 
     def test_update_service_to_wrapper(self):
         """_update_service_to_wrapper replaces ExecStart target."""
@@ -1520,8 +1552,9 @@ class TestUpstreamFixes:
         assert 'ConnectionRefusedError' in content
         assert '_original_get_interface_stats' in content
         assert '_original_get_path_table' in content
-        # Returns None (same as RNS standalone mode)
-        assert 'return None' in content
+        # Returns safe empty values (not None — MeshChat iterates these)
+        assert 'return {}' in content
+        assert 'return []' in content
 
     def test_wrapper_rpc_patches_handle_import_error(self):
         """Wrapper RPC patches gracefully skip if RNS not importable."""
