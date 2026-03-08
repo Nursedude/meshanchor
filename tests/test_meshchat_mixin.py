@@ -1501,3 +1501,68 @@ class TestUpstreamFixes:
                         handler._handle_start_failure('reticulum-meshchat')
         handler.ctx.dialog.yesno.assert_called_once()
         assert 'JSON' in handler.ctx.dialog.yesno.call_args[0][0]
+
+    def test_wrapper_includes_rns_wait(self):
+        """Wrapper script includes RNS shared instance wait logic."""
+        handler = _make_handler()
+        content = handler._WRAPPER_CONTENT
+        assert '_rns_shared_instance_ready' in content
+        assert '@rns/default' in content
+        assert '/proc/net/unix' in content
+        assert 'time.sleep(1)' in content
+
+    @patch('subprocess.run')
+    def test_handle_start_failure_detects_connection_refused(self, mock_run):
+        """_handle_start_failure detects RNS ConnectionRefusedError."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            stdout=(
+                'ConnectionRefusedError: [Errno 111] Connection refused\n'
+                'File "/usr/local/lib/python3.13/dist-packages/RNS/Reticulum.py", '
+                'line 1088, in get_rpc_client'
+            ),
+            returncode=0,
+        )
+        handler.ctx.dialog.yesno.return_value = False  # Decline retry
+        with patch.object(handler, '_get_rnsd_user', return_value=None):
+            handler._handle_start_failure('reticulum-meshchat')
+        handler.ctx.dialog.yesno.assert_called_once()
+        assert 'Connection Refused' in handler.ctx.dialog.yesno.call_args[0][0]
+
+    @patch('subprocess.run')
+    def test_handle_start_failure_connection_refused_retries(self, mock_run):
+        """_handle_start_failure retries MeshChat after ConnectionRefusedError."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            stdout='ConnectionRefusedError: [Errno 111] Connection refused\n'
+                   'get_rpc_client',
+            returncode=0,
+        )
+        handler.ctx.dialog.yesno.return_value = True  # Accept retry
+        with patch.object(handler, '_get_rnsd_user', return_value='wh6gxz'):
+            with patch.object(handler, '_wait_for_rns_shared_instance'):
+                with patch('launcher_tui.handlers.meshchat.start_service'):
+                    with patch.object(handler, '_is_meshchat_running',
+                                     return_value=True):
+                        with patch.object(handler, '_get_meshchat_url',
+                                         return_value='http://test:8000'):
+                            handler._handle_start_failure('reticulum-meshchat')
+        handler.ctx.dialog.msgbox.assert_called_once()
+        assert 'MeshChat Started' in handler.ctx.dialog.msgbox.call_args[0][0]
+
+    def test_wait_for_rns_no_rnsd(self):
+        """_wait_for_rns_shared_instance returns immediately if rnsd not running."""
+        handler = _make_handler()
+        with patch.object(handler, '_get_rnsd_user', return_value=None):
+            handler._wait_for_rns_shared_instance(timeout=1)
+        # Should not have shown any dialog
+        handler.ctx.dialog.infobox.assert_not_called()
+
+    def test_wait_for_rns_already_ready(self):
+        """_wait_for_rns_shared_instance returns immediately if socket ready."""
+        handler = _make_handler()
+        with patch.object(handler, '_get_rnsd_user', return_value='wh6gxz'):
+            with patch('launcher_tui.handlers.meshchat.check_rns_shared_instance',
+                      return_value=True):
+                handler._wait_for_rns_shared_instance(timeout=1)
+        handler.ctx.dialog.infobox.assert_not_called()
