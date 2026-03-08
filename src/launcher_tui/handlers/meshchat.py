@@ -1890,8 +1890,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
+    _WRAPPER_VERSION = 3  # Bump when _WRAPPER_CONTENT changes
+
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
+# meshforge_wrapper_version: 3
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1900,7 +1903,7 @@ Fixes applied:
 2. Waits for RNS shared instance socket before starting MeshChat
    (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
 3. Monkey-patches RNS RPC methods to catch ConnectionRefusedError at runtime
-   (returns None instead of crashing — same as RNS standalone mode)
+   (returns safe empty values instead of crashing the web UI)
 
 Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
@@ -1962,7 +1965,7 @@ if _rnsd_running() and not _rns_shared_instance_ready():
 # --- Fix 3: Resilient RNS RPC calls (runtime ConnectionRefusedError) ---
 # MeshChat calls get_interface_stats() on every web request (index handler).
 # If rnsd drops or restarts at runtime, this crashes the entire web UI.
-# Patch to return None (same as RNS standalone mode) instead of crashing.
+# Patch to return safe empty values instead of crashing.
 try:
     import RNS
 
@@ -1973,13 +1976,13 @@ try:
         try:
             return _original_get_interface_stats(self)
         except (ConnectionRefusedError, OSError):
-            return None
+            return {}
 
     def _safe_get_path_table(self):
         try:
             return _original_get_path_table(self)
         except (ConnectionRefusedError, OSError):
-            return None
+            return []
 
     RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
     RNS.Reticulum.get_path_table = _safe_get_path_table
@@ -2015,6 +2018,19 @@ runpy.run_path(_meshchat_path, run_name="__main__")
             except OSError:
                 pass
         return wrapper_path
+
+    def _wrapper_needs_update(self, wrapper_path: Path) -> bool:
+        """Check if existing wrapper is outdated and needs regeneration."""
+        try:
+            content = wrapper_path.read_text()
+            for line in content.splitlines():
+                if line.startswith('# meshforge_wrapper_version:'):
+                    version = int(line.split(':')[1].strip())
+                    return version < self._WRAPPER_VERSION
+            # No version marker → old wrapper before versioning was added
+            return True
+        except (OSError, ValueError):
+            return True
 
     def _update_service_to_wrapper(self, install_dir: Path = None) -> bool:
         """Update systemd ExecStart to use the wrapper script.
@@ -2056,8 +2072,10 @@ runpy.run_path(_meshchat_path, run_name="__main__")
     def _apply_upstream_fixes(self, install_dir: Path = None) -> list:
         """Apply known upstream fixes to MeshChat. Returns list of fixes applied.
 
-        Creates a wrapper script that monkey-patches datetime serialization
-        and updates the systemd service to use it. Safe and idempotent.
+        Creates a wrapper script that monkey-patches datetime serialization,
+        waits for RNS, and patches RPC methods for resilience. Updates the
+        systemd service to use the wrapper. Safe and idempotent — regenerates
+        the wrapper when a new version is available.
         """
         if install_dir is None:
             install_dir = self._get_meshchat_install_dir()
@@ -2067,14 +2085,17 @@ runpy.run_path(_meshchat_path, run_name="__main__")
 
         fixes = []
 
-        # Fix 1: Create wrapper for datetime JSON serialization
+        # Create or update wrapper (versioned — regenerates when outdated)
         wrapper = install_dir / self.WRAPPER_FILENAME
         if not wrapper.exists():
             self._create_meshchat_wrapper(install_dir)
-            fixes.append('datetime JSON serialization (wrapper)')
+            fixes.append('upstream fixes (wrapper created)')
+        elif self._wrapper_needs_update(wrapper):
+            self._create_meshchat_wrapper(install_dir)
+            fixes.append('upstream fixes (wrapper updated)')
 
-        # Fix 2: Update systemd service to use wrapper
-        if fixes and self._update_service_to_wrapper(install_dir):
+        # Ensure systemd service points to wrapper
+        if self._update_service_to_wrapper(install_dir):
             fixes.append('systemd service updated')
 
         return fixes
