@@ -16,7 +16,7 @@
     "settings_schema": {
         "host": {
             "type": "string",
-            "default": "127.0.0.1",
+            "default": "0.0.0.0",
             "label": "MeshChat Host"
         },
         "port": {
