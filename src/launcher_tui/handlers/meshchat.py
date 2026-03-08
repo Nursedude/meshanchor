@@ -689,6 +689,9 @@ class MeshChatHandler(BaseHandler):
         if not self._check_rns_for_meshchat():
             return
 
+        # Preflight: ensure user-space RNS config for shared instance
+        self._ensure_meshchat_rns_config()
+
         # Preflight: check LXMF availability
         if not _HAS_LXMF:
             if not self._offer_install_lxmf():
@@ -1585,6 +1588,7 @@ class MeshChatHandler(BaseHandler):
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
         - Bind host mismatch vs configured setting
         - ExecStart not using wrapper (datetime/RPC fixes)
+        - Missing --reticulum-config-dir (RNS shared instance)
 
         Regenerates the service file if any issues are found.
         """
@@ -1645,6 +1649,11 @@ class MeshChatHandler(BaseHandler):
             logger.warning(
                 "Service uses meshchat.py directly — updating to wrapper"
             )
+            needs_regen = True
+
+        # Check for missing --reticulum-config-dir (RNS shared instance)
+        if '--reticulum-config-dir' not in content:
+            logger.warning("Service missing --reticulum-config-dir — adding")
             needs_regen = True
 
         if needs_regen:
@@ -1901,11 +1910,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 4  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 5  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 4
+# meshforge_wrapper_version: 5
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1915,6 +1924,8 @@ Fixes applied:
    (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
 3. Monkey-patches RNS RPC methods to catch ConnectionRefusedError at runtime
    (returns safe empty values instead of crashing the web UI)
+4. Monkey-patches datetime.strptime to handle Peewee datetime objects
+   (prevents TypeError when meshchat.py passes datetime to strptime)
 
 Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
@@ -1999,6 +2010,24 @@ try:
     RNS.Reticulum.get_path_table = _safe_get_path_table
 except ImportError:
     pass  # RNS not installed — meshchat.py will fail on its own
+
+
+# --- Fix 4: Resilient datetime.strptime (handles Peewee datetime objects) ---
+# Upstream meshchat.py calls datetime.strptime() on Peewee DateTimeField values
+# which are already datetime objects -> TypeError. Monkey-patch survives updates.
+_original_strptime = datetime.datetime.strptime
+
+
+@classmethod
+def _safe_strptime(cls, date_string, format_str):
+    if isinstance(date_string, datetime.datetime):
+        return date_string
+    if isinstance(date_string, datetime.date):
+        return datetime.datetime(date_string.year, date_string.month, date_string.day)
+    return _original_strptime(date_string, format_str)
+
+
+datetime.datetime.strptime = _safe_strptime
 
 # Run meshchat.py in this process, preserving __main__ semantics
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2450,6 +2479,7 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         python_path = self._get_service_python()
         meshchat_py = install_dir / 'meshchat.py'
         bind_host = self._get_meshchat_bind_host()
+        rns_config_dir = self._ensure_meshchat_rns_config()
 
         # Use wrapper if available (patches datetime serialization)
         wrapper_path = install_dir / self.WRAPPER_FILENAME
@@ -2473,7 +2503,8 @@ runpy.run_path(_meshchat_path, run_name="__main__")
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
             f"ExecStart={python_path} {exec_target}"
-            f" --headless --host {bind_host}\n"
+            f" --headless --host {bind_host}"
+            f" --reticulum-config-dir {rns_config_dir}\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
