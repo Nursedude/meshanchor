@@ -247,11 +247,11 @@ class MeshChatHandler(BaseHandler):
             # Verify using the SERVICE python, not the current process.
             # The current process may not have the venv on sys.path.
             service_python = self._get_service_python()
-            if self._check_lxmf_with_python(service_python):
+            if self._check_lxmf_with_python(service_python, run_as_user):
                 # Service python confirmed LXMF is importable — set the flag
                 _HAS_LXMF = True
                 # Ensure systemd service uses the correct Python
-                self._verify_service_python_path()
+                self._verify_service_file()
                 self.ctx.dialog.msgbox(
                     "LXMF Installed",
                     "LXMF module installed successfully.\n\n"
@@ -322,7 +322,7 @@ class MeshChatHandler(BaseHandler):
         success = self._install_meshchat_pip(install_dir, run_as_user)
 
         service_python = self._get_service_python()
-        still_missing = self._check_meshchat_deps(service_python)
+        still_missing = self._check_meshchat_deps(service_python, run_as_user)
 
         if success and not still_missing:
             self.ctx.dialog.msgbox(
@@ -363,7 +363,7 @@ class MeshChatHandler(BaseHandler):
                     print(f"  Error installing {mod}: {e}")
 
             # Re-check after fallback
-            still_missing = self._check_meshchat_deps(service_python)
+            still_missing = self._check_meshchat_deps(service_python, run_as_user)
             if not still_missing:
                 self.ctx.dialog.msgbox(
                     "Dependencies Installed",
@@ -563,7 +563,8 @@ class MeshChatHandler(BaseHandler):
         # MeshChat Python dependencies status
         if installed:
             service_python = self._get_service_python()
-            missing_deps = self._check_meshchat_deps(service_python)
+            service_user = self._get_service_user()
+            missing_deps = self._check_meshchat_deps(service_python, service_user)
             if missing_deps:
                 missing_str = ', '.join(missing_deps)
                 print(f"  MeshChat deps: MISSING ({missing_str})")
@@ -656,7 +657,9 @@ class MeshChatHandler(BaseHandler):
 
         # Preflight: check MeshChat's own Python dependencies (aiohttp, etc.)
         if self._is_meshchat_installed():
-            missing_deps = self._check_meshchat_deps(self._get_service_python())
+            missing_deps = self._check_meshchat_deps(
+                self._get_service_python(), self._get_service_user()
+            )
             if missing_deps:
                 if not self._offer_install_meshchat_deps(missing_deps):
                     return
@@ -801,7 +804,9 @@ class MeshChatHandler(BaseHandler):
                     f"MeshChat crashed because '{mod_name}' is not installed.\n\n"
                     f"Install MeshChat dependencies now?",
                 ):
-                    missing = self._check_meshchat_deps()
+                    missing = self._check_meshchat_deps(
+                        run_as_user=self._get_service_user()
+                    )
                     if not missing:
                         missing = [mod_name]
                     self._offer_install_meshchat_deps(missing)
@@ -1169,8 +1174,36 @@ class MeshChatHandler(BaseHandler):
             return str(venv_python)
         return shutil.which('python3') or '/usr/bin/python3'
 
-    def _check_meshchat_deps(self, python_path: str = None) -> list:
+    def _get_service_user(self) -> str:
+        """Return the user the MeshChat service runs as.
+
+        Checks the systemd service file first, falls back to SUDO_USER.
+        Returns None if running as root without sudo.
+        """
+        service_path = Path(
+            f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
+        )
+        if service_path.exists():
+            try:
+                for line in service_path.read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith('User='):
+                        user = stripped.split('=', 1)[1].strip()
+                        if user and user != 'root':
+                            return user
+            except (IOError, OSError):
+                pass
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user and sudo_user != 'root':
+            return sudo_user
+        return None
+
+    def _check_meshchat_deps(self, python_path: str = None,
+                             run_as_user: str = None) -> list:
         """Check if MeshChat's key Python deps are importable by service Python.
+
+        When run_as_user is set and no venv is in use, runs the import check
+        as that user so user-site-packages (--user installs) are visible.
 
         Returns a list of missing module names (empty = all OK).
         """
@@ -1180,11 +1213,17 @@ class MeshChatHandler(BaseHandler):
         # Key deps from MeshChat's requirements.txt that cause crash-loops
         required_modules = ['aiohttp', 'cryptography']
         missing = []
+        using_venv = Path('/opt/meshforge/venv/bin/python3').is_file()
 
         for mod in required_modules:
             try:
+                cmd = [python_path, '-c', f'import {mod}']
+                # When not using venv, run as the service user so that
+                # user-site-packages (~user/.local/lib/...) are visible.
+                if run_as_user and not using_venv:
+                    cmd = ['sudo', '-H', '-u', run_as_user] + cmd
                 result = subprocess.run(
-                    [python_path, '-c', f'import {mod}'],
+                    cmd,
                     capture_output=True,
                     timeout=10,
                 )
@@ -1195,18 +1234,26 @@ class MeshChatHandler(BaseHandler):
 
         return missing
 
-    def _check_lxmf_with_python(self, python_path: str = None) -> bool:
+    def _check_lxmf_with_python(self, python_path: str = None,
+                                run_as_user: str = None) -> bool:
         """Check if LXMF is importable by the service's Python interpreter.
 
         Uses subprocess to test the import in the correct Python environment,
         avoiding false negatives when the current process's sys.path differs
         from the service's (e.g., sudo python3 vs venv python3).
+
+        When run_as_user is set and no venv is in use, runs the import check
+        as that user so user-site-packages are visible.
         """
         if python_path is None:
             python_path = self._get_service_python()
         try:
+            cmd = [python_path, '-c', 'import LXMF']
+            using_venv = Path('/opt/meshforge/venv/bin/python3').is_file()
+            if run_as_user and not using_venv:
+                cmd = ['sudo', '-H', '-u', run_as_user] + cmd
             result = subprocess.run(
-                [python_path, '-c', 'import LXMF'],
+                cmd,
                 capture_output=True,
                 timeout=10,
             )
@@ -1215,11 +1262,15 @@ class MeshChatHandler(BaseHandler):
             logger.debug("LXMF import check failed for %s: %s", python_path, e)
             return False
 
-    def _verify_service_python_path(self):
-        """Check if the systemd service file uses the correct Python.
+    def _verify_service_file(self):
+        """Check if the systemd service file is current and correct.
 
-        If ExecStart uses a different Python than _get_service_python(),
-        regenerate the service file so the service can find LXMF.
+        Detects and fixes:
+        - Wrong Python path in ExecStart
+        - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
+        - --host 0.0.0.0 instead of 127.0.0.1 (security fix)
+
+        Regenerates the service file if any issues are found.
         """
         service_path = Path(
             f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
@@ -1232,9 +1283,12 @@ class MeshChatHandler(BaseHandler):
         except (IOError, OSError):
             return
 
+        needs_regen = False
         expected_python = self._get_service_python()
+        lines = content.splitlines()
 
-        for line in content.splitlines():
+        # Check Python path in ExecStart
+        for line in lines:
             if line.strip().startswith('ExecStart='):
                 exec_start = line.strip().split('=', 1)[1]
                 current_python = exec_start.split()[0] if exec_start else ''
@@ -1243,11 +1297,31 @@ class MeshChatHandler(BaseHandler):
                         "Service uses %s but pip target is %s",
                         current_python, expected_python,
                     )
-                    install_dir = self._get_meshchat_install_dir()
-                    sudo_user = os.environ.get('SUDO_USER')
-                    run_as = sudo_user if sudo_user and sudo_user != 'root' else None
-                    self._install_meshchat_service(install_dir, run_as)
+                    needs_regen = True
                 break
+
+        # Check for StartLimitIntervalSec in [Service] (belongs in [Unit])
+        in_service_section = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == '[Service]':
+                in_service_section = True
+            elif stripped.startswith('[') and stripped.endswith(']'):
+                in_service_section = False
+            elif in_service_section and 'StartLimitIntervalSec' in stripped:
+                logger.warning("StartLimitIntervalSec in [Service] — stale file")
+                needs_regen = True
+                break
+
+        # Check for --host 0.0.0.0 (should be 127.0.0.1)
+        if '--host 0.0.0.0' in content:
+            logger.warning("Service binds to 0.0.0.0 — updating to 127.0.0.1")
+            needs_regen = True
+
+        if needs_regen:
+            install_dir = self._get_meshchat_install_dir()
+            run_as = self._get_service_user()
+            self._install_meshchat_service(install_dir, run_as)
 
     def _install_meshchat(self):
         """Automated MeshChat installation.
@@ -1542,7 +1616,7 @@ class MeshChatHandler(BaseHandler):
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
             f"ExecStart={python_path} {meshchat_py}"
-            f" --headless --host 0.0.0.0\n"
+            f" --headless --host 127.0.0.1\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
