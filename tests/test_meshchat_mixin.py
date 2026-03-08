@@ -1552,8 +1552,8 @@ class TestUpstreamFixes:
         assert 'ConnectionRefusedError' in content
         assert '_original_get_interface_stats' in content
         assert '_original_get_path_table' in content
-        # Returns safe empty values (not None — MeshChat iterates these)
-        assert 'return {}' in content
+        # Returns safe structures MeshChat expects (not empty dict/None)
+        assert 'return {"interfaces": []}' in content
         assert 'return []' in content
 
     def test_wrapper_rpc_patches_handle_import_error(self):
