@@ -493,6 +493,7 @@ class MeshChatHandler(BaseHandler):
                 choices.append(("network", "Network Access (LAN/Local)"))
                 choices.append(("npm", "NPM Management"))
                 choices.append(("rebuild", "Rebuild Frontend"))
+                choices.append(("fix-upstream", "Apply Upstream Fixes"))
                 choices.append(("logs", "View Logs"))
                 choices.append(("uninstall", "Disable MeshChat"))
             else:
@@ -525,6 +526,7 @@ class MeshChatHandler(BaseHandler):
                 "network": ("Network Access", self._configure_network_access),
                 "npm": ("NPM Management", self._npm_management_menu),
                 "rebuild": ("Rebuild Frontend", self._rebuild_frontend),
+                "fix-upstream": ("Apply Upstream Fixes", self._apply_upstream_fixes_interactive),
                 "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
             entry = dispatch.get(choice)
@@ -838,6 +840,26 @@ class MeshChatHandler(BaseHandler):
                     if not missing:
                         missing = [mod_name]
                     self._offer_install_meshchat_deps(missing)
+                return
+
+            if 'datetime' in result.stdout and 'not JSON serializable' in result.stdout:
+                if self.ctx.dialog.yesno(
+                    "JSON Serialization Error",
+                    "MeshChat crashed due to a datetime serialization bug.\n\n"
+                    "This is a known upstream issue. Apply fix now?",
+                ):
+                    fixes = self._apply_upstream_fixes()
+                    if fixes:
+                        if _HAS_SERVICE_CHECK and start_service:
+                            start_service(service_name)
+                            time.sleep(3)
+                            if self._is_meshchat_running():
+                                self.ctx.dialog.msgbox(
+                                    "Fixed & Restarted",
+                                    f"Fix applied and MeshChat restarted.\n\n"
+                                    f"Web UI: {self._get_meshchat_url()}",
+                                )
+                                return
                 return
 
             if 'does not exist' in result.stdout and 'public' in result.stdout:
@@ -1610,6 +1632,11 @@ class MeshChatHandler(BaseHandler):
                 self.ctx.wait_for_enter()
                 return
 
+            # Step 2.5: Apply known upstream fixes
+            fixes = self._apply_upstream_fixes(install_dir)
+            if fixes:
+                print(f"Applied upstream fixes: {', '.join(fixes)}")
+
             # Step 3: pip install
             if not self._install_meshchat_pip(install_dir, run_as_user):
                 self.ctx.wait_for_enter()
@@ -1712,6 +1739,10 @@ class MeshChatHandler(BaseHandler):
                 print("Continuing with existing checkout.")
             else:
                 print("Repository updated.")
+            # Re-apply upstream fixes after pull (they may get overwritten)
+            fixes = self._apply_upstream_fixes(install_dir)
+            if fixes:
+                print(f"Applied upstream fixes: {', '.join(fixes)}")
             return True
 
         print(f"Cloning MeshChat to {install_dir}...")
@@ -1783,6 +1814,87 @@ class MeshChatHandler(BaseHandler):
 
         print("\nPython dependencies installed.\n")
         return True
+
+    # ------------------------------------------------------------------
+    # Upstream Fixes
+    # ------------------------------------------------------------------
+
+    def _apply_upstream_fixes(self, install_dir: Path = None) -> list:
+        """Apply known upstream fixes to MeshChat. Returns list of fixes applied.
+
+        Safe and idempotent — skips fixes already applied or patterns not found.
+        """
+        if install_dir is None:
+            install_dir = self._get_meshchat_install_dir()
+
+        meshchat_py = install_dir / 'meshchat.py'
+        if not meshchat_py.exists():
+            return []
+
+        fixes_applied = []
+        try:
+            content = meshchat_py.read_text()
+            original = content
+
+            # Fix 1: datetime JSON serialization (upstream meshchat.py ~line 1235)
+            # The announces endpoint passes datetime objects to web.json_response()
+            # which calls json.dumps() without a default handler, causing:
+            #   TypeError: Object of type datetime is not JSON serializable
+            if ('json_response' in content
+                    and 'announces' in content
+                    and 'default=str' not in content):
+                # Add functools import if missing
+                if 'import functools' not in content:
+                    content = content.replace(
+                        'import json\n',
+                        'import json\nimport functools\n',
+                        1,
+                    )
+                # Patch: add dumps= with default=str to the announces response
+                content = content.replace(
+                    'return web.json_response({\n'
+                    '            "announces": announces,\n'
+                    '        })',
+                    'return web.json_response({\n'
+                    '            "announces": announces,\n'
+                    '        }, dumps=functools.partial(json.dumps, default=str))',
+                )
+                if content != original:
+                    fixes_applied.append('datetime JSON serialization')
+
+            if fixes_applied:
+                # Preserve file ownership when running as root/sudo
+                stat_info = meshchat_py.stat()
+                meshchat_py.write_text(content)
+                try:
+                    os.chown(meshchat_py, stat_info.st_uid, stat_info.st_gid)
+                except OSError:
+                    pass  # Non-critical if chown fails
+
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Failed to apply upstream fixes: %s", e)
+
+        return fixes_applied
+
+    def _apply_upstream_fixes_interactive(self):
+        """Apply known upstream fixes with user feedback."""
+        fixes = self._apply_upstream_fixes()
+        if fixes:
+            msg = "Applied fixes:\n" + "\n".join(f"  - {f}" for f in fixes)
+            if self._is_meshchat_running():
+                if self.ctx.dialog.yesno(
+                    "Fixes Applied",
+                    msg + "\n\nRestart MeshChat to apply changes?",
+                ):
+                    self._restart_meshchat()
+                    return
+            self.ctx.dialog.msgbox("Fixes Applied", msg)
+        else:
+            self.ctx.dialog.msgbox(
+                "No Fixes Needed",
+                "MeshChat is up to date — no known upstream\n"
+                "fixes to apply.",
+            )
 
     # ------------------------------------------------------------------
     # NPM Management
