@@ -750,6 +750,11 @@ class MeshChatHandler(BaseHandler):
         clear_screen()
         print("=== Creating MeshChat Service ===\n")
 
+        # Ask about network access if not yet configured
+        settings = self._get_meshchat_settings()
+        if not settings.file_path.exists():
+            self._prompt_network_access_during_install()
+
         if not self._install_meshchat_service(install_dir, run_as_user):
             self.ctx.dialog.msgbox(
                 "Service Creation Failed",
@@ -1232,6 +1237,37 @@ class MeshChatHandler(BaseHandler):
                 "Create a systemd service to apply.",
             )
 
+    def _prompt_network_access_during_install(self):
+        """Ask user about network access during initial install.
+
+        Presents a simple choice and persists the setting so the
+        service file is generated with the correct bind host.
+        """
+        choices = [
+            ("lan", "LAN accessible (0.0.0.0) — access from any device"),
+            ("local", "Local only (127.0.0.1)  — this machine only"),
+        ]
+
+        choice = self.ctx.dialog.menu(
+            "Network Access",
+            "How should the MeshChat web UI be accessible?\n\n"
+            "LAN: Access from other devices (e.g. 192.168.x.x:8000)\n"
+            "Local: Only from this machine (localhost:8000)",
+            choices,
+        )
+
+        if choice is None:
+            # Default to LAN — most common use case for mesh setups
+            choice = "lan"
+
+        new_host = "127.0.0.1" if choice == "local" else "0.0.0.0"
+        settings = self._get_meshchat_settings()
+        settings.set("bind_host", new_host)
+        settings.save()
+
+        label = "LAN (0.0.0.0)" if new_host == "0.0.0.0" else "Local (127.0.0.1)"
+        print(f"Network access: {label}\n")
+
     def _get_pip_command(self) -> list:
         """Return the pip command appropriate for this install.
 
@@ -1424,8 +1460,9 @@ class MeshChatHandler(BaseHandler):
         3. git clone reticulum-meshchat
         4. pip install -r requirements.txt
         5. npm install && npm run build-frontend
-        6. Create systemd service
-        7. Enable + start service
+        6. Choose network access (LAN/Local)
+        7. Create systemd service
+        8. Enable + start service
         """
         if self._is_meshchat_installed():
             self.ctx.dialog.msgbox(
@@ -1443,7 +1480,8 @@ class MeshChatHandler(BaseHandler):
             "  2. Clone the MeshChat repository\n"
             "  3. Install Python dependencies\n"
             "  4. Build the web frontend (npm)\n"
-            "  5. Create a systemd service\n\n"
+            "  5. Choose network access (LAN/Local)\n"
+            "  6. Create a systemd service\n\n"
             "MeshChat provides LXMF messaging with a\n"
             "web UI on port 8000\n\n"
             "Source: github.com/liamcottle/reticulum-meshchat\n\n"
@@ -1483,13 +1521,16 @@ class MeshChatHandler(BaseHandler):
                 self.ctx.wait_for_enter()
                 return
 
-            # Step 5: systemd service
+            # Step 5: Network access choice (before service creation)
+            self._prompt_network_access_during_install()
+
+            # Step 6: systemd service
             if not self._install_meshchat_service(install_dir, run_as_user):
                 print("\nSystemd service creation failed.")
                 print("You can still run MeshChat manually:")
                 print(f"  cd {install_dir} && python3 meshchat.py")
 
-            # Step 6: Start service
+            # Step 7: Start service
             print("\nStarting MeshChat service...")
             try:
                 subprocess.run(
