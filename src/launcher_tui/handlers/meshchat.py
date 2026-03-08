@@ -672,9 +672,6 @@ class MeshChatHandler(BaseHandler):
         if not self._check_rns_for_meshchat():
             return
 
-        # Preflight: ensure user-space RNS config for shared instance
-        self._ensure_meshchat_rns_config()
-
         # Preflight: check LXMF availability
         if not _HAS_LXMF:
             if not self._offer_install_lxmf():
@@ -1570,7 +1567,6 @@ class MeshChatHandler(BaseHandler):
         - Wrong Python path in ExecStart
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
         - Bind host mismatch vs configured setting
-        - Missing --reticulum-config-dir (RNS shared instance)
 
         Regenerates the service file if any issues are found.
         """
@@ -1623,17 +1619,6 @@ class MeshChatHandler(BaseHandler):
                 "Service binds to %s — updating to %s",
                 other_host, configured_host,
             )
-            needs_regen = True
-
-        # Check for missing --reticulum-config-dir (RNS shared instance)
-        if '--reticulum-config-dir' not in content:
-            logger.warning("Service missing --reticulum-config-dir — adding")
-            needs_regen = True
-
-        # Check if ExecStart uses the wrapper (datetime serialization fix)
-        wrapper_path = self._get_meshchat_install_dir() / self.WRAPPER_FILENAME
-        if wrapper_path.exists() and self.WRAPPER_FILENAME not in content:
-            logger.warning("Service uses meshchat.py directly — updating to wrapper")
             needs_regen = True
 
         if needs_regen:
@@ -1890,11 +1875,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 3  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 4  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 3
+# meshforge_wrapper_version: 4
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1976,7 +1961,7 @@ try:
         try:
             return _original_get_interface_stats(self)
         except (ConnectionRefusedError, OSError):
-            return {}
+            return {"interfaces": []}
 
     def _safe_get_path_table(self):
         try:
@@ -2407,7 +2392,6 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         python_path = self._get_service_python()
         meshchat_py = install_dir / 'meshchat.py'
         bind_host = self._get_meshchat_bind_host()
-        rns_config_dir = self._ensure_meshchat_rns_config()
 
         # Use wrapper if available (patches datetime serialization)
         wrapper_path = install_dir / self.WRAPPER_FILENAME
@@ -2431,8 +2415,7 @@ runpy.run_path(_meshchat_path, run_name="__main__")
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
             f"ExecStart={python_path} {exec_target}"
-            f" --headless --host {bind_host}"
-            f" --reticulum-config-dir {rns_config_dir}\n"
+            f" --headless --host {bind_host}\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
