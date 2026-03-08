@@ -491,6 +491,7 @@ class MeshChatHandler(BaseHandler):
                 if not self._has_meshchat_systemd_service():
                     choices.append(("create_service", "Create Systemd Service"))
                 choices.append(("network", "Network Access (LAN/Local)"))
+                choices.append(("npm", "NPM Management"))
                 choices.append(("rebuild", "Rebuild Frontend"))
                 choices.append(("logs", "View Logs"))
                 choices.append(("uninstall", "Disable MeshChat"))
@@ -522,6 +523,7 @@ class MeshChatHandler(BaseHandler):
                 "install": ("Install MeshChat", self._install_meshchat),
                 "create_service": ("Create Service", self._create_meshchat_service),
                 "network": ("Network Access", self._configure_network_access),
+                "npm": ("NPM Management", self._npm_management_menu),
                 "rebuild": ("Rebuild Frontend", self._rebuild_frontend),
                 "uninstall": ("Disable MeshChat", self._uninstall_meshchat),
             }
@@ -1781,6 +1783,247 @@ class MeshChatHandler(BaseHandler):
 
         print("\nPython dependencies installed.\n")
         return True
+
+    # ------------------------------------------------------------------
+    # NPM Management
+    # ------------------------------------------------------------------
+
+    def _run_npm_command(self, args: list) -> subprocess.CompletedProcess:
+        """Run an npm command in the MeshChat install directory.
+
+        Handles sudo elevation and install directory resolution.
+        Returns the CompletedProcess result.
+        """
+        install_dir = self._get_meshchat_install_dir()
+        sudo_user = os.environ.get('SUDO_USER')
+        run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+
+        cmd = ['npm'] + args
+        if run_as_user:
+            cmd = ['sudo', '-H', '-u', run_as_user] + cmd
+
+        return subprocess.run(
+            cmd, cwd=str(install_dir), capture_output=False, timeout=300,
+        )
+
+    def _npm_check_installed(self) -> bool:
+        """Verify MeshChat has a package.json. Shows dialog if not."""
+        install_dir = self._get_meshchat_install_dir()
+        if not (install_dir / 'package.json').exists():
+            self.ctx.dialog.msgbox(
+                "Not Found",
+                f"No package.json in {install_dir}.\n\n"
+                "MeshChat may not be installed correctly.",
+            )
+            return False
+        return True
+
+    def _npm_management_menu(self):
+        """NPM package management for MeshChat frontend."""
+        if not self._npm_check_installed():
+            return
+
+        while True:
+            choices = [
+                ("audit", "Security Audit      npm audit"),
+                ("audit-fix", "Auto-fix Vulns      npm audit fix"),
+                ("outdated", "Check Outdated      npm outdated"),
+                ("update", "Update Packages     npm update"),
+                ("logs", "View npm Logs"),
+                ("rebuild", "Rebuild Frontend    npm install + build"),
+                ("back", "Back"),
+            ]
+
+            choice = self.ctx.dialog.menu(
+                "NPM Management",
+                "Manage MeshChat frontend dependencies:",
+                choices,
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            dispatch = {
+                "audit": ("Security Audit", self._npm_audit),
+                "audit-fix": ("Auto-fix Vulnerabilities", self._npm_audit_fix),
+                "outdated": ("Check Outdated", self._npm_outdated),
+                "update": ("Update Packages", self._npm_update),
+                "logs": ("View npm Logs", self._npm_view_logs),
+                "rebuild": ("Rebuild Frontend", self._rebuild_frontend),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self.ctx.safe_call(*entry)
+
+    def _npm_audit(self):
+        """Run npm audit to check for vulnerabilities."""
+        clear_screen()
+        print("=== NPM Security Audit ===\n")
+        result = self._run_npm_command(['audit'])
+        # npm audit returns non-zero when vulnerabilities found (not an error)
+        if result.returncode > 1:
+            print("\nnpm audit encountered an error.")
+        print()
+        self.ctx.wait_for_enter()
+
+    def _npm_audit_fix(self):
+        """Run npm audit fix to auto-resolve vulnerabilities."""
+        if not self.ctx.dialog.yesno(
+            "Auto-fix Vulnerabilities",
+            "Run 'npm audit fix' to automatically resolve\n"
+            "known vulnerabilities?\n\n"
+            "This modifies package-lock.json and node_modules.",
+        ):
+            return
+
+        was_running = self._is_meshchat_running()
+        if was_running:
+            self.ctx.dialog.infobox("Stopping", "Stopping MeshChat for npm fix...")
+            self._stop_meshchat_process()
+            time.sleep(1)
+
+        clear_screen()
+        print("=== NPM Audit Fix ===\n")
+        result = self._run_npm_command(['audit', 'fix'])
+
+        if result.returncode == 0:
+            print("\nAudit fix complete.")
+            # Rebuild frontend after dependency changes
+            print("\nRebuilding frontend...\n")
+            install_dir = self._get_meshchat_install_dir()
+            sudo_user = os.environ.get('SUDO_USER')
+            run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+            self._install_meshchat_npm(install_dir, run_as_user)
+        else:
+            print("\nnpm audit fix encountered issues.")
+            print("Try: npm audit fix --force  (may introduce breaking changes)")
+
+        if was_running:
+            print("\nRestarting MeshChat...")
+            self._launch_meshchat()
+        else:
+            print()
+            self.ctx.wait_for_enter()
+
+    def _npm_outdated(self):
+        """Run npm outdated to check for outdated packages."""
+        clear_screen()
+        print("=== Outdated NPM Packages ===\n")
+        result = self._run_npm_command(['outdated'])
+        # npm outdated returns 1 when outdated packages exist (not an error)
+        if result.returncode == 0:
+            print("All packages are up to date.")
+        print()
+        self.ctx.wait_for_enter()
+
+    def _npm_update(self):
+        """Run npm update to update packages within semver ranges."""
+        if not self.ctx.dialog.yesno(
+            "Update Packages",
+            "Run 'npm update' to update packages within\n"
+            "their allowed semver ranges?\n\n"
+            "This modifies package-lock.json and node_modules.\n"
+            "Frontend will be rebuilt after update.",
+        ):
+            return
+
+        was_running = self._is_meshchat_running()
+        if was_running:
+            self.ctx.dialog.infobox("Stopping", "Stopping MeshChat for update...")
+            self._stop_meshchat_process()
+            time.sleep(1)
+
+        clear_screen()
+        print("=== NPM Update ===\n")
+        result = self._run_npm_command(['update'])
+
+        if result.returncode == 0:
+            print("\nPackages updated.")
+            # Rebuild frontend after dependency changes
+            print("\nRebuilding frontend...\n")
+            install_dir = self._get_meshchat_install_dir()
+            sudo_user = os.environ.get('SUDO_USER')
+            run_as_user = sudo_user if sudo_user and sudo_user != 'root' else None
+            self._install_meshchat_npm(install_dir, run_as_user)
+        else:
+            print("\nnpm update failed.")
+
+        if was_running:
+            print("\nRestarting MeshChat...")
+            self._launch_meshchat()
+        else:
+            print()
+            self.ctx.wait_for_enter()
+
+    def _npm_view_logs(self):
+        """View recent npm debug logs."""
+        clear_screen()
+        print("=== NPM Logs ===\n")
+
+        # npm stores logs in ~/.npm/_logs/
+        npm_log_dir = get_real_user_home() / '.npm' / '_logs'
+
+        if not npm_log_dir.is_dir():
+            print(f"No npm log directory found at {npm_log_dir}")
+            print()
+            self.ctx.wait_for_enter()
+            return
+
+        # List log files sorted by modification time (newest first)
+        try:
+            log_files = sorted(
+                npm_log_dir.glob('*.log'),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError as e:
+            print(f"Error reading log directory: {e}")
+            print()
+            self.ctx.wait_for_enter()
+            return
+
+        if not log_files:
+            print("No npm log files found.")
+            print()
+            self.ctx.wait_for_enter()
+            return
+
+        print(f"Found {len(log_files)} log file(s).\n")
+
+        # Show list of recent logs
+        recent = log_files[:10]
+        choices = []
+        for i, lf in enumerate(recent):
+            # Format: timestamp from filename + size
+            size_kb = lf.stat().st_size / 1024
+            choices.append((str(i), f"{lf.name}  ({size_kb:.1f} KB)"))
+        choices.append(("back", "Back"))
+
+        choice = self.ctx.dialog.menu(
+            "NPM Logs",
+            f"{len(log_files)} log file(s) in {npm_log_dir}\n\n"
+            "Select a log to view:",
+            choices,
+        )
+
+        if choice is None or choice == "back":
+            return
+
+        try:
+            idx = int(choice)
+            log_path = recent[idx]
+            content = log_path.read_text(errors='replace')
+            # Truncate if very large
+            if len(content) > 16000:
+                content = content[-16000:]
+                content = f"... (truncated, showing last 16KB) ...\n{content}"
+            clear_screen()
+            print(f"=== {log_path.name} ===\n")
+            print(content)
+            print()
+            self.ctx.wait_for_enter()
+        except (ValueError, IndexError, OSError) as e:
+            self.ctx.dialog.msgbox("Error", f"Could not read log: {e}")
 
     def _install_meshchat_npm(self, install_dir: Path, run_as_user: str = None) -> bool:
         """Build MeshChat web frontend with npm. Returns True on success."""
