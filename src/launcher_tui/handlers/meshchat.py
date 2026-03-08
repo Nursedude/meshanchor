@@ -1898,7 +1898,9 @@ Fixes applied:
 1. Monkey-patches json.JSONEncoder.default to handle datetime objects
    (upstream MeshChat passes datetime to aiohttp json_response without handler)
 2. Waits for RNS shared instance socket before starting MeshChat
-   (prevents ConnectionRefusedError on get_interface_stats RPC calls)
+   (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
+3. Monkey-patches RNS RPC methods to catch ConnectionRefusedError at runtime
+   (returns None instead of crashing — same as RNS standalone mode)
 
 Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
@@ -1955,6 +1957,34 @@ if _rnsd_running() and not _rns_shared_instance_ready():
         if _rns_shared_instance_ready():
             break
         time.sleep(1)
+
+
+# --- Fix 3: Resilient RNS RPC calls (runtime ConnectionRefusedError) ---
+# MeshChat calls get_interface_stats() on every web request (index handler).
+# If rnsd drops or restarts at runtime, this crashes the entire web UI.
+# Patch to return None (same as RNS standalone mode) instead of crashing.
+try:
+    import RNS
+
+    _original_get_interface_stats = RNS.Reticulum.get_interface_stats
+    _original_get_path_table = RNS.Reticulum.get_path_table
+
+    def _safe_get_interface_stats(self):
+        try:
+            return _original_get_interface_stats(self)
+        except (ConnectionRefusedError, OSError):
+            return None
+
+    def _safe_get_path_table(self):
+        try:
+            return _original_get_path_table(self)
+        except (ConnectionRefusedError, OSError):
+            return None
+
+    RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
+    RNS.Reticulum.get_path_table = _safe_get_path_table
+except ImportError:
+    pass  # RNS not installed — meshchat.py will fail on its own
 
 # Run meshchat.py in this process, preserving __main__ semantics
 _script_dir = os.path.dirname(os.path.abspath(__file__))
