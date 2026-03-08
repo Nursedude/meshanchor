@@ -808,3 +808,138 @@ class TestMeshChatServiceHint:
         """INSTALL_HINT mentions nodejs prerequisite."""
         from plugins.meshchat.service import MeshChatService
         assert "nodejs" in MeshChatService.INSTALL_HINT
+
+
+# ============================================================================
+# Pip Install Environment Tests (Issue: venv pip + sudo -u mismatch)
+# ============================================================================
+
+class TestMeshChatPipInstall:
+    """Test _install_meshchat_pip handles Python environments correctly.
+
+    Root cause of crash-loop: venv pip wrapped with sudo -u <user> fails
+    because non-root user can't write to root-owned /opt/meshforge/venv/.
+    Fix mirrors the guard in _install_lxmf_package (line 358-361).
+    """
+
+    @patch('subprocess.run')
+    @patch('pathlib.Path.exists', return_value=True)
+    def test_venv_pip_no_sudo_prefix(self, mock_exists, mock_run):
+        """When venv pip exists, command must NOT get sudo -u prefix."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='Installed ok', stderr='',
+        )
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            (install_dir / 'requirements.txt').write_text('aiohttp\n')
+            handler._install_meshchat_pip(install_dir, run_as_user='testuser')
+
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] != 'sudo', \
+                f"Venv pip should not be wrapped with sudo -u, got: {cmd}"
+            assert '/opt/meshforge/venv/bin/pip' in cmd[0] or 'pip' in cmd[0]
+
+    @patch('subprocess.run')
+    def test_system_pip_with_sudo_prefix(self, mock_run):
+        """When no venv, command should get sudo -u prefix for run_as_user."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='Installed ok', stderr='',
+        )
+
+        # Patch _get_pip_command to return system pip (no venv)
+        handler._get_pip_command = lambda: ['pip3']
+
+        import tempfile
+        from pathlib import Path
+        orig_exists = Path.exists
+
+        def exists_side_effect(self):
+            if str(self) == '/opt/meshforge/venv/bin/pip':
+                return False
+            return orig_exists(self)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            (install_dir / 'requirements.txt').write_text('aiohttp\n')
+            with patch.object(Path, 'exists', exists_side_effect):
+                handler._install_meshchat_pip(install_dir, run_as_user='testuser')
+
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == 'sudo', \
+                f"System pip should be wrapped with sudo -u, got: {cmd}"
+            assert '-u' in cmd
+            assert 'testuser' in cmd
+
+    @patch('subprocess.run')
+    def test_system_pip_pep668_adds_user_flag(self, mock_run):
+        """PEP 668 system + run_as_user should include --user flag."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='Installed ok', stderr='',
+        )
+
+        handler._get_pip_command = lambda: ['pip3', 'install', '--break-system-packages']
+
+        import tempfile
+        from pathlib import Path
+        orig_exists = Path.exists
+
+        def exists_side_effect(self):
+            if str(self) == '/opt/meshforge/venv/bin/pip':
+                return False
+            return orig_exists(self)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = Path(tmpdir)
+            (install_dir / 'requirements.txt').write_text('aiohttp\n')
+            with patch.object(Path, 'exists', exists_side_effect):
+                handler._install_meshchat_pip(install_dir, run_as_user='testuser')
+
+            cmd = mock_run.call_args[0][0]
+            assert '--user' in cmd, \
+                f"PEP 668 + run_as_user should include --user, got: {cmd}"
+            assert 'sudo' in cmd[0]
+
+    @patch('subprocess.run')
+    @patch('pathlib.Path.exists', return_value=True)
+    def test_venv_pip_no_run_as_user(self, mock_exists, mock_run):
+        """Venv pip without run_as_user runs directly (no sudo prefix)."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='Installed ok', stderr='',
+        )
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            (install_dir / 'requirements.txt').write_text('aiohttp\n')
+            result = handler._install_meshchat_pip(install_dir, run_as_user=None)
+
+            assert result is True
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] != 'sudo'
+
+    @patch('subprocess.run')
+    @patch('pathlib.Path.exists', return_value=True)
+    def test_pip_failure_captures_error(self, mock_exists, mock_run):
+        """Failed pip install captures stderr for error reporting."""
+        handler = _make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout='Collecting aiohttp',
+            stderr='ERROR: Could not install packages\nPermission denied',
+        )
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir = __import__('pathlib').Path(tmpdir)
+            (install_dir / 'requirements.txt').write_text('aiohttp\n')
+            result = handler._install_meshchat_pip(install_dir)
+
+            assert result is False
+            assert hasattr(handler, '_last_pip_error')
+            assert 'Permission denied' in handler._last_pip_error
