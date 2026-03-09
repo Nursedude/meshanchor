@@ -189,4 +189,8 @@ def get_all_handlers() -> List[Type]:
     from handlers.load_balancer import LoadBalancerHandler
     handlers.append(LoadBalancerHandler)
 
+    # Batch 13 — dual-radio failover setup
+    from handlers.dual_radio_failover import DualRadioFailoverHandler
+    handlers.append(DualRadioFailoverHandler)
+
     return handlers
