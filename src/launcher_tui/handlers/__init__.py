@@ -193,4 +193,8 @@ def get_all_handlers() -> List[Type]:
     from handlers.dual_radio_failover import DualRadioFailoverHandler
     handlers.append(DualRadioFailoverHandler)
 
+    # Batch 14 — startup health (extracted from main.py for dispatcher principle)
+    from handlers.startup_health import StartupHealthHandler
+    handlers.append(StartupHealthHandler)
+
     return handlers

@@ -40,10 +40,15 @@ try:
     from utils.service_check import (
         check_service, enable_service, _sudo_write, _sudo_cmd,
     )
-    from utils._port_detection import check_port
     _HAS_SERVICE = True
 except ImportError:
     _HAS_SERVICE = False
+
+try:
+    from utils._port_detection import check_port
+    _HAS_PORT_DETECTION = True
+except ImportError:
+    _HAS_PORT_DETECTION = False
 
 from utils.ports import (
     MESHTASTICD_PORT, MESHTASTICD_ALT_PORT, MESHTASTICD_WEB_PORT,
@@ -318,14 +323,14 @@ class DualRadioFailoverHandler(BaseHandler):
                    "meshtastic_http module not available")
 
         # 5. Primary TCP port
-        if _HAS_SERVICE:
+        if _HAS_SERVICE and _HAS_PORT_DETECTION:
             ok = check_port(MESHTASTICD_PORT)
             _check("Primary TCP port (%d)" % MESHTASTICD_PORT, ok)
         else:
             _check("Primary TCP port", False, "port check not available")
 
         # 6. Secondary TCP port
-        if _HAS_SERVICE:
+        if _HAS_SERVICE and _HAS_PORT_DETECTION:
             ok = check_port(MESHTASTICD_ALT_PORT)
             _check("Secondary TCP port (%d)" % MESHTASTICD_ALT_PORT, ok)
         else:
