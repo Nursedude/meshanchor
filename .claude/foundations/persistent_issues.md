@@ -3,7 +3,7 @@
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > This serves as institutional memory for development.
 >
-> **Last audited**: 2026-02-28 — Code quality review: Handler registry migration confirmed complete (49 mixins → 60 handlers + Protocol + TUIContext), 2 broken tests fixed, CLAUDE.md architecture tree updated, test counts refreshed (2,547 tests / 73 files)
+> **Last audited**: 2026-03-09 — TUI code review & cleanup: MeshChat removed (PR #1104), gateway_heartbeat.py deleted (dead code), _lxmf_utils.py generalized (port-based check), main.py dead code removed, version bumped to 0.5.5-beta (2,745 tests / 77 files, 60 handlers)
 
 ---
 
@@ -20,6 +20,7 @@ The 49-mixin inheritance chain on `MeshForgeLauncher` has been fully replaced wi
 handler registry pattern. See `handler_protocol.py` (Protocol + BaseHandler + TUIContext)
 and `handler_registry.py` (register/lookup/dispatch). Each handler is a self-contained
 class in `launcher_tui/handlers/` (60 files). `main.py` dropped from 1,947 to 1,148 lines.
+`gateway_heartbeat.py` removed 2026-03-09 (dead code — unregistered, broken API calls).
 
 **Impact**: Resolves Feb 26 audit item #1 (Critical — mixin explosion). MRO is now trivial,
 state coupling eliminated, new handlers are straightforward to add.
