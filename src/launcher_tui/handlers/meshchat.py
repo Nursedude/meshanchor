@@ -738,7 +738,7 @@ class MeshChatHandler(BaseHandler):
                 if not self._offer_install_meshchat_deps(missing_deps):
                     return
 
-        # Preflight: deploy upstream fixes (wrapper) and verify service file
+        # Preflight: deploy upstream fixes (source patches) and verify service
         self._apply_upstream_fixes()
         self._verify_service_file()
 
@@ -1090,7 +1090,7 @@ class MeshChatHandler(BaseHandler):
 
     def _restart_meshchat(self):
         """Restart MeshChat service to apply config changes."""
-        # Deploy upstream fixes before restart so the wrapper is in place
+        # Deploy upstream fixes (source patches) and clean up legacy wrapper
         self._apply_upstream_fixes()
         self._verify_service_file()
 
@@ -1619,7 +1619,7 @@ class MeshChatHandler(BaseHandler):
         - Wrong Python path in ExecStart
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
         - Bind host mismatch vs configured setting
-        - ExecStart not using wrapper (datetime/RPC fixes)
+        - ExecStart still using legacy wrapper (should use meshchat.py)
         - Missing --reticulum-config-dir (RNS shared instance)
 
         Regenerates the service file if any issues are found.
@@ -1675,11 +1675,10 @@ class MeshChatHandler(BaseHandler):
             )
             needs_regen = True
 
-        # Check if ExecStart uses the wrapper (datetime/RPC resilience fixes)
-        wrapper_path = self._get_meshchat_install_dir() / self.WRAPPER_FILENAME
-        if wrapper_path.exists() and self.WRAPPER_FILENAME not in content:
+        # Check if ExecStart still uses the legacy wrapper (should use meshchat.py)
+        if self.WRAPPER_FILENAME in content:
             logger.warning(
-                "Service uses meshchat.py directly — updating to wrapper"
+                "Service uses legacy wrapper — updating to meshchat.py directly"
             )
             needs_regen = True
 
@@ -1940,250 +1939,54 @@ class MeshChatHandler(BaseHandler):
     # Upstream Fixes
     # ------------------------------------------------------------------
 
+    # Legacy wrapper filename — kept for cleanup of old installations
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 9  # Bump when _WRAPPER_CONTENT changes
+    def _cleanup_legacy_wrapper(self, install_dir: Path = None):
+        """Remove old meshforge_wrapper.py and update service if needed.
 
-    _WRAPPER_CONTENT = '''\
-#!/usr/bin/env python3
-# meshforge_wrapper_version: 9
-"""MeshForge wrapper - patches and pre-checks before MeshChat starts.
-
-Fixes applied:
-1. Monkey-patches json.JSONEncoder.default to handle datetime objects
-   (upstream MeshChat passes datetime to aiohttp json_response without handler)
-2. Waits for RNS shared instance socket before starting MeshChat
-   (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
-3. Monkey-patches RNS RPC methods with timeout protection (3s)
-   (prevents hung RPC from blocking aiohttp event loop indefinitely)
-4. Monkey-patches datetime.strptime and datetime.fromisoformat to handle
-   Peewee datetime objects (prevents TypeError in meshchat.py)
-
-Safe to remove once upstream fixes the issues.
-Created by MeshForge. Do not edit — it will be regenerated on update.
-"""
-import concurrent.futures
-import datetime
-import json
-import os
-import runpy
-import sys
-import time
-
-# --- Fix 1: datetime JSON serialization ---
-_original_default = json.JSONEncoder.default
-
-
-def _patched_default(self, obj):
-    if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
-        return obj.isoformat()
-    return _original_default(self, obj)
-
-
-json.JSONEncoder.default = _patched_default
-
-
-# --- Fix 2: Wait for RNS shared instance (best-effort, 10s max) ---
-def _rns_shared_instance_ready():
-    """Check /proc/net/unix for @rns/default abstract socket."""
-    try:
-        with open('/proc/net/unix', 'r') as f:
-            return any('@rns/default' in line for line in f)
-    except OSError:
-        return False
-
-
-# Only wait if rnsd appears to be running (don't block standalone mode)
-def _rnsd_running():
-    """Quick check if rnsd process exists."""
-    try:
-        for entry in os.listdir('/proc'):
-            if entry.isdigit():
-                try:
-                    cmdline = open(f'/proc/{entry}/cmdline', 'rb').read()
-                    if b'rnsd' in cmdline:
-                        return True
-                except (OSError, PermissionError):
-                    pass
-    except OSError:
-        pass
-    return False
-
-
-if _rnsd_running() and not _rns_shared_instance_ready():
-    for _i in range(10):
-        if _rns_shared_instance_ready():
-            break
-        time.sleep(1)
-
-
-# --- Fix 3: Resilient RNS RPC calls with timeout (runtime failures) ---
-# MeshChat calls get_interface_stats() on every web request (index handler).
-# If rnsd is stuck/slow, the RPC call blocks the aiohttp event loop forever,
-# freezing the entire web UI. Use concurrent.futures to enforce a 3s timeout.
-# 3s < MeshForge HTTP client's 5s timeout (utils/timeouts.py RNS_RPC).
-_RPC_TIMEOUT = 3  # seconds — RPC should respond in <100ms normally
-
-try:
-    import RNS
-
-    _original_get_interface_stats = RNS.Reticulum.get_interface_stats
-    _original_get_path_table = RNS.Reticulum.get_path_table
-
-    # Dedicated single-thread executors prevent thread buildup from repeated
-    # timeouts. daemon threads won't block process exit.
-    _stats_executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix='rns_stats'
-    )
-    _path_executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix='rns_path'
-    )
-
-    def _safe_get_interface_stats(self):
-        try:
-            future = _stats_executor.submit(_original_get_interface_stats, self)
-            return future.result(timeout=_RPC_TIMEOUT)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            print("[meshforge_wrapper] WARNING: get_interface_stats RPC timed "
-                  f"out after {_RPC_TIMEOUT}s — returning empty", file=sys.stderr)
-            return {"interfaces": []}
-        except Exception:
-            return {"interfaces": []}
-
-    def _safe_get_path_table(self):
-        try:
-            future = _path_executor.submit(_original_get_path_table, self)
-            return future.result(timeout=_RPC_TIMEOUT)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            print("[meshforge_wrapper] WARNING: get_path_table RPC timed "
-                  f"out after {_RPC_TIMEOUT}s — returning empty", file=sys.stderr)
-            return []
-        except Exception:
-            return []
-
-    RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
-    RNS.Reticulum.get_path_table = _safe_get_path_table
-except ImportError:
-    pass  # RNS not installed — meshchat.py will fail on its own
-
-
-# --- Fix 4: Resilient datetime parsing (handles Peewee datetime objects) ---
-# datetime.datetime is a C type — can't set attributes on it directly.
-# Instead, replace it in the module with a subclass that overrides parsing methods.
-# meshchat.py's "from datetime import datetime" picks up the patched version.
-class _PatchedDatetime(datetime.datetime):
-    @classmethod
-    def strptime(cls, date_string, format_str):
-        if isinstance(date_string, datetime.datetime):
-            return date_string
-        if isinstance(date_string, datetime.date):
-            return datetime.datetime(
-                date_string.year, date_string.month, date_string.day
-            )
-        return super().strptime(date_string, format_str)
-
-    @classmethod
-    def fromisoformat(cls, date_string):
-        if isinstance(date_string, datetime.datetime):
-            return date_string
-        if isinstance(date_string, datetime.date):
-            return datetime.datetime(
-                date_string.year, date_string.month, date_string.day
-            )
-        return super().fromisoformat(date_string)
-
-
-datetime.datetime = _PatchedDatetime
-
-# Run meshchat.py in this process, preserving __main__ semantics
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_meshchat_path = os.path.join(_script_dir, "meshchat.py")
-sys.argv[0] = _meshchat_path
-runpy.run_path(_meshchat_path, run_name="__main__")
-'''
-
-    def _create_meshchat_wrapper(self, install_dir: Path = None) -> Path:
-        """Create a wrapper script that patches datetime serialization.
-
-        The wrapper monkey-patches json.JSONEncoder.default before
-        executing meshchat.py, so datetime objects serialize to ISO strings.
+        The wrapper approach (v1-v9) caused RPC hangs by monkey-patching
+        RNS methods and replacing datetime.datetime globally. MeshChat
+        runs fine without it — source-level datetime patches are sufficient.
         """
         if install_dir is None:
             install_dir = self._get_meshchat_install_dir()
 
         wrapper_path = install_dir / self.WRAPPER_FILENAME
-        wrapper_path.write_text(self._WRAPPER_CONTENT)
-        wrapper_path.chmod(0o755)
+        if not wrapper_path.exists():
+            return
 
-        # Preserve ownership to match meshchat.py
-        meshchat_py = install_dir / 'meshchat.py'
-        if meshchat_py.exists():
-            stat_info = meshchat_py.stat()
-            try:
-                os.chown(wrapper_path, stat_info.st_uid, stat_info.st_gid)
-            except OSError:
-                pass
-        return wrapper_path
-
-    def _wrapper_needs_update(self, wrapper_path: Path) -> bool:
-        """Check if existing wrapper is outdated and needs regeneration."""
-        try:
-            content = wrapper_path.read_text()
-            for line in content.splitlines():
-                if line.startswith('# meshforge_wrapper_version:'):
-                    version = int(line.split(':')[1].strip())
-                    return version < self._WRAPPER_VERSION
-            # No version marker → old wrapper before versioning was added
-            return True
-        except (OSError, ValueError):
-            return True
-
-    def _update_service_to_wrapper(self, install_dir: Path = None) -> bool:
-        """Update systemd ExecStart to use the wrapper script.
-
-        Reads the existing service file, replaces meshchat.py with
-        meshforge_wrapper.py in ExecStart, writes back, and reloads.
-        """
-        if install_dir is None:
-            install_dir = self._get_meshchat_install_dir()
-
-        service_path = (
+        # Check if systemd service still references the wrapper
+        service_path = Path(
             f"/etc/systemd/system/{self.MESHCHAT_SERVICE_NAME}.service"
         )
+        if service_path.exists():
+            try:
+                content = service_path.read_text()
+                if self.WRAPPER_FILENAME in content:
+                    # Service still uses wrapper — regenerate to use meshchat.py
+                    run_as = self._get_service_user()
+                    self._install_meshchat_service(install_dir, run_as)
+                    logger.info("Updated service to use meshchat.py directly")
+            except (IOError, OSError) as e:
+                logger.debug("Could not check service file: %s", e)
+
+        # Remove the wrapper file
         try:
-            content = Path(service_path).read_text()
-        except OSError:
-            return False
-
-        meshchat_py = str(install_dir / 'meshchat.py')
-        wrapper_str = str(install_dir / self.WRAPPER_FILENAME)
-
-        if wrapper_str in content:
-            return False  # Already using wrapper
-
-        if meshchat_py not in content:
-            return False  # Can't find target to replace
-
-        new_content = content.replace(meshchat_py, wrapper_str)
-        if _HAS_SUDO_WRITE and _sudo_write:
-            ok, msg = _sudo_write(service_path, new_content)
-            if ok:
-                subprocess.run(
-                    ['systemctl', 'daemon-reload'],
-                    capture_output=True, timeout=15,
-                )
-                return True
-        return False
+            wrapper_path.unlink()
+            logger.info("Removed legacy wrapper: %s", wrapper_path)
+        except OSError as e:
+            logger.debug("Could not remove wrapper: %s", e)
 
     def _apply_upstream_fixes(self, install_dir: Path = None) -> list:
         """Apply known upstream fixes to MeshChat. Returns list of fixes applied.
 
-        Creates a wrapper script that monkey-patches datetime serialization,
-        waits for RNS, and patches RPC methods for resilience. Updates the
-        systemd service to use the wrapper. Safe and idempotent — regenerates
-        the wrapper when a new version is available.
+        Patches meshchat.py source directly to fix datetime serialization
+        bugs (strptime/fromisoformat on Peewee datetime objects).
+        These patches are idempotent and applied at install/restart time.
+
+        The old wrapper approach (v1-v9) is no longer used — it caused
+        RPC hangs by monkey-patching RNS and replacing datetime.datetime.
         """
         if install_dir is None:
             install_dir = self._get_meshchat_install_dir()
@@ -2193,14 +1996,8 @@ runpy.run_path(_meshchat_path, run_name="__main__")
 
         fixes = []
 
-        # Create or update wrapper (versioned — regenerates when outdated)
-        wrapper = install_dir / self.WRAPPER_FILENAME
-        if not wrapper.exists():
-            self._create_meshchat_wrapper(install_dir)
-            fixes.append('upstream fixes (wrapper created)')
-        elif self._wrapper_needs_update(wrapper):
-            self._create_meshchat_wrapper(install_dir)
-            fixes.append('upstream fixes (wrapper updated)')
+        # Clean up legacy wrapper if present
+        self._cleanup_legacy_wrapper(install_dir)
 
         # Patch strptime calls in meshchat.py source (idempotent)
         if self._apply_strptime_patch(install_dir):
@@ -2209,10 +2006,6 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         # Patch fromisoformat calls in meshchat.py source (idempotent)
         if self._apply_fromisoformat_patch(install_dir):
             fixes.append('fromisoformat datetime fix applied')
-
-        # Ensure systemd service points to wrapper
-        if self._update_service_to_wrapper(install_dir):
-            fixes.append('systemd service updated')
 
         return fixes
 
@@ -2581,9 +2374,10 @@ runpy.run_path(_meshchat_path, run_name="__main__")
         bind_host = self._get_meshchat_bind_host()
         rns_config_dir = self._ensure_meshchat_rns_config()
 
-        # Use wrapper if available (patches datetime serialization)
-        wrapper_path = install_dir / self.WRAPPER_FILENAME
-        exec_target = wrapper_path if wrapper_path.exists() else meshchat_py
+        # Run meshchat.py directly — no wrapper needed.
+        # Source-level datetime patches are applied separately by
+        # _apply_upstream_fixes() at install/restart time.
+        exec_target = meshchat_py
 
         service_content = (
             f"[Unit]\n"
