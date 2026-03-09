@@ -1399,105 +1399,65 @@ class TestUpstreamFixes:
             result = handler._apply_upstream_fixes(Path(tmpdir))
             assert result == []
 
-    def test_creates_wrapper_script(self):
-        """Creates wrapper script with datetime monkey-patch."""
+    def test_apply_json_encoder_patch_inserts_encoder(self):
+        """Inserts datetime-safe JSON encoder after 'import json'."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text('print("hello")\n')
-            wrapper = handler._create_meshchat_wrapper(Path(tmpdir))
-            assert wrapper.exists()
-            content = wrapper.read_text()
+            meshchat_py.write_text('import json\nprint("hello")\n')
+            result = handler._apply_json_encoder_patch(Path(tmpdir))
+            assert result is True
+            content = meshchat_py.read_text()
+            assert '# meshforge: datetime-safe JSON encoder' in content
             assert 'json.JSONEncoder.default' in content
-            assert 'datetime' in content
             assert 'isoformat' in content
-            assert 'meshchat.py' in content
 
-    def test_apply_upstream_fixes_creates_wrapper(self):
-        """_apply_upstream_fixes creates wrapper when meshchat.py exists."""
+    def test_apply_json_encoder_patch_idempotent(self):
+        """Second call returns False when already patched."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text('print("hello")\n')
-            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
-                result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert any('wrapper' in f for f in result)
-            assert (Path(tmpdir) / handler.WRAPPER_FILENAME).exists()
+            meshchat_py.write_text('import json\nprint("hello")\n')
+            assert handler._apply_json_encoder_patch(Path(tmpdir)) is True
+            assert handler._apply_json_encoder_patch(Path(tmpdir)) is False
 
-    def test_apply_upstream_fixes_idempotent(self):
-        """Running twice with same version doesn't recreate wrapper."""
+    def test_apply_json_encoder_patch_no_import_json(self):
+        """Returns False when meshchat.py has no 'import json'."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text('print("hello")\n')
-            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
-                result1 = handler._apply_upstream_fixes(Path(tmpdir))
-                assert len(result1) >= 1
-                result2 = handler._apply_upstream_fixes(Path(tmpdir))
-                assert result2 == []
+            meshchat_py.write_text('print("no json here")\n')
+            assert handler._apply_json_encoder_patch(Path(tmpdir)) is False
 
-    def test_apply_upstream_fixes_regenerates_outdated_wrapper(self):
-        """Regenerates wrapper when version is outdated."""
+    def test_apply_upstream_fixes_includes_json_encoder(self):
+        """_apply_upstream_fixes applies JSON encoder patch."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text('print("hello")\n')
-            # Create old wrapper with version 1
-            wrapper = Path(tmpdir) / handler.WRAPPER_FILENAME
-            wrapper.write_text('# meshforge_wrapper_version: 1\nold content\n')
-            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
-                result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert any('updated' in f for f in result)
-            content = wrapper.read_text()
-            assert f'meshforge_wrapper_version: {handler._WRAPPER_VERSION}' in content
+            meshchat_py.write_text('import json\nprint("hello")\n')
+            result = handler._apply_upstream_fixes(Path(tmpdir))
+            assert any('JSON encoder' in f for f in result)
 
-    def test_apply_upstream_fixes_regenerates_unversioned_wrapper(self):
-        """Regenerates wrapper that has no version marker."""
-        handler = _make_handler()
-        import tempfile
-        from pathlib import Path
-        with tempfile.TemporaryDirectory() as tmpdir:
-            meshchat_py = Path(tmpdir) / 'meshchat.py'
-            meshchat_py.write_text('print("hello")\n')
-            # Create old wrapper WITHOUT version marker
-            wrapper = Path(tmpdir) / handler.WRAPPER_FILENAME
-            wrapper.write_text('#!/usr/bin/env python3\n# old wrapper\n')
-            with patch.object(handler, '_update_service_to_wrapper', return_value=False):
-                result = handler._apply_upstream_fixes(Path(tmpdir))
-            assert any('updated' in f for f in result)
-
-    def test_update_service_to_wrapper(self):
-        """_update_service_to_wrapper replaces ExecStart target."""
+    def test_cleanup_legacy_wrapper_removes_file(self):
+        """_cleanup_legacy_wrapper removes old wrapper file."""
         handler = _make_handler()
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmpdir:
             install_dir = Path(tmpdir)
-            service_content = (
-                f"[Service]\nExecStart=/usr/bin/python3 "
-                f"{install_dir}/meshchat.py --headless\n"
-            )
-            service_path = (
-                f"/etc/systemd/system/{handler.MESHCHAT_SERVICE_NAME}.service"
-            )
-            with patch('builtins.open', create=True):
-                with patch('pathlib.Path.read_text', return_value=service_content):
-                    with patch('launcher_tui.handlers.meshchat._sudo_write',
-                              return_value=(True, 'ok')) as mock_write:
-                        with patch('subprocess.run'):
-                            result = handler._update_service_to_wrapper(install_dir)
-            if mock_write.called:
-                written = mock_write.call_args[0][1]
-                assert handler.WRAPPER_FILENAME in written
-                assert result is True
+            wrapper = install_dir / handler.WRAPPER_FILENAME
+            wrapper.write_text('#!/usr/bin/env python3\n# old wrapper\n')
+            assert wrapper.exists()
+            handler._cleanup_legacy_wrapper(install_dir)
+            assert not wrapper.exists()
 
     def test_apply_upstream_fixes_interactive_no_fixes(self):
         """Shows 'no fixes needed' dialog when already patched."""
@@ -1535,34 +1495,6 @@ class TestUpstreamFixes:
                         handler._handle_start_failure('reticulum-meshchat')
         handler.ctx.dialog.yesno.assert_called_once()
         assert 'JSON' in handler.ctx.dialog.yesno.call_args[0][0]
-
-    def test_wrapper_includes_rns_wait(self):
-        """Wrapper script includes RNS shared instance wait logic."""
-        handler = _make_handler()
-        content = handler._WRAPPER_CONTENT
-        assert '_rns_shared_instance_ready' in content
-        assert '@rns/default' in content
-        assert '/proc/net/unix' in content
-        assert 'time.sleep(1)' in content
-
-    def test_wrapper_includes_rns_rpc_patches(self):
-        """Wrapper patches RNS RPC methods for runtime resilience."""
-        handler = _make_handler()
-        content = handler._WRAPPER_CONTENT
-        assert '_safe_get_interface_stats' in content
-        assert '_safe_get_path_table' in content
-        assert 'ConnectionRefusedError' in content
-        assert '_original_get_interface_stats' in content
-        assert '_original_get_path_table' in content
-        # Returns safe structures MeshChat expects (not empty dict/None)
-        assert 'return {"interfaces": []}' in content
-        assert 'return []' in content
-
-    def test_wrapper_rpc_patches_handle_import_error(self):
-        """Wrapper RPC patches gracefully skip if RNS not importable."""
-        handler = _make_handler()
-        content = handler._WRAPPER_CONTENT
-        assert 'except ImportError' in content
 
     @patch('subprocess.run')
     def test_handle_start_failure_detects_connection_refused(self, mock_run):

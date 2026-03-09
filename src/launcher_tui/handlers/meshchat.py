@@ -120,6 +120,23 @@ def _build_fromisoformat_replacement(match: re.Match) -> str:
     )
 
 
+# Sentinel and patch block for datetime-safe JSON encoder.
+# Inserted after 'import json' in meshchat.py to handle Peewee DateTimeField
+# objects that reach web.json_response() without explicit .isoformat() conversion.
+_JSON_ENCODER_SENTINEL = '# meshforge: datetime-safe JSON encoder'
+
+_JSON_ENCODER_PATCH = (
+    '\n# meshforge: datetime-safe JSON encoder\n'
+    '_original_json_encoder_default = json.JSONEncoder.default\n'
+    'def _meshforge_json_default(self, obj):\n'
+    '    from datetime import datetime, date\n'
+    '    if isinstance(obj, (datetime, date)):\n'
+    '        return obj.isoformat()\n'
+    '    return _original_json_encoder_default(self, obj)\n'
+    'json.JSONEncoder.default = _meshforge_json_default\n'
+)
+
+
 class MeshChatHandler(BaseHandler):
     """TUI handler for MeshChat client management."""
 
@@ -2007,6 +2024,10 @@ class MeshChatHandler(BaseHandler):
         if self._apply_fromisoformat_patch(install_dir):
             fixes.append('fromisoformat datetime fix applied')
 
+        # Patch JSON encoder for datetime serialization (idempotent)
+        if self._apply_json_encoder_patch(install_dir):
+            fixes.append('datetime JSON encoder fix applied')
+
         return fixes
 
     def _apply_strptime_patch(self, install_dir: Path) -> bool:
@@ -2056,6 +2077,40 @@ class MeshChatHandler(BaseHandler):
         patched = _FROMISOFORMAT_ASSIGNMENT_RE.sub(
             _build_fromisoformat_replacement, source
         )
+        if patched == source:
+            return False
+
+        try:
+            meshchat_py.write_text(patched, encoding='utf-8')
+        except OSError:
+            return False
+        return True
+
+    def _apply_json_encoder_patch(self, install_dir: Path) -> bool:
+        """Patch meshchat.py with a datetime-safe JSON encoder.
+
+        Inserts a JSONEncoder.default override after 'import json' so that
+        datetime objects from Peewee DateTimeField are serialized as ISO-8601
+        strings instead of crashing json.dumps() / web.json_response().
+        Idempotent -- checks for sentinel comment before inserting.
+        """
+        meshchat_py = install_dir / 'meshchat.py'
+        if not meshchat_py.exists():
+            return False
+
+        try:
+            source = meshchat_py.read_text(encoding='utf-8')
+        except OSError:
+            return False
+
+        if _JSON_ENCODER_SENTINEL in source:
+            return False  # Already patched
+
+        anchor = 'import json\n'
+        if anchor not in source:
+            return False  # Unexpected — meshchat.py doesn't import json
+
+        patched = source.replace(anchor, anchor + _JSON_ENCODER_PATCH, 1)
         if patched == source:
             return False
 
