@@ -42,7 +42,7 @@ check_process_running, start_service, stop_service, apply_config_and_restart, _s
 # Sudo-safe home directory — first-party, always available (MF001)
 from utils.paths import get_real_user_home
 
-# LXMF exclusivity — shared utility for MeshChat/NomadNet conflict prevention
+# LXMF exclusivity — prevent concurrent LXMF apps on port 37428
 from handlers._lxmf_utils import ensure_lxmf_exclusive
 
 # RNS prerequisite checks extracted for file size compliance (CLAUDE.md #6)
@@ -69,11 +69,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # ------------------------------------------------------------------
 
     def _ensure_lxmf_exclusive(self, starting_app: str) -> bool:
-        """Ensure only one LXMF app runs at a time.
-
-        NomadNet doesn't have is_meshchat_running_fn, so it uses the
-        default pgrep fallback in the utility.
-        """
+        """Ensure no other LXMF app is using port 37428."""
         return ensure_lxmf_exclusive(self.ctx.dialog, starting_app)
 
     # ------------------------------------------------------------------
@@ -496,7 +492,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not nn_path:
             return
 
-        # LXMF exclusivity: stop MeshChat if running (one at a time)
+        # LXMF exclusivity: prevent concurrent LXMF apps
         if not self._ensure_lxmf_exclusive("nomadnet"):
             return
 
@@ -795,7 +791,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             self.ctx.dialog.msgbox("Already Running", "NomadNet is already running.")
             return
 
-        # LXMF exclusivity: stop MeshChat if running (one at a time)
+        # LXMF exclusivity: prevent concurrent LXMF apps
         if not self._ensure_lxmf_exclusive("nomadnet"):
             return
 
