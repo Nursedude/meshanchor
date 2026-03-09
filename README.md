@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.4--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.5--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2607%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2745%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -38,7 +38,6 @@ Plug in a LoRa radio, run the installer, and you get:
 - **AI diagnostics** that work offline
 
 Optional add-ons (install from TUI when you need them):
-- **MeshChat** — LXMF messaging with web UI (Reticulum users)
 - **NomadNet** — terminal-based LXMF client (Reticulum users)
 
 ### The Vision
@@ -114,14 +113,13 @@ refactoring. See [Branch Strategy](#branch-strategy) for details.
 
 ### Deployment Profiles
 
-MeshForge supports 6 deployment profiles. Install only the dependencies you need:
+MeshForge supports 5 deployment profiles. Install only the dependencies you need:
 
 | Profile | Services Needed | Install | Use Case |
 |---------|----------------|---------|----------|
 | `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
 | `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
 | `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
-| `meshchat` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt` + MeshChat | LXMF messaging with web UI |
 | `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
 | `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
 
@@ -165,6 +163,7 @@ cd /opt/meshforge && sudo git pull origin main
 ```
 
 **Upgrading from pre-v0.5.4?** The gateway now uses MQTT instead of TCP.
+**Upgrading from v0.5.4?** MeshChat was removed (upstream unmaintained). Use NomadNet for LXMF messaging.
 Install mosquitto (`sudo apt install mosquitto`) and configure via
 `TUI → Gateway Config → MQTT Bridge Settings → Run Setup Guide`.
 
@@ -182,7 +181,7 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 Main Menu (MeshForge NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
 ├── 2. Mesh Networks         Meshtastic, RNS, MeshCore, AREDN, MQTT, Gateway
-│       └── RNS submenu      NomadNet Client, MeshChat Client (install/manage)
+│       └── RNS submenu      NomadNet Client (install/manage)
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
 ├── 5. Configuration         Radio, channels, RNS config, services, backup
@@ -202,7 +201,7 @@ Main Menu (MeshForge NOC)
 
 ---
 
-## What Works (v0.5.4-beta)
+## What Works (v0.5.5-beta)
 
 ### Status Definitions
 
@@ -219,7 +218,7 @@ These features have been used in actual mesh deployments with physical radios an
 
 | Category | Capabilities |
 |----------|-------------|
-| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics — 64 handlers via registry pattern |
+| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics — 60 handlers via registry pattern |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather (NOAA), Cython-optimized |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting, confidence scoring |
@@ -244,7 +243,6 @@ Code works in testing but hasn't been validated in real-world deployments with a
 | **Traffic Inspector** | Packet capture, protocol tree, display filters, path tracing | Needs real packet flow |
 | **Emergency Alerts** | NOAA/NWS weather, USGS volcano, FEMA iPAWS | API-dependent |
 | **Node Favorites** | Meshtastic 2.7+ favorites management, sync with device | Needs 2.7+ firmware |
-| **MeshChat** | Automated install, LXMF messaging, web UI (:8000), systemd service | Needs RNS + MeshChat running |
 | **Protobuf HTTP Client** | Full device config via protobuf HTTP (8 device + 13 module configs) | Needs meshtasticd 9443 |
 | **Config API** | RESTful configuration management with NGINX reliability patterns | Needs integration test |
 | **Network Topology** | D3.js force-directed graphs, path tracing, ASCII display | Needs live node data |
@@ -294,10 +292,11 @@ the MeshAnchor repository split. They will move to `Nursedude/meshanchor`:
 | First-run setup wizard | v0.5.1 | Hardware auto-detect templates |
 | Network topology visualization | v0.5.3 | D3.js + ASCII modes |
 | Tactical messaging (XTOC interop) | v0.5.4 | 8 templates, X1 codec, KML/CoT/ATAK export |
-| Handler registry migration | v0.5.4 | All 49 mixins replaced with 64 handler registry modules |
+| Handler registry migration | v0.5.4 | All 49 mixins replaced with 60 handler registry modules |
 | Service pre-flight expansion | v0.5.4 | Advisory `check_service()` on all TCP/MQTT connections |
 | Logging consolidation | v0.5.4 | 9 `basicConfig()` calls → canonical `setup_logging()` |
 | Meshtastic API 2.7.x upgrade | v0.5.4 | Latest meshtastic library support |
+| MeshChat removal + dead code cleanup | v0.5.5 | Removed 2,683-line MeshChat handler, simplified LXMF utils, bumped to 5 profiles |
 
 **Current Priority: Field Validation (v0.5.x → v0.6.0)**
 
@@ -391,7 +390,6 @@ graph TB
     subgraph External Services
         MESHTASTICD[meshtasticd<br>LoRa radio daemon]
         RNSD[rnsd<br>Reticulum transport]
-        MESHCHAT[MeshChat<br>LXMF messaging :8000]
         AREDN_NET[AREDN<br>IP mesh network]
         MQTT[MQTT Broker<br>Node telemetry]
         NOAA[NOAA SWPC<br>Space weather]
@@ -415,7 +413,6 @@ graph TB
 
     GATEWAY --> MQTT
     GATEWAY --> RNSD
-    MESHCHAT --> RNSD
     MONITOR --> MQTT
     MQTT --> MESHTASTICD
     TRAFFIC --> GATEWAY
@@ -432,7 +429,6 @@ graph TB
     style BROWSER fill:#2d5016,color:#fff
     style CLI fill:#2d5016,color:#fff
     style GATEWAY fill:#1a3a5c,color:#fff
-    style MESHCHAT fill:#1a5c3a,color:#fff
     style TRAFFIC fill:#3a1a5c,color:#fff
     style AI fill:#5c1a3a,color:#fff
     style UCONSOLE fill:#5c4a1a,color:#fff
@@ -515,29 +511,6 @@ PRIMARY_ACTIVE → FAILOVER_PENDING → SECONDARY_ACTIVE
 
 Requires two meshtasticd instances on ports 4403 (primary) and 4404 (secondary) with
 HTTP APIs enabled. Enable via TUI or `failover.enabled: true` in gateway config.
-
-### MeshChat (LXMF Messaging)
-
-MeshChat provides LXMF encrypted messaging with a web UI at `http://127.0.0.1:8000`.
-MeshForge automates the full installation and manages MeshChat as a systemd service.
-
-**Install from TUI:**
-```
-Mesh Networks → RNS → MeshChat Client → Install MeshChat
-```
-
-The installer handles everything: Node.js/npm prerequisites, git clone, Python
-dependencies, frontend build, and systemd service creation. MeshChat connects
-to rnsd as a shared instance client for Meshtastic bridging.
-
-**LXMF app exclusivity:** MeshChat and NomadNet are both LXMF clients. Only one
-should run at a time to avoid port conflicts. MeshForge enforces this — starting
-one will offer to stop the other.
-
-**Data flow:**
-```
-Meshtastic Node → meshtasticd → MeshForge Gateway → LXMF → rnsd → MeshChat (:8000)
-```
 
 ### Design Principles
 
@@ -707,7 +680,7 @@ src/
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── handlers/          # 64 self-contained command handlers
+│   └── handlers/          # 60 registered command handlers
 ├── commands/              # Command modules
 │   ├── propagation.py     # Space weather & HF propagation (NOAA primary)
 │   ├── rns.py             # RNS/Reticulum commands
@@ -717,8 +690,7 @@ src/
 ├── plugins/               # Protocol plugins
 │   ├── eas_alerts.py      # NOAA/NWS/FEMA emergency alerts
 │   ├── meshcore.py        # MeshCore plugin (alpha branch)
-│   ├── mqtt_bridge.py     # MQTT bridge plugin
-│   └── meshchat/          # MeshChat integration
+│   └── mqtt_bridge.py     # MQTT bridge plugin
 ├── gateway/               # Multi-mesh bridge
 │   ├── rns_bridge.py      # Meshtastic ↔ RNS transport
 │   ├── mqtt_bridge_handler.py # MQTT-based bridge (zero interference)
@@ -830,7 +802,6 @@ See `dashboards/README.md` and `docs/METRICS.md` for full setup instructions.
 | 1883 | mosquitto MQTT | mosquitto | Multi-consumer (optional) |
 | 5000 | MeshForge Map Server | **MeshForge** | Live NOC map + REST API (20 endpoints) |
 | 5001 | MeshForge WebSocket | **MeshForge** | Real-time message broadcast |
-| 8000 | MeshChat Web UI | MeshChat | LXMF messaging + HTTP API |
 | 8081 | MeshForge Config API | **MeshForge** | RESTful config management |
 | 9090 | Prometheus metrics | **MeshForge** | Prometheus + Grafana JSON API |
 | 9443 | meshtasticd Web UI | meshtasticd | Protobuf + JSON endpoints |
@@ -919,11 +890,11 @@ connection (port 4403):
 | `test_bridge_health.py` | 55 | Gateway health monitoring, circuit breaker patterns |
 | `test_reconnect.py` | 45 | Exponential backoff, jitter, slow start recovery, thread safety |
 | `test_rf.py` | 107 | RF calculations: haversine, FSPL, Fresnel, link budget, signal classification |
-| `test_deployment_profiles.py` | 31 | Deployment profile system (radio_maps, monitor, gateway, meshcore, full) |
+| `test_deployment_profiles.py` | 31 | Deployment profile system (5 profiles: radio_maps, monitor, meshcore, gateway, full) |
 | `test_startup_health.py` | 20 | Startup health checks, service verification |
 | `test_compliance.py` | 13 | HAM compliance validation, encryption modes |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,607 across 71 files as new features were added with test coverage. All tests use mocked external services — field validation with real hardware is a separate QA track.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,745 across 77 files as new features were added with test coverage. All tests use mocked external services — field validation with real hardware is a separate QA track.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
@@ -970,7 +941,7 @@ print(f'Issues: {report.total_issues}, Files scanned: {report.total_files_scanne
 - Shared connection manager prevents TCP:4403 client contention
 - Exponential backoff reconnection (1s → 2s → 4s → ... → 30s max)
 - Canonical logging via `setup_logging()` — all 9 `basicConfig()` calls consolidated
-- Handler registry pattern: all 64 TUI handlers use registry dispatch (mixin inheritance fully replaced)
+- Handler registry pattern: all 60 TUI handlers use registry dispatch (mixin inheritance fully replaced)
 - Connection failure logs upgraded to WARNING level for visibility (cleanup errors stay DEBUG)
 
 ---
@@ -996,7 +967,7 @@ See [CLAUDE.md](CLAUDE.md) for details.
 
 | Branch | Version | Focus | Real-World Tested |
 |--------|---------|-------|-------------------|
-| `main` | `0.5.4-beta` | Meshtastic-primary NOC, production use | TUI, meshtasticd, RNS, NomadNet |
+| `main` | `0.5.5-beta` | Meshtastic-primary NOC, production use | TUI, meshtasticd, RNS, NomadNet |
 | `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore-primary (becoming **MeshAnchor**) | Field testing in progress |
 
 **MeshAnchor split (2026-03-05):** The alpha branch will become a separate
@@ -1235,7 +1206,6 @@ Full research library: [`.claude/research/`](.claude/research/README.md)
 | Development Blog | [nursedude.substack.com](https://nursedude.substack.com) | Project updates |
 | Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) | Primary radio network |
 | Reticulum Network | [reticulum.network](https://reticulum.network/) | Bridge target (encrypted transport) |
-| MeshChat | [github.com/liamcottle/reticulum-meshchat](https://github.com/liamcottle/reticulum-meshchat) | LXMF messaging client (automated install) |
 | AREDN Mesh | [arednmesh.org](https://www.arednmesh.org/) | Monitoring integration |
 | RTL-SDR | [rtl-sdr.com](https://www.rtl-sdr.com/) | Spectrum analysis (planned) |
 | uConsole AIO V2 | [hackergadgets.com](https://hackergadgets.com/products/uconsole-aio-v2) | Field hardware (Q2 2026) |
