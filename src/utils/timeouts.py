@@ -74,6 +74,10 @@ GPSD_CONNECT = 3.0  # seconds
 # Online/offline connectivity probe
 CONNECTIVITY_CHECK = 3.0  # seconds
 
+# RNS RPC call timeout (local Unix socket, should respond in <100ms)
+# Used in meshforge_wrapper.py (hardcoded there since wrapper can't import this)
+RNS_RPC = 3  # seconds
+
 # =============================================================================
 # Service Check / Daemon
 # =============================================================================
