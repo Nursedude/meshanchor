@@ -37,7 +37,6 @@ from __version__ import __version__
 
 # Import optional modules at module level
 from utils.active_health_probe import get_health_probe
-from utils.service_check import lock_port_external
 # TopologyVisualizer is in handlers/topology.py
 
 # Import centralized path utility - SINGLE SOURCE OF TRUTH for all paths
@@ -45,9 +44,7 @@ from utils.service_check import lock_port_external
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
 from utils.paths import get_real_user_home
 
-# Import centralized service checker - SINGLE SOURCE OF TRUTH for service status
-# See: utils/service_check.py and .claude/foundations/install_reliability_triage.md
-from utils.service_check import apply_config_and_restart
+# Service check utilities moved to handlers/startup_health.py
 
 # Import dialog backend directly (not through package namespace)
 from backend import DialogBackend, clear_screen
@@ -374,7 +371,9 @@ class MeshForgeLauncher:
             first_run_handler.on_startup()
 
         # Check for service misconfiguration (SPI HAT with USB config)
-        self._check_service_misconfig()
+        startup_health = self._registry.get_handler("startup_health")
+        if startup_health:
+            startup_health.on_startup()
 
         # Detect if daemon is managing core services
         self._daemon_active = self._is_daemon_running()
@@ -386,7 +385,8 @@ class MeshForgeLauncher:
             # If daemon owns these, starting them here would cause
             # port conflicts (Config API :8081) or singleton clashes.
             self._registry.startup_all()  # AITools, MQTT, ConfigAPI, etc.
-            self._maybe_auto_lock_port()
+            if startup_health:
+                startup_health.auto_lock_port()
             self._start_health_monitor()
 
         # Non-blocking update check — sets _updates_available for status hint
@@ -546,86 +546,8 @@ class MeshForgeLauncher:
                 # Less alarming message since rnsd isn't running yet
                 # The NomadNet menu will handle specific issues when they arise
 
-    def _check_service_misconfig(self):
-        """Check for service misconfiguration and offer to fix."""
-        config_d = Path('/etc/meshtasticd/config.d')
-        if not config_d.exists():
-            return
-
-        # Check what configs are active
-        active_configs = list(config_d.glob('*.yaml'))
-        usb_config = config_d / 'usb-serial.yaml'
-
-        # Check for SPI configs
-        spi_config_names = ['meshadv', 'waveshare', 'rak-hat', 'meshtoad', 'sx126', 'sx127', 'lora']
-        has_spi_config = any(
-            any(name in cfg.name.lower() for name in spi_config_names)
-            for cfg in active_configs
-        )
-
-        # If SPI config exists AND usb-serial.yaml also exists, that's wrong
-        if has_spi_config and usb_config.exists():
-            spi_configs = [c.name for c in active_configs if any(n in c.name.lower() for n in spi_config_names)]
-
-            msg = "CONFLICTING CONFIGURATIONS!\n\n"
-            msg += "Both SPI HAT and USB configs are active:\n\n"
-            msg += f"  SPI: {', '.join(spi_configs)}\n"
-            msg += f"  USB: usb-serial.yaml (WRONG)\n\n"
-            msg += "Remove the USB config?"
-
-            if self.dialog.yesno("Config Conflict", msg):
-                try:
-                    usb_config.unlink()
-                    apply_config_and_restart('meshtasticd')
-                    self.dialog.msgbox(
-                        "Fixed",
-                        "Removed usb-serial.yaml\n"
-                        "Restarted meshtasticd\n\n"
-                        "Check: systemctl status meshtasticd"
-                    )
-                except Exception as e:
-                    self.dialog.msgbox("Error", f"Failed:\n{e}")
-            return
-
-        # Check: SPI hardware present but USB config active (wrong)
-        spi_devices = list(Path('/dev').glob('spidev*'))
-
-        has_spi = len(spi_devices) > 0
-
-        # Only skip if no SPI hardware at all
-        if not has_spi:
-            return
-
-        if not usb_config.exists():
-            return
-
-        result = subprocess.run(['which', 'meshtasticd'], capture_output=True, timeout=5)
-        has_native = result.returncode == 0
-
-        msg = "CONFIGURATION MISMATCH!\n\n"
-        msg += "SPI HAT detected but USB config active.\n\n"
-        msg += f"SPI: {', '.join(d.name for d in spi_devices)}\n"
-        msg += "Config: usb-serial.yaml (WRONG)\n"
-        if not has_native:
-            msg += "Native meshtasticd: NOT INSTALLED\n"
-        msg += "\nFix this now?"
-
-        if self.dialog.yesno("Service Misconfiguration", msg):
-            self._fix_spi_config(has_native)
-
-    def _maybe_auto_lock_port(self):
-        """Auto-lock port 9443 on startup so meshtasticd web is MeshForge-only.
-
-        Silent operation - logs result but no dialogs on failure.
-        """
-        try:
-            success, msg = lock_port_external(9443)
-            if success:
-                logger.info("Startup port lock: %s", msg)
-            else:
-                logger.warning("Startup port lock failed: %s", msg)
-        except Exception as e:
-            logger.debug("Auto port lock error: %s", e)
+    # _check_service_misconfig and _maybe_auto_lock_port moved to
+    # handlers/startup_health.py (StartupHealthHandler)
 
     _MAX_DIALOG_RETRIES = 3
 
