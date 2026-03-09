@@ -3,9 +3,9 @@ MeshForge - LoRa Mesh Network Development & Operations Suite
 Version information and changelog
 """
 
-__version__ = "0.5.4-beta"
-__version_info__ = (0, 5, 4, 'beta')
-__release_date__ = "2026-02-11"
+__version__ = "0.5.5-beta"
+__version_info__ = (0, 5, 5, 'beta')
+__release_date__ = "2026-03-09"
 __app_name__ = "MeshForge"
 __app_description__ = "Mesh Network Operations Center & Development Ecosystem"
 __app_tagline__ = "Build. Test. Deploy. Monitor."

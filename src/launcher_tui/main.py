@@ -36,7 +36,6 @@ if str(_launcher_dir) not in sys.path:
 from __version__ import __version__
 
 # Import optional modules at module level
-from utils.cli import find_meshtastic_cli
 from utils.active_health_probe import get_health_probe
 from utils.service_check import lock_port_external
 # TopologyVisualizer is in handlers/topology.py
@@ -73,7 +72,6 @@ class MeshForgeLauncher:
         self.src_dir = Path(__file__).parent.parent  # src/ directory
         self.env = self._detect_environment()
         self._setup_status_bar()
-        self._meshtastic_path = None  # Cached CLI path
         self._bridge_log_path = None  # Path to active bridge log file
         # Enhanced startup checker (v0.4.8)
         self._startup_checker = StartupChecker()
@@ -160,12 +158,6 @@ class MeshForgeLauncher:
         # Without this, old print output stays in scrollback and causes
         # "screen roll" — visible flash of terminal text behind the dialog.
         clear_screen()
-
-    def _get_meshtastic_cli(self) -> str:
-        """Find the meshtastic CLI binary path, with caching."""
-        if self._meshtastic_path is None:
-            self._meshtastic_path = find_meshtastic_cli() or 'meshtastic'
-        return self._meshtastic_path
 
     @staticmethod
     def _validate_hostname(host: str) -> bool:
