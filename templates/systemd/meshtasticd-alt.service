@@ -1,0 +1,17 @@
+[Unit]
+Description=Meshtastic Daemon (Secondary)
+Documentation=https://meshtastic.org
+After=network.target meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/meshtasticd-alt
+ExecStart=@MESHTASTICD_BIN@ -c /etc/meshtasticd-alt/config.yaml
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=multi-user.target
