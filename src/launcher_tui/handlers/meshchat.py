@@ -678,6 +678,22 @@ class MeshChatHandler(BaseHandler):
                 print(f"  Propagation: {'Yes' if mc_status.propagation_node else 'No'}")
             except Exception as e:
                 print(f"\n  API Error:  {e}")
+                is_timeout = ('timed out' in str(e).lower()
+                              or 'timeout' in type(e).__name__.lower())
+                if running and is_timeout:
+                    print("\n  MeshChat is running but not responding.")
+                    print("  This usually means RNS RPC calls are blocking"
+                          " the event loop.")
+                    print()
+                    if self.ctx.dialog.yesno(
+                        "MeshChat Not Responding",
+                        "MeshChat is running but its API is not responding.\n\n"
+                        "This is typically caused by hung RNS RPC calls.\n"
+                        "Restarting will apply the latest upstream fixes.\n\n"
+                        "Restart MeshChat now?",
+                    ):
+                        self._restart_meshchat()
+                        return
 
         # RNS shared instance status
         print()
@@ -1926,11 +1942,11 @@ class MeshChatHandler(BaseHandler):
 
     WRAPPER_FILENAME = 'meshforge_wrapper.py'
 
-    _WRAPPER_VERSION = 8  # Bump when _WRAPPER_CONTENT changes
+    _WRAPPER_VERSION = 9  # Bump when _WRAPPER_CONTENT changes
 
     _WRAPPER_CONTENT = '''\
 #!/usr/bin/env python3
-# meshforge_wrapper_version: 8
+# meshforge_wrapper_version: 9
 """MeshForge wrapper - patches and pre-checks before MeshChat starts.
 
 Fixes applied:
@@ -1938,14 +1954,15 @@ Fixes applied:
    (upstream MeshChat passes datetime to aiohttp json_response without handler)
 2. Waits for RNS shared instance socket before starting MeshChat
    (prevents ConnectionRefusedError on get_interface_stats RPC calls at startup)
-3. Monkey-patches RNS RPC methods to catch ConnectionRefusedError at runtime
-   (returns safe empty values instead of crashing the web UI)
+3. Monkey-patches RNS RPC methods with timeout protection (3s)
+   (prevents hung RPC from blocking aiohttp event loop indefinitely)
 4. Monkey-patches datetime.strptime and datetime.fromisoformat to handle
    Peewee datetime objects (prevents TypeError in meshchat.py)
 
 Safe to remove once upstream fixes the issues.
 Created by MeshForge. Do not edit — it will be regenerated on update.
 """
+import concurrent.futures
 import datetime
 import json
 import os
@@ -2000,26 +2017,49 @@ if _rnsd_running() and not _rns_shared_instance_ready():
         time.sleep(1)
 
 
-# --- Fix 3: Resilient RNS RPC calls (runtime failures) ---
+# --- Fix 3: Resilient RNS RPC calls with timeout (runtime failures) ---
 # MeshChat calls get_interface_stats() on every web request (index handler).
-# If rnsd drops, restarts (new auth key), or is unreachable, the RPC call
-# crashes the entire web UI. Catch all exceptions from RPC calls and return
-# safe empty values. KeyboardInterrupt/SystemExit are not Exception subclasses.
+# If rnsd is stuck/slow, the RPC call blocks the aiohttp event loop forever,
+# freezing the entire web UI. Use concurrent.futures to enforce a 3s timeout.
+# 3s < MeshForge HTTP client's 5s timeout (utils/timeouts.py RNS_RPC).
+_RPC_TIMEOUT = 3  # seconds — RPC should respond in <100ms normally
+
 try:
     import RNS
 
     _original_get_interface_stats = RNS.Reticulum.get_interface_stats
     _original_get_path_table = RNS.Reticulum.get_path_table
 
+    # Dedicated single-thread executors prevent thread buildup from repeated
+    # timeouts. daemon threads won't block process exit.
+    _stats_executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix='rns_stats'
+    )
+    _path_executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix='rns_path'
+    )
+
     def _safe_get_interface_stats(self):
         try:
-            return _original_get_interface_stats(self)
+            future = _stats_executor.submit(_original_get_interface_stats, self)
+            return future.result(timeout=_RPC_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            print("[meshforge_wrapper] WARNING: get_interface_stats RPC timed "
+                  f"out after {_RPC_TIMEOUT}s — returning empty", file=sys.stderr)
+            return {"interfaces": []}
         except Exception:
             return {"interfaces": []}
 
     def _safe_get_path_table(self):
         try:
-            return _original_get_path_table(self)
+            future = _path_executor.submit(_original_get_path_table, self)
+            return future.result(timeout=_RPC_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            print("[meshforge_wrapper] WARNING: get_path_table RPC timed "
+                  f"out after {_RPC_TIMEOUT}s — returning empty", file=sys.stderr)
+            return []
         except Exception:
             return []
 
