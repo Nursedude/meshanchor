@@ -738,8 +738,8 @@ class MeshChatHandler(BaseHandler):
         if not self._check_rns_for_meshchat():
             return
 
-        # Preflight: ensure user-space RNS config for shared instance
-        self._ensure_meshchat_rns_config()
+        # Preflight: verify RNS config has share_instance=Yes when rnsd runs
+        self._check_rns_config_share_instance()
 
         # Preflight: check LXMF availability
         if not _HAS_LXMF:
@@ -1365,46 +1365,46 @@ class MeshChatHandler(BaseHandler):
         """Return configured bind host, default 127.0.0.1."""
         return self._get_meshchat_settings().get("bind_host") or "127.0.0.1"
 
-    def _ensure_meshchat_rns_config(self) -> Path:
-        """Ensure a client-only RNS config exists for MeshChat.
+    def _check_rns_config_share_instance(self) -> bool:
+        """Check that the user's RNS config has share_instance=Yes.
 
-        Creates ~/.reticulum/config with share_instance=Yes and no
-        interfaces, so MeshChat connects to rnsd as a shared instance
-        client rather than starting its own RNS instance.
+        When rnsd is running, MeshChat must connect as a shared instance
+        client.  The user's existing ~/.reticulum/config should already
+        have share_instance=Yes (set during rnsd setup).
 
-        Returns the RNS config directory path.
+        Returns True if config looks OK or rnsd isn't running (MeshChat
+        will start its own instance).  Returns False only on fatal error.
         """
+        if not self._get_rnsd_user():
+            return True  # rnsd not running — MeshChat can start standalone
+
         user_home = get_real_user_home()
-        rns_dir = user_home / '.reticulum'
-        rns_config = rns_dir / 'config'
+        rns_config = user_home / '.reticulum' / 'config'
 
-        if rns_config.exists():
-            return rns_dir
+        if not rns_config.exists():
+            # No config at all — RNS will create a default one.
+            # Warn the user since rnsd is running and they'll need
+            # share_instance=Yes to avoid port conflicts.
+            logger.warning(
+                "No RNS config at %s — MeshChat may conflict with rnsd",
+                rns_config,
+            )
+            return True  # proceed and let MeshChat/RNS sort it out
 
-        logger.info("Creating client-only RNS config at %s", rns_config)
-        rns_dir.mkdir(parents=True, exist_ok=True)
-        rns_config.write_text(
-            "[reticulum]\n"
-            "  share_instance = Yes\n"
-            "  shared_instance_port = 37428\n"
-            "  instance_control_port = 37429\n"
-            "\n"
-            "[interfaces]\n"
-            "  # No interfaces - rnsd manages hardware\n"
-        )
+        try:
+            content = rns_config.read_text()
+        except OSError:
+            return True  # can't read, proceed anyway
 
-        # Ensure owned by service user (not root when running under sudo)
-        service_user = self._get_service_user()
-        if service_user and service_user != 'root':
-            try:
-                subprocess.run(
-                    ['chown', '-R', f'{service_user}:{service_user}', str(rns_dir)],
-                    capture_output=True, timeout=10,
-                )
-            except (subprocess.SubprocessError, OSError) as e:
-                logger.debug("chown on %s failed: %s", rns_dir, e)
+        # Check for share_instance = Yes (case-insensitive)
+        if not re.search(r'share_instance\s*=\s*[Yy]es', content):
+            logger.warning(
+                "RNS config at %s does not have share_instance=Yes — "
+                "MeshChat may conflict with rnsd",
+                rns_config,
+            )
 
-        return rns_dir
+        return True
 
     def _get_meshchat_url(self) -> str:
         """Get MeshChat web UI URL using hostname for display."""
@@ -1637,7 +1637,7 @@ class MeshChatHandler(BaseHandler):
         - StartLimitIntervalSec in [Service] instead of [Unit] (stale file)
         - Bind host mismatch vs configured setting
         - ExecStart still using legacy wrapper (should use meshchat.py)
-        - Missing --reticulum-config-dir (RNS shared instance)
+        - Stale --reticulum-config-dir flag (no longer used)
 
         Regenerates the service file if any issues are found.
         """
@@ -1699,9 +1699,14 @@ class MeshChatHandler(BaseHandler):
             )
             needs_regen = True
 
-        # Check for missing --reticulum-config-dir (RNS shared instance)
-        if '--reticulum-config-dir' not in content:
-            logger.warning("Service missing --reticulum-config-dir — adding")
+        # Remove stale --reticulum-config-dir (no longer used — MeshChat
+        # uses the service user's default ~/.reticulum/config, which has
+        # the real interfaces and share_instance setting)
+        if '--reticulum-config-dir' in content:
+            logger.warning(
+                "Service has --reticulum-config-dir — removing "
+                "(MeshChat should use default RNS config)"
+            )
             needs_regen = True
 
         if needs_regen:
@@ -2421,18 +2426,18 @@ class MeshChatHandler(BaseHandler):
         return True
 
     def _install_meshchat_service(self, install_dir: Path, run_as_user: str = None) -> bool:
-        """Create systemd service for MeshChat. Returns True on success."""
+        """Create systemd service for MeshChat. Returns True on success.
+
+        Service runs meshchat.py directly with --headless, matching manual
+        usage.  No --reticulum-config-dir is passed — MeshChat uses the
+        service user's default ~/.reticulum/config, which must have
+        share_instance=Yes when rnsd is running (same as manual start).
+        """
         service_user = run_as_user or 'root'
         user_home = get_real_user_home()
         python_path = self._get_service_python()
         meshchat_py = install_dir / 'meshchat.py'
         bind_host = self._get_meshchat_bind_host()
-        rns_config_dir = self._ensure_meshchat_rns_config()
-
-        # Run meshchat.py directly — no wrapper needed.
-        # Source-level datetime patches are applied separately by
-        # _apply_upstream_fixes() at install/restart time.
-        exec_target = meshchat_py
 
         service_content = (
             f"[Unit]\n"
@@ -2451,9 +2456,8 @@ class MeshChatHandler(BaseHandler):
             f"for i in 1 2 3 4 5; do "
             f"grep -q rns/default /proc/net/unix 2>/dev/null && exit 0; "
             f"sleep 1; done; exit 0'\n"
-            f"ExecStart={python_path} {exec_target}"
-            f" --headless --host {bind_host}"
-            f" --reticulum-config-dir {rns_config_dir}\n"
+            f"ExecStart={python_path} {meshchat_py}"
+            f" --headless --host {bind_host}\n"
             f"Restart=on-failure\n"
             f"RestartSec=5\n"
             f"Environment=HOME={user_home}\n"
