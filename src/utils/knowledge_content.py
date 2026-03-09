@@ -576,7 +576,7 @@ Path Discovery:
 - Paths expire and refresh automatically
 - No central routing authority
 
-Network Visualizer (like MeshChat):
+Network Visualizer:
 - Shows announced nodes and their connectivity
 - Tracks path hops to each destination
 - Displays announce timestamps

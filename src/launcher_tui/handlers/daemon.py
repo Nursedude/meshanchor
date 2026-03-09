@@ -1,7 +1,7 @@
 """
 Daemon mode handler — start/stop/status for headless NOC services.
 
-The MeshForge daemon runs gateway bridge, maps, RNS, NomadNet, MeshChat
+The MeshForge daemon runs gateway bridge, maps, RNS, NomadNet
 and other services in the background without the TUI.
 
 Batch 10b: Extracted from MeshForgeLauncher._daemon_menu() in main.py.
@@ -66,7 +66,7 @@ class DaemonHandler(BaseHandler):
             choice = self.ctx.dialog.menu(
                 "MeshForge Daemon",
                 "Headless NOC — runs services without the TUI:\n"
-                "  Gateway bridge, maps, RNS, NomadNet, MeshChat",
+                "  Gateway bridge, maps, RNS, and NomadNet",
                 choices
             )
 

@@ -104,13 +104,6 @@ class SetupWizard:
             'install_hint': 'pipx install nomadnet',
         },
         {
-            'name': 'meshchat',
-            'display': 'MeshChat',
-            'check_cmd': ['meshchat', '--version'],
-            'systemd': None,
-            'install_hint': 'pipx install meshchat',
-        },
-        {
             'name': 'lxmf',
             'display': 'LXMF (messaging)',
             'check_cmd': ['lxmd', '--version'],
