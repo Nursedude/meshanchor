@@ -397,7 +397,7 @@ def check_process_running(process_name: str) -> bool:
             return True
 
         # Fallback: Check via ps for python-based services (e.g., python3 -m rnsd)
-        if process_name in ('rnsd', 'nomadnet', 'meshchat'):
+        if process_name in ('rnsd', 'nomadnet'):
             result = subprocess.run(
                 ['pgrep', '-f', f'python.*{process_name}'],
                 capture_output=True,

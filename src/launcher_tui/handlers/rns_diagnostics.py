@@ -753,14 +753,13 @@ class RNSDiagnosticsHandler(BaseHandler):
             return False
 
     def _check_lxmf_app_conflict(self) -> Optional[str]:
-        """Check if an LXMF app (NomadNet or MeshChat) holds port 37428.
+        """Check if an LXMF app (NomadNet) holds port 37428.
 
-        Both NomadNet and MeshChat can create their own RNS shared instance,
+        NomadNet can create its own RNS shared instance,
         which conflicts with rnsd if both try to bind port 37428.
 
         Returns the app name if conflict detected, None otherwise.
         """
-        # Check NomadNet
         try:
             result = subprocess.run(
                 ['pgrep', '-f', 'nomadnet'],
@@ -768,17 +767,6 @@ class RNSDiagnosticsHandler(BaseHandler):
             )
             if result.returncode == 0:
                 return "NomadNet"
-        except (subprocess.SubprocessError, OSError):
-            pass
-
-        # Check MeshChat
-        try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'meshchat'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return "MeshChat"
         except (subprocess.SubprocessError, OSError):
             pass
 
@@ -805,17 +793,6 @@ class RNSDiagnosticsHandler(BaseHandler):
         if self.ctx.registry:
             return self.ctx.registry.get_handler("rns_config")
         return None
-
-    def _check_meshchat_installed(self) -> bool:
-        """Check if MeshChat is installed (cross-mixin compatibility)."""
-        try:
-            result = subprocess.run(
-                ['which', 'meshchat'],
-                capture_output=True, text=True, timeout=5
-            )
-            return result.returncode == 0
-        except (subprocess.SubprocessError, OSError):
-            return False
 
     # ------------------------------------------------------------------
     # Repair methods (from rns_menu_mixin.py)

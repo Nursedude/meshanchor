@@ -789,7 +789,7 @@ class MeshForgeLauncher:
         """Mesh Networks - Meshtastic, RNS, AREDN."""
         _ORDERING = ["meshtastic", "meshcore", "rns", "gateway", "aredn",
                       "messaging", "traffic", "mqtt", "favorites", "ham", "services",
-                      "nomadnet", "meshchat"]
+                      "nomadnet"]
         while True:
             # Legacy items — feature-gated items built conditionally
             legacy = []

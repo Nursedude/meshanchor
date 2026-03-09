@@ -109,7 +109,6 @@ Limitations:
 AREDN nodes can host and access various network services.
 
 Common Services:
-- Chat: MeshChat (web-based group messaging)
 - VoIP: Asterisk PBX for voice calls
 - Video: IP cameras and streaming
 - File sharing: FTP/SFTP servers
@@ -123,7 +122,6 @@ Service Advertisement:
 
 For Emergency Communications:
 - Voice: Multiple VoIP servers for redundancy
-- Messaging: MeshChat for text-based coordination
 - Situational Awareness: Shared maps and status boards
 - Infrastructure: DNS, NTP, monitoring
 
@@ -139,7 +137,7 @@ Hardware Needed:
 - GL.iNet (compact, low power)
 - Any device with AREDN firmware support
 """,
-        keywords=["aredn", "services", "voip", "chat", "meshchat", "video", "emergency"],
+        keywords=["aredn", "services", "voip", "video", "emergency"],
         related_entries=["AREDN Network Overview", "AREDN Node Discovery"],
         expertise_level="intermediate",
     ))

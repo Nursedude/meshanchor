@@ -374,7 +374,6 @@ def diagnose_rns_connectivity(handler, error_output: str):
             f"= auth failure\n"
         )
         nomadnet_installed = bool(shutil.which('nomadnet'))
-        meshchat_installed = handler._check_meshchat_installed()
         menu_items = [
             ("fix", f"Fix rnsd to run as {sudo_user} (recommended)"),
         ]
@@ -382,11 +381,6 @@ def diagnose_rns_connectivity(handler, error_output: str):
             menu_items.append(
                 ("nomadnet",
                  "Stop rnsd — let NomadNet manage RNS"),
-            )
-        if meshchat_installed:
-            menu_items.append(
-                ("meshchat",
-                 "Stop rnsd — let MeshChat manage RNS"),
             )
         menu_items.append(("skip", "Skip (show diagnostics)"))
 
@@ -402,8 +396,8 @@ def diagnose_rns_connectivity(handler, error_output: str):
             if handler._fix_rnsd_user(sudo_user):
                 print("\nRetry: RNS > Status from the menu.")
             return
-        elif choice in ("nomadnet", "meshchat"):
-            app_name = "NomadNet" if choice == "nomadnet" else "MeshChat"
+        elif choice == "nomadnet":
+            app_name = "NomadNet"
             handler.ctx.dialog.infobox(
                 "Stopping rnsd",
                 "Stopping rnsd service...",

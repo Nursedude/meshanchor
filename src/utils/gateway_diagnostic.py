@@ -22,20 +22,6 @@ from utils.config_drift import detect_rnsd_config_drift
 # Optional external dependencies
 from utils.safe_import import safe_import
 _meshtastic_mod, _HAS_MESHTASTIC = safe_import('meshtastic')
-MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
-    'plugins.meshchat', 'MeshChatService', 'ServiceState'
-)
-if not _HAS_MESHCHAT:
-    MeshChatService, MeshChatServiceState, _HAS_MESHCHAT = safe_import(
-        'src.plugins.meshchat', 'MeshChatService', 'ServiceState'
-    )
-MeshChatClient, _HAS_MESHCHAT_CLIENT = safe_import(
-    'plugins.meshchat.client', 'MeshChatClient'
-)
-if not _HAS_MESHCHAT_CLIENT:
-    MeshChatClient, _HAS_MESHCHAT_CLIENT = safe_import(
-        'src.plugins.meshchat.client', 'MeshChatClient'
-    )
 
 
 class CheckStatus(Enum):
@@ -96,10 +82,6 @@ class GatewayDiagnostic:
         self.results.append(self.check_meshtastic_interface())
         self.results.append(self.check_meshtastic_module_for_rnsd())
         self.results.append(self.check_meshtasticd())
-
-        # Optional integrations
-        self.results.append(self.check_meshchat())
-        self.results.append(self.check_meshchat_rns_integration())
 
         # Connection checks
         conn_types = self.detect_connection_types()
@@ -514,110 +496,6 @@ class GatewayDiagnostic:
         except Exception as e:
             return CheckResult(
                 name="meshtasticd Service",
-                status=CheckStatus.SKIP,
-                message=f"Check skipped: {e}"
-            )
-
-    # ========================================
-    # Optional Integrations
-    # ========================================
-
-    def check_meshchat(self) -> CheckResult:
-        """Check if MeshChat service is available (optional)."""
-        if not _HAS_MESHCHAT:
-            # MeshChat plugin not available - check port directly
-            if self.check_tcp_port('localhost', 8000):
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.PASS,
-                    message="Detected on port 8000"
-                )
-            return CheckResult(
-                name="MeshChat (Optional)",
-                status=CheckStatus.SKIP,
-                message="Not installed (optional)"
-            )
-
-        try:
-            service = MeshChatService()
-            status = service.check_status(blocking=True)
-
-            if status.available:
-                version_str = f" v{status.version}" if status.version else ""
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.PASS,
-                    message=f"Running{version_str} on port {service.port}",
-                    details=f"PID: {status.pid}" if status.pid else None
-                )
-            elif status.state == MeshChatServiceState.STOPPED:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.SKIP,
-                    message="Installed but not running",
-                    fix_hint=status.fix_hint
-                )
-            elif status.state == MeshChatServiceState.STARTING:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.WARN,
-                    message="Starting (port not ready yet)"
-                )
-            else:
-                return CheckResult(
-                    name="MeshChat (Optional)",
-                    status=CheckStatus.SKIP,
-                    message="Not installed (optional LXMF messaging)",
-                    fix_hint="Install from: https://github.com/liamcottle/reticulum-meshchat"
-                )
-        except Exception as e:
-            return CheckResult(
-                name="MeshChat (Optional)",
-                status=CheckStatus.SKIP,
-                message=f"Check skipped: {e}"
-            )
-
-    def check_meshchat_rns_integration(self) -> CheckResult:
-        """Check if MeshChat is properly connected to RNS (optional)."""
-        if not _HAS_MESHCHAT_CLIENT:
-            return CheckResult(
-                name="MeshChat-RNS Link",
-                status=CheckStatus.SKIP,
-                message="MeshChat client not available"
-            )
-
-        try:
-            client = MeshChatClient(timeout=3)
-            if not client.is_available():
-                return CheckResult(
-                    name="MeshChat-RNS Link",
-                    status=CheckStatus.SKIP,
-                    message="MeshChat not running"
-                )
-
-            mc_status = client.get_status()
-            if mc_status.rns_connected:
-                details = []
-                if mc_status.peer_count:
-                    details.append(f"{mc_status.peer_count} peers")
-                if mc_status.message_count:
-                    details.append(f"{mc_status.message_count} messages")
-                detail_str = f" ({', '.join(details)})" if details else ""
-                return CheckResult(
-                    name="MeshChat-RNS Link",
-                    status=CheckStatus.PASS,
-                    message=f"Connected to RNS{detail_str}"
-                )
-            else:
-                return CheckResult(
-                    name="MeshChat-RNS Link",
-                    status=CheckStatus.FAIL,
-                    message="MeshChat running but RNS not connected",
-                    fix_hint="Check that rnsd is running with share_instance = Yes"
-                )
-        except Exception as e:
-            return CheckResult(
-                name="MeshChat-RNS Link",
                 status=CheckStatus.SKIP,
                 message=f"Check skipped: {e}"
             )
