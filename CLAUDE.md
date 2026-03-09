@@ -11,7 +11,7 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 
 | Branch | Version | Purpose | Field-Tested |
 |--------|---------|---------|--------------|
-| `main` | `0.5.4-beta` | Stable beta — TUI, meshtasticd, RNS, RF tools | TUI, radio config, RNS, NomadNet |
+| `main` | `0.5.5-beta` | Stable beta — TUI, meshtasticd, RNS, RF tools | TUI, radio config, RNS, NomadNet |
 | `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing + structural refactoring | Not yet |
 
 - **main** is the production-ready line. All PRs targeting stable features merge here.
@@ -56,7 +56,7 @@ python3 -m pytest tests/test_regression_guards.py -v   # Regression guards
 git config core.hooksPath .githooks                    # Enable pre-commit hook
 
 # Version is in src/__version__.py
-# main: 0.5.4-beta | alpha/meshcore-bridge: 0.6.0-alpha
+# main: 0.5.5-beta | alpha/meshcore-bridge: 0.6.0-alpha
 ```
 
 ## Architecture Overview
@@ -72,7 +72,7 @@ src/
 │   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
 │   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
 │   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
-│   └── handlers/            # 64 self-contained command handlers
+│   └── handlers/            # 60 registered command handlers
 │       ├── dashboard.py     # Main dashboard
 │       ├── gateway.py       # Gateway bridge control
 │       ├── propagation.py   # Space weather & HF propagation
@@ -80,7 +80,7 @@ src/
 │       ├── service_menu.py  # Service management
 │       ├── mqtt.py          # MQTT monitoring & bridge
 │       ├── meshcore.py      # MeshCore TUI menu
-│       └── ...              # 57 more handlers (rf_tools, settings, etc.)
+│       └── ...              # 53 more handlers (rf_tools, settings, etc.)
 ├── commands/          # Command modules
 │   ├── propagation.py # Space weather & HF propagation (NOAA primary)
 │   ├── hamclock.py    # HamClock client (optional/legacy)

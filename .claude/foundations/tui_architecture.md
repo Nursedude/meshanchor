@@ -2,7 +2,7 @@
 
 > Code-level documentation for MeshForge's Terminal UI (launcher_tui)
 
-**Date**: 2026-01-30
+**Date**: 2026-03-09
 **Status**: Living Document
 **Audience**: Developers working on the TUI codebase
 
@@ -10,14 +10,16 @@
 
 ## Overview
 
-The TUI is MeshForge's primary interface, using whiptail/dialog for a raspi-config style experience. The architecture uses a **mixin pattern** to keep the codebase modular despite the single-class design required by whiptail integration.
+The TUI is MeshForge's primary interface, using whiptail/dialog for a raspi-config style experience. The architecture uses a **handler registry pattern** where each feature is a self-contained handler class dispatched through a central registry.
 
 ### Key Design Decisions
 
-1. **Mixin Composition**: Features are organized into `*_mixin.py` files that are combined via multiple inheritance
-2. **DialogBackend Abstraction**: Whiptail/dialog commands wrapped in a clean Python API
-3. **Status Bar**: Persistent service status displayed via `--backtitle`
-4. **Startup Checks**: Environment detection and conflict resolution before menu loop
+1. **Handler Registry**: Features are self-contained `BaseHandler` subclasses registered in `handler_registry.py` and dispatched by handler ID
+2. **TUIContext**: Shared state dataclass passed to all handlers — replaces implicit `self.*` access from the old mixin pattern
+3. **CommandHandler Protocol**: Type-safe interface defining `handler_id`, `menu_section`, `menu_items()`, `execute()`
+4. **DialogBackend Abstraction**: Whiptail/dialog commands wrapped in a clean Python API
+5. **Status Bar**: Persistent service status displayed via `--backtitle`
+6. **Startup Checks**: Environment detection and conflict resolution before menu loop
 
 ---
 
@@ -28,90 +30,194 @@ src/launcher_tui/
 ├── Entry Points
 │   ├── __init__.py           # Package exports
 │   ├── __main__.py           # python -m launcher_tui
-│   └── main.py               # MeshForgeLauncher class + orchestration
+│   └── main.py               # MeshForgeLauncher class + orchestration (~1,160 lines)
 │
 ├── Core Infrastructure
-│   ├── backend.py            # DialogBackend - whiptail/dialog wrapper
+│   ├── handler_protocol.py   # CommandHandler Protocol + TUIContext + BaseHandler
+│   ├── handler_registry.py   # HandlerRegistry — register/lookup/dispatch
+│   ├── backend.py            # DialogBackend — whiptail/dialog wrapper
 │   ├── startup_checks.py     # Environment detection, hardware scan
 │   ├── conflict_resolver.py  # Interactive port conflict resolution
 │   └── status_bar.py         # Persistent status line
 │
-└── Feature Mixins (24 files)
-    ├── Network & Mesh
-    │   ├── rns_menu_mixin.py         # Reticulum menu
-    │   ├── radio_menu_mixin.py       # Meshtastic radio
-    │   ├── aredn_mixin.py            # AREDN integration
-    │   ├── rns_interfaces_mixin.py   # RNS interfaces
-    │   └── nomadnet_client_mixin.py  # NomadNet
-    │
-    ├── Configuration
-    │   ├── meshtasticd_config_mixin.py  # meshtasticd config
-    │   ├── channel_config_mixin.py      # Channels
-    │   ├── first_run_mixin.py           # Setup wizard
-    │   ├── settings_menu_mixin.py       # App settings
-    │   └── device_backup_mixin.py       # Backup/restore
-    │
-    ├── Tools & Analysis
-    │   ├── rf_tools_mixin.py        # RF calculators
-    │   ├── rf_awareness_mixin.py    # SDR monitoring
-    │   ├── ai_tools_mixin.py        # Maps, diagnostics
-    │   ├── topology_mixin.py        # Network topology
-    │   ├── metrics_mixin.py         # Historical metrics
-    │   └── link_quality_mixin.py    # Link analysis
-    │
-    └── Operations
-        ├── quick_actions_mixin.py   # Single-key shortcuts
-        ├── emergency_mode_mixin.py  # Field operations
-        ├── system_tools_mixin.py    # Linux shell, reboot
-        ├── logs_menu_mixin.py       # Log viewing
-        ├── service_menu_mixin.py    # Service control
-        └── hardware_menu_mixin.py   # Hardware detection
+├── Handlers (60 registered classes across 12 batches)
+│   ├── __init__.py               # get_all_handlers() — all 60 imports
+│   │
+│   ├── Batch 1 — Pilot handlers
+│   │   ├── latency.py            # Network latency testing
+│   │   ├── classifier.py         # Traffic classifier
+│   │   ├── amateur_radio.py      # Ham radio tools
+│   │   ├── analytics.py          # Network analytics
+│   │   └── rf_tools.py           # RF calculators
+│   │
+│   ├── Batch 2 — Core features
+│   │   ├── node_health.py        # Node health monitoring
+│   │   ├── metrics.py            # Historical metrics
+│   │   ├── propagation.py        # Space weather & HF propagation
+│   │   ├── site_planner.py       # Site planning
+│   │   ├── sdr.py                # SDR monitoring
+│   │   ├── link_quality.py       # Link analysis
+│   │   ├── webhooks.py           # Webhook management
+│   │   └── network_tools.py      # Network utilities
+│   │
+│   ├── Batch 3 — Device & data
+│   │   ├── favorites.py          # Favorite nodes
+│   │   ├── messaging.py          # Messaging
+│   │   ├── aredn.py              # AREDN integration
+│   │   ├── rnode.py              # RNode tools
+│   │   ├── device_backup.py      # Backup/restore
+│   │   ├── logs.py               # Log viewing
+│   │   ├── hardware.py           # Hardware detection
+│   │   └── service_discovery.py  # Service discovery
+│   │
+│   ├── Batch 4 — Config & control
+│   │   ├── channel_config.py     # Channel configuration
+│   │   ├── gateway.py            # Gateway bridge control
+│   │   ├── radio_menu.py         # Meshtastic radio menu
+│   │   ├── settings.py           # App settings
+│   │   ├── meshcore.py           # MeshCore menu
+│   │   └── updates.py            # Update management
+│   │
+│   ├── Batch 5 — Dashboard & ops
+│   │   ├── dashboard.py          # Main dashboard
+│   │   ├── quick_actions.py      # Single-key shortcuts
+│   │   └── emergency_mode.py     # Field operations
+│   │
+│   ├── Batch 6 — Topology & tactical
+│   │   ├── topology.py           # Network topology
+│   │   ├── traffic_inspector.py  # Packet capture
+│   │   └── tactical_ops.py       # XTOC/ATAK/CoT ops
+│   │
+│   ├── Batch 7 — RNS (5 sub-handlers + dispatcher)
+│   │   ├── rns_config.py         # RNS configuration
+│   │   ├── rns_diagnostics.py    # RNS diagnostics
+│   │   ├── rns_interfaces.py     # RNS interface management
+│   │   ├── rns_monitor.py        # RNS monitoring
+│   │   ├── rns_sniffer.py        # RNS packet sniffer
+│   │   └── rns_menu.py           # RNS menu dispatcher
+│   │
+│   ├── Batch 8 — Services & MQTT
+│   │   ├── service_menu.py       # Service management
+│   │   ├── mqtt.py               # MQTT monitoring
+│   │   ├── broker.py             # Broker management
+│   │   └── web_client.py         # Web client
+│   │
+│   ├── Batch 9 — AI & system
+│   │   ├── ai_tools.py           # AI assistant
+│   │   ├── auto_review.py        # Self-audit
+│   │   ├── system_tools.py       # System utilities
+│   │   ├── nomadnet.py           # NomadNet client
+│   │   └── first_run.py          # Setup wizard
+│   │
+│   ├── Batch 10 — Meshtasticd
+│   │   ├── meshtasticd_config.py   # Config management
+│   │   ├── meshtasticd_radio.py    # Radio settings
+│   │   ├── meshtasticd_lora.py     # LoRa parameters
+│   │   ├── meshtasticd_mqtt.py     # Device MQTT
+│   │   └── meshtasticd_nodedb.py   # Node database
+│   │
+│   ├── Batch 11 — QA cleanup
+│   │   ├── about.py              # About screen
+│   │   ├── daemon.py             # Daemon control
+│   │   ├── reboot.py             # Reboot handler
+│   │   ├── diagnostics.py        # Diagnostics
+│   │   └── config_api.py         # Config API
+│   │
+│   ├── Batch 12 — Automation & load balancing
+│   │   ├── automation.py         # Auto-ping, auto-traceroute, auto-welcome
+│   │   └── load_balancer.py      # TX load balancer (dual-radio)
+│   │
+│   └── Utility Modules (not handlers)
+│       ├── _lxmf_utils.py            # LXMF port conflict detection
+│       ├── _nomadnet_rns_checks.py   # NomadNet/RNS pre-flight checks
+│       ├── _rns_diagnostics_engine.py # RNS diagnostic engine
+│       ├── _rns_interface_mgr.py     # RNS interface manager
+│       └── _rns_repair.py           # RNS repair utilities
 ```
 
 ---
 
-## Class Hierarchy
+## Handler Registry Pattern
 
-### MeshForgeLauncher
+### TUIContext (`handler_protocol.py`)
 
-The main class inherits from all mixins:
+Shared state dataclass created once in `MeshForgeLauncher.__init__()`:
 
 ```python
-class MeshForgeLauncher(
-    RFToolsMixin,
-    ChannelConfigMixin,
-    AIToolsMixin,
-    MeshtasticdConfigMixin,
-    SitePlannerMixin,
-    ServiceDiscoveryMixin,
-    FirstRunMixin,
-    SystemToolsMixin,
-    QuickActionsMixin,
-    EmergencyModeMixin,
-    RNSInterfacesMixin,
-    NomadNetClientMixin,
-    TopologyMixin,
-    RFAwarenessMixin,
-    MetricsMixin,
-    LinkQualityMixin,
-    RNSMenuMixin,
-    AREDNMixin,
-    RadioMenuMixin,
-    ServiceMenuMixin,
-    HardwareMenuMixin,
-    SettingsMenuMixin,
-    LogsMenuMixin,
-    DeviceBackupMixin
-):
-    """MeshForge launcher with raspi-config style interface."""
+@dataclass
+class TUIContext:
+    dialog: DialogBackend          # UI abstraction
+    env_state: Optional[EnvironmentState]  # From startup checks
+    startup_checker: Optional[StartupChecker]
+    status_bar: Optional[StatusBar]
+    feature_flags: dict            # Deployment profile flags
+    profile: Optional[Any]         # Active profile
+    src_dir: Path                  # src/ directory
+    env: dict                      # Environment detection
+    registry: Optional[HandlerRegistry]  # Back-reference
+    daemon_active: bool            # meshforged ownership
+
+    # Utility methods
+    def feature_enabled(feature: str) -> bool  # Profile check
+    def wait_for_enter(msg: str) -> None       # Pause + clear
+    def get_meshtastic_cli() -> str            # CLI path (cached)
+    def validate_hostname(host: str) -> bool   # Input validation
+    def validate_port(port_str: str) -> bool   # Port validation
+    def log_error(context, exc) -> None        # Error logging
 ```
 
-### Why Mixins?
+### CommandHandler Protocol
 
-- **No diamond inheritance**: Mixins don't inherit from each other
-- **Modular features**: Each mixin is a cohesive unit
-- **Shared state**: All mixins access `self.dialog` and base methods
-- **File size control**: Keeps individual files under 500 lines
+```python
+@runtime_checkable
+class CommandHandler(Protocol):
+    handler_id: str                                    # Unique identifier
+    menu_section: str                                  # Menu grouping
+    def menu_items(self) -> List[Tuple[str, str]]: ... # (tag, description)
+    def execute(self, action: str) -> None: ...        # Dispatch action
+```
+
+### BaseHandler
+
+Concrete base class implementing the Protocol with TUIContext access:
+
+```python
+class BaseHandler:
+    handler_id: str = ""
+    menu_section: str = ""
+
+    def __init__(self):
+        self.ctx: Optional[TUIContext] = None  # Set by registry
+
+    def bind(self, ctx: TUIContext) -> None:
+        self.ctx = ctx
+
+    def menu_items(self) -> List[Tuple[str, str]]:
+        return []
+
+    def execute(self, action: str) -> None:
+        pass
+```
+
+### HandlerRegistry (`handler_registry.py`)
+
+Central dispatch:
+
+```python
+class HandlerRegistry:
+    def register(self, handler: BaseHandler) -> None
+    def get_handler(self, handler_id: str) -> Optional[BaseHandler]
+    def get_menu_items(self, section: str) -> List[Tuple[str, str]]
+    def dispatch(self, handler_id: str, action: str) -> None
+```
+
+### Why Handler Registry?
+
+- **No MRO complexity**: The old 49-mixin chain caused Python MRO conflicts and made state debugging painful
+- **Self-contained handlers**: Each handler is a complete unit with `handler_id`, `menu_section`, `menu_items()`, `execute()`
+- **Explicit state sharing**: `TUIContext` makes dependencies visible — no hidden `self.*` coupling
+- **Easy to add/remove**: Add a handler class, import in `__init__.py`, done
+- **Testable**: Handlers can be tested in isolation with a mock `TUIContext`
 
 ---
 
@@ -123,23 +229,12 @@ Terminal UI abstraction for whiptail/dialog:
 
 ```python
 class DialogBackend:
-    def menu(self, title: str, text: str, choices: List[Tuple[str, str]]) -> Optional[str]:
-        """Show selection menu. Returns tag or None if cancelled."""
-
-    def msgbox(self, title: str, text: str) -> None:
-        """Show information message with OK button."""
-
-    def yesno(self, title: str, text: str, default_no: bool = False) -> bool:
-        """Show yes/no confirmation. Returns True for Yes."""
-
-    def inputbox(self, title: str, text: str, init: str = "") -> Optional[str]:
-        """Show text input. Returns user input or None if cancelled."""
-
-    def infobox(self, title: str, text: str) -> None:
-        """Show transient message (auto-closes)."""
-
-    def set_status_bar(self, status_bar: StatusBar) -> None:
-        """Attach status bar for --backtitle."""
+    def menu(self, title, text, choices) -> Optional[str]   # Selection menu
+    def msgbox(self, title, text) -> None                   # Info message
+    def yesno(self, title, text, default_no=False) -> bool  # Confirmation
+    def inputbox(self, title, text, init="") -> Optional[str]  # Text input
+    def infobox(self, title, text) -> None                  # Transient message
+    def set_status_bar(self, status_bar) -> None            # Attach status bar
 ```
 
 **Implementation Details**:
@@ -165,28 +260,13 @@ class EnvironmentState:
     config_exists: bool
 ```
 
-**Service Monitoring**:
-- Checks systemctl status + port availability
-- 10-second cache TTL
-- States: RUNNING, STOPPED, FAILED, UNKNOWN
-
-**Hardware Detection**:
-- SPI: `/dev/spidev*`
-- I2C: `/dev/i2c-*`
-- USB Serial: `/dev/ttyUSB*`, `/dev/ttyACM*`
-- GPIO: `/sys/class/gpio`
-
 ### StatusBar (`status_bar.py`)
 
 Persistent status shown at top of every dialog:
 
 ```
-MeshForge v0.4.7 | meshtasticd: ● | rnsd: ○ | mqtt: ○ | Conflicts: 1
+MeshForge v0.5.5 | meshtasticd: ● | rnsd: ○ | mqtt: ○ | Conflicts: 0
 ```
-
-**Caching**:
-- Service status: 10s TTL
-- Space weather: 300s TTL (matches NOAA)
 
 ---
 
@@ -202,111 +282,120 @@ MeshForgeLauncher()
     │   ├── self.dialog = DialogBackend()
     │   ├── self._setup_status_bar()
     │   ├── self._startup_checker = StartupChecker()
-    │   └── self.env = self._detect_environment()
+    │   ├── self.env = self._detect_environment()
+    │   ├── ctx = TUIContext(dialog, env_state, ...)
+    │   └── registry = HandlerRegistry()
+    │       └── for handler in get_all_handlers():
+    │               handler.bind(ctx)
+    │               registry.register(handler)
     │
     └── run()
         ├── Check root privilege (exit if not)
         ├── Check dialog available (fallback if not)
         ├── _run_startup_checks()
-        │   ├── Detect environment
-        │   ├── Check port conflicts
-        │   └── Show conflict resolution (if needed)
         ├── _check_first_run()
-        │   └── _run_first_run_wizard() (if first run)
         ├── _check_service_misconfig()
         ├── _maybe_auto_start_map()
-        └── _run_main_menu()  ← Main loop
+        └── _run_main_menu()  ← Main loop (dispatches to handlers)
 ```
 
 ---
 
-## Mixin Pattern
+## Handler Pattern
 
-### Anatomy of a Mixin
+### Anatomy of a Handler
 
 ```python
-class ExampleMixin:
-    """Mixin providing feature menu functionality."""
+"""My Feature handler for MeshForge TUI."""
 
-    def _feature_menu(self):
-        """Top-level menu handler."""
-        while True:
-            choices = [
-                ("action1", "First action description"),
-                ("action2", "Second action description"),
-                ("back", "Back"),
-            ]
-            choice = self.dialog.menu("Feature Title", "Select an option:", choices)
+from handler_protocol import BaseHandler
 
-            if choice is None or choice == "back":
-                break
-            elif choice == "action1":
-                self._handle_action1()
-            elif choice == "action2":
-                self._handle_action2()
+
+class MyFeatureHandler(BaseHandler):
+    """Provides my feature functionality."""
+
+    handler_id = "my_feature"
+    menu_section = "tools"  # Groups with other tool handlers
+
+    def menu_items(self):
+        return [
+            ("my_action1", "First action description"),
+            ("my_action2", "Second action description"),
+        ]
+
+    def execute(self, action):
+        if action == "my_action1":
+            self._handle_action1()
+        elif action == "my_action2":
+            self._handle_action2()
 
     def _handle_action1(self):
         """Implements specific action."""
-        # Use self.dialog for UI
-        result = self.dialog.inputbox("Input", "Enter value:", "default")
+        result = self.ctx.dialog.inputbox("Input", "Enter value:", "default")
         if result:
-            self.dialog.msgbox("Success", f"You entered: {result}")
+            self.ctx.dialog.msgbox("Success", f"You entered: {result}")
+
+    def _handle_action2(self):
+        """Another action using TUIContext."""
+        self.ctx.dialog.msgbox("Action 2", "You selected action 2")
 ```
 
-### Available Base Methods
+### Available via TUIContext (`self.ctx`)
 
-All mixins have access to these via `self`:
+All handlers access shared state through `self.ctx`:
 
 ```python
 # UI
-self.dialog                    # DialogBackend instance
-self._wait_for_enter(msg)      # Pause for user after terminal output
+self.ctx.dialog                    # DialogBackend instance
+self.ctx.wait_for_enter(msg)       # Pause for user after terminal output
 
 # Validation
-self._validate_hostname(host)  # True if valid hostname
-self._validate_port(port_str)  # True if 1-65535
+self.ctx.validate_hostname(host)   # True if valid hostname
+self.ctx.validate_port(port_str)   # True if 1-65535
 
 # Environment
-self._env_state               # Current EnvironmentState
-self._startup_checker         # StartupChecker instance
-self._detect_environment()    # Refresh environment
+self.ctx.env_state                 # Current EnvironmentState
+self.ctx.startup_checker           # StartupChecker instance
+self.ctx.env                       # Environment dict
+self.ctx.feature_enabled("rns")    # Profile feature check
 
 # Paths
-self.src_dir                  # src/ directory path
+self.ctx.src_dir                   # src/ directory path
 
 # CLI
-self._get_meshtastic_cli()    # Get meshtastic CLI path
-```
+self.ctx.get_meshtastic_cli()      # Get meshtastic CLI path (cached)
 
-### Menu Choices Format
+# Registry
+self.ctx.registry                  # HandlerRegistry (for cross-handler dispatch)
 
-Menu items are tuples: `(tag, description)`
-
-```python
-choices = [
-    ("status", "View service status"),      # tag="status"
-    ("restart", "Restart all services"),    # tag="restart"
-    ("back", "Back to main menu"),          # tag="back"
-]
-choice = self.dialog.menu("Services", "Select action:", choices)
-# choice is "status", "restart", "back", or None (cancelled)
+# Error logging
+self.ctx.log_error(context, exc)   # Write to TUI error log
 ```
 
 ---
 
 ## Common Patterns
 
-### 1. Menu Loop Pattern
+### 1. Submenu Loop Pattern
 
-Every submenu uses this structure:
+Handlers that present their own submenu:
 
 ```python
-def _some_menu(self):
+def execute(self, action):
+    if action == "my_submenu":
+        self._my_submenu()
+
+def _my_submenu(self):
     while True:
-        choice = self.dialog.menu("Title", "Subtitle", choices)
+        choice = self.ctx.dialog.menu("Title", "Subtitle", [
+            ("action1", "Do something"),
+            ("action2", "Do another thing"),
+            ("back", "Back"),
+        ])
         if choice is None or choice == "back":
             break
-        # Handle choice...
+        elif choice == "action1":
+            self._action1()
 ```
 
 ### 2. Terminal Output Pattern
@@ -315,28 +404,21 @@ For commands that produce text output:
 
 ```python
 def _show_logs(self):
-    """Display log output in terminal."""
     subprocess.run(['clear'], check=False, timeout=5)
     print("=== Recent Logs ===\n")
     subprocess.run(['journalctl', '-u', 'meshtasticd', '-n', '50'], timeout=30)
-    self._wait_for_enter("Press Enter to continue...")
+    self.ctx.wait_for_enter("Press Enter to continue...")
 ```
 
-### 3. Dynamic Method Dispatch
+### 3. Cross-Handler Dispatch
 
-Used by QuickActionsMixin and others:
+Handlers can invoke other handlers via the registry:
 
 ```python
-ACTIONS = [
-    ('s', 'Service status', '_qa_service_status'),
-    ('n', 'Node list', '_qa_node_list'),
-]
-
-def _quick_menu(self):
-    for tag, desc, method_name in ACTIONS:
-        if choice == tag:
-            method = getattr(self, method_name)
-            method()
+def _delegate_to_rns(self):
+    handler = self.ctx.registry.get_handler("rns_diagnostics")
+    if handler:
+        handler.execute("run_diagnostics")
 ```
 
 ### 4. Error Handling with Fallback
@@ -347,8 +429,7 @@ def _optional_feature(self):
         from utils.optional_module import feature
         feature()
     except ImportError:
-        self.dialog.msgbox("Unavailable", "Feature requires optional dependency")
-        return
+        self.ctx.dialog.msgbox("Unavailable", "Feature requires optional dependency")
 ```
 
 ### 5. Subprocess with Timeout
@@ -368,78 +449,25 @@ result = subprocess.run(
 
 ## Adding New Features
 
-### Step 1: Create Mixin File
+### Step 1: Create Handler File
 
-Create `src/launcher_tui/my_feature_mixin.py`:
+Create `src/launcher_tui/handlers/my_feature.py` with handler class extending `BaseHandler`.
 
-```python
-"""My Feature mixin for MeshForge TUI."""
+### Step 2: Register in `__init__.py`
 
-
-class MyFeatureMixin:
-    """Provides my feature functionality."""
-
-    def _my_feature_menu(self):
-        """Main entry point for this feature."""
-        while True:
-            choices = [
-                ("action1", "Do something"),
-                ("action2", "Do another thing"),
-                ("back", "Back"),
-            ]
-            choice = self.dialog.menu(
-                "My Feature",
-                "Select an option:",
-                choices
-            )
-
-            if choice is None or choice == "back":
-                break
-            elif choice == "action1":
-                self._my_action1()
-            elif choice == "action2":
-                self._my_action2()
-
-    def _my_action1(self):
-        """Handle first action."""
-        self.dialog.msgbox("Action 1", "You selected action 1")
-
-    def _my_action2(self):
-        """Handle second action."""
-        result = self.dialog.inputbox("Action 2", "Enter value:")
-        if result:
-            self.dialog.msgbox("Result", f"You entered: {result}")
-```
-
-### Step 2: Add to MeshForgeLauncher
-
-In `main.py`, add to the import and class definition:
+Add import to appropriate batch in `handlers/__init__.py`:
 
 ```python
-from .my_feature_mixin import MyFeatureMixin
-
-class MeshForgeLauncher(
-    MyFeatureMixin,  # Add here
-    RFToolsMixin,
-    # ... rest of mixins
-):
+# In the appropriate batch section:
+from handlers.my_feature import MyFeatureHandler
+handlers.append(MyFeatureHandler)
 ```
+
+The handler auto-registers via `get_all_handlers()` at startup.
 
 ### Step 3: Wire to Menu
 
-Add to appropriate parent menu:
-
-```python
-def _some_parent_menu(self):
-    choices = [
-        # ... existing choices
-        ("myfeature", "My New Feature"),
-        ("back", "Back"),
-    ]
-    # ... in handler:
-    elif choice == "myfeature":
-        self._my_feature_menu()
-```
+Set `menu_section` to match an existing section (e.g., `"tools"`, `"network"`, `"config"`) or create a new one. The main menu in `main.py` queries handlers by section.
 
 ---
 
@@ -448,12 +476,10 @@ def _some_parent_menu(self):
 ### Input Validation
 
 ```python
-def _validate_hostname(self, host: str) -> bool:
-    """Prevent flag injection in ping/DNS commands."""
-    if not host or host.startswith('-'):
-        return False
-    # Additional validation...
-    return True
+# Use TUIContext validation methods
+if not self.ctx.validate_hostname(host):
+    self.ctx.dialog.msgbox("Error", "Invalid hostname")
+    return
 ```
 
 ### Path Security
@@ -462,13 +488,7 @@ Always use `get_real_user_home()` instead of `Path.home()`:
 
 ```python
 from utils.paths import get_real_user_home
-
-# CORRECT - works with sudo
-home = get_real_user_home()
-config = home / ".config" / "meshforge"
-
-# WRONG - returns /root with sudo
-# config = Path.home() / ".config" / "meshforge"
+config = get_real_user_home() / ".config" / "meshforge"
 ```
 
 ### Subprocess Safety
@@ -493,20 +513,22 @@ subprocess.run(f'meshtastic --info {node_id}', shell=True)
 python3 -m pytest tests/ -v
 ```
 
-### Mocking DialogBackend
+### Mocking TUIContext for Handler Tests
 
 ```python
 from unittest.mock import MagicMock
+from handler_protocol import TUIContext, BaseHandler
 
-def test_my_feature():
-    launcher = MeshForgeLauncher.__new__(MeshForgeLauncher)
-    launcher.dialog = MagicMock()
-    launcher.dialog.menu.return_value = "action1"
-    launcher.dialog.msgbox = MagicMock()
+def test_my_handler():
+    ctx = MagicMock(spec=TUIContext)
+    ctx.dialog = MagicMock()
+    ctx.dialog.menu.return_value = "action1"
 
-    launcher._my_feature_menu()
+    handler = MyFeatureHandler()
+    handler.bind(ctx)
+    handler.execute("action1")
 
-    launcher.dialog.msgbox.assert_called_once()
+    ctx.dialog.msgbox.assert_called_once()
 ```
 
 ---
@@ -517,14 +539,15 @@ Per `.claude/foundations/persistent_issues.md`, files should stay under 1,500 li
 
 | File | Target | Purpose |
 |------|--------|---------|
-| main.py | <1,500 | Menu orchestration + base methods |
-| *_mixin.py | <500 | Single feature implementation |
+| main.py | <1,500 | Menu orchestration + startup |
+| handlers/*.py | <500 | Single handler implementation |
 | backend.py | <300 | Dialog abstraction |
-| startup_checks.py | <500 | Environment detection |
+| handler_protocol.py | <200 | Protocol + TUIContext |
+| handler_registry.py | <150 | Registry dispatch |
 
-When a mixin exceeds 500 lines, consider splitting into:
-- Core mixin (menu + dispatch)
-- Helper module (utility functions)
+When a handler exceeds 500 lines, split into:
+- Handler file (menu + dispatch)
+- Underscore-prefixed utility module (e.g., `_rns_diagnostics_engine.py`)
 
 ---
 
