@@ -118,14 +118,13 @@ src/
 
 ## Deployment Profiles
 
-MeshForge supports 6 deployment profiles. Dependencies don't block your choice.
+MeshForge supports 5 deployment profiles. Dependencies don't block your choice.
 
 | Profile | Services Needed | Install | Use Case |
 |---------|----------------|---------|----------|
 | `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
 | `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
 | `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
-| `meshchat` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt` + MeshChat | LXMF messaging with web UI |
 | `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
 | `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
 

@@ -21,6 +21,21 @@ ALPHA_VERSION = "0.6.0-alpha"
 # Version history
 VERSION_HISTORY = [
     {
+        "version": "0.5.5-beta",
+        "date": "2026-03-09",
+        "status": "beta",
+        "changes": [
+            "REMOVED: MeshChat handler (2,683 lines) — upstream unmaintained, 11+ bugs",
+            "REMOVED: MeshChat plugin (client.py, service.py, manifest.json)",
+            "REMOVED: MeshChat deployment profile (6 → 5 profiles)",
+            "REMOVED: MeshChat tests (114 tests)",
+            "SIMPLIFIED: _lxmf_utils.py — NomadNet-only LXMF exclusivity check",
+            "SIMPLIFIED: RNS diagnostics, gateway diagnostics — no MeshChat references",
+            "FOCUS: NomadNet is MeshForge's supported LXMF messaging client",
+            "FOCUS: MeshForge core mission — gateway/bridge, maps, monitoring, RF tools",
+        ]
+    },
+    {
         "version": "0.6.0-alpha",
         "date": "2026-02-17",
         "status": "alpha",
