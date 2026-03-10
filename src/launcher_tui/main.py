@@ -192,46 +192,13 @@ class MeshForgeLauncher:
 
     def _get_error_log_path(self) -> Path:
         """Get the path to the TUI error log file."""
-        try:
-            log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            return log_dir / "tui_errors.log"
-        except Exception as e:
-            logger.debug(f"Cannot create log directory, using /tmp fallback: {e}")
-            return Path("/tmp/meshforge_tui_errors.log")
+        from utils.tui_logging import get_error_log_path
+        return get_error_log_path()
 
     def _log_error(self, context: str, exc: Exception) -> None:
-        """Write error details to the TUI error log file.
-
-        This preserves full tracebacks for debugging while keeping
-        the TUI display clean for the user.
-
-        Rotates the log when it exceeds 1 MB to prevent unbounded
-        disk growth on resource-constrained systems (e.g. Pi).
-        """
-        try:
-            import datetime
-            log_path = self._get_error_log_path()
-
-            # Rotate if log exceeds 1 MB
-            _MAX_LOG_BYTES = 1_048_576
-            try:
-                if log_path.exists() and log_path.stat().st_size > _MAX_LOG_BYTES:
-                    rotated = log_path.with_suffix('.log.1')
-                    if rotated.exists():
-                        rotated.unlink()
-                    log_path.rename(rotated)
-            except OSError:
-                pass  # Rotation failure is non-critical
-
-            with open(log_path, 'a') as f:
-                f.write(f"\n{'='*60}\n")
-                f.write(f"[{datetime.datetime.now().isoformat()}] {context}\n")
-                f.write(f"Exception: {type(exc).__name__}: {exc}\n")
-                f.write(traceback.format_exc())
-                f.write(f"{'='*60}\n")
-        except Exception:
-            pass  # Logging failure must never compound the original error
+        """Write error details to the TUI error log file."""
+        from utils.tui_logging import log_error
+        log_error(context, exc)
 
     def _safe_call(self, method_name: str, method, *args, **kwargs):
         """Safely call a mixin method with exception handling.
