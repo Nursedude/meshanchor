@@ -295,6 +295,31 @@ class MeshtasticdRadioHandler(BaseHandler):
             pass
         return "spi"
 
+    def _get_template_description(self, config_path: Path) -> str:
+        """Get human-readable description for a hardware template.
+
+        Resolution order:
+        1. RADIO_TEMPLATES dict (covers MeshForge-bundled templates)
+        2. First comment line from the YAML file (covers upstream templates)
+        3. Filename stem as fallback
+        """
+        try:
+            from core.meshtasticd_config import RADIO_TEMPLATES
+            template = RADIO_TEMPLATES.get(config_path.stem, {})
+            if template and template.get("description"):
+                return template["description"]
+        except ImportError:
+            pass
+        # Fallback: read first comment line from YAML
+        try:
+            with open(config_path, 'r') as f:
+                first_line = f.readline().strip()
+                if first_line.startswith("#"):
+                    return first_line[1:].strip()[:60]
+        except (OSError, UnicodeDecodeError):
+            pass
+        return config_path.stem
+
     def _hardware_config_menu(self):
         """Hardware configuration selection with USB/SPI categorization."""
         try:
@@ -338,20 +363,29 @@ class MeshtasticdRadioHandler(BaseHandler):
                 else:
                     spi_configs.append(cfg)
 
+            # Map stem tags back to full filenames for activation
+            stem_to_name = {}
+
             choices = []
             choices.append(("_usb_", f"--- USB Radios ({len(usb_configs)}) ---"))
             for cfg in usb_configs:
                 status = " [ACTIVE]" if cfg.name in active else ""
-                # Sanitize tag: prefix with 'f:' if name starts with '-'
+                stem = cfg.stem
+                # Sanitize tag: prefix with 'f:' if stem starts with '-'
                 # to prevent whiptail interpreting it as a flag
-                tag = f"f:{cfg.name}" if cfg.name.startswith("-") else cfg.name
-                choices.append((tag, f"  {cfg.stem}{status}"))
+                tag = f"f:{stem}" if stem.startswith("-") else stem
+                stem_to_name[tag] = cfg.name
+                desc = self._get_template_description(cfg)
+                choices.append((tag, f"{desc}{status}"))
 
             choices.append(("_spi_", f"--- SPI HATs ({len(spi_configs)}) ---"))
             for cfg in spi_configs:
                 status = " [ACTIVE]" if cfg.name in active else ""
-                tag = f"f:{cfg.name}" if cfg.name.startswith("-") else cfg.name
-                choices.append((tag, f"  {cfg.stem}{status}"))
+                stem = cfg.stem
+                tag = f"f:{stem}" if stem.startswith("-") else stem
+                stem_to_name[tag] = cfg.name
+                desc = self._get_template_description(cfg)
+                choices.append((tag, f"{desc}{status}"))
 
             choices.append(("view", "View Config Details"))
             choices.append(("remove", "Remove Active Config(s)"))
@@ -376,8 +410,8 @@ class MeshtasticdRadioHandler(BaseHandler):
             elif choice == "remove":
                 self._remove_active_hardware_config(config_d, active_names_set)
             else:
-                # Restore sanitized tag (remove 'f:' prefix if present)
-                config_name = choice[2:] if choice.startswith("f:") else choice
+                # Resolve stem tag back to full filename
+                config_name = stem_to_name.get(choice, f"{choice}.yaml")
                 self._activate_hardware_config(config_name, available_dir, config_d)
 
     def _activate_hardware_config(self, config_name: str, available_dir: Path, config_d: Path):
@@ -409,7 +443,7 @@ class MeshtasticdRadioHandler(BaseHandler):
             "1. Remove old hardware configs from config.d/\n"
             f"2. Copy {config_name} to {config_d}/\n"
             "3. Restart meshtasticd service",
-            default_no=True
+            default_no=False
         )
 
         if not confirm:
