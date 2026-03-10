@@ -33,6 +33,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 import signal
 from datetime import datetime
@@ -42,6 +43,7 @@ from typing import Optional
 # Module-level imports
 from utils.paths import get_real_user_home
 from monitoring import NodeMonitor
+from __version__ import __version__
 
 # Config file location
 CONFIG_DIR = get_real_user_home() / '.config' / 'meshtastic-monitor'
@@ -67,7 +69,13 @@ def save_config(config: dict):
         print(f"Warning: Could not save config: {e}")
 
 def setup_interactive() -> dict:
-    """Interactive setup for host configuration"""
+    """Interactive setup for host configuration (requires TTY)"""
+    if not sys.stdin.isatty():
+        print("Warning: --setup requires a terminal (TTY). Using saved config.",
+              file=sys.stderr)
+        config = load_config()
+        return config or {'host': 'localhost', 'port': 4403}
+
     print("\n=== Meshtastic Monitor Setup ===\n")
 
     config = load_config()
@@ -101,12 +109,11 @@ def setup_interactive() -> dict:
     return config
 
 # Handle graceful shutdown
-_running = True
+_stop_event = threading.Event()
 
 def signal_handler(sig, frame):
-    global _running
-    _running = False
-    print("\nShutting down...")
+    _stop_event.set()
+    print("\nShutting down...", file=sys.stderr)
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -131,12 +138,22 @@ def format_time_ago(dt: Optional[datetime]) -> str:
 
 
 def print_banner():
-    """Print application banner"""
-    print("""
-╔═══════════════════════════════════════════════════════════╗
-║         Meshtastic Node Monitor (No Sudo Required)        ║
-╚═══════════════════════════════════════════════════════════╝
-""")
+    """Print application banner (skipped when stdout is not a TTY)"""
+    if not sys.stdout.isatty():
+        return
+    inner_w = 59
+    lines = [
+        "MESHFORGE NODE MONITOR",
+        "Standalone Mesh Network Monitor",
+        f"Version {__version__}",
+    ]
+    print()
+    print(f"╔{'═' * inner_w}╗")
+    for line in lines:
+        padded = f"  {line}".ljust(inner_w)
+        print(f"║{padded}║")
+    print(f"╚{'═' * inner_w}╝")
+    print()
 
 
 def print_node_table(nodes: list, my_node_id: Optional[str] = None):
@@ -162,7 +179,6 @@ def print_node_table(nodes: list, my_node_id: Optional[str] = None):
 
 def run_monitor(host: str, port: int, json_output: bool, watch: bool, interval: int):
     """Main monitoring function"""
-    global _running
 
     if not json_output:
         print_banner()
@@ -198,12 +214,12 @@ def run_monitor(host: str, port: int, json_output: bool, watch: bool, interval: 
         if json_output:
             # JSON output mode
             if watch:
-                while _running:
+                while not _stop_event.is_set():
                     data = monitor.to_dict()
                     data['timestamp'] = datetime.now().isoformat()
                     print(json.dumps(data))
                     sys.stdout.flush()
-                    time.sleep(interval)
+                    _stop_event.wait(interval)
             else:
                 print(json.dumps(monitor.to_dict(), indent=2))
         else:
@@ -213,10 +229,10 @@ def run_monitor(host: str, port: int, json_output: bool, watch: bool, interval: 
 
             if watch:
                 print("Watching for updates (Ctrl+C to stop)...\n")
-                while _running:
+                while not _stop_event.is_set():
                     print(f"\n--- {datetime.now().strftime('%H:%M:%S')} ---")
                     print_node_table(monitor.get_nodes(), monitor.my_node_id)
-                    time.sleep(interval)
+                    _stop_event.wait(interval)
             else:
                 print_node_table(monitor.get_nodes(), monitor.my_node_id)
 
@@ -245,6 +261,7 @@ Examples:
   python3 -m src.monitor --watch      # Continuous monitoring
   python3 -m src.monitor --json       # JSON output
   python3 -m src.monitor --host pi4   # Connect to specific host
+  python3 -m src.monitor --daemon     # systemd service mode (watch + JSON)
         """
     )
 
@@ -262,15 +279,23 @@ Examples:
                         help='Interactive setup to configure host')
     parser.add_argument('--show-config', action='store_true',
                         help='Show current configuration')
+    parser.add_argument('--daemon', action='store_true',
+                        help='Daemon mode: implies --watch --json, no banner (for systemd)')
 
     args = parser.parse_args()
+
+    # --daemon implies --watch --json
+    if args.daemon:
+        args.watch = True
+        args.json = True
 
     # Handle --setup
     if args.setup:
         config = setup_interactive()
-        response = input("Connect now? [Y/n]: ").strip().lower()
-        if response == 'n':
-            return
+        if sys.stdin.isatty():
+            response = input("Connect now? [Y/n]: ").strip().lower()
+            if response == 'n':
+                return
         host = config['host']
         port = config['port']
     elif args.show_config:
