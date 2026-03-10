@@ -104,39 +104,13 @@ class TUIContext:
 
     def get_error_log_path(self) -> Path:
         """Get the path to the TUI error log file."""
-        try:
-            from utils.paths import get_real_user_home
-            log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            return log_dir / "tui_errors.log"
-        except Exception as e:
-            logger.debug("Cannot create log directory, using /tmp fallback: %s", e)
-            return Path("/tmp/meshforge_tui_errors.log")
+        from utils.tui_logging import get_error_log_path
+        return get_error_log_path()
 
     def log_error(self, context: str, exc: Exception) -> None:
         """Write error details to the TUI error log file."""
-        try:
-            import datetime
-            log_path = self.get_error_log_path()
-
-            _MAX_LOG_BYTES = 1_048_576
-            try:
-                if log_path.exists() and log_path.stat().st_size > _MAX_LOG_BYTES:
-                    rotated = log_path.with_suffix('.log.1')
-                    if rotated.exists():
-                        rotated.unlink()
-                    log_path.rename(rotated)
-            except OSError:
-                pass
-
-            with open(log_path, 'a') as f:
-                f.write(f"\n{'='*60}\n")
-                f.write(f"[{datetime.datetime.now().isoformat()}] {context}\n")
-                f.write(f"Exception: {type(exc).__name__}: {exc}\n")
-                f.write(traceback.format_exc())
-                f.write(f"{'='*60}\n")
-        except Exception:
-            pass
+        from utils.tui_logging import log_error
+        log_error(context, exc)
 
     def safe_call(self, name: str, method, *args, **kwargs):
         """Safely call a handler method with exception handling.
