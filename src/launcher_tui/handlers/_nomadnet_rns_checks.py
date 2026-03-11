@@ -348,7 +348,7 @@ class NomadNetRNSChecksMixin:
                 mismatch_hint = (
                     f"\n\nNOTE: System rnstatus can connect (RNS {sys_ver}),\n"
                     f"but NomadNet's RNS ({nn_ver}) cannot.\n"
-                    f"Fix: pipx inject nomadnet rns=={sys_ver}"
+                    f"Fix: pipx inject --force nomadnet rns=={sys_ver}"
                 )
 
         # RPC still failing — offer to restart rnsd
@@ -569,7 +569,7 @@ class NomadNetRNSChecksMixin:
                 f"  NomadNet RNS: {nn_ver}\n"
                 f"  System RNS:   {sys_ver}\n\n"
                 "Fix (match NomadNet's RNS to system):\n"
-                f"  pipx inject nomadnet rns=={sys_ver}\n\n"
+                f"  pipx inject --force nomadnet rns=={sys_ver}\n\n"
                 "Or upgrade everything:\n"
                 "  pipx upgrade nomadnet\n\n"
                 "Then retry launching NomadNet.",
