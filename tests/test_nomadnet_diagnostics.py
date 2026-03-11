@@ -585,6 +585,7 @@ class TestRpcAutoRestart(unittest.TestCase):
         handler = self._make_handler()
         handler._wait_for_rns_port = MagicMock(return_value=True)
         handler._check_rnsd_rpc = MagicMock(return_value=True)
+        handler._get_rnsd_user = MagicMock(return_value='testuser')
         mock_stop.return_value = (True, 'ok')
         mock_start.return_value = (True, 'ok')
         mock_home.return_value = Path('/tmp/fakehome')
