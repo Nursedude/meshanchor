@@ -40,13 +40,22 @@ class NomadNetRNSChecksMixin:
         self._get_nomadnet_config_path() -> Optional[Path]
     """
 
-    def _check_rns_for_nomadnet(self) -> bool:
+    def _check_rns_for_nomadnet(
+        self,
+        nn_path: str = None,
+        rns_config_path: str = None,
+    ) -> bool:
         """Check that RNS/rnsd is available and properly configured.
+
+        Args:
+            nn_path: Path to NomadNet binary (for venv-aware RPC check).
+            rns_config_path: RNS config directory NomadNet will use.
 
         Checks:
         1. Is /etc/reticulum blocking user access?
         2. Is rnsd running?
-        3. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
+        3. User mismatch? (rnsd as root vs NomadNet as user)
+        4. RPC connectivity (using NomadNet's own RNS library)
 
         Returns True if OK to proceed, False if user cancelled.
         """
@@ -275,14 +284,26 @@ class NomadNetRNSChecksMixin:
         # NomadNet's TextUI calls get_interface_stats() via RPC on startup.
         # If rnsd's RPC socket isn't ready, NomadNet crashes with
         # ConnectionRefusedError [Errno 111].
-        rpc_ok = self._check_rnsd_rpc(sudo_user)
+        #
+        # IMPORTANT: Use NomadNet's own RNS library for the check, not
+        # system rnstatus. NomadNet installed via pipx has its own venv
+        # with a potentially different RNS version — the system rnstatus
+        # may pass while NomadNet's RNS fails (version/protocol mismatch).
+        rpc_ok = self._check_rnsd_rpc(sudo_user, nn_path, rns_config_path)
         if not rpc_ok:
-            return self._handle_rpc_failure(sudo_user)
+            return self._handle_rpc_failure(
+                sudo_user, nn_path, rns_config_path
+            )
 
         # rnsd running as correct user with working RPC
         return True
 
-    def _handle_rpc_failure(self, sudo_user: str = None) -> bool:
+    def _handle_rpc_failure(
+        self,
+        sudo_user: str = None,
+        nn_path: str = None,
+        rns_config_path: str = None,
+    ) -> bool:
         """Handle RPC check failure with diagnosis and auto-restart.
 
         Called when _check_rnsd_rpc returns False and user mismatch has
@@ -305,13 +326,28 @@ class NomadNetRNSChecksMixin:
             # Wait in 2-second increments, checking RPC each time
             for _ in range(5):
                 time.sleep(2)
-                if self._check_rnsd_rpc(sudo_user):
+                if self._check_rnsd_rpc(sudo_user, nn_path, rns_config_path):
                     self.ctx.dialog.msgbox(
                         "RPC Ready",
                         "rnsd RPC is now accepting connections.\n\n"
                         "NomadNet should start normally.",
                     )
                     return True
+
+        # Check for version mismatch: NomadNet's RNS fails but system
+        # rnstatus works — indicates different RNS installations
+        mismatch_hint = ""
+        nn_python = self._get_nn_python(nn_path)
+        if nn_python:
+            # NomadNet has its own venv — check if system rnstatus works
+            sys_rpc_ok = self._check_rnsd_rpc_via_rnstatus(sudo_user)
+            if sys_rpc_ok:
+                mismatch_hint = (
+                    "\n\nNOTE: System rnstatus can connect to rnsd,\n"
+                    "but NomadNet's own RNS library cannot.\n"
+                    "This suggests an RNS version mismatch.\n"
+                    "Try: pipx upgrade nomadnet"
+                )
 
         # RPC still failing — offer to restart rnsd
         uptime_info = f" (uptime: {uptime}s)" if uptime is not None else ""
@@ -321,7 +357,7 @@ class NomadNetRNSChecksMixin:
             "but its RPC socket is not accepting connections.\n\n"
             "NomadNet needs RPC to query interface stats on startup.\n"
             "Without it, NomadNet will crash with:\n"
-            "  ConnectionRefusedError: [Errno 111]\n\n"
+            f"  ConnectionRefusedError: [Errno 111]{mismatch_hint}\n\n"
             "How do you want to proceed?",
             [
                 ("restart", "Restart rnsd and retry (recommended)"),
@@ -331,13 +367,20 @@ class NomadNetRNSChecksMixin:
         )
 
         if choice == "restart":
-            return self._restart_rnsd_and_verify_rpc(sudo_user)
+            return self._restart_rnsd_and_verify_rpc(
+                sudo_user, nn_path, rns_config_path
+            )
         elif choice == "continue":
             return True
         else:
             return False
 
-    def _restart_rnsd_and_verify_rpc(self, sudo_user: str = None) -> bool:
+    def _restart_rnsd_and_verify_rpc(
+        self,
+        sudo_user: str = None,
+        nn_path: str = None,
+        rns_config_path: str = None,
+    ) -> bool:
         """Restart rnsd and verify RPC becomes available.
 
         Returns:
@@ -389,7 +432,7 @@ class NomadNetRNSChecksMixin:
         time.sleep(2)
 
         # Verify RPC
-        if self._check_rnsd_rpc(sudo_user):
+        if self._check_rnsd_rpc(sudo_user, nn_path, rns_config_path):
             self.ctx.dialog.msgbox(
                 "rnsd RPC Ready",
                 "rnsd has been restarted and RPC is working.\n\n"
@@ -430,7 +473,12 @@ class NomadNetRNSChecksMixin:
             pass
         return None
 
-    def _check_rnsd_rpc(self, sudo_user: str = None) -> bool:
+    def _check_rnsd_rpc(
+        self,
+        sudo_user: str = None,
+        nn_path: str = None,
+        rns_config_path: str = None,
+    ) -> bool:
         """Check if rnsd's RPC socket is accepting connections.
 
         NomadNet's TextUI calls ``get_interface_stats()`` during init,
@@ -438,14 +486,78 @@ class NomadNetRNSChecksMixin:
         If the RPC socket isn't ready, NomadNet crashes with
         ``ConnectionRefusedError: [Errno 111]``.
 
-        We probe the same RPC path by running ``rnstatus`` as the target
-        user.  If it succeeds, RPC is live.
+        IMPORTANT: When nn_path is provided, uses NomadNet's own Python
+        interpreter to test RPC. NomadNet installed via pipx has its own
+        venv with a potentially different RNS version — system ``rnstatus``
+        may succeed while NomadNet's RNS fails (version/protocol mismatch).
+
+        Falls back to system ``rnstatus -p`` if no venv Python is found.
 
         Returns:
             True if RPC is available (or we can't determine), False if
             definitely refusing connections.
         """
-        # Build command: run rnstatus as the target user if we're root
+        # Prefer NomadNet's own Python for the RPC check — this tests
+        # the exact same code path that crashes in NomadNet.
+        nn_python = self._get_nn_python(nn_path)
+        if nn_python:
+            configdir = rns_config_path or '/etc/reticulum'
+            # Minimal script that does exactly what NomadNet does:
+            # RNS.Reticulum() → get_interface_stats() → RPC Client()
+            rpc_test = (
+                "import RNS; import sys; "
+                f"r = RNS.Reticulum(configdir='{configdir}'); "
+                "r.get_interface_stats(); "
+                "print('RPC_OK')"
+            )
+            cmd = [nn_python, '-c', rpc_test]
+            if sudo_user and os.getuid() == 0 and sudo_user != 'root':
+                cmd = ['sudo', '-u', sudo_user, '-H'] + cmd
+
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=15
+                )
+                if result.returncode == 0 and 'RPC_OK' in result.stdout:
+                    return True
+                # Check for connection refused in output
+                combined = (
+                    (result.stderr or '') + (result.stdout or '')
+                ).lower()
+                if 'connection refused' in combined or 'errno 111' in combined:
+                    logger.warning(
+                        "RPC check via NomadNet's RNS failed: "
+                        "ConnectionRefusedError"
+                    )
+                    return False
+                # Other failure (import error, etc.) — fall through to rnstatus
+                logger.debug(
+                    "RPC check via NomadNet Python failed (rc=%d): %s",
+                    result.returncode,
+                    (result.stderr or '').strip()[:200],
+                )
+            except FileNotFoundError:
+                logger.debug("NomadNet Python not found: %s", nn_python)
+            except subprocess.TimeoutExpired:
+                logger.warning("RPC check via NomadNet Python timed out")
+                return False
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.debug("RPC check via NomadNet Python failed: %s", e)
+
+        # Fallback: use system rnstatus
+        return self._check_rnsd_rpc_via_rnstatus(sudo_user)
+
+    def _check_rnsd_rpc_via_rnstatus(self, sudo_user: str = None) -> bool:
+        """Check RPC using system rnstatus (fallback).
+
+        This may use a different RNS version than NomadNet's pipx venv,
+        so it can give false positives. Prefer _check_rnsd_rpc() which
+        uses NomadNet's own Python when available.
+
+        Returns:
+            True if RPC is available (or we can't determine), False if
+            definitely refusing connections.
+        """
         cmd = ['rnstatus', '-p']
         if sudo_user and os.getuid() == 0 and sudo_user != 'root':
             cmd = ['sudo', '-u', sudo_user] + cmd
@@ -456,7 +568,6 @@ class NomadNetRNSChecksMixin:
             )
             if result.returncode == 0:
                 return True
-            # Check stderr for connection refused
             stderr = (result.stderr or '').lower()
             if 'connection refused' in stderr or 'errno 111' in stderr:
                 logger.warning("rnsd RPC connection refused (rnstatus failed)")
@@ -464,14 +575,31 @@ class NomadNetRNSChecksMixin:
             # Other failures (rnstatus not installed, etc.) — don't block
             return True
         except FileNotFoundError:
-            # rnstatus not installed — can't check, allow proceeding
             return True
         except subprocess.TimeoutExpired:
             logger.warning("rnstatus timed out checking RPC")
             return False
         except (subprocess.SubprocessError, OSError) as e:
             logger.debug("RPC check failed: %s", e)
-            return True  # Don't block on unexpected errors
+            return True
+
+    def _get_nn_python(self, nn_path: str = None) -> str | None:
+        """Get the Python interpreter from NomadNet's venv.
+
+        NomadNet installed via pipx lives in a venv. The Python binary
+        is in the same bin/ directory as the nomadnet script.
+
+        Returns:
+            Path to Python interpreter, or None if not a venv install.
+        """
+        if not nn_path:
+            return None
+        nn_bin_dir = Path(nn_path).resolve().parent
+        for candidate in ('python3', 'python'):
+            py = nn_bin_dir / candidate
+            if py.exists():
+                return str(py)
+        return None
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
