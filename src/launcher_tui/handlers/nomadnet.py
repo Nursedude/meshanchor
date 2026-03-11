@@ -705,7 +705,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 import collections
                 with open(logfile, 'r') as f:
                     last_lines = list(
-                        collections.deque(f, maxlen=20)
+                        collections.deque(f, maxlen=50)
                     )
 
                 # Look for known error patterns
@@ -753,10 +753,8 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                         error_hints.append("Missing Python dependencies")
                         error_hints.append("Try: pipx reinstall nomadnet")
                         break
-                    elif 'ConnectionRefusedError' in line or (
-                        'Connection refused' in line
-                        and 'Errno 111' in line
-                    ):
+                    elif ('ConnectionRefusedError' in line
+                          or 'Connection refused' in line):
                         error_hints.append(
                             "RPC connection refused — NomadNet connected to rnsd's "
                             "shared instance but rnsd's RPC socket is not accepting "

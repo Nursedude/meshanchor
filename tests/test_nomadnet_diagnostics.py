@@ -361,6 +361,53 @@ class TestConnectionRefusedDiagnosis(unittest.TestCase):
             self.assertIn('RPC', output)
 
 
+    @patch('launcher_tui.handlers.nomadnet.get_real_user_home')
+    def test_connection_refused_in_long_traceback(self, mock_home):
+        """ConnectionRefusedError detected even with long traceback + teardown."""
+        handler = self._make_handler()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+            nn_dir = Path(tmpdir) / '.nomadnetwork'
+            nn_dir.mkdir()
+            logfile = nn_dir / 'logfile'
+            # Simulate the real log: Error lines, then ~20 traceback frames,
+            # then teardown notices — old maxlen=20 would miss the Error lines
+            lines = [
+                "[2026-03-11 08:43:50] [Info]     Starting user interface...\n",
+                "[2026-03-11 08:43:50] [Error]    An unhandled exception occurred\n",
+                "[2026-03-11 08:43:50] [Error]    Type  : "
+                "<class 'ConnectionRefusedError'>\n",
+                "[2026-03-11 08:43:50] [Error]    Value : "
+                "[Errno 111] Connection refused\n",
+                "[2026-03-11 08:43:50] [Error]    Trace :\n",
+            ]
+            # Add 20 traceback frame lines
+            for i in range(20):
+                lines.append(
+                    f'  File "nomadnet/module{i}.py", line {i}, in func{i}\n'
+                )
+            # Add teardown notices
+            lines.extend([
+                "[2026-03-11 08:43:50] [Notice]   Tearing down...\n",
+                "[2026-03-11 08:43:50] [Notice]   Persisting LXMF state...\n",
+                "[2026-03-11 08:43:50] [Notice]   Saving 0 peers...\n",
+                "[2026-03-11 08:43:50] [Notice]   Saved 0 peers in 400µs\n",
+            ])
+            logfile.write_text(''.join(lines))
+
+            with patch('builtins.print') as mock_print:
+                handler._diagnose_nomadnet_error(1, 'testuser')
+
+            output = ' '.join(
+                str(call.args[0]) for call in mock_print.call_args_list
+                if call.args
+            )
+            self.assertIn('RPC', output)
+            # Should NOT fall through to "No known error pattern"
+            self.assertNotIn('No known error pattern', output)
+
+
 class TestRnsdRpcCheck(unittest.TestCase):
     """Test _check_rnsd_rpc pre-launch check."""
 
