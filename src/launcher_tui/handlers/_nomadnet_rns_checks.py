@@ -337,32 +337,48 @@ class NomadNetRNSChecksMixin:
         # Check for version mismatch: NomadNet's RNS fails but system
         # rnstatus works — indicates different RNS installations
         mismatch_hint = ""
+        mismatch_env = None
+        mismatch_fix_type = None
         nn_python = self._get_nn_python(nn_path)
         if nn_python:
             # NomadNet has its own venv — check if system rnstatus works
             sys_rpc_ok = self._check_rnsd_rpc_via_rnstatus(sudo_user)
             if sys_rpc_ok:
-                env = self._get_rns_env_info(nn_python, sudo_user)
+                mismatch_env = self._get_rns_env_info(nn_python, sudo_user)
                 rns_match = (
-                    env["nn_rns"] != "unknown"
-                    and env["nn_rns"] == env["sys_rns"]
+                    mismatch_env["nn_rns"] != "unknown"
+                    and mismatch_env["nn_rns"] == mismatch_env["sys_rns"]
                 )
                 if rns_match:
+                    mismatch_fix_type = "reinstall_python"
                     mismatch_hint = (
-                        f"\n\nNOTE: System rnstatus connects (Python {env['sys_py']}),\n"
-                        f"but NomadNet's Python {env['nn_py']} cannot.\n"
-                        "RNS versions match — Python version incompatibility.\n"
-                        f"Fix: pipx reinstall nomadnet --python python{env['sys_py']}"
+                        f"\n\nNOTE: System rnstatus connects (Python {mismatch_env['sys_py']}),\n"
+                        f"but NomadNet's Python {mismatch_env['nn_py']} cannot.\n"
+                        "RNS versions match — Python version incompatibility."
                     )
                 else:
+                    mismatch_fix_type = "inject_rns"
                     mismatch_hint = (
-                        f"\n\nNOTE: System rnstatus can connect (RNS {env['sys_rns']}),\n"
-                        f"but NomadNet's RNS ({env['nn_rns']}) cannot.\n"
-                        f"Fix: pipx inject --force nomadnet rns=={env['sys_rns']}"
+                        f"\n\nNOTE: System rnstatus can connect (RNS {mismatch_env['sys_rns']}),\n"
+                        f"but NomadNet's RNS ({mismatch_env['nn_rns']}) cannot."
                     )
 
-        # RPC still failing — offer to restart rnsd
+        # RPC still failing — offer to restart rnsd (and fix if mismatch)
         uptime_info = f" (uptime: {uptime}s)" if uptime is not None else ""
+
+        menu_choices = []
+        if mismatch_env and mismatch_fix_type:
+            if mismatch_fix_type == "reinstall_python":
+                fix_label = f"Reinstall NomadNet with Python {mismatch_env['sys_py']}"
+            else:
+                fix_label = f"Inject RNS {mismatch_env['sys_rns']} into NomadNet"
+            menu_choices.append(("fix", f"{fix_label} (recommended)"))
+            menu_choices.append(("restart", "Restart rnsd and retry"))
+        else:
+            menu_choices.append(("restart", "Restart rnsd and retry (recommended)"))
+        menu_choices.append(("continue", "Continue anyway (may crash)"))
+        menu_choices.append(("cancel", "Cancel"))
+
         choice = self.ctx.dialog.menu(
             "rnsd RPC Not Ready",
             f"rnsd is running{uptime_info} and listening on port 37428,\n"
@@ -371,14 +387,16 @@ class NomadNetRNSChecksMixin:
             "Without it, NomadNet will crash with:\n"
             f"  ConnectionRefusedError: [Errno 111]{mismatch_hint}\n\n"
             "How do you want to proceed?",
-            [
-                ("restart", "Restart rnsd and retry (recommended)"),
-                ("continue", "Continue anyway (may crash)"),
-                ("cancel", "Cancel"),
-            ],
+            menu_choices,
         )
 
-        if choice == "restart":
+        if choice == "fix":
+            if self._fix_nomadnet_python_compat(
+                mismatch_env, mismatch_fix_type, sudo_user
+            ):
+                return True
+            return False
+        elif choice == "restart":
             return self._restart_rnsd_and_verify_rpc(
                 sudo_user, nn_path, rns_config_path
             )
@@ -579,33 +597,42 @@ class NomadNetRNSChecksMixin:
             )
             if rns_match:
                 # Same RNS version — Python version incompatibility
-                self.ctx.dialog.msgbox(
+                choice = self.ctx.dialog.menu(
                     "RPC Incompatibility",
                     "rnsd RPC is reachable by system tools but not\n"
                     "by NomadNet's Python environment.\n\n"
                     f"  NomadNet: RNS {env['nn_rns']} / Python {env['nn_py']}\n"
                     f"  System:   RNS {env['sys_rns']} / Python {env['sys_py']}\n\n"
-                    "RNS versions match — the likely cause is Python\n"
-                    "version incompatibility in multiprocessing.connection\n"
-                    "(RPC transport).\n\n"
-                    "Fix options:\n"
-                    f"  pipx reinstall nomadnet --python python{env['sys_py']}\n"
-                    "  pip install --user nomadnet  (uses system Python)",
+                    "RNS versions match — likely Python version\n"
+                    "incompatibility in multiprocessing.connection.\n\n"
+                    "How do you want to fix this?",
+                    [
+                        ("fix", f"Reinstall NomadNet with Python {env['sys_py']} (recommended)"),
+                        ("cancel", "Cancel"),
+                    ],
                 )
+                if choice == "fix":
+                    return self._fix_nomadnet_python_compat(
+                        env, "reinstall_python", sudo_user
+                    )
             else:
                 # Different RNS versions
-                self.ctx.dialog.msgbox(
+                choice = self.ctx.dialog.menu(
                     "RNS Version Mismatch",
                     "rnsd is running and system tools can connect,\n"
                     "but NomadNet's bundled RNS library cannot.\n\n"
                     f"  NomadNet: RNS {env['nn_rns']} / Python {env['nn_py']}\n"
                     f"  System:   RNS {env['sys_rns']} / Python {env['sys_py']}\n\n"
-                    "Fix (match NomadNet's RNS to system):\n"
-                    f"  pipx inject --force nomadnet rns=={env['sys_rns']}\n\n"
-                    "Or upgrade everything:\n"
-                    "  pipx upgrade nomadnet\n\n"
-                    "Then retry launching NomadNet.",
+                    "How do you want to fix this?",
+                    [
+                        ("fix", f"Inject RNS {env['sys_rns']} into NomadNet (recommended)"),
+                        ("cancel", "Cancel"),
+                    ],
                 )
+                if choice == "fix":
+                    return self._fix_nomadnet_python_compat(
+                        env, "inject_rns", sudo_user
+                    )
             return False
 
         return self.ctx.dialog.yesno(
@@ -818,6 +845,63 @@ class NomadNetRNSChecksMixin:
             pass
 
         return info
+
+    def _fix_nomadnet_python_compat(
+        self, env: dict, fix_type: str, sudo_user: str = None
+    ) -> bool:
+        """Run pipx to fix NomadNet's Python/RNS compatibility.
+
+        Args:
+            env: Dict from _get_rns_env_info().
+            fix_type: "reinstall_python" or "inject_rns".
+            sudo_user: Real user (pipx must not run as root).
+
+        Returns:
+            True if fix succeeded, False otherwise.
+        """
+        if fix_type == "reinstall_python":
+            args = [
+                'pipx', 'reinstall', 'nomadnet',
+                '--python', f"python{env['sys_py']}",
+            ]
+            progress = f"Reinstalling NomadNet with Python {env['sys_py']}..."
+        else:
+            args = [
+                'pipx', 'inject', '--force', 'nomadnet',
+                f"rns=={env['sys_rns']}",
+            ]
+            progress = f"Injecting RNS {env['sys_rns']} into NomadNet..."
+
+        cmd = args
+        if sudo_user and os.getuid() == 0 and sudo_user != 'root':
+            cmd = ['sudo', '-i', '-u', sudo_user] + args
+
+        self.ctx.dialog.infobox("Fixing NomadNet", progress)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300
+            )
+            if result.returncode == 0:
+                self.ctx.dialog.msgbox(
+                    "Fix Applied",
+                    "NomadNet has been updated successfully.\n"
+                    "Retry launching NomadNet.",
+                )
+                return True
+            error = (result.stderr or result.stdout or '').strip()[:400]
+            self.ctx.dialog.msgbox(
+                "Fix Failed",
+                f"Command failed (rc={result.returncode}):\n{error}",
+            )
+            return False
+        except subprocess.TimeoutExpired:
+            self.ctx.dialog.msgbox(
+                "Fix Failed", "Command timed out after 5 minutes."
+            )
+            return False
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox("Fix Failed", f"Could not run fix: {e}")
+            return False
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
