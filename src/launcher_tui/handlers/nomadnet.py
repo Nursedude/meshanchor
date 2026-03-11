@@ -668,7 +668,24 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                self._diagnose_nomadnet_error(result.returncode, sudo_user)
+                conn_refused = self._diagnose_nomadnet_error(
+                    result.returncode, sudo_user
+                )
+                if conn_refused:
+                    # Offer active recovery instead of just hints
+                    try:
+                        answer = input(
+                            "\nRestart rnsd and retry NomadNet? [Y/n] "
+                        )
+                    except (EOFError, KeyboardInterrupt):
+                        answer = 'n'
+                    if answer.strip().lower() in ('', 'y', 'yes'):
+                        if self._restart_rnsd_and_verify_rpc(
+                            sudo_user, nn_path, rns_config_path
+                        ):
+                            # Re-launch with full pre-flight checks
+                            self._launch_nomadnet_textui()
+                            return
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -693,9 +710,17 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             except (EOFError, KeyboardInterrupt):
                 pass
 
-    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None):
-        """Analyze NomadNet failure and provide helpful diagnostics."""
+    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None) -> bool:
+        """Analyze NomadNet failure and provide helpful diagnostics.
+
+        Returns:
+            True if the failure was a ConnectionRefusedError (RPC not
+            available), False for all other failures. The caller can
+            use this to offer active recovery (restart rnsd + retry).
+        """
         print(f"NomadNet exited with error code {returncode}")
+
+        connection_refused = False
 
         # Try to read the log file for clues
         user_home = get_real_user_home()
@@ -757,6 +782,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                         break
                     elif ('ConnectionRefusedError' in line
                           or 'Connection refused' in line):
+                        connection_refused = True
                         error_hints.append(
                             "RPC connection refused — NomadNet connected to rnsd's "
                             "shared instance but rnsd's RPC socket is not accepting "
@@ -889,6 +915,8 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             print(f"\nFull logs:")
             print(f"  cat {logfile}")
             print("  journalctl --user -u nomadnet -n 50")
+
+        return connection_refused
 
     # ------------------------------------------------------------------
     # Log viewer
