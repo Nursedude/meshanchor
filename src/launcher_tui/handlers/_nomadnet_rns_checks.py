@@ -526,7 +526,23 @@ class NomadNetRNSChecksMixin:
             )
             return True
 
-        # RPC still not working after restart — check journal for clues
+        # RPC still not working after restart — diagnose WHY instead of
+        # showing a generic message. The most common persistent cause is
+        # an RNS version mismatch between NomadNet's pipx venv and rnsd.
+        # Same check as _handle_rpc_failure() lines 337-350.
+        mismatch_hint = ""
+        nn_python = self._get_nn_python(nn_path)
+        if nn_python:
+            sys_rpc_ok = self._check_rnsd_rpc_via_rnstatus(sudo_user)
+            if sys_rpc_ok:
+                mismatch_hint = (
+                    "\n\nDiagnosis: System rnstatus CAN connect to rnsd,\n"
+                    "but NomadNet's RNS library CANNOT.\n"
+                    "This is an RNS version mismatch.\n\n"
+                    "Fix: pipx upgrade nomadnet\n"
+                    "Then retry launching NomadNet."
+                )
+
         journal_hint = ""
         try:
             jr = subprocess.run(
@@ -540,6 +556,20 @@ class NomadNetRNSChecksMixin:
                 )
         except (subprocess.SubprocessError, OSError):
             pass
+
+        if mismatch_hint:
+            # Version mismatch — show specific diagnosis, not generic
+            self.ctx.dialog.msgbox(
+                "RNS Version Mismatch",
+                "rnsd is running and system tools can connect,\n"
+                "but NomadNet's bundled RNS library cannot.\n\n"
+                "NomadNet (installed via pipx) has its own RNS version\n"
+                "that is incompatible with the running rnsd.\n\n"
+                "Fix: pipx upgrade nomadnet\n"
+                "     (this upgrades NomadNet's bundled RNS)\n\n"
+                "Then retry launching NomadNet.",
+            )
+            return False
 
         return self.ctx.dialog.yesno(
             "RPC Still Not Ready",
