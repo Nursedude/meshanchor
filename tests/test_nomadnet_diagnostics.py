@@ -4,6 +4,7 @@ share_instance pre-flight check, and rnsd crash-loop detection.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -288,11 +289,143 @@ class TestRnsdCrashLoopDetection(unittest.TestCase):
         handler = self._make_handler()
         handler._get_rnsd_user = MagicMock(return_value='testuser')
         handler._wait_for_rns_port = MagicMock(return_value=True)
+        handler._check_rnsd_rpc = MagicMock(return_value=True)
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._check_rns_for_nomadnet()
 
         self.assertTrue(result)
+
+
+class TestConnectionRefusedDiagnosis(unittest.TestCase):
+    """Test ConnectionRefusedError pattern in _diagnose_nomadnet_error."""
+
+    def _make_handler(self):
+        from launcher_tui.handlers.nomadnet import NomadNetHandler
+
+        ctx = MagicMock()
+        ctx.dialog = MagicMock()
+        handler = NomadNetHandler.__new__(NomadNetHandler)
+        handler.ctx = ctx
+        return handler
+
+    @patch('launcher_tui.handlers.nomadnet.get_real_user_home')
+    def test_connection_refused_detected(self, mock_home):
+        """ConnectionRefusedError pattern produces RPC hint."""
+        handler = self._make_handler()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+            nn_dir = Path(tmpdir) / '.nomadnetwork'
+            nn_dir.mkdir()
+            logfile = nn_dir / 'logfile'
+            logfile.write_text(
+                "[2026-03-11 08:43:50] [Error] Type  : "
+                "<class 'ConnectionRefusedError'>\n"
+                "[2026-03-11 08:43:50] [Error] Value : "
+                "[Errno 111] Connection refused\n"
+            )
+
+            with patch('builtins.print') as mock_print:
+                handler._diagnose_nomadnet_error(1, 'testuser')
+
+            output = ' '.join(
+                str(call.args[0]) for call in mock_print.call_args_list
+                if call.args
+            )
+            self.assertIn('RPC', output)
+            self.assertIn('rnstatus', output)
+
+    @patch('launcher_tui.handlers.nomadnet.get_real_user_home')
+    def test_errno_111_detected(self, mock_home):
+        """Errno 111 + Connection refused pattern detected."""
+        handler = self._make_handler()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_home.return_value = Path(tmpdir)
+            nn_dir = Path(tmpdir) / '.nomadnetwork'
+            nn_dir.mkdir()
+            logfile = nn_dir / 'logfile'
+            logfile.write_text(
+                "[2026-03-11 08:43:50] s.connect(address)\n"
+                "[2026-03-11 08:43:50] [Errno 111] Connection refused\n"
+            )
+
+            with patch('builtins.print') as mock_print:
+                handler._diagnose_nomadnet_error(1, 'testuser')
+
+            output = ' '.join(
+                str(call.args[0]) for call in mock_print.call_args_list
+                if call.args
+            )
+            self.assertIn('RPC', output)
+
+
+class TestRnsdRpcCheck(unittest.TestCase):
+    """Test _check_rnsd_rpc pre-launch check."""
+
+    def _make_handler(self):
+        from launcher_tui.handlers._nomadnet_rns_checks import NomadNetRNSChecksMixin
+
+        class MockHandler(NomadNetRNSChecksMixin):
+            pass
+
+        handler = MockHandler()
+        handler.ctx = MagicMock()
+        handler.ctx.dialog = MagicMock()
+        return handler
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_ok(self, mock_run):
+        """rnstatus success means RPC is available."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(returncode=0, stderr='')
+        self.assertTrue(handler._check_rnsd_rpc('testuser'))
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_connection_refused(self, mock_run):
+        """rnstatus failing with connection refused returns False."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr='Connection refused'
+        )
+        self.assertFalse(handler._check_rnsd_rpc('testuser'))
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rnstatus_not_installed(self, mock_run):
+        """Missing rnstatus doesn't block launch."""
+        handler = self._make_handler()
+        mock_run.side_effect = FileNotFoundError("rnstatus")
+        self.assertTrue(handler._check_rnsd_rpc('testuser'))
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_timeout(self, mock_run):
+        """Timeout returns False (RPC is stuck)."""
+        handler = self._make_handler()
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd='rnstatus', timeout=10)
+        self.assertFalse(handler._check_rnsd_rpc('testuser'))
+
+    @patch.dict(os.environ, {'SUDO_USER': 'testuser'}, clear=False)
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_failure_blocks_nomadnet_launch(self, mock_run):
+        """RPC failure in _check_rns_for_nomadnet shows warning dialog."""
+        handler = self._make_handler()
+        handler._get_rnsd_user = MagicMock(return_value='testuser')
+        handler._wait_for_rns_port = MagicMock(return_value=True)
+        # rnstatus returns connection refused
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr='[Errno 111] Connection refused'
+        )
+        handler.ctx.dialog.yesno = MagicMock(return_value=False)
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._check_rns_for_nomadnet()
+
+        self.assertFalse(result)
+        # Verify yesno was called with RPC warning
+        yesno_calls = handler.ctx.dialog.yesno.call_args_list
+        rpc_call = [c for c in yesno_calls if 'RPC' in str(c)]
+        self.assertTrue(len(rpc_call) > 0, "Expected RPC warning dialog")
 
 
 if __name__ == '__main__':

@@ -182,6 +182,23 @@ class NomadNetRNSChecksMixin:
             )
             return False
 
+        # Verify RPC connectivity — NomadNet's TextUI calls
+        # get_interface_stats() via RPC on startup. If rnsd's RPC
+        # socket isn't ready, NomadNet crashes with ConnectionRefusedError.
+        rpc_ok = self._check_rnsd_rpc(sudo_user)
+        if not rpc_ok:
+            return self.ctx.dialog.yesno(
+                "rnsd RPC Not Ready",
+                "rnsd is running and listening on port 37428, but\n"
+                "its RPC socket is not accepting connections yet.\n\n"
+                "NomadNet needs RPC to query interface stats on startup.\n"
+                "Without it, NomadNet will crash with:\n"
+                "  ConnectionRefusedError: [Errno 111]\n\n"
+                "This usually resolves after a few seconds.\n"
+                "Try: rnstatus (if it works, RPC is ready)\n\n"
+                "Continue anyway?",
+            )
+
         # rnsd is running and listening - check for user mismatches
         current_uid = os.getuid()
         we_are_root = current_uid == 0
@@ -268,6 +285,49 @@ class NomadNetRNSChecksMixin:
 
         # rnsd running as correct user (or no sudo context)
         return True
+
+    def _check_rnsd_rpc(self, sudo_user: str = None) -> bool:
+        """Check if rnsd's RPC socket is accepting connections.
+
+        NomadNet's TextUI calls ``get_interface_stats()`` during init,
+        which connects to rnsd via ``multiprocessing.connection.Client``.
+        If the RPC socket isn't ready, NomadNet crashes with
+        ``ConnectionRefusedError: [Errno 111]``.
+
+        We probe the same RPC path by running ``rnstatus`` as the target
+        user.  If it succeeds, RPC is live.
+
+        Returns:
+            True if RPC is available (or we can't determine), False if
+            definitely refusing connections.
+        """
+        # Build command: run rnstatus as the target user if we're root
+        cmd = ['rnstatus', '-p']
+        if sudo_user and os.getuid() == 0 and sudo_user != 'root':
+            cmd = ['sudo', '-u', sudo_user] + cmd
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                return True
+            # Check stderr for connection refused
+            stderr = (result.stderr or '').lower()
+            if 'connection refused' in stderr or 'errno 111' in stderr:
+                logger.warning("rnsd RPC connection refused (rnstatus failed)")
+                return False
+            # Other failures (rnstatus not installed, etc.) — don't block
+            return True
+        except FileNotFoundError:
+            # rnstatus not installed — can't check, allow proceeding
+            return True
+        except subprocess.TimeoutExpired:
+            logger.warning("rnstatus timed out checking RPC")
+            return False
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("RPC check failed: %s", e)
+            return True  # Don't block on unexpected errors
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
