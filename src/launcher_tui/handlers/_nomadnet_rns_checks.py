@@ -425,6 +425,30 @@ class NomadNetRNSChecksMixin:
                     except (OSError, PermissionError):
                         pass
 
+        # Verify port 37428 is free before starting rnsd.
+        # A stale rnsd process (not cleaned by systemctl stop) or another
+        # LXMF client may still hold the port, causing the new rnsd to
+        # either fail to bind or connect as a client instead of master.
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            port_busy = s.connect_ex(('127.0.0.1', 37428)) == 0
+            s.close()
+        except OSError:
+            port_busy = False
+        if port_busy:
+            logger.warning("Port 37428 still occupied after rnsd stop — "
+                           "killing stale rnsd processes")
+            try:
+                subprocess.run(
+                    ['pkill', '-f', 'rnsd'],
+                    capture_output=True, timeout=5
+                )
+            except (subprocess.SubprocessError, OSError):
+                pass
+            time.sleep(2)  # Let socket enter TIME_WAIT and close
+
         # Start rnsd with fresh auth tokens
         self.ctx.dialog.infobox(
             "Starting rnsd",
@@ -452,6 +476,30 @@ class NomadNetRNSChecksMixin:
             )
             return False
 
+        # Verify rnsd process is actually running (not just systemctl OK).
+        # A service can report "started" then crash during initialization.
+        time.sleep(1)
+        if not self._get_rnsd_user():
+            # rnsd started but crashed immediately — get journal
+            crash_info = ""
+            try:
+                jr = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '10',
+                     '--no-pager', '-q', '--no-hostname'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if jr.returncode == 0 and jr.stdout.strip():
+                    crash_info = "\n\n" + jr.stdout.strip()[:600]
+            except (subprocess.SubprocessError, OSError):
+                pass
+            self.ctx.dialog.msgbox(
+                "rnsd Crashed on Start",
+                "rnsd was started but is no longer running.\n"
+                "It likely crashed during initialization.\n\n"
+                f"Check: sudo journalctl -u rnsd -n 30{crash_info}",
+            )
+            return False
+
         # Wait for port to come up
         self.ctx.dialog.infobox(
             "Waiting for rnsd",
@@ -460,7 +508,8 @@ class NomadNetRNSChecksMixin:
         if not self._wait_for_rns_port(max_wait=15):
             self.ctx.dialog.msgbox(
                 "rnsd Not Ready",
-                "rnsd restarted but port 37428 not listening after 15s.\n\n"
+                "rnsd is running but port 37428 not listening after 15s.\n\n"
+                "An interface may be blocking startup.\n"
                 "Check: sudo journalctl -u rnsd -n 30",
             )
             return False
@@ -481,13 +530,13 @@ class NomadNetRNSChecksMixin:
         journal_hint = ""
         try:
             jr = subprocess.run(
-                ['journalctl', '-u', 'rnsd', '-n', '5',
+                ['journalctl', '-u', 'rnsd', '-n', '10',
                  '--no-pager', '-q', '--no-hostname'],
                 capture_output=True, text=True, timeout=5
             )
             if jr.returncode == 0 and jr.stdout.strip():
                 journal_hint = (
-                    "\n\nRecent rnsd log:\n" + jr.stdout.strip()[:300]
+                    "\n\nRecent rnsd log:\n" + jr.stdout.strip()[:600]
                 )
         except (subprocess.SubprocessError, OSError):
             pass
