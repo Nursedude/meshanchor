@@ -342,11 +342,13 @@ class NomadNetRNSChecksMixin:
             # NomadNet has its own venv — check if system rnstatus works
             sys_rpc_ok = self._check_rnsd_rpc_via_rnstatus(sudo_user)
             if sys_rpc_ok:
+                nn_ver, sys_ver = self._get_rns_versions(
+                    nn_python, sudo_user
+                )
                 mismatch_hint = (
-                    "\n\nNOTE: System rnstatus can connect to rnsd,\n"
-                    "but NomadNet's own RNS library cannot.\n"
-                    "This suggests an RNS version mismatch.\n"
-                    "Try: pipx upgrade nomadnet"
+                    f"\n\nNOTE: System rnstatus can connect (RNS {sys_ver}),\n"
+                    f"but NomadNet's RNS ({nn_ver}) cannot.\n"
+                    f"Fix: pipx inject nomadnet rns=={sys_ver}"
                 )
 
         # RPC still failing — offer to restart rnsd
@@ -558,15 +560,18 @@ class NomadNetRNSChecksMixin:
             pass
 
         if mismatch_hint:
-            # Version mismatch — show specific diagnosis, not generic
+            # Version mismatch — show actual versions and targeted fix
+            nn_ver, sys_ver = self._get_rns_versions(nn_python, sudo_user)
             self.ctx.dialog.msgbox(
                 "RNS Version Mismatch",
                 "rnsd is running and system tools can connect,\n"
                 "but NomadNet's bundled RNS library cannot.\n\n"
-                "NomadNet (installed via pipx) has its own RNS version\n"
-                "that is incompatible with the running rnsd.\n\n"
-                "Fix: pipx upgrade nomadnet\n"
-                "     (this upgrades NomadNet's bundled RNS)\n\n"
+                f"  NomadNet RNS: {nn_ver}\n"
+                f"  System RNS:   {sys_ver}\n\n"
+                "Fix (match NomadNet's RNS to system):\n"
+                f"  pipx inject nomadnet rns=={sys_ver}\n\n"
+                "Or upgrade everything:\n"
+                "  pipx upgrade nomadnet\n\n"
                 "Then retry launching NomadNet.",
             )
             return False
@@ -730,6 +735,44 @@ class NomadNetRNSChecksMixin:
             if py.exists():
                 return str(py)
         return None
+
+    def _get_rns_versions(
+        self, nn_python: str, sudo_user: str = None
+    ) -> tuple[str, str]:
+        """Get RNS versions from NomadNet's venv and system.
+
+        Returns:
+            (nn_rns_version, sys_rns_version) — either may be "unknown".
+        """
+        nn_ver = "unknown"
+        sys_ver = "unknown"
+        ver_cmd = "import RNS; print(RNS.__version__)"
+
+        # NomadNet's venv RNS version
+        cmd = [nn_python, '-c', ver_cmd]
+        if sudo_user and os.getuid() == 0 and sudo_user != 'root':
+            cmd = ['sudo', '-u', sudo_user, '-H'] + cmd
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                nn_ver = r.stdout.strip().split('\n')[0]
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # System RNS version
+        try:
+            r = subprocess.run(
+                ['python3', '-c', ver_cmd],
+                capture_output=True, text=True, timeout=5
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                sys_ver = r.stdout.strip().split('\n')[0]
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        return nn_ver, sys_ver
 
     def _validate_nomadnet_config(self) -> bool:
         """Validate and repair NomadNet config if needed.
