@@ -454,25 +454,155 @@ class TestRnsdRpcCheck(unittest.TestCase):
 
     @patch.dict(os.environ, {'SUDO_USER': 'testuser'}, clear=False)
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
-    def test_rpc_failure_blocks_nomadnet_launch(self, mock_run):
-        """RPC failure in _check_rns_for_nomadnet shows warning dialog."""
+    def test_rpc_failure_shows_menu(self, mock_run):
+        """RPC failure in _check_rns_for_nomadnet shows restart menu."""
         handler = self._make_handler()
         handler._get_rnsd_user = MagicMock(return_value='testuser')
         handler._wait_for_rns_port = MagicMock(return_value=True)
+        handler._get_rnsd_uptime = MagicMock(return_value=60)
         # rnstatus returns connection refused
         mock_run.return_value = MagicMock(
             returncode=1, stderr='[Errno 111] Connection refused'
         )
-        handler.ctx.dialog.yesno = MagicMock(return_value=False)
+        # User cancels from the menu
+        handler.ctx.dialog.menu = MagicMock(return_value='cancel')
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._check_rns_for_nomadnet()
 
         self.assertFalse(result)
-        # Verify yesno was called with RPC warning
-        yesno_calls = handler.ctx.dialog.yesno.call_args_list
-        rpc_call = [c for c in yesno_calls if 'RPC' in str(c)]
-        self.assertTrue(len(rpc_call) > 0, "Expected RPC warning dialog")
+        # Verify menu was called with RPC options
+        menu_calls = handler.ctx.dialog.menu.call_args_list
+        rpc_call = [c for c in menu_calls if 'RPC' in str(c)]
+        self.assertTrue(len(rpc_call) > 0, "Expected RPC menu dialog")
+
+
+class TestRpcAutoRestart(unittest.TestCase):
+    """Test RPC failure auto-restart flow."""
+
+    def _make_handler(self):
+        from launcher_tui.handlers._nomadnet_rns_checks import NomadNetRNSChecksMixin
+
+        class MockHandler(NomadNetRNSChecksMixin):
+            pass
+
+        handler = MockHandler()
+        handler.ctx = MagicMock()
+        handler.ctx.dialog = MagicMock()
+        return handler
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_young_rnsd_waits_and_retries(self, mock_run):
+        """RPC failure with young rnsd triggers wait+retry."""
+        handler = self._make_handler()
+        handler._get_rnsd_uptime = MagicMock(return_value=3)
+        # First check fails, second succeeds (after wait)
+        handler._check_rnsd_rpc = MagicMock(side_effect=[True])
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._handle_rpc_failure('testuser')
+
+        self.assertTrue(result)
+        # Should have shown "Waiting" infobox
+        infobox_calls = handler.ctx.dialog.infobox.call_args_list
+        waiting_call = [c for c in infobox_calls if 'Waiting' in str(c)]
+        self.assertTrue(len(waiting_call) > 0)
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_mature_rnsd_offers_restart(self, mock_run):
+        """RPC failure with mature rnsd shows restart menu."""
+        handler = self._make_handler()
+        handler._get_rnsd_uptime = MagicMock(return_value=120)
+        handler._check_rnsd_rpc = MagicMock(return_value=False)
+        handler.ctx.dialog.menu = MagicMock(return_value='cancel')
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._handle_rpc_failure('testuser')
+
+        self.assertFalse(result)
+        handler.ctx.dialog.menu.assert_called_once()
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.restart_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_restart_resolves_rpc(self, mock_run, mock_restart):
+        """Successful restart makes RPC work."""
+        handler = self._make_handler()
+        handler._wait_for_rns_port = MagicMock(return_value=True)
+        handler._check_rnsd_rpc = MagicMock(return_value=True)
+        mock_restart.return_value = (True, 'ok')
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._restart_rnsd_and_verify_rpc('testuser')
+
+        self.assertTrue(result)
+        handler.ctx.dialog.msgbox.assert_called()
+        # Verify "RPC Ready" shown
+        msg_calls = handler.ctx.dialog.msgbox.call_args_list
+        rpc_ready = [c for c in msg_calls if 'RPC Ready' in str(c)]
+        self.assertTrue(len(rpc_ready) > 0)
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.restart_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_restart_fails(self, mock_run, mock_restart):
+        """Failed restart shows error."""
+        handler = self._make_handler()
+        mock_restart.return_value = (False, 'unit not found')
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._restart_rnsd_and_verify_rpc('testuser')
+
+        self.assertFalse(result)
+        handler.ctx.dialog.msgbox.assert_called()
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_user_mismatch_checked_before_rpc(self, mock_run):
+        """User mismatch is detected before RPC check runs."""
+        handler = self._make_handler()
+        # rnsd as root, user is testuser
+        handler._get_rnsd_user = MagicMock(return_value='root')
+        handler._wait_for_rns_port = MagicMock(return_value=True)
+        # User cancels from mismatch menu
+        handler.ctx.dialog.menu = MagicMock(return_value='cancel')
+
+        with patch.dict(os.environ, {'SUDO_USER': 'testuser'}, clear=False), \
+             patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._check_rns_for_nomadnet()
+
+        self.assertFalse(result)
+        # Menu should show "Running as Root" (user mismatch), not "RPC"
+        menu_call = handler.ctx.dialog.menu.call_args
+        self.assertIn('Root', str(menu_call))
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_get_rnsd_uptime(self, mock_run):
+        """_get_rnsd_uptime parses ps output."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='   42\n'
+        )
+        self.assertEqual(handler._get_rnsd_uptime(), 42)
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_get_rnsd_uptime_not_running(self, mock_run):
+        """_get_rnsd_uptime returns None when rnsd not running."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout=''
+        )
+        self.assertIsNone(handler._get_rnsd_uptime())
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_continue_anyway_from_rpc_menu(self, mock_run):
+        """User can choose 'continue' from RPC failure menu."""
+        handler = self._make_handler()
+        handler._get_rnsd_uptime = MagicMock(return_value=120)
+        handler._check_rnsd_rpc = MagicMock(return_value=False)
+        handler.ctx.dialog.menu = MagicMock(return_value='continue')
+
+        with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+            result = handler._handle_rpc_failure('testuser')
+
+        self.assertTrue(result)
 
 
 if __name__ == '__main__':

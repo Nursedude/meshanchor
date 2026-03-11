@@ -1290,3 +1290,40 @@ browser rendered a full-width native scrollbar inside the panel, consuming conte
 - Applied to `.panel-body`, `.no-gps-list`, and `.sim-links-list`
 
 **Status**: **FIXED**
+
+---
+
+## Issue #30: NomadNet RPC ConnectionRefusedError [Errno 111] (2026-03-11)
+
+**Symptom**: NomadNet crashes immediately on startup with:
+```
+ConnectionRefusedError: [Errno 111] Connection refused
+```
+The crash occurs in NomadNet's `TextUI.__init__` when calling `get_interface_stats()`,
+which connects to rnsd's RPC socket via `multiprocessing.connection.Client`.
+
+**Root causes** (in order of likelihood):
+1. **User mismatch** — rnsd runs as root, NomadNet as user → different RNS identities
+   → different auth keys → RPC connection refused. This is the #1 cause.
+2. **rnsd still initializing** — RPC listener starts after interface init. If NomadNet
+   launches too quickly after rnsd starts, the RPC socket isn't ready yet.
+3. **Stale state** — After rnsd crash/restart, old auth tokens or socket state can
+   cause RPC to refuse connections until a clean restart.
+
+**Pre-launch check flow** (`_nomadnet_rns_checks.py`):
+1. Storage permissions → fix if needed
+2. rnsd running? → port 37428 listening? → crash-loop check
+3. **User mismatch?** → fix rnsd user / stop rnsd (checked BEFORE RPC)
+4. **RPC check** → if fails: wait for young rnsd / offer restart / continue anyway
+
+**Post-failure diagnosis** (`nomadnet.py:_diagnose_nomadnet_error`):
+- Detects `ConnectionRefusedError` and `Errno 111` patterns in NomadNet logfile
+- Provides specific RPC diagnosis with `rnstatus` verification hint
+
+**Key files**:
+- `src/launcher_tui/handlers/_nomadnet_rns_checks.py` — pre-launch RPC check + auto-restart
+- `src/launcher_tui/handlers/nomadnet.py` — post-failure error pattern detection
+
+**Related**: Issue #12 (EADDRINUSE/share_instance), Issue #24 (Python env mismatch)
+
+**Status**: **FIXED** — Pre-launch detection with auto-restart + post-failure diagnosis

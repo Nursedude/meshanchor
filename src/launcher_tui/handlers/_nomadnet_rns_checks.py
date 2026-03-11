@@ -21,6 +21,9 @@ from utils.safe_import import safe_import
 stop_service, _HAS_SERVICE_CHECK = safe_import(
     'utils.service_check', 'stop_service'
 )
+restart_service, _HAS_RESTART = safe_import(
+    'utils.service_check', 'restart_service'
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,24 +185,9 @@ class NomadNetRNSChecksMixin:
             )
             return False
 
-        # Verify RPC connectivity — NomadNet's TextUI calls
-        # get_interface_stats() via RPC on startup. If rnsd's RPC
-        # socket isn't ready, NomadNet crashes with ConnectionRefusedError.
-        rpc_ok = self._check_rnsd_rpc(sudo_user)
-        if not rpc_ok:
-            return self.ctx.dialog.yesno(
-                "rnsd RPC Not Ready",
-                "rnsd is running and listening on port 37428, but\n"
-                "its RPC socket is not accepting connections yet.\n\n"
-                "NomadNet needs RPC to query interface stats on startup.\n"
-                "Without it, NomadNet will crash with:\n"
-                "  ConnectionRefusedError: [Errno 111]\n\n"
-                "This usually resolves after a few seconds.\n"
-                "Try: rnstatus (if it works, RPC is ready)\n\n"
-                "Continue anyway?",
-            )
-
-        # rnsd is running and listening - check for user mismatches
+        # Check for user mismatches BEFORE RPC — user mismatch is the
+        # #1 cause of RPC failure (different identities = different auth keys).
+        # Fixing the user first avoids a misleading "RPC not ready" warning.
         current_uid = os.getuid()
         we_are_root = current_uid == 0
 
@@ -283,8 +271,164 @@ class NomadNetRNSChecksMixin:
             else:
                 return False  # User cancelled
 
-        # rnsd running as correct user (or no sudo context)
+        # Users match — now verify RPC connectivity.
+        # NomadNet's TextUI calls get_interface_stats() via RPC on startup.
+        # If rnsd's RPC socket isn't ready, NomadNet crashes with
+        # ConnectionRefusedError [Errno 111].
+        rpc_ok = self._check_rnsd_rpc(sudo_user)
+        if not rpc_ok:
+            return self._handle_rpc_failure(sudo_user)
+
+        # rnsd running as correct user with working RPC
         return True
+
+    def _handle_rpc_failure(self, sudo_user: str = None) -> bool:
+        """Handle RPC check failure with diagnosis and auto-restart.
+
+        Called when _check_rnsd_rpc returns False and user mismatch has
+        already been ruled out. Determines WHY RPC is failing and offers
+        to fix it.
+
+        Returns:
+            True to proceed with NomadNet launch, False to abort.
+        """
+        uptime = self._get_rnsd_uptime()
+
+        # If rnsd just started, wait and retry — RPC listener starts
+        # after interfaces are initialized
+        if uptime is not None and uptime < 10:
+            self.ctx.dialog.infobox(
+                "Waiting for rnsd RPC",
+                f"rnsd started {uptime}s ago — RPC may still be initializing.\n"
+                "Waiting up to 10 seconds...",
+            )
+            # Wait in 2-second increments, checking RPC each time
+            for _ in range(5):
+                time.sleep(2)
+                if self._check_rnsd_rpc(sudo_user):
+                    self.ctx.dialog.msgbox(
+                        "RPC Ready",
+                        "rnsd RPC is now accepting connections.\n\n"
+                        "NomadNet should start normally.",
+                    )
+                    return True
+
+        # RPC still failing — offer to restart rnsd
+        uptime_info = f" (uptime: {uptime}s)" if uptime is not None else ""
+        choice = self.ctx.dialog.menu(
+            "rnsd RPC Not Ready",
+            f"rnsd is running{uptime_info} and listening on port 37428,\n"
+            "but its RPC socket is not accepting connections.\n\n"
+            "NomadNet needs RPC to query interface stats on startup.\n"
+            "Without it, NomadNet will crash with:\n"
+            "  ConnectionRefusedError: [Errno 111]\n\n"
+            "How do you want to proceed?",
+            [
+                ("restart", "Restart rnsd and retry (recommended)"),
+                ("continue", "Continue anyway (may crash)"),
+                ("cancel", "Cancel"),
+            ],
+        )
+
+        if choice == "restart":
+            return self._restart_rnsd_and_verify_rpc(sudo_user)
+        elif choice == "continue":
+            return True
+        else:
+            return False
+
+    def _restart_rnsd_and_verify_rpc(self, sudo_user: str = None) -> bool:
+        """Restart rnsd and verify RPC becomes available.
+
+        Returns:
+            True if RPC is working after restart, or user wants to
+            continue anyway. False if restart failed or user cancelled.
+        """
+        self.ctx.dialog.infobox(
+            "Restarting rnsd",
+            "Restarting rnsd service...",
+        )
+
+        try:
+            if restart_service:
+                ok, msg = restart_service('rnsd')
+                if not ok:
+                    self.ctx.dialog.msgbox(
+                        "Restart Failed",
+                        f"Could not restart rnsd:\n  {msg}\n\n"
+                        "Try manually: sudo systemctl restart rnsd",
+                    )
+                    return False
+            else:
+                # Fallback if service_check not available
+                subprocess.run(
+                    ['sudo', 'systemctl', 'restart', 'rnsd'],
+                    capture_output=True, timeout=30
+                )
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox(
+                "Restart Failed",
+                f"Could not restart rnsd:\n  {e}",
+            )
+            return False
+
+        # Wait for port to come up
+        self.ctx.dialog.infobox(
+            "Waiting for rnsd",
+            "Waiting for rnsd to initialize (port 37428)...",
+        )
+        if not self._wait_for_rns_port(max_wait=15):
+            self.ctx.dialog.msgbox(
+                "rnsd Not Ready",
+                "rnsd restarted but port 37428 not listening after 15s.\n\n"
+                "Check: sudo journalctl -u rnsd -n 30",
+            )
+            return False
+
+        # Wait a moment for RPC to come up after port
+        time.sleep(2)
+
+        # Verify RPC
+        if self._check_rnsd_rpc(sudo_user):
+            self.ctx.dialog.msgbox(
+                "rnsd RPC Ready",
+                "rnsd has been restarted and RPC is working.\n\n"
+                "NomadNet should start normally.",
+            )
+            return True
+
+        # RPC still not working after restart
+        return self.ctx.dialog.yesno(
+            "RPC Still Not Ready",
+            "rnsd was restarted but RPC is still not responding.\n\n"
+            "This may indicate a deeper issue.\n"
+            "Check: rnstatus\n"
+            "Check: sudo journalctl -u rnsd -n 30\n\n"
+            "Continue anyway?",
+        )
+
+    def _get_rnsd_uptime(self) -> int | None:
+        """Get rnsd process uptime in seconds.
+
+        Returns:
+            Uptime in seconds, or None if cannot determine.
+        """
+        try:
+            result = subprocess.run(
+                ['ps', '-C', 'rnsd', '-o', 'etimes='],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # May have multiple lines if multiple processes; take minimum
+                uptimes = []
+                for line in result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line.isdigit():
+                        uptimes.append(int(line))
+                return min(uptimes) if uptimes else None
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+        return None
 
     def _check_rnsd_rpc(self, sudo_user: str = None) -> bool:
         """Check if rnsd's RPC socket is accepting connections.
