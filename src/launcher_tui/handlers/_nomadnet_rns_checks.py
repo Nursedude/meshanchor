@@ -14,12 +14,12 @@ import subprocess
 import time
 from pathlib import Path
 
-from utils.paths import ReticulumPaths
+from utils.paths import ReticulumPaths, get_real_user_home
 
 from utils.safe_import import safe_import
 
-stop_service, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'stop_service'
+stop_service, start_service, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'stop_service', 'start_service'
 )
 restart_service, _HAS_RESTART = safe_import(
     'utils.service_check', 'restart_service'
@@ -389,29 +389,66 @@ class NomadNetRNSChecksMixin:
         """
         self.ctx.dialog.infobox(
             "Restarting rnsd",
-            "Restarting rnsd service...",
+            "Stopping rnsd and clearing stale auth tokens...",
         )
 
+        # Stop → clear stale auth tokens → start (not just restart).
+        # Stale shared_instance_* files from the previous rnsd session
+        # cause RPC auth failures even after restart. Same pattern used
+        # in _rns_repair.py:238 and rns_diagnostics.py:234.
         try:
-            if restart_service:
-                ok, msg = restart_service('rnsd')
+            if stop_service:
+                stop_service('rnsd')
+            else:
+                subprocess.run(
+                    ['sudo', 'systemctl', 'stop', 'rnsd'],
+                    capture_output=True, timeout=30
+                )
+            time.sleep(1)
+        except (subprocess.SubprocessError, OSError):
+            pass  # Best-effort stop; start below will handle it
+
+        # Clear stale shared_instance_* auth token files
+        user_home = get_real_user_home()
+        storage_dirs = [
+            Path('/etc/reticulum/storage'),
+            Path('/root/.reticulum/storage'),
+            user_home / '.reticulum' / 'storage',
+            user_home / '.config' / 'reticulum' / 'storage',
+        ]
+        for storage_dir in storage_dirs:
+            if storage_dir.exists():
+                for auth_file in storage_dir.glob('shared_instance_*'):
+                    try:
+                        auth_file.unlink()
+                        logger.debug("Cleared stale auth file: %s", auth_file)
+                    except (OSError, PermissionError):
+                        pass
+
+        # Start rnsd with fresh auth tokens
+        self.ctx.dialog.infobox(
+            "Starting rnsd",
+            "Starting rnsd with fresh auth tokens...",
+        )
+        try:
+            if start_service:
+                ok, msg = start_service('rnsd')
                 if not ok:
                     self.ctx.dialog.msgbox(
-                        "Restart Failed",
-                        f"Could not restart rnsd:\n  {msg}\n\n"
-                        "Try manually: sudo systemctl restart rnsd",
+                        "Start Failed",
+                        f"Could not start rnsd:\n  {msg}\n\n"
+                        "Try manually: sudo systemctl start rnsd",
                     )
                     return False
             else:
-                # Fallback if service_check not available
                 subprocess.run(
-                    ['sudo', 'systemctl', 'restart', 'rnsd'],
+                    ['sudo', 'systemctl', 'start', 'rnsd'],
                     capture_output=True, timeout=30
                 )
         except (subprocess.SubprocessError, OSError) as e:
             self.ctx.dialog.msgbox(
-                "Restart Failed",
-                f"Could not restart rnsd:\n  {e}",
+                "Start Failed",
+                f"Could not start rnsd:\n  {e}",
             )
             return False
 
@@ -440,13 +477,27 @@ class NomadNetRNSChecksMixin:
             )
             return True
 
-        # RPC still not working after restart
+        # RPC still not working after restart — check journal for clues
+        journal_hint = ""
+        try:
+            jr = subprocess.run(
+                ['journalctl', '-u', 'rnsd', '-n', '5',
+                 '--no-pager', '-q', '--no-hostname'],
+                capture_output=True, text=True, timeout=5
+            )
+            if jr.returncode == 0 and jr.stdout.strip():
+                journal_hint = (
+                    "\n\nRecent rnsd log:\n" + jr.stdout.strip()[:300]
+                )
+        except (subprocess.SubprocessError, OSError):
+            pass
+
         return self.ctx.dialog.yesno(
             "RPC Still Not Ready",
-            "rnsd was restarted but RPC is still not responding.\n\n"
-            "This may indicate a deeper issue.\n"
-            "Check: rnstatus\n"
-            "Check: sudo journalctl -u rnsd -n 30\n\n"
+            "rnsd was restarted (with stale auth tokens cleared)\n"
+            "but RPC is still not responding.\n\n"
+            "This may indicate rnsd is misconfigured or crashing.\n"
+            f"Check: sudo journalctl -u rnsd -n 30{journal_hint}\n\n"
             "Continue anyway?",
         )
 

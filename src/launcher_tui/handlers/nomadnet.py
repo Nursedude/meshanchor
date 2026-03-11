@@ -1045,7 +1045,10 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._fix_user_directory_ownership():
             return
 
-        if not self._check_rns_for_nomadnet():
+        # Resolve RNS config path for pre-flight checks (same as TextUI launcher)
+        rns_config_path = self._get_rns_config_for_user()
+
+        if not self._check_rns_for_nomadnet(nn_path, rns_config_path):
             return
 
         if not self.ctx.dialog.yesno(
@@ -1060,9 +1063,6 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             return
 
         self.ctx.dialog.infobox("Starting", "Starting NomadNet daemon...")
-
-        # Check if we need to use a specific RNS config path
-        rns_config_path = self._get_rns_config_for_user()
 
         # Build command - run as real user if we're under sudo
         # This ensures NomadNet uses ~/.nomadnetwork/config, not /root/.nomadnetwork/config

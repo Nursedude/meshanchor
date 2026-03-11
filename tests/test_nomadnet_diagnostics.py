@@ -576,31 +576,41 @@ class TestRpcAutoRestart(unittest.TestCase):
         self.assertFalse(result)
         handler.ctx.dialog.menu.assert_called_once()
 
-    @patch('launcher_tui.handlers._nomadnet_rns_checks.restart_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.get_real_user_home')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.start_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.stop_service')
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
-    def test_restart_resolves_rpc(self, mock_run, mock_restart):
-        """Successful restart makes RPC work."""
+    def test_restart_resolves_rpc(self, mock_run, mock_stop, mock_start, mock_home):
+        """Successful restart (stop + clear tokens + start) makes RPC work."""
         handler = self._make_handler()
         handler._wait_for_rns_port = MagicMock(return_value=True)
         handler._check_rnsd_rpc = MagicMock(return_value=True)
-        mock_restart.return_value = (True, 'ok')
+        mock_stop.return_value = (True, 'ok')
+        mock_start.return_value = (True, 'ok')
+        mock_home.return_value = Path('/tmp/fakehome')
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._restart_rnsd_and_verify_rpc('testuser')
 
         self.assertTrue(result)
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once()
         handler.ctx.dialog.msgbox.assert_called()
         # Verify "RPC Ready" shown
         msg_calls = handler.ctx.dialog.msgbox.call_args_list
         rpc_ready = [c for c in msg_calls if 'RPC Ready' in str(c)]
         self.assertTrue(len(rpc_ready) > 0)
 
-    @patch('launcher_tui.handlers._nomadnet_rns_checks.restart_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.get_real_user_home')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.start_service')
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.stop_service')
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
-    def test_restart_fails(self, mock_run, mock_restart):
-        """Failed restart shows error."""
+    def test_restart_fails(self, mock_run, mock_stop, mock_start, mock_home):
+        """Failed start shows error."""
         handler = self._make_handler()
-        mock_restart.return_value = (False, 'unit not found')
+        mock_stop.return_value = (True, 'ok')
+        mock_start.return_value = (False, 'unit not found')
+        mock_home.return_value = Path('/tmp/fakehome')
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._restart_rnsd_and_verify_rpc('testuser')
