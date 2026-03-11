@@ -165,6 +165,23 @@ class NomadNetRNSChecksMixin:
                     "Continue anyway?",
                 )
 
+        # Brief stability check — catch rnsd crash-looping after restart.
+        # If the user just restarted rnsd with a bad config, it may pass
+        # the initial check but crash moments later.
+        time.sleep(1)
+        rnsd_still_running = self._get_rnsd_user()
+        if not rnsd_still_running:
+            self.ctx.dialog.msgbox(
+                "rnsd Crashed",
+                "rnsd was running but crashed shortly after.\n\n"
+                "This often happens after a config change that has\n"
+                "syntax errors or missing dependencies.\n\n"
+                "Check: sudo journalctl -u rnsd -n 30\n\n"
+                "Fix the config issue and restart rnsd before\n"
+                "launching NomadNet.",
+            )
+            return False
+
         # rnsd is running and listening - check for user mismatches
         current_uid = os.getuid()
         we_are_root = current_uid == 0
