@@ -746,10 +746,10 @@ class TestVersionMismatchDetection(unittest.TestCase):
             with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
                 handler._handle_rpc_failure('testuser', nn_path)
 
-        # Menu should contain version mismatch hint
+        # Menu should contain version mismatch hint with versions
         menu_call_args = str(handler.ctx.dialog.menu.call_args)
-        self.assertIn('version mismatch', menu_call_args.lower())
-        self.assertIn('pipx upgrade', menu_call_args)
+        self.assertIn('rnstatus can connect', menu_call_args.lower())
+        self.assertIn('pipx inject', menu_call_args)
 
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
     def test_no_mismatch_hint_when_both_fail(self, mock_run):
