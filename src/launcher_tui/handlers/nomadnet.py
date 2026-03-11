@@ -619,13 +619,15 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._validate_nomadnet_config():
             return
 
-        # Check if rnsd is running (NomadNet needs RNS)
-        if not self._check_rns_for_nomadnet():
-            return
-
-        # Check if we need to use a specific RNS config path
-        # This handles the case where /etc/reticulum exists but isn't writable
+        # Resolve RNS config path early — needed for both the RPC check
+        # and the share_instance check
         rns_config_path = self._get_rns_config_for_user()
+
+        # Check if rnsd is running (NomadNet needs RNS).
+        # Pass nn_path so the RPC check uses NomadNet's own RNS library
+        # instead of system rnstatus (avoids version mismatch false positives).
+        if not self._check_rns_for_nomadnet(nn_path, rns_config_path):
+            return
 
         # Verify share_instance = Yes when rnsd is running (prevents EADDRINUSE)
         if not self._check_share_instance_for_nomadnet(rns_config_path):

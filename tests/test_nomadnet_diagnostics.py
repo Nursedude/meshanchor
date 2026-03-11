@@ -423,14 +423,15 @@ class TestRnsdRpcCheck(unittest.TestCase):
         return handler
 
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
-    def test_rpc_ok(self, mock_run):
-        """rnstatus success means RPC is available."""
+    def test_rpc_ok_via_rnstatus(self, mock_run):
+        """rnstatus success means RPC is available (no nn_path)."""
         handler = self._make_handler()
         mock_run.return_value = MagicMock(returncode=0, stderr='')
+        # No nn_path — falls back to rnstatus
         self.assertTrue(handler._check_rnsd_rpc('testuser'))
 
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
-    def test_rpc_connection_refused(self, mock_run):
+    def test_rpc_connection_refused_via_rnstatus(self, mock_run):
         """rnstatus failing with connection refused returns False."""
         handler = self._make_handler()
         mock_run.return_value = MagicMock(
@@ -451,6 +452,57 @@ class TestRnsdRpcCheck(unittest.TestCase):
         handler = self._make_handler()
         mock_run.side_effect = subprocess.TimeoutExpired(cmd='rnstatus', timeout=10)
         self.assertFalse(handler._check_rnsd_rpc('testuser'))
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_ok_via_nn_python(self, mock_run):
+        """RPC check using NomadNet's Python succeeds."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout='RPC_OK\n', stderr=''
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a mock venv with python3
+            py_path = Path(tmpdir) / 'python3'
+            py_path.touch()
+            nn_path = str(Path(tmpdir) / 'nomadnet')
+            self.assertTrue(
+                handler._check_rnsd_rpc('testuser', nn_path, '/etc/reticulum')
+            )
+            # Should have called python3 -c, not rnstatus
+            cmd = mock_run.call_args[0][0]
+            self.assertIn(str(py_path), cmd)
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_rpc_refused_via_nn_python(self, mock_run):
+        """RPC check using NomadNet's Python detects ConnectionRefusedError."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout='',
+            stderr='ConnectionRefusedError: [Errno 111] Connection refused',
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py_path = Path(tmpdir) / 'python3'
+            py_path.touch()
+            nn_path = str(Path(tmpdir) / 'nomadnet')
+            self.assertFalse(
+                handler._check_rnsd_rpc('testuser', nn_path, '/etc/reticulum')
+            )
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_nn_python_fallback_to_rnstatus(self, mock_run):
+        """Falls back to rnstatus when nn_path has no venv Python."""
+        handler = self._make_handler()
+        mock_run.return_value = MagicMock(returncode=0, stderr='')
+        # nn_path points to a dir with no python3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nn_path = str(Path(tmpdir) / 'nomadnet')
+            self.assertTrue(
+                handler._check_rnsd_rpc('testuser', nn_path, '/etc/reticulum')
+            )
+            # Should have called rnstatus (possibly via sudo), not python3
+            cmd = mock_run.call_args[0][0]
+            self.assertIn('rnstatus', cmd)
 
     @patch.dict(os.environ, {'SUDO_USER': 'testuser'}, clear=False)
     @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
@@ -496,8 +548,9 @@ class TestRpcAutoRestart(unittest.TestCase):
         """RPC failure with young rnsd triggers wait+retry."""
         handler = self._make_handler()
         handler._get_rnsd_uptime = MagicMock(return_value=3)
-        # First check fails, second succeeds (after wait)
+        # First check succeeds (after wait)
         handler._check_rnsd_rpc = MagicMock(side_effect=[True])
+        handler._get_nn_python = MagicMock(return_value=None)
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._handle_rpc_failure('testuser')
@@ -514,6 +567,7 @@ class TestRpcAutoRestart(unittest.TestCase):
         handler = self._make_handler()
         handler._get_rnsd_uptime = MagicMock(return_value=120)
         handler._check_rnsd_rpc = MagicMock(return_value=False)
+        handler._get_nn_python = MagicMock(return_value=None)
         handler.ctx.dialog.menu = MagicMock(return_value='cancel')
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
@@ -597,12 +651,114 @@ class TestRpcAutoRestart(unittest.TestCase):
         handler = self._make_handler()
         handler._get_rnsd_uptime = MagicMock(return_value=120)
         handler._check_rnsd_rpc = MagicMock(return_value=False)
+        handler._get_nn_python = MagicMock(return_value=None)
         handler.ctx.dialog.menu = MagicMock(return_value='continue')
 
         with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
             result = handler._handle_rpc_failure('testuser')
 
         self.assertTrue(result)
+
+
+class TestGetNnPython(unittest.TestCase):
+    """Test _get_nn_python venv detection."""
+
+    def _make_handler(self):
+        from launcher_tui.handlers._nomadnet_rns_checks import NomadNetRNSChecksMixin
+
+        class MockHandler(NomadNetRNSChecksMixin):
+            pass
+
+        handler = MockHandler()
+        return handler
+
+    def test_finds_python3_in_venv(self):
+        """Finds python3 in same bin dir as nomadnet."""
+        handler = self._make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py = Path(tmpdir) / 'python3'
+            py.touch()
+            nn = str(Path(tmpdir) / 'nomadnet')
+            self.assertEqual(handler._get_nn_python(nn), str(py))
+
+    def test_finds_python_fallback(self):
+        """Falls back to 'python' if python3 not present."""
+        handler = self._make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py = Path(tmpdir) / 'python'
+            py.touch()
+            nn = str(Path(tmpdir) / 'nomadnet')
+            self.assertEqual(handler._get_nn_python(nn), str(py))
+
+    def test_returns_none_no_python(self):
+        """Returns None when no Python in bin dir."""
+        handler = self._make_handler()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nn = str(Path(tmpdir) / 'nomadnet')
+            self.assertIsNone(handler._get_nn_python(nn))
+
+    def test_returns_none_no_path(self):
+        """Returns None when nn_path is None."""
+        handler = self._make_handler()
+        self.assertIsNone(handler._get_nn_python(None))
+
+
+class TestVersionMismatchDetection(unittest.TestCase):
+    """Test RNS version mismatch detection in _handle_rpc_failure."""
+
+    def _make_handler(self):
+        from launcher_tui.handlers._nomadnet_rns_checks import NomadNetRNSChecksMixin
+
+        class MockHandler(NomadNetRNSChecksMixin):
+            pass
+
+        handler = MockHandler()
+        handler.ctx = MagicMock()
+        handler.ctx.dialog = MagicMock()
+        return handler
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_version_mismatch_hint_shown(self, mock_run):
+        """When system rnstatus works but nn_python fails, show mismatch hint."""
+        handler = self._make_handler()
+        handler._get_rnsd_uptime = MagicMock(return_value=120)
+        handler._check_rnsd_rpc = MagicMock(return_value=False)
+        # System rnstatus works
+        handler._check_rnsd_rpc_via_rnstatus = MagicMock(return_value=True)
+        handler.ctx.dialog.menu = MagicMock(return_value='cancel')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py = Path(tmpdir) / 'python3'
+            py.touch()
+            nn_path = str(Path(tmpdir) / 'nomadnet')
+
+            with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+                handler._handle_rpc_failure('testuser', nn_path)
+
+        # Menu should contain version mismatch hint
+        menu_call_args = str(handler.ctx.dialog.menu.call_args)
+        self.assertIn('version mismatch', menu_call_args.lower())
+        self.assertIn('pipx upgrade', menu_call_args)
+
+    @patch('launcher_tui.handlers._nomadnet_rns_checks.subprocess.run')
+    def test_no_mismatch_hint_when_both_fail(self, mock_run):
+        """No mismatch hint when system rnstatus also fails."""
+        handler = self._make_handler()
+        handler._get_rnsd_uptime = MagicMock(return_value=120)
+        handler._check_rnsd_rpc = MagicMock(return_value=False)
+        handler._check_rnsd_rpc_via_rnstatus = MagicMock(return_value=False)
+        handler.ctx.dialog.menu = MagicMock(return_value='cancel')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py = Path(tmpdir) / 'python3'
+            py.touch()
+            nn_path = str(Path(tmpdir) / 'nomadnet')
+
+            with patch('launcher_tui.handlers._nomadnet_rns_checks.time.sleep'):
+                handler._handle_rpc_failure('testuser', nn_path)
+
+        menu_call_args = str(handler.ctx.dialog.menu.call_args)
+        self.assertNotIn('version mismatch', menu_call_args.lower())
 
 
 if __name__ == '__main__':
