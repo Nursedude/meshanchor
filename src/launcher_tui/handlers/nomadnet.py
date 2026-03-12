@@ -611,7 +611,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 import collections
                 with open(logfile, 'r') as f:
                     last_lines = list(
-                        collections.deque(f, maxlen=20)
+                        collections.deque(f, maxlen=50)
                     )
 
                 # Look for known error patterns
@@ -713,9 +713,24 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             for hint in error_hints:
                 print(f"  - {hint}")
         else:
-            print("\nCheck logs for details:")
-            print(f"  cat {logfile}")
-            print("  journalctl --user -u nomadnet -n 50")
+            # No known pattern matched — show the log tail directly
+            # so the user doesn't have to manually cat the file.
+            print(f"\nNo known error pattern detected.")
+            if logfile.exists():
+                try:
+                    import collections
+                    with open(logfile, 'r') as f:
+                        tail = list(collections.deque(f, maxlen=15))
+                    if tail:
+                        print(f"\n--- Last {len(tail)} lines of {logfile} ---")
+                        for line in tail:
+                            print(f"  {line.rstrip()}")
+                        print("---")
+                except OSError:
+                    print(f"\nCheck logs: cat {logfile}")
+            else:
+                print(f"\nNo logfile found at: {logfile}")
+            print(f"  journalctl --user -u nomadnet -n 50")
 
         return connection_refused
 
