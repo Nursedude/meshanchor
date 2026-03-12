@@ -1336,3 +1336,47 @@ the dialog explicitly tells the user about the mismatch and suggests `pipx upgra
 **Related**: Issue #12 (EADDRINUSE/share_instance), Issue #24 (Python env mismatch)
 
 **Status**: **FIXED** — Venv-aware RPC check + version mismatch detection + auto-restart
+
+---
+
+## Issue #31: No Silent Persistent System Changes on Startup (2026-03-12)
+
+**Symptom**: Meshtastic web UI stops sending messages after MeshForge has been launched,
+even after MeshForge is closed. Users report MeshForge is "breaking what used to work."
+
+**Root cause**: MeshForge's `startup_health.auto_lock_port()` silently added an iptables
+REJECT rule blocking external access to port 9443 on every TUI launch. The rule persisted
+after exit and was never cleaned up. The lockdown was meant to force users through
+MeshForge's proxy at port 5000, but that proxy only runs when the map server is explicitly
+started — leaving port 9443 blocked with no alternative.
+
+**Rule**: NEVER make persistent system changes silently on startup. This includes:
+- iptables / firewall rules
+- cron jobs
+- udev rules
+- systemd unit modifications
+- config file overwrites (see also Issue #22)
+
+MeshForge **observes and assists** — it does not take over infrastructure.
+Explicit user actions (e.g., service_menu lock/unlock) are acceptable.
+Silent startup side effects are not.
+
+**Fix**: Removed `auto_lock_port()` from startup sequence. The iptables utility functions
+remain available as explicit user tools in the service menu.
+
+**Prevention**:
+- Startup sequence (`main.py`) must not call functions that modify system state
+- `on_startup()` lifecycle hooks are for read-only initialization only
+- Any system modification requires explicit user confirmation via dialog
+
+**Cleanup for affected users**:
+```bash
+sudo iptables -D INPUT -p tcp --dport 9443 ! -s 127.0.0.1 -j REJECT
+```
+
+**Key files**:
+- `src/launcher_tui/main.py` — startup sequence (auto_lock_port call removed)
+- `src/launcher_tui/handlers/startup_health.py` — auto_lock_port method removed
+- `src/utils/_service_iptables.py` — utility functions retained for explicit use
+
+**Status**: **FIXED** — Silent iptables lockdown removed from startup

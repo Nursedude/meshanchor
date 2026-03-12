@@ -352,8 +352,6 @@ class MeshForgeLauncher:
             # If daemon owns these, starting them here would cause
             # port conflicts (Config API :8081) or singleton clashes.
             self._registry.startup_all()  # AITools, MQTT, ConfigAPI, etc.
-            if startup_health:
-                startup_health.auto_lock_port()
             self._start_health_monitor()
 
         # Non-blocking update check — sets _updates_available for status hint
@@ -513,8 +511,8 @@ class MeshForgeLauncher:
                 # Less alarming message since rnsd isn't running yet
                 # The NomadNet menu will handle specific issues when they arise
 
-    # _check_service_misconfig and _maybe_auto_lock_port moved to
-    # handlers/startup_health.py (StartupHealthHandler)
+    # _check_service_misconfig moved to handlers/startup_health.py (StartupHealthHandler)
+    # auto_lock_port removed (Issue #31 — no silent persistent system changes)
 
     _MAX_DIALOG_RETRIES = 3
 
