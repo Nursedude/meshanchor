@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from utils.paths import ReticulumPaths
+from utils.paths import ReticulumPaths, get_real_user_home
 
 from utils.safe_import import safe_import
 
@@ -37,13 +37,132 @@ class NomadNetRNSChecksMixin:
         self._get_nomadnet_config_path() -> Optional[Path]
     """
 
-    def _check_rns_for_nomadnet(self) -> bool:
+    def _get_nomadnet_venv_python(self, nn_path: str) -> str:
+        """Derive NomadNet's pipx venv Python path from the binary.
+
+        NomadNet installed via pipx lives in a venv like:
+          ~/.local/pipx/venvs/nomadnet/bin/nomadnet
+        The Python interpreter is at:
+          ~/.local/pipx/venvs/nomadnet/bin/python3
+
+        Returns the path string, or None if not found.
+        """
+        try:
+            nn_resolved = Path(nn_path).resolve()
+            venv_bin = nn_resolved.parent
+            candidate = venv_bin / 'python3'
+            if candidate.exists():
+                return str(candidate)
+            # Try python (no version suffix)
+            candidate = venv_bin / 'python'
+            if candidate.exists():
+                return str(candidate)
+        except (OSError, ValueError) as e:
+            logger.debug("Cannot resolve NomadNet venv Python: %s", e)
+        return None
+
+    def _check_rpc_with_nomadnet_venv(self, nn_path: str) -> bool:
+        """Test RNS RPC connectivity using NomadNet's own Python/RNS.
+
+        This catches version mismatches where system rnstatus works
+        (using system RNS) but NomadNet's bundled RNS (in pipx venv)
+        cannot connect due to RPC protocol differences.
+
+        Returns True if RPC check passes or is skipped (no venv found).
+        Returns False if user cancelled after seeing the error dialog.
+        """
+        venv_python = self._get_nomadnet_venv_python(nn_path)
+        if not venv_python:
+            logger.debug("No venv Python found for NomadNet, skipping RPC check")
+            return True
+
+        # Determine config dir — prefer /etc/reticulum if it exists
+        config_dir = '/etc/reticulum'
+        if not Path(config_dir).exists():
+            config_dir = str(get_real_user_home() / '.reticulum')
+
+        # Test RPC using NomadNet's own Python interpreter
+        rpc_snippet = (
+            "import RNS; "
+            f"r = RNS.Reticulum(configdir='{config_dir}'); "
+            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
+        )
+
+        sudo_user = os.environ.get('SUDO_USER')
+        try:
+            if sudo_user and sudo_user != 'root':
+                result = subprocess.run(
+                    ['sudo', '-u', sudo_user, '-H', venv_python, '-c', rpc_snippet],
+                    capture_output=True, text=True, timeout=15,
+                )
+            else:
+                result = subprocess.run(
+                    [venv_python, '-c', rpc_snippet],
+                    capture_output=True, text=True, timeout=15,
+                )
+        except subprocess.TimeoutExpired:
+            logger.warning("NomadNet venv RPC check timed out")
+            return self.ctx.dialog.yesno(
+                "RPC Check Timeout",
+                "The RNS RPC connectivity check timed out.\n\n"
+                "rnsd may be overloaded or initializing slowly.\n\n"
+                "Continue anyway?",
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("NomadNet venv RPC check failed to run: %s", e)
+            return True  # Can't run check, don't block
+
+        if result.returncode == 0 and 'connected' in result.stdout:
+            logger.debug("NomadNet venv RPC check passed")
+            return True
+
+        # RPC failed via NomadNet's Python — check if system rnstatus works
+        logger.warning(
+            "NomadNet venv RPC check failed: rc=%d stderr=%s",
+            result.returncode, result.stderr.strip()[:200],
+        )
+        system_rpc_ok = False
+        try:
+            sys_result = subprocess.run(
+                ['rnstatus'], capture_output=True, text=True, timeout=10,
+            )
+            system_rpc_ok = sys_result.returncode == 0
+        except (subprocess.SubprocessError, OSError, FileNotFoundError):
+            pass
+
+        if system_rpc_ok:
+            # System RNS works but NomadNet's doesn't → version mismatch
+            return self.ctx.dialog.yesno(
+                "RNS Version Mismatch",
+                "System rnstatus connects to rnsd, but NomadNet's\n"
+                "bundled RNS library cannot (version mismatch).\n\n"
+                "NomadNet will likely crash with ConnectionRefusedError.\n\n"
+                "Fix: pipx upgrade nomadnet\n"
+                "     (updates NomadNet's bundled RNS to match system)\n\n"
+                "Continue anyway?",
+            )
+        else:
+            # Both fail — rnsd RPC issue
+            return self.ctx.dialog.yesno(
+                "RNS RPC Unavailable",
+                "Neither NomadNet's RNS nor system rnstatus can\n"
+                "connect to the rnsd shared instance.\n\n"
+                "The rnsd RPC socket may be broken or not ready.\n\n"
+                "Fix: sudo systemctl restart rnsd\n\n"
+                "Continue anyway?",
+            )
+
+    def _check_rns_for_nomadnet(self, nn_path: str = None) -> bool:
         """Check that RNS/rnsd is available and properly configured.
 
         Checks:
         1. Is /etc/reticulum blocking user access?
         2. Is rnsd running?
         3. Is rnsd running as root? (causes RPC auth failures with user NomadNet)
+        4. Can NomadNet's own RNS library connect via RPC? (version mismatch check)
+
+        Args:
+            nn_path: Path to NomadNet binary (for venv-aware RPC check).
 
         Returns True if OK to proceed, False if user cancelled.
         """
@@ -165,7 +284,12 @@ class NomadNetRNSChecksMixin:
                     "Continue anyway?",
                 )
 
-        # rnsd is running and listening - check for user mismatches
+        # rnsd is running and listening - verify RPC with NomadNet's own RNS
+        if nn_path:
+            if not self._check_rpc_with_nomadnet_venv(nn_path):
+                return False
+
+        # Check for user mismatches
         current_uid = os.getuid()
         we_are_root = current_uid == 0
 
