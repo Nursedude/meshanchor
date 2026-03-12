@@ -552,7 +552,22 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                self._diagnose_nomadnet_error(result.returncode, sudo_user)
+                was_conn_refused = self._diagnose_nomadnet_error(
+                    result.returncode, sudo_user
+                )
+                if was_conn_refused:
+                    # Offer active recovery — restart rnsd (iterative, NOT recursive)
+                    try:
+                        answer = input(
+                            "\nRestart rnsd and retry? [Y/n] "
+                        )
+                    except (EOFError, KeyboardInterrupt):
+                        answer = 'n'
+                    if answer.strip().lower() in ('', 'y', 'yes'):
+                        if self._restart_rnsd_and_verify_rpc(nn_path=nn_path):
+                            print("\nrnsd RPC is now available.")
+                            print("Please re-launch NomadNet from the menu.")
+                        # Do NOT recursively call _launch_nomadnet_textui()
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -577,9 +592,14 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             except (EOFError, KeyboardInterrupt):
                 pass
 
-    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None):
-        """Analyze NomadNet failure and provide helpful diagnostics."""
+    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None) -> bool:
+        """Analyze NomadNet failure and provide helpful diagnostics.
+
+        Returns True if the failure was ConnectionRefusedError (caller
+        can offer auto-restart), False otherwise.
+        """
         print(f"NomadNet exited with error code {returncode}")
+        connection_refused = False
 
         # Try to read the log file for clues
         user_home = get_real_user_home()
@@ -597,6 +617,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 # Look for known error patterns
                 for line in last_lines:
                     if 'ConnectionRefusedError' in line or 'Errno 111' in line:
+                        connection_refused = True
                         error_hints.append("RPC connection to rnsd refused (Errno 111)")
                         rnsd_user = self._get_rnsd_user()
                         if not rnsd_user:
@@ -695,6 +716,8 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             print("\nCheck logs for details:")
             print(f"  cat {logfile}")
             print("  journalctl --user -u nomadnet -n 50")
+
+        return connection_refused
 
     # ------------------------------------------------------------------
     # Log viewer
