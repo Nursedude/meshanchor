@@ -81,11 +81,15 @@ class NomadNetRNSChecksMixin:
         if not Path(config_dir).exists():
             config_dir = str(get_real_user_home() / '.reticulum')
 
-        # Test RPC using NomadNet's own Python interpreter
+        # Test RPC using NomadNet's own Python interpreter.
+        # Must call get_interface_stats() — this exercises the actual RPC path
+        # (multiprocessing.connection.Client) that crashes NomadNet, not just
+        # the shared instance connection which can succeed independently.
         rpc_snippet = (
             "import RNS; "
             f"r = RNS.Reticulum(configdir='{config_dir}'); "
-            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
+            "stats = r.get_interface_stats(); "
+            "print('connected' if stats is not None else 'standalone')"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
