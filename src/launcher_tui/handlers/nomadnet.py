@@ -344,6 +344,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 choices.append(("logs", "View NomadNet Logs"))
                 choices.append(("config", "View NomadNet Config"))
                 choices.append(("edit", "Edit NomadNet Config"))
+                choices.append(("propnode", "Set Propagation Node"))
                 choices.append(("uninstall", "Disable NomadNet"))
             else:
                 choices.append(("install", "Install NomadNet"))
@@ -368,6 +369,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 "logs": ("View NomadNet Logs", self._view_nomadnet_logs),
                 "config": ("View NomadNet Config", self._view_nomadnet_config),
                 "edit": ("Edit NomadNet Config", self._edit_nomadnet_config),
+                "propnode": ("Set Propagation Node", self._configure_propagation_node),
                 "install": ("Install NomadNet", self._install_nomadnet),
                 "uninstall": ("Disable NomadNet", self._uninstall_nomadnet),
             }
@@ -476,6 +478,27 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         except (subprocess.SubprocessError, OSError) as e:
             logger.debug("rnsd status check failed: %s", e)
             print("  rnsd:      (check failed)")
+
+        # Show RNS interface status when rnsd is running
+        if rnsd_running:
+            try:
+                from utils.rns_status_parser import run_rnstatus, InterfaceStatus
+                status = run_rnstatus()
+                if status and status.interfaces:
+                    print()
+                    print("--- RNS Interfaces ---")
+                    for iface in status.interfaces:
+                        if iface.status == InterfaceStatus.UP:
+                            icon = "\033[0;32mUP\033[0m"
+                        elif iface.status == InterfaceStatus.DOWN:
+                            icon = "\033[0;31mDOWN\033[0m"
+                        else:
+                            icon = "?"
+                        print(f"  {iface.display_name:<40} {icon}")
+                elif status and status.parse_error:
+                    print(f"\n  (rnstatus: {status.parse_error})")
+            except Exception as e:
+                logger.debug("Interface status check failed: %s", e)
 
         self.ctx.wait_for_enter()
 
@@ -1204,6 +1227,124 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             return
 
         subprocess.run([editor, str(config_path)], timeout=None)
+
+    # ------------------------------------------------------------------
+    # Propagation node configuration
+    # ------------------------------------------------------------------
+
+    def _configure_propagation_node(self):
+        """Configure the LXMF propagation node for store-and-forward messaging.
+
+        Writes/updates the propagation_node setting in the NomadNet config
+        file under the [client] section. This tells LXMF where to sync
+        messages for offline destinations.
+        """
+        config_path = self._get_nomadnet_config_path()
+        if not config_path or not config_path.exists():
+            self.ctx.dialog.msgbox(
+                "No Config",
+                "NomadNet config not found.\n\n"
+                "Launch NomadNet once first to generate it,\n"
+                "then set the propagation node.",
+            )
+            return
+
+        # Read current value if set
+        current_value = ""
+        try:
+            content = config_path.read_text()
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("propagation_node"):
+                    parts = stripped.split("=", 1)
+                    if len(parts) == 2:
+                        current_value = parts[1].strip()
+                        break
+        except (OSError, PermissionError) as e:
+            logger.warning("Cannot read NomadNet config: %s", e)
+
+        prompt = (
+            "Enter the LXMF propagation node hash (32 hex characters).\n\n"
+            "This enables store-and-forward messaging for offline nodes.\n"
+            "You can find propagation nodes via 'rnstatus' or NomadNet's\n"
+            "network browser.\n\n"
+            "Leave empty to clear the current setting."
+        )
+
+        result = self.ctx.dialog.inputbox(
+            "Propagation Node", prompt, current_value
+        )
+        if result is None:
+            return
+
+        node_hash = result.strip()
+
+        # Validate if non-empty
+        if node_hash:
+            if len(node_hash) != 32:
+                self.ctx.dialog.msgbox(
+                    "Invalid Hash",
+                    f"Expected 32 hex characters, got {len(node_hash)}.\n\n"
+                    f"Input: {node_hash}",
+                )
+                return
+            try:
+                bytes.fromhex(node_hash)
+            except ValueError:
+                self.ctx.dialog.msgbox(
+                    "Invalid Hex",
+                    f"Not valid hexadecimal:\n  {node_hash}",
+                )
+                return
+
+        # Update NomadNet config
+        try:
+            content = config_path.read_text()
+            lines = content.splitlines()
+            found = False
+            new_lines = []
+
+            for line in lines:
+                if line.strip().startswith("propagation_node"):
+                    if node_hash:
+                        new_lines.append(f"  propagation_node = {node_hash}")
+                    # else: drop the line to clear the setting
+                    found = True
+                else:
+                    new_lines.append(line)
+
+            # If not found and we have a value, add under [client]
+            if not found and node_hash:
+                final_lines = []
+                added = False
+                for line in new_lines:
+                    final_lines.append(line)
+                    if line.strip() == "[client]" and not added:
+                        final_lines.append(f"  propagation_node = {node_hash}")
+                        added = True
+                if not added:
+                    # No [client] section — append one
+                    final_lines.append("")
+                    final_lines.append("[client]")
+                    final_lines.append(f"  propagation_node = {node_hash}")
+                new_lines = final_lines
+
+            config_path.write_text("\n".join(new_lines) + "\n")
+
+            if node_hash:
+                self.ctx.dialog.msgbox(
+                    "Propagation Node Set",
+                    f"Propagation node configured:\n  {node_hash}\n\n"
+                    "Restart NomadNet for the change to take effect.",
+                )
+            else:
+                self.ctx.dialog.msgbox(
+                    "Propagation Node Cleared",
+                    "Propagation node setting removed.\n\n"
+                    "Restart NomadNet for the change to take effect.",
+                )
+        except (OSError, PermissionError) as e:
+            self.ctx.dialog.msgbox("Error", f"Failed to update config:\n{e}")
 
     # ------------------------------------------------------------------
     # Install
