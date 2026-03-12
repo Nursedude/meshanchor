@@ -223,116 +223,6 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # share_instance pre-flight check
     # ------------------------------------------------------------------
 
-    def _check_share_instance_for_nomadnet(self, rns_config_path: str) -> bool:
-        """Verify share_instance = Yes when rnsd is running.
-
-        When rnsd is already running, NomadNet must connect as a client
-        via the shared instance. Without share_instance = Yes, NomadNet
-        tries to create its own interfaces and fails with EADDRINUSE.
-
-        Args:
-            rns_config_path: The RNS config directory NomadNet will use.
-
-        Returns:
-            True to proceed, False if user cancelled.
-        """
-        import re
-
-        # Only relevant when rnsd is running
-        rnsd_user = self._get_rnsd_user()
-        if not rnsd_user:
-            return True  # No rnsd, NomadNet will run standalone
-
-        config_file = Path(rns_config_path) / 'config'
-        if not config_file.exists():
-            return True  # No config yet, RNS will create defaults
-
-        try:
-            from commands.rns import _parse_share_instance
-            from utils.service_check import _sudo_write
-
-            content = config_file.read_text()
-            if _parse_share_instance(content):
-                return True  # Already enabled
-
-            # share_instance not enabled — NomadNet WILL fail
-            if not self.ctx.dialog.yesno(
-                "share_instance Not Enabled",
-                "rnsd is running, but the RNS config does not have\n"
-                "  share_instance = Yes\n\n"
-                "Without this, NomadNet will try to create its own\n"
-                "interfaces and fail with 'Address already in use'.\n\n"
-                f"Config: {config_file}\n\n"
-                "Set share_instance = Yes and restart rnsd?",
-            ):
-                return self.ctx.dialog.yesno(
-                    "Continue Anyway?",
-                    "NomadNet will likely fail without share_instance = Yes.\n\n"
-                    "Continue anyway?",
-                )
-
-            # Fix: set share_instance = Yes (same pattern as _rns_repair.py)
-            if re.search(r'^\s*share_instance\s*=', content, re.MULTILINE):
-                fixed = re.sub(
-                    r'^(\s*share_instance\s*=\s*).*$',
-                    r'\1Yes',
-                    content,
-                    count=1,
-                    flags=re.MULTILINE,
-                )
-            elif '[reticulum]' in content.lower():
-                fixed = content.replace(
-                    '[reticulum]',
-                    '[reticulum]\n  share_instance = Yes',
-                    1,
-                )
-            else:
-                fixed = '[reticulum]\n  share_instance = Yes\n\n' + content
-
-            ok, msg = _sudo_write(str(config_file), fixed)
-            if not ok:
-                self.ctx.dialog.msgbox(
-                    "Config Write Failed",
-                    f"Could not update config:\n  {msg}\n\n"
-                    f"Manually set share_instance = Yes in:\n  {config_file}",
-                )
-                return False
-
-            # Verify the write took effect
-            verify = config_file.read_text()
-            if not _parse_share_instance(verify):
-                self.ctx.dialog.msgbox(
-                    "Verification Failed",
-                    "Config was written but share_instance is still not Yes.\n\n"
-                    f"Check: {config_file}",
-                )
-                return False
-
-            # Restart rnsd to pick up the change
-            self.ctx.dialog.infobox("Restarting rnsd", "Applying config change...")
-            success, restart_msg = apply_config_and_restart('rnsd')
-            if success:
-                # Wait for rnsd to be ready
-                time.sleep(2)
-                self.ctx.dialog.msgbox(
-                    "Config Fixed",
-                    "Set share_instance = Yes and restarted rnsd.\n\n"
-                    "NomadNet should now connect as a client.",
-                )
-            else:
-                self.ctx.dialog.msgbox(
-                    "Restart Failed",
-                    f"Config updated but rnsd restart failed:\n  {restart_msg}\n\n"
-                    "Try: sudo systemctl restart rnsd",
-                )
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.debug("share_instance pre-flight check failed: %s", e)
-            return True  # Don't block on check failure
-
     # ------------------------------------------------------------------
     # Ownership fix for user directories
     # ------------------------------------------------------------------
@@ -619,19 +509,13 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._validate_nomadnet_config():
             return
 
-        # Resolve RNS config path early — needed for both the RPC check
-        # and the share_instance check
+        # Check if rnsd is running (NomadNet needs RNS)
+        if not self._check_rns_for_nomadnet():
+            return
+
+        # Check if we need to use a specific RNS config path
+        # This handles the case where /etc/reticulum exists but isn't writable
         rns_config_path = self._get_rns_config_for_user()
-
-        # Check if rnsd is running (NomadNet needs RNS).
-        # Pass nn_path so the RPC check uses NomadNet's own RNS library
-        # instead of system rnstatus (avoids version mismatch false positives).
-        if not self._check_rns_for_nomadnet(nn_path, rns_config_path):
-            return
-
-        # Verify share_instance = Yes when rnsd is running (prevents EADDRINUSE)
-        if not self._check_share_instance_for_nomadnet(rns_config_path):
-            return
 
         # Clear screen before launching
         clear_screen()
@@ -668,24 +552,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                conn_refused = self._diagnose_nomadnet_error(
-                    result.returncode, sudo_user
-                )
-                if conn_refused:
-                    # Offer active recovery instead of just hints
-                    try:
-                        answer = input(
-                            "\nRestart rnsd and retry NomadNet? [Y/n] "
-                        )
-                    except (EOFError, KeyboardInterrupt):
-                        answer = 'n'
-                    if answer.strip().lower() in ('', 'y', 'yes'):
-                        if self._restart_rnsd_and_verify_rpc(
-                            sudo_user, nn_path, rns_config_path
-                        ):
-                            # Re-launch with full pre-flight checks
-                            self._launch_nomadnet_textui()
-                            return
+                self._diagnose_nomadnet_error(result.returncode, sudo_user)
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -710,17 +577,9 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             except (EOFError, KeyboardInterrupt):
                 pass
 
-    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None) -> bool:
-        """Analyze NomadNet failure and provide helpful diagnostics.
-
-        Returns:
-            True if the failure was a ConnectionRefusedError (RPC not
-            available), False for all other failures. The caller can
-            use this to offer active recovery (restart rnsd + retry).
-        """
+    def _diagnose_nomadnet_error(self, returncode: int, sudo_user: str = None):
+        """Analyze NomadNet failure and provide helpful diagnostics."""
         print(f"NomadNet exited with error code {returncode}")
-
-        connection_refused = False
 
         # Try to read the log file for clues
         user_home = get_real_user_home()
@@ -732,7 +591,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 import collections
                 with open(logfile, 'r') as f:
                     last_lines = list(
-                        collections.deque(f, maxlen=50)
+                        collections.deque(f, maxlen=20)
                     )
 
                 # Look for known error patterns
@@ -780,97 +639,11 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                         error_hints.append("Missing Python dependencies")
                         error_hints.append("Try: pipx reinstall nomadnet")
                         break
-                    elif ('ConnectionRefusedError' in line
-                          or 'Connection refused' in line):
-                        connection_refused = True
-                        error_hints.append(
-                            "RPC connection refused — NomadNet connected to rnsd's "
-                            "shared instance but rnsd's RPC socket is not accepting "
-                            "connections"
-                        )
-                        error_hints.append(
-                            "This usually means rnsd is still initializing or "
-                            "crashed mid-startup"
-                        )
-                        error_hints.append(
-                            "Fix: Wait a few seconds and try again, or restart rnsd:"
-                        )
-                        error_hints.append(
-                            "     sudo systemctl restart rnsd"
-                        )
-                        error_hints.append(
-                            "     Then verify: rnstatus"
-                        )
-                        break
-                    elif 'Address already in use' in line or 'Errno 98' in line:
-                        error_hints.append(
-                            "Port conflict (EADDRINUSE) — NomadNet tried to bind "
-                            "a port already held by rnsd"
-                        )
-                        error_hints.append(
-                            "This happens when share_instance is not set to Yes"
-                        )
-                        error_hints.append(
-                            "Fix: Set share_instance = Yes in [reticulum] section"
-                        )
-                        error_hints.append(
-                            "     of /etc/reticulum/config, then restart rnsd:"
-                        )
-                        error_hints.append(
-                            "     sudo systemctl restart rnsd"
-                        )
-                        break
-                    elif 'could not be created' in line.lower():
-                        error_hints.append(
-                            "An RNS interface could not be created"
-                        )
-                        error_hints.append(
-                            "Check interface definitions in the RNS config"
-                        )
-                        error_hints.append(
-                            "When using rnsd, client apps should use "
-                            "share_instance = Yes"
-                        )
-                        error_hints.append(
-                            "and not define their own interfaces"
-                        )
-                        break
-                    elif ('configparser' in line.lower()
-                          or 'parsingerror' in line.lower()):
-                        error_hints.append(
-                            "Config file has syntax errors"
-                        )
-                        error_hints.append(
-                            "Validate /etc/reticulum/config format (INI-style)"
-                        )
-                        break
-
-                # Fallback: extract traceback from log if no specific pattern matched
-                if not error_hints:
-                    tb_start = None
-                    for i, line in enumerate(last_lines):
-                        if 'Traceback' in line:
-                            tb_start = i
-                    if tb_start is not None:
-                        error_hints.append("Python traceback found in log:")
-                        for line in last_lines[tb_start:]:
-                            stripped = line.rstrip()
-                            if stripped:
-                                error_hints.append(f"  {stripped}")
-
             except (OSError, PermissionError):
                 pass
 
-        # If no NomadNet-specific error found, check rnsd status & journal.
-        if not error_hints:
-            # Check if rnsd is still running
-            rnsd_user = self._get_rnsd_user()
-            if not rnsd_user:
-                error_hints.append("rnsd is not running (crashed or stopped)")
-                error_hints.append("NomadNet depends on rnsd for network access")
-                error_hints.append("Check: sudo systemctl status rnsd")
-                error_hints.append("       sudo journalctl -u rnsd -n 30")
-
+        # If no NomadNet-specific error found, check rnsd journal for clues.
+        # NomadNet fails when rnsd is down due to meshtastic module issue.
         if not error_hints:
             try:
                 journal_r = subprocess.run(
@@ -897,26 +670,11 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if error_hints:
             print("\nDiagnosis:")
             for hint in error_hints:
-                print(f"  {hint}")
+                print(f"  - {hint}")
         else:
-            # Always show last few log lines as fallback instead of just "check logs"
-            print("\nNo known error pattern matched. Last log entries:")
-            if logfile.exists():
-                try:
-                    import collections
-                    with open(logfile, 'r') as f:
-                        tail = list(collections.deque(f, maxlen=10))
-                    for line in tail:
-                        stripped = line.rstrip()
-                        if stripped:
-                            print(f"  {stripped}")
-                except (OSError, PermissionError):
-                    pass
-            print(f"\nFull logs:")
+            print("\nCheck logs for details:")
             print(f"  cat {logfile}")
             print("  journalctl --user -u nomadnet -n 50")
-
-        return connection_refused
 
     # ------------------------------------------------------------------
     # Log viewer
@@ -1045,10 +803,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._fix_user_directory_ownership():
             return
 
-        # Resolve RNS config path for pre-flight checks (same as TextUI launcher)
-        rns_config_path = self._get_rns_config_for_user()
-
-        if not self._check_rns_for_nomadnet(nn_path, rns_config_path):
+        if not self._check_rns_for_nomadnet():
             return
 
         if not self.ctx.dialog.yesno(
