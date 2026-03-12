@@ -37,6 +37,7 @@ class RNSInterfacesHandler(BaseHandler):
         """Manage RNS interfaces (add / remove / enable / disable)."""
         while True:
             choices = [
+                ("status", "Interface Status (live)"),
                 ("list", "List Configured Interfaces"),
                 ("add", "Add Interface from Template"),
                 ("enable", "Enable Interface"),
@@ -65,6 +66,7 @@ class RNSInterfacesHandler(BaseHandler):
                 continue
 
             dispatch = {
+                "status": ("Interface Status", self._rns_interface_status),
                 "list": ("List Interfaces", self._rns_list_interfaces),
                 "add": ("Add Interface", self._rns_add_interface),
                 "enable": ("Enable Interface", lambda: self._rns_toggle_interface(enable=True)),
@@ -74,6 +76,175 @@ class RNSInterfacesHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+
+    # ------------------------------------------------------------------
+    # Interface Status (live)
+    # ------------------------------------------------------------------
+
+    def _rns_interface_status(self):
+        """Show live interface status: config + blocking reasons + TX/RX."""
+        from ._rns_interface_mgr import find_blocking_interfaces
+        from ._rns_diagnostics_engine import check_rns_interface_health
+        from utils.service_check import (
+            check_process_running, get_rns_shared_instance_info,
+            get_udp_port_owner,
+        )
+
+        clear_screen()
+        print("=== Interface Status ===\n")
+
+        # 1. Determine who is running the RNS instance
+        rnsd_running = check_process_running('rnsd')
+        si_info = get_rns_shared_instance_info()
+        si_available = si_info.get('available', False)
+
+        if rnsd_running and si_available:
+            print(f"  RNS Instance: rnsd — shared instance available")
+        elif rnsd_running:
+            print(f"  RNS Instance: rnsd — running but shared instance NOT available")
+        else:
+            # Check if NomadNet or Sideband is serving as shared instance
+            port_owner = None
+            try:
+                port_owner = get_udp_port_owner(37428)
+            except Exception:
+                pass
+            if port_owner:
+                proc_name, pid = port_owner
+                print(f"  RNS Instance: {proc_name} (PID {pid}) — running its own RNS")
+            elif si_available:
+                print(f"  RNS Instance: available (unknown process)")
+            else:
+                print(f"  RNS Instance: NOT RUNNING — no shared instance")
+        print()
+
+        # 2. Get configured interfaces from config
+        result = self._rns_cmd_list_interfaces()
+        if result is None:
+            self.ctx.wait_for_enter()
+            return
+
+        interfaces = result.data.get('interfaces', [])
+        if not interfaces:
+            print("  No interfaces configured in Reticulum config.\n")
+            print("  Use 'Add Interface from Template' to create one.")
+            self.ctx.wait_for_enter()
+            return
+
+        # 3. Get blocking info (why interfaces can't connect)
+        blocking_map = {}
+        try:
+            blocking = find_blocking_interfaces()
+            for iface_name, reason, fix in blocking:
+                blocking_map[iface_name] = (reason, fix)
+        except Exception as e:
+            logger.debug("Blocking interface check failed: %s", e)
+
+        # 4. Get live health from rnstatus (TX/RX counters)
+        health_map = {}
+        try:
+            health = check_rns_interface_health()
+            for entry in health:
+                # entry = (display_name, tx_str, rx_str, is_healthy)
+                name = entry[0]
+                health_map[name] = {
+                    'tx': entry[1], 'rx': entry[2], 'healthy': entry[3],
+                }
+        except Exception as e:
+            logger.debug("Interface health check failed: %s", e)
+
+        # 5. Display unified table
+        print(f"  {'Name':<26} {'Type':<24} {'Status':<10} Detail")
+        print(f"  {'─' * 80}")
+
+        for iface in interfaces:
+            name = iface.get('name', '(unnamed)')
+            settings = iface.get('settings', {})
+            itype = settings.get('type', '?')
+            enabled_raw = str(settings.get('enabled', 'no')).lower()
+            enabled = enabled_raw in ('yes', 'true', '1')
+
+            if not enabled:
+                status = "DISABLED"
+                detail = ""
+            elif name in blocking_map:
+                status = "BLOCKED"
+                reason, fix = blocking_map[name]
+                detail = reason
+            else:
+                # Try to match against rnstatus output
+                live = self._match_live_health(name, itype, health_map)
+                if live:
+                    if not live['healthy']:
+                        status = "RX-ONLY"
+                        detail = f"↑{live['tx']}  ↓{live['rx']} (link establishment failing)"
+                    else:
+                        status = "UP"
+                        detail = f"↑{live['tx']}  ↓{live['rx']}"
+                elif rnsd_running and si_available:
+                    # rnsd is running and we have shared instance
+                    # but no rnstatus data for this interface
+                    if itype == 'TCPServerInterface':
+                        status = "LISTEN"
+                        detail = "waiting for clients"
+                    else:
+                        status = "UP"
+                        detail = "(no traffic data)"
+                elif rnsd_running:
+                    status = "UNKNOWN"
+                    detail = "rnsd running but shared instance not available"
+                else:
+                    status = "DOWN"
+                    detail = "rnsd not running"
+
+            # Color-coded status hint via text markers
+            if status == "BLOCKED":
+                marker = "!"
+            elif status in ("DOWN", "RX-ONLY"):
+                marker = "~"
+            elif status == "DISABLED":
+                marker = "-"
+            else:
+                marker = " "
+
+            print(f" {marker}{name:<26} {itype:<24} {status:<10} {detail}")
+
+            # Show fix hint for blocked interfaces
+            if name in blocking_map:
+                _, fix = blocking_map[name]
+                print(f"  {' ' * 26} {' ' * 24} {'':10} Fix: {fix}")
+
+        print(f"\n  Total: {len(interfaces)} interface(s)")
+
+        # Summary hints
+        if blocking_map:
+            print(f"\n  ! = blocked (dependency missing)")
+        if not rnsd_running:
+            print(f"\n  Start rnsd: sudo systemctl start rnsd")
+        elif not si_available:
+            print(f"\n  Shared instance not available. Run: RNS > Diagnostics")
+
+        self.ctx.wait_for_enter()
+
+    def _match_live_health(self, config_name: str, iface_type: str,
+                           health_map: dict) -> dict:
+        """Match a config interface name to rnstatus output.
+
+        rnstatus shows interfaces as 'TypeName[DisplayName]'.
+        Config names are [[DisplayName]]. Try fuzzy matching.
+        """
+        # Direct match: TypeName[config_name]
+        for key, data in health_map.items():
+            if config_name in key:
+                return data
+
+        # Type-based partial match
+        type_prefix = iface_type.replace('_', '')
+        for key, data in health_map.items():
+            if key.startswith(type_prefix):
+                return data
+
+        return {}
 
     # ------------------------------------------------------------------
     # List interfaces
