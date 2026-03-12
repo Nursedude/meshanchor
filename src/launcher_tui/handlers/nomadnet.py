@@ -1305,6 +1305,82 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _find_pipx(self) -> str:
+        """Find pipx binary, checking PATH and common locations.
+
+        pipx is often installed to ~/.local/bin which may not be in
+        the current shell's PATH (especially under sudo).
+        Returns the path string, or None if not found.
+        """
+        pipx_path = shutil.which('pipx')
+        if pipx_path:
+            return pipx_path
+        # Check common locations
+        for candidate in [
+            get_real_user_home() / '.local' / 'bin' / 'pipx',
+            Path('/usr/bin/pipx'),
+            Path('/usr/local/bin/pipx'),
+        ]:
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    def _upgrade_nomadnet(self) -> bool:
+        """Upgrade NomadNet via pipx to fix RNS version mismatches.
+
+        Returns True if upgrade succeeded, False otherwise.
+        """
+        pipx_path = self._find_pipx()
+        if not pipx_path:
+            self.ctx.dialog.msgbox(
+                "pipx Not Found",
+                "Cannot find pipx to upgrade NomadNet.\n\n"
+                "Install pipx first:\n"
+                "  sudo apt install pipx\n\n"
+                "Then upgrade:\n"
+                "  pipx upgrade nomadnet",
+            )
+            return False
+
+        self.ctx.dialog.infobox(
+            "Upgrading NomadNet",
+            "Running pipx upgrade nomadnet...\n"
+            "This may take a minute.",
+        )
+
+        sudo_user = os.environ.get('SUDO_USER')
+        try:
+            if sudo_user and sudo_user != 'root':
+                result = subprocess.run(
+                    ['sudo', '-H', '-u', sudo_user, pipx_path, 'upgrade', 'nomadnet'],
+                    capture_output=True, text=True, timeout=120,
+                )
+            else:
+                result = subprocess.run(
+                    [pipx_path, 'upgrade', 'nomadnet'],
+                    capture_output=True, text=True, timeout=120,
+                )
+
+            output = (result.stdout + result.stderr).strip()
+            if result.returncode == 0:
+                self.ctx.dialog.msgbox(
+                    "Upgrade Complete",
+                    f"NomadNet has been upgraded.\n\n{output[:200]}",
+                )
+                return True
+            else:
+                self.ctx.dialog.msgbox(
+                    "Upgrade Failed",
+                    f"pipx upgrade nomadnet failed:\n\n{output[:300]}",
+                )
+                return False
+        except subprocess.TimeoutExpired:
+            self.ctx.dialog.msgbox("Timeout", "Upgrade timed out after 2 minutes.")
+            return False
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox("Error", f"Upgrade failed: {e}")
+            return False
+
     def _is_nomadnet_installed(self) -> bool:
         """Check if NomadNet is installed."""
         if shutil.which('nomadnet'):
