@@ -679,6 +679,19 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                         )
                         error_hints.append("Then: sudo systemctl restart rnsd")
                         break
+                    elif 'TypeError' in line and 'list indices' in line:
+                        error_hints.append(
+                            "NomadNet crash: interface stats returned wrong "
+                            "type (list instead of dict)"
+                        )
+                        error_hints.append(
+                            "The MeshForge NomadNet wrapper needs updating"
+                        )
+                        error_hints.append(
+                            "Fix: Relaunch NomadNet from MeshForge "
+                            "(wrapper auto-updates)"
+                        )
+                        break
                     elif 'ModuleNotFoundError' in line or 'ImportError' in line:
                         error_hints.append("Missing Python dependencies")
                         error_hints.append("Try: pipx reinstall nomadnet")
@@ -1563,7 +1576,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # NomadNet wrapper (monkey-patch broken RPC)
     # ------------------------------------------------------------------
 
-    _WRAPPER_VERSION = "2"  # bump to force re-creation
+    _WRAPPER_VERSION = "3"  # bump to force re-creation
 
     def _create_nomadnet_wrapper(self) -> Optional[Path]:
         """Create a wrapper script that patches get_interface_stats.
@@ -1574,7 +1587,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         broken, this crashes NomadNet with ConnectionRefusedError.
 
         The wrapper monkey-patches get_interface_stats to catch the error
-        and return an empty list (graceful degradation — no stats shown).
+        and return an empty stats dict (graceful degradation — no stats shown).
 
         Returns the wrapper path, or None if creation failed.
         """
@@ -1599,8 +1612,8 @@ _orig_get_interface_stats = RNS.Reticulum.get_interface_stats
 def _safe_get_interface_stats(self):
     try:
         return _orig_get_interface_stats(self)
-    except ConnectionRefusedError:
-        return []
+    except (ConnectionRefusedError, BrokenPipeError, TypeError, KeyError, OSError):
+        return {'interfaces': []}
 
 RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
 
