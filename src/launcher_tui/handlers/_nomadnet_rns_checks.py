@@ -81,15 +81,16 @@ class NomadNetRNSChecksMixin:
         if not Path(config_dir).exists():
             config_dir = str(get_real_user_home() / '.reticulum')
 
-        # Test RPC using NomadNet's own Python interpreter.
-        # Must call get_interface_stats() — this exercises the actual RPC path
-        # (multiprocessing.connection.Client) that crashes NomadNet, not just
-        # the shared instance connection which can succeed independently.
+        # Test shared instance connection using NomadNet's own Python.
+        # Only test is_connected_to_shared_instance — NOT get_interface_stats().
+        # The RPC management socket (multiprocessing.connection) is separate
+        # from the shared instance socket and may be broken (rnsd RPC listener
+        # not running) even when the shared instance works fine. NomadNet needs
+        # the shared instance, not the management RPC.
         rpc_snippet = (
             "import RNS; "
             f"r = RNS.Reticulum(configdir='{config_dir}'); "
-            "stats = r.get_interface_stats(); "
-            "print('connected' if stats is not None else 'standalone')"
+            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
@@ -313,10 +314,10 @@ class NomadNetRNSChecksMixin:
         return True
 
     def _test_rpc_silent(self, nn_path: str) -> bool:
-        """Silent RPC connectivity test — no dialogs, just pass/fail.
+        """Silent shared instance connectivity test — no dialogs, just pass/fail.
 
         Used after rnsd restart to avoid recursive dialog loops.
-        Returns True if NomadNet's venv RNS can connect to rnsd RPC.
+        Returns True if NomadNet's venv RNS can connect to the shared instance.
         """
         venv_python = self._get_nomadnet_venv_python(nn_path)
         if not venv_python:
@@ -329,8 +330,7 @@ class NomadNetRNSChecksMixin:
         rpc_snippet = (
             "import RNS; "
             f"r = RNS.Reticulum(configdir='{config_dir}'); "
-            "stats = r.get_interface_stats(); "
-            "print('connected' if stats is not None else 'standalone')"
+            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
