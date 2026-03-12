@@ -535,6 +535,9 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             if rns_config_path:
                 nn_args = ['--rnsconfig', rns_config_path, '--textui']
 
+            # Build command — use wrapper to patch RPC if possible
+            cmd = self._get_wrapper_command(nn_path, nn_args)
+
             if sudo_user and sudo_user != 'root':
                 # Run as real user using 'sudo -u' with explicit PATH
                 # The -H sets HOME correctly, we pass PATH for pipx binaries
@@ -542,12 +545,12 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 user_path = f"{user_home}/.local/bin:/usr/local/bin:/usr/bin:/bin"
                 result = subprocess.run(
                     ['sudo', '-u', sudo_user, '-H',
-                     f'PATH={user_path}', nn_path] + nn_args,
+                     f'PATH={user_path}'] + cmd,
                     timeout=None
                 )
             else:
                 # Not running via sudo, run directly
-                result = subprocess.run([nn_path] + nn_args, timeout=None)
+                result = subprocess.run(cmd, timeout=None)
 
             # After NomadNet exits, show status and wait for user
             print()
@@ -889,12 +892,15 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if rns_config_path:
             nn_args = ['--rnsconfig', rns_config_path, '--daemon']
 
+        # Build command — use wrapper to patch RPC if possible
+        base_cmd = self._get_wrapper_command(nn_path, nn_args)
+
         if sudo_user and sudo_user != 'root':
             # Run as real user with -H to set HOME correctly
             # Using -H instead of -i avoids running shell profiles which can interfere
-            cmd = ['sudo', '-H', '-u', sudo_user, nn_path] + nn_args
+            cmd = ['sudo', '-H', '-u', sudo_user] + base_cmd
         else:
-            cmd = [nn_path] + nn_args
+            cmd = base_cmd
 
         try:
             subprocess.Popen(
@@ -1552,6 +1558,105 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
 
         # Return the default path (even if it doesn't exist yet)
         return user_home / '.nomadnetwork' / 'config'
+
+    # ------------------------------------------------------------------
+    # NomadNet wrapper (monkey-patch broken RPC)
+    # ------------------------------------------------------------------
+
+    _WRAPPER_VERSION = "1"  # bump to force re-creation
+
+    def _create_nomadnet_wrapper(self) -> Optional[Path]:
+        """Create a wrapper script that patches get_interface_stats.
+
+        NomadNet's TextUI.MainDisplay.__init__() calls
+        RNS.Reticulum.get_interface_stats() which uses the RPC management
+        socket (multiprocessing.connection). When rnsd's RPC listener is
+        broken, this crashes NomadNet with ConnectionRefusedError.
+
+        The wrapper monkey-patches get_interface_stats to catch the error
+        and return an empty list (graceful degradation — no stats shown).
+
+        Returns the wrapper path, or None if creation failed.
+        """
+        user_home = get_real_user_home()
+        wrapper_dir = user_home / '.config' / 'meshforge'
+        wrapper_path = wrapper_dir / 'nomadnet_wrapper.py'
+
+        wrapper_content = '''\
+"""MeshForge NomadNet wrapper — patches RPC ConnectionRefusedError.
+
+Version: {version}
+
+NomadNet crashes when rnsd RPC management socket is not listening.
+This wrapper patches RNS.Reticulum.get_interface_stats to catch the
+error gracefully so NomadNet can still run (without interface stats).
+"""
+import sys
+import RNS
+
+_orig_get_interface_stats = RNS.Reticulum.get_interface_stats
+
+def _safe_get_interface_stats(self):
+    try:
+        return _orig_get_interface_stats(self)
+    except ConnectionRefusedError:
+        return []
+
+RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
+
+from nomadnet.__main__ import main
+sys.exit(main())
+'''.format(version=self._WRAPPER_VERSION)
+
+        # Check if wrapper already exists with correct version
+        version_marker = f"Version: {self._WRAPPER_VERSION}"
+        if wrapper_path.exists():
+            try:
+                existing = wrapper_path.read_text()
+                if version_marker in existing:
+                    return wrapper_path
+            except OSError:
+                pass
+
+        # Create/update the wrapper
+        try:
+            wrapper_dir.mkdir(parents=True, exist_ok=True)
+            wrapper_path.write_text(wrapper_content)
+            logger.debug("Created NomadNet wrapper at %s", wrapper_path)
+
+            # Fix ownership if running under sudo
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user and sudo_user != 'root':
+                import pwd
+                try:
+                    pw = pwd.getpwnam(sudo_user)
+                    os.chown(wrapper_dir, pw.pw_uid, pw.pw_gid)
+                    os.chown(wrapper_path, pw.pw_uid, pw.pw_gid)
+                except (KeyError, OSError) as e:
+                    logger.debug("Could not chown wrapper: %s", e)
+
+            return wrapper_path
+        except OSError as e:
+            logger.warning("Failed to create NomadNet wrapper: %s", e)
+            return None
+
+    def _get_wrapper_command(self, nn_path: str, nn_args: list) -> list:
+        """Build launch command using wrapper if possible.
+
+        Returns [venv_python, wrapper, ...args] if wrapper is available,
+        otherwise [nn_path, ...args] as fallback.
+        """
+        venv_python = self._get_nomadnet_venv_python(nn_path)
+        if not venv_python:
+            return [nn_path] + nn_args
+
+        wrapper_path = self._create_nomadnet_wrapper()
+        if not wrapper_path:
+            return [nn_path] + nn_args
+
+        # sys.argv[0] will be the wrapper path, remaining args are
+        # forwarded to NomadNet's main() via sys.argv
+        return [venv_python, str(wrapper_path)] + nn_args
 
     # RNS prerequisite checks provided by NomadNetRNSChecksMixin:
     # _check_rns_for_nomadnet, _validate_nomadnet_config
