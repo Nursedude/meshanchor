@@ -213,15 +213,20 @@ class NomadNetRNSChecksMixin:
             )
             return False
 
-        # Re-verify RPC with NomadNet's venv
-        if nn_path and not self._check_rpc_with_nomadnet_venv(nn_path):
-            self.ctx.dialog.msgbox(
-                "RPC Still Failing",
-                "rnsd restarted but RPC check still fails.\n\n"
-                "Try: pipx upgrade nomadnet\n"
-                "     sudo systemctl restart rnsd",
-            )
-            return False
+        # Re-verify RPC silently (no dialogs) to avoid recursive dialog loop.
+        # _check_rpc_with_nomadnet_venv shows its own restart/continue/cancel
+        # dialog which would recurse back here if the user picks restart.
+        if nn_path:
+            rpc_ok = self._test_rpc_silent(nn_path)
+            if not rpc_ok:
+                return self.ctx.dialog.yesno(
+                    "RPC Still Failing",
+                    "rnsd restarted but NomadNet's RNS still cannot\n"
+                    "connect via RPC.\n\n"
+                    "This is usually an RNS version mismatch:\n"
+                    "  pipx upgrade nomadnet\n\n"
+                    "Launch NomadNet anyway?",
+                )
 
         self.ctx.dialog.msgbox(
             "rnsd Restarted",
@@ -229,6 +234,44 @@ class NomadNetRNSChecksMixin:
             "NomadNet should now connect successfully.",
         )
         return True
+
+    def _test_rpc_silent(self, nn_path: str) -> bool:
+        """Silent RPC connectivity test — no dialogs, just pass/fail.
+
+        Used after rnsd restart to avoid recursive dialog loops.
+        Returns True if NomadNet's venv RNS can connect to rnsd RPC.
+        """
+        venv_python = self._get_nomadnet_venv_python(nn_path)
+        if not venv_python:
+            return True  # Can't test, assume OK
+
+        config_dir = '/etc/reticulum'
+        if not Path(config_dir).exists():
+            config_dir = str(get_real_user_home() / '.reticulum')
+
+        rpc_snippet = (
+            "import RNS; "
+            f"r = RNS.Reticulum(configdir='{config_dir}'); "
+            "stats = r.get_interface_stats(); "
+            "print('connected' if stats is not None else 'standalone')"
+        )
+
+        sudo_user = os.environ.get('SUDO_USER')
+        try:
+            if sudo_user and sudo_user != 'root':
+                result = subprocess.run(
+                    ['sudo', '-u', sudo_user, '-H', venv_python, '-c', rpc_snippet],
+                    capture_output=True, text=True, timeout=15,
+                )
+            else:
+                result = subprocess.run(
+                    [venv_python, '-c', rpc_snippet],
+                    capture_output=True, text=True, timeout=15,
+                )
+            return result.returncode == 0 and 'connected' in result.stdout
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Silent RPC check failed: %s", e)
+            return False
 
     def _check_rns_for_nomadnet(self, nn_path: str = None) -> bool:
         """Check that RNS/rnsd is available and properly configured.
