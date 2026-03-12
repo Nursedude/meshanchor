@@ -1326,7 +1326,13 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         return None
 
     def _upgrade_nomadnet(self) -> bool:
-        """Upgrade NomadNet via pipx to fix RNS version mismatches.
+        """Upgrade NomadNet and its RNS dependency to fix version mismatches.
+
+        Strategy:
+        1. pipx upgrade nomadnet (upgrades NomadNet + deps)
+        2. If already at latest, also upgrade RNS inside the venv
+           (pipx runpip nomadnet -- install --upgrade rns)
+        3. Show version comparison between venv RNS and system RNS
 
         Returns True if upgrade succeeded, False otherwise.
         """
@@ -1342,44 +1348,115 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             )
             return False
 
+        sudo_user = os.environ.get('SUDO_USER')
+
+        def _run_pipx(args, timeout_sec=120):
+            """Run pipx command as real user."""
+            if sudo_user and sudo_user != 'root':
+                cmd = ['sudo', '-H', '-u', sudo_user, pipx_path] + args
+            else:
+                cmd = [pipx_path] + args
+            return subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout_sec,
+            )
+
+        # Step 1: Show RNS version comparison for diagnostics
+        self.ctx.dialog.infobox(
+            "Checking Versions",
+            "Comparing RNS versions (system vs NomadNet venv)...",
+        )
+        versions = self._get_rns_version_info(pipx_path, sudo_user)
+
+        # Step 2: Upgrade NomadNet package
         self.ctx.dialog.infobox(
             "Upgrading NomadNet",
-            "Running pipx upgrade nomadnet...\n"
-            "This may take a minute.",
+            "Running pipx upgrade nomadnet...",
         )
+        try:
+            result = _run_pipx(['upgrade', 'nomadnet'])
+            already_latest = 'already at latest' in (result.stdout + result.stderr).lower()
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox("Error", f"pipx upgrade failed: {e}")
+            return False
 
-        sudo_user = os.environ.get('SUDO_USER')
+        # Step 3: Also upgrade RNS inside the venv
+        # pipx upgrade only upgrades the package itself; if NomadNet
+        # pins an older RNS, the venv RNS stays stale.
+        self.ctx.dialog.infobox(
+            "Upgrading RNS",
+            "Upgrading RNS library inside NomadNet venv...",
+        )
+        try:
+            rns_result = _run_pipx(
+                ['runpip', 'nomadnet', '--', 'install', '--upgrade', 'rns'],
+            )
+            rns_output = (rns_result.stdout + rns_result.stderr).strip()
+            rns_upgraded = rns_result.returncode == 0
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.warning("Failed to upgrade RNS in venv: %s", e)
+            rns_output = str(e)
+            rns_upgraded = False
+
+        # Step 4: Show results
+        new_versions = self._get_rns_version_info(pipx_path, sudo_user)
+        summary_lines = []
+        if versions:
+            summary_lines.append(f"Before: {versions}")
+        if new_versions:
+            summary_lines.append(f"After:  {new_versions}")
+        if rns_upgraded:
+            summary_lines.append("\nRNS upgraded in NomadNet venv.")
+        else:
+            summary_lines.append(f"\nRNS upgrade issue:\n{rns_output[:150]}")
+
+        self.ctx.dialog.msgbox(
+            "Upgrade Complete",
+            "\n".join(summary_lines),
+        )
+        return rns_upgraded
+
+    def _get_rns_version_info(self, pipx_path: str, sudo_user: str) -> str:
+        """Get RNS version comparison: system vs NomadNet venv.
+
+        Returns a short summary string, or empty string on failure.
+        """
+        sys_ver = ''
+        venv_ver = ''
+
+        # System RNS version
+        try:
+            r = subprocess.run(
+                ['pip3', 'show', 'rns'],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in r.stdout.splitlines():
+                if line.startswith('Version:'):
+                    sys_ver = line.split(':', 1)[1].strip()
+                    break
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # Venv RNS version
         try:
             if sudo_user and sudo_user != 'root':
-                result = subprocess.run(
-                    ['sudo', '-H', '-u', sudo_user, pipx_path, 'upgrade', 'nomadnet'],
-                    capture_output=True, text=True, timeout=120,
-                )
+                cmd = ['sudo', '-H', '-u', sudo_user, pipx_path,
+                       'runpip', 'nomadnet', '--', 'show', 'rns']
             else:
-                result = subprocess.run(
-                    [pipx_path, 'upgrade', 'nomadnet'],
-                    capture_output=True, text=True, timeout=120,
-                )
+                cmd = [pipx_path, 'runpip', 'nomadnet', '--', 'show', 'rns']
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=10,
+            )
+            for line in r.stdout.splitlines():
+                if line.startswith('Version:'):
+                    venv_ver = line.split(':', 1)[1].strip()
+                    break
+        except (subprocess.SubprocessError, OSError):
+            pass
 
-            output = (result.stdout + result.stderr).strip()
-            if result.returncode == 0:
-                self.ctx.dialog.msgbox(
-                    "Upgrade Complete",
-                    f"NomadNet has been upgraded.\n\n{output[:200]}",
-                )
-                return True
-            else:
-                self.ctx.dialog.msgbox(
-                    "Upgrade Failed",
-                    f"pipx upgrade nomadnet failed:\n\n{output[:300]}",
-                )
-                return False
-        except subprocess.TimeoutExpired:
-            self.ctx.dialog.msgbox("Timeout", "Upgrade timed out after 2 minutes.")
-            return False
-        except (subprocess.SubprocessError, OSError) as e:
-            self.ctx.dialog.msgbox("Error", f"Upgrade failed: {e}")
-            return False
+        if sys_ver or venv_ver:
+            match = "MATCH" if sys_ver == venv_ver else "MISMATCH"
+            return f"system={sys_ver or '?'} venv={venv_ver or '?'} ({match})"
+        return ''
 
     def _is_nomadnet_installed(self) -> bool:
         """Check if NomadNet is installed."""
