@@ -849,6 +849,9 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._check_rns_for_nomadnet(nn_path=nn_path):
             return
 
+        # Get RNS config path (must match rnsd to prevent config drift)
+        rns_config_path = self._get_rns_config_for_user()
+
         if not self.ctx.dialog.yesno(
             "Start NomadNet Daemon",
             "Start NomadNet in daemon mode (background)?\n\n"
@@ -897,12 +900,43 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                     "Use 'Stop NomadNet' to shut it down.",
                 )
             else:
-                self.ctx.dialog.msgbox(
-                    "Start Failed",
-                    "NomadNet daemon failed to start.\n\n"
-                    "Check logs: ~/.nomadnetwork/logfile\n"
-                    "Or run manually: nomadnet --daemon --console",
-                )
+                # Check log for specific errors to provide better diagnosis
+                user_home = get_real_user_home()
+                logfile = user_home / '.nomadnetwork' / 'logfile'
+                conn_refused = False
+                if logfile.exists():
+                    try:
+                        import collections
+                        with open(logfile, 'r') as f:
+                            last_lines = list(
+                                collections.deque(f, maxlen=10)
+                            )
+                        for line in last_lines:
+                            if 'ConnectionRefusedError' in line or 'Errno 111' in line:
+                                conn_refused = True
+                                break
+                    except OSError:
+                        pass
+
+                if conn_refused:
+                    self.ctx.dialog.msgbox(
+                        "Start Failed — Connection Refused",
+                        "NomadNet daemon crashed: ConnectionRefusedError.\n\n"
+                        "rnsd RPC socket is not accepting connections.\n\n"
+                        "Possible causes:\n"
+                        "  - rnsd not fully initialized yet\n"
+                        "  - RNS version mismatch (pipx vs system)\n"
+                        "  - User/identity mismatch with rnsd\n\n"
+                        "Try: sudo systemctl restart rnsd\n"
+                        "     Then wait 20s and re-launch NomadNet.",
+                    )
+                else:
+                    self.ctx.dialog.msgbox(
+                        "Start Failed",
+                        "NomadNet daemon failed to start.\n\n"
+                        "Check logs: ~/.nomadnetwork/logfile\n"
+                        "Or run manually: nomadnet --daemon --console",
+                    )
         except FileNotFoundError:
             self.ctx.dialog.msgbox("Error", f"NomadNet binary not found at: {nn_path}")
         except Exception as e:
