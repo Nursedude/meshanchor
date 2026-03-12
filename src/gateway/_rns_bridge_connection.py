@@ -255,6 +255,16 @@ class RNSConnectionMixin:
             display_name="MeshForge Gateway"
         )
 
+        # Configure outbound propagation node for store-and-forward
+        prop_node = self.config.rns.propagation_node.strip()
+        if prop_node:
+            try:
+                prop_node_hash = bytes.fromhex(prop_node)
+                self._lxmf_router.set_outbound_propagation_node(prop_node_hash)
+                logger.info("LXMF propagation node set: %s", prop_node)
+            except (ValueError, TypeError) as e:
+                logger.error("Invalid propagation_node hash '%s': %s", prop_node, e)
+
         # Announce presence
         self._lxmf_router.announce(self._lxmf_source.hash)
 
