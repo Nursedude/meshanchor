@@ -205,7 +205,7 @@ class NomadNetRNSChecksMixin:
             "Waiting for rnsd",
             "Waiting for rnsd shared instance (port 37428)...",
         )
-        if not self._wait_for_rns_port(max_wait=15):
+        if not self._wait_for_rns_port(max_wait=20):
             self.ctx.dialog.msgbox(
                 "rnsd Not Ready",
                 "rnsd did not bind port 37428 after restart.\n\n"
@@ -329,9 +329,10 @@ class NomadNetRNSChecksMixin:
         # instance port, so we give it time before declaring failure.
         self.ctx.dialog.infobox(
             "Checking rnsd",
-            "Verifying rnsd shared instance (port 37428)...",
+            "Verifying rnsd shared instance (port 37428)...\n"
+            "This may take up to 20s if interfaces are initializing.",
         )
-        port_listening = self._wait_for_rns_port(max_wait=10)
+        port_listening = self._wait_for_rns_port(max_wait=20)
 
         if not port_listening:
             # rnsd running but not listening -- check for blocking interfaces
