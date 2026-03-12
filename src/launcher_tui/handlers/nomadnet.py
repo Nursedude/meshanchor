@@ -1305,6 +1305,159 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _find_pipx(self) -> str:
+        """Find pipx binary, checking PATH and common locations.
+
+        pipx is often installed to ~/.local/bin which may not be in
+        the current shell's PATH (especially under sudo).
+        Returns the path string, or None if not found.
+        """
+        pipx_path = shutil.which('pipx')
+        if pipx_path:
+            return pipx_path
+        # Check common locations
+        for candidate in [
+            get_real_user_home() / '.local' / 'bin' / 'pipx',
+            Path('/usr/bin/pipx'),
+            Path('/usr/local/bin/pipx'),
+        ]:
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    def _upgrade_nomadnet(self) -> bool:
+        """Upgrade NomadNet and its RNS dependency to fix version mismatches.
+
+        Strategy:
+        1. pipx upgrade nomadnet (upgrades NomadNet + deps)
+        2. If already at latest, also upgrade RNS inside the venv
+           (pipx runpip nomadnet -- install --upgrade rns)
+        3. Show version comparison between venv RNS and system RNS
+
+        Returns True if upgrade succeeded, False otherwise.
+        """
+        pipx_path = self._find_pipx()
+        if not pipx_path:
+            self.ctx.dialog.msgbox(
+                "pipx Not Found",
+                "Cannot find pipx to upgrade NomadNet.\n\n"
+                "Install pipx first:\n"
+                "  sudo apt install pipx\n\n"
+                "Then upgrade:\n"
+                "  pipx upgrade nomadnet",
+            )
+            return False
+
+        sudo_user = os.environ.get('SUDO_USER')
+
+        def _run_pipx(args, timeout_sec=120):
+            """Run pipx command as real user."""
+            if sudo_user and sudo_user != 'root':
+                cmd = ['sudo', '-H', '-u', sudo_user, pipx_path] + args
+            else:
+                cmd = [pipx_path] + args
+            return subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout_sec,
+            )
+
+        # Step 1: Show RNS version comparison for diagnostics
+        self.ctx.dialog.infobox(
+            "Checking Versions",
+            "Comparing RNS versions (system vs NomadNet venv)...",
+        )
+        versions = self._get_rns_version_info(pipx_path, sudo_user)
+
+        # Step 2: Upgrade NomadNet package
+        self.ctx.dialog.infobox(
+            "Upgrading NomadNet",
+            "Running pipx upgrade nomadnet...",
+        )
+        try:
+            result = _run_pipx(['upgrade', 'nomadnet'])
+            already_latest = 'already at latest' in (result.stdout + result.stderr).lower()
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox("Error", f"pipx upgrade failed: {e}")
+            return False
+
+        # Step 3: Also upgrade RNS inside the venv
+        # pipx upgrade only upgrades the package itself; if NomadNet
+        # pins an older RNS, the venv RNS stays stale.
+        self.ctx.dialog.infobox(
+            "Upgrading RNS",
+            "Upgrading RNS library inside NomadNet venv...",
+        )
+        try:
+            rns_result = _run_pipx(
+                ['runpip', 'nomadnet', '--', 'install', '--upgrade', 'rns'],
+            )
+            rns_output = (rns_result.stdout + rns_result.stderr).strip()
+            rns_upgraded = rns_result.returncode == 0
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.warning("Failed to upgrade RNS in venv: %s", e)
+            rns_output = str(e)
+            rns_upgraded = False
+
+        # Step 4: Show results
+        new_versions = self._get_rns_version_info(pipx_path, sudo_user)
+        summary_lines = []
+        if versions:
+            summary_lines.append(f"Before: {versions}")
+        if new_versions:
+            summary_lines.append(f"After:  {new_versions}")
+        if rns_upgraded:
+            summary_lines.append("\nRNS upgraded in NomadNet venv.")
+        else:
+            summary_lines.append(f"\nRNS upgrade issue:\n{rns_output[:150]}")
+
+        self.ctx.dialog.msgbox(
+            "Upgrade Complete",
+            "\n".join(summary_lines),
+        )
+        return rns_upgraded
+
+    def _get_rns_version_info(self, pipx_path: str, sudo_user: str) -> str:
+        """Get RNS version comparison: system vs NomadNet venv.
+
+        Returns a short summary string, or empty string on failure.
+        """
+        sys_ver = ''
+        venv_ver = ''
+
+        # System RNS version
+        try:
+            r = subprocess.run(
+                ['pip3', 'show', 'rns'],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in r.stdout.splitlines():
+                if line.startswith('Version:'):
+                    sys_ver = line.split(':', 1)[1].strip()
+                    break
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        # Venv RNS version
+        try:
+            if sudo_user and sudo_user != 'root':
+                cmd = ['sudo', '-H', '-u', sudo_user, pipx_path,
+                       'runpip', 'nomadnet', '--', 'show', 'rns']
+            else:
+                cmd = [pipx_path, 'runpip', 'nomadnet', '--', 'show', 'rns']
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=10,
+            )
+            for line in r.stdout.splitlines():
+                if line.startswith('Version:'):
+                    venv_ver = line.split(':', 1)[1].strip()
+                    break
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+        if sys_ver or venv_ver:
+            match = "MATCH" if sys_ver == venv_ver else "MISMATCH"
+            return f"system={sys_ver or '?'} venv={venv_ver or '?'} ({match})"
+        return ''
+
     def _is_nomadnet_installed(self) -> bool:
         """Check if NomadNet is installed."""
         if shutil.which('nomadnet'):
