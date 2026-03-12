@@ -725,8 +725,12 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 )
             else:
                 # Broadcast not directly supported in LXMF
-                # Would need group destination or propagation
-                logger.warning("Broadcast to RNS requires propagation node")
+                if self.config.rns.propagation_node:
+                    logger.warning("RNS broadcast via propagation node not yet implemented")
+                else:
+                    logger.warning(
+                        "Broadcast to RNS requires propagation_node in gateway config"
+                    )
                 return False
 
             lxm = LXMF.LXMessage(
