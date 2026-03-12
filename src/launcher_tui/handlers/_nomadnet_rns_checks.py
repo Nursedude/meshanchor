@@ -81,15 +81,16 @@ class NomadNetRNSChecksMixin:
         if not Path(config_dir).exists():
             config_dir = str(get_real_user_home() / '.reticulum')
 
-        # Test RPC using NomadNet's own Python interpreter.
-        # Must call get_interface_stats() — this exercises the actual RPC path
-        # (multiprocessing.connection.Client) that crashes NomadNet, not just
-        # the shared instance connection which can succeed independently.
+        # Test shared instance connection using NomadNet's own Python.
+        # Only test is_connected_to_shared_instance — NOT get_interface_stats().
+        # The RPC management socket (multiprocessing.connection) is separate
+        # from the shared instance socket and may be broken (rnsd RPC listener
+        # not running) even when the shared instance works fine. NomadNet needs
+        # the shared instance, not the management RPC.
         rpc_snippet = (
             "import RNS; "
             f"r = RNS.Reticulum(configdir='{config_dir}'); "
-            "stats = r.get_interface_stats(); "
-            "print('connected' if stats is not None else 'standalone')"
+            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
@@ -120,11 +121,20 @@ class NomadNetRNSChecksMixin:
             logger.debug("NomadNet venv RPC check passed")
             return True
 
-        # RPC failed via NomadNet's Python — check if system rnstatus works
+        # RPC failed via NomadNet's Python — diagnose root cause.
+        # Common cause: Python version mismatch between NomadNet venv
+        # (e.g. 3.13) and system rnsd (e.g. 3.11). The multiprocessing
+        # .connection authentication protocol is incompatible across
+        # Python major.minor versions, causing ConnectionRefusedError
+        # even when RNS versions match and users match.
         logger.warning(
             "NomadNet venv RPC check failed: rc=%d stderr=%s",
             result.returncode, result.stderr.strip()[:200],
         )
+
+        # Detect Python version mismatch
+        py_mismatch = self._detect_python_version_mismatch(venv_python)
+
         system_rpc_ok = False
         try:
             sys_result = subprocess.run(
@@ -134,16 +144,31 @@ class NomadNetRNSChecksMixin:
         except (subprocess.SubprocessError, OSError, FileNotFoundError):
             pass
 
-        if system_rpc_ok:
-            # System RNS works but NomadNet's doesn't → version mismatch
+        if py_mismatch:
+            # Python version mismatch — RPC check is unreliable,
+            # make this advisory (default to continue).
+            return self.ctx.dialog.yesno(
+                "Python Version Mismatch",
+                f"NomadNet uses {py_mismatch[0]} but rnsd uses\n"
+                f"{py_mismatch[1]}.\n\n"
+                "Python's multiprocessing.connection protocol is\n"
+                "incompatible across versions. NomadNet may crash\n"
+                "with ConnectionRefusedError during UI startup.\n\n"
+                "Fix: Install NomadNet with matching Python, or\n"
+                "rebuild rnsd to use NomadNet's Python version.\n\n"
+                "Launch NomadNet anyway?",
+            )
+        elif system_rpc_ok:
+            # System RNS works but NomadNet's doesn't
             choice = self.ctx.dialog.menu(
-                "RNS Version Mismatch",
+                "RNS RPC Mismatch",
                 "System rnstatus connects to rnsd, but NomadNet's\n"
-                "bundled RNS library cannot (version mismatch).\n\n"
-                "NomadNet will crash with ConnectionRefusedError.",
+                "bundled RNS cannot.\n\n"
+                "NomadNet may crash with ConnectionRefusedError.",
                 [
-                    ("restart", "Restart rnsd and retry (recommended)"),
-                    ("continue", "Continue anyway (will likely crash)"),
+                    ("continue", "Launch NomadNet anyway (recommended)"),
+                    ("upgrade", "Upgrade NomadNet RNS"),
+                    ("restart", "Restart rnsd and retry"),
                     ("cancel", "Cancel"),
                 ],
             )
@@ -155,18 +180,46 @@ class NomadNetRNSChecksMixin:
                 "connect to the rnsd shared instance.\n\n"
                 "The rnsd RPC socket may be broken or not ready.",
                 [
-                    ("restart", "Restart rnsd and retry (recommended)"),
-                    ("continue", "Continue anyway"),
+                    ("continue", "Launch NomadNet anyway"),
+                    ("upgrade", "Upgrade NomadNet RNS"),
+                    ("restart", "Restart rnsd and retry"),
                     ("cancel", "Cancel"),
                 ],
             )
 
-        if choice == "restart":
+        if choice == "upgrade":
+            if self._upgrade_nomadnet():
+                return self._restart_rnsd_and_verify_rpc(nn_path)
+            return False
+        elif choice == "restart":
             return self._restart_rnsd_and_verify_rpc(nn_path)
         elif choice == "continue":
             return True
         else:
             return False
+
+    def _detect_python_version_mismatch(self, venv_python: str):
+        """Check if NomadNet venv Python differs from system Python.
+
+        Returns (venv_ver, system_ver) tuple if mismatched, None if same.
+        multiprocessing.connection is incompatible across Python versions.
+        """
+        try:
+            venv_r = subprocess.run(
+                [venv_python, '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
+                capture_output=True, text=True, timeout=5,
+            )
+            sys_r = subprocess.run(
+                ['/usr/bin/python3', '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
+                capture_output=True, text=True, timeout=5,
+            )
+            venv_ver = venv_r.stdout.strip()
+            sys_ver = sys_r.stdout.strip()
+            if venv_ver and sys_ver and venv_ver != sys_ver:
+                return (f"Python {venv_ver}", f"Python {sys_ver}")
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("Python version comparison failed: %s", e)
+        return None
 
     def _restart_rnsd_and_verify_rpc(self, nn_path: str = None) -> bool:
         """Restart rnsd and verify RPC becomes available.
@@ -219,14 +272,39 @@ class NomadNetRNSChecksMixin:
         if nn_path:
             rpc_ok = self._test_rpc_silent(nn_path)
             if not rpc_ok:
-                return self.ctx.dialog.yesno(
+                choice = self.ctx.dialog.menu(
                     "RPC Still Failing",
                     "rnsd restarted but NomadNet's RNS still cannot\n"
                     "connect via RPC.\n\n"
-                    "This is usually an RNS version mismatch:\n"
-                    "  pipx upgrade nomadnet\n\n"
-                    "Launch NomadNet anyway?",
+                    "This is usually an RNS version mismatch.",
+                    [
+                        ("upgrade", "Upgrade NomadNet (recommended)"),
+                        ("continue", "Launch NomadNet anyway"),
+                        ("cancel", "Cancel"),
+                    ],
                 )
+                if choice == "upgrade":
+                    if self._upgrade_nomadnet():
+                        # Re-test after upgrade
+                        rpc_ok = self._test_rpc_silent(nn_path)
+                        if rpc_ok:
+                            self.ctx.dialog.msgbox(
+                                "RPC Fixed",
+                                "NomadNet upgrade fixed the RPC connection.\n\n"
+                                "NomadNet should now connect successfully.",
+                            )
+                            return True
+                        # Still failing after upgrade — let user decide
+                        return self.ctx.dialog.yesno(
+                            "Still Failing",
+                            "RPC still fails after upgrade.\n\n"
+                            "Launch NomadNet anyway?",
+                        )
+                    return False
+                elif choice == "continue":
+                    return True
+                else:
+                    return False
 
         self.ctx.dialog.msgbox(
             "rnsd Restarted",
@@ -236,10 +314,10 @@ class NomadNetRNSChecksMixin:
         return True
 
     def _test_rpc_silent(self, nn_path: str) -> bool:
-        """Silent RPC connectivity test — no dialogs, just pass/fail.
+        """Silent shared instance connectivity test — no dialogs, just pass/fail.
 
         Used after rnsd restart to avoid recursive dialog loops.
-        Returns True if NomadNet's venv RNS can connect to rnsd RPC.
+        Returns True if NomadNet's venv RNS can connect to the shared instance.
         """
         venv_python = self._get_nomadnet_venv_python(nn_path)
         if not venv_python:
@@ -252,8 +330,7 @@ class NomadNetRNSChecksMixin:
         rpc_snippet = (
             "import RNS; "
             f"r = RNS.Reticulum(configdir='{config_dir}'); "
-            "stats = r.get_interface_stats(); "
-            "print('connected' if stats is not None else 'standalone')"
+            "print('connected' if r.is_connected_to_shared_instance else 'standalone')"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
