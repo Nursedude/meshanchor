@@ -4,12 +4,17 @@ RNS Interfaces Handler — RNS network interface CRUD management.
 Converted from rns_interfaces_mixin.py as part of the mixin-to-registry migration.
 """
 
+import os
 import re
 import logging
+import shutil
+import subprocess
+from pathlib import Path
 
 from handler_protocol import BaseHandler
 from backend import clear_screen
 from commands import rns as rns_mod
+from utils.paths import get_real_user_home, ReticulumPaths
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ class RNSInterfacesHandler(BaseHandler):
                 ("enable", "Enable Interface"),
                 ("disable", "Disable Interface"),
                 ("remove", "Remove Interface"),
+                ("fix_ownership", "Fix RNS File Ownership"),
                 ("plugin", "Install Meshtastic Plugin"),
                 ("back", "Back"),
             ]
@@ -72,6 +78,7 @@ class RNSInterfacesHandler(BaseHandler):
                 "enable": ("Enable Interface", lambda: self._rns_toggle_interface(enable=True)),
                 "disable": ("Disable Interface", lambda: self._rns_toggle_interface(enable=False)),
                 "remove": ("Remove Interface", self._rns_remove_interface),
+                "fix_ownership": ("Fix Ownership", self._fix_rns_ownership),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -83,8 +90,6 @@ class RNSInterfacesHandler(BaseHandler):
 
     def _rns_interface_status(self):
         """Show live interface status: config + blocking reasons + TX/RX."""
-        import subprocess
-        from pathlib import Path
         from ._rns_interface_mgr import find_blocking_interfaces
         from ._rns_diagnostics_engine import check_rns_interface_health
         from utils.service_check import (
@@ -270,6 +275,25 @@ class RNSInterfacesHandler(BaseHandler):
                     clear_screen()
                     diag._repair_rns_shared_instance()
 
+        # NomadNet connectivity check (only when rnsd is healthy)
+        if si_available:
+            nn_path, venv_python = self._find_nomadnet_info()
+            if nn_path and venv_python:
+                print(f"\n  NomadNet Connectivity:")
+                print(f"    Binary: {nn_path}")
+                status, detail, debug_lines = self._test_nomadnet_connectivity(
+                    venv_python,
+                )
+                if status == 'connected':
+                    print(f"    Shared Instance: CONNECTED")
+                else:
+                    print(f"    Shared Instance: {status.upper()} — {detail}")
+                    if debug_lines:
+                        print(f"\n    RNS debug log:")
+                        for line in debug_lines[-8:]:
+                            print(f"      {line[:90]}")
+                    print(f"\n    Try: Fix RNS File Ownership (in this menu)")
+
         self.ctx.wait_for_enter()
 
     def _match_live_health(self, config_name: str, iface_type: str,
@@ -291,6 +315,193 @@ class RNSInterfacesHandler(BaseHandler):
                 return data
 
         return {}
+
+    # ------------------------------------------------------------------
+    # NomadNet connectivity helpers
+    # ------------------------------------------------------------------
+
+    def _find_nomadnet_info(self):
+        """Find NomadNet binary and its venv Python (if pipx-installed).
+
+        Returns (nn_path, venv_python) or (None, None).
+        """
+        nn_path = shutil.which('nomadnet')
+        if not nn_path:
+            user_home = get_real_user_home()
+            for p in [user_home / '.local' / 'bin' / 'nomadnet',
+                      Path('/usr/local/bin/nomadnet')]:
+                if p.exists():
+                    nn_path = str(p)
+                    break
+        if not nn_path:
+            return None, None
+        # Resolve symlink to find venv python3
+        try:
+            venv_bin = Path(nn_path).resolve().parent
+            candidate = venv_bin / 'python3'
+            if candidate.exists():
+                return nn_path, str(candidate)
+            candidate = venv_bin / 'python'
+            if candidate.exists():
+                return nn_path, str(candidate)
+        except (OSError, ValueError):
+            pass
+        # Fallback to system python
+        sys_python = shutil.which('python3')
+        return nn_path, sys_python
+
+    def _test_nomadnet_connectivity(self, venv_python):
+        """Test if NomadNet's RNS can connect to rnsd shared instance.
+
+        Uses RNS loglevel=6 (Debug) to capture the actual failure reason.
+
+        Returns (status, detail, debug_lines):
+            status: 'connected', 'standalone', or 'error'
+            detail: human-readable explanation
+            debug_lines: list of RNS debug log lines from stderr
+        """
+        config_dir = '/etc/reticulum'
+        if not Path(config_dir).exists():
+            config_dir = str(get_real_user_home() / '.reticulum')
+
+        snippet = (
+            "import RNS,sys; "
+            f"r = RNS.Reticulum(configdir='{config_dir}', loglevel=6); "
+            "s = 'connected' if r.is_connected_to_shared_instance else 'standalone'; "
+            "print(s); r.__exit_handler()"
+        )
+
+        sudo_user = os.environ.get('SUDO_USER')
+        try:
+            if sudo_user and sudo_user != 'root':
+                cmd = ['sudo', '-u', sudo_user, '-H',
+                       venv_python, '-c', snippet]
+            else:
+                cmd = [venv_python, '-c', snippet]
+
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15,
+            )
+            debug_lines = [
+                line.strip() for line in r.stderr.splitlines()
+                if line.strip()
+            ] if r.stderr else []
+
+            if r.returncode == 0 and 'connected' in r.stdout:
+                return 'connected', 'shared instance OK', debug_lines
+            elif r.returncode == 0 and 'standalone' in r.stdout:
+                return 'standalone', 'NOT connected to rnsd', debug_lines
+            else:
+                err = r.stderr.strip()[:100] if r.stderr else 'unknown'
+                return 'error', err, debug_lines
+        except subprocess.TimeoutExpired:
+            return 'error', 'timed out (15s)', []
+        except (subprocess.SubprocessError, OSError) as e:
+            return 'error', str(e)[:100], []
+
+    # ------------------------------------------------------------------
+    # Fix RNS file ownership
+    # ------------------------------------------------------------------
+
+    def _fix_rns_ownership(self):
+        """Audit and fix ownership/permissions on all RNS-related paths.
+
+        Addresses the root/user ownership mismatch caused by MeshForge
+        running with sudo while rnsd and NomadNet run as the real user.
+        """
+        import stat
+
+        clear_screen()
+        print("=== Fix RNS File Ownership ===\n")
+
+        sudo_user = os.environ.get('SUDO_USER')
+        user_home = get_real_user_home()
+        issues_found = 0
+        issues_fixed = 0
+
+        # 1. Fix /etc/reticulum/ — identity and config world-readable,
+        #    storage world-read/write
+        etc_rns = ReticulumPaths.ETC_BASE
+        if etc_rns.is_dir():
+            print(f"  Checking {etc_rns}/...")
+
+            # Identity and config: ensure world-readable
+            for fname in ('identity', 'config'):
+                fpath = etc_rns / fname
+                if fpath.exists():
+                    try:
+                        mode = fpath.stat().st_mode
+                        if not (mode & stat.S_IROTH):
+                            issues_found += 1
+                            fpath.chmod(mode | stat.S_IROTH | stat.S_IRGRP)
+                            issues_fixed += 1
+                            print(f"    Fixed: {fname} → world-readable")
+                        else:
+                            print(f"    OK: {fname}")
+                    except (PermissionError, OSError) as e:
+                        issues_found += 1
+                        print(f"    FAIL: {fname} — {e}")
+
+            # Storage: world-read/write (files 0o666, dirs 0o777)
+            try:
+                ReticulumPaths._fix_storage_file_permissions()
+                print(f"    OK: storage/ — permissions fixed")
+            except Exception as e:
+                print(f"    FAIL: storage/ — {e}")
+
+        # 2. Fix ~/.reticulum/ — should be owned by user, not root
+        user_rns_dirs = [
+            user_home / '.reticulum',
+            user_home / '.nomadnetwork',
+            user_home / '.config' / 'nomadnetwork',
+        ]
+        for dir_path in user_rns_dirs:
+            if dir_path.exists():
+                try:
+                    st = dir_path.stat()
+                    if st.st_uid == 0 and sudo_user and sudo_user != 'root':
+                        issues_found += 1
+                        subprocess.run(
+                            ['chown', '-R', f'{sudo_user}:{sudo_user}',
+                             str(dir_path)],
+                            capture_output=True, timeout=30,
+                        )
+                        issues_fixed += 1
+                        print(f"    Fixed: {dir_path} → owned by {sudo_user}")
+                    else:
+                        print(f"    OK: {dir_path}")
+                except (PermissionError, OSError, subprocess.SubprocessError) as e:
+                    issues_found += 1
+                    print(f"    FAIL: {dir_path} — {e}")
+
+        print(f"\n  Issues found: {issues_found}")
+        print(f"  Issues fixed: {issues_fixed}")
+
+        if issues_fixed > 0:
+            print(f"\n  Restart rnsd to apply: sudo systemctl restart rnsd")
+            if self.ctx.dialog.yesno(
+                "Restart rnsd?",
+                f"Fixed {issues_fixed} permission issue(s).\n\n"
+                f"Restart rnsd to regenerate auth tokens\n"
+                f"with correct ownership?",
+            ):
+                from utils.service_check import stop_service, start_service
+                print(f"\n  Restarting rnsd...")
+                stop_service('rnsd')
+                import time
+                time.sleep(1)
+                start_service('rnsd')
+                time.sleep(2)
+                # Fix permissions on newly-created auth tokens
+                try:
+                    ReticulumPaths._fix_storage_file_permissions()
+                except Exception:
+                    pass
+                print(f"  rnsd restarted and permissions re-applied")
+        elif issues_found == 0:
+            print(f"\n  All files have correct ownership and permissions.")
+
+        self.ctx.wait_for_enter()
 
     # ------------------------------------------------------------------
     # List interfaces
