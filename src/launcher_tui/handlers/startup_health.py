@@ -22,13 +22,6 @@ try:
 except ImportError:
     _HAS_SERVICE_CHECK = False
 
-try:
-    from utils.service_check import lock_port_external
-    _HAS_PORT_LOCK = True
-except ImportError:
-    _HAS_PORT_LOCK = False
-
-
 class StartupHealthHandler(BaseHandler):
     """Pre-main-menu config sanity checks.
 
@@ -50,23 +43,6 @@ class StartupHealthHandler(BaseHandler):
     def on_startup(self):
         """Run pre-main-menu health checks."""
         self._check_service_misconfig()
-
-    def auto_lock_port(self):
-        """Auto-lock port 9443 so meshtasticd web is MeshForge-only.
-
-        Silent operation — logs result but no dialogs on failure.
-        Called after startup_all() when daemon is not active.
-        """
-        if not _HAS_PORT_LOCK:
-            return
-        try:
-            success, msg = lock_port_external(9443)
-            if success:
-                logger.info("Startup port lock: %s", msg)
-            else:
-                logger.warning("Startup port lock failed: %s", msg)
-        except Exception as e:
-            logger.debug("Auto port lock error: %s", e)
 
     # -- Internal --
 

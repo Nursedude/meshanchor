@@ -2,7 +2,7 @@
 Unit tests for StartupHealthHandler.
 
 Tests structure, lifecycle hooks, config conflict detection,
-SPI mismatch detection, and auto port locking.
+and SPI mismatch detection.
 """
 
 import os
@@ -60,39 +60,6 @@ class TestStartupHealthLifecycle:
         with patch.object(h, '_check_service_misconfig') as mock:
             h.on_startup()
             mock.assert_called_once()
-
-
-# ── Auto Port Lock ──────────────────────────────────────────────────
-
-
-class TestStartupHealthAutoPortLock:
-
-    @patch('handlers.startup_health._HAS_PORT_LOCK', False)
-    def test_auto_lock_no_module(self):
-        h = _make_handler()
-        h.auto_lock_port()  # Should not raise
-
-    @patch('handlers.startup_health._HAS_PORT_LOCK', True)
-    @patch('handlers.startup_health.lock_port_external')
-    def test_auto_lock_success(self, mock_lock):
-        mock_lock.return_value = (True, "Locked 9443")
-        h = _make_handler()
-        h.auto_lock_port()
-        mock_lock.assert_called_once_with(9443)
-
-    @patch('handlers.startup_health._HAS_PORT_LOCK', True)
-    @patch('handlers.startup_health.lock_port_external')
-    def test_auto_lock_failure_silent(self, mock_lock):
-        mock_lock.return_value = (False, "Already locked")
-        h = _make_handler()
-        h.auto_lock_port()  # Should not raise
-
-    @patch('handlers.startup_health._HAS_PORT_LOCK', True)
-    @patch('handlers.startup_health.lock_port_external')
-    def test_auto_lock_exception_silent(self, mock_lock):
-        mock_lock.side_effect = OSError("Permission denied")
-        h = _make_handler()
-        h.auto_lock_port()  # Should not raise
 
 
 # ── Config Misconfig Detection ──────────────────────────────────────
