@@ -510,7 +510,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             return
 
         # Check if rnsd is running (NomadNet needs RNS)
-        if not self._check_rns_for_nomadnet():
+        if not self._check_rns_for_nomadnet(nn_path=nn_path):
             return
 
         # Check if we need to use a specific RNS config path
@@ -596,7 +596,27 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
 
                 # Look for known error patterns
                 for line in last_lines:
-                    if 'AuthenticationError' in line or 'digest sent was rejected' in line:
+                    if 'ConnectionRefusedError' in line or 'Errno 111' in line:
+                        error_hints.append("RPC connection to rnsd refused (Errno 111)")
+                        rnsd_user = self._get_rnsd_user()
+                        if not rnsd_user:
+                            error_hints.append("rnsd is NOT running — NomadNet cannot connect")
+                            error_hints.append("Fix: sudo systemctl start rnsd")
+                            error_hints.append("     Then wait a few seconds and retry")
+                        else:
+                            if rnsd_user == 'root' and sudo_user and sudo_user != 'root':
+                                error_hints.append(f"rnsd runs as root, NomadNet as '{sudo_user}'")
+                                error_hints.append("Different users = different RNS identities")
+                                error_hints.append("Fix: stop rnsd, reconfigure to run as your user")
+                            else:
+                                error_hints.append("rnsd is running but RPC socket refused connection")
+                                error_hints.append("Possible causes:")
+                                error_hints.append("  - RNS version mismatch (pipx venv vs system)")
+                                error_hints.append("  - Stale auth tokens after rnsd restart")
+                                error_hints.append("Verify: rnstatus")
+                                error_hints.append("Fix: pipx upgrade nomadnet && sudo systemctl restart rnsd")
+                        break
+                    elif 'AuthenticationError' in line or 'digest sent was rejected' in line:
                         error_hints.append("RPC authentication failed between NomadNet and rnsd")
                         # Check if rnsd is running as root
                         rnsd_user = self._get_rnsd_user()
@@ -803,7 +823,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
         if not self._fix_user_directory_ownership():
             return
 
-        if not self._check_rns_for_nomadnet():
+        if not self._check_rns_for_nomadnet(nn_path=nn_path):
             return
 
         if not self.ctx.dialog.yesno(
