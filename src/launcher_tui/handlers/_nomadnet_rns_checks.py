@@ -142,7 +142,8 @@ class NomadNetRNSChecksMixin:
                 "bundled RNS library cannot (version mismatch).\n\n"
                 "NomadNet will crash with ConnectionRefusedError.",
                 [
-                    ("restart", "Restart rnsd and retry (recommended)"),
+                    ("upgrade", "Upgrade NomadNet (recommended)"),
+                    ("restart", "Restart rnsd and retry"),
                     ("continue", "Continue anyway (will likely crash)"),
                     ("cancel", "Cancel"),
                 ],
@@ -155,13 +156,19 @@ class NomadNetRNSChecksMixin:
                 "connect to the rnsd shared instance.\n\n"
                 "The rnsd RPC socket may be broken or not ready.",
                 [
-                    ("restart", "Restart rnsd and retry (recommended)"),
+                    ("upgrade", "Upgrade NomadNet (recommended)"),
+                    ("restart", "Restart rnsd and retry"),
                     ("continue", "Continue anyway"),
                     ("cancel", "Cancel"),
                 ],
             )
 
-        if choice == "restart":
+        if choice == "upgrade":
+            if self._upgrade_nomadnet():
+                # Re-check after upgrade
+                return self._restart_rnsd_and_verify_rpc(nn_path)
+            return False
+        elif choice == "restart":
             return self._restart_rnsd_and_verify_rpc(nn_path)
         elif choice == "continue":
             return True
@@ -219,14 +226,39 @@ class NomadNetRNSChecksMixin:
         if nn_path:
             rpc_ok = self._test_rpc_silent(nn_path)
             if not rpc_ok:
-                return self.ctx.dialog.yesno(
+                choice = self.ctx.dialog.menu(
                     "RPC Still Failing",
                     "rnsd restarted but NomadNet's RNS still cannot\n"
                     "connect via RPC.\n\n"
-                    "This is usually an RNS version mismatch:\n"
-                    "  pipx upgrade nomadnet\n\n"
-                    "Launch NomadNet anyway?",
+                    "This is usually an RNS version mismatch.",
+                    [
+                        ("upgrade", "Upgrade NomadNet (recommended)"),
+                        ("continue", "Launch NomadNet anyway"),
+                        ("cancel", "Cancel"),
+                    ],
                 )
+                if choice == "upgrade":
+                    if self._upgrade_nomadnet():
+                        # Re-test after upgrade
+                        rpc_ok = self._test_rpc_silent(nn_path)
+                        if rpc_ok:
+                            self.ctx.dialog.msgbox(
+                                "RPC Fixed",
+                                "NomadNet upgrade fixed the RPC connection.\n\n"
+                                "NomadNet should now connect successfully.",
+                            )
+                            return True
+                        # Still failing after upgrade — let user decide
+                        return self.ctx.dialog.yesno(
+                            "Still Failing",
+                            "RPC still fails after upgrade.\n\n"
+                            "Launch NomadNet anyway?",
+                        )
+                    return False
+                elif choice == "continue":
+                    return True
+                else:
+                    return False
 
         self.ctx.dialog.msgbox(
             "rnsd Restarted",
