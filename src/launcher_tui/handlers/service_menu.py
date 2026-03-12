@@ -25,6 +25,8 @@ from utils.service_check import (
     apply_config_and_restart, enable_service, start_service, stop_service,
     restart_service, ServiceState, _sudo_cmd, check_udp_port,
     check_rns_shared_instance,
+)
+from utils._service_iptables import (
     lock_port_external, unlock_port_external,
     check_port_locked, persist_iptables,
 )

@@ -78,11 +78,6 @@ __all__ = [
     'stop_service',              # Stop a systemd service
     'restart_service',           # Restart a systemd service
     'apply_config_and_restart',  # Reload daemon + restart service
-    # Port lockdown (MeshForge owns the browser)
-    'lock_port_external',        # Block external access to a port
-    'unlock_port_external',      # Restore external access to a port
-    'check_port_locked',         # Check if port is locked to localhost
-    'persist_iptables',          # Save iptables rules to survive reboot
     # Privilege elevation & file I/O
     '_sudo_cmd',            # Prefix command with sudo when not root
     '_sudo_write',          # Write file content with privilege elevation
@@ -941,8 +936,3 @@ def _sudo_write(file_path: str, content: str, timeout: int = 10) -> Tuple[bool, 
         logger.error(f"Error writing {file_path}: {e}")
         return False, f"Error: {e}"
 
-
-# Port lockdown functions extracted to _service_iptables.py — re-exported for backward compat
-from utils._service_iptables import (  # noqa: F401, E402
-    lock_port_external, unlock_port_external, check_port_locked, persist_iptables,
-)
