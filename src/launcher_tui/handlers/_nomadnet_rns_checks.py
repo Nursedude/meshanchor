@@ -18,8 +18,8 @@ from utils.paths import ReticulumPaths, get_real_user_home
 
 from utils.safe_import import safe_import
 
-stop_service, _HAS_SERVICE_CHECK = safe_import(
-    'utils.service_check', 'stop_service'
+start_service, stop_service, _HAS_SERVICE_CHECK = safe_import(
+    'utils.service_check', 'start_service', 'stop_service'
 )
 
 logger = logging.getLogger(__name__)
@@ -136,25 +136,99 @@ class NomadNetRNSChecksMixin:
 
         if system_rpc_ok:
             # System RNS works but NomadNet's doesn't → version mismatch
-            return self.ctx.dialog.yesno(
+            choice = self.ctx.dialog.menu(
                 "RNS Version Mismatch",
                 "System rnstatus connects to rnsd, but NomadNet's\n"
                 "bundled RNS library cannot (version mismatch).\n\n"
-                "NomadNet will likely crash with ConnectionRefusedError.\n\n"
-                "Fix: pipx upgrade nomadnet\n"
-                "     (updates NomadNet's bundled RNS to match system)\n\n"
-                "Continue anyway?",
+                "NomadNet will crash with ConnectionRefusedError.",
+                [
+                    ("restart", "Restart rnsd and retry (recommended)"),
+                    ("continue", "Continue anyway (will likely crash)"),
+                    ("cancel", "Cancel"),
+                ],
             )
         else:
             # Both fail — rnsd RPC issue
-            return self.ctx.dialog.yesno(
+            choice = self.ctx.dialog.menu(
                 "RNS RPC Unavailable",
                 "Neither NomadNet's RNS nor system rnstatus can\n"
                 "connect to the rnsd shared instance.\n\n"
-                "The rnsd RPC socket may be broken or not ready.\n\n"
-                "Fix: sudo systemctl restart rnsd\n\n"
-                "Continue anyway?",
+                "The rnsd RPC socket may be broken or not ready.",
+                [
+                    ("restart", "Restart rnsd and retry (recommended)"),
+                    ("continue", "Continue anyway"),
+                    ("cancel", "Cancel"),
+                ],
             )
+
+        if choice == "restart":
+            return self._restart_rnsd_and_verify_rpc(nn_path)
+        elif choice == "continue":
+            return True
+        else:
+            return False
+
+    def _restart_rnsd_and_verify_rpc(self, nn_path: str = None) -> bool:
+        """Restart rnsd and verify RPC becomes available.
+
+        Stops rnsd, restarts it, waits for port 37428, then re-runs
+        the venv-aware RPC check. Returns True if RPC is now working.
+        """
+        self.ctx.dialog.infobox("Restarting rnsd", "Stopping rnsd...")
+        try:
+            if _HAS_SERVICE_CHECK and stop_service:
+                stop_service('rnsd')
+            subprocess.run(
+                ['pkill', '-f', 'rnsd'], capture_output=True, timeout=5
+            )
+            time.sleep(1)
+        except Exception as e:
+            logger.warning("Failed to stop rnsd: %s", e)
+
+        self.ctx.dialog.infobox("Restarting rnsd", "Starting rnsd...")
+        try:
+            if _HAS_SERVICE_CHECK and start_service:
+                start_service('rnsd')
+            else:
+                subprocess.run(
+                    ['sudo', 'systemctl', 'start', 'rnsd'],
+                    capture_output=True, timeout=10,
+                )
+        except Exception as e:
+            self.ctx.dialog.msgbox(
+                "Restart Failed", f"Could not start rnsd: {e}"
+            )
+            return False
+
+        # Wait for port 37428
+        self.ctx.dialog.infobox(
+            "Waiting for rnsd",
+            "Waiting for rnsd shared instance (port 37428)...",
+        )
+        if not self._wait_for_rns_port(max_wait=15):
+            self.ctx.dialog.msgbox(
+                "rnsd Not Ready",
+                "rnsd did not bind port 37428 after restart.\n\n"
+                "Check: sudo journalctl -u rnsd -n 30",
+            )
+            return False
+
+        # Re-verify RPC with NomadNet's venv
+        if nn_path and not self._check_rpc_with_nomadnet_venv(nn_path):
+            self.ctx.dialog.msgbox(
+                "RPC Still Failing",
+                "rnsd restarted but RPC check still fails.\n\n"
+                "Try: pipx upgrade nomadnet\n"
+                "     sudo systemctl restart rnsd",
+            )
+            return False
+
+        self.ctx.dialog.msgbox(
+            "rnsd Restarted",
+            "rnsd has been restarted and RPC is working.\n\n"
+            "NomadNet should now connect successfully.",
+        )
+        return True
 
     def _check_rns_for_nomadnet(self, nn_path: str = None) -> bool:
         """Check that RNS/rnsd is available and properly configured.
