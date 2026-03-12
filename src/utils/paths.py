@@ -211,6 +211,22 @@ class ReticulumPaths:
         except (PermissionError, OSError):
             pass  # Best effort
 
+        # Also fix files in the config directory itself (identity, config).
+        # NomadNet and other RNS clients need to read the identity file to
+        # authenticate with rnsd's shared instance.  If the identity was
+        # created by root (via sudo MeshForge), non-root users can't read
+        # it and RNS generates a different identity → auth mismatch.
+        for fname in ('identity', 'config'):
+            fpath = cls.ETC_BASE / fname
+            try:
+                if fpath.exists():
+                    current = fpath.stat().st_mode
+                    # Make world-readable (not writable — only rnsd writes)
+                    if not (current & stat.S_IROTH):
+                        fpath.chmod(current | stat.S_IROTH | stat.S_IRGRP)
+            except (PermissionError, OSError):
+                pass
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get Reticulum config directory.

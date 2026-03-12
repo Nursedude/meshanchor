@@ -354,6 +354,17 @@ def repair_rns_shared_instance(handler) -> bool:
     except Exception as e:
         print(f"  Warning: {e}")
 
+    # Fix permissions on files rnsd just created (auth tokens, caches).
+    # This must run AFTER rnsd start so newly-created shared_instance_*
+    # files and identity are covered.  Without this, NomadNet (running as
+    # a non-root user) cannot read the auth tokens → auth mismatch.
+    try:
+        time.sleep(1)  # brief delay for rnsd to create files
+        ReticulumPaths._fix_storage_file_permissions()
+        print("  Fixed file permissions for shared access")
+    except Exception as e:
+        logger.debug("Post-restart permission fix: %s", e)
+
     # Step 5: Verify shared instance
     print(f"\n[5/5] Verifying shared instance...")
     print("  Waiting for rnsd shared instance...")
