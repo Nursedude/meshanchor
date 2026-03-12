@@ -83,6 +83,8 @@ class RNSInterfacesHandler(BaseHandler):
 
     def _rns_interface_status(self):
         """Show live interface status: config + blocking reasons + TX/RX."""
+        import subprocess
+        from pathlib import Path
         from ._rns_interface_mgr import find_blocking_interfaces
         from ._rns_diagnostics_engine import check_rns_interface_health
         from utils.service_check import (
@@ -101,7 +103,21 @@ class RNSInterfacesHandler(BaseHandler):
         if rnsd_running and si_available:
             print(f"  RNS Instance: rnsd — shared instance available")
         elif rnsd_running:
-            print(f"  RNS Instance: rnsd — running but shared instance NOT available")
+            # Degraded state: rnsd running but shared instance not responding
+            # Check abstract Unix socket for more specific diagnosis
+            unix_socket_exists = False
+            try:
+                proc_unix = Path('/proc/net/unix').read_text()
+                unix_socket_exists = (
+                    '@rns/default' in proc_unix
+                    or 'rns/default' in proc_unix
+                )
+            except (OSError, PermissionError):
+                pass
+            if unix_socket_exists:
+                print(f"  RNS Instance: rnsd — DEGRADED (socket exists, auth may be stale)")
+            else:
+                print(f"  RNS Instance: rnsd — DEGRADED (socket missing, may be hung)")
         else:
             # Check if NomadNet or Sideband is serving as shared instance
             port_owner = None
@@ -222,7 +238,37 @@ class RNSInterfacesHandler(BaseHandler):
         if not rnsd_running:
             print(f"\n  Start rnsd: sudo systemctl start rnsd")
         elif not si_available:
-            print(f"\n  Shared instance not available. Run: RNS > Diagnostics")
+            # Degraded state: show journal tail for immediate visibility
+            print(f"\n  rnsd is running but shared instance is NOT responding.")
+            print(f"  Common causes: stale auth tokens, config drift, hung interface.")
+            try:
+                r = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '5',
+                     '--no-pager', '-q', '--no-hostname'],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if r.stdout and r.stdout.strip():
+                    print(f"\n  Recent rnsd log:")
+                    for line in r.stdout.strip().splitlines():
+                        print(f"    {line.strip()[:90]}")
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+            # Offer repair wizard via cross-handler dispatch
+            diag = (self.ctx.registry.get_handler("rns_diagnostics")
+                    if self.ctx.registry else None)
+            if diag:
+                print()
+                if self.ctx.dialog.yesno(
+                    "Repair Shared Instance",
+                    "rnsd is running but the shared instance is not\n"
+                    "responding. This prevents NomadNet, rnstatus, and\n"
+                    "all RNS tools from connecting.\n\n"
+                    "Run the repair wizard?\n"
+                    "(Clears stale auth, checks config, restarts rnsd)",
+                ):
+                    clear_screen()
+                    diag._repair_rns_shared_instance()
 
         self.ctx.wait_for_enter()
 
