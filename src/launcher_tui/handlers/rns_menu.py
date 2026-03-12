@@ -29,7 +29,7 @@ _RNS_ORDERING = [
     "status", "monitor", "paths", "sniffer",
     "probe", "identity", "nodes", "positions",
     "diag", "repair", "drift",
-    "ifaces", "config", "edit", "check",
+    "ifaces", "config", "edit", "logging", "check",
 ]
 
 

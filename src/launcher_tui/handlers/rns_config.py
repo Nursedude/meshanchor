@@ -32,6 +32,7 @@ class RNSConfigHandler(BaseHandler):
         return [
             ("config", "View Reticulum Config", None),
             ("edit", "Edit Reticulum Config", None),
+            ("logging", "Configure RNS Logging", None),
             ("check", "Check RNS Setup", None),
         ]
 
@@ -39,6 +40,7 @@ class RNSConfigHandler(BaseHandler):
         dispatch = {
             "config": self._view_rns_config,
             "edit": self._edit_rns_config,
+            "logging": self._configure_rns_logging,
             "check": self._check_rns_setup,
         }
         method = dispatch.get(action)
@@ -426,6 +428,130 @@ class RNSConfigHandler(BaseHandler):
                 self._install_meshtastic_interface_plugin()
 
         return True
+
+    # ------------------------------------------------------------------
+    # Logging configuration
+    # ------------------------------------------------------------------
+
+    def _configure_rns_logging(self):
+        """Configure RNS loglevel in reticulum config."""
+        config_path = ReticulumPaths.get_config_file()
+        if not config_path.exists():
+            self.ctx.dialog.msgbox(
+                "No Config",
+                "No Reticulum config found.\n\n"
+                "Use 'Check RNS Setup' to deploy a config first."
+            )
+            return
+
+        # Read current loglevel
+        try:
+            content = config_path.read_text()
+        except (OSError, PermissionError) as e:
+            self.ctx.dialog.msgbox("Error", f"Cannot read config:\n{e}")
+            return
+
+        current_level = "4"
+        level_match = re.search(
+            r'^\s*loglevel\s*=\s*(\d+)',
+            content, re.MULTILINE
+        )
+        if level_match:
+            current_level = level_match.group(1)
+
+        # Show level picker
+        levels = [
+            ("0", "Critical"),
+            ("1", "Error"),
+            ("2", "Warning"),
+            ("3", "Notice"),
+            ("4", f"Info (default)"),
+            ("5", "Verbose"),
+            ("6", "Debug — troubleshooting"),
+            ("7", "Extreme — very verbose"),
+        ]
+
+        choice = self.ctx.dialog.menu(
+            "RNS Log Level",
+            f"Current loglevel: {current_level}\n\n"
+            f"Higher = more verbose. Set to 6 (Debug) or 7\n"
+            f"(Extreme) to see interface connection details.\n\n"
+            f"Logs visible via: sudo journalctl -u rnsd -f",
+            levels,
+        )
+
+        if choice is None:
+            return
+
+        if choice == current_level:
+            self.ctx.dialog.msgbox(
+                "No Change",
+                f"Loglevel is already {choice}."
+            )
+            return
+
+        # Update loglevel in config
+        if level_match:
+            new_content = content[:level_match.start(1)] + choice + content[level_match.end(1):]
+        else:
+            # No loglevel line found — add one in [logging] section
+            logging_match = re.search(r'^\[logging\]\s*$', content, re.MULTILINE)
+            if logging_match:
+                insert_pos = logging_match.end()
+                new_content = (content[:insert_pos]
+                               + f"\n  loglevel = {choice}"
+                               + content[insert_pos:])
+            else:
+                # No [logging] section — append one
+                new_content = content.rstrip() + f"\n\n[logging]\n  loglevel = {choice}\n"
+
+        # Write with backup
+        try:
+            backup = config_path.with_suffix('.config.bak')
+            if config_path.exists():
+                import shutil as _shutil
+                _shutil.copy2(str(config_path), str(backup))
+            config_path.write_text(new_content)
+        except (OSError, PermissionError) as e:
+            self.ctx.dialog.msgbox("Error", f"Cannot write config:\n{e}")
+            return
+
+        level_name = dict(levels).get(choice, choice)
+        # Offer to restart rnsd
+        if self.ctx.dialog.yesno(
+            "Loglevel Updated",
+            f"Set loglevel to {choice} ({level_name}).\n\n"
+            f"Restart rnsd to apply?\n\n"
+            f"View logs with:\n"
+            f"  sudo journalctl -u rnsd -f"
+        ):
+            try:
+                result = subprocess.run(
+                    ['sudo', 'systemctl', 'restart', 'rnsd'],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if result.returncode == 0:
+                    self.ctx.dialog.msgbox(
+                        "rnsd Restarted",
+                        f"rnsd restarted with loglevel {choice}.\n\n"
+                        f"View logs:\n  sudo journalctl -u rnsd -f"
+                    )
+                else:
+                    self.ctx.dialog.msgbox(
+                        "Restart Failed",
+                        f"rnsd restart failed:\n{result.stderr or result.stdout}\n\n"
+                        f"Try manually: sudo systemctl restart rnsd"
+                    )
+            except (subprocess.SubprocessError, OSError) as e:
+                self.ctx.dialog.msgbox("Error", f"Restart failed:\n{e}")
+        else:
+            self.ctx.dialog.msgbox(
+                "Loglevel Updated",
+                f"Set loglevel to {choice} ({level_name}).\n\n"
+                f"Restart rnsd to apply:\n"
+                f"  sudo systemctl restart rnsd\n\n"
+                f"View logs:\n  sudo journalctl -u rnsd -f"
+            )
 
     # ------------------------------------------------------------------
     # Meshtastic plugin methods (from rns_menu_mixin.py)
