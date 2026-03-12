@@ -1563,7 +1563,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
     # NomadNet wrapper (monkey-patch broken RPC)
     # ------------------------------------------------------------------
 
-    _WRAPPER_VERSION = "1"  # bump to force re-creation
+    _WRAPPER_VERSION = "2"  # bump to force re-creation
 
     def _create_nomadnet_wrapper(self) -> Optional[Path]:
         """Create a wrapper script that patches get_interface_stats.
@@ -1604,7 +1604,7 @@ def _safe_get_interface_stats(self):
 
 RNS.Reticulum.get_interface_stats = _safe_get_interface_stats
 
-from nomadnet.__main__ import main
+from nomadnet.nomadnet import main
 sys.exit(main())
 '''.format(version=self._WRAPPER_VERSION)
 
