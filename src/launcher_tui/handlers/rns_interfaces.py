@@ -368,7 +368,7 @@ class RNSInterfacesHandler(BaseHandler):
             "import RNS,sys; "
             f"r = RNS.Reticulum(configdir='{config_dir}', loglevel=6); "
             "s = 'connected' if r.is_connected_to_shared_instance else 'standalone'; "
-            "print(s); r.__exit_handler()"
+            "print(s)"
         )
 
         sudo_user = os.environ.get('SUDO_USER')
