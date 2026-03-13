@@ -6,7 +6,7 @@ Run the MeshForge self-audit system and report findings.
 
 1. Run the auto-review system:
 ```bash
-cd /home/user/meshforge/src && python3 -c "
+cd /opt/meshforge/src && python3 -c "
 from utils.auto_review import ReviewOrchestrator
 r = ReviewOrchestrator()
 report = r.run_full_review()

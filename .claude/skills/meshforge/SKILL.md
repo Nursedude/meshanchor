@@ -19,7 +19,7 @@ description: >
 MeshForge is a Network Operations Center (NOC) bridging Meshtastic and Reticulum mesh networks.
 First open-source tool to unify these incompatible mesh ecosystems.
 
-**Version:** 0.5.4-beta
+**Version:** 0.5.5-beta
 **Callsign:** WH6GXZ (Nursedude)
 
 ## Development Principles
@@ -92,17 +92,21 @@ else:
     print(status.fix_hint)  # "sudo systemctl start meshtasticd"
 ```
 
-## TUI Threading Rule
+## TUI Architecture
 
-Background work in TUI uses daemon threads. Keep heavy operations off the main thread:
+**Handler Registry Pattern** (Protocol + BaseHandler + TUIContext):
+- Each menu action is a self-contained handler in `handlers/`
+- Dispatched by `handler_registry.py`
+- See `handler_protocol.py` for the Protocol definition and TUIContext shared state
+
 ```python
-import threading
+# Handler pattern
+from launcher_tui.handler_protocol import BaseHandler, TUIContext
 
-def background_work():
-    result = slow_operation()
-    # TUI refreshes on next input loop — no GLib.idle_add needed
-
-threading.Thread(target=background_work, daemon=True).start()
+class MyHandler(BaseHandler):
+    def execute(self, ctx: TUIContext, **kwargs):
+        # Handler logic here
+        pass
 ```
 
 ## Common Commands
@@ -127,11 +131,14 @@ systemctl status rnsd             # User service, no sudo
 ```
 src/
 ├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
-│   ├── main.py        # NOC dispatcher (whiptail/dialog)
-│   ├── backend/       # Backend services
-│   └── *_mixin.py     # 46 feature mixins
+│   ├── main.py        # NOC launcher + handler registration
+│   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
+│   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
+│   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
+│   └── handlers/            # 60 registered command handlers
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway (MQTT transport)
+│   ├── canonical_message.py   # Multi-protocol message format
 │   └── message_queue.py # SQLite queue
 ├── commands/          # Command modules
 │   └── propagation.py # Space weather (NOAA primary)
@@ -140,7 +147,7 @@ src/
 │   ├── service_check.py # check_service() — SINGLE SOURCE OF TRUTH
 │   └── rf.py          # RF calculations
 ├── monitoring/        # MQTT subscriber
-└── core/              # Orchestrator, diagnostics, plugin base
+└── __version__.py     # Version and changelog
 ```
 
 ## Persistent Issues Reference
