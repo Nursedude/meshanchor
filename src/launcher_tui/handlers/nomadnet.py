@@ -487,14 +487,78 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 if status and status.interfaces:
                     print()
                     print("--- RNS Interfaces ---")
+                    has_down = False
+                    has_rx_only = False
                     for iface in status.interfaces:
                         if iface.status == InterfaceStatus.UP:
                             icon = "\033[0;32mUP\033[0m"
                         elif iface.status == InterfaceStatus.DOWN:
                             icon = "\033[0;31mDOWN\033[0m"
+                            has_down = True
                         else:
                             icon = "?"
-                        print(f"  {iface.display_name:<40} {icon}")
+                        # Build traffic info
+                        traffic = ""
+                        if iface.tx.bytes_total > 0 or iface.rx.bytes_total > 0:
+                            traffic = (
+                                f"  \u2191{iface.tx.bytes_total:.0f} "
+                                f"{iface.tx.bytes_unit}  "
+                                f"\u2193{iface.rx.bytes_total:.0f} "
+                                f"{iface.rx.bytes_unit}"
+                            )
+                        # Flag anomalies
+                        flags = ""
+                        if iface.is_rx_only:
+                            flags = "  \033[0;33m[RX-ONLY]\033[0m"
+                            has_rx_only = True
+                        elif (iface.is_zero_traffic
+                              and iface.status == InterfaceStatus.UP):
+                            flags = "  \033[0;33m[no traffic]\033[0m"
+                        print(f"  {iface.display_name:<40} "
+                              f"{icon}{traffic}{flags}")
+
+                    # Show blocking reasons for DOWN interfaces
+                    if has_down:
+                        try:
+                            from handlers._rns_interface_mgr import (
+                                find_blocking_interfaces,
+                            )
+                            blocking = find_blocking_interfaces()
+                            if blocking:
+                                print()
+                                print("--- Blocking Interfaces ---")
+                                for name, reason, fix in blocking:
+                                    print(f"  \033[0;33m[{name}]\033[0m "
+                                          f"{reason}")
+                                    print(f"    Fix: {fix}")
+                                    logger.warning(
+                                        "RNS blocking interface [%s]: "
+                                        "%s (fix: %s)",
+                                        name, reason, fix,
+                                    )
+                        except Exception as e:
+                            logger.debug(
+                                "Blocking interface check failed: %s", e
+                            )
+
+                    # Warn about RX-only interfaces
+                    if has_rx_only:
+                        rx_only = [
+                            i for i in status.interfaces if i.is_rx_only
+                        ]
+                        print()
+                        print(
+                            f"  \033[0;33mWARNING: {len(rx_only)} "
+                            f"interface(s) receiving only — link "
+                            f"establishment may be failing\033[0m"
+                        )
+                        for iface in rx_only:
+                            logger.warning(
+                                "RNS interface %s is RX-only "
+                                "(link establishment failing)",
+                                iface.display_name,
+                            )
+
                 elif status and status.parse_error:
                     print(f"\n  (rnstatus: {status.parse_error})")
             except Exception as e:
@@ -804,6 +868,7 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             ("last50", "Last 50 lines"),
             ("last200", "Last 200 lines"),
             ("errors", "Errors only (last 200 lines)"),
+            ("rnsd", "rnsd journal logs (last 50 lines)"),
             ("follow", "Follow live (Ctrl+C to stop)"),
             ("back", "Back"),
         ]
@@ -828,6 +893,31 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                 )
             except KeyboardInterrupt:
                 pass
+            return
+
+        if choice == "rnsd":
+            clear_screen()
+            print("=== rnsd journal (last 50 lines) ===\n")
+            try:
+                result = subprocess.run(
+                    ['journalctl', '-u', 'rnsd', '-n', '50',
+                     '--no-pager'],
+                    capture_output=True, text=True, timeout=15,
+                )
+                output = result.stdout.strip()
+                if output:
+                    print(output)
+                else:
+                    print("  (no rnsd journal entries found)")
+                    print("  Check if rnsd runs as a systemd service:")
+                    print("    sudo systemctl status rnsd")
+            except FileNotFoundError:
+                print("  journalctl not found (not a systemd system?)")
+            except subprocess.TimeoutExpired:
+                print("  journalctl timed out")
+            except OSError as e:
+                print(f"  Error reading journal: {e}")
+            self.ctx.wait_for_enter()
             return
 
         # Read the logfile tail

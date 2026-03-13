@@ -194,6 +194,7 @@ def parse_rnstatus(output: str) -> RNSStatus:
     for pattern in _ERROR_PATTERNS:
         if pattern in lower:
             result.parse_error = output.strip()
+            logger.warning("rnstatus error detected: %s", result.parse_error)
             break
 
     current: Optional[RNSInterface] = None
@@ -320,6 +321,7 @@ def run_rnstatus() -> RNSStatus:
     """
     rnstatus_path = _find_rnstatus_binary()
     if not rnstatus_path:
+        logger.warning("rnstatus binary not found")
         return RNSStatus(
             parse_error="rnstatus binary not found. Install RNS: pip install rns"
         )
@@ -334,8 +336,11 @@ def run_rnstatus() -> RNSStatus:
         combined = (proc.stdout or "") + (proc.stderr or "")
         return parse_rnstatus(combined)
     except subprocess.TimeoutExpired:
+        logger.warning("rnstatus timed out — rnsd may be unresponsive")
         return RNSStatus(parse_error="rnstatus timed out (rnsd unresponsive)")
     except FileNotFoundError:
+        logger.warning("rnstatus not found at %s", rnstatus_path)
         return RNSStatus(parse_error=f"rnstatus not found at {rnstatus_path}")
     except OSError as e:
+        logger.warning("Failed to run rnstatus: %s", e)
         return RNSStatus(parse_error=f"Failed to run rnstatus: {e}")
