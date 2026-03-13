@@ -1,41 +1,67 @@
 # MeshForge - Claude Code Configuration
 
 > **Dude AI**: Network Engineer, Physicist, Programmer, Project Manager
-> **Architect**: WH6GXZ (Nursedude) - HAM General, Infrastructure Engineering, RN BSN
+> **Architect**: WH6GXZ (Nursedude) — HAM General, Infrastructure Engineering, RN BSN
+
+<!-- Auto-loaded by Claude Code -->
+@.claude/rules/security.md
+@.claude/foundations/persistent_issues.md
+
+---
+
+## CRITICAL — Read Before Any Code Change
+
+**Service Interaction Rules** (Issue #29 — regression prevention):
+- **NEVER** create `TCPInterface()` directly — use `MeshtasticConnection` from `connection_manager.py` or acquire `MESHTASTIC_CONNECTION_LOCK` first
+- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()` from `meshtastic_protobuf_client.py`
+- **NEVER** call `RNS.Reticulum()` without `configdir=` — causes EADDRINUSE when rnsd is running
+- **NEVER** use raw `systemctl is-active` — use `check_service()` from `service_check.py`
+- **NEVER** use `Path.home()` directly — use `utils.paths.get_real_user_home()` (MF001)
+- **NEVER** use `safe_import` for first-party modules — external deps only
+- **NEVER** use `shell=True`, bare `except:`, or skip input validation / subprocess timeouts
+- **ALWAYS** use `_stop_event.wait()` instead of `time.sleep()` in daemon loops
+- **ALWAYS** split files exceeding 1,500 lines
+
+> Full security rules: `.claude/rules/security.md`
+> Known issues & fixes: `.claude/foundations/persistent_issues.md`
+
+---
 
 ## Quick Context
 
-MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Reticulum (RNS) mesh networks. First open-source tool to unify these incompatible mesh ecosystems.
+MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Reticulum (RNS) mesh networks — the first open-source tool to unify these incompatible ecosystems.
+
+**Active context / current sprint**: `.claude/CURRENT.md`
+
+---
 
 ## Branch Strategy
 
-| Branch | Version | Purpose | Field-Tested |
-|--------|---------|---------|--------------|
-| `main` | `0.5.5-beta` | Stable beta — TUI, meshtasticd, RNS, RF tools | TUI, radio config, RNS, NomadNet |
-| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing + structural refactoring | Not yet |
+| Branch | Version | Status |
+|--------|---------|--------|
+| `main` | `0.5.5-beta` | Stable — TUI, meshtasticd, RNS, RF tools. Field-tested. |
+| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing + structural refactor. Not field-tested. |
 
-- **main** is the production-ready line. All PRs targeting stable features merge here.
-  Includes tactical ops (XTOC interop, ATAK/KML/CoT), MQTT bridge, security hardening.
-  Gateway bridge, coverage maps, and live NOC map have unit tests but need field validation.
-- **alpha/meshcore-bridge** diverged at PR #1000 (139 commits ahead, 18 behind as of
-  2026-03-03). Contains MeshCore 3-way routing, RadioMode abstraction, and major
-  structural refactoring (src/core/rf/, src/core/services/, src/mapping/). Also lacks
-  main's recent Meshtastic 2.7.x upgrade and dead code cleanup.
-- **Convergence plan**: After field testing, rebase main's 18 unique commits onto alpha.
-  See `.claude/plans/branch_convergence_guide.md` for the full technical plan.
-- **Architecture decision**: MeshCore stays IN MeshForge (not a separate project).
-  MeshCore is a protocol (like Meshtastic/RNS), not a plugin. The CanonicalMessage
-  format requires all protocol handlers in one codebase.
-- Feature branches use `claude/` prefix and merge via PR to the appropriate target branch.
+- `main` includes XTOC/ATAK/CoT, MQTT bridge, security hardening. Gateway bridge, coverage maps, NOC map have unit tests but need field validation.
+- `alpha` diverged at PR #1000. Contains RadioMode abstraction, `src/core/rf/`, `src/core/services/`, `src/mapping/`. Missing main's Meshtastic 2.7.x upgrade and dead code cleanup.
+- **Convergence plan**: After field testing, rebase main's unique commits onto alpha. See `.claude/plans/branch_convergence_guide.md`.
+- **Architecture decision**: MeshCore stays IN MeshForge — it's a protocol (like Meshtastic/RNS), not a plugin.
+- Feature branches use `claude/` prefix → PR to target branch.
+
+> Current branch delta: `git log --oneline main..alpha/meshcore-bridge | wc -l`
+
+---
 
 ## Development Principles
 
 ```
-1. Make it work       ← First priority
-2. Make it reliable   ← Security, testing
+1. Make it work         ← First priority
+2. Make it reliable     ← Security, testing
 3. Make it maintainable ← Clean code, docs
-4. Make it fast       ← Only when proven necessary
+4. Make it fast         ← Only when proven necessary
 ```
+
+---
 
 ## Key Commands
 
@@ -43,127 +69,101 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 # Launch
 sudo python3 src/launcher_tui/main.py   # Primary interface (TUI)
 python3 src/standalone.py               # Zero-dependency RF tools
-
-# GTK4 desktop was REMOVED (TUI is the only interface now)
+# GTK4 desktop REMOVED — TUI is the only interface
 
 # Verify changes
-python3 -m pytest tests/ -v       # Run tests
+python3 -m pytest tests/ -v
 python3 -c "from src.__version__ import __version__; print(__version__)"
 
 # Regression prevention (Issue #29)
-python3 scripts/lint.py --all                          # Lint (MF001-MF010)
-python3 -m pytest tests/test_regression_guards.py -v   # Regression guards
-git config core.hooksPath .githooks                    # Enable pre-commit hook
-
-# Version is in src/__version__.py
-# main: 0.5.5-beta | alpha/meshcore-bridge: 0.6.0-alpha
+python3 scripts/lint.py --all
+python3 -m pytest tests/test_regression_guards.py -v
+git config core.hooksPath .githooks
 ```
+
+---
 
 ## Architecture Overview
 
-**TUI Pattern**: Handler Registry (Protocol + BaseHandler + TUIContext). Each menu action is a
-self-contained handler in `handlers/` dispatched by `handler_registry.py`. See
-`handler_protocol.py` for the Protocol definition and `TUIContext` shared state.
+**TUI Pattern**: Handler Registry (Protocol + BaseHandler + TUIContext). Each menu action is a self-contained handler in `handlers/` dispatched by `handler_registry.py`.
 
 ```
 src/
-├── launcher_tui/      # Terminal UI — PRIMARY INTERFACE
-│   ├── main.py        # NOC launcher + handler registration (1,168 lines)
+├── launcher_tui/      # PRIMARY INTERFACE (TUI)
+│   ├── main.py        # NOC launcher + handler registration
 │   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
-│   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
-│   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
+│   ├── handler_registry.py  # register/lookup/dispatch
+│   ├── backend.py           # whiptail/dialog abstraction
 │   └── handlers/            # 60 registered command handlers
-│       ├── dashboard.py     # Main dashboard
-│       ├── gateway.py       # Gateway bridge control
-│       ├── propagation.py   # Space weather & HF propagation
-│       ├── rns_diagnostics.py  # RNS diagnostics & transport testing
-│       ├── service_menu.py  # Service management
-│       ├── mqtt.py          # MQTT monitoring & bridge
-│       ├── meshcore.py      # MeshCore TUI menu
-│       └── ...              # 53 more handlers (rf_tools, settings, etc.)
-├── commands/          # Command modules
-│   ├── propagation.py # Space weather & HF propagation (NOAA primary)
-│   ├── hamclock.py    # HamClock client (optional/legacy)
-│   └── base.py        # CommandResult base class
+├── commands/          # propagation.py, hamclock.py, base.py
 ├── gateway/           # RNS-Meshtastic bridge
-│   ├── rns_bridge.py  # Main gateway bridge
-│   ├── gateway_cli.py # Headless CLI helpers (extracted)
-│   ├── meshcore_handler.py    # MeshCore protocol handler (not field-tested)
+│   ├── rns_bridge.py, gateway_cli.py, meshcore_handler.py
 │   ├── canonical_message.py   # Multi-protocol message format
-│   ├── meshcore_bridge_mixin.py # MeshCore bridge mixin
-│   ├── message_routing.py     # 3-way routing classifier
-│   └── message_queue.py # Persistent message queue (SQLite)
-├── monitoring/        # Network monitoring
-│   ├── mqtt_subscriber.py # Nodeless MQTT monitoring
-│   ├── node_monitor.py    # Node status tracking
-│   ├── traffic_inspector.py # Packet capture & analysis
-│   └── packet_dissectors.py # Protocol-specific packet parsing
-├── plugins/           # Protocol plugins
-│   └── meshcore.py    # MeshCore plugin wrapper
-├── utils/             # RF tools, common utilities
-│   ├── rf.py          # RF calculations (tested)
-│   ├── rf_fast.pyx    # Cython optimization
-│   ├── common.py      # SettingsManager
-│   ├── service_check.py     # Service management (SINGLE SOURCE OF TRUTH)
-│   ├── auto_review.py # Self-audit system
-│   ├── diagnostic_engine.py # Intelligent diagnostics
-│   ├── knowledge_base.py    # Mesh networking knowledge
-│   ├── classifier.py  # Traffic routing classifier
-│   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
-│   └── coverage_map.py      # Folium map generator
-├── launcher.py        # Auto-detect (falls through to TUI)
+│   └── message_routing.py, message_queue.py (SQLite)
+├── monitoring/        # mqtt_subscriber, node_monitor, traffic_inspector, packet_dissectors
+├── plugins/           # meshcore.py plugin wrapper
+├── utils/             # rf.py, common.py, service_check.py, coverage_map.py, claude_assistant.py
 ├── standalone.py      # Zero-dependency RF tools
-└── __version__.py     # Version and changelog
+└── __version__.py     # Version + changelog
 ```
+
+> Full architecture: `.claude/foundations/domain_architecture.md`
+
+---
+
+## Exploration Entry Points
+
+| Question | Start here |
+|----------|-----------|
+| Service behavior | `src/utils/service_check.py` |
+| Protocol routing | `src/gateway/message_routing.py` |
+| TUI handler dispatch | `src/launcher_tui/handler_registry.py` |
+| RF math | `src/utils/rf.py` |
+| AI assistant | `src/utils/claude_assistant.py` |
+| Coverage maps | `src/utils/coverage_map.py` |
+
+---
 
 ## Deployment Profiles
 
-MeshForge supports 5 deployment profiles. Dependencies don't block your choice.
-
-| Profile | Services Needed | Install | Use Case |
-|---------|----------------|---------|----------|
-| `radio_maps` | meshtasticd | `pip install -r requirements/core.txt -r requirements/maps.txt` | Radio config + coverage maps |
-| `monitor` | (none) | `pip install -r requirements/core.txt -r requirements/mqtt.txt` | MQTT packet analysis |
-| `meshcore` | (none) | `pip install -r requirements/core.txt` + meshcore | MeshCore companion radio |
-| `gateway` | meshtasticd, rnsd | `pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt` | Meshtastic <> RNS bridge |
-| `full` | meshtasticd, rnsd, mosquitto | `pip install -r requirements.txt` | Everything |
+Profiles: `radio_maps` | `monitor` | `meshcore` | `gateway` | `full`
 
 ```bash
-# Select profile at launch
-python3 src/launcher.py --profile gateway
-
-# Auto-detect (default): scans running services and installed packages
-python3 src/launcher.py
-
-# Profile is saved to ~/.config/meshforge/deployment.json
-# Setup wizard also offers profile selection
+python3 src/launcher.py --profile gateway   # Select profile
+python3 src/launcher.py                      # Auto-detect (default)
+# Profile saved to ~/.config/meshforge/deployment.json
 ```
 
-**Key files**: `src/utils/deployment_profiles.py` (definitions), `src/utils/startup_health.py` (health checks), `src/utils/defaults.py` (constants), `src/utils/validation.py` (input validators)
+> Full profile definitions + install commands: `.claude/foundations/deployment_profiles.md`
 
-## Code Standards
+---
 
-**Security**: See `.claude/rules/security.md` (auto-loaded). Non-negotiable: no `shell=True`, no bare `except:`, validate inputs, timeouts on subprocess.
+## Service Management
 
-**Service Interaction Rules** (Issue #29 — regression prevention):
-- **NEVER** create `TCPInterface()` directly — use `MeshtasticConnection` from `connection_manager.py` or acquire `MESHTASTIC_CONNECTION_LOCK` first (meshtasticd supports ONE TCP client)
-- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()` from `meshtastic_protobuf_client.py`
-- **NEVER** call `RNS.Reticulum()` without `configdir=` — causes EADDRINUSE when rnsd is running
-- **NEVER** use raw `systemctl is-active` for service state — use `check_service()` from `service_check.py`
-- **ALWAYS** use `_stop_event.wait()` instead of `time.sleep()` in daemon loops
+`utils/service_check.py` — **SINGLE SOURCE OF TRUTH** for systemd operations.
 
-**Style**: Python 3.9+, type hints encouraged, 4-space indent, ~100 char lines.
+Key imports: `check_service`, `apply_config_and_restart`, `enable_service`, `start_service`, `stop_service`, `_sudo_cmd`, `_sudo_write`
 
-## When Exploring
+**Privilege Separation**:
+- **Viewer Mode** (default, no sudo): Monitoring, RF calcs, API data
+- **Admin Mode** (sudo): Service control, `/etc/` config, hardware
 
-Use the Explore agent for:
-- "Where is X implemented?"
-- "How does feature Y work?"
-- "What files handle Z?"
+---
 
-## Auto-Review System
+## Key Modules
 
-Run self-audit:
+| Module | API |
+|--------|-----|
+| `utils/diagnostic_engine.py` | `diagnose(symptom, category, severity)` |
+| `utils/knowledge_base.py` | `get_knowledge_base().query("topic")` |
+| `utils/claude_assistant.py` | AI assistant (Standalone + PRO tiers) |
+| `utils/coverage_map.py` | Folium coverage map generator |
+| `commands/propagation.py` | Space weather (NOAA primary) |
+
+---
+
+## Auto-Review
+
 ```python
 cd src && python3 -c "
 from utils.auto_review import ReviewOrchestrator
@@ -173,66 +173,31 @@ print(f'Issues: {report.total_issues}')
 "
 ```
 
-## Research Documents
-
-Deep documentation in `.claude/` (84 files, 853KB as of 2026-02-28 audit):
-- `foundations/meshforge_ecosystem.md` - **ECOSYSTEM: All 5 repos, boundaries, APIs** (canonical)
-- `dude_ai_university.md` - Project vision, self-healing principles, plugin & Dude AI architecture
-- `foundations/domain_architecture.md` - **ARCHITECTURE: Core vs Plugin model**
-- `foundations/ai_principles.md` - Human-centered design philosophy
-- `foundations/persistent_issues.md` - **CRITICAL: Known issues & fixes**
-- `INDEX.md` - Full documentation index with quick lookups
-- `research/README.md` - Index of 22 technical deep dives (RNS, AREDN, HamClock, RF, etc.)
-- `plans/qa_field_testing_plan.md` - **QA: Gateway, maps, MeshCore field-test protocol**
-- `plans/branch_convergence_guide.md` - **CONVERGENCE: main ↔ alpha merge strategy**
-
-## Architecture Model
-
-**Privilege Separation** (see `foundations/domain_architecture.md`):
-- **Viewer Mode** (default, no sudo): Monitoring, RF calcs, API data
-- **Admin Mode** (sudo): Service control, /etc/ config, hardware
-
-**Core vs Plugin**:
-- **Core**: Gateway bridge, node tracker, RF tools, diagnostics
-- **Plugins**: HamClock, AREDN, MQTT, third-party integrations
-
-**Services run independently** - MeshForge connects to them, doesn't embed them.
-
-## Persistent Issues (MUST READ)
-
-**Before making changes**, review `.claude/foundations/persistent_issues.md`. Critical items:
-- **#1 Path.home()**: NEVER use directly — use `utils.paths.get_real_user_home()` (see `rules/security.md` MF001)
-- **#3 Service verification**: Always check services before using — use `utils.service_check`
-- **#5 safe_import**: Only for external deps, never first-party modules
-- **#6 File size**: Split files exceeding 1,500 lines
-
-## Service Management
-
-`utils/service_check.py` is the **SINGLE SOURCE OF TRUTH** for systemd operations. Read its docstrings for API details. Key imports: `check_service`, `apply_config_and_restart`, `enable_service`, `start_service`, `stop_service`, `_sudo_cmd`, `_sudo_write`.
+---
 
 ## Commit Style
 
 ```
-feat: Add new feature
-fix: Bug fix
-docs: Documentation
-refactor: Code restructure
-test: Add tests
-security: Security fix
+feat: Add new feature       fix: Bug fix
+docs: Documentation         refactor: Code restructure
+test: Add tests             security: Security fix
 ```
 
-## Key Modules (read docstrings for API details)
+---
 
-- `utils/diagnostic_engine.py` — `diagnose(symptom, category, severity)` for offline diagnostics
-- `utils/knowledge_base.py` — `get_knowledge_base().query("topic")` for mesh knowledge
-- `utils/claude_assistant.py` — AI assistant (Standalone + PRO tiers)
-- `utils/coverage_map.py` — Folium coverage map generator
-- `commands/propagation.py` — Space weather (NOAA primary, OpenHamClock/HamClock optional)
+## Research Docs (`.claude/` — 84 files)
 
-## Contact
-
-- GitHub: github.com/Nursedude/meshforge
-- Callsign: WH6GXZ
+| File | Contents |
+|------|----------|
+| `foundations/meshforge_ecosystem.md` | All 5 repos, boundaries, APIs (canonical) |
+| `foundations/domain_architecture.md` | Core vs Plugin model |
+| `foundations/ai_principles.md` | Human-centered design philosophy |
+| `foundations/persistent_issues.md` | **Known issues & fixes** |
+| `plans/branch_convergence_guide.md` | main ↔ alpha merge strategy |
+| `plans/qa_field_testing_plan.md` | Gateway, maps, MeshCore field-test protocol |
+| `INDEX.md` | Full doc index with quick lookups |
+| `research/README.md` | 22 technical deep dives (RNS, AREDN, RF, etc.) |
 
 ---
+
 *Made with aloha for the mesh community*

@@ -52,3 +52,6 @@ CLAUDE.local.md
 # Distribution / packaging
 *.tar.gz
 *.zip
+
+# Session context (local only)
+.claude/CURRENT.md
