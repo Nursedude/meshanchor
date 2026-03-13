@@ -480,15 +480,55 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
             print("  rnsd:      (check failed)")
 
         # Show RNS interface status when rnsd is running
+        has_issues = False
         if rnsd_running:
             try:
-                from utils.rns_status_parser import run_rnstatus, InterfaceStatus
+                from utils.rns_status_parser import (
+                    run_rnstatus, InterfaceStatus, parse_rnstatus,
+                )
                 status = run_rnstatus()
+
+                # If rnstatus failed (e.g. auth mismatch when running
+                # as root), retry as the real user
+                if status and status.parse_error and not status.interfaces:
+                    sudo_user = os.environ.get('SUDO_USER')
+                    if sudo_user and sudo_user != 'root':
+                        try:
+                            import shutil as _shutil
+                            rnstatus_bin = _shutil.which('rnstatus')
+                            if not rnstatus_bin:
+                                _candidate = (
+                                    get_real_user_home() / '.local'
+                                    / 'bin' / 'rnstatus'
+                                )
+                                if _candidate.exists():
+                                    rnstatus_bin = str(_candidate)
+                            if rnstatus_bin:
+                                proc = subprocess.run(
+                                    ['sudo', '-u', sudo_user, '-H',
+                                     rnstatus_bin],
+                                    capture_output=True, text=True,
+                                    timeout=15,
+                                )
+                                combined = (
+                                    (proc.stdout or "")
+                                    + (proc.stderr or "")
+                                )
+                                retry = parse_rnstatus(combined)
+                                if retry.interfaces:
+                                    status = retry
+                        except (subprocess.SubprocessError, OSError) as e:
+                            logger.debug(
+                                "rnstatus retry as %s failed: %s",
+                                sudo_user, e,
+                            )
+
                 if status and status.interfaces:
                     print()
                     print("--- RNS Interfaces ---")
                     has_down = False
                     has_rx_only = False
+                    has_zero_traffic = False
                     for iface in status.interfaces:
                         if iface.status == InterfaceStatus.UP:
                             icon = "\033[0;32mUP\033[0m"
@@ -514,35 +554,56 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                         elif (iface.is_zero_traffic
                               and iface.status == InterfaceStatus.UP):
                             flags = "  \033[0;33m[no traffic]\033[0m"
+                            has_zero_traffic = True
                         print(f"  {iface.display_name:<40} "
                               f"{icon}{traffic}{flags}")
 
-                    # Show blocking reasons for DOWN interfaces
-                    if has_down:
-                        try:
-                            from handlers._rns_interface_mgr import (
-                                find_blocking_interfaces,
-                            )
-                            blocking = find_blocking_interfaces()
-                            if blocking:
-                                print()
-                                print("--- Blocking Interfaces ---")
-                                for name, reason, fix in blocking:
-                                    print(f"  \033[0;33m[{name}]\033[0m "
-                                          f"{reason}")
-                                    print(f"    Fix: {fix}")
-                                    logger.warning(
-                                        "RNS blocking interface [%s]: "
-                                        "%s (fix: %s)",
-                                        name, reason, fix,
-                                    )
-                        except Exception as e:
-                            logger.debug(
-                                "Blocking interface check failed: %s", e
-                            )
+                    # Connectivity summary
+                    total = len(status.interfaces)
+                    connected = len([
+                        i for i in status.interfaces
+                        if i.tx.bytes_total > 0 or i.rx.bytes_total > 0
+                    ])
+                    isolated = len(status.zero_traffic_interfaces)
+                    down_count = len([
+                        i for i in status.interfaces
+                        if i.status == InterfaceStatus.DOWN
+                    ])
+                    print()
+                    print(f"  Summary: {total} interfaces, "
+                          f"{connected} with traffic, "
+                          f"{isolated} zero-traffic, "
+                          f"{down_count} down")
+
+                    # Always check for blocking interfaces — an
+                    # interface can be UP in rnstatus but its
+                    # dependency may be flaky or unreachable
+                    try:
+                        from handlers._rns_interface_mgr import (
+                            find_blocking_interfaces,
+                        )
+                        blocking = find_blocking_interfaces()
+                        if blocking:
+                            has_issues = True
+                            print()
+                            print("--- Blocking Interfaces ---")
+                            for name, reason, fix in blocking:
+                                print(f"  \033[0;33m[{name}]\033[0m "
+                                      f"{reason}")
+                                print(f"    Fix: {fix}")
+                                logger.warning(
+                                    "RNS blocking interface [%s]: "
+                                    "%s (fix: %s)",
+                                    name, reason, fix,
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            "Blocking interface check failed: %s", e
+                        )
 
                     # Warn about RX-only interfaces
                     if has_rx_only:
+                        has_issues = True
                         rx_only = [
                             i for i in status.interfaces if i.is_rx_only
                         ]
@@ -559,10 +620,91 @@ class NomadNetHandler(NomadNetRNSChecksMixin, BaseHandler):
                                 iface.display_name,
                             )
 
+                    # Warn about zero-traffic UP interfaces
+                    if has_zero_traffic:
+                        has_issues = True
+                        zero = status.zero_traffic_interfaces
+                        print()
+                        print(
+                            f"  \033[0;33mWARNING: {len(zero)} "
+                            f"interface(s) UP but no traffic — "
+                            f"no peers announcing on these "
+                            f"interfaces\033[0m"
+                        )
+                        for iface in zero:
+                            logger.warning(
+                                "RNS interface %s is UP but has "
+                                "zero traffic (no peers/announces)",
+                                iface.display_name,
+                            )
+
                 elif status and status.parse_error:
-                    print(f"\n  (rnstatus: {status.parse_error})")
+                    has_issues = True
+                    print(f"\n  rnstatus: {status.parse_error}")
+                    logger.warning(
+                        "rnstatus failed in NomadNet status: %s",
+                        status.parse_error,
+                    )
             except Exception as e:
                 logger.debug("Interface status check failed: %s", e)
+
+        # Check rnsd loglevel — suggest increasing if interfaces
+        # have issues and loglevel is too low for troubleshooting
+        if has_issues:
+            try:
+                from utils.paths import ReticulumPaths
+                rns_config = ReticulumPaths.get_config_file()
+                if rns_config.exists():
+                    import re as _re
+                    content = rns_config.read_text()
+                    m = _re.search(
+                        r'^\s*loglevel\s*=\s*(\d+)',
+                        content, _re.MULTILINE,
+                    )
+                    current_level = int(m.group(1)) if m else 4
+                    if current_level < 6:
+                        print()
+                        print(
+                            "  \033[0;36mTIP: Set loglevel = 6 in "
+                            f"{rns_config}\033[0m"
+                        )
+                        print(
+                            "       and restart rnsd to see why "
+                            "interfaces aren't connecting."
+                        )
+                        print(
+                            "       View via: NomadNet > Logs > "
+                            "rnsd journal"
+                        )
+            except Exception as e:
+                logger.debug("loglevel check failed: %s", e)
+
+        # Show recent NomadNet logfile errors inline
+        nn_logfile = get_real_user_home() / '.nomadnetwork' / 'logfile'
+        if nn_logfile.exists():
+            try:
+                import collections
+                with open(nn_logfile, 'r') as f:
+                    recent = list(collections.deque(f, maxlen=200))
+                error_patterns = [
+                    'Error', 'Exception', 'CRITICAL',
+                    'WARNING', 'AuthenticationError',
+                    'ConnectionRefused', 'Traceback',
+                ]
+                errors = [
+                    line.rstrip() for line in recent
+                    if any(p in line for p in error_patterns)
+                ]
+                if errors:
+                    print()
+                    print("--- Recent NomadNet Errors ---")
+                    for line in errors[-5:]:
+                        print(f"  {line}")
+                    if len(errors) > 5:
+                        print(f"  ... ({len(errors) - 5} more — "
+                              f"see Logs > Errors)")
+            except (OSError, PermissionError):
+                pass
 
         self.ctx.wait_for_enter()
 
