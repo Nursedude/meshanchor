@@ -975,7 +975,7 @@ class PersistentMessageQueue:
 
             placeholders = ",".join("?" * len(ids))
             conn.execute(
-                f"DELETE FROM messages WHERE id IN ({placeholders})", ids
+                "DELETE FROM messages WHERE id IN ({})".format(placeholders), ids
             )
 
             shed_count = len(ids)
