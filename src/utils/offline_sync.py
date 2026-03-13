@@ -338,11 +338,11 @@ class OfflineSyncQueue:
                 ids = [row[0] for row in rows]
                 if ids:
                     placeholders = ','.join('?' * len(ids))
-                    conn.execute(f"""
-                        UPDATE sync_queue
-                        SET status = ?, updated_at = ?
-                        WHERE record_id IN ({placeholders})
-                    """, [SyncStatus.IN_PROGRESS.value, now] + ids)
+                    conn.execute(
+                        "UPDATE sync_queue"
+                        " SET status = ?, updated_at = ?"
+                        " WHERE record_id IN ({})".format(placeholders),
+                        [SyncStatus.IN_PROGRESS.value, now] + ids)
                     conn.commit()
 
                 for row in rows:
