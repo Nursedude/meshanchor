@@ -463,6 +463,11 @@ class NomadNetRNSChecksMixin:
                 logger.debug("Blocking interface check failed: %s", e)
 
             if blocking:
+                for iface_name, reason, fix in blocking:
+                    logger.warning(
+                        "RNS blocking interface [%s]: %s (fix: %s)",
+                        iface_name, reason, fix,
+                    )
                 lines = ["rnsd is running but NOT listening on port 37428.\n"]
                 lines.append("Cause: an enabled interface is blocking startup:\n")
                 for iface_name, reason, fix in blocking:
