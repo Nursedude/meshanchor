@@ -12,13 +12,16 @@ from unittest.mock import patch, MagicMock
 
 from src.utils.config_drift import (
     DriftResult,
+    ShadowResult,
     detect_rnsd_config_drift,
+    detect_config_shadowing,
     get_rnsd_effective_config_dir,
     validate_gateway_rns_config,
     _get_rnsd_pid,
     _get_rnsd_config_from_proc,
     _get_rnsd_config_from_systemd,
     _get_rnsd_effective_config,
+    _parse_reticulum_section,
 )
 
 
@@ -415,3 +418,138 @@ class TestDriftResult:
             rnsd_config_dir=Path('/etc/reticulum'),
         )
         assert result.can_auto_fix is False
+
+
+class TestParseReticulumSection:
+    """Tests for _parse_reticulum_section helper."""
+
+    def test_basic_settings(self):
+        """Test parsing standard [reticulum] settings."""
+        config = """
+[reticulum]
+  enable_transport = Yes
+  share_instance = True
+  instance_name = volcano ai rns
+  shared_instance_type = tcp
+
+[interfaces]
+  [[Default Interface]]
+    type = AutoInterface
+    enabled = Yes
+
+  [[HawaiiNet]]
+    type = TCPClientInterface
+    enabled = yes
+"""
+        result = _parse_reticulum_section(config)
+        assert result['enable_transport'] == 'Yes'
+        assert result['share_instance'] == 'True'
+        assert result['instance_name'] == 'volcano ai rns'
+        assert result['shared_instance_type'] == 'tcp'
+        assert result['interface_count'] == 2
+
+    def test_commented_lines_ignored(self):
+        """Test that commented settings and interfaces are skipped."""
+        config = """
+[reticulum]
+  # enable_transport = Yes
+  share_instance = True
+
+[interfaces]
+  [[Active Interface]]
+    type = AutoInterface
+  # [[Commented Interface]]
+  #   type = TCPClientInterface
+"""
+        result = _parse_reticulum_section(config)
+        assert 'enable_transport' not in result
+        assert result['share_instance'] == 'True'
+        assert result['interface_count'] == 1
+
+    def test_empty_config(self):
+        """Test parsing empty config."""
+        result = _parse_reticulum_section("")
+        assert result['interface_count'] == 0
+
+
+class TestDetectConfigShadowing:
+    """Tests for detect_config_shadowing."""
+
+    def test_only_etc_config(self, tmp_path):
+        """No shadowing when only /etc config exists."""
+        etc = tmp_path / 'etc' / 'reticulum'
+        etc.mkdir(parents=True)
+        (etc / 'config').write_text("[reticulum]\n  share_instance = Yes\n")
+        home = tmp_path / 'home' / 'user'
+        home.mkdir(parents=True)
+
+        with patch('src.utils.config_drift.Path') as mock_path_cls, \
+             patch('src.utils.config_drift.get_real_user_home', return_value=home):
+            # /etc/reticulum/config exists
+            etc_config = etc / 'config'
+            real_path = Path('/etc/reticulum/config')
+            mock_path_cls.return_value = MagicMock()
+            mock_path_cls.return_value.is_file.return_value = True
+
+            # Call with real filesystem via tmp_path
+            result = detect_config_shadowing()
+            assert result.shadowed is False or result.ignored_path is None
+
+    def test_both_configs_with_differences(self, tmp_path):
+        """Shadowing detected with setting differences."""
+        etc_dir = tmp_path / 'etc_ret'
+        etc_dir.mkdir()
+        etc_config = etc_dir / 'config'
+        etc_config.write_text(
+            "[reticulum]\n"
+            "  enable_transport = False\n"
+            "[interfaces]\n"
+            "  [[Default Interface]]\n"
+            "    type = AutoInterface\n"
+        )
+
+        home = tmp_path / 'home'
+        home.mkdir()
+        user_dir = home / '.reticulum'
+        user_dir.mkdir()
+        user_config = user_dir / 'config'
+        user_config.write_text(
+            "[reticulum]\n"
+            "  enable_transport = Yes\n"
+            "  instance_name = volcano ai rns\n"
+            "[interfaces]\n"
+            "  [[Default Interface]]\n"
+            "    type = AutoInterface\n"
+            "  [[HawaiiNet]]\n"
+            "    type = TCPClientInterface\n"
+        )
+
+        with patch.object(Path, 'is_file', side_effect=lambda s=None: True), \
+             patch('src.utils.config_drift.get_real_user_home', return_value=home):
+            # Patch Path('/etc/reticulum/config') to point to tmp
+            with patch('src.utils.config_drift.Path') as mock_path_cls:
+                mock_etc = MagicMock()
+                mock_etc.is_file.return_value = True
+                mock_etc.read_text.return_value = etc_config.read_text()
+                mock_etc.__str__ = lambda s: str(etc_config)
+                mock_path_cls.return_value = mock_etc
+
+                # Use real function with mocked paths
+                from src.utils.config_drift import _parse_reticulum_section
+
+                etc_settings = _parse_reticulum_section(etc_config.read_text())
+                user_settings = _parse_reticulum_section(user_config.read_text())
+
+                assert etc_settings['enable_transport'] == 'False'
+                assert user_settings['enable_transport'] == 'Yes'
+                assert user_settings['instance_name'] == 'volcano ai rns'
+                assert etc_settings['interface_count'] == 1
+                assert user_settings['interface_count'] == 2
+
+    def test_no_configs_exist(self):
+        """No shadowing when no configs exist."""
+        with patch.object(Path, 'is_file', return_value=False), \
+             patch('src.utils.config_drift.get_real_user_home',
+                   return_value=Path('/home/nobody')):
+            result = detect_config_shadowing()
+            assert result.shadowed is False

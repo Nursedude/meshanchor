@@ -355,12 +355,28 @@ def get_rns_shared_instance_info(instance_name: str = 'default',
             'detail': f'127.0.0.1:{port} (UDP)',
         }
 
+    # Before returning "not available", check if rnsd process exists
+    # to distinguish "rnsd not running" from "rnsd running but broken"
+    rnsd_running = check_process_running('rnsd')
+    detail = (f'No shared instance found '
+              f'(checked @rns/{instance_name}, '
+              f'TCP:{port}, UDP:{port})')
+    if rnsd_running:
+        return {
+            'available': False,
+            'method': 'none',
+            'detail': detail,
+            'diagnostic': (
+                'rnsd process running but shared instance not serving '
+                '\u2014 likely config issue (check shared_instance_type '
+                'and /etc/reticulum/storage/ permissions)'
+            ),
+        }
+
     return {
         'available': False,
         'method': 'none',
-        'detail': (f'No shared instance found '
-                   f'(checked @rns/{instance_name}, '
-                   f'TCP:{port}, UDP:{port})'),
+        'detail': detail,
     }
 
 
