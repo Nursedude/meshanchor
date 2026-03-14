@@ -398,7 +398,8 @@ class FailoverManager:
                 radio.consecutive_failures += 1
                 if radio.consecutive_failures >= 3:
                     radio.reachable = False
-        except Exception:
+        except Exception as e:
+            logger.debug("Health check failed for %s:%d: %s", radio.host, radio.port, e)
             radio.consecutive_failures += 1
             if radio.consecutive_failures >= 3:
                 radio.reachable = False
@@ -1076,7 +1077,8 @@ class RadioLoadBalancer:
                 radio.consecutive_failures += 1
                 if radio.consecutive_failures >= 3:
                     radio.reachable = False
-        except Exception:
+        except Exception as e:
+            logger.debug("Health check failed for %s:%d: %s", radio.host, radio.port, e)
             radio.consecutive_failures += 1
             if radio.consecutive_failures >= 3:
                 radio.reachable = False
