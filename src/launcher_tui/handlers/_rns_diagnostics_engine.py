@@ -121,17 +121,68 @@ def run_rns_diagnostics(handler):
 
     # 2. Config check
     print("\n[2/6] Checking configuration...")
+    config_dir = ReticulumPaths.get_config_dir()
     config_exists = status_data.get('config_exists', False)
     print(f"  Config: {'found' if config_exists else 'MISSING'}")
     if config_exists:
         iface_count = status_data.get('interface_count', 0)
         print(f"  Interfaces: {iface_count}")
 
+    # 2b. Check for config shadowing and problematic settings
+    try:
+        from utils.config_drift import detect_config_shadowing
+        shadow = detect_config_shadowing()
+        if shadow.shadowed:
+            print(f"  WARNING: Config shadowing detected!")
+            print(f"    Active:  {shadow.active_path}")
+            print(f"    Ignored: {shadow.ignored_path}")
+            if shadow.differences:
+                print("    Differences:")
+                for diff in shadow.differences:
+                    print(f"      - {diff}")
+            warnings.append(
+                f"Config shadowing: {shadow.ignored_path} is silently "
+                f"ignored because {shadow.active_path} takes precedence"
+            )
+    except Exception as e:
+        logger.debug("Config shadowing check failed: %s", e)
+
+    # 2c. Check for shared_instance_type = tcp (broken on Linux/epoll)
+    try:
+        config_path = config_dir / 'config' if config_exists else None
+        if config_path and config_path.is_file():
+            cfg_text = config_path.read_text()
+            in_ret = False
+            for line in cfg_text.split('\n'):
+                s = line.strip()
+                if s.startswith('#'):
+                    continue
+                if s == '[reticulum]':
+                    in_ret = True
+                    continue
+                if s.startswith('[') and in_ret:
+                    break
+                if (in_ret and 'shared_instance_type' in s
+                        and '=' in s):
+                    _, val = s.split('=', 1)
+                    if val.strip().lower() == 'tcp':
+                        print("  WARNING: shared_instance_type = tcp")
+                        print("    This causes silent shared instance "
+                              "failures on Linux with epoll.")
+                        print("    Fix: Remove this setting to use "
+                              "domain sockets (default, recommended).")
+                        warnings.append(
+                            "shared_instance_type = tcp causes silent "
+                            "failures on Linux with epoll"
+                        )
+                    break
+    except (OSError, PermissionError) as e:
+        logger.debug("shared_instance_type check failed: %s", e)
+
     # 3. Identity check
     print("\n[3/6] Checking identity...")
     identity_exists = status_data.get('identity_exists', False)
     print(f"  Gateway identity: {'found' if identity_exists else 'not created'}")
-    config_dir = ReticulumPaths.get_config_dir()
     rns_identity = config_dir / 'identity'
     print(f"  RNS identity: {'found' if rns_identity.exists() else 'not created'}")
 
@@ -184,6 +235,8 @@ def run_rns_diagnostics(handler):
                 print("  ! rnsd running but shared instance NOT "
                       "available after 10s wait")
                 print(f"    {si_info['detail']}")
+                if si_info.get('diagnostic'):
+                    print(f"    Diagnostic: {si_info['diagnostic']}")
                 # Show who owns port 37428 (if anyone, for TCP/UDP mode)
                 try:
                     owner = get_udp_port_owner(37428)

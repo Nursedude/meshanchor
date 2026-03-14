@@ -23,8 +23,9 @@ Usage:
 
 import logging
 import os
+import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -404,3 +405,123 @@ def validate_gateway_rns_config(config) -> list:
         ))
 
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Config Shadowing Detection
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ShadowResult:
+    """Result of a config shadowing check."""
+    shadowed: bool
+    active_path: Optional[Path] = None
+    ignored_path: Optional[Path] = None
+    differences: list = field(default_factory=list)
+
+
+def _parse_reticulum_section(content: str) -> dict:
+    """Extract key settings from the [reticulum] section of an RNS config.
+
+    Returns dict with: instance_name, enable_transport, shared_instance_type,
+    share_instance, and interface_count.
+    """
+    settings: dict = {}
+    in_reticulum = False
+    interface_count = 0
+
+    for line in content.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            continue
+
+        # Section headers
+        if stripped == '[reticulum]':
+            in_reticulum = True
+            continue
+        if stripped.startswith('[') and not stripped.startswith('[['):
+            in_reticulum = False
+            continue
+
+        # Count enabled interfaces
+        if stripped.startswith('[[') and stripped.endswith(']]'):
+            interface_count += 1
+            continue
+
+        # Parse key=value in [reticulum] section
+        if in_reticulum and '=' in stripped:
+            key, _, value = stripped.partition('=')
+            key = key.strip()
+            value = value.strip()
+            if key in ('instance_name', 'enable_transport',
+                       'shared_instance_type', 'share_instance'):
+                settings[key] = value
+
+    settings['interface_count'] = interface_count
+    return settings
+
+
+def detect_config_shadowing() -> ShadowResult:
+    """Detect if multiple RNS config files exist (one shadows the other).
+
+    RNS resolution order (from Reticulum.__init__):
+      1. /etc/reticulum/config  (system-wide, WINS if present)
+      2. ~/.config/reticulum/config  (XDG)
+      3. ~/.reticulum/config  (legacy)
+
+    If /etc/reticulum/config exists AND a user-home config also exists,
+    the user config is silently ignored. This function detects that case
+    and reports key setting differences.
+    """
+    etc_config = Path('/etc/reticulum/config')
+    home = get_real_user_home()
+
+    # Find user config (first match wins, same order as RNS)
+    user_candidates = [
+        home / '.config' / 'reticulum' / 'config',
+        home / '.reticulum' / 'config',
+    ]
+    user_config = None
+    for candidate in user_candidates:
+        if candidate.is_file():
+            user_config = candidate
+            break
+
+    # No shadowing if only one config exists
+    if not (etc_config.is_file() and user_config):
+        active = etc_config if etc_config.is_file() else user_config
+        return ShadowResult(shadowed=False, active_path=active)
+
+    # Both exist — the /etc config shadows the user config
+    differences = []
+    try:
+        etc_settings = _parse_reticulum_section(etc_config.read_text())
+        user_settings = _parse_reticulum_section(user_config.read_text())
+
+        # Compare key settings
+        for key in ('instance_name', 'enable_transport',
+                    'shared_instance_type', 'share_instance'):
+            etc_val = etc_settings.get(key, '(not set)')
+            user_val = user_settings.get(key, '(not set)')
+            if etc_val != user_val:
+                differences.append(
+                    f"{key}: /etc={etc_val} vs {user_config.parent.name}={user_val}"
+                )
+
+        etc_ifaces = etc_settings.get('interface_count', 0)
+        user_ifaces = user_settings.get('interface_count', 0)
+        if etc_ifaces != user_ifaces:
+            differences.append(
+                f"interfaces: /etc has {etc_ifaces}, "
+                f"{user_config.parent.name} has {user_ifaces}"
+            )
+    except (OSError, PermissionError) as e:
+        logger.debug("Could not compare config files: %s", e)
+        differences.append(f"(could not compare: {e})")
+
+    return ShadowResult(
+        shadowed=True,
+        active_path=etc_config,
+        ignored_path=user_config,
+        differences=differences,
+    )

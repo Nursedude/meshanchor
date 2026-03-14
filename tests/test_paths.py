@@ -77,6 +77,67 @@ class TestGetRealUsername:
             assert result == 'realuser'
 
 
+class TestReticulumPathsDiscovery:
+    """Tests for ETC_DISCOVERY directory in ReticulumPaths."""
+
+    def test_discovery_constant_exists(self):
+        """ETC_DISCOVERY path constant is defined."""
+        from utils.paths import ReticulumPaths
+        assert ReticulumPaths.ETC_DISCOVERY == (
+            Path('/etc/reticulum/storage/discovery')
+        )
+
+    def test_ensure_system_dirs_creates_discovery(self, tmp_path):
+        """ensure_system_dirs creates the discovery directory."""
+        from utils.paths import ReticulumPaths
+
+        # Temporarily override class paths to use tmp_path
+        orig_base = ReticulumPaths.ETC_BASE
+        orig_storage = ReticulumPaths.ETC_STORAGE
+        orig_discovery = ReticulumPaths.ETC_DISCOVERY
+        orig_ratchets = ReticulumPaths.ETC_RATCHETS
+        orig_resources = ReticulumPaths.ETC_RESOURCES
+        orig_cache = ReticulumPaths.ETC_CACHE
+        orig_announce = ReticulumPaths.ETC_ANNOUNCE_CACHE
+        orig_ifaces = ReticulumPaths.ETC_INTERFACES
+
+        try:
+            ReticulumPaths.ETC_BASE = tmp_path / 'reticulum'
+            ReticulumPaths.ETC_STORAGE = tmp_path / 'reticulum' / 'storage'
+            ReticulumPaths.ETC_DISCOVERY = (
+                tmp_path / 'reticulum' / 'storage' / 'discovery'
+            )
+            ReticulumPaths.ETC_RATCHETS = (
+                tmp_path / 'reticulum' / 'storage' / 'ratchets'
+            )
+            ReticulumPaths.ETC_RESOURCES = (
+                tmp_path / 'reticulum' / 'storage' / 'resources'
+            )
+            ReticulumPaths.ETC_CACHE = (
+                tmp_path / 'reticulum' / 'storage' / 'cache'
+            )
+            ReticulumPaths.ETC_ANNOUNCE_CACHE = (
+                tmp_path / 'reticulum' / 'storage' / 'cache' / 'announces'
+            )
+            ReticulumPaths.ETC_INTERFACES = (
+                tmp_path / 'reticulum' / 'interfaces'
+            )
+
+            result = ReticulumPaths.ensure_system_dirs()
+
+            assert result is True
+            assert ReticulumPaths.ETC_DISCOVERY.is_dir()
+        finally:
+            ReticulumPaths.ETC_BASE = orig_base
+            ReticulumPaths.ETC_STORAGE = orig_storage
+            ReticulumPaths.ETC_DISCOVERY = orig_discovery
+            ReticulumPaths.ETC_RATCHETS = orig_ratchets
+            ReticulumPaths.ETC_RESOURCES = orig_resources
+            ReticulumPaths.ETC_CACHE = orig_cache
+            ReticulumPaths.ETC_ANNOUNCE_CACHE = orig_announce
+            ReticulumPaths.ETC_INTERFACES = orig_ifaces
+
+
 class TestPathConsistency:
     """Test consistency between path functions."""
 

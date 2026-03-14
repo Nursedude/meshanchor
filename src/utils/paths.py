@@ -113,6 +113,7 @@ class ReticulumPaths:
     ETC_RESOURCES = ETC_STORAGE / 'resources'
     ETC_CACHE = ETC_STORAGE / 'cache'
     ETC_ANNOUNCE_CACHE = ETC_CACHE / 'announces'
+    ETC_DISCOVERY = ETC_STORAGE / 'discovery'
     ETC_INTERFACES = ETC_BASE / 'interfaces'
 
     @classmethod
@@ -153,6 +154,7 @@ class ReticulumPaths:
                 cls.ETC_RESOURCES.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_ANNOUNCE_CACHE.mkdir(mode=0o777, parents=True, exist_ok=True)
+                cls.ETC_DISCOVERY.mkdir(mode=0o777, parents=True, exist_ok=True)
                 cls.ETC_INTERFACES.mkdir(mode=0o755, parents=True, exist_ok=True)
             finally:
                 os.umask(old_umask)
