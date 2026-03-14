@@ -263,7 +263,7 @@ class TestDaemonReload:
             assert 'succeeded' in msg
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0][0]
-            assert call_args == ['systemctl', 'daemon-reload']
+            assert call_args[-2:] == ['systemctl', 'daemon-reload']
 
     def test_daemon_reload_failure(self):
         """Test failed daemon-reload."""

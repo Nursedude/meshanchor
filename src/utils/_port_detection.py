@@ -364,6 +364,42 @@ def get_rns_shared_instance_info(instance_name: str = 'default',
     }
 
 
+def _verify_process_cmdline(pid_str: str, process_name: str) -> bool:
+    """Verify a PID is genuinely running the named process via /proc/cmdline.
+
+    Reads /proc/{pid}/cmdline (null-separated argv) and checks if the
+    process name appears as a script path or ``-m`` module argument.
+    Eliminates false positives from shell invocations that merely
+    reference the process name as a string in their command line.
+
+    Args:
+        pid_str: PID as a string.
+        process_name: Expected process name (e.g. ``'rnsd'``).
+
+    Returns:
+        True if the PID genuinely runs the named process.
+    """
+    if not pid_str.isdigit():
+        return False
+    try:
+        with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
+            cmdline = f.read().decode('utf-8', errors='replace')
+        args = cmdline.split('\0')
+        for i, arg in enumerate(args):
+            # Match binary/script path — use basename to avoid
+            # matching e.g. /usr/bin/superrnsd when checking for rnsd
+            basename = arg.rsplit('/', 1)[-1]
+            if basename == process_name:
+                return True
+            # Match python -m <process_name>
+            if arg == '-m' and i + 1 < len(args):
+                if args[i + 1] == process_name:
+                    return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
 def check_process_running(process_name: str) -> bool:
     """
     Check if a process is running by name.
@@ -385,8 +421,8 @@ def check_process_running(process_name: str) -> bool:
         if result.returncode == 0 and result.stdout.strip():
             return True
 
-        # Also check with -f but use word boundaries to avoid partial matches
-        # e.g., match "rnsd" but not "myrnsd_wrapper"
+        # Also check with -f but use word boundaries + cmdline verification
+        # e.g., match "rnsd" but not "myrnsd_wrapper" or shell scripts
         result = subprocess.run(
             ['pgrep', '-f', f'(^|/)({process_name})(\\s|$)'],
             capture_output=True,
@@ -394,17 +430,29 @@ def check_process_running(process_name: str) -> bool:
             timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():
-            return True
+            for pid_str in result.stdout.strip().split('\n'):
+                pid_str = pid_str.strip()
+                if pid_str and _verify_process_cmdline(pid_str, process_name):
+                    return True
 
-        # Fallback: Check via ps for python-based services (e.g., python3 -m rnsd)
+        # Fallback: Check via pgrep for python-based services (e.g., python3 -m rnsd)
+        # Use tight regex + /proc/cmdline verification to prevent false positives
+        # from shell invocations that merely reference the process name as a string.
         if process_name in ('rnsd', 'nomadnet'):
             result = subprocess.run(
-                ['pgrep', '-f', f'python.*{process_name}'],
+                ['pgrep', '-f',
+                 f'python3?\\s+(-m\\s+)?{process_name}(\\s|$)'],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
-            return result.returncode == 0 and result.stdout.strip()
+            if result.returncode == 0 and result.stdout.strip():
+                for pid_str in result.stdout.strip().split('\n'):
+                    pid_str = pid_str.strip()
+                    if not pid_str:
+                        continue
+                    if _verify_process_cmdline(pid_str, process_name):
+                        return True
 
         return False
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -438,18 +486,18 @@ def check_process_with_pid(process_name: str) -> Tuple[bool, Optional[str]]:
             pid = result.stdout.strip().split('\n')[0]
             return True, pid
 
-        # Also check with -f for processes run via interpreters
+        # Also check with -f using word boundaries + cmdline verification
         result = subprocess.run(
-            ['pgrep', '-f', process_name],
+            ['pgrep', '-f', f'(^|/)({process_name})(\\s|$)'],
             capture_output=True,
             text=True,
             timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():
-            # Filter out pgrep itself and get first real PID
-            pids = [p for p in result.stdout.strip().split('\n') if p]
-            if pids:
-                return True, pids[0]
+            for pid_str in result.stdout.strip().split('\n'):
+                pid_str = pid_str.strip()
+                if pid_str and _verify_process_cmdline(pid_str, process_name):
+                    return True, pid_str
 
         return False, None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

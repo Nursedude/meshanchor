@@ -1,122 +1,88 @@
 # MeshForge Persistent Issues & Resolution Patterns
 
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
-> This serves as institutional memory for development.
->
-> **Last audited**: 2026-03-09 — TUI code review & cleanup: MeshChat removed (PR #1104), gateway_heartbeat.py deleted (dead code), _lxmf_utils.py generalized (port-based check), main.py dead code removed, version bumped to 0.5.5-beta (2,745 tests / 77 files, 60 handlers)
+> **Last audited**: 2026-03-13 — Trimmed to <40k chars; resolved issues archived.
 
 ---
 
-## Health Check Reconciliation (2026-02-20) — ALL RESOLVED
+## Archived / Fully Resolved Issues
 
-C1-C5 and H1 from the 2026-01-24 code review are all FIXED/MITIGATED.
-Full details moved to `persistent_issues_archive.md` (2026-02-26).
+The following are **RESOLVED** with automated prevention (linter + regression tests).
+Full history in `persistent_issues_archive.md`.
+
+| Issue | Summary | Prevention |
+|-------|---------|------------|
+| Health Check Reconciliation | C1-C5, H1 all fixed (2026-02-20) | — |
+| Handler Registry Migration | 49 mixins → 60 handler files (2026-02-28) | — |
+| #1 Path.home() | Use `get_real_user_home()` | Lint MF001 + regression test |
+| #5 Duplicate Utilities | `safe_import` for external deps only | Direct imports for first-party |
+| #7 Missing File References | Create scripts before referencing them | — |
+| #8 Outdated Fallback Versions | Search hardcoded versions on bump | `grep -rn "0\.[0-9]\.[0-9]" src/` |
+| #9 Broad Exception Swallowing | 28/30 fixed; 2 benign by design | `grep except.*:.*pass` |
+| #10 Map Scrollbar Overlap | Thin dark-themed scrollbar CSS | — |
+| #25, #26, #28 | rnsd ratchets, ReticulumPaths copies, API proxy | — |
+| GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
 
 ---
 
-## Handler Registry Migration — COMPLETE (2026-02-28)
+## Development Checklist
 
-The 49-mixin inheritance chain on `MeshForgeLauncher` has been fully replaced with a
-handler registry pattern. See `handler_protocol.py` (Protocol + BaseHandler + TUIContext)
-and `handler_registry.py` (register/lookup/dispatch). Each handler is a self-contained
-class in `launcher_tui/handlers/` (60 files). `main.py` dropped from 1,947 to 1,148 lines.
-`gateway_heartbeat.py` removed 2026-03-09 (dead code — unregistered, broken API calls).
+Before committing, verify:
 
-**Impact**: Resolves Feb 26 audit item #1 (Critical — mixin explosion). MRO is now trivial,
-state coupling eliminated, new handlers are straightforward to add.
+- [ ] No `Path.home()` — use `get_real_user_home()`
+- [ ] Actionable error messages, appropriate log levels
+- [ ] Services verified with `check_service()` before use
+- [ ] `subprocess` calls have `timeout=` (MF004)
+- [ ] Utilities from central location, not duplicated
+- [ ] `safe_import` for external deps only; direct imports for first-party
 
 ---
 
-## Issue #1: Path.home() Returns /root with sudo — RESOLVED (2026-02-20)
-
-### Status: **RESOLVED** — Zero `Path.home()` violations remain in codebase.
-
-### Rule
-**ALWAYS use `get_real_user_home()` from `utils/paths.py`** instead of `Path.home()`:
+## Quick Reference: Import Patterns
 
 ```python
-# WRONG - breaks with sudo
-from pathlib import Path
-config_file = Path.home() / ".config" / "meshforge" / "settings.json"
+# Paths
+from utils.paths import get_real_user_home, get_real_username, MeshForgePaths, ReticulumPaths
 
-# CORRECT - works with sudo
-from utils.paths import get_real_user_home
-config_file = get_real_user_home() / ".config" / "meshforge" / "settings.json"
+# Settings / Logging
+from utils.common import SettingsManager, CONFIG_DIR
+from utils.logging_config import get_logger
+
+# Service checks
+from utils.service_check import check_service, check_port, ServiceState
+
+# External deps (safe_import)
+from utils.safe_import import safe_import
+RNS, _HAS_RNS = safe_import('RNS')
+_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+
+# First-party — ALWAYS direct import
+from utils.service_check import check_service
+from utils.event_bus import emit_message
+from gateway.rns_bridge import RNSMeshtasticBridge
 ```
 
-### Resolution (2026-02-20)
-- Fixed last 3 violations: `mqtt_bridge_handler.py`, `cli.py`, `rns_config.py`
-- Consolidated 20 `safe_import` fallback copies to direct imports (Issue #5)
-- Linter (`scripts/lint.py`) checks MF001
-
-### Prevention
-- Use `from utils.paths import get_real_user_home, MeshForgePaths`
-- Grep for `Path.home()` before committing
-- Linter enforces MF001
-
----
-
-## Archived GTK Issues (#2, #10, #11, #13, #14, #15)
-
-GTK4 was removed in v0.5.x. These issues are no longer relevant.
-Historical details in `persistent_issues_archive.md`.
-
----
-
-## Issue #3: Services Not Started/Verified — MOSTLY RESOLVED (2026-02-27)
-
-### Status: **Gateway + secondary pre-flight checks done.** Display-only systemctl calls remain (acceptable).
-
-### Rule
-**Always call `check_service()` before connecting to services.**
-
-**Advisory vs Blocking**:
-- **Advisory** (background daemons): Warn but continue — service may run outside systemd
-- **Blocking** (user-facing TUI menus): Show error + fix hint, don't proceed
-
+**Test patching**: Patch `_HAS_*` flags directly, not `sys.modules`:
 ```python
-# ADVISORY — for background daemon connections (gateway, bridges)
-status = check_service('meshtasticd')
-if not status.available:
-    logger.warning("meshtasticd service check: %s (attempting connection anyway)",
-                   status.message)
-    # Continue — TCP connect attempt is the definitive test
-
-# BLOCKING — for user-initiated TUI actions
-status = check_service('meshtasticd')
-if not status.available:
-    show_error(status.message)
-    show_fix(status.fix_hint)
-    return  # Don't proceed
+@patch('gateway.rns_bridge._HAS_RNS', True)  # CORRECT
+def test_rns(self): ...
 ```
 
-### Completed (2026-02-20)
-- `meshtastic_handler.py` — Advisory `check_service('meshtasticd')` before TCP connect
-- `mqtt_bridge_handler.py` — Advisory `check_service('mosquitto')` for localhost brokers
-- `rns_bridge.py` — Advisory `check_service('rnsd')` before RNS init
-- `meshtastic_connection.py` — Replaced raw `systemctl restart` with `restart_service()`
+---
 
-### Completed (2026-02-27)
-- `device_controller.py` — Advisory meshtasticd pre-flight before TCPInterface
-- `connections.py` — Advisory meshtasticd pre-flight before TCPInterface
-- `rns_transport.py` — Advisory meshtasticd pre-flight before TCPInterface
-- `node_monitor.py` — Advisory meshtasticd pre-flight before TCPInterface
-- `mesh_bridge.py` — Advisory meshtasticd pre-flight (TCP) + mosquitto pre-flight (MQTT, localhost only)
-- `mqtt_bridge.py` (plugin) — Advisory mosquitto pre-flight for localhost brokers
-- `mqtt_subscriber.py` — Advisory mosquitto pre-flight for localhost brokers
-- `diagnose.py` — Converted `safe_import` to direct import, eliminated raw systemctl fallback
-- `handlers/metrics.py` — Replaced raw `systemctl is-active grafana-server` with `check_service()`
+## Issue #3: Services Not Started/Verified — MOSTLY RESOLVED
 
-**Note**: Gateway pre-flight checks are ADVISORY (warn + continue), not blocking.
-Services may run outside systemd (Docker, manual start). The actual connection
-attempt is the definitive test. Blocking checks caused "waiting for delivery"
+**Rule**: Always call `check_service()` before connecting to services.
+
+- **Advisory** (daemons): Warn + continue — service may run outside systemd
+- **Blocking** (TUI actions): Show error + fix hint, don't proceed
+
+**Note**: Gateway checks are ADVISORY. Blocking checks caused "waiting for delivery"
 regression when mosquitto wasn't detectable via systemctl.
 
-### Remaining (display-only — acceptable)
-- `system_tools_mixin.py` — `systemctl list-units/status` for display to user (not state decisions)
-- `service_menu_mixin.py` — `systemctl status` for display to user (not state decisions)
+**Remaining** (acceptable): `system_tools_mixin.py` and `service_menu_mixin.py` use
+`systemctl status` for display only, not state decisions.
 
-### Known Services (in `utils/service_check.py`)
 | Service | Port | systemd name |
 |---------|------|--------------|
 | meshtasticd | 4403 | meshtasticd |
@@ -128,1255 +94,270 @@ regression when mosquitto wasn't detectable via systemctl.
 
 ## Issue #4: Silent Debug-Level Logging
 
-### Symptom
-Errors occur but user/developer sees no indication because logs are at DEBUG level.
-
-### Root Cause
-Over-cautious logging to avoid "spam" means real errors are hidden.
-
-### Proper Fix
-Use appropriate log levels:
-- **ERROR**: Something broke, needs attention
-- **WARNING**: Something unusual, might be a problem
-- **INFO**: User-visible operations (connected, saved, etc.)
-- **DEBUG**: Internal details for developers
-
-```python
-# WRONG - hides important info
-logger.debug(f"Connection failed: {error}")
-
-# CORRECT - visible in normal logging
-logger.info(f"[Component] Connection failed: {error}")
-```
+Use appropriate log levels — don't hide errors at DEBUG:
+- **ERROR**: Something broke | **WARNING**: Unusual | **INFO**: User-visible ops | **DEBUG**: Dev internals
 
 ---
 
-## Issue #5: Duplicate Utility Functions — RESOLVED (2026-02-20)
+## Issue #6: Large Files — ALL UNDER THRESHOLD
 
-### Status: **RESOLVED** — All 20 `safe_import` fallback copies consolidated to direct imports.
+Only `knowledge_content.py` (1,993 lines) exceeds 1,500 — acceptable as content file.
+Monitor files approaching 1,400 lines. Split proactively at 1,000 lines when adding features.
 
-### Rule
-**Single source of truth**: Define once in `utils/paths.py`, import everywhere else.
-
-```python
-# CORRECT — first-party module, always available
-from utils.paths import get_real_user_home
-
-# WRONG — safe_import is for EXTERNAL deps only
-_home, _HAS_PATHS = safe_import('utils.paths', 'get_real_user_home')
-```
-
-### Resolution (2026-02-20)
-Consolidated 20 files from `safe_import('utils.paths', ...)` fallback patterns to direct `from utils.paths import get_real_user_home`. Net -220 lines removed.
-
-### Follow-up (2026-02-23)
-Review found `startup_checks.py` still used `safe_import('utils.service_check', ...)` with `_HAS_SERVICE_CHECK` guard — converted to direct import. The guard created a dead fallback path that would silently revert RNS socket detection to broken UDP-only behavior.
+Top files: `meshtastic_protobuf_client.py` (1,433), `service_check.py` (1,410),
+`map_http_handler.py` (1,404), `prometheus_exporter.py` (1,399).
 
 ---
 
-## Development Checklist
+## Issue #12: RNS "Address Already in Use"
 
-Before committing, verify:
+**Rule**: Never call `RNS.Reticulum()` without `configdir=` when rnsd is running.
 
-- [ ] No new `Path.home()` calls added (use `get_real_user_home()`)
-- [ ] Error messages are actionable, not generic
-- [ ] Log levels appropriate (INFO for user actions, ERROR for failures)
-- [ ] Services are verified before use (use `check_service()`)
-- [ ] subprocess calls have timeout parameters (MF004)
-- [ ] Utilities imported from central location, not duplicated
+MeshForge creates a client-only config in `/tmp/meshforge_rns_client/` with
+`share_instance = Yes` and no interface definitions, allowing connection to
+rnsd without binding ports.
 
----
-
-## Quick Reference: Import Patterns
-
-```python
-# Paths - use these instead of Path.home()
-from utils.paths import get_real_user_home, get_real_username
-from utils.paths import MeshForgePaths, ReticulumPaths
-
-# Settings
-from utils.common import SettingsManager, CONFIG_DIR
-
-# Logging
-from utils.logging_config import get_logger
-
-# Service availability checks - use before service-dependent operations
-from utils.service_check import check_service, check_port, ServiceState
-
-# Optional external dependencies — use safe_import
-from utils.safe_import import safe_import
-RNS, _HAS_RNS = safe_import('RNS')                              # External
-_pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')                 # External
-_yaml, _HAS_YAML = safe_import('yaml')                            # External
-
-# First-party modules — ALWAYS use direct imports (never safe_import)
-from utils.service_check import check_service    # ✓ Direct
-from utils.event_bus import emit_message         # ✓ Direct
-from gateway.rns_bridge import RNSMeshtasticBridge  # ✓ Direct
-```
-
-### Test Patching with safe_import
-
-When testing code that uses safe_import for external deps, patch the
-module-level `_HAS_*` flags directly — NOT `sys.modules`:
-
-```python
-# WRONG - flags already evaluated at import time
-@patch.dict('sys.modules', {'RNS': MagicMock()})
-def test_rns(self): ...  # _HAS_RNS is still False!
-
-# CORRECT - patch the flag directly
-@patch('gateway.rns_bridge._HAS_RNS', True)
-def test_rns(self): ...  # Now _HAS_RNS is True
-```
-
----
-
-## Issue #6: Large Files Exceeding Guidelines
-
-### Symptom
-Files exceed the 1,500 line guideline from CLAUDE.md, making them difficult to navigate, test, and maintain.
-
-### Current Status (2026-03-02, refreshed)
-
-**Python files over 1,500 lines:**
-
-| File | Lines | Status | Notes |
-|------|-------|--------|-------|
-| `src/utils/knowledge_content.py` | 1,993 | OK | Content file by design - no split needed |
-
-All other Python files are under 1,500 lines.
-
-**Top files by line count (all under 1,500):**
-
-| File | Lines | Notes |
-|------|-------|-------|
-| `src/gateway/meshtastic_protobuf_client.py` | 1,433 | Monitor |
-| `src/utils/service_check.py` | 1,410 | Extracted _service_iptables.py |
-| `src/utils/map_http_handler.py` | 1,404 | Extracted _map_meshtastic_proxy.py |
-| `src/utils/prometheus_exporter.py` | 1,399 | Extracted metrics_server.py |
-| `src/gateway/rns_bridge.py` | 1,349 | Extracted _rns_bridge_connection.py |
-| `src/utils/map_data_collector.py` | 1,320 | Extracted _map_collector_rns.py |
-| `src/launcher_tui/handlers/nomadnet.py` | 1,315 | Extracted _nomadnet_rns_checks.py |
-| `src/commands/rns.py` | 1,306 | Extracted rns_templates.py |
-
-**Previously over threshold (NOW RESOLVED):**
-
-| File | Was | Now | Resolution |
-|------|-----|-----|------------|
-| `src/launcher_tui/handlers/nomadnet.py` | 1,610 | 1,315 | Extracted _nomadnet_rns_checks.py (2026-03-02) |
-| `src/gateway/rns_bridge.py` | 1,599 | 1,349 | Extracted _rns_bridge_connection.py (2026-03-02) |
-| `src/utils/service_check.py` | 1,573 | 1,410 | Extracted _service_iptables.py (2026-03-02) |
-| `src/utils/map_data_collector.py` | 1,568 | 1,320 | Extracted _map_collector_rns.py (2026-03-02) |
-| `src/utils/map_http_handler.py` | 1,557 | 1,404 | Extracted _map_meshtastic_proxy.py (2026-03-02) |
-| `src/utils/prometheus_exporter.py` | 1,523 | 1,399 | Extracted metrics_server.py (2026-03-02) |
-| `src/commands/rns.py` | 1,505 | 1,306 | Extracted rns_templates.py (2026-03-02) |
-| `src/core/meshtasticd_config.py` | 1,497 | 516 | Extracted meshtasticd_templates.py (2026-03-02) |
-| `src/monitoring/traffic_inspector.py` | 2,194 | 442 | Extracted to packet_dissectors, traffic_models, traffic_storage |
-| `src/gateway/node_tracker.py` | 1,808 | 989 | Extracted to node_models.py |
-| `src/launcher_tui/main.py` | 1,799 | 1,489 | Extracted network_tools, web_client, data_path mixins; removed dead code |
-| `src/core/diagnostics/engine.py` | 1,767 | 709 | Extracted to models.py |
-| `src/utils/metrics_export.py` | 1,762 | 96 | Split to common/prometheus/influxdb modules |
-| `src/launcher_tui/rns_menu_mixin.py` | 1,524 | 1,496 | Extracted rns_sniffer_mixin + rns_config_mixin + rns_diagnostics_mixin |
-
-**GTK files removed from tracking (GTK deprecated):**
-- GTK4 interface was removed; TUI is now the only interface
-
-**Markdown files over 1,000 lines:**
-
-| File | Lines | Action |
-|------|-------|--------|
-| `.claude/dude_ai_university.md` | ~200 | Trimmed in dedup audit (2026-02-23) |
-| `.claude/foundations/persistent_issues.md` | 1,165 | Stable after archiving resolved issues |
-
-### Remaining Extraction Candidates
-
-No files currently over the 1,500-line threshold. Monitor files approaching 1,400 lines.
-
-### Completed Extractions (2026-03-02)
-
-8 files split in Session 2 (2026-03-02):
-- meshtasticd_config.py: 1,497 → 516 (meshtasticd_templates.py — RadioType, RadioConfig, RADIO_TEMPLATES)
-- rns.py: 1,505 → 1,306 (rns_templates.py — interface template functions)
-- prometheus_exporter.py: 1,523 → 1,399 (metrics_server.py — MetricsServer class)
-- map_http_handler.py: 1,557 → 1,404 (_map_meshtastic_proxy.py — MeshtasticProxyMixin)
-- map_data_collector.py: 1,568 → 1,320 (_map_collector_rns.py — RNSDataCollectorMixin)
-- service_check.py: 1,573 → 1,410 (_service_iptables.py — iptables functions)
-- rns_bridge.py: 1,599 → 1,349 (_rns_bridge_connection.py — RNSConnectionMixin)
-- nomadnet.py: 1,610 → 1,315 (_nomadnet_rns_checks.py — NomadNetRNSChecksMixin)
-
-Previous extractions (2026-02-06):
-- traffic_inspector.py: 2,194 → 442 (split to 4 modules)
-- main.py: 1,799 → 1,489 (43 mixins extracted, dead code removed)
-- node_tracker.py: 1,808 → 989 (node_models.py extracted)
-- metrics_export.py: 1,762 → 96 (split to common/prometheus/influxdb)
-- engine.py: 1,767 → 709 (models.py extracted)
-- rns_menu_mixin.py: 1,524 → 1,210 (sniffer extracted)
-
-### Proper Fix
-
-Files over 1,500 lines should be split when adding new features to them.
-Previously refactored: launcher_tui (extracted 30 mixins), hamclock (extracted API client),
-rns.py (extracted config editor + mixins). Web UI and Rich CLI were deleted in consolidation.
-
-### Prevention
-- Check file length before adding new features
-- Split files proactively at 1,000 lines
-- Use `wc -l src/**/*.py | sort -rn | head -10` to monitor
-- When adding to launcher_tui/main.py, **always check if a mixin exists or should be created**
-
----
-
-## Issue #7: Missing File References in Launchers
-
-### Symptom
-TUI or launcher crashes when selecting a menu option because the referenced file doesn't exist.
-
-### Example
-`launcher_tui.py` line 349 referenced `gateway/bridge_cli.py` which didn't exist:
-```python
-subprocess.run([sys.executable, str(self.src_dir / 'gateway' / 'bridge_cli.py')])
-```
-
-### Root Cause
-Adding menu options that reference new scripts without creating the scripts first.
-
-### Proper Fix
-1. **Create the script before referencing it**
-2. **Add verification step**: Check all file references exist before committing
-3. **Use commands layer when possible**: Instead of running scripts, use commands module
-
-### Prevention
-Run this verification before committing launcher changes:
-```bash
-# Check all referenced files exist
-for f in src/launcher.py src/launcher_tui/main.py \
-         src/standalone.py; do
-  [ -f "$f" ] && echo "OK: $f" || echo "MISSING: $f"
-done
-```
-
----
-
-## Issue #8: Outdated Fallback Version Strings
-
-### Symptom
-Application shows old version number even after version bump.
-
-### Root Cause
-Fallback version strings in try/except blocks don't get updated:
-```python
-try:
-    from __version__ import __version__
-except ImportError:
-    __version__ = "0.4.3"  # Outdated!
-```
-
-### Proper Fix
-1. Search for hardcoded version strings when bumping version
-2. Use `grep -r "0\.4\." src/` to find all occurrences
-
-### Prevention
-```bash
-# Before releasing, search for version strings
-grep -rn "0\.[0-9]\.[0-9]" src/*.py | grep -v __version__.py
-```
-
----
-
-## Issue #9: Broad Exception Swallowing — MOSTLY RESOLVED (2026-02-20)
-
-### Status: **MOSTLY RESOLVED** — 28 of 30 instances fixed. 2 benign exceptions remain by design.
-
-### Rule
-```python
-# BAD - hides all errors
-except Exception:
-    pass
-
-# GOOD - log it
-except Exception as e:
-    logger.debug("Non-critical operation failed: %s", e)
-```
-
-### Resolution (2026-02-20)
-Fixed 28 silent `except Exception: pass` across 7 files:
-- `tcp_monitor.py` (7) — callback failures now logged as warnings
-- `system_diagnostics.py` (8) — converted to `logger.debug()`
-- `setup_wizard.py` (3) — converted to `logger.debug()`
-- `hardware_config.py` (2) — converted to logged warnings
-- `rns_sniffer.py` (2) — converted to `logger.debug()`
-- `site_planner.py` (2) — converted to `logger.debug()`
-
-### Remaining (by design)
-- `packet_dissectors.py` — benign decode try/except (no logger in file)
-- `pskreporter_subscriber.py` — cleanup exceptions inside outer try that already logs
-
-### Prevention
-- Grep for `except.*:.*pass` before committing
-- Code review should flag broad exception handlers
-
----
-
-## Issue #12: RNS "Address Already in Use" When Connecting as Client
-
-### Symptom
-Application errors like:
-```
-[Error] The interface "Default Interface" could not be created
-[Error] The contained exception was: [Errno 98] Address already in use
-```
-
-This happens when MeshForge tries to connect to an existing rnsd instance.
-
-### Root Cause
-`RNS.Reticulum()` reads the user's `~/.reticulum/config` which defines interfaces (like AutoInterface). Even when connecting to a shared instance, RNS tries to create these interfaces, which fails because rnsd already bound those ports.
-
-### Wrong Fix (documented but not implemented)
-The old workaround in `fresh_install_test.md` said to manually edit `~/.reticulum/config` to disable AutoInterface. This requires user intervention and doesn't scale.
-
-### Proper Fix (2026-01-13)
-MeshForge now creates a client-only config in `/tmp/meshforge_rns_client/` with:
-- `share_instance = Yes`
-- No interface definitions
-
-This allows connecting to rnsd without trying to bind ports.
-
-### Location
-`src/gateway/node_tracker.py` - `_init_rns_main_thread()` method
-
-### Prevention
-- When connecting to shared RNS instances, always use a client-only config
-- Never call `RNS.Reticulum()` without a configdir when rnsd is running
+Location: `src/gateway/node_tracker.py` — `_init_rns_main_thread()`
 
 ---
 
 ## Issue #16: Gateway Message Routing Reliability
 
-### Symptom
-- Messages may not reach destination
-- Delivery confirmation unreliable over LoRa
+Delivery is **best-effort** — inherent to mesh networking. Message queue persists to SQLite for retry.
+Always show "Sent (delivery not guaranteed)" or "Queued" status.
 
-### Root Cause
-Inherent to mesh networking: best-effort delivery, node unreachability, queue overflow.
-
-### Current State
-- Message transmission implemented via HTTP protobuf (v0.5.4)
-- Gateway bridge connects RNS and Meshtastic networks
-- Message queue persists to SQLite for retry
-
-### Proper Fix
-**Accept reliability limitations** — document delivery as "best effort":
-```python
-result = messaging.send_message(dest, text)
-if result.get("status") == "sent":
-    show_status("Sent (delivery not guaranteed)")
-elif result.get("status") == "queued":
-    show_status("Queued - gateway not connected")
-```
-
-### Files Involved
-- `src/commands/messaging.py` — Message sending logic
-- `src/gateway/rns_bridge.py` — RNS-Meshtastic bridge
-- `src/gateway/message_queue.py` — SQLite message queue
+Files: `commands/messaging.py`, `gateway/rns_bridge.py`, `gateway/message_queue.py`
 
 ---
 
-## Issue #17: Meshtastic Connection Contention (meshtasticd Single-Client)
+## Issue #17: Meshtastic Connection Contention (Single-Client TCP)
 
-### Symptom
-- Recurring "Connection reset by peer" and "Broken pipe" errors
-- meshtasticd logs show "Force close previous TCP connection" every second
-- Gateway connection drops intermittently
-- Multiple components competing for TCP connection
+**meshtasticd only supports ONE TCP client at a time.** Multiple components creating
+independent connections causes thrashing every 1-2 seconds.
 
-### Root Cause (Identified 2026-01-18)
-**meshtasticd only supports ONE TCP client at a time.** When multiple components create independent TCP connections:
-```
-Component A connects → OK
-Component B connects → A disconnected by meshtasticd
-Component A reconnects → B disconnected
-... cycle continues
-```
+### Fix: Shared Connection Manager
+All components share ONE persistent connection via `get_connection_manager()`.
+Short-lived reads use `MeshtasticConnection` context manager.
+Long-lived connections acquire `MESHTASTIC_CONNECTION_LOCK`.
 
-### Impact
-- Connection thrashing every 1-2 seconds
-- Messages may be lost during reconnection
-- Gateway stability compromised
-- External tools (Meshtastic Web UI on port 9443) also compete
-
-### Proper Fix (Implemented 2026-01-18)
-**Shared connection manager** - All components share ONE persistent connection:
-
-```python
-# message_listener.py - Check for existing connection BEFORE creating new one
-def _run(self):
-    conn_mgr = get_connection_manager(host=self.host)
-    if conn_mgr.has_persistent():
-        # Another component owns the connection - just subscribe to pub/sub
-        self._interface = conn_mgr.get_interface()
-        self._owns_connection = False
-        logger.info(f"Using existing connection from {conn_mgr.get_persistent_owner()}")
-    else:
-        # No existing connection - we need to create one
-        if conn_mgr.acquire_persistent(owner="message_listener"):
-            self._interface = conn_mgr.get_interface()
-            self._owns_connection = True
-```
-
-### Files Changed
-- `src/utils/message_listener.py` - Check for existing persistent connection
-- `src/utils/meshtastic_connection.py` - Connection manager
-
-### HTTP fromradio Contention Fix (2026-02-23)
-
-**Additional root cause**: The `/api/v1/fromradio` HTTP endpoint is also single-consumer.
-When the protobuf client calls `connect()`, it drains all fromradio packets (including
-delivery ACKs) during session setup, starving the meshtasticd web client at :9443 and
-causing "waiting for delivery" hangs. The meshtastic CLI fallback also competes via TCP.
-
-**Fix**: `send_text_direct()` — a stateless TX function that POSTs directly to
-`/api/v1/toradio` without ever reading from `/api/v1/fromradio`. meshtasticd fills
-in the source node number automatically, so no session handshake is needed for sending.
-
-All TX paths now use `send_text_direct()` as primary, with session-based send as fallback:
-- `mqtt_bridge_handler.py` — gateway MQTT bridge TX
-- `mesh_bridge.py` — preset bridge TX
-- `commands/meshtastic.py` — TUI/CLI message sending (before CLI subprocess fallback)
-
-### Files Changed
-- `src/gateway/meshtastic_protobuf_client.py` — Added `send_text_direct()` stateless TX
-- `src/gateway/mqtt_bridge_handler.py` — Stateless TX as primary path
-- `src/gateway/mesh_bridge.py` — Stateless TX as primary path
-- `src/commands/meshtastic.py` — HTTP protobuf before CLI subprocess
+### HTTP fromradio Contention Fix
+The `/api/v1/fromradio` endpoint is also single-consumer. `send_text_direct()` POSTs
+directly to `/api/v1/toradio` without ever reading fromradio. All TX paths use this.
 
 ### Prevention
-- **NEVER read from `/api/v1/fromradio` during TX operations**
-- Use `send_text_direct()` for all message sending (write-only to toradio)
-- Reserve session-based `connect()` + `start_polling()` for config read operations only
-- Always use `get_connection_manager()` instead of creating `TCPInterface` directly
-- Check `has_persistent()` before creating connections
-- Use `acquire_persistent(owner="component_name")` for long-lived connections
-- For short operations, use the existing interface without taking ownership
+- **NEVER** create `TCPInterface()` directly — use connection manager
+- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()`
+- Reserve session-based `connect()` + `start_polling()` for config reads only
 
 ---
 
-## Issue #18: Meshtastic Auto-Reconnect on Connection Drop
+## Issue #18: Auto-Reconnect on Connection Drop
 
-### Symptom
-- Gateway stops working after meshtasticd restart
-- No automatic recovery from network issues
-- User must manually restart MeshForge
-
-### Root Cause
-Original implementation had no reconnection logic - once connection dropped, it stayed dropped.
-
-### Proper Fix (Implemented 2026-01-18)
-**Health monitoring + exponential backoff reconnect**:
-
-```python
-# rns_bridge.py
-def _poll_meshtastic(self):
-    """Poll Meshtastic for health check"""
-    if self._mesh_interface:
-        try:
-            if hasattr(self._mesh_interface, 'isConnected'):
-                if not self._mesh_interface.isConnected:
-                    self._handle_connection_lost()
-                    return
-        except (BrokenPipeError, ConnectionResetError, OSError) as e:
-            logger.warning(f"Meshtastic connection lost: {e}")
-            self._handle_connection_lost()
-
-def _handle_connection_lost(self):
-    """Cleanup and prepare for reconnect"""
-    self._connected_mesh = False
-    if hasattr(self, '_conn_manager') and self._conn_manager:
-        self._conn_manager.release_persistent()
-    # Clear subscriptions, wait for cooldown
-
-def _meshtastic_loop(self):
-    """Main loop with auto-reconnect"""
-    reconnect_delay = 1
-    max_reconnect_delay = 30
-    while self._running:
-        if not self._connected_mesh:
-            self._connect_meshtastic()
-            if self._connected_mesh:
-                reconnect_delay = 1  # Reset on success
-            else:
-                time.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
-```
-
-### Files Changed
-- `src/gateway/rns_bridge.py` - Health monitoring, auto-reconnect, exponential backoff
-
-### Prevention
-- All persistent connections should have health monitoring
-- Use exponential backoff (1s → 2s → 4s → ... → 30s max) to avoid hammering
-- Release connection manager resources on disconnect
+Gateway uses health monitoring + exponential backoff (1s → 2s → 4s → ... → 30s max)
+in `rns_bridge.py`. All persistent connections should have health monitoring.
+Release connection manager resources on disconnect.
 
 ---
 
 ## Issue #19: RNS Node Discovery from path_table
 
-### Symptom
-- RNS gateway only discovers 2 of 6+ nodes on network
-- Nodes visible in `rnstatus` but not in MeshForge
-- Node count doesn't match actual network
+Use `RNS.Transport.path_table` (not just `destinations`) for complete routing info.
+**path_table may be empty immediately after connect** — use delayed checks (5s) and
+periodic re-checks (30s).
 
-### Root Cause (Identified 2026-01-18)
-MeshForge was only checking `RNS.Transport.destinations` which is limited. The complete routing table is in `RNS.Transport.path_table` which contains ALL destinations rnsd knows about.
-
-### Proper Fix (Implemented 2026-01-18)
-**Check path_table first** for complete routing information:
-
-```python
-# node_tracker.py
-def _load_known_rns_destinations(self, RNS):
-    # PRIMARY: Check path_table - contains ALL destinations rnsd knows about
-    if hasattr(RNS.Transport, 'path_table') and RNS.Transport.path_table:
-        for dest_hash, path_data in RNS.Transport.path_table.items():
-            if isinstance(dest_hash, bytes) and len(dest_hash) == 16:
-                node_id = f"rns_{dest_hash.hex()[:16]}"
-                if node_id not in self._nodes:
-                    hops = path_data[1] if isinstance(path_data, tuple) and len(path_data) > 1 else 0
-                    node = UnifiedNode.from_rns(dest_hash, name="", app_data=None)
-                    self.add_node(node)
-                    logger.info(f"[RNS] Discovered node from path_table: {node_id} ({hops} hops)")
-```
-
-### Timing Issue
-**path_table may be empty immediately after connect** - rnsd syncs data asynchronously.
-Use delayed checks (5s after connection) and periodic re-checks (30s intervals).
-
-### Files Changed
-- `src/gateway/node_tracker.py` - path_table discovery + delayed/periodic checks
-
-### Prevention
-- When connecting to shared RNS instances, always check path_table
-- Allow time for data sync before assuming empty
-- Implement periodic re-checks for dynamic networks
+Location: `src/gateway/node_tracker.py`
 
 ---
 
-*Last updated: 2026-02-21 - Cleanup: consolidated archived stubs, removed GTK references, cleaned separators*
+## Issue #20: Service Detection & Status Display — ALL DONE
 
----
+All 3 components resolved:
 
-## Issue #20: Service Detection & Status Display Redesign Required
+1. **Service Detection**: Simplified to systemctl-only for systemd services (SSOT)
+2. **Status Display**: Separates "service state" from "detection capability" —
+   never shows "FAILED" when service is running
+3. **RX Messages**: `event_bus.py` → `websocket_server.py` → TUI live feed
 
-### Symptom
-After multiple fix attempts, these issues persist:
-1. **RNS panel shows wrong status** - Lights/indicators show running/stopped incorrectly
-2. **Meshtastic detection shows "FAILED"** - Even when meshtasticd service is running and functional
-3. **TX works but RX doesn't display** - Messages sent successfully, received messages not shown in UI
-
-### Root Cause Analysis
-
-**Problem 1: Too Many Detection Methods**
-Current `service_check.py` uses 3+ fallback methods with conflicting results:
-```
-UDP port check → pgrep → systemctl is-active → systemctl status
-```
-Each method can give different answers. When they conflict, UI shows wrong state.
-
-**Problem 2: Conflating "Service Running" with "CLI Detection"**
-The meshtastic detection treats CLI failures as service failures:
-```
-Service: RUNNING (systemctl says active)
-CLI:     FAILS (can't connect via meshtastic --export-config)
-UI:      Shows "DETECTION FAILED" ← Misleading
-```
-
-**Problem 3: No Event System for RX Messages**
-Messages flow: `meshtasticd → gateway → logs` but NOT to UI
-- TX: User action → API call → works
-- RX: Incoming packet → log entry → UI never updated
-
-### Failed Fix Attempts (2026-01-17)
-1. Added UDP port check for 0.0.0.0 in addition to 127.0.0.1 - Still fails
-2. Improved pgrep with exact match and word boundaries - Still matches incorrectly
-3. Added service_running flag to detection result - UI still shows "FAILED"
-4. Fixed NodeTracker import (was wrong class name) - Telemetry still doesn't show
-
-### Redesign Specification
-
-#### Component 1: Service Detection (service_check.py)
-
-**Current Architecture (BROKEN):**
-```
-check_service() {
-  if check_udp_port() → return running
-  if check_process_running() → return running
-  if check_systemd_service() → return running
-  return not_running
-}
-```
-
-**Proposed Architecture:**
-```
-check_service() {
-  # SINGLE SOURCE OF TRUTH for systemd services
-  if is_systemd_service(name):
-    return systemctl_is_active(name)  # That's it. No fallbacks.
-
-  # Only use port/process for non-systemd services
-  return check_port_or_process(name)
-}
-```
-
-**Rationale:**
-- If rnsd/meshtasticd are managed by systemd, trust systemd
-- Fallback methods (port check, pgrep) are unreliable
-- "Unknown" state is better than wrong state
-
-#### Component 2: Status Display (UI panels)
-
-**Current Architecture (BROKEN):**
-```
-detection = detect_meshtastic_settings()
-if detection is None or detection['preset'] is None:
-    show "DETECTION FAILED"  ← Wrong when service runs but CLI unavailable
-```
-
-**Proposed Architecture:**
-```
-# Separate service status from detection capability
-service_status = check_service('meshtasticd')
-detection = detect_meshtastic_settings()
-
-# Show BOTH states clearly
-"Service: Running" or "Service: Stopped"
-"Preset: MEDIUM_FAST" or "Preset: Unknown (select manually)"
-
-# Never show "FAILED" when service is running
-```
-
-#### Component 3: RX Message Display
-
-**Current Architecture (BROKEN):**
-```
-gateway.rns_bridge receives packet → logger.info("Received...")
-                                   → No UI notification
-```
-
-**Proposed Architecture:**
-```
-# Event-based message notification
-class MessageEvent:
-    direction: "tx" | "rx"
-    content: str
-    timestamp: datetime
-    node_id: str
-
-# Gateway emits events
-gateway.on_message_received(packet):
-    event = MessageEvent(direction="rx", ...)
-    event_bus.emit("message", event)
-
-# UI subscribes to events
-panel.on_init():
-    event_bus.subscribe("message", self._on_message)
-
-def _on_message(self, event):
-    GLib.idle_add(self._add_message_to_list, event)
-```
-
-### Implementation Priority
-
-| Component | Effort | Impact | Priority | Status (2026-02-20) |
-|-----------|--------|--------|----------|---------------------|
-| Service Detection Simplification | LOW | HIGH | 1 | **DONE** — systemctl trusted as SSOT for systemd services |
-| Status Display Separation | MEDIUM | HIGH | 2 | **DONE** — meshtasticd_config_mixin separates service state from CLI detection |
-| RX Message Events | HIGH | MEDIUM | 3 | **DONE** — event_bus wired to WebSocket server |
-
-### Files Modified
-
-**Phase 1: Service Detection** (completed earlier)
-- `src/utils/service_check.py` — Simplified to systemctl-only for systemd services
-
-**Phase 2: Status Display** (completed 2026-02-20)
-- `src/launcher_tui/meshtasticd_config_mixin.py` — Shows service state and CLI detection separately
-- Shows fix hints when stopped, "(CLI detection unavailable — select preset manually)" when detection fails
-
-**Phase 3: RX Messages** (completed 2026-02-20)
-- `src/utils/event_bus.py` — Thread-safe pub/sub with MessageEvent, ServiceEvent, NodeEvent
-- `src/gateway/rns_bridge.py` — Emits message events on RX
-- `src/utils/websocket_server.py` — Subscribes to event_bus, broadcasts to WebSocket clients
-- `src/launcher_tui/messaging_mixin.py` — TUI live feed subscribes to message events
-
-### RNS Socket Detection Enhancement (2026-02-22, PRs #920-922)
+### RNS Socket Detection
 RNS uses abstract Unix domain sockets (`\0rns/{instance_name}`), not UDP port 37428.
-All 20+ `check_udp_port(37428)` calls replaced with `check_rns_shared_instance()` which
-uses 3-tier detection: abstract Unix socket -> TCP -> UDP fallback. KNOWN_SERVICES rnsd
-`port_type` changed from `'udp'` to `'unix_socket'`. 18 unit tests added; consistency
-test prevents drift between `startup_checks.SERVICES_TO_CHECK` and `KNOWN_SERVICES`.
-
-Stale docstring in `status_bar.py` (said "UDP port 37428") and `safe_import` for
-first-party `utils.service_check` in `startup_checks.py` cleaned up 2026-02-23.
+Use `check_rns_shared_instance()` (3-tier: Unix socket → TCP → UDP fallback).
 
 ### Prevention
-- Don't add more detection fallback methods - simplify instead
-- UI should always distinguish "service state" from "detection capability"
-- Use `check_rns_shared_instance()` for all rnsd reachability checks (never raw UDP)
+- UI must always distinguish "service state" from "detection capability"
+- Use `check_rns_shared_instance()` for all rnsd checks (never raw UDP)
 
 ---
 
-## Issue #21: Meshtastic CLI Preset Settings Not Reliably Applied
+## Issue #21: Meshtastic CLI Preset Bug (Upstream)
 
-### Symptom (Discovered MOC2 2026-01-20)
-- User sets modem preset via CLI: `meshtastic --host localhost --set lora.modem_preset SHORT_TURBO`
-- CLI reports success
-- Browser UI at localhost:9443 shows LONG_FAST (not SHORT_TURBO)
-- Other settings (region, owner) apply correctly
-
-### Root Cause
-**Upstream meshtastic CLI issue** - The Python meshtastic CLI doesn't always apply preset changes correctly. This is NOT a MeshForge bug.
-
-### Impact
-- Users think they're on one preset but actually on another
-- Network performance expectations don't match reality
-- Slot coordination fails if nodes on different presets
-
-### Workaround
-**Always verify in browser** - The Web UI at port 9443 is the source of truth:
-1. Apply settings via CLI
-2. Verify in browser: `http://localhost:9443`
-3. If mismatch, use browser to set correct value
-
-### MeshForge Recommendation
-Add verification step after CLI config:
-
-```python
-# In device config wizard
-def apply_preset(preset_name):
-    result = run_meshtastic_cli(['--set', 'lora.modem_preset', preset_name])
-    if result.success:
-        console.print(f"[yellow]Verify preset in browser: http://localhost:9443[/yellow]")
-        console.print("[dim]Note: CLI preset changes may not always apply correctly[/dim]")
-```
-
-### Files to Update
-- `src/config/radio.py` - Add verification warning
-- `src/launcher_tui/main.py` - Add verification step in config wizard
-- Documentation - Note the CLI limitation
-
-### Prevention
-- Always recommend browser verification after CLI changes
-- Consider implementing direct meshtasticd API calls instead of CLI
-- Track upstream meshtastic-python issue
+**Not a MeshForge bug.** The Python meshtastic CLI doesn't always apply modem preset
+changes correctly. Always verify in browser at `http://localhost:9443` after CLI changes.
+Consider direct meshtasticd API calls instead of CLI.
 
 ---
 
-## Issue #22: MeshForge Overwriting meshtasticd's config.yaml
+## Issue #22: Never Overwrite meshtasticd's config.yaml
 
-### Symptom
-- Web client (https://localhost:9443) not working
-- config.yaml contains radio parameters (Bandwidth, SpreadFactor, TXpower) instead of base config
-- User's HAT works but then stops after MeshForge install/update
-- "Webserver:" section missing from config.yaml
-
-### Root Cause
-MeshForge install scripts and TUI were **overwriting** `/etc/meshtasticd/config.yaml` with our own templates, even when meshtasticd package already provided a valid one.
-
-Multiple places were creating HAT templates in `available.d/` that might conflict with meshtasticd's official templates.
-
-### Impact
-- Web client inaccessible (missing Webserver config)
-- Users think meshtasticd is broken when it's a config issue
-- Radio parameters (Bandwidth, SpreadFactor, TXpower) appear in config.yaml where they shouldn't be
-- User has to manually fix config.yaml
-
-### The Correct Architecture
+**Rule**: Check for existing valid config before touching it.
 
 ```
 /etc/meshtasticd/
-├── config.yaml              # Base config (Module: auto, Webserver, Logging)
-│                            # PROVIDED BY meshtasticd package - DO NOT OVERWRITE
-├── available.d/             # HAT templates (GPIO pins only)
-│   ├── lora-MeshAdv-900M30S.yaml
-│   ├── lora-waveshare-sxxx.yaml
-│   └── ...                  # PROVIDED BY meshtasticd package - DO NOT CREATE OUR OWN
-└── config.d/                # User's active HAT config
-    └── lora-MeshAdv-900M30S.yaml  # COPIED from available.d/ by user
+├── config.yaml     # PROVIDED BY meshtasticd — DO NOT OVERWRITE
+├── available.d/    # HAT templates — PROVIDED BY meshtasticd — DO NOT CREATE
+└── config.d/       # User's active HAT config — COPY from available.d/
 ```
 
-**Radio parameters (Bandwidth, SpreadFactor, TXpower) are:**
-- Set via `meshtastic --set lora.modem_preset LONG_TURBO`
-- Stored in meshtasticd's internal device database
-- **NEVER in yaml files**
+Radio parameters (Bandwidth, SpreadFactor, TXpower) are set via
+`meshtastic --set lora.modem_preset` and stored internally — **NEVER in yaml files**.
 
-### Proper Fix
-
-**In install scripts:**
-```bash
-# CHECK if config.yaml exists and is valid BEFORE touching it
-if [[ -f "$CONFIG_DIR/config.yaml" ]] && grep -q "Webserver:" "$CONFIG_DIR/config.yaml"; then
-    echo "Using existing config.yaml from meshtasticd package"
-else
-    # Only create if missing/empty
-    create_minimal_config
-fi
-```
-
-**In Python code:**
-```python
-config_yaml = Path('/etc/meshtasticd/config.yaml')
-
-# Check if valid config exists
-if config_yaml.exists() and 'Webserver:' in config_yaml.read_text():
-    # DO NOT OVERWRITE - meshtasticd provided a good one
-    pass
-elif not config_yaml.exists():
-    # Only create if missing
-    create_minimal_config(config_yaml)
-```
-
-**MeshForge's job is to:**
-1. Help users SELECT their HAT from meshtasticd's available.d/
-2. COPY (not create) the HAT config to config.d/
-3. NEVER overwrite config.yaml if meshtasticd provided a valid one
-4. NEVER create HAT templates - meshtasticd provides them
-
-### Files Fixed (2026-01-22)
-- [x] `scripts/install_noc.sh` - Don't overwrite config.yaml, don't create HAT templates
-- [x] `src/launcher_tui/main.py` - _fix_spi_config(), _install_native_meshtasticd()
-- [x] `templates/config.yaml` - Simplified to minimal base config
-- [x] Removed `templates/available.d/` HAT configs (meshtasticd provides these)
-
-### Prevention
-- NEVER use `cp templates/config.yaml /etc/meshtasticd/config.yaml` without checking
-- NEVER create HAT templates - point users to meshtasticd's available.d/
-- Always CHECK for "Webserver:" in existing config before modifying
-- Test fresh installs with `apt install meshtasticd` THEN run MeshForge
+MeshForge's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY to
+`config.d/`. Never overwrite `config.yaml` if it has a `Webserver:` section.
 
 ---
 
-## Issue #23: No Post-Install Verification (Installation Unreliability)
+## Issue #23: Post-Install Verification
 
-### Symptom
-Installation completes "successfully" but:
-- meshtasticd doesn't start
-- Web client (port 9443) doesn't respond
-- Gateway can't connect
-- User spends more time troubleshooting than manual install would take
+**Rule**: Never mark install "complete" until verification passes.
 
-### Root Cause (Identified 2026-01-22)
-**No automated verification after installation.** The install script:
-1. Installs packages ✓
-2. Creates config files ✓
-3. Creates systemd services ✓
-4. **Does NOT verify anything actually works** ✗
-
-### Impact
-- User thinks install succeeded when it didn't
-- Silent failures lead to confusion hours later
-- MeshForge takes MORE time than manual install (defeats purpose)
-- Support burden from "it doesn't work" reports
-
-### The Problem Pattern
-```
-install_noc.sh runs...
-  ✓ meshtasticd package installed
-  ✓ config.yaml created
-  ✓ systemd service created
-  "Installation Complete!"
-
-User runs meshforge...
-  ✗ meshtasticd won't start (config invalid)
-  ✗ Web client unreachable (Webserver section missing)
-  ✗ Gateway fails (no HAT config selected)
-```
-
-### Proper Fix (Implemented 2026-01-22)
-
-**1. Created `scripts/verify_post_install.sh`:**
-```bash
-#!/bin/bash
-# Verify MeshForge installation health
-# Run after install_noc.sh or anytime to check system state
-
-# Checks performed:
-# - meshtasticd binary exists and is executable
-# - config.yaml exists and has required sections
-# - systemd service can start (or is already running)
-# - Web client port 9443 responds
-# - At least one radio configured (SPI HAT or USB)
-# - RNS installed and rnsd functional
-```
-
-**2. Added `meshforge --verify-install` command**
-
-**3. Install script now calls verification automatically:**
-```bash
-# At end of install_noc.sh:
-echo "Verifying installation..."
-if bash scripts/verify_post_install.sh; then
-    echo "✓ Installation verified successfully"
-else
-    echo "⚠ Installation needs attention - see above"
-fi
-```
-
-### Required Verification Checks
-
-| Check | What It Verifies | Failure Action |
-|-------|------------------|----------------|
-| meshtasticd binary | Native daemon installed | Suggest apt install |
-| config.yaml exists | Base config created | Create minimal config |
-| Webserver section | Web client will work | Warn, show fix command |
-| Port 9443 | Web client responding | Check service status |
-| Radio detected | Hardware present | Warn, suggest HAT selection |
-| config.d/ populated | HAT config selected (SPI) | Prompt HAT selection |
-| rnsd available | RNS tools installed | Suggest pip install rns |
-| udev rules | Device permissions correct | Reload udev rules |
-
-### Files Changed
-- [NEW] `scripts/verify_post_install.sh` - Comprehensive verification script
-- [MOD] `scripts/install_noc.sh` - Call verification at end
-- [NEW] `src/commands/verify.py` - Python verification for CLI
-- [MOD] `src/launcher.py` - Add --verify-install flag
-
-### Prevention
-- ALWAYS run verification after install changes
-- CI should test verification on all supported platforms
-- Verification failures should be actionable (show how to fix)
-- Never mark install "complete" until verification passes
+`scripts/verify_post_install.sh` checks: meshtasticd binary, config.yaml validity,
+Webserver section, port 9443, radio detection, config.d/, rnsd, udev rules.
+Also available via `meshforge --verify-install`.
 
 ---
 
-## Issue #24: Meshtastic Module Not Found by rnsd (Python Environment Mismatch)
+## Issue #24: Python Environment Mismatch (rnsd + meshtastic module)
 
-### Symptom
-NomadNet or rnsd fails to start with:
-```
-[Critical] Using this interface requires a meshtastic module to be installed.
-[Critical] You can install one with the command: python3 -m pip install meshtastic
-```
+rnsd's `Meshtastic_Interface.py` plugin requires the `meshtastic` Python module.
+pipx isolation, different Python versions, or user vs system site-packages can
+make the module invisible to rnsd.
 
-rnsd repeatedly crashes with exit code 255/EXCEPTION:
-```
-systemd[1]: rnsd.service: Main process exited, code=exited, status=255/EXCEPTION
-```
+**Fix**: `sudo pip3 install --break-system-packages --ignore-installed meshtastic`
+or install to the same Python that rnsd uses:
+`head -1 $(which rnsd)` then use that interpreter's pip.
 
-This happens even when the user has previously installed `meshtastic` via CLI.
-
-### Root Cause
-**Python environment mismatch.** The `Meshtastic_Interface.py` plugin in `/etc/reticulum/interfaces/` requires the `meshtastic` Python module. However:
-
-1. **pipx isolation**: Installing meshtastic CLI with `pipx install meshtastic` puts it in an isolated virtual environment that rnsd cannot access
-2. **Different Python version**: rnsd may use `/usr/bin/python3` while user installed meshtastic to `/usr/local/bin/python3`
-3. **User vs system site-packages**: `pip3 install --user meshtastic` installs to `~/.local/lib/python3.x/` which root's rnsd cannot access
-
-### Impact
-- rnsd enters restart loop (every 5 seconds per systemd restart policy)
-- NomadNet refuses to launch
-- RNS-Meshtastic gateway completely broken
-- User thinks system is broken when it's just a module path issue
-
-### Proper Fix
-
-**Option 1: System-wide install (recommended for rnsd)**
-```bash
-# Install to system site-packages where rnsd can find it
-# --break-system-packages required on Debian 12+ / Pi OS Bookworm
-# --ignore-installed avoids "Cannot uninstall packaging" errors
-sudo pip3 install --break-system-packages --ignore-installed meshtastic
-```
-
-**Option 2: Install to same Python that rnsd uses**
-```bash
-# Check which Python rnsd uses
-head -1 $(which rnsd 2>/dev/null || sudo find /usr -name rnsd 2>/dev/null | head -1)
-
-# If rnsd uses /usr/local/bin/python3:
-sudo /usr/local/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
-
-# If rnsd uses /usr/bin/python3:
-sudo /usr/bin/python3 -m pip install --break-system-packages --ignore-installed meshtastic
-```
-
-**Option 3: Disable the Meshtastic interface if not needed**
-```bash
-# Edit RNS config to disable the interface
-sudo nano /etc/reticulum/config
-# Change 'enabled = yes' to 'enabled = no' under [[Meshtastic Interface]]
-
-# Or remove the interface file entirely
-sudo rm /etc/reticulum/interfaces/Meshtastic_Interface.py
-sudo systemctl restart rnsd
-```
-
-### Diagnosing the Issue
-```bash
-# Check if meshtastic is importable by root's Python
-sudo python3 -c "import meshtastic; print(f'OK: {meshtastic.__version__}')" 2>&1
-
-# If "No module named 'meshtastic'":
-# The module is not installed in root's Python path
-
-# Check where meshtastic is installed (if at all)
-pip3 show meshtastic 2>/dev/null && echo "User install found"
-sudo pip3 show meshtastic 2>/dev/null && echo "System install found"
-pipx list 2>/dev/null | grep meshtastic && echo "pipx install found (isolated!)"
-```
-
-### Files Involved
-- `/etc/reticulum/interfaces/Meshtastic_Interface.py` - The RNS plugin that requires meshtastic
-- `/etc/reticulum/config` - RNS configuration referencing the interface
-- RNS interface plugin from: https://github.com/landandair/RNS_Over_Meshtastic
-
-### MeshForge Detection
-The gateway diagnostic (`src/utils/gateway_diagnostic.py`) should be updated to:
-1. Check if Meshtastic_Interface.py exists
-2. If it exists, verify meshtastic is importable as root
-3. Show specific fix instructions if not
-
-### Prevention
-- When installing Meshtastic_Interface plugin, always verify meshtastic module is available
-- Add pre-flight check in TUI before enabling RNS-Meshtastic bridge
-- Document in installation wizard that meshtastic must be installed system-wide
+**Diagnose**: `sudo python3 -c "import meshtastic; print(meshtastic.__version__)"`
 
 ---
 
-## Archived Resolved Issues (#25, #26, #28)
+## Issue #27: rnsd is OPTIONAL
 
-Issues #25 (rnsd ratchets PermissionError), #26 (ReticulumPaths fallback copies), and #28 (API proxy fromradio) are resolved. Historical details in `persistent_issues_archive.md`.
+MeshForge supports two independent transports:
+- **MQTT** (mosquitto) — Meshtastic native. Used for preset bridging, monitoring.
+- **RNS** (rnsd) — Reticulum. Used for LXMF messaging, cross-protocol bridging.
 
----
+**Meshtastic preset bridging** (LF ↔ ST) needs only mosquitto — both radios MQTT
+uplink/downlink to the same broker with same channel/PSK. No gateway code needed.
 
-## Issue #27: rnsd is OPTIONAL for Meshtastic-only Deployments
-
-### Context
-MeshForge supports two independent transport layers:
-1. **MQTT** — Meshtastic native MQTT protocol (via mosquitto)
-2. **RNS** — Reticulum Network Stack (via rnsd)
-
-### When rnsd IS Needed
-- RNS/LXMF messaging (NomadNet, Sideband)
-- Cross-protocol bridging: Meshtastic <-> RNS/LXMF
-- RNS-only mesh networks (non-Meshtastic)
-
-### When rnsd is NOT Needed
-- Meshtastic-to-Meshtastic bridging across presets (e.g., LongFast <-> ShortTurbo)
-- MQTT monitoring (nodeless observation)
-- RF calculations, propagation tools
-- Node tracking via MQTT subscriber
-
-### Architecture: Meshtastic LF <-> Private Broker <-> Meshtastic ST
-For bridging between Meshtastic presets (e.g., LongFast slot 20 <-> ShortTurbo slot 8),
-**no gateway code or rnsd is needed**. Both radios connect to the same MQTT broker
-with the same channel name/PSK and use uplink_enabled + downlink_enabled:
-
-```
-Radio A (LONG_FAST)  --WiFi-->  mosquitto  <--WiFi--  Radio B (SHORT_TURBO)
-  Channel: "MeshBridge"         (broker)              Channel: "MeshBridge"
-  PSK: <custom_key>                                   PSK: <same_key>
-  uplink: true                                        uplink: true
-  downlink: true                                      downlink: true
-```
-
-Messages are bridged by the radios themselves via native Meshtastic MQTT.
-MeshForge's role is running mosquitto and monitoring traffic.
-
-### Architecture: Full MeshForge NOC (Meshtastic + RNS)
-For the complete NOC with both transports:
-
-```
-Meshtastic LF ──> mosquitto ──> MeshForge MQTT Subscriber (monitoring)
-Meshtastic ST ──>     │
-                      └──> RNS Gateway Bridge ──> rnsd ──> NomadNet/Sideband
-```
-
-Both MQTT and RNS can coexist. The private broker handles Meshtastic transport,
-RNS handles encrypted mesh-independent routing.
-
-### Status: DOCUMENTED
+**Full NOC** (Meshtastic + RNS) uses both transports. They coexist independently.
 
 ---
 
-## Issue #29: Regression Prevention System (2026-02-23)
+## Issue #29: Regression Prevention System — ACTIVE
 
-### Status: **ACTIVE** — Automated guards preventing circular regressions.
+100+ hours of circular regressions led to this 4-layer prevention system.
 
-### Problem
-100+ hours spent in circular regressions across meshtasticd (:4403/:9443), rnsd,
-gateway bridge, and MQTT. Fix one service → break another → fix that → break the first.
+### Layer 1: Lint Rules (`scripts/lint.py`)
+| Rule | Catches |
+|------|---------|
+| MF007 | Direct `TCPInterface()` outside connection infrastructure |
+| MF008 | Raw `systemctl` for service state (use `service_check`) |
+| MF009 | `RNS.Reticulum()` without `configdir=` |
+| MF010 | `time.sleep()` in daemon loops |
 
-### Root Causes
-1. **TCP Connection Contention** (Issue #17): meshtasticd supports ONE TCP client.
-   Multiple components creating `TCPInterface()` directly caused connection thrashing.
-2. **fromradio Endpoint Draining**: Reading `/api/v1/fromradio` starved :9443 web client.
-3. **Config Drift**: Gateway and rnsd reading different config files silently.
-4. **No automated regression guards** to catch anti-patterns at code-change time.
-
-### Solution: 4-Layer Prevention
-
-#### Layer 1: Lint Rules (`scripts/lint.py`)
-| Rule | Severity | What It Catches |
-|------|----------|-----------------|
-| MF007 | ERROR | Direct `TCPInterface()` creation outside connection infrastructure |
-| MF008 | WARNING | Raw `systemctl` for service state decisions (use `service_check`) |
-| MF009 | ERROR | `RNS.Reticulum()` without `configdir=` (causes EADDRINUSE) |
-| MF010 | WARNING | `time.sleep()` in daemon loops (blocks clean shutdown) |
-
-#### Layer 2: Regression Guard Tests (`tests/test_regression_guards.py`)
-Codebase-scanning pytest tests that fail if anti-patterns reappear:
-- `TestTCPConnectionContract` — No new files creating TCPInterface directly
-- `TestFromradioContract` — TX paths use `send_text_direct()`
+### Layer 2: Regression Guard Tests (`tests/test_regression_guards.py`)
+- `TestTCPConnectionContract` — No new direct TCPInterface
+- `TestFromradioContract` — TX uses `send_text_direct()`
 - `TestServiceCheckContract` — Service state via `check_service()` only
 - `TestPathHomeContract` — No `Path.home()` violations
 - `TestNoShellTrue` — No `shell=True` in subprocess
 - `TestKnownServicesConsistency` — KNOWN_SERVICES stays correct
 
-#### Layer 3: Pre-Commit Hook (`.githooks/pre-commit`)
-Runs linter + regression guards before every commit.
+### Layer 3: Pre-Commit Hook (`.githooks/pre-commit`)
 Setup: `git config core.hooksPath .githooks`
 
-#### Layer 4: TCPInterface Violations Fixed
-All direct `TCPInterface()` creation routed through connection manager or global lock:
-- `node_health_mixin.py` — TCP fallback removed (HTTP-only)
-- `favorites_mixin.py` — Uses `MeshtasticConnection` context manager
-- `config/device.py` — Uses `MeshtasticConnection` context manager
-- `device_controller.py` — Acquires `MESHTASTIC_CONNECTION_LOCK`
-- `mesh_bridge.py` — Acquires lock + deprecation warning
-- `rns_transport.py` — Acquires lock + releases on disconnect
+### Working With This System
 
-### How to Work With This System
-
-**Adding a new file that needs meshtasticd TCP:**
+**New file needs meshtasticd TCP:**
 ```python
-# For short-lived reads:
+# Short-lived:
 from utils.connection_manager import MeshtasticConnection
 with MeshtasticConnection() as conn:
-    if conn:
-        nodes = conn.nodes
+    if conn: nodes = conn.nodes
 
-# For long-lived connections:
+# Long-lived:
 from utils.meshtastic_connection import MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown
 if MESHTASTIC_CONNECTION_LOCK.acquire(timeout=10):
     wait_for_cooldown()
     interface = TCPInterface(hostname='localhost')
-    # ... use interface ...
-    # Release lock on disconnect
 ```
 
-**Adding a legitimate TCPInterface creation:**
-1. Add the filename to `ALLOWLISTED` in `TestTCPConnectionContract`
-2. Add the filename to `lock_aware_files` in lint.py MF007 rule
-3. Ensure the code acquires `MESHTASTIC_CONNECTION_LOCK` before creating
-
-**Updating ratchet counts:**
-When fixing a violation, update the expected count in the corresponding test class.
-The test will fail if the count goes DOWN without updating (forces tightening).
+**Adding legitimate TCPInterface creation:**
+1. Add to `ALLOWLISTED` in `TestTCPConnectionContract`
+2. Add to `lock_aware_files` in lint.py MF007
+3. Acquire `MESHTASTIC_CONNECTION_LOCK` before creating
 
 ---
 
-## #10 Map Control Panel Scrollbar Overlap (2026-02-25)
+## Issue #30: NomadNet RPC ConnectionRefusedError (2026-03-11)
 
-**Symptom**: On the `:5000` map page, the right-side control panel's native browser scrollbar
-(~15-17px wide) obstructs filter checkboxes, buttons, and stat rows when content overflows.
+NomadNet crashes on startup when `get_interface_stats()` can't connect to rnsd's RPC socket.
 
-**Root cause**: `.panel-body` used `overflow-y: auto` without any scrollbar styling, so the
-browser rendered a full-width native scrollbar inside the panel, consuming content space.
+**Root causes**: RNS version mismatch (pipx venv vs system rnsd), user mismatch
+(root rnsd vs user NomadNet), rnsd still initializing, or stale state.
 
-**Fix**: Added thin dark-themed scrollbar CSS to `web/node_map.html`:
-- `scrollbar-width: thin` + `scrollbar-color` (Firefox)
-- `::-webkit-scrollbar` at 6px width (Chrome/Safari/Edge)
-- `scrollbar-gutter: stable` to prevent layout shift
-- `padding-right: 4px` on `.panel-body` for content buffer
-- Applied to `.panel-body`, `.no-gps-list`, and `.sim-links-list`
+**Fix**: Pre-launch check in `_nomadnet_rns_checks.py` uses NomadNet's own Python
+interpreter to test RPC (not system rnstatus). Detects version mismatches and
+suggests `pipx upgrade nomadnet`. Auto-restarts rnsd if needed.
 
-**Status**: **FIXED**
-
----
-
-## Issue #30: NomadNet RPC ConnectionRefusedError [Errno 111] (2026-03-11)
-
-**Symptom**: NomadNet crashes immediately on startup with:
-```
-ConnectionRefusedError: [Errno 111] Connection refused
-```
-The crash occurs in NomadNet's `TextUI.__init__` when calling `get_interface_stats()`,
-which connects to rnsd's RPC socket via `multiprocessing.connection.Client`.
-
-**Root causes** (in order of likelihood):
-1. **RNS version mismatch** — NomadNet installed via pipx has its own venv with a
-   potentially different RNS version than system rnsd. System `rnstatus` may connect
-   fine while NomadNet's RNS library cannot (different RPC protocol/auth). The pre-launch
-   check now uses NomadNet's own Python interpreter to test RPC, not system rnstatus.
-2. **User mismatch** — rnsd runs as root, NomadNet as user → different RNS identities
-   → different auth keys → RPC connection refused.
-3. **rnsd still initializing** — RPC listener starts after interface init. If NomadNet
-   launches too quickly after rnsd starts, the RPC socket isn't ready yet.
-4. **Stale state** — After rnsd crash/restart, old auth tokens or socket state can
-   cause RPC to refuse connections until a clean restart.
-
-**Pre-launch check flow** (`_nomadnet_rns_checks.py`):
-1. Storage permissions → fix if needed
-2. rnsd running? → port 37428 listening? → crash-loop check
-3. **User mismatch?** → fix rnsd user / stop rnsd (checked BEFORE RPC)
-4. **RPC check using NomadNet's own Python** → tests exact same code path as NomadNet
-   - Falls back to system rnstatus if no venv Python found
-   - If fails: wait for young rnsd / detect version mismatch / offer restart
-
-**Version mismatch detection**: When NomadNet's RNS fails but system rnstatus works,
-the dialog explicitly tells the user about the mismatch and suggests `pipx upgrade nomadnet`.
-
-**Post-failure diagnosis** (`nomadnet.py:_diagnose_nomadnet_error`):
-- Detects `ConnectionRefusedError` and `Errno 111` patterns in NomadNet logfile
-- Provides specific RPC diagnosis with `rnstatus` verification hint
-
-**Key files**:
-- `src/launcher_tui/handlers/_nomadnet_rns_checks.py` — venv-aware RPC check + auto-restart
-- `src/launcher_tui/handlers/nomadnet.py` — threads nn_path to RPC check + error diagnosis
-
-**Related**: Issue #12 (EADDRINUSE/share_instance), Issue #24 (Python env mismatch)
-
-**Status**: **FIXED** — Venv-aware RPC check + version mismatch detection + auto-restart
+Post-failure diagnosis in `nomadnet.py:_diagnose_nomadnet_error` detects
+`ConnectionRefusedError` / `Errno 111` patterns in NomadNet logfile.
 
 ---
 
 ## Issue #31: No Silent Persistent System Changes on Startup (2026-03-12)
 
-**Symptom**: Meshtastic web UI stops sending messages after MeshForge has been launched,
-even after MeshForge is closed. Users report MeshForge is "breaking what used to work."
+**Rule**: NEVER make persistent system changes silently on startup.
 
-**Root cause**: MeshForge's `startup_health.auto_lock_port()` silently added an iptables
-REJECT rule blocking external access to port 9443 on every TUI launch. The rule persisted
-after exit and was never cleaned up. The lockdown was meant to force users through
-MeshForge's proxy at port 5000, but that proxy only runs when the map server is explicitly
-started — leaving port 9443 blocked with no alternative.
+MeshForge's `auto_lock_port()` was silently adding iptables REJECT rules on port 9443
+every TUI launch, persisting after exit. This broke the Meshtastic web UI.
 
-**Rule**: NEVER make persistent system changes silently on startup. This includes:
-- iptables / firewall rules
-- cron jobs
-- udev rules
-- systemd unit modifications
-- config file overwrites (see also Issue #22)
+**Prohibited on startup**: iptables rules, cron jobs, udev rules, systemd unit mods,
+config file overwrites (see also Issue #22).
 
 MeshForge **observes and assists** — it does not take over infrastructure.
 Explicit user actions (e.g., service_menu lock/unlock) are acceptable.
-Silent startup side effects are not.
 
-**Fix**: Removed `auto_lock_port()` from startup sequence. The iptables utility functions
-remain available as explicit user tools in the service menu.
+**Cleanup for affected users**: `sudo iptables -D INPUT -p tcp --dport 9443 ! -s 127.0.0.1 -j REJECT`
+
+---
+
+## Issue #32: NomadNet "Enabled but Disconnected" Interfaces (2026-03-13)
+
+**Symptoms**: NomadNet shows interfaces as "enabled" but disconnected with no RX/TX.
+MeshForge status says "rnsd: RUNNING (shared instance available)" when rnsd is actually dead.
+
+**Root causes** (3 bugs):
+
+1. **pgrep false positive**: `check_process_running('rnsd')` fallback used `pgrep -f 'python.*rnsd'`
+   which matched any process mentioning "rnsd" (shell invocations, test runners, editors).
+
+2. **Blind status display**: NomadNet status printed "(shared instance available)" without calling
+   `check_rns_shared_instance()` — it assumed shared instance from process detection alone.
+
+3. **No diagnostics when down**: Interface health checks (rnstatus, blocking interfaces) only
+   ran when rnsd was detected as "running". When detection was wrong or rnsd was genuinely
+   down, user got zero actionable diagnostic info.
+
+**Fixes** (2026-03-13):
+
+- `_port_detection.py`: Tightened pgrep regex, added `/proc/{pid}/cmdline` verification
+  via `_verify_process_cmdline()` to eliminate self-matches. Same fix for `check_process_with_pid()`.
+- `nomadnet.py`: Status display now calls `get_rns_shared_instance_info()` to verify shared
+  instance. Shows three states: verified connected (with method), running but no shared instance,
+  or not running (with systemd fix hint). Blocking interface diagnostics now shown even when
+  rnsd is down.
 
 **Prevention**:
-- Startup sequence (`main.py`) must not call functions that modify system state
-- `on_startup()` lifecycle hooks are for read-only initialization only
-- Any system modification requires explicit user confirmation via dialog
-
-**Cleanup for affected users**:
-```bash
-sudo iptables -D INPUT -p tcp --dport 9443 ! -s 127.0.0.1 -j REJECT
-```
-
-**Key files**:
-- `src/launcher_tui/main.py` — startup sequence (auto_lock_port call removed)
-- `src/launcher_tui/handlers/startup_health.py` — auto_lock_port method removed
-- `src/utils/_service_iptables.py` — utility functions retained for explicit use
-
-**Status**: **FIXED** — Silent iptables lockdown removed from startup
+- `check_process_running()` now verifies all pgrep hits via `/proc/cmdline`
+- Status display always distinguishes process detection from shared instance availability
+- `find_blocking_interfaces()` runs regardless of rnsd state for pre-startup diagnostics
