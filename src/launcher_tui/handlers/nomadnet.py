@@ -38,6 +38,12 @@ from utils.safe_import import safe_import
 check_process_running, _HAS_SERVICE_CHECK = safe_import(
     'utils.service_check', 'check_process_running'
 )
+get_rns_shared_instance_info, _ = safe_import(
+    'utils.service_check', 'get_rns_shared_instance_info'
+)
+check_systemd_service_fn, _ = safe_import(
+    'utils.service_check', 'check_systemd_service'
+)
 
 # Sudo-safe home directory — first-party, always available (MF001)
 from utils.paths import get_real_user_home
@@ -459,32 +465,62 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             print(f"  Expected:  ~/.nomadnetwork/config")
             print(f"             (created on first run)")
 
-        # RNS shared instance check
+        # RNS shared instance check — verify BOTH process AND shared instance
         print()
         print("--- RNS Connectivity ---")
+        rnsd_running = False
+        shared_available = False
+        shared_detail = ''
         try:
             if _HAS_SERVICE_CHECK:
                 rnsd_running = check_process_running('rnsd')
+                if get_rns_shared_instance_info:
+                    si_info = get_rns_shared_instance_info()
+                    shared_available = (si_info or {}).get(
+                        'available', False
+                    )
+                    shared_detail = (si_info or {}).get('detail', '')
             else:
-                # Fallback to direct pgrep call
+                # Fallback to direct pgrep call (exact match only)
                 result = subprocess.run(
-                    ['pgrep', '-f', 'rnsd'],
+                    ['pgrep', '-x', 'rnsd'],
                     capture_output=True, text=True, timeout=5
                 )
                 rnsd_running = result.returncode == 0
 
-            if rnsd_running:
-                print("  rnsd:      RUNNING (shared instance available)")
+            if rnsd_running and shared_available:
+                print(f"  rnsd:      RUNNING (shared instance: "
+                      f"{shared_detail})")
+            elif rnsd_running:
+                print("  rnsd:      RUNNING (shared instance "
+                      "NOT available)")
+                print("  WARNING:   rnsd may be hung or "
+                      "interfaces blocking startup")
             else:
                 print("  rnsd:      NOT running")
-                print("  WARNING:   NomadNet needs rnsd or share_instance=Yes")
+                # Show actionable fix hint from systemd state
+                if _HAS_SERVICE_CHECK and check_systemd_service_fn:
+                    try:
+                        _, is_enabled = check_systemd_service_fn('rnsd')
+                        if not is_enabled:
+                            print("  Fix:       sudo systemctl "
+                                  "enable --now rnsd")
+                        else:
+                            print("  Fix:       sudo systemctl "
+                                  "start rnsd")
+                    except Exception as e:
+                        logger.debug(
+                            "systemd check for rnsd failed: %s", e
+                        )
+                print("  WARNING:   NomadNet needs rnsd or "
+                      "share_instance=Yes")
         except (subprocess.SubprocessError, OSError) as e:
             logger.debug("rnsd status check failed: %s", e)
             print("  rnsd:      (check failed)")
 
-        # Show RNS interface status when rnsd is running
+        # Show RNS interface status when shared instance is available
         has_issues = False
-        if rnsd_running:
+        if rnsd_running and shared_available:
             try:
                 from utils.rns_status_parser import (
                     run_rnstatus, InterfaceStatus, parse_rnstatus,
@@ -650,6 +686,40 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                     )
             except Exception as e:
                 logger.debug("Interface status check failed: %s", e)
+
+        # When shared instance is unavailable, still check for blocking
+        # interfaces — gives actionable diagnostics even when rnsd is down
+        if not shared_available:
+            try:
+                from handlers._rns_interface_mgr import (
+                    find_blocking_interfaces,
+                )
+                blocking = find_blocking_interfaces()
+                if blocking:
+                    has_issues = True
+                    print()
+                    print("--- Blocking Interfaces ---")
+                    for name, reason, fix in blocking:
+                        print(f"  \033[0;33m[{name}]\033[0m "
+                              f"{reason}")
+                        print(f"    Fix: {fix}")
+                        logger.warning(
+                            "RNS blocking interface [%s]: "
+                            "%s (fix: %s)",
+                            name, reason, fix,
+                        )
+                    if not rnsd_running:
+                        print()
+                        print("  NOTE: Fix these before starting "
+                              "rnsd — they will block startup.")
+                elif not rnsd_running:
+                    print()
+                    print("  No interface dependency issues "
+                          "detected — rnsd should start cleanly.")
+            except Exception as e:
+                logger.debug(
+                    "Blocking interface check failed: %s", e
+                )
 
         # Check rnsd loglevel — suggest increasing if interfaces
         # have issues and loglevel is too low for troubleshooting
