@@ -48,7 +48,7 @@ def get_interface_templates() -> CommandResult:
         },
         'tcp_rns_amsterdam': {
             'name': 'RNS Testnet Amsterdam',
-            'description': 'Official RNS testnet (Amsterdam, NL)',
+            'description': 'Official RNS testnet (Amsterdam, NL) — offline since 2026-03',
             'type': 'TCPClientInterface',
             'settings': {
                 'target_host': 'amsterdam.connect.reticulum.network',
