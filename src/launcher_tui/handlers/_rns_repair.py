@@ -644,3 +644,85 @@ def _diagnose_timeout(handler, user_declined_disable: bool) -> bool:
 
     print("\n  Run RNS > Diagnostics for a full health check.")
     return False
+
+
+def fix_rns_storage_permissions(ctx) -> bool:
+    """Fix /etc/reticulum/storage permissions for non-root users.
+
+    When rnsd runs as root, it creates /etc/reticulum/storage owned by root.
+    NomadNet (running as user) needs write access. This sets 0o777 on the
+    storage directory and fixes file permissions within.
+
+    Moved from _nomadnet_rns_checks.py Tier 1 chmod logic.
+
+    Args:
+        ctx: TUIContext with dialog backend.
+
+    Returns:
+        True if permissions fixed or already OK, False on failure.
+    """
+    import os
+    import stat
+
+    etc_rns = Path('/etc/reticulum')
+    if not etc_rns.exists():
+        return True
+
+    storage_dir = etc_rns / 'storage'
+    sudo_user = os.environ.get('SUDO_USER')
+
+    # Check if storage is writable by the real user
+    can_write = False
+    try:
+        if storage_dir.exists():
+            if sudo_user and sudo_user != 'root':
+                mode = storage_dir.stat().st_mode
+                can_write = bool(mode & stat.S_IWOTH)
+            else:
+                test_file = storage_dir / '.write_test'
+                try:
+                    test_file.touch()
+                    test_file.unlink()
+                    can_write = True
+                except (OSError, PermissionError):
+                    pass
+        else:
+            try:
+                storage_dir.mkdir(parents=True, exist_ok=True)
+                can_write = True
+            except (OSError, PermissionError):
+                pass
+    except (OSError, ValueError) as e:
+        logger.debug("RNS storage dir check failed: %s", e)
+
+    if can_write:
+        return True
+
+    # Fix permissions
+    target_user = sudo_user if sudo_user and sudo_user != 'root' else 'current user'
+    logger.info(
+        "/etc/reticulum/storage not writable by %s, fixing permissions to 0o777",
+        target_user,
+    )
+    try:
+        old_umask = os.umask(0)
+        try:
+            storage_dir.chmod(0o777)
+            ReticulumPaths._fix_storage_file_permissions()
+        finally:
+            os.umask(old_umask)
+        ctx.dialog.msgbox(
+            "Storage Permissions Fixed",
+            "/etc/reticulum/storage/ permissions have been fixed.\n\n"
+            "NomadNet will use the system config (same as rnsd).",
+        )
+        return True
+    except (OSError, PermissionError) as e:
+        ctx.dialog.msgbox(
+            "Permission Fix Failed",
+            f"Could not fix /etc/reticulum/storage permissions:\n"
+            f"  {e}\n\n"
+            f"Try manually:\n"
+            f"  sudo chmod 777 /etc/reticulum/storage"
+        )
+        return False

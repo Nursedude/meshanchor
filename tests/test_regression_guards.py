@@ -373,3 +373,72 @@ class TestMessageLengthEnforcement:
                 f"{filename} must reference MAX_MESHTASTIC_MSG_LENGTH "
                 f"or inherit from BaseMessageHandler which does"
             )
+
+
+class TestNomadNetPrelaunchContract:
+    """Enforce: _nomadnet_rns_checks.py must not contain repair logic.
+
+    Pre-launch checks should be read-only state queries + diagnostics redirect.
+    Repair logic belongs in _rns_repair.py or the rns_diagnostics handler.
+    """
+
+    def test_prelaunch_no_service_mutations(self):
+        """_nomadnet_rns_checks.py must not call start/stop/enable_service."""
+        filepath = os.path.join(SRC_DIR, 'launcher_tui', 'handlers', '_nomadnet_rns_checks.py')
+        if not os.path.exists(filepath):
+            pytest.skip("_nomadnet_rns_checks.py not found")
+
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        for fn in ['start_service', 'stop_service', 'enable_service']:
+            # Allow imports but not calls
+            lines = content.splitlines()
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith('#') or stripped.startswith('"') or stripped.startswith("'"):
+                    continue
+                # Check for function calls (not imports)
+                if f'{fn}(' in line and 'import' not in line and 'safe_import' not in line:
+                    assert False, (
+                        f"_nomadnet_rns_checks.py:{i} calls {fn}(). "
+                        f"Repair logic belongs in _rns_repair.py or diagnostics handler."
+                    )
+
+    def test_prelaunch_no_subprocess(self):
+        """_nomadnet_rns_checks.py must not call subprocess.run/Popen for repairs."""
+        filepath = os.path.join(SRC_DIR, 'launcher_tui', 'handlers', '_nomadnet_rns_checks.py')
+        if not os.path.exists(filepath):
+            pytest.skip("_nomadnet_rns_checks.py not found")
+
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        # Allow subprocess for chown in _validate_nomadnet_config (config repair),
+        # but not for service management (systemctl, pkill, rnstatus)
+        forbidden = ['systemctl', 'pkill', 'rnstatus', 'rnsd']
+        lines = content.splitlines()
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('#') or stripped.startswith('"') or stripped.startswith("'"):
+                continue
+            if 'subprocess' in line and any(f"'{cmd}'" in line or f'"{cmd}"' in line
+                                            for cmd in forbidden):
+                assert False, (
+                    f"_nomadnet_rns_checks.py:{i} uses subprocess for service management. "
+                    f"Repair logic belongs in _rns_repair.py or diagnostics handler."
+                )
+
+    def test_prelaunch_file_size(self):
+        """_nomadnet_rns_checks.py must stay under 300 lines."""
+        filepath = os.path.join(SRC_DIR, 'launcher_tui', 'handlers', '_nomadnet_rns_checks.py')
+        if not os.path.exists(filepath):
+            pytest.skip("_nomadnet_rns_checks.py not found")
+
+        with open(filepath, 'r') as f:
+            line_count = sum(1 for _ in f)
+
+        assert line_count <= 300, (
+            f"_nomadnet_rns_checks.py is {line_count} lines (limit: 300). "
+            f"Move complex logic to _nomadnet_prelaunch.py or _rns_repair.py."
+        )
