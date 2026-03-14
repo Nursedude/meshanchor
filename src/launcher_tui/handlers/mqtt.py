@@ -155,6 +155,15 @@ class MQTTHandler(BaseHandler):
             self._mqtt_subscriber.start()
             logger.info("MQTT subscriber auto-started (broker=%s)", broker)
 
+            # Attach mesh alert engine to subscriber for live alerting
+            try:
+                from utils.mesh_alert_engine import get_alert_engine
+                alert_engine = get_alert_engine()
+                alert_engine.attach_subscriber(self._mqtt_subscriber)
+                alert_engine.start()
+            except Exception as e:
+                logger.debug("Mesh alert engine attach failed (non-fatal): %s", e)
+
         except Exception as e:
             logger.debug("MQTT auto-start failed (non-fatal): %s", e)
             self._mqtt_subscriber = None
@@ -233,6 +242,15 @@ class MQTTHandler(BaseHandler):
             if _HAS_WS_BRIDGE:
                 choices.append(("websocket", f"WebSocket Bridge    {ws_status}"))
 
+            # Show crypto status if available
+            try:
+                from utils.mqtt_decryptor import get_decryptor
+                dec = get_decryptor()
+                crypto_label = "Available" if dec.is_available else "Not available"
+                choices.append(("crypto", f"Encryption          {crypto_label}"))
+            except Exception:
+                pass
+
             choices.append(("back", "Back"))
 
             subtitle = f"MQTT Broker: {mode} ({broker})\n"
@@ -263,6 +281,7 @@ class MQTTHandler(BaseHandler):
                 "telemetry": ("Telemetry Requests", self._request_telemetry_menu),
                 "export": ("Export MQTT Data", self._export_mqtt_data),
                 "websocket": ("WebSocket Bridge", self._toggle_ws_bridge),
+                "crypto": ("Encryption Status", self._show_crypto_status),
             }
             entry = dispatch.get(choice)
             if entry:
@@ -341,6 +360,25 @@ class MQTTHandler(BaseHandler):
             except Exception as e:
                 logger.error("WebSocket bridge error: %s", e)
                 self.ctx.dialog.msgbox("Error", f"WebSocket bridge error:\n{e}")
+
+    def _show_crypto_status(self):
+        """Show MQTT packet decryption status."""
+        try:
+            from utils.mqtt_decryptor import get_decryptor
+            dec = get_decryptor()
+            stats = dec.get_stats()
+            lines = [
+                f"Crypto available:   {'Yes' if stats['available'] else 'No'}",
+                f"Packets decrypted:  {stats['decrypted']}",
+                f"Decrypt failures:   {stats['failed']}",
+            ]
+            if not stats['available']:
+                lines.append("")
+                lines.append("Requires: meshing_around_meshforge at /opt/")
+                lines.append("  and: pip install cryptography meshtastic")
+            self.ctx.dialog.msgbox("Encryption Status", "\n".join(lines))
+        except Exception as e:
+            self.ctx.dialog.msgbox("Encryption", f"Crypto module not available:\n{e}")
 
     def _show_mqtt_status(self):
         """Show detailed MQTT status."""
@@ -438,6 +476,15 @@ class MQTTHandler(BaseHandler):
             self._mqtt_subscriber = MQTTNodelessSubscriber(config=subscriber_config)
             self._mqtt_subscriber.start()
             time.sleep(2)
+
+            # Attach mesh alert engine to subscriber for live alerting
+            try:
+                from utils.mesh_alert_engine import get_alert_engine
+                alert_engine = get_alert_engine()
+                alert_engine.attach_subscriber(self._mqtt_subscriber)
+                alert_engine.start()
+            except Exception as e:
+                logger.debug("Mesh alert engine attach failed (non-fatal): %s", e)
 
             if self._mqtt_subscriber.is_connected():
                 self.ctx.dialog.msgbox(

@@ -13,7 +13,7 @@
   <a href="https://github.com/Nursedude/meshforge"><img src="https://img.shields.io/badge/version-0.5.5--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.9+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2745%20passing-brightgreen.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshforge/actions"><img src="https://img.shields.io/badge/tests-2975%20passing-brightgreen.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -218,7 +218,7 @@ These features have been used in actual mesh deployments with physical radios an
 
 | Category | Capabilities |
 |----------|-------------|
-| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics — 60 handlers via registry pattern |
+| **TUI Interface** | Installer, service control, device config wizard, gateway config, diagnostics — 64 handlers via registry pattern |
 | **Radio Management** | Install/configure meshtasticd, LoRa presets, channels, SPI/USB auto-detect |
 | **RF Engineering** | Link budget, Fresnel zone, path loss, site planning, space weather (NOAA), Cython-optimized |
 | **AI Diagnostics** | Offline knowledge base (20+ topics), rule-based troubleshooting, confidence scoring |
@@ -288,15 +288,19 @@ the MeshAnchor repository split. They will move to `Nursedude/meshanchor`:
 | Feature | Version | Notes |
 |---------|---------|-------|
 | MQTT bridge architecture | v0.5.4 | Zero-interference gateway |
-| Gateway-essential test suite | v0.5.3 | 2,459 tests across 71 files |
+| Gateway-essential test suite | v0.5.3 | 2,975 tests across 81 files |
 | First-run setup wizard | v0.5.1 | Hardware auto-detect templates |
 | Network topology visualization | v0.5.3 | D3.js + ASCII modes |
 | Tactical messaging (XTOC interop) | v0.5.4 | 8 templates, X1 codec, KML/CoT/ATAK export |
-| Handler registry migration | v0.5.4 | All 49 mixins replaced with 60 handler registry modules |
+| Handler registry migration | v0.5.4 | All 49 mixins replaced with 64 handler registry modules |
 | Service pre-flight expansion | v0.5.4 | Advisory `check_service()` on all TCP/MQTT connections |
 | Logging consolidation | v0.5.4 | 9 `basicConfig()` calls → canonical `setup_logging()` |
 | Meshtastic API 2.7.x upgrade | v0.5.4 | Latest meshtastic library support |
 | MeshChat removal + dead code cleanup | v0.5.5 | Removed 2,683-line MeshChat handler, simplified LXMF utils, bumped to 5 profiles |
+| Mesh alert engine | v0.5.5 | Battery, emergency, disconnect, new node, noisy node, SNR alerts with cooldowns |
+| Demo mode | v0.5.5 | Simulated mesh traffic for hardware-free testing (via meshing_around MockAPI) |
+| MQTT packet decryption | v0.5.5 | Optional AES-256-CTR decryption via meshing_around crypto bridge |
+| Cross-repo ecosystem config | v0.5.5 | `.claude/` configurations synced across meshforge, meshing_around, meshforge-maps |
 
 **Current Priority: Field Validation (v0.5.x → v0.6.0)**
 
@@ -351,7 +355,7 @@ Currently field-testing on `alpha/meshcore-bridge` before the split:
 
 ### Testing Reality Check
 
-MeshForge has **2,459 automated tests** across 71 files. However, automated tests
+MeshForge has **2,975 automated tests** across 81 files. However, automated tests
 validate code paths with mocks — they do not replace field testing. The following
 features have strong unit test coverage but have **not been run with real services
 and radios** in a live deployment:
@@ -680,7 +684,7 @@ src/
 │   ├── backend.py         # whiptail/dialog abstraction
 │   ├── startup_checks.py  # Environment checks + conflict resolution
 │   ├── status_bar.py      # Service status bar
-│   └── handlers/          # 60 registered command handlers
+│   └── handlers/          # 64 registered command handlers
 ├── commands/              # Command modules
 │   ├── propagation.py     # Space weather & HF propagation (NOAA primary)
 │   ├── rns.py             # RNS/Reticulum commands
@@ -711,6 +715,9 @@ src/
 │   ├── service_check.py   # Service management + RNS shared instance detection (single source of truth)
 │   ├── diagnostic_engine.py # Rule-based AI diagnostics
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
+│   ├── mesh_alert_engine.py # Mesh alert engine (battery, emergency, disconnect, SNR)
+│   ├── demo_mode.py        # Simulated mesh traffic (uses meshing_around MockAPI)
+│   ├── mqtt_decryptor.py   # AES-256-CTR packet decryption bridge
 │   ├── knowledge_base.py   # Core knowledge base + 20 topics
 │   ├── prometheus_exporter.py # Prometheus/Grafana metrics
 │   ├── uconsole.py        # uConsole AIO V2 hardware profile
@@ -873,7 +880,7 @@ connection (port 4403):
 
 ### Test Coverage
 
-**2,607 tests** across 71 test files:
+**2,975 tests** across 81 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -894,7 +901,7 @@ connection (port 4403):
 | `test_startup_health.py` | 20 | Startup health checks, service verification |
 | `test_compliance.py` | 13 | HAM compliance validation, encryption modes |
 
-*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,745 across 77 files as new features were added with test coverage. All tests use mocked external services — field validation with real hardware is a separate QA track.*
+*Note: Test suite was trimmed from 4,017 to 1,411 in v0.5.4 to focus on gateway-essential coverage. Since then, tests have grown to 2,975 across 81 files as new features were added with test coverage. All tests use mocked external services — field validation with real hardware is a separate QA track.*
 
 ```bash
 python3 -m pytest tests/ -v            # Run all tests
