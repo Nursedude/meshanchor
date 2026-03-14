@@ -86,6 +86,24 @@ class NodeEvent:
 
 
 @dataclass
+class AlertEvent:
+    """Event representing a mesh network alert."""
+    alert_type: str   # 'battery', 'emergency', 'new_node', 'disconnect', etc.
+    title: str
+    message: str
+    severity: int     # 1=Low, 2=Medium, 3=High, 4=Critical
+    source_node: str = ""
+    timestamp: datetime = field(default_factory=datetime.now)
+    acknowledged: bool = False
+    metadata: Optional[Dict] = None
+
+    @property
+    def severity_label(self) -> str:
+        labels = {1: "LOW", 2: "MEDIUM", 3: "HIGH", 4: "CRITICAL"}
+        return labels.get(self.severity, "UNKNOWN")
+
+
+@dataclass
 class TacticalEvent:
     """Event representing a tactical message (SITREP, TASK, CHECKIN, etc.)."""
     tactical_type: str  # "SITREP", "TASK", "CHECKIN", etc.
@@ -314,6 +332,35 @@ def emit_node_update(
     event_bus.emit('node', event)
 
 
+def emit_alert(
+    alert_type: str,
+    title: str,
+    message: str,
+    severity: int = 2,
+    source_node: str = "",
+    metadata: Optional[Dict] = None,
+) -> None:
+    """Emit a mesh alert event.
+
+    Args:
+        alert_type: Alert category ('battery', 'emergency', 'new_node', etc.)
+        title: Short alert title
+        message: Alert detail message
+        severity: 1=Low, 2=Medium, 3=High, 4=Critical
+        source_node: Source node ID if applicable
+        metadata: Optional extra data
+    """
+    event = AlertEvent(
+        alert_type=alert_type,
+        title=title,
+        message=message,
+        severity=severity,
+        source_node=source_node,
+        metadata=metadata,
+    )
+    event_bus.emit('alert', event)
+
+
 def emit_tactical(
     tactical_type: str,
     message_id: str,
@@ -349,9 +396,11 @@ __all__ = [
     'MessageDirection',
     'ServiceEvent',
     'NodeEvent',
+    'AlertEvent',
     'TacticalEvent',
     'emit_message',
     'emit_service_status',
     'emit_node_update',
+    'emit_alert',
     'emit_tactical',
 ]

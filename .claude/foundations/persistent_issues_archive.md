@@ -2,7 +2,7 @@
 
 > **Purpose**: Historical record of resolved issues.
 > These were moved from `persistent_issues.md` to reduce file size.
-> Last updated: 2026-02-21
+> Last updated: 2026-03-13
 >
 > **Note**: GTK-specific issues (#2, #11, #13, #14, #15) were removed during
 > the 2026-02-21 cleanup. GTK4 was removed in v0.5.x; TUI is the only interface.
@@ -114,3 +114,73 @@ issues. All resolved:
 | C4 | Stats dict race conditions (24 racy increments) | **FIXED** | threading.Lock added |
 | C5 | Atomic write uses deterministic temp path | **FIXED** | `tempfile.mkstemp()` |
 | H1 | Non-interruptible shutdown in daemon loops | **FIXED** | `_stop_event.wait()` everywhere |
+
+
+---
+
+## Issue #1: Path.home() Returns /root with sudo — RESOLVED (2026-02-20)
+
+Zero `Path.home()` violations remain. Use `get_real_user_home()` from `utils/paths.py`.
+Fixed last 3 violations in `mqtt_bridge_handler.py`, `cli.py`, `rns_config.py`.
+Linter (`scripts/lint.py`) checks MF001. Regression test in `test_regression_guards.py`.
+
+---
+
+## Issue #5: Duplicate Utility Functions — RESOLVED (2026-02-20)
+
+All 20 `safe_import` fallback copies consolidated to direct imports (-220 lines).
+Rule: `safe_import` is for EXTERNAL deps only. First-party modules always use direct imports.
+Follow-up: `startup_checks.py` converted from `safe_import('utils.service_check')` to direct import.
+
+---
+
+## Issue #6: Large Files — Extraction History (2026-03-02)
+
+8 files split in Session 2 (2026-03-02):
+- meshtasticd_config.py: 1,497 → 516 (meshtasticd_templates.py)
+- rns.py: 1,505 → 1,306 (rns_templates.py)
+- prometheus_exporter.py: 1,523 → 1,399 (metrics_server.py)
+- map_http_handler.py: 1,557 → 1,404 (_map_meshtastic_proxy.py)
+- map_data_collector.py: 1,568 → 1,320 (_map_collector_rns.py)
+- service_check.py: 1,573 → 1,410 (_service_iptables.py)
+- rns_bridge.py: 1,599 → 1,349 (_rns_bridge_connection.py)
+- nomadnet.py: 1,610 → 1,315 (_nomadnet_rns_checks.py)
+
+Previous extractions (2026-02-06):
+- traffic_inspector.py: 2,194 → 442, main.py: 1,799 → 1,489
+- node_tracker.py: 1,808 → 989, metrics_export.py: 1,762 → 96
+- engine.py: 1,767 → 709, rns_menu_mixin.py: 1,524 → 1,210
+
+---
+
+## Issue #7: Missing File References — RESOLVED
+
+Create scripts before referencing them in menu options. Use commands layer when possible.
+
+---
+
+## Issue #8: Outdated Fallback Versions — RESOLVED
+
+Search for hardcoded version strings when bumping: `grep -rn "0\.[0-9]\.[0-9]" src/*.py`
+
+---
+
+## Issue #9: Broad Exception Swallowing — MOSTLY RESOLVED (2026-02-20)
+
+28/30 fixed across 7 files (tcp_monitor, system_diagnostics, setup_wizard, hardware_config,
+rns_sniffer, site_planner). 2 benign by design (packet_dissectors, pskreporter_subscriber).
+
+---
+
+## Issue #10: Map Control Panel Scrollbar Overlap — FIXED (2026-02-25)
+
+Added thin dark-themed scrollbar CSS to `web/node_map.html`.
+
+---
+
+## Handler Registry Migration — COMPLETE (2026-02-28)
+
+49-mixin inheritance chain replaced with handler registry pattern.
+See `handler_protocol.py` (Protocol + BaseHandler + TUIContext) and
+`handler_registry.py` (register/lookup/dispatch). 60 handler files in
+`launcher_tui/handlers/`. `main.py` dropped from 1,947 to 1,148 lines.

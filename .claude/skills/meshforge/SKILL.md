@@ -95,7 +95,7 @@ else:
 ## TUI Architecture
 
 **Handler Registry Pattern** (Protocol + BaseHandler + TUIContext):
-- Each menu action is a self-contained handler in `handlers/`
+- 64 handlers, each a self-contained module in `handlers/`
 - Dispatched by `handler_registry.py`
 - See `handler_protocol.py` for the Protocol definition and TUIContext shared state
 

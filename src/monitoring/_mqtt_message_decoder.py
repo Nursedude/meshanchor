@@ -63,13 +63,58 @@ class MQTTMessageDecoderMixin:
             self._handle_text_message(data)
 
     def _handle_encrypted_message(self, topic: str, payload: bytes) -> None:
-        """Handle encrypted message - just track node existence."""
+        """Handle encrypted message - track node existence and optionally decrypt."""
         # Topic format: msh/US/2/e/LongFast/!abcd1234
         parts = topic.split("/")
         if len(parts) >= 6:
             node_id = parts[-1]
             if node_id.startswith("!"):
                 self._ensure_node(node_id)
+
+        # Attempt decryption if crypto bridge is available
+        try:
+            from utils.mqtt_decryptor import get_decryptor
+            decryptor = get_decryptor()
+            if decryptor.is_available:
+                key = getattr(self, '_config', {}).get("key", "AQ==") if hasattr(self, '_config') else "AQ=="
+                result = decryptor.decrypt_packet(payload, key)
+                if result and result.get("text"):
+                    self._process_decrypted_text(result, parts)
+        except Exception:
+            pass  # Crypto not available — existing behavior unchanged
+
+    def _process_decrypted_text(self, result: dict, topic_parts: list) -> None:
+        """Process a successfully decrypted text message."""
+        try:
+            sender_num = result.get("sender", 0)
+            sender_id = f"!{sender_num:08x}" if sender_num else ""
+            text = result.get("text", "")
+            if not text or not sender_id:
+                return
+
+            self._ensure_node(sender_id)
+
+            msg = MQTTMessage(
+                message_id=str(result.get("packet_id", "")),
+                from_id=sender_id,
+                to_id="",
+                text=text,
+                channel=result.get("channel", 0) if isinstance(result.get("channel"), int) else 0,
+            )
+            with self._messages_lock:
+                self._messages.append(msg)
+            with self._stats_lock:
+                self._stats["messages_received"] = self._stats.get("messages_received", 0) + 1
+                self._stats["encrypted_decrypted"] = self._stats.get("encrypted_decrypted", 0) + 1
+
+            # Notify message callbacks
+            for cb in getattr(self, '_message_callbacks', []):
+                try:
+                    cb(msg)
+                except Exception:
+                    pass
+        except Exception:
+            pass  # Decrypted text processing is best-effort
 
     def _ensure_node(self, node_id: str) -> MQTTNode:
         """Ensure a node exists in our tracking."""

@@ -197,4 +197,12 @@ def get_all_handlers() -> List[Type]:
     from handlers.startup_health import StartupHealthHandler
     handlers.append(StartupHealthHandler)
 
+    # Batch 15 — mesh alerts + demo mode (meshing_around integration)
+    from handlers.mesh_alerts import MeshAlertsHandler
+    from handlers.demo import DemoHandler
+    handlers.extend([
+        MeshAlertsHandler,
+        DemoHandler,
+    ])
+
     return handlers

@@ -584,9 +584,13 @@ class DashboardHandler(BaseHandler):
     }
 
     def _show_alerts(self):
-        """Show current alerts from environment state and EAS."""
+        """Show current alerts from environment state, mesh alerts, and EAS."""
         clear_screen()
         print("=== Current Alerts ===\n")
+
+        # Demo mode indicator
+        if self.ctx.env.get('demo_mode'):
+            print("  \033[0;36m[DEMO MODE ACTIVE]\033[0m\n")
 
         has_system_alerts = False
         alert_texts = []
@@ -603,6 +607,32 @@ class DashboardHandler(BaseHandler):
                 print("  System: No alerts - healthy")
         else:
             print("  Environment state not available")
+
+        # Mesh alerts from alert engine
+        print()
+        try:
+            from utils.mesh_alert_engine import get_alert_engine
+            engine = get_alert_engine()
+            mesh_alerts = engine.get_active_alerts()
+            if mesh_alerts:
+                print(f"MESH ALERTS ({len(mesh_alerts)}):")
+                severity_colors = {
+                    1: "\033[0;34m",   # Blue
+                    2: "\033[0;33m",   # Yellow
+                    3: "\033[0;31m",   # Red
+                    4: "\033[1;31m",   # Bold Red
+                }
+                reset = "\033[0m"
+                for alert in mesh_alerts[:10]:
+                    color = severity_colors.get(alert.severity, "")
+                    print(f"  {color}[{alert.severity_label}]{reset} {alert.title}")
+                    print(f"           {alert.message}")
+                if len(mesh_alerts) > 10:
+                    print(f"  ... and {len(mesh_alerts) - 10} more")
+            else:
+                print("  Mesh: No active alerts")
+        except Exception as e:
+            logger.debug("Mesh alert check failed: %s", e)
 
         print()
         try:
