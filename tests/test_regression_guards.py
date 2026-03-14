@@ -414,10 +414,9 @@ class TestNomadNetPrelaunchContract:
         with open(filepath, 'r') as f:
             content = f.read()
 
-        # Allow subprocess for chown in _validate_nomadnet_config (config repair)
-        # and rnstatus as a read-only health probe (not a repair action).
+        # Allow subprocess for chown in _validate_nomadnet_config (config repair).
         # Forbid service management commands.
-        forbidden = ['systemctl', 'pkill', 'rnsd']
+        forbidden = ['systemctl', 'pkill', 'rnstatus', 'rnsd']
         lines = content.splitlines()
         for i, line in enumerate(lines, 1):
             stripped = line.strip()

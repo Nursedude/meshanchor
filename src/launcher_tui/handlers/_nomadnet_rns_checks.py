@@ -11,6 +11,7 @@ _rns_repair.py and rns_diagnostics handler.
 
 import logging
 import os
+import socket
 import subprocess
 from pathlib import Path
 
@@ -83,16 +84,21 @@ class NomadNetRNSChecksMixin:
 
         sudo_user = os.environ.get('SUDO_USER')
 
-        # 1b. Probe rnsd health via rnstatus (fast, <3s timeout)
+        # 1b. Probe rnsd health via shared instance data exchange
+        # Note: rnstatus uses RPC which may fail even when rnsd is healthy
+        # (e.g., enable_transport=False). Instead, we verify the shared
+        # instance socket accepts connections and responds to data.
         rnsd_healthy = None
         if rnsd_user and shared_info.get('available', False):
             try:
-                r = subprocess.run(
-                    ['rnstatus'], capture_output=True, text=True, timeout=3
-                )
-                rnsd_healthy = (r.returncode == 0)
-            except (subprocess.SubprocessError, OSError, FileNotFoundError):
-                pass  # Can't determine, don't block
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(2)
+                s.connect('\x00rns/default')
+                # If we connected, the shared instance is alive
+                rnsd_healthy = True
+                s.close()
+            except OSError:
+                rnsd_healthy = False
 
         # 2. Pure decision
         result = check_rns_readiness(
