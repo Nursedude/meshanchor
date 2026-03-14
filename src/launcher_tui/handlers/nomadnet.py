@@ -848,31 +848,20 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                 result = subprocess.run(
                     ['sudo', '-u', sudo_user, '-H',
                      f'PATH={user_path}'] + cmd,
+                    stderr=subprocess.PIPE, text=True,
                     timeout=None
                 )
             else:
                 # Not running via sudo, run directly
-                result = subprocess.run(cmd, timeout=None)
+                result = subprocess.run(
+                    cmd, stderr=subprocess.PIPE, text=True,
+                    timeout=None
+                )
 
             # After NomadNet exits, show status and wait for user
             print()
             if result.returncode != 0:
-                was_conn_refused = self._diagnose_nomadnet_error(
-                    result.returncode, sudo_user
-                )
-                if was_conn_refused:
-                    # Offer active recovery — restart rnsd (iterative, NOT recursive)
-                    try:
-                        answer = input(
-                            "\nRestart rnsd and retry? [Y/n] "
-                        )
-                    except (EOFError, KeyboardInterrupt):
-                        answer = 'n'
-                    if answer.strip().lower() in ('', 'y', 'yes'):
-                        if self._restart_rnsd_and_verify_rpc(nn_path=nn_path):
-                            print("\nrnsd RPC is now available.")
-                            print("Please re-launch NomadNet from the menu.")
-                        # Do NOT recursively call _launch_nomadnet_textui()
+                self._show_launch_error(result.returncode, result.stderr)
             else:
                 print("NomadNet exited normally.")
             print("\nPress Enter to return to MeshForge...")
@@ -897,7 +886,51 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             except (EOFError, KeyboardInterrupt):
                 pass
 
-    # _diagnose_nomadnet_error provided by NomadNetInstallUtilsMixin
+    def _show_launch_error(self, returncode: int, stderr: str = ""):
+        """Show NomadNet launch error using stderr output.
+
+        Replaces the 150-line logfile parser with direct stderr inspection.
+        """
+        print(f"NomadNet exited with error code {returncode}")
+
+        if stderr and stderr.strip():
+            # Extract the most relevant lines from stderr
+            lines = stderr.strip().splitlines()
+            # Look for known error patterns
+            for line in lines:
+                if 'ConnectionRefusedError' in line or 'Errno 111' in line:
+                    print("\nDiagnosis: RPC connection to rnsd refused")
+                    print("  Fix: Use RNS Diagnostics to check rnsd status")
+                    print("       sudo systemctl restart rnsd")
+                    return
+                if 'AuthenticationError' in line or 'digest sent was rejected' in line:
+                    print("\nDiagnosis: RPC authentication failed")
+                    print("  Fix: Use RNS Diagnostics to fix user mismatch")
+                    return
+                if 'KeyError' in line and 'textui' in line.lower():
+                    print("\nDiagnosis: Config missing [textui] section")
+                    print("  Fix: Delete ~/.nomadnetwork/config and restart")
+                    return
+                if 'PermissionError' in line or 'Permission denied' in line:
+                    print("\nDiagnosis: Permission denied")
+                    print("  Fix: Check file ownership with ls -la ~/.nomadnetwork/")
+                    return
+                if 'ModuleNotFoundError' in line or 'ImportError' in line:
+                    print("\nDiagnosis: Missing Python dependencies")
+                    print("  Fix: pipx reinstall nomadnet")
+                    return
+
+            # No known pattern — show last few stderr lines
+            print("\n--- stderr output ---")
+            for line in lines[-10:]:
+                print(f"  {line}")
+            print("---")
+        else:
+            # No stderr captured — fall back to logfile hint
+            user_home = get_real_user_home()
+            logfile = user_home / '.nomadnetwork' / 'logfile'
+            print(f"\nCheck logs: cat {logfile}")
+            print(f"  journalctl --user -u nomadnet -n 50")
 
     # ------------------------------------------------------------------
     # Log viewer
@@ -1091,10 +1124,10 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             cmd = base_cmd
 
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 start_new_session=True
             )
 
@@ -1109,35 +1142,32 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                     "Use 'Stop NomadNet' to shut it down.",
                 )
             else:
-                # Check log for specific errors to provide better diagnosis
-                user_home = get_real_user_home()
-                logfile = user_home / '.nomadnetwork' / 'logfile'
-                conn_refused = False
-                if logfile.exists():
-                    try:
-                        import collections
-                        with open(logfile, 'r') as f:
-                            last_lines = list(
-                                collections.deque(f, maxlen=10)
-                            )
-                        for line in last_lines:
-                            if 'ConnectionRefusedError' in line or 'Errno 111' in line:
-                                conn_refused = True
-                                break
-                    except OSError:
-                        pass
+                # Read stderr from the failed process
+                stderr_out = ""
+                try:
+                    stderr_bytes = proc.stderr.read(4096) if proc.stderr else b""
+                    stderr_out = stderr_bytes.decode('utf-8', errors='replace').strip()
+                except (OSError, ValueError):
+                    pass
 
-                if conn_refused:
+                if stderr_out and ('ConnectionRefusedError' in stderr_out
+                                   or 'Errno 111' in stderr_out):
                     self.ctx.dialog.msgbox(
                         "Start Failed — Connection Refused",
                         "NomadNet daemon crashed: ConnectionRefusedError.\n\n"
-                        "rnsd RPC socket is not accepting connections.\n\n"
-                        "Possible causes:\n"
-                        "  - rnsd not fully initialized yet\n"
-                        "  - RNS version mismatch (pipx vs system)\n"
-                        "  - User/identity mismatch with rnsd\n\n"
-                        "Try: sudo systemctl restart rnsd\n"
-                        "     Then wait 20s and re-launch NomadNet.",
+                        "Use RNS Diagnostics to check rnsd status.\n\n"
+                        "Quick fix: sudo systemctl restart rnsd\n"
+                        "Then wait 20s and re-launch NomadNet.",
+                    )
+                elif stderr_out:
+                    # Show first few lines of stderr
+                    lines = stderr_out.splitlines()[:5]
+                    detail = "\n".join(lines)
+                    self.ctx.dialog.msgbox(
+                        "Start Failed",
+                        f"NomadNet daemon failed to start.\n\n"
+                        f"Error output:\n{detail}\n\n"
+                        f"Or run manually: nomadnet --daemon --console",
                     )
                 else:
                     self.ctx.dialog.msgbox(

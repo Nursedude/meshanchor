@@ -13,6 +13,7 @@ Checks:
 - MF008: Raw systemctl for service state decisions (must use service_check, Issue #20)
 - MF009: RNS.Reticulum() without configdir (causes EADDRINUSE, Issue #12)
 - MF010: time.sleep() in daemon loops (must use _stop_event.wait(), H1)
+- MF011: Repair logic in _nomadnet_rns_checks.py (must be in _rns_repair.py/diagnostics)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -281,6 +282,33 @@ class MeshForgeLinter:
                             "RNS.Reticulum() without configdir= — will cause EADDRINUSE "
                             "when rnsd is running (Issue #12)"
                         ))
+
+        # MF011: _nomadnet_rns_checks.py must not contain repair/service logic
+        if '_nomadnet_rns_checks.py' in filepath:
+            repair_patterns = ['start_service(', 'stop_service(', 'enable_service(', 'chmod(']
+            # subprocess is only flagged for service management commands
+            subprocess_forbidden = ['systemctl', 'pkill', 'rnstatus', 'rnsd']
+            is_string = stripped.startswith('"') or stripped.startswith("'")
+            is_comment = stripped.startswith('#')
+            is_import = 'import' in line or 'safe_import' in line
+            if not is_string and not is_comment and not is_import:
+                for pattern in repair_patterns:
+                    if pattern in line:
+                        issues.append(LintIssue(
+                            filepath, lineno, Severity.ERROR, "MF011",
+                            f"Repair logic in _nomadnet_rns_checks.py — move to "
+                            f"_rns_repair.py or diagnostics handler"
+                        ))
+                        break
+                if 'subprocess' in line:
+                    for cmd in subprocess_forbidden:
+                        if f"'{cmd}'" in line or f'"{cmd}"' in line:
+                            issues.append(LintIssue(
+                                filepath, lineno, Severity.ERROR, "MF011",
+                                f"Service management subprocess in _nomadnet_rns_checks.py — "
+                                f"move to _rns_repair.py or diagnostics handler"
+                            ))
+                            break
 
         # MF010: time.sleep() in daemon loops (should use _stop_event.wait())
         if 'time.sleep(' in line:
