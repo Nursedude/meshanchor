@@ -21,6 +21,9 @@ from utils.safe_import import safe_import
 start_service, stop_service, _HAS_SERVICE_CHECK = safe_import(
     'utils.service_check', 'start_service', 'stop_service'
 )
+enable_service, _ = safe_import(
+    'utils.service_check', 'enable_service'
+)
 
 logger = logging.getLogger(__name__)
 
@@ -434,15 +437,57 @@ class NomadNetRNSChecksMixin:
         rnsd_user = self._get_rnsd_user()
 
         if not rnsd_user:
-            # rnsd not running -- warn but allow proceeding
-            return self.ctx.dialog.yesno(
+            # rnsd not running -- offer to start it (not just warn)
+            choice = self.ctx.dialog.menu(
                 "rnsd Not Running",
                 "The RNS daemon (rnsd) is not running.\n\n"
-                "NomadNet can start its own RNS instance,\n"
-                "but for Meshtastic bridging you should run rnsd\n"
-                "with share_instance = Yes in the Reticulum config.\n\n"
-                "Continue anyway?",
+                "NomadNet needs rnsd for Meshtastic bridging\n"
+                "and shared RNS interfaces.",
+                [
+                    ("start", "Start & enable rnsd (recommended)"),
+                    ("continue", "Continue without rnsd"),
+                    ("cancel", "Cancel"),
+                ],
             )
+
+            if choice == "start":
+                self.ctx.dialog.infobox(
+                    "Starting rnsd",
+                    "Enabling rnsd and starting service...",
+                )
+                if _HAS_SERVICE_CHECK and enable_service:
+                    success, msg = enable_service('rnsd', start=True)
+                else:
+                    result = subprocess.run(
+                        ['sudo', 'systemctl', 'enable', '--now', 'rnsd'],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    success = result.returncode == 0
+                    msg = result.stderr.strip() if not success else ''
+
+                if not success:
+                    self.ctx.dialog.msgbox(
+                        "Start Failed",
+                        f"Could not start rnsd: {msg}\n\n"
+                        f"Try manually:\n"
+                        f"  sudo systemctl enable --now rnsd",
+                    )
+                    return False
+
+                # rnsd started — fall through to Tier 3 (port check)
+                # to verify it actually comes up and check for
+                # blocking interfaces
+                rnsd_user = self._get_rnsd_user()
+                if not rnsd_user:
+                    # Started but process not detected yet — give it
+                    # a moment and recheck
+                    time.sleep(2)
+                    rnsd_user = self._get_rnsd_user()
+
+            elif choice == "continue":
+                return True
+            else:
+                return False
 
         # rnsd is running -- wait for it to bind port 37428.
         # rnsd initializes crypto and interfaces BEFORE binding the shared
