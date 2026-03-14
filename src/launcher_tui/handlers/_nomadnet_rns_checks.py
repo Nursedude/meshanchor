@@ -164,7 +164,7 @@ class NomadNetRNSChecksMixin:
 
         if choice == "restart":
             from handlers._rns_repair import restart_rnsd
-            self.ctx.dialog.infobox("Restarting rnsd...")
+            self.ctx.dialog.infobox("Restarting", "Restarting rnsd...")
             if restart_rnsd():
                 self.ctx.dialog.msgbox(
                     "rnsd Restarted",
