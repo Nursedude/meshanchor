@@ -42,7 +42,27 @@ class StartupHealthHandler(BaseHandler):
 
     def on_startup(self):
         """Run pre-main-menu health checks."""
+        self._patch_rns_transport_race()
         self._check_service_misconfig()
+
+    def _patch_rns_transport_race(self):
+        """Apply RNS Transport.owner race condition fix if needed.
+
+        RNS <= 1.1.4 crashes ~12h after rnsd start because __jobs
+        calls persist_data() before Transport.owner is set. This
+        runs the patch script silently on startup so it survives
+        pip upgrades.
+        """
+        patch_script = Path(__file__).parent.parent.parent / 'scripts' / 'patch_rns_transport_race.py'
+        if not patch_script.exists():
+            return
+        try:
+            subprocess.run(
+                ['python3', str(patch_script)],
+                capture_output=True, timeout=10,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug("RNS transport race patch: %s", e)
 
     # -- Internal --
 
