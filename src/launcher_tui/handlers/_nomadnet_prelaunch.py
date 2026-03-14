@@ -23,6 +23,7 @@ class RNSReadiness:
         rnsd_running: Whether rnsd process was detected.
         shared_instance: Whether RNS shared instance is available.
         user_match: Whether rnsd user matches launch user (None if N/A).
+        rnsd_healthy: Whether rnsd responded to rnstatus (None if unknown).
     """
     can_launch: bool
     reason: str
@@ -31,28 +32,32 @@ class RNSReadiness:
     rnsd_running: bool = False
     shared_instance: bool = False
     user_match: Optional[bool] = None
+    rnsd_healthy: Optional[bool] = None
 
 
 def check_rns_readiness(
     rnsd_running: bool,
     shared_instance_available: bool,
+    rnsd_healthy: Optional[bool] = None,
     rnsd_user: Optional[str] = None,
     launch_user: Optional[str] = None,
 ) -> RNSReadiness:
     """Pure function: system state in, launch decision out.
 
     Decision matrix:
-        rnsd running | shared instance | users match | Result
-        -------------|-----------------|-------------|-------
-        yes          | yes             | yes         | can_launch=True
-        yes          | yes             | no          | can_launch=True + warning
-        yes          | no              | —           | can_launch=False
-        no           | no              | —           | can_launch=False
-        no           | yes             | —           | can_launch=True (standalone)
+        rnsd running | shared instance | healthy | users match | Result
+        -------------|-----------------|---------|-------------|-------
+        yes          | yes             | yes/None| yes         | can_launch=True
+        yes          | yes             | no      | —           | can_launch=True + degraded warning
+        yes          | yes             | —       | no          | can_launch=True + user warning
+        yes          | no              | —       | —           | can_launch=False
+        no           | no              | —       | —           | can_launch=False
+        no           | yes             | —       | —           | can_launch=True (standalone)
 
     Args:
         rnsd_running: Whether rnsd process is detected.
         shared_instance_available: Whether RNS shared instance socket is up.
+        rnsd_healthy: Whether rnstatus succeeded (None = couldn't determine).
         rnsd_user: OS user running rnsd (None if not running).
         launch_user: OS user who will run NomadNet (SUDO_USER or current).
 
@@ -106,7 +111,15 @@ def check_rns_readiness(
 
     # Case: rnsd running + shared instance available
     warning = None
-    if user_match is False:
+
+    # Degraded rnsd takes priority over user mismatch
+    if rnsd_healthy is False:
+        warning = (
+            "rnsd is running but appears degraded (rnstatus failed).\n"
+            "Interfaces may not work correctly.\n"
+            "Use RNS Diagnostics to restart rnsd, or restart from the menu below."
+        )
+    elif user_match is False:
         # User mismatch — advisory, not blocking
         warning = (
             f"rnsd runs as '{rnsd_user}' but NomadNet will run as "
@@ -123,4 +136,5 @@ def check_rns_readiness(
         rnsd_running=True,
         shared_instance=True,
         user_match=user_match,
+        rnsd_healthy=rnsd_healthy,
     )

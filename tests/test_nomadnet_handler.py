@@ -153,10 +153,12 @@ def _make_nomadnet():
 class TestPrelaunchCheckIntegration:
     """Test _check_rns_for_nomadnet dialog integration."""
 
+    @patch('subprocess.run')
     @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
-    def test_prelaunch_passes_when_ready(self, mock_info):
+    def test_prelaunch_passes_when_ready(self, mock_info, mock_run):
         """When RNS is ready, check returns True with no dialog."""
         mock_info.return_value = {'available': True}
+        mock_run.return_value = MagicMock(returncode=0, stdout='ok', stderr='')
         h = _make_nomadnet()
         with patch.object(h, '_get_rnsd_user', return_value='pi'):
             with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
@@ -198,10 +200,12 @@ class TestPrelaunchCheckIntegration:
             result = h._check_rns_for_nomadnet()
         assert result is False
 
+    @patch('subprocess.run')
     @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
-    def test_prelaunch_user_mismatch_warning(self, mock_info):
+    def test_prelaunch_user_mismatch_warning(self, mock_info, mock_run):
         """User mismatch shows warning but still allows launch."""
         mock_info.return_value = {'available': True}
+        mock_run.return_value = MagicMock(returncode=0, stdout='ok', stderr='')
         h = _make_nomadnet()
         with patch.object(h, '_get_rnsd_user', return_value='root'):
             with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
@@ -373,6 +377,128 @@ class TestNomadNetStopFlow:
         h.ctx.dialog._yesno_returns = [False]
         with patch.object(h, '_is_nomadnet_running', return_value=True):
             h._stop_nomadnet()
+
+
+# ======================================================================
+# Phase 2b: Degraded rnsd (rnsd_healthy parameter)
+# ======================================================================
+
+class TestRNSReadinessDegraded:
+    """Test rnsd_healthy parameter in the readiness gate."""
+
+    def test_rnsd_running_shared_instance_degraded(self):
+        """rnsd running + shared instance + unhealthy: can launch with warning."""
+        r = check_rns_readiness(
+            rnsd_running=True,
+            shared_instance_available=True,
+            rnsd_healthy=False,
+            rnsd_user="pi",
+            launch_user="pi",
+        )
+        assert r.can_launch is True
+        assert r.rnsd_healthy is False
+        assert r.warning is not None
+        assert "degraded" in r.warning.lower()
+
+    def test_rnsd_healthy_unknown(self):
+        """rnsd running + shared instance + health unknown: can launch, no warning."""
+        r = check_rns_readiness(
+            rnsd_running=True,
+            shared_instance_available=True,
+            rnsd_healthy=None,
+            rnsd_user="pi",
+            launch_user="pi",
+        )
+        assert r.can_launch is True
+        assert r.rnsd_healthy is None
+        assert r.warning is None
+
+    def test_rnsd_healthy_true(self):
+        """rnsd running + shared instance + healthy: can launch, no warning."""
+        r = check_rns_readiness(
+            rnsd_running=True,
+            shared_instance_available=True,
+            rnsd_healthy=True,
+            rnsd_user="pi",
+            launch_user="pi",
+        )
+        assert r.can_launch is True
+        assert r.rnsd_healthy is True
+        assert r.warning is None
+
+    def test_degraded_warning_overrides_user_mismatch(self):
+        """Degraded warning takes priority over user mismatch."""
+        r = check_rns_readiness(
+            rnsd_running=True,
+            shared_instance_available=True,
+            rnsd_healthy=False,
+            rnsd_user="root",
+            launch_user="pi",
+        )
+        assert r.can_launch is True
+        assert "degraded" in r.warning.lower()
+        # User mismatch warning is not shown when degraded
+        assert "root" not in r.warning
+
+
+class TestPrelaunchDegradedFlow:
+    """Test _handle_degraded_rnsd dialog flow."""
+
+    @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
+    @patch('subprocess.run')
+    def test_prelaunch_degraded_user_picks_restart(self, mock_run, mock_info):
+        """Degraded rnsd, user picks restart -> restart_rnsd called."""
+        mock_info.return_value = {'available': True}
+        # rnstatus returns non-zero (degraded)
+        mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='')
+        h = _make_nomadnet()
+        h.ctx.dialog._menu_returns = ["restart"]
+        with patch.object(h, '_get_rnsd_user', return_value='pi'):
+            with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
+                with patch('handlers._rns_repair.restart_rnsd', return_value=True):
+                    result = h._check_rns_for_nomadnet()
+        assert result is True
+
+    @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
+    @patch('subprocess.run')
+    def test_prelaunch_degraded_user_picks_continue(self, mock_run, mock_info):
+        """Degraded rnsd, user picks continue -> launches anyway."""
+        mock_info.return_value = {'available': True}
+        mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='')
+        h = _make_nomadnet()
+        h.ctx.dialog._menu_returns = ["continue"]
+        with patch.object(h, '_get_rnsd_user', return_value='pi'):
+            with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
+                result = h._check_rns_for_nomadnet()
+        assert result is True
+
+    @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
+    @patch('subprocess.run')
+    def test_prelaunch_degraded_user_cancels(self, mock_run, mock_info):
+        """Degraded rnsd, user cancels -> returns False."""
+        mock_info.return_value = {'available': True}
+        mock_run.return_value = MagicMock(returncode=1, stdout='', stderr='')
+        h = _make_nomadnet()
+        h.ctx.dialog._menu_returns = [None]  # cancel
+        with patch.object(h, '_get_rnsd_user', return_value='pi'):
+            with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
+                result = h._check_rns_for_nomadnet()
+        assert result is False
+
+    @patch('handlers._nomadnet_rns_checks.get_rns_shared_instance_info')
+    @patch('subprocess.run')
+    def test_prelaunch_healthy_skips_degraded_dialog(self, mock_run, mock_info):
+        """Healthy rnsd skips degraded dialog entirely."""
+        mock_info.return_value = {'available': True}
+        mock_run.return_value = MagicMock(returncode=0, stdout='ok', stderr='')
+        h = _make_nomadnet()
+        with patch.object(h, '_get_rnsd_user', return_value='pi'):
+            with patch.dict(os.environ, {'SUDO_USER': 'pi'}):
+                result = h._check_rns_for_nomadnet()
+        assert result is True
+        # No menu dialog should have been shown
+        menu_calls = [c for c in h.ctx.dialog.calls if c[0] == 'menu']
+        assert len(menu_calls) == 0
 
 
 class TestConfigValidation:

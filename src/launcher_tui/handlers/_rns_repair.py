@@ -23,6 +23,29 @@ from ._rns_interface_mgr import find_blocking_interfaces, disable_interfaces_in_
 logger = logging.getLogger(__name__)
 
 
+def restart_rnsd() -> bool:
+    """Restart rnsd via service_check (stop + start + wait).
+
+    Thin helper so callers outside _rns_repair.py don't need to
+    import stop_service/start_service directly.
+
+    Returns True if rnsd restarted and shared instance became available.
+    """
+    stop_service('rnsd')
+    time.sleep(1)
+    success, msg = start_service('rnsd')
+    if not success:
+        logger.warning("rnsd start failed: %s", msg)
+        return False
+    # Wait up to 5s for shared instance
+    for _ in range(5):
+        time.sleep(1)
+        if check_rns_shared_instance():
+            return True
+    logger.warning("rnsd restarted but shared instance not available after 5s")
+    return False
+
+
 def validate_rnsd_service_file() -> bool:
     """Validate and fix the rnsd systemd service file.
 
