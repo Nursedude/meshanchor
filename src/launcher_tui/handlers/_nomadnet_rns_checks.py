@@ -83,15 +83,31 @@ class NomadNetRNSChecksMixin:
 
         sudo_user = os.environ.get('SUDO_USER')
 
+        # 1b. Probe rnsd health via rnstatus (fast, <3s timeout)
+        rnsd_healthy = None
+        if rnsd_user and shared_info.get('available', False):
+            try:
+                r = subprocess.run(
+                    ['rnstatus'], capture_output=True, text=True, timeout=3
+                )
+                rnsd_healthy = (r.returncode == 0)
+            except (subprocess.SubprocessError, OSError, FileNotFoundError):
+                pass  # Can't determine, don't block
+
         # 2. Pure decision
         result = check_rns_readiness(
             rnsd_running=bool(rnsd_user),
             shared_instance_available=shared_info.get('available', False),
+            rnsd_healthy=rnsd_healthy,
             rnsd_user=rnsd_user,
             launch_user=sudo_user,
         )
 
-        # 3. Show warning if applicable (but still allow launch)
+        # 3. Handle degraded rnsd (running but unhealthy)
+        if result.can_launch and result.rnsd_healthy is False:
+            return self._handle_degraded_rnsd(result)
+
+        # 4. Show warning if applicable (but still allow launch)
         if result.can_launch:
             if result.warning:
                 self.ctx.dialog.msgbox("RNS Warning", result.warning)
@@ -124,6 +140,53 @@ class NomadNetRNSChecksMixin:
                     "  rnstatus",
                 )
             return False  # Return to NomadNet menu after diagnostics
+
+        return choice == "continue"
+
+    def _handle_degraded_rnsd(self, result) -> bool:
+        """Handle degraded rnsd — offer restart, diagnostics, or continue.
+
+        Called when rnsd is running and shared instance is up but rnstatus
+        failed, indicating internal rnsd crash (e.g., RNS 1.1.3 race).
+
+        Returns True if OK to proceed with NomadNet launch.
+        """
+        choice = self.ctx.dialog.menu(
+            "RNS Degraded",
+            result.warning,
+            [
+                ("restart", "Restart rnsd (recommended)"),
+                ("diagnostics", "Open RNS Diagnostics"),
+                ("continue", "Launch anyway"),
+                ("cancel", "Cancel"),
+            ],
+        )
+
+        if choice == "restart":
+            from handlers._rns_repair import restart_rnsd
+            self.ctx.dialog.infobox("Restarting rnsd...")
+            if restart_rnsd():
+                self.ctx.dialog.msgbox(
+                    "rnsd Restarted",
+                    "rnsd restarted successfully.\n"
+                    "Shared instance is available.",
+                )
+                return True
+            self.ctx.dialog.msgbox(
+                "Restart Failed",
+                "rnsd restart did not fully recover.\n\n"
+                "Use RNS Diagnostics for a full repair.",
+            )
+            return False
+
+        if choice == "diagnostics":
+            diag = self._get_rns_diagnostics_handler()
+            if diag:
+                try:
+                    diag._rns_diagnostics()
+                except Exception as e:
+                    logger.warning("RNS diagnostics failed: %s", e)
+            return False
 
         return choice == "continue"
 
