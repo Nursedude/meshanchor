@@ -517,6 +517,37 @@ def get_propagation_summary() -> str:
     return api.get_quick_summary()
 
 
+def classify_overall_conditions(
+    solar_flux: Optional[float],
+    k_index: Optional[int],
+) -> str:
+    """Classify overall HF propagation conditions from solar indices.
+
+    Args:
+        solar_flux: Solar Flux Index (SFU), or None if unavailable.
+        k_index: Planetary K-index (0-9), or None if unavailable.
+
+    Returns:
+        One of "Excellent", "Good", "Fair", "Poor", "Disturbed", or "Unknown".
+    """
+    if k_index is not None and k_index >= 5:
+        return "Disturbed"
+
+    sfi = solar_flux or 0
+    kp = k_index or 0
+
+    if solar_flux is not None and sfi >= 120 and kp < 3:
+        return "Excellent"
+    if solar_flux is not None and sfi >= 90:
+        return "Good"
+    if solar_flux is not None and sfi >= 70:
+        return "Fair"
+    if solar_flux is not None:
+        return "Poor"
+
+    return "Unknown"
+
+
 if __name__ == "__main__":
     # Test the API
     from utils.logging_config import setup_logging
