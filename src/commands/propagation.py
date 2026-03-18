@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 
 from .base import CommandResult
 from utils.common import SettingsManager
-from utils.space_weather import SpaceWeatherAPI
+from utils.space_weather import SpaceWeatherAPI, classify_overall_conditions
 from monitoring.pskreporter_subscriber import get_pskreporter_subscriber
 
 logger = logging.getLogger(__name__)
@@ -341,16 +341,7 @@ def get_band_conditions() -> CommandResult:
     bands = {k: v.value for k, v in data.band_conditions.items()}
 
     # Determine overall condition
-    if data.k_index is not None and data.k_index >= 5:
-        overall = "Disturbed"
-    elif data.solar_flux and data.solar_flux >= 120:
-        overall = "Good"
-    elif data.solar_flux and data.solar_flux >= 90:
-        overall = "Fair"
-    elif data.solar_flux:
-        overall = "Poor"
-    else:
-        overall = "Unknown"
+    overall = classify_overall_conditions(data.solar_flux, data.k_index)
 
     return CommandResult.ok(
         f"Band conditions: {overall} ({len(bands)} bands assessed)",
@@ -414,23 +405,7 @@ def get_propagation_summary() -> CommandResult:
     data = api.get_current_conditions()
 
     # Overall assessment
-    overall = "Unknown"
-    try:
-        sfi = data.solar_flux or 0
-        kp = data.k_index or 0
-
-        if kp >= 5:
-            overall = "Disturbed"
-        elif sfi >= 120 and kp < 3:
-            overall = "Excellent"
-        elif sfi >= 90:
-            overall = "Good"
-        elif sfi >= 70:
-            overall = "Fair"
-        else:
-            overall = "Poor"
-    except (ValueError, TypeError):
-        pass
+    overall = classify_overall_conditions(data.solar_flux, data.k_index)
 
     return CommandResult.ok(
         summary_str,
