@@ -21,6 +21,14 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from handler_protocol import BaseHandler
+from utils.mqtt_defaults import (
+    MESHTASTIC_PUBLIC_BROKER,
+    MESHTASTIC_PUBLIC_CHANNEL,
+    MESHTASTIC_PUBLIC_PASSWORD,
+    MESHTASTIC_PUBLIC_PORT,
+    MESHTASTIC_PUBLIC_ROOT_TOPIC,
+    MESHTASTIC_PUBLIC_USERNAME,
+)
 from utils.safe_import import safe_import
 from utils.paths import get_real_user_home
 
@@ -595,11 +603,11 @@ class MQTTHandler(BaseHandler):
 
             elif choice == "public":
                 config = {
-                    'broker': 'mqtt.meshtastic.org',
-                    'port': 8883,
-                    'topic': 'msh/US/2/e/LongFast/#',
-                    'username': 'meshdev',
-                    'password': 'large4cats',
+                    'broker': MESHTASTIC_PUBLIC_BROKER,
+                    'port': MESHTASTIC_PUBLIC_PORT,
+                    'topic': f'{MESHTASTIC_PUBLIC_ROOT_TOPIC}/{MESHTASTIC_PUBLIC_CHANNEL}/#',
+                    'username': MESHTASTIC_PUBLIC_USERNAME,
+                    'password': MESHTASTIC_PUBLIC_PASSWORD,
                     'use_tls': True
                 }
                 save_mqtt_config(config)

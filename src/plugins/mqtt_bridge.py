@@ -63,13 +63,15 @@ _paho_mqtt, _HAS_PAHO_MQTT = safe_import('paho.mqtt.client')
 
 logger = logging.getLogger(__name__)
 
-# Default Meshtastic MQTT settings (from pdxlocations/connect)
-DEFAULT_MQTT_BROKER = "mqtt.meshtastic.org"
-DEFAULT_MQTT_PORT = 1883
-DEFAULT_MQTT_PORT_TLS = 8883
-DEFAULT_ROOT_TOPIC = "msh/US/2/e"
-DEFAULT_CHANNEL = "LongFast"
-DEFAULT_KEY = "AQ=="  # Default Meshtastic key
+# Default Meshtastic MQTT settings (from centralized mqtt_defaults)
+from utils.mqtt_defaults import (
+    MESHTASTIC_PUBLIC_BROKER as DEFAULT_MQTT_BROKER,
+    MESHTASTIC_PUBLIC_PORT_PLAIN as DEFAULT_MQTT_PORT,
+    MESHTASTIC_PUBLIC_PORT as DEFAULT_MQTT_PORT_TLS,
+    MESHTASTIC_PUBLIC_ROOT_TOPIC as DEFAULT_ROOT_TOPIC,
+    MESHTASTIC_PUBLIC_CHANNEL as DEFAULT_CHANNEL,
+    MESHTASTIC_PUBLIC_KEY as DEFAULT_KEY,
+)
 
 
 class MQTTBridgePlugin(IntegrationPlugin):

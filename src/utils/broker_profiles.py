@@ -29,6 +29,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 
+from utils.mqtt_defaults import (
+    MESHTASTIC_PUBLIC_BROKER,
+    MESHTASTIC_PUBLIC_KEY,
+    MESHTASTIC_PUBLIC_PASSWORD,
+    MESHTASTIC_PUBLIC_PORT,
+    MESHTASTIC_PUBLIC_USERNAME,
+)
+
 from utils.paths import get_real_user_home
 from utils.service_check import check_service as _check_service, apply_config_and_restart as _apply_config_and_restart, enable_service as _enable_service
 
@@ -218,14 +226,14 @@ def create_public_profile(
     return BrokerProfile(
         name="Meshtastic Public",
         broker_type=BrokerType.PUBLIC.value,
-        host="mqtt.meshtastic.org",
-        port=8883,
-        username="meshdev",
-        password="large4cats",
+        host=MESHTASTIC_PUBLIC_BROKER,
+        port=MESHTASTIC_PUBLIC_PORT,
+        username=MESHTASTIC_PUBLIC_USERNAME,
+        password=MESHTASTIC_PUBLIC_PASSWORD,
         use_tls=True,
         root_topic=f"msh/{region}/2/e",
         channel=channel,
-        encryption_key="AQ==",
+        encryption_key=MESHTASTIC_PUBLIC_KEY,
         region=region,
         json_enabled=False,  # Public broker mainly uses encrypted protobuf
         uplink_enabled=False,  # Read-only monitoring
