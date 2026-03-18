@@ -330,8 +330,8 @@ class DeviceScanner:
         except FileNotFoundError:
             # lsusb not available
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("USB scan error: %s", e)
 
         return devices
 
@@ -349,7 +349,7 @@ class DeviceScanner:
                         if busnum == dev.bus and devnum == dev.device:
                             usb_path = p
                             break
-                    except Exception:
+                    except (OSError, ValueError):
                         continue
 
             if usb_path.exists():
@@ -368,8 +368,8 @@ class DeviceScanner:
                 if driver_link.is_symlink():
                     dev.driver = driver_link.resolve().name
 
-        except Exception:
-            pass
+        except OSError as e:
+            logger.debug("sysfs enrichment failed: %s", e)
 
     def _scan_serial_ports(self) -> List[SerialPort]:
         """Scan for serial ports"""
@@ -493,7 +493,7 @@ class DeviceScanner:
                     content = cfg_path.read_text()
                     if device_path in content:
                         return "Meshtastic (meshtasticd config)"
-                except Exception:
+                except OSError:
                     pass
             elif cfg_path.is_dir():
                 try:
@@ -501,7 +501,7 @@ class DeviceScanner:
                         content = yaml_file.read_text()
                         if device_path in content:
                             return "Meshtastic (meshtasticd config)"
-                except Exception:
+                except OSError:
                     pass
 
         # Check if it looks like a serial console
@@ -531,7 +531,7 @@ class DeviceScanner:
                     content = cfg_path.read_text()
                     if device_path in content:
                         return True
-                except Exception:
+                except OSError:
                     pass
 
         # Check if meshtastic process has this port open
@@ -544,8 +544,8 @@ class DeviceScanner:
             )
             if 'meshtastic' in result.stdout.lower():
                 return True
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+            logger.debug("lsof check failed for %s: %s", device_path, e)
 
         return False
 
