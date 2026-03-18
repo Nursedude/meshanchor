@@ -269,8 +269,8 @@ class GatewayHeartbeat:
                 status_topic = (f"{self._config.mqtt_topic_prefix}/"
                                f"{self._config.gateway_id}/status")
                 self._mqtt_client.publish(status_topic, "offline", retain=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to publish offline status: %s", e)
 
         if self._heartbeat_thread:
             self._heartbeat_thread.join(timeout=5)
@@ -283,8 +283,8 @@ class GatewayHeartbeat:
             try:
                 self._mqtt_client.disconnect()
                 self._mqtt_client.loop_stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("MQTT disconnect error during stop: %s", e)
             self._mqtt_client = None
 
         logger.info("Gateway heartbeat stopped")
@@ -550,8 +550,8 @@ class GatewayHeartbeat:
                     False,
                     f"Peer {peer_id} is down",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("EventBus emit failed (peer_down): %s", e)
 
     def _handle_peer_recovered(self, peer_id: str) -> None:
         """Handle a peer gateway recovering."""
@@ -591,8 +591,8 @@ class GatewayHeartbeat:
                     True,
                     f"Peer {peer_id} recovered",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("EventBus emit failed (peer_recovered): %s", e)
 
     def _record_promotion(self) -> None:
         """Record promotion event (state already set by caller under lock)."""
@@ -617,8 +617,8 @@ class GatewayHeartbeat:
                     state="active",
                     reason="Secondary promoted — primary down",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to persist promotion to shared state: %s", e)
 
     def _record_demotion(self) -> None:
         """Record demotion event (state already set by caller under lock)."""
@@ -642,8 +642,8 @@ class GatewayHeartbeat:
                     state="standby",
                     reason="Secondary demoted — primary recovered",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to persist demotion to shared state: %s", e)
 
     # ── Background threads ─────────────────────────────────────────────
 
@@ -692,8 +692,8 @@ class GatewayHeartbeat:
         if self._failover_manager is not None:
             try:
                 payload['failover_state'] = self._failover_manager.state.value
-            except Exception:
-                pass
+            except (AttributeError, ValueError) as e:
+                logger.debug("Could not read failover state: %s", e)
 
         # Include health score if available
         if _HAS_HEALTH_SCORER:
@@ -701,7 +701,8 @@ class GatewayHeartbeat:
                 scorer = get_health_scorer()
                 snapshot = scorer.get_snapshot()
                 payload['health_score'] = snapshot.overall_score
-            except Exception:
+            except (AttributeError, RuntimeError) as e:
+                logger.debug("Could not read health score: %s", e)
                 payload['health_score'] = 0
 
         topic = (f"{self._config.mqtt_topic_prefix}/"
