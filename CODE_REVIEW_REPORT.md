@@ -1,6 +1,6 @@
 # MeshForge Code Review Report
 
-**Version**: 0.5.4-beta
+**Version**: 0.5.5-beta
 **Date**: 2026-02-21
 **Reviewer**: Claude Opus 4.6 (Automated Security & Code Review)
 **Branch**: `claude/security-code-review-RoBiy`
