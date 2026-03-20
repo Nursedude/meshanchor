@@ -370,6 +370,10 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             if choice is None or choice == "back":
                 break
 
+            # Actions that take over the terminal — return to main menu
+            # after completion instead of looping back to this submenu
+            terminal_actions = {"textui", "stop"}
+
             dispatch = {
                 "status": ("NomadNet Status", self._nomadnet_status),
                 "textui": ("Launch NomadNet TUI", self._launch_nomadnet_textui),
@@ -385,6 +389,8 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+                if choice in terminal_actions:
+                    break
 
     # ------------------------------------------------------------------
     # Status
@@ -871,6 +877,7 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                 pass
         except KeyboardInterrupt:
             print("\n\nAborted.")
+            print("\nReturning to MeshForge...")
         except FileNotFoundError:
             print(f"\nError: NomadNet binary not found at: {nn_path}")
             print("\nPress Enter to continue...")
