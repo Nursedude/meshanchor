@@ -230,8 +230,36 @@ class MapServer:
         except Exception as e:
             logger.debug(f"Error stopping WebSocket server: {e}")
 
+    def _check_mqtt_available(self) -> bool:
+        """Check if mosquitto MQTT broker is available for message listening.
+
+        Uses check_service (SSOT for systemd) with port fallback for
+        non-systemd installations.
+        """
+        try:
+            from utils.service_check import check_service, check_port
+            status = check_service('mosquitto')
+            if status.available:
+                return True
+            # mosquitto may run outside systemd — check port directly
+            return check_port(1883)
+        except ImportError:
+            import socket
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('localhost', 1883))
+                sock.close()
+                return result == 0
+            except OSError:
+                return False
+
     def _start_message_listener(self):
-        """Start the MessageListener for receiving inbound mesh messages."""
+        """Start the MessageListener for receiving inbound mesh messages.
+
+        Prefers MQTT mode to avoid TCP contention with meshtasticd's
+        web UI — fromradio is single-consumer (Issue #17).
+        """
         if not self.enable_message_listener:
             return
 
@@ -241,19 +269,30 @@ class MapServer:
             return
 
         try:
-            # Start the listener
-            success = _start_listener(host="localhost")
+            # Prefer MQTT mode — avoids TCP contention with web UI
+            mqtt_available = self._check_mqtt_available()
+            if mqtt_available:
+                success = _start_listener(host="localhost", mode="mqtt")
+                mode_label = "MQTT"
+            else:
+                logger.info(
+                    "MQTT not available, falling back to TCP listener "
+                    "(may cause 'waiting for delivery' in web UI at :9443)"
+                )
+                success = _start_listener(host="localhost", mode="tcp")
+                mode_label = "TCP"
+
             if success:
                 self._message_listener_started = True
-                logger.info("MessageListener started - inbound messages enabled")
-                print("  Message RX: Enabled (listening for inbound messages)")
+                logger.info(f"MessageListener started ({mode_label})")
+                print(f"  Message RX: Enabled ({mode_label})")
 
                 # Register WebSocket broadcast callback
                 self._register_websocket_callback()
             else:
                 status = _get_listener_status()
                 logger.warning(f"MessageListener failed to start: {status.get('error', 'unknown')}")
-                print("  Message RX: Failed to start (check meshtasticd)")
+                print("  Message RX: Failed to start (check meshtasticd/mosquitto)")
         except Exception as e:
             logger.warning(f"Error starting MessageListener: {e}")
 

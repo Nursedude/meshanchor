@@ -340,6 +340,18 @@ class MessageListener:
             self._status.error = None
             logger.info("Message listener connected and subscribed")
 
+            # Warn if web UI is also running — TCP starves HTTP fromradio
+            try:
+                from utils.service_check import check_port
+                if check_port(9443):
+                    logger.warning(
+                        "TCP listener active while meshtasticd web UI on :9443. "
+                        "May cause 'waiting for delivery' in web UI. "
+                        "Consider MQTT mode (requires mosquitto)."
+                    )
+            except ImportError:
+                pass
+
             # Keep thread alive while running (interruptible via stop_event)
             while self._running:
                 if self._stop_event.wait(1):
