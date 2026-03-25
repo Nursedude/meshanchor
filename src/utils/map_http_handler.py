@@ -238,7 +238,11 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
     _VALID_DESTINATION = re.compile(r'^[!~^]?[a-zA-Z0-9]+$')
 
     def _handle_send_message(self):
-        """Handle POST /api/radio/message - send a message via radio."""
+        """Handle POST /api/radio/message - send a message via radio.
+
+        Uses HTTP protobuf (send_text_direct) to avoid TCP contention
+        with the meshtasticd web UI — fromradio is single-consumer.
+        """
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length <= 0 or content_length > self._MAX_MESSAGE_BODY:
@@ -259,12 +263,41 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
                 self._serve_json({"error": "Invalid destination format"}, status=400)
                 return
 
+            # Convert string destination to int for send_text_direct
+            dest_num = None  # None = broadcast (0xFFFFFFFF)
+            if destination and destination != '^all':
+                try:
+                    if destination.startswith('!'):
+                        dest_num = int(destination[1:], 16)
+                    else:
+                        dest_num = int(destination)
+                except (ValueError, IndexError):
+                    self._serve_json({"error": "Invalid destination format"}, status=400)
+                    return
+
+            # Prefer HTTP protobuf — no TCP contention with web UI
+            try:
+                from gateway.meshtastic_protobuf_client import send_text_direct
+                success = send_text_direct(text=text, destination=dest_num)
+                if success:
+                    self._serve_json({
+                        "success": True,
+                        "message": "Sent via radio (delivery best-effort)",
+                        "destination": destination,
+                        "connection_mode": "http"
+                    })
+                    return
+                else:
+                    logger.debug("send_text_direct failed, trying TCP fallback")
+            except ImportError:
+                logger.debug("Protobuf client not available, trying TCP fallback")
+
+            # Fallback: TCP connection manager
             conn = self._get_radio_connection()
             if not conn:
                 self._serve_json({
                     "error": "Radio not available",
-                    "detail": "meshtastic Python library not installed. "
-                              "Install with: pip3 install meshtastic",
+                    "detail": "meshtasticd not reachable via HTTP or TCP.",
                 }, status=503)
                 return
 
@@ -279,7 +312,7 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
             else:
                 self._serve_json({
                     "error": "Send failed",
-                    "detail": "Verify meshtasticd is running and TCP is enabled.",
+                    "detail": "Verify meshtasticd is running.",
                 }, status=502)
 
         except json.JSONDecodeError:
