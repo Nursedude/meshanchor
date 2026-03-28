@@ -160,13 +160,16 @@ ask_radio_type() {
         fi
 
         local CHOICE
-        CHOICE=$(whiptail --title "Radio Type" --menu \
+        flush_terminal_input
+        CHOICE=$(whiptail --title "Radio Type" \
+            --default-item "$DEFAULT_ITEM" \
+            --menu \
             "What type of LoRa radio is connected to this device?\n\nSelect your hardware:" \
             15 60 3 \
+            -- \
             "spi"  "SPI HAT (MeshAdv, Waveshare, RAK, Meshtoad)" \
             "usb"  "USB Serial (T-Beam, Heltec, RAK USB)" \
             "none" "No radio connected / install later" \
-            --default-item "$DEFAULT_ITEM" \
             3>&1 1>&2 2>&3) || CHOICE="none"
 
         echo "$CHOICE"
@@ -204,6 +207,124 @@ load_ch341_driver() {
         echo -e "  ${CYAN}Loading CH341 driver...${NC}"
         modprobe ch341 2>/dev/null || true
         sleep 1
+    fi
+}
+
+flush_terminal_input() {
+    # Drain stale keystrokes before launching whiptail dialogs.
+    # Without this, buffered input (from user typing during apt install etc.)
+    # can cause whiptail to immediately process Enter/Escape and close.
+    # Mirrors termios.tcflush() in src/launcher_tui/backend.py:106-109
+    read -t 0.1 -n 10000 discard < /dev/tty 2>/dev/null || true
+}
+
+classify_template() {
+    # Classify a hardware template as "spi", "usb", or "display".
+    # Mirrors src/launcher_tui/handlers/meshtasticd_radio.py:277-296
+    local file="$1"
+    local stem
+    stem=$(basename "$file" .yaml)
+
+    # Display configs (not radio hardware)
+    [[ "$stem" == display-* ]] && { echo "display"; return; }
+
+    # Name-based USB detection (covers MeshForge-named templates)
+    case "$stem" in
+        *-usb|usb-*) echo "usb"; return ;;
+    esac
+
+    # Content-based: Serial: section without spidev -> USB serial radio
+    local content
+    content=$(head -20 "$file" 2>/dev/null) || content=""
+    if echo "$content" | grep -q "^Serial:" && ! echo "$content" | grep -qi "spidev"; then
+        echo "usb"; return
+    fi
+
+    # CH341 USB-to-SPI adapters used as USB devices
+    if [[ "$stem" == *usb* ]] && echo "$content" | grep -qi "spidev:.*ch341"; then
+        echo "usb"; return
+    fi
+
+    echo "spi"
+}
+
+get_template_description() {
+    # Return human-readable description for a hardware template.
+    # Built-in lookup from RADIO_TEMPLATES (src/core/meshtasticd_templates.py),
+    # then fallback to first comment line, then filename.
+    # Mirrors src/launcher_tui/handlers/meshtasticd_radio.py:298-321
+    local file="$1"
+    local stem
+    stem=$(basename "$file" .yaml)
+
+    case "$stem" in
+        # USB radios
+        heltec-usb)          echo "Heltec V3/V4 USB (ESP32-S3, 28dBm)" ;;
+        station-g2-usb)      echo "Station G2 USB (CP2102, gateway, PoE)" ;;
+        tbeam-usb)           echo "T-Beam S3 USB (CH9102, GPS, gateway)" ;;
+        rak4631-usb)         echo "RAK4631 USB (nRF52840 + SX1262)" ;;
+        meshtoad-usb)        echo "MeshToad/MeshTadpole USB (CH340)" ;;
+        meshstick-usb)       echo "MeshStick USB (official Meshtastic)" ;;
+        usb-serial-generic)  echo "Generic USB Serial (FTDI, fallback)" ;;
+        lora-pinedio-usb-sx1262)  echo "Pinedio USB (CH341 + SX1262)" ;;
+        lora-usb-meshtoad-e22)    echo "MeshToad E22 USB (CH341 + SX1262)" ;;
+        # SPI radios
+        meshtoad-spi)        echo "Meshtoad/MeshStick SPI (SX1262 CH341)" ;;
+        meshadv-pi-hat)      echo "MeshAdv-Pi-Hat 1W (SX1262, GPS)" ;;
+        meshadv-mini)        echo "MeshAdv-Mini (SX1262, GPS, +22dBm)" ;;
+        meshadv-pi-v1.1)     echo "MeshAdv-Pi v1.1 (SX1262)" ;;
+        waveshare-sx1262)    echo "Waveshare SX1262 LoRa HAT" ;;
+        rak-hat-spi)         echo "RAK WisLink / RAK2287 SPI HAT" ;;
+        adafruit-rfm9x)      echo "Adafruit RFM9x Bonnet (SX1276)" ;;
+        femtofox)            echo "FemtoFox LoRa Board (SX1262)" ;;
+        ebyte-e22-900m30s)   echo "Ebyte E22-900M30S 1W (915MHz)" ;;
+        ebyte-e22-400m30s)   echo "Ebyte E22-400M30S 1W (433MHz)" ;;
+        elecrow-rfm95)       echo "Elecrow RFM95 HAT (SX1276)" ;;
+        seeed-sensecap)      echo "Seeed SenseCAP E5 HAT (SX1262)" ;;
+        # Upstream-named SPI templates
+        lora-Adafruit-RFM9x)       echo "Adafruit RFM9x (upstream, SX1276)" ;;
+        lora-MeshAdv-900M30S)       echo "MeshAdv E22-900M30S 1W (SX1262)" ;;
+        lora-MeshAdv-Mini-900M22S)  echo "MeshAdv Mini E22-900M22S (SX1262)" ;;
+        lora-RAK6421-13300-slot1)   echo "RAK6421 Pi-HAT RAK13300 Slot 1" ;;
+        lora-RAK6421-13300-slot2)   echo "RAK6421 Pi-HAT RAK13300 Slot 2" ;;
+        lora-meshstick-1262)        echo "MeshStick 1262 SPI (CH341)" ;;
+        lora-piggystick-lr1121)     echo "PiggyStick LR1121 (CH341)" ;;
+        lora-lyra-picocalc-wio-sx1262) echo "Lyra PicoCalc WIO SX1262" ;;
+        lora-raxda-rock2f-starter-edition-hat) echo "Radxa Rock 2F Starter HAT" ;;
+        lora-starter-edition-sx1262-i2c) echo "Starter Edition SX1262 I2C HAT" ;;
+        lora-waveshare-sxxx)        echo "Waveshare SX126X XXXM HAT" ;;
+        lora-ws-raspberry-pi-pico-to-rpi-adapter) echo "Waveshare Pico-to-RPi Adapter" ;;
+        lora-ws-raspberry-pico-to-orangepi-03) echo "Waveshare SX1262 Orange Pi Zero3" ;;
+        # Displays
+        display-waveshare-1-44)  echo "Waveshare 1.44in LCD HAT (ST7735S)" ;;
+        display-waveshare-2.8)   echo "Waveshare 2.8in LCD + Touch (ST7789)" ;;
+        *)
+            # Fallback: first comment line from file (strip all leading #)
+            local desc
+            desc=$(grep "^#" "$file" 2>/dev/null | head -1 | sed 's/^#[# ]*//' | head -c 55)
+            if [[ -n "$desc" ]]; then
+                echo "$desc"
+            else
+                echo "$stem"
+            fi
+            ;;
+    esac
+}
+
+deploy_meshforge_templates() {
+    # Deploy MeshForge's curated hardware templates to available.d/.
+    # Uses cp -f to overwrite system templates (which have garbage descriptions)
+    # with MeshForge's curated versions (which have proper # Description headers).
+    # Must be called AFTER apt install meshtasticd to overwrite dpkg's copies.
+    if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
+        mkdir -p "$MESHTASTICD_CONFIG_DIR/available.d"
+        cp -f "$INSTALL_DIR/templates/available.d/"*.yaml \
+            "$MESHTASTICD_CONFIG_DIR/available.d/" 2>/dev/null || true
+        local deployed
+        deployed=$(ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | wc -l)
+        echo -e "  ${GREEN}✓ Deployed ${deployed} hardware templates to available.d/${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ templates/available.d/ not found in $INSTALL_DIR${NC}"
     fi
 }
 
@@ -480,15 +601,9 @@ UDEV_RULES
     mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
     chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
 
-    # Deploy MeshForge hardware templates (USB + SPI HATs) to available.d/
-    # Templates ship with MeshForge, not the meshtasticd Debian package
-    if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
-        cp -n "$INSTALL_DIR/templates/available.d/"*.yaml "$MESHTASTICD_CONFIG_DIR/available.d/" 2>/dev/null
-        DEPLOYED=$(ls -1 "$MESHTASTICD_CONFIG_DIR/available.d/"*.yaml 2>/dev/null | wc -l)
-        echo -e "  ${GREEN}✓ Deployed ${DEPLOYED} hardware templates to available.d/${NC}"
-    else
-        echo -e "  ${YELLOW}⚠ templates/available.d/ not found in $INSTALL_DIR${NC}"
-    fi
+    # MeshForge hardware templates are deployed AFTER apt install meshtasticd
+    # (via deploy_meshforge_templates) so they overwrite dpkg's copies which
+    # lack proper description comments. See Issue #33: whiptail non-interactive.
 
     # Deploy config.yaml if missing
     if [[ ! -f "$MESHTASTICD_CONFIG_DIR/config.yaml" ]]; then
@@ -523,6 +638,7 @@ UDEV_RULES
                 INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                 echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
                 NATIVE_INSTALLED=true
+                deploy_meshforge_templates
             else
                 # Add OpenSUSE Build Service repo and install via apt
                 if add_meshtastic_repo; then
@@ -533,6 +649,7 @@ UDEV_RULES
                             INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                             echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
                             NATIVE_INSTALLED=true
+                            deploy_meshforge_templates
                         else
                             echo -e "  ${RED}Package installed but binary not found${NC}"
                         fi
@@ -699,44 +816,67 @@ REBOOT_CONFIG
                         echo -e "  ${GREEN}✓ HAT config already active: ${HAT_NAME}${NC}"
                         HAT_SELECTED=true
                     elif [[ -d "$AVAIL_DIR" ]] && ls -1 "$AVAIL_DIR/"*.yaml &>/dev/null; then
-                        # Build HAT menu from available.d/
+                        # Build HAT menu from available.d/ — SPI templates only
                         declare -a HAT_OPTIONS=()
+                        declare -A HAT_TAG_MAP=()
                         while IFS= read -r hat_file; do
+                            # Filter: only show SPI templates (skip USB, display)
+                            [[ "$(classify_template "$hat_file")" != "spi" ]] && continue
                             hat_base=$(basename "$hat_file" .yaml)
-                            # Extract first comment line as description
-                            hat_desc=$(grep "^#" "$hat_file" 2>/dev/null | head -1 | sed 's/^# *//' || echo "$hat_base")
-                            [[ -z "$hat_desc" ]] && hat_desc="$hat_base"
-                            HAT_OPTIONS+=("$hat_base" "$hat_desc")
+                            hat_desc=$(get_template_description "$hat_file")
+                            # Sanitize tag: prefix if starts with '-' (whiptail flag confusion)
+                            tag="$hat_base"
+                            [[ "$tag" == -* ]] && tag="f:$tag"
+                            HAT_TAG_MAP["$tag"]="$hat_base"
+                            HAT_OPTIONS+=("$tag" "$hat_desc")
                         done < <(ls -1 "$AVAIL_DIR/"*.yaml 2>/dev/null | sort)
 
                         if [[ ${#HAT_OPTIONS[@]} -gt 0 ]]; then
                             HAT_COUNT=$((${#HAT_OPTIONS[@]} / 2))
+                            SELECTED_HAT=""
 
                             if command -v whiptail &>/dev/null; then
-                                # Calculate menu height (min 10, max 20)
                                 MENU_H=$((HAT_COUNT + 7))
                                 [[ $MENU_H -lt 12 ]] && MENU_H=12
                                 [[ $MENU_H -gt 22 ]] && MENU_H=22
+                                # Cap list-height to available dialog space
+                                LIST_H=$((MENU_H - 8))
+                                [[ $LIST_H -gt $HAT_COUNT ]] && LIST_H=$HAT_COUNT
+                                [[ $LIST_H -lt 1 ]] && LIST_H=$HAT_COUNT
 
-                                SELECTED_HAT=$(whiptail --title "SPI HAT Selection" --menu \
+                                flush_terminal_input
+                                SELECTED_HAT=$(whiptail --title "SPI HAT Selection" \
+                                    --menu \
                                     "Which LoRa HAT is connected to this Pi?\n\nConfigs from: ${AVAIL_DIR}/" \
-                                    $MENU_H 70 $HAT_COUNT \
+                                    $MENU_H 70 $LIST_H \
+                                    -- \
                                     "${HAT_OPTIONS[@]}" \
                                     3>&1 1>&2 2>&3) || SELECTED_HAT=""
-                            else
-                                # Fallback: numbered text menu
+
+                                # Resolve tag back to original filename stem
+                                if [[ -n "$SELECTED_HAT" ]] && [[ -n "${HAT_TAG_MAP[$SELECTED_HAT]+x}" ]]; then
+                                    SELECTED_HAT="${HAT_TAG_MAP[$SELECTED_HAT]}"
+                                fi
+                            fi
+
+                            # Fallback: text menu (if whiptail unavailable or failed)
+                            if [[ -z "$SELECTED_HAT" ]]; then
+                                if command -v whiptail &>/dev/null; then
+                                    echo -e "  ${YELLOW}Dialog failed or cancelled — trying text menu...${NC}" >&2
+                                fi
                                 echo "" >&2
                                 echo -e "  ${BOLD}Select your SPI HAT:${NC}" >&2
                                 i=1
                                 for ((idx=0; idx<${#HAT_OPTIONS[@]}; idx+=2)); do
-                                    echo "    $i) ${HAT_OPTIONS[$idx]} - ${HAT_OPTIONS[$((idx+1))]}" >&2
+                                    echo "    $i) ${HAT_OPTIONS[$((idx+1))]}" >&2
                                     ((i++))
                                 done
                                 echo "" >&2
-                                read -rp "  Select [1-${HAT_COUNT}]: " hat_choice
+                                read -rp "  Select [1-${HAT_COUNT}]: " hat_choice || true
                                 if [[ "$hat_choice" =~ ^[0-9]+$ ]] && [[ "$hat_choice" -ge 1 ]] && [[ "$hat_choice" -le "$HAT_COUNT" ]]; then
                                     idx=$(( (hat_choice - 1) * 2 ))
-                                    SELECTED_HAT="${HAT_OPTIONS[$idx]}"
+                                    sel_tag="${HAT_OPTIONS[$idx]}"
+                                    SELECTED_HAT="${HAT_TAG_MAP[$sel_tag]:-${sel_tag#f:}}"
                                 fi
                             fi
 
@@ -750,6 +890,9 @@ REBOOT_CONFIG
                                 echo -e "  ${YELLOW}⚠ No HAT selected - meshtasticd may not start correctly${NC}"
                                 echo -e "  ${YELLOW}  Fix: cp /etc/meshtasticd/available.d/<your-hat>.yaml /etc/meshtasticd/config.d/${NC}"
                             fi
+                        else
+                            echo -e "  ${YELLOW}⚠ No SPI HAT templates found (all templates are USB/display)${NC}"
+                            echo -e "  ${YELLOW}  Copy a SPI template to /etc/meshtasticd/config.d/ manually${NC}"
                         fi
                     else
                         echo -e "  ${YELLOW}⚠ No HAT templates found in ${AVAIL_DIR}/${NC}"
@@ -886,6 +1029,7 @@ NATIVE_SERVICE
                 INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                 echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
                 NATIVE_INSTALLED=true
+                deploy_meshforge_templates
             else
                 # Install native meshtasticd via apt (same as SPI path)
                 if add_meshtastic_repo; then
@@ -895,14 +1039,17 @@ NATIVE_SERVICE
                             INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                             echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
                             NATIVE_INSTALLED=true
+                            deploy_meshforge_templates
                         else
                             echo -e "  ${RED}Package installed but binary not found${NC}"
                         fi
                     else
                         echo -e "  ${YELLOW}⚠ apt install meshtasticd failed — will use USB templates only${NC}"
+                        deploy_meshforge_templates
                     fi
                 else
                     echo -e "  ${YELLOW}⚠ Could not add Meshtastic repo — will use USB templates only${NC}"
+                    deploy_meshforge_templates
                 fi
             fi
 
@@ -910,9 +1057,11 @@ NATIVE_SERVICE
                 MESHTASTICD_BIN=$(command -v meshtasticd)
 
                 # Let user select their USB hardware template from available.d
+                AVAIL_DIR="$MESHTASTICD_CONFIG_DIR/available.d"
                 USB_TEMPLATES=()
-                for tmpl in "$MESHTASTICD_CONFIG_DIR/available.d/"*-usb.yaml "$MESHTASTICD_CONFIG_DIR/available.d/usb-"*.yaml; do
-                    [[ -f "$tmpl" ]] && USB_TEMPLATES+=("$tmpl")
+                for tmpl in "$AVAIL_DIR/"*.yaml; do
+                    [[ -f "$tmpl" ]] || continue
+                    [[ "$(classify_template "$tmpl")" == "usb" ]] && USB_TEMPLATES+=("$tmpl")
                 done
 
                 if [[ ${#USB_TEMPLATES[@]} -gt 0 ]]; then
@@ -926,43 +1075,63 @@ NATIVE_SERVICE
                         USB_NAME=$(basename "$EXISTING_USB")
                         echo -e "  ${GREEN}✓ USB config already active: ${USB_NAME}${NC}"
                     else
-                        # Build USB menu from available.d/ (mirrors SPI HAT selection)
-                        AVAIL_DIR="$MESHTASTICD_CONFIG_DIR/available.d"
+                        # Build USB menu from available.d/ — USB templates only
                         declare -a USB_OPTIONS=()
+                        declare -A USB_TAG_MAP=()
                         for tmpl in "${USB_TEMPLATES[@]}"; do
                             usb_base=$(basename "$tmpl" .yaml)
-                            usb_desc=$(grep "^#" "$tmpl" 2>/dev/null | head -1 | sed 's/^# *//' || echo "$usb_base")
-                            [[ -z "$usb_desc" ]] && usb_desc="$usb_base"
-                            USB_OPTIONS+=("$usb_base" "$usb_desc")
+                            usb_desc=$(get_template_description "$tmpl")
+                            tag="$usb_base"
+                            [[ "$tag" == -* ]] && tag="f:$tag"
+                            USB_TAG_MAP["$tag"]="$usb_base"
+                            USB_OPTIONS+=("$tag" "$usb_desc")
                         done
 
                         if [[ ${#USB_OPTIONS[@]} -gt 0 ]]; then
                             USB_COUNT=$((${#USB_OPTIONS[@]} / 2))
+                            SELECTED_USB=""
 
                             if command -v whiptail &>/dev/null; then
                                 MENU_H=$((USB_COUNT + 7))
                                 [[ $MENU_H -lt 12 ]] && MENU_H=12
                                 [[ $MENU_H -gt 22 ]] && MENU_H=22
+                                LIST_H=$((MENU_H - 8))
+                                [[ $LIST_H -gt $USB_COUNT ]] && LIST_H=$USB_COUNT
+                                [[ $LIST_H -lt 1 ]] && LIST_H=$USB_COUNT
 
-                                SELECTED_USB=$(whiptail --title "USB Radio Selection" --menu \
+                                flush_terminal_input
+                                SELECTED_USB=$(whiptail --title "USB Radio Selection" \
+                                    --menu \
                                     "Which USB radio is connected?\n\nConfigs from: ${AVAIL_DIR}/" \
-                                    $MENU_H 70 $USB_COUNT \
+                                    $MENU_H 70 $LIST_H \
+                                    -- \
                                     "${USB_OPTIONS[@]}" \
                                     3>&1 1>&2 2>&3) || SELECTED_USB=""
-                            else
-                                # Fallback: numbered text menu
+
+                                # Resolve tag back to filename stem
+                                if [[ -n "$SELECTED_USB" ]] && [[ -n "${USB_TAG_MAP[$SELECTED_USB]+x}" ]]; then
+                                    SELECTED_USB="${USB_TAG_MAP[$SELECTED_USB]}"
+                                fi
+                            fi
+
+                            # Fallback: text menu (if whiptail unavailable or failed)
+                            if [[ -z "$SELECTED_USB" ]]; then
+                                if command -v whiptail &>/dev/null; then
+                                    echo -e "  ${YELLOW}Dialog failed or cancelled — trying text menu...${NC}" >&2
+                                fi
                                 echo "" >&2
                                 echo -e "  ${BOLD}Select your USB radio:${NC}" >&2
                                 i=1
                                 for ((idx=0; idx<${#USB_OPTIONS[@]}; idx+=2)); do
-                                    echo "    $i) ${USB_OPTIONS[$idx]} - ${USB_OPTIONS[$((idx+1))]}" >&2
+                                    echo "    $i) ${USB_OPTIONS[$((idx+1))]}" >&2
                                     ((i++))
                                 done
                                 echo "" >&2
-                                read -rp "  Select [1-${USB_COUNT}]: " usb_choice
+                                read -rp "  Select [1-${USB_COUNT}]: " usb_choice || true
                                 if [[ "$usb_choice" =~ ^[0-9]+$ ]] && [[ "$usb_choice" -ge 1 ]] && [[ "$usb_choice" -le "$USB_COUNT" ]]; then
                                     idx=$(( (usb_choice - 1) * 2 ))
-                                    SELECTED_USB="${USB_OPTIONS[$idx]}"
+                                    sel_tag="${USB_OPTIONS[$idx]}"
+                                    SELECTED_USB="${USB_TAG_MAP[$sel_tag]:-${sel_tag#f:}}"
                                 fi
                             fi
 
