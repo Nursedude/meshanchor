@@ -203,7 +203,7 @@ class ReviewAgent:
 
         # Skip scanning the auto_review.py file itself - contains pattern definitions
         # that would trigger false positives for security, performance, and reliability patterns
-        if file_path.name == 'auto_review.py' and self.category in (ReviewCategory.SECURITY, ReviewCategory.PERFORMANCE, ReviewCategory.RELIABILITY):
+        if file_path.name in ('auto_review.py', 'review_patterns.py') and self.category in (ReviewCategory.SECURITY, ReviewCategory.PERFORMANCE, ReviewCategory.RELIABILITY):
             return findings
 
         # Skip canonical implementation files for specific patterns
@@ -316,6 +316,11 @@ class ReviewAgent:
             # Check if Popen is assigned to self. (tracked for later wait())
             if 'Popen' in line and 'self.' in line and '=' in line:
                 return True  # Will be managed via self.external_process.wait(timeout=)
+            # Check if Popen is followed by .wait(timeout=) within next few lines
+            if 'Popen' in line and lines:
+                for lookahead in lines[line_num:line_num + 3]:
+                    if '.wait(' in lookahead and 'timeout' in lookahead:
+                        return True
             # Check if it's xdg-open (fire-and-forget)
             if 'xdg-open' in line:
                 return True
