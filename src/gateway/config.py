@@ -350,6 +350,7 @@ class RNSConfig:
     identity_name: str = "meshforge_gateway"
     announce_interval: int = 300  # seconds
     propagation_node: str = ""  # Optional propagation node address
+    default_lxmf_destination: str = ""  # Hex hash — broadcast messages route here
 
 
 @dataclass
