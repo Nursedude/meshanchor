@@ -725,12 +725,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 )
             else:
                 # Broadcast not directly supported in LXMF
-                if self.config.rns.propagation_node:
-                    logger.warning("RNS broadcast via propagation node not yet implemented")
-                else:
-                    logger.warning(
-                        "Broadcast to RNS requires propagation_node in gateway config"
-                    )
+                logger.info(
+                    "Broadcast to RNS dropped: set rns.default_lxmf_destination "
+                    "in gateway config to route broadcasts to a specific LXMF peer"
+                )
                 return False
 
             lxm = LXMF.LXMessage(
@@ -1267,6 +1265,14 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             destination_hash = None
             if msg.destination_id and not msg.is_broadcast:
                 destination_hash = self._get_rns_destination(msg.destination_id)
+
+            # Broadcast → default LXMF destination (e.g., NomadNet)
+            default_dest = getattr(self.config.rns, 'default_lxmf_destination', '')
+            if destination_hash is None and isinstance(default_dest, str) and default_dest:
+                try:
+                    destination_hash = bytes.fromhex(default_dest)
+                except ValueError:
+                    logger.warning("Invalid default_lxmf_destination hex in config")
 
             if self.send_to_rns(content, destination_hash):
                 logger.info(f"Bridge Mesh→RNS: {content[:50]}...")
