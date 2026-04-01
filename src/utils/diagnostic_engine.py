@@ -1,5 +1,5 @@
 """
-MeshForge Diagnostic Intelligence Engine.
+MeshAnchor Diagnostic Intelligence Engine.
 
 Provides intelligent, context-aware diagnostics for mesh network operations.
 Works standalone (rule-based) or enhanced with Claude API (PRO mode).
@@ -412,7 +412,7 @@ class DiagnosticEngine:
     def _get_db_path(self) -> Path:
         """Get path to diagnostic history database."""
         from utils.paths import get_real_user_home
-        db_dir = get_real_user_home() / ".config" / "meshforge"
+        db_dir = get_real_user_home() / ".config" / "meshanchor"
         db_dir.mkdir(parents=True, exist_ok=True)
         return db_dir / "diagnostic_history.db"
 
@@ -772,7 +772,7 @@ class DiagnosticEngine:
             parts.append(f"The most likely fix is: {rule.suggestions[0]}")
 
         if rule.auto_recoverable:
-            parts.append(f"MeshForge will automatically attempt recovery.")
+            parts.append(f"MeshAnchor will automatically attempt recovery.")
 
         return " ".join(parts)
 

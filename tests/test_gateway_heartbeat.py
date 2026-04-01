@@ -320,7 +320,7 @@ class TestMQTTMessageHandling:
         hb = GatewayHeartbeat(config=primary_config)
 
         msg = MagicMock()
-        msg.topic = f"meshforge/gateway/{primary_config.gateway_id}/heartbeat"
+        msg.topic = f"meshanchor/gateway/{primary_config.gateway_id}/heartbeat"
         msg.payload = json.dumps({'role': 'primary'}).encode()
 
         hb._on_mqtt_message(None, None, msg)
@@ -333,7 +333,7 @@ class TestMQTTMessageHandling:
         hb = GatewayHeartbeat(config=secondary_config)
 
         msg = MagicMock()
-        msg.topic = "meshforge/gateway/gw-primary/heartbeat"
+        msg.topic = "meshanchor/gateway/gw-primary/heartbeat"
         msg.payload = json.dumps({
             'role': 'primary', 'state': 'active', 'health_score': 85,
         }).encode()
@@ -350,7 +350,7 @@ class TestMQTTMessageHandling:
         )
 
         msg = MagicMock()
-        msg.topic = "meshforge/gateway/gw-primary/status"
+        msg.topic = "meshanchor/gateway/gw-primary/status"
         msg.payload = b"offline"
 
         hb._on_mqtt_message(None, None, msg)

@@ -16,18 +16,18 @@ from commands import propagation
 
 
 class SettingsHandler(BaseHandler):
-    """TUI handler for MeshForge application settings."""
+    """TUI handler for MeshAnchor application settings."""
 
     handler_id = "settings"
     menu_section = "configuration"
 
     def menu_items(self):
         return [
-            ("meshforge", "MeshForge Settings  App preferences", None),
+            ("meshanchor", "MeshAnchor Settings  App preferences", None),
         ]
 
     def execute(self, action):
-        if action == "meshforge":
+        if action == "meshanchor":
             self._settings_menu()
 
     def _settings_menu(self):
@@ -42,7 +42,7 @@ class SettingsHandler(BaseHandler):
             ]
 
             choice = self.ctx.dialog.menu(
-                "MeshForge Settings",
+                "MeshAnchor Settings",
                 "Application configuration:",
                 choices
             )
@@ -78,7 +78,7 @@ class SettingsHandler(BaseHandler):
 
             choice = self.ctx.dialog.menu(
                 "Log Level Configuration",
-                "Adjust logging verbosity.\nLogs are written to ~/.config/meshforge/logs/",
+                "Adjust logging verbosity.\nLogs are written to ~/.config/meshanchor/logs/",
                 choices
             )
 
@@ -143,7 +143,7 @@ class SettingsHandler(BaseHandler):
                     "Profile Updated",
                     f"Deployment profile set to: {choice}\n\n"
                     "Menu sections will update on next navigation.\n"
-                    "Restart MeshForge for full effect."
+                    "Restart MeshAnchor for full effect."
                 )
             except Exception as e:
                 self.ctx.dialog.msgbox("Error", f"Failed to set profile:\n{e}")

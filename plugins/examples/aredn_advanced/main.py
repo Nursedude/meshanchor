@@ -8,7 +8,7 @@ Provides comprehensive AREDN mesh network configuration tools:
 - Link budget calculator for AREDN
 - Configuration export/import
 
-This plugin integrates with MeshForge's AREDN hardware module for
+This plugin integrates with MeshAnchor's AREDN hardware module for
 advanced configuration beyond the built-in AREDN panel.
 """
 
@@ -46,7 +46,7 @@ except ImportError:
 
 @dataclass
 class PluginContext:
-    """Context provided by MeshForge plugin system"""
+    """Context provided by MeshAnchor plugin system"""
     settings: Dict[str, Any]
     data_dir: Path
     app_version: str
@@ -56,7 +56,7 @@ class AREDNAdvancedPlugin:
     """
     AREDN Advanced Configuration Plugin
 
-    Extends MeshForge with comprehensive AREDN configuration tools.
+    Extends MeshAnchor with comprehensive AREDN configuration tools.
     """
 
     def __init__(self, context: PluginContext):
@@ -82,7 +82,7 @@ class AREDNAdvancedPlugin:
             label.add_css_class("title-1")
             box.append(label)
 
-            info = Gtk.Label(label="The aredn_hardware module could not be loaded.\nEnsure MeshForge is properly installed.")
+            info = Gtk.Label(label="The aredn_hardware module could not be loaded.\nEnsure MeshAnchor is properly installed.")
             info.add_css_class("dim-label")
             box.append(info)
 

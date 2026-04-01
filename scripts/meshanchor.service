@@ -1,0 +1,27 @@
+[Unit]
+Description=MeshAnchor Mesh Network Operations Center
+Documentation=https://github.com/Nursedude/meshanchor
+After=network.target rnsd.service
+# meshtasticd is optional gateway — not a hard dependency
+After=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshanchor
+ExecStart=/usr/bin/python3 /opt/meshanchor/src/launcher.py --no-services
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /tmp /home
+PrivateTmp=true
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -7,7 +7,7 @@
 
 ## Overview
 
-The MeshForge Gateway bridges two mesh ecosystems:
+The MeshAnchor Gateway bridges two mesh ecosystems:
 - **Meshtastic**: LoRa mesh network (915/868 MHz)
 - **Reticulum (RNS)**: Cryptographic mesh network (multi-transport)
 
@@ -44,7 +44,7 @@ systemctl status rnsd
 ### Via CLI
 ```bash
 # Test meshtasticd connection
-meshforge gateway test
+meshanchor gateway test
 
 # Or use Python
 python3 -c "
@@ -64,7 +64,7 @@ curl -X POST http://localhost:5000/api/gateway/test
 ## Step 2: Configure Gateway
 
 ### Configuration File
-Location: `~/.config/meshforge/gateway.json`
+Location: `~/.config/meshanchor/gateway.json`
 
 ### Basic Configuration
 ```json
@@ -79,7 +79,7 @@ Location: `~/.config/meshforge/gateway.json`
     "channel": 0
   },
   "rns": {
-    "identity_name": "meshforge_gateway",
+    "identity_name": "meshanchor_gateway",
     "announce_interval": 300
   }
 }
@@ -115,7 +115,7 @@ curl -X POST http://localhost:5000/api/gateway/start
 ```
 
 ### Via GTK UI
-1. Open MeshForge
+1. Open MeshAnchor
 2. Navigate to **RNS Panel** → **Gateway** tab
 3. Click **Enable Gateway**
 
@@ -145,7 +145,7 @@ Response:
 
 ### Check Logs
 ```bash
-journalctl -u meshforge -f | grep gateway
+journalctl -u meshanchor -f | grep gateway
 ```
 
 ---

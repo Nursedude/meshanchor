@@ -4,7 +4,7 @@ Gateway Commands
 Provides unified interface for RNS-Meshtastic gateway operations.
 Used by both TUI and CLI interfaces.
 
-The gateway is a cornerstone of MeshForge - bridging Meshtastic
+The gateway is a cornerstone of MeshAnchor - bridging Meshtastic
 and Reticulum (RNS) mesh networks.
 """
 

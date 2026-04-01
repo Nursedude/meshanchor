@@ -1,5 +1,5 @@
 """
-Tactical Map Module for MeshForge.
+Tactical Map Module for MeshAnchor.
 
 Generates tactical overlays on Folium maps:
 - Zone polygons and circles (from ZoneMarking messages)
@@ -276,7 +276,7 @@ def export_kml(
     zones: List[ZoneMarking],
     markers: List[Dict[str, Any]],
     output_path: Path,
-    document_name: str = "MeshForge Tactical",
+    document_name: str = "MeshAnchor Tactical",
 ) -> Path:
     """Export tactical data as KML for Google Earth / ATAK.
 
@@ -390,7 +390,7 @@ def export_cot_xml(
         if checkin.latitude is None or checkin.longitude is None:
             continue
 
-        event_uid = f"meshforge-{uuid.uuid4().hex[:12]}"
+        event_uid = f"meshanchor-{uuid.uuid4().hex[:12]}"
 
         # CoT event element
         event = ET.SubElement(root, 'event')

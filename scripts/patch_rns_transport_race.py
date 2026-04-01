@@ -67,7 +67,7 @@ def find_transport_files():
 
     for venv_root in [
         os.path.join(home, ".local/share/pipx/venvs"),
-        "/opt/meshforge/venv/lib",
+        "/opt/meshanchor/venv/lib",
     ]:
         if os.path.isdir(venv_root):
             for root, dirs, files in os.walk(venv_root):

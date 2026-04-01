@@ -1,6 +1,6 @@
 # AREDN Mesh Network Integration Research
 
-> Research document for MeshForge AREDN integration
+> Research document for MeshAnchor AREDN integration
 > Date: 2026-01-05
 
 ---
@@ -168,7 +168,7 @@ Newer hAP ac3 units ship with RouterOS v7 which has wireless interface issues. R
 
 ---
 
-## MeshForge Integration Design
+## MeshAnchor Integration Design
 
 ### AREDN Panel Features
 
@@ -236,7 +236,7 @@ class AREDNNode:
 - AREDN provides IP backbone
 - Meshtastic provides LoRa last-mile
 - Gateway bridges both networks
-- Unified mesh management in MeshForge
+- Unified mesh management in MeshAnchor
 
 ### RNS/Reticulum Bridge
 - LXMF messaging over AREDN

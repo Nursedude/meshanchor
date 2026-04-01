@@ -1,4 +1,4 @@
-"""Resource diagnostic rules for MeshForge Diagnostic Engine."""
+"""Resource diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 
@@ -22,7 +22,7 @@ def load_resource_rules(engine: "DiagnosticEngine") -> None:
         suggestions=[
             "Check memory usage: free -h",
             "Identify memory-heavy processes: top -o %MEM",
-            "Restart MeshForge to free memory",
+            "Restart MeshAnchor to free memory",
             "Consider increasing system RAM",
         ],
         confidence_base=0.8,

@@ -430,11 +430,11 @@ class NomadNetInstallUtilsMixin:
         Returns the wrapper path, or None if creation failed.
         """
         user_home = get_real_user_home()
-        wrapper_dir = user_home / '.config' / 'meshforge'
+        wrapper_dir = user_home / '.config' / 'meshanchor'
         wrapper_path = wrapper_dir / 'nomadnet_wrapper.py'
 
         wrapper_content = '''\
-"""MeshForge NomadNet wrapper — patches RPC ConnectionRefusedError.
+"""MeshAnchor NomadNet wrapper — patches RPC ConnectionRefusedError.
 
 Version: {version}
 
@@ -657,10 +657,10 @@ sys.exit(main())
                             "type (list instead of dict)"
                         )
                         error_hints.append(
-                            "The MeshForge NomadNet wrapper needs updating"
+                            "The MeshAnchor NomadNet wrapper needs updating"
                         )
                         error_hints.append(
-                            "Fix: Relaunch NomadNet from MeshForge "
+                            "Fix: Relaunch NomadNet from MeshAnchor "
                             "(wrapper auto-updates)"
                         )
                         break

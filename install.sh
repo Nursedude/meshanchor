@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# MeshForge - One-Liner Quick Install
+# MeshAnchor - One-Liner Quick Install
 #
 # LoRa Mesh Network Development & Operations Suite
-# Downloads, installs, and launches MeshForge automatically.
+# Downloads, installs, and launches MeshAnchor automatically.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo bash
 #
 # Options:
 #   UPGRADE_SYSTEM=yes      - Automatically upgrade all system packages
@@ -16,10 +16,10 @@
 #
 # Examples:
 #   # Install with system upgrade
-#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo UPGRADE_SYSTEM=yes bash
 #
 #   # Install without upgrade prompt
-#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo SKIP_UPGRADE=yes bash
+#   curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo SKIP_UPGRADE=yes bash
 #
 
 set -e
@@ -33,7 +33,7 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║   MeshForge - LoRa Mesh Network Operations Suite          ║"
+echo "║   MeshAnchor - LoRa Mesh Network Operations Suite          ║"
 echo "║   For Raspberry Pi OS & Linux                             ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -94,8 +94,8 @@ apt-get install -y -qq python3 python3-pip python3-venv git wget curl &>/dev/nul
 echo -e "${GREEN}  ✓ Core dependencies installed${NC}"
 
 # Clone or update repository
-INSTALL_DIR="/opt/meshforge"
-echo -e "${CYAN}[5/7] Setting up MeshForge...${NC}"
+INSTALL_DIR="/opt/meshanchor"
+echo -e "${CYAN}[5/7] Setting up MeshAnchor...${NC}"
 
 if [[ -d "$INSTALL_DIR" ]]; then
     echo "  Updating existing installation..."
@@ -105,7 +105,7 @@ if [[ -d "$INSTALL_DIR" ]]; then
     git pull -q || echo -e "${YELLOW}  Warning: Could not pull updates${NC}"
 else
     echo "  Cloning repository..."
-    git clone -q https://github.com/Nursedude/meshforge.git "$INSTALL_DIR"
+    git clone -q https://github.com/Nursedude/meshanchor.git "$INSTALL_DIR"
     # Fix git safe directory issue for future updates
     git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
     cd "$INSTALL_DIR"
@@ -131,7 +131,7 @@ elif [[ "$PEP668_DETECTED" == "true" ]] && [[ -c /dev/tty ]]; then
     echo -e "${YELLOW}  Detected: Externally managed Python (PEP 668 - Debian/RPi OS)${NC}"
     echo ""
     echo "  Choose Python package installation method:"
-    echo "    1) Virtual environment at /opt/meshforge/venv (recommended)"
+    echo "    1) Virtual environment at /opt/meshanchor/venv (recommended)"
     echo "    2) System-wide with --break-system-packages (simpler)"
     echo ""
     read -p "  Choose [1/2] (default: 1): " -n 1 -r choice < /dev/tty
@@ -167,40 +167,40 @@ fi
 echo -e "${CYAN}[7/7] Creating system commands...${NC}"
 
 # Main launcher wizard (default)
-cat > /usr/local/bin/meshforge << 'EOF'
+cat > /usr/local/bin/meshanchor << 'EOF'
 #!/bin/bash
-cd /opt/meshforge
+cd /opt/meshanchor
 if [[ -f .no-venv ]]; then
     exec sudo python3 src/launcher.py "$@"
 else
-    exec sudo /opt/meshforge/venv/bin/python src/launcher.py "$@"
+    exec sudo /opt/meshanchor/venv/bin/python src/launcher.py "$@"
 fi
 EOF
-chmod +x /usr/local/bin/meshforge
+chmod +x /usr/local/bin/meshanchor
 
 # TUI access (raspi-config style)
-cat > /usr/local/bin/meshforge-tui << 'EOF'
+cat > /usr/local/bin/meshanchor-tui << 'EOF'
 #!/bin/bash
-cd /opt/meshforge
+cd /opt/meshanchor
 if [[ -f .no-venv ]]; then
     exec sudo python3 src/launcher_tui/main.py "$@"
 else
-    exec sudo /opt/meshforge/venv/bin/python src/launcher_tui/main.py "$@"
+    exec sudo /opt/meshanchor/venv/bin/python src/launcher_tui/main.py "$@"
 fi
 EOF
-chmod +x /usr/local/bin/meshforge-tui
+chmod +x /usr/local/bin/meshanchor-tui
 
-echo -e "${GREEN}  ✓ Commands created: meshforge, meshforge-tui${NC}"
+echo -e "${GREEN}  ✓ Commands created: meshanchor, meshanchor-tui${NC}"
 
 # Success message
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         MeshForge Installation Complete!                  ║${NC}"
+echo -e "${GREEN}║         MeshAnchor Installation Complete!                  ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Quick Start:${NC}"
-echo "  ${GREEN}meshforge${NC}              - Launch TUI (raspi-config style)"
-echo "  ${GREEN}meshforge-tui${NC}          - Same as above (explicit)"
+echo "  ${GREEN}meshanchor${NC}              - Launch TUI (raspi-config style)"
+echo "  ${GREEN}meshanchor-tui${NC}          - Same as above (explicit)"
 echo ""
 echo -e "${CYAN}Features:${NC}"
 echo "  • Meshtastic + Reticulum (RNS) gateway bridge"
@@ -209,20 +209,20 @@ echo "  • Hardware simulation mode"
 echo "  • HamClock space weather integration"
 echo "  • Interactive node map"
 echo ""
-echo -e "${CYAN}Would you like to start MeshForge now? [Y/n]${NC}"
+echo -e "${CYAN}Would you like to start MeshAnchor now? [Y/n]${NC}"
 
 # Try to read from TTY if available for interactive prompt
 if [[ -c /dev/tty ]]; then
     read -r response < /dev/tty
     if [[ "$response" =~ ^([nN][oO]|[nN])$ ]]; then
         echo ""
-        echo -e "${YELLOW}Installation complete. Run 'meshforge' when ready.${NC}"
+        echo -e "${YELLOW}Installation complete. Run 'meshanchor' when ready.${NC}"
         exit 0
     fi
 fi
 
 # Launch installer (default action)
 echo ""
-echo -e "${GREEN}Starting MeshForge...${NC}"
+echo -e "${GREEN}Starting MeshAnchor...${NC}"
 echo ""
-exec /usr/local/bin/meshforge
+exec /usr/local/bin/meshanchor

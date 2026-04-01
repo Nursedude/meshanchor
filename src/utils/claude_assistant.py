@@ -1,5 +1,5 @@
 """
-MeshForge Claude Assistant (PRO).
+MeshAnchor Claude Assistant (PRO).
 
 AI-powered assistant for mesh network operations using Claude API.
 Provides natural language queries, complex situation analysis, and
@@ -30,7 +30,7 @@ Usage:
 
 Environment:
     ANTHROPIC_API_KEY: Set API key via environment variable
-    MESHFORGE_PRO: Set to "1" to enable PRO features
+    MESHANCHOR_PRO: Set to "1" to enable PRO features
 """
 
 import json
@@ -95,7 +95,7 @@ class ConversationMessage:
 
 class ClaudeAssistant:
     """
-    AI-powered assistant for MeshForge.
+    AI-powered assistant for MeshAnchor.
 
     Operates in two modes:
     - STANDALONE: Uses local knowledge base and diagnostic engine
@@ -105,7 +105,7 @@ class ClaudeAssistant:
     """
 
     # System prompt for Claude API
-    SYSTEM_PROMPT = """You are an expert assistant for MeshForge, a Network Operations Center (NOC) that bridges Meshtastic and Reticulum (RNS) mesh networks.
+    SYSTEM_PROMPT = """You are an expert assistant for MeshAnchor, a Network Operations Center (NOC) that bridges Meshtastic and Reticulum (RNS) mesh networks.
 
 Your expertise includes:
 - RF fundamentals: propagation, antennas, SNR, RSSI, LoRa modulation
@@ -119,10 +119,10 @@ Guidelines:
 2. Provide actionable steps when diagnosing issues
 3. Include relevant commands when appropriate
 4. Adapt explanations to the user's expertise level
-5. Reference specific MeshForge features when helpful
+5. Reference specific MeshAnchor features when helpful
 6. If uncertain, say so and suggest where to find more info
 
-You are embedded in MeshForge, so you have context about:
+You are embedded in MeshAnchor, so you have context about:
 - The user's mesh network topology (when provided)
 - Recent diagnostic events
 - Current system health metrics
@@ -154,7 +154,7 @@ Always prioritize safety - never suggest actions that could damage hardware
         self._conversation: List[ConversationMessage] = []
         self._conversation_lock = threading.Lock()
 
-        # Network context (populated by MeshForge)
+        # Network context (populated by MeshAnchor)
         self._network_context: Dict[str, Any] = {}
 
         # Claude client (lazy loaded)

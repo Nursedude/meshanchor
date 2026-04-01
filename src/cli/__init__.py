@@ -1,4 +1,3 @@
-"""CLI modules"""
-from .meshtastic_cli import MeshtasticCLI
+"""CLI modules — MeshAnchor"""
 
-__all__ = ['MeshtasticCLI']
+__all__ = []

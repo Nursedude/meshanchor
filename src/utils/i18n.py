@@ -1,5 +1,5 @@
 """
-MeshForge Internationalization (i18n) Framework.
+MeshAnchor Internationalization (i18n) Framework.
 
 Provides multi-language support for the global HAM community.
 Inspired by meshtastic/standalone-ui which supports 18 languages.
@@ -55,7 +55,7 @@ def get_locale_dir() -> Path:
         return package_locale
 
     # Fall back to user config
-    user_locale = get_real_user_home() / ".config" / "meshforge" / "locale"
+    user_locale = get_real_user_home() / ".config" / "meshanchor" / "locale"
     user_locale.mkdir(parents=True, exist_ok=True)
     return user_locale
 

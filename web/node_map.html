@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Network Map - MeshForge</title>
+    <title>Network Map - MeshAnchor</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
@@ -1292,7 +1292,7 @@
     <!-- Control Panel -->
     <div class="control-panel" id="control-panel">
         <div class="panel-header" onclick="togglePanel()">
-            <h4>MeshForge NOC</h4>
+            <h4>MeshAnchor NOC</h4>
             <button class="panel-toggle" id="panel-toggle">&#x25BC;</button>
         </div>
         <div class="panel-body">
@@ -1628,7 +1628,7 @@
 
     <script>
     // ============================================
-    // MeshForge Live Map Engine
+    // MeshAnchor Live Map Engine
     // ============================================
 
     // State management
@@ -3377,8 +3377,8 @@
 
     async function refreshNodes() {
         // 1. Check for embedded data (injected by GTK panel)
-        if (window.meshforgeData) {
-            loadNodes(window.meshforgeData);
+        if (window.meshanchorData) {
+            loadNodes(window.meshanchorData);
             updateApiStatus(true);
             return;
         }
@@ -4581,7 +4581,7 @@
     initWebSocket();
 
     // Auto-refresh every 30 seconds (only if no embedded data pushing updates)
-    if (!window.meshforgeData) {
+    if (!window.meshanchorData) {
         setInterval(refreshNodes, 30000);
     }
 
@@ -4651,7 +4651,7 @@
     };
 
     // Phase 4: Public API for external integration
-    window.meshforgeMap = {
+    window.meshanchorMap = {
         getState: () => state,
         switchView: switchView,
         refreshNodes: refreshNodes,

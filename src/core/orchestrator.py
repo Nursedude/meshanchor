@@ -1,13 +1,13 @@
 """
-MeshForge Service Orchestrator
+MeshAnchor Service Orchestrator
 
-Manages the complete NOC stack: meshtasticd, rnsd, and MeshForge services.
-MeshForge IS the node - this orchestrator ensures all services start, run, and recover.
+Manages the complete NOC stack: meshtasticd, rnsd, and MeshAnchor services.
+MeshAnchor IS the node - this orchestrator ensures all services start, run, and recover.
 
 Supports:
     - Native meshtasticd (for SPI radios like Meshtoad)
     - Python meshtastic CLI (for USB serial radios)
-    - Automatic config detection from /etc/meshforge/noc.yaml
+    - Automatic config detection from /etc/meshanchor/noc.yaml
 
 Usage:
     # As module
@@ -36,7 +36,7 @@ from utils.safe_import import safe_import
 
 # Module-level safe imports
 _yaml, _HAS_YAML = safe_import('yaml')
-# Import centralized port checker for consistency across MeshForge
+# Import centralized port checker for consistency across MeshAnchor
 # See: utils/service_check.py - SINGLE SOURCE OF TRUTH
 from utils.service_check import (
     check_port as _centralized_check_port,
@@ -51,7 +51,7 @@ from utils.service_check import (
 logger = logging.getLogger(__name__)
 
 # Configuration paths
-NOC_CONFIG_PATH = Path("/etc/meshforge/noc.yaml")
+NOC_CONFIG_PATH = Path("/etc/meshanchor/noc.yaml")
 MESHTASTICD_CONFIG_DIR = Path("/etc/meshtasticd")
 
 
@@ -92,7 +92,7 @@ class ServiceStatus:
 
 class ServiceOrchestrator:
     """
-    Orchestrates MeshForge NOC services.
+    Orchestrates MeshAnchor NOC services.
 
     Manages meshtasticd, rnsd, and ensures they start in the correct order
     with proper health verification (double-tap).
@@ -161,7 +161,7 @@ class ServiceOrchestrator:
         self._configure_meshtasticd()
 
     def _load_config(self):
-        """Load NOC configuration from /etc/meshforge/noc.yaml."""
+        """Load NOC configuration from /etc/meshanchor/noc.yaml."""
         # Default config
         self.config = {
             'mode': 'local',  # local | client | remote-only
@@ -971,7 +971,7 @@ class ServiceOrchestrator:
         Returns:
             True if all required services are running and healthy (or graceful mode)
         """
-        logger.info("═══ MeshForge NOC Startup ═══")
+        logger.info("═══ MeshAnchor NOC Startup ═══")
 
         # Pre-flight: check all required services are installed BEFORE starting anything
         missing = self._preflight_check()
@@ -984,8 +984,8 @@ class ServiceOrchestrator:
                     logger.error(f"  • {svc_name}")
                     logger.error(f"    Fix: {fix_cmd}")
                 logger.error("")
-                logger.error("After installing, run: meshforge-noc --start")
-                logger.error("Or run the full installer: sudo bash /opt/meshforge/scripts/install_noc.sh")
+                logger.error("After installing, run: meshanchor-noc --start")
+                logger.error("Or run the full installer: sudo bash /opt/meshanchor/scripts/install_noc.sh")
                 return False
             else:
                 for svc_name, fix_cmd in missing:
@@ -1038,12 +1038,12 @@ class ServiceOrchestrator:
             logger.warning("═══ Startup completed with failures (graceful mode) ═══")
             if failed_services:
                 logger.warning(f"Failed services: {', '.join(failed_services)}")
-            logger.info("MeshForge running in degraded mode - some features unavailable")
+            logger.info("MeshAnchor running in degraded mode - some features unavailable")
         else:
             logger.error("═══ Startup failed ═══")
             if failed_services:
                 logger.error(f"Failed: {', '.join(failed_services)}")
-                logger.error("Run 'meshforge-noc --status' for details")
+                logger.error("Run 'meshanchor-noc --status' for details")
 
         return success or graceful
 
@@ -1068,7 +1068,7 @@ class ServiceOrchestrator:
     def _get_install_hint(self, service_name: str) -> str:
         """Get actionable install command for a missing service."""
         hints = {
-            'meshtasticd': 'sudo apt install meshtasticd (add repo first: see meshforge docs)',
+            'meshtasticd': 'sudo apt install meshtasticd (add repo first: see meshanchor docs)',
             'rnsd': 'pipx install rns && sudo systemctl enable rnsd',
             'mosquitto': 'sudo apt install mosquitto',
         }
@@ -1076,7 +1076,7 @@ class ServiceOrchestrator:
 
     def shutdown(self) -> bool:
         """Stop all managed services in reverse order."""
-        logger.info("═══ MeshForge NOC Shutdown ═══")
+        logger.info("═══ MeshAnchor NOC Shutdown ═══")
 
         self._running = False
         success = True
@@ -1251,7 +1251,7 @@ def main():
     from utils.logging_config import setup_logging
     setup_logging(level=logging.INFO)
 
-    parser = argparse.ArgumentParser(description='MeshForge Service Orchestrator')
+    parser = argparse.ArgumentParser(description='MeshAnchor Service Orchestrator')
     parser.add_argument('--start', action='store_true', help='Start all services')
     parser.add_argument('--stop', action='store_true', help='Stop all services')
     parser.add_argument('--restart', action='store_true', help='Restart all services')
@@ -1266,7 +1266,7 @@ def main():
     orch = ServiceOrchestrator()
 
     if args.config:
-        print("\n═══ MeshForge NOC Configuration ═══\n")
+        print("\n═══ MeshAnchor NOC Configuration ═══\n")
         config_info = orch.get_config_info()
         print(f"  Config File:        {config_info['config_file']}")
         print(f"  Config Exists:      {config_info['config_exists']}")
@@ -1307,7 +1307,7 @@ def main():
         sys.exit(0 if orch.startup() else 1)
 
     if args.status:
-        print("\n═══ MeshForge NOC Status ═══\n")
+        print("\n═══ MeshAnchor NOC Status ═══\n")
         config_info = orch.get_config_info()
         print(f"  Mode: {config_info['mode']} | Radio: {config_info['radio_type']} | Daemon: {config_info['daemon_type']}\n")
 

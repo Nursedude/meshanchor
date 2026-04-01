@@ -111,7 +111,7 @@ def get_lan_ip() -> str:
 
 
 class MapServer:
-    """MeshForge HTTP server for network monitoring and radio control.
+    """MeshAnchor HTTP server for network monitoring and radio control.
 
     Serves:
     - GET /              -> node_map.html (the live map)
@@ -124,7 +124,7 @@ class MapServer:
     - GET /api/status    -> server health check + history stats
     - GET /*             -> static files from web/
 
-    Meshtastic API Proxy (MeshForge-owned):
+    Meshtastic API Proxy (MeshAnchor-owned):
     - GET  /api/v1/fromradio -> multiplexed protobuf from meshtasticd
     - PUT  /api/v1/toradio   -> forwarded to meshtasticd
     - GET  /json/nodes       -> proxied from meshtasticd
@@ -132,7 +132,7 @@ class MapServer:
     - GET  /mesh/*           -> meshtastic web client (proxied)
     - GET  /api/proxy/status -> proxy health + stats
 
-    Radio Control API (MeshForge-owned):
+    Radio Control API (MeshAnchor-owned):
     - GET /api/radio/info     -> radio device information
     - GET /api/radio/nodes    -> nodes from connected radio
     - GET /api/radio/channels -> channels from connected radio
@@ -350,7 +350,7 @@ class MapServer:
 
         self._server = HTTPServer((self.host, self.port), MapRequestHandler)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
-        print(f"MeshForge NOC Server running on port {self.port}")
+        print(f"MeshAnchor NOC Server running on port {self.port}")
         if self.host == "0.0.0.0":
             # Show all available IPs when binding to all interfaces
             ips = get_all_ips()
@@ -428,7 +428,7 @@ def main():
     import signal
 
     parser = argparse.ArgumentParser(
-        description="MeshForge Live Map Server - NOC Web Interface",
+        description="MeshAnchor Live Map Server - NOC Web Interface",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -450,8 +450,8 @@ Examples:
     parser.add_argument("--status", action="store_true",
                         help="Check if map server is running")
     parser.add_argument("--pid-file", type=str,
-                        default="/run/meshforge/map-server.pid",
-                        help="PID file location (default: /run/meshforge/map-server.pid)")
+                        default="/run/meshanchor/map-server.pid",
+                        help="PID file location (default: /run/meshanchor/map-server.pid)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose logging")
     args = parser.parse_args()
@@ -531,7 +531,7 @@ def _is_port_in_use(port: int) -> bool:
 def _check_server_status(port: int) -> int:
     """Check if map server is running and report status."""
     if _is_port_in_use(port):
-        print(f"MeshForge Map Server is running on port {port}")
+        print(f"MeshAnchor Map Server is running on port {port}")
         # Try to get status from API
         try:
             import urllib.request
@@ -546,7 +546,7 @@ def _check_server_status(port: int) -> int:
             pass
         return 0
     else:
-        print(f"MeshForge Map Server is not running on port {port}")
+        print(f"MeshAnchor Map Server is not running on port {port}")
         return 1
 
 
@@ -560,7 +560,7 @@ def _write_pid_file(pid_file: str) -> None:
         logger.debug(f"PID file written: {pid_file}")
     except PermissionError:
         # Running as non-root, use alternative location
-        alt_pid = Path("/tmp/meshforge-map-server.pid")
+        alt_pid = Path("/tmp/meshanchor-map-server.pid")
         with open(alt_pid, 'w') as f:
             f.write(str(os.getpid()))
         logger.debug(f"PID file written: {alt_pid}")
@@ -570,7 +570,7 @@ def _write_pid_file(pid_file: str) -> None:
 
 def _remove_pid_file(pid_file: str) -> None:
     """Remove PID file on shutdown."""
-    for path in [pid_file, "/tmp/meshforge-map-server.pid"]:
+    for path in [pid_file, "/tmp/meshanchor-map-server.pid"]:
         try:
             Path(path).unlink(missing_ok=True)
         except Exception:

@@ -1,11 +1,11 @@
 # HamClock Decoupling — Session Notes
 
-> Session: 2026-02-08 | Branch: claude/decouple-meshforge-hamclock-52CXI
+> Session: 2026-02-08 | Branch: claude/decouple-meshanchor-hamclock-52CXI
 
 ## Context
 
 The original HamClock developer (Elwood Downey, WB0OEW) is SK. The original
-HamClock backend is scheduled to **sunset June 2026**. MeshForge needed to be
+HamClock backend is scheduled to **sunset June 2026**. MeshAnchor needed to be
 decoupled from HamClock as a dependency.
 
 **OpenHamClock** (https://github.com/accius/openhamclock) is the community
@@ -20,7 +20,7 @@ replacement — MIT license, React/Node.js, Docker-friendly, port 3000.
 
 ### New File: `src/commands/propagation.py`
 
-MeshForge-owned propagation command module. This is the new recommended
+MeshAnchor-owned propagation command module. This is the new recommended
 interface for all space weather and propagation data.
 
 Features:
@@ -75,7 +75,7 @@ Features:
 
 ### P1 — Done ✅
 - [x] Persist propagation source config to disk via SettingsManager
-  - `propagation.json` in `~/.config/meshforge/`
+  - `propagation.json` in `~/.config/meshanchor/`
   - Auto-loads on module import, auto-saves on `configure_source()`
   - Graceful degradation if SettingsManager unavailable
 - [x] Update CLAUDE.md: Added `commands/` to architecture, propagation docs section
@@ -83,7 +83,7 @@ Features:
 
 ### P2 — Done ✅
 - [x] Docker OpenHamClock management in service menu (start/stop/status/logs)
-  - Auto-configures MeshForge propagation source on first Docker start
+  - Auto-configures MeshAnchor propagation source on first Docker start
 - [x] Direct DX cluster telnet: `get_dx_spots_telnet()` — connects to DX Spider nodes
 - [x] VOACAP online: `get_voacap_online()` — public VOACAP P2P predictions
 - [x] Ionosonde data: `get_ionosonde_data()` — real foF2/MUF from prop.kc2g.com
@@ -112,4 +112,4 @@ Features:
 | PSKReporter | No | Yes (MQTT) | No |
 | POTA/SOTA | No | Yes | No |
 | Availability | Always | Self-hosted | Sunsets June 2026 |
-| MeshForge status | PRIMARY | Optional plugin | Optional/legacy |
+| MeshAnchor status | PRIMARY | Optional plugin | Optional/legacy |

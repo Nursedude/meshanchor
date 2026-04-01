@@ -1,6 +1,6 @@
 # RNS Over Meshtastic Gateway - Code Review
 
-> **Reviewer**: Dude AI (Claude) - MeshForge Project
+> **Reviewer**: Dude AI (Claude) - MeshAnchor Project
 > **Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 > **Date**: 2026-01-06
 > **Commit**: HEAD (latest)
@@ -212,7 +212,7 @@ def clear_screen():
 
 ## Architecture Comparison
 
-| Feature | RNS Gateway | MeshForge |
+| Feature | RNS Gateway | MeshAnchor |
 |---------|-------------|-----------|
 | Subprocess security | Needs work | Strict (no shell=True) |
 | Timeouts | Missing | 5-300s per operation |
@@ -285,9 +285,9 @@ def get_serial_ports() -> list:
 2. Fix 2x bare `except:` in supervisor.py
 3. Add timeouts to all subprocess calls
 4. Use `pyserial` for cross-platform port detection
-5. Consider MeshForge's `utils/system.py` as reference
+5. Consider MeshAnchor's `utils/system.py` as reference
 
-**MeshForge can provide**:
+**MeshAnchor can provide**:
 - Security patterns from `CLAUDE.md`
 - Graceful degradation from `standalone.py`
 - Platform abstraction examples from `utils/system.py`

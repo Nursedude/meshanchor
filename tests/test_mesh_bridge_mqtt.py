@@ -224,7 +224,7 @@ class TestMeshtasticPresetBridgePersistence:
 
         bridge = MeshtasticPresetBridge(config=mock_config)
 
-        queue_dir = tmp_path / ".config" / "meshforge" / "mesh_bridge_queues"
+        queue_dir = tmp_path / ".config" / "meshanchor" / "mesh_bridge_queues"
         assert queue_dir.exists()
         assert (queue_dir / "p2s.db").exists()
         assert (queue_dir / "s2p.db").exists()

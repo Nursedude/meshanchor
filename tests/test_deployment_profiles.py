@@ -45,26 +45,26 @@ class TestProfileDefinitions:
         for name in ProfileName:
             assert name in PROFILES, f"Missing profile for {name}"
 
-    def test_radio_maps_requires_meshtasticd(self):
-        """Radio+Maps profile requires meshtasticd service."""
-        profile = PROFILES[ProfileName.RADIO_MAPS]
-        assert "meshtasticd" in profile.required_services
+    def test_meshcore_default_requires_no_services(self):
+        """MeshCore default profile requires no services (direct radio)."""
+        profile = PROFILES[ProfileName.MESHCORE]
+        assert len(profile.required_services) == 0
+        assert profile.feature_flags["meshcore"] is True
 
     def test_monitor_requires_no_services(self):
         """Monitor profile should require no services (runs standalone)."""
         profile = PROFILES[ProfileName.MONITOR]
         assert len(profile.required_services) == 0
 
-    def test_gateway_requires_meshtasticd_and_rnsd(self):
-        """Gateway profile requires both meshtasticd and rnsd."""
+    def test_gateway_has_optional_bridge_services(self):
+        """Gateway profile has meshtasticd/rnsd as optional services."""
         profile = PROFILES[ProfileName.GATEWAY]
-        assert "meshtasticd" in profile.required_services
-        assert "rnsd" in profile.required_services
+        assert "meshtasticd" in profile.optional_services
+        assert "rnsd" in profile.optional_services
 
-    def test_full_requires_all_three_services(self):
-        """Full profile requires meshtasticd, rnsd, and mosquitto."""
+    def test_full_requires_rnsd_and_mosquitto(self):
+        """Full profile requires rnsd and mosquitto."""
         profile = PROFILES[ProfileName.FULL]
-        assert "meshtasticd" in profile.required_services
         assert "rnsd" in profile.required_services
         assert "mosquitto" in profile.required_services
 
@@ -136,12 +136,12 @@ class TestProfileDetection:
 
     @patch('utils.deployment_profiles._check_service_available')
     @patch('utils.deployment_profiles._check_package')
-    def test_defaults_to_radio_maps(self, mock_pkg, mock_svc):
-        """Defaults to radio_maps when nothing special detected."""
+    def test_defaults_to_meshcore(self, mock_pkg, mock_svc):
+        """Defaults to meshcore when nothing special detected (MeshAnchor default)."""
         mock_svc.return_value = False
         mock_pkg.return_value = False
         profile = detect_profile()
-        assert profile.name == ProfileName.RADIO_MAPS
+        assert profile.name == ProfileName.MESHCORE
 
     @patch('utils.deployment_profiles._check_service_available')
     @patch('utils.deployment_profiles._check_package')
@@ -223,7 +223,7 @@ class TestProfileValidation:
         """Profile is not ready when a required service is missing."""
         mock_svc.side_effect = lambda name: name != 'rnsd'
         mock_pkg.return_value = True
-        profile = PROFILES[ProfileName.GATEWAY]
+        profile = PROFILES[ProfileName.FULL]
         health = validate_profile(profile)
         assert health.ready is False
         assert 'rnsd' in health.missing_services
@@ -234,7 +234,7 @@ class TestProfileValidation:
         """Profile is not ready when a required package is missing."""
         mock_svc.return_value = True
         mock_pkg.side_effect = lambda name: name != 'RNS'
-        profile = PROFILES[ProfileName.GATEWAY]
+        profile = PROFILES[ProfileName.FULL]
         health = validate_profile(profile)
         assert health.ready is False
         assert 'RNS' in health.missing_packages

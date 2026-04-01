@@ -1,7 +1,7 @@
 """
-MeshForge Plugin Architecture
+MeshAnchor Plugin Architecture
 
-Provides extensibility for MeshForge.io through a plugin system.
+Provides extensibility for MeshAnchor.io through a plugin system.
 
 Plugin Types:
 - Panel Plugins: Add new UI panels
@@ -59,7 +59,7 @@ class PluginManifest:
         "author": "Developer Name",
         "type": "panel",
         "entry_point": "main.py",
-        "min_meshforge_version": "1.0.0"
+        "min_meshanchor_version": "1.0.0"
     }
     """
     id: str
@@ -69,7 +69,7 @@ class PluginManifest:
     author: str
     plugin_type: PluginType
     entry_point: str
-    min_meshforge_version: str = "1.0.0"
+    min_meshanchor_version: str = "1.0.0"
 
     # Optional fields
     homepage: Optional[str] = None
@@ -93,7 +93,7 @@ class PluginManifest:
             author=data["author"],
             plugin_type=PluginType(data["type"]),
             entry_point=data["entry_point"],
-            min_meshforge_version=data.get("min_meshforge_version", "1.0.0"),
+            min_meshanchor_version=data.get("min_meshanchor_version", "1.0.0"),
             homepage=data.get("homepage"),
             license=data.get("license"),
             icon=data.get("icon"),
@@ -114,7 +114,7 @@ class PluginManifest:
 
 class Plugin(ABC):
     """
-    Base class for all MeshForge plugins.
+    Base class for all MeshAnchor plugins.
 
     To create a plugin:
     1. Create a directory with manifest.json
@@ -162,7 +162,7 @@ class Plugin(ABC):
         - Initialize resources
 
         Args:
-            context: Plugin context for interacting with MeshForge
+            context: Plugin context for interacting with MeshAnchor
         """
         pass
 
@@ -206,7 +206,7 @@ class Plugin(ABC):
 @dataclass
 class PluginContext:
     """
-    Context provided to plugins for interacting with MeshForge.
+    Context provided to plugins for interacting with MeshAnchor.
 
     This is the plugin's interface to the host application.
     """
@@ -308,7 +308,7 @@ class PluginContext:
 
     def get_service(self, service_name: str) -> Optional[Any]:
         """
-        Get a MeshForge service.
+        Get a MeshAnchor service.
 
         Available services:
         - "meshtastic": Meshtastic connection
@@ -345,7 +345,7 @@ class PluginManager:
 
     def __init__(self, plugins_dir: Optional[Path] = None):
         if plugins_dir is None:
-            plugins_dir = get_real_user_home() / ".config" / "meshforge" / "plugins"
+            plugins_dir = get_real_user_home() / ".config" / "meshanchor" / "plugins"
         self.plugins_dir = plugins_dir
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
 
@@ -428,7 +428,7 @@ class PluginManager:
         try:
             # Load the plugin module
             spec = importlib.util.spec_from_file_location(
-                f"meshforge_plugin_{plugin_id}",
+                f"meshanchor_plugin_{plugin_id}",
                 entry_point
             )
             module = importlib.util.module_from_spec(spec)
@@ -589,7 +589,7 @@ class PluginManager:
 # Example plugin template
 EXAMPLE_PLUGIN_TEMPLATE = '''
 """
-Example MeshForge Plugin (Tool type)
+Example MeshAnchor Plugin (Tool type)
 
 manifest.json:
 {
@@ -600,12 +600,12 @@ manifest.json:
     "author": "Your Name",
     "type": "tool",
     "entry_point": "main.py",
-    "min_meshforge_version": "0.5.0"
+    "min_meshanchor_version": "0.5.0"
 }
 """
 
 import logging
-from meshforge.core.plugin_base import Plugin, PluginContext
+from meshanchor.core.plugin_base import Plugin, PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -613,7 +613,7 @@ logger = logging.getLogger(__name__)
 class MyPlugin(Plugin):
     """Example tool plugin implementation.
 
-    Tool plugins add calculation/analysis capabilities to MeshForge
+    Tool plugins add calculation/analysis capabilities to MeshAnchor
     without requiring any specific UI framework.
     """
 
@@ -664,11 +664,11 @@ def create_plugin_template(plugin_dir: Path, plugin_id: str,
         "id": plugin_id,
         "name": plugin_name,
         "version": "1.0.0",
-        "description": f"A {plugin_type.value} plugin for MeshForge",
+        "description": f"A {plugin_type.value} plugin for MeshAnchor",
         "author": "Your Name",
         "type": plugin_type.value,
         "entry_point": "main.py",
-        "min_meshforge_version": "1.0.0",
+        "min_meshanchor_version": "1.0.0",
         "permissions": [],
         "tags": [],
     }

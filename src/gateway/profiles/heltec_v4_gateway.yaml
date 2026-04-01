@@ -1,4 +1,4 @@
-# MeshForge Gateway Profile: Heltec V4 (ESP32-S3 High Power)
+# MeshAnchor Gateway Profile: Heltec V4 (ESP32-S3 High Power)
 # Optimized for gateway/router operation with maximum TX power
 # Apply with: meshtastic --configure heltec_v4_gateway.yaml
 #

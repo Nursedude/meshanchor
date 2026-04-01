@@ -229,7 +229,7 @@ class RNSMenuHandler(BaseHandler):
                         print("  Not found — use 'Create identities' to generate.\n")
 
                     gw_id = get_identity_path()
-                    print(f"\nMeshForge gateway identity: {gw_id}")
+                    print(f"\nMeshAnchor gateway identity: {gw_id}")
                     if gw_id.exists():
                         if diag:
                             diag._run_rns_tool(
@@ -256,7 +256,7 @@ class RNSMenuHandler(BaseHandler):
                         print("  Not found (created on first rnsd start)")
 
                     gw_id = get_identity_path()
-                    print(f"\nMeshForge gateway:  {gw_id}")
+                    print(f"\nMeshAnchor gateway:  {gw_id}")
                     if gw_id.exists():
                         stat = gw_id.stat()
                         print(f"  Size: {stat.st_size} bytes")
@@ -475,7 +475,7 @@ class RNSMenuHandler(BaseHandler):
 
     def _save_rns_node_position(self, node_id: str, name: str, lat: float, lon: float):
         """Save an RNS node position to the node cache."""
-        cache_path = get_real_user_home() / '.config' / 'meshforge' / 'node_cache.json'
+        cache_path = get_real_user_home() / '.config' / 'meshanchor' / 'node_cache.json'
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Load existing cache

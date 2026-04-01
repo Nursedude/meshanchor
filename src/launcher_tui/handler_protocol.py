@@ -1,7 +1,7 @@
 """
 Handler Protocol — TUIContext and CommandHandler for registry-based dispatch.
 
-Replaces the 49-mixin inheritance chain on MeshForgeLauncher with a
+Replaces the 49-mixin inheritance chain on MeshAnchorLauncher with a
 Protocol + Registry pattern. Each handler is a self-contained class that
 receives a shared TUIContext instead of accessing state via ``self``.
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class TUIContext:
     """Shared state and utilities for TUI command handlers.
 
-    Created once in MeshForgeLauncher.__init__() and passed to every handler
+    Created once in MeshAnchorLauncher.__init__() and passed to every handler
     via HandlerRegistry.register(). Replaces the implicit ``self.*`` access
     pattern from the mixin architecture.
 
@@ -53,7 +53,7 @@ class TUIContext:
     src_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent)
     env: dict = field(default_factory=dict)
     registry: Optional[Any] = None  # HandlerRegistry — set after construction
-    daemon_active: bool = False  # True when meshforged owns services
+    daemon_active: bool = False  # True when meshanchord owns services
 
     # Internal cached values
     _meshtastic_path: Optional[str] = field(default=None, repr=False)
@@ -115,7 +115,7 @@ class TUIContext:
     def safe_call(self, name: str, method, *args, **kwargs):
         """Safely call a handler method with exception handling.
 
-        Mirrors MeshForgeLauncher._safe_call() so handlers get the same
+        Mirrors MeshAnchorLauncher._safe_call() so handlers get the same
         error-dialog behavior as mixin methods.
         """
         import subprocess as _sp
@@ -151,7 +151,7 @@ class TUIContext:
                 "Permission Denied",
                 f"Insufficient permissions for {name}.\n\n"
                 f"{e}\n\n"
-                f"Make sure MeshForge is running with sudo."
+                f"Make sure MeshAnchor is running with sudo."
             )
         except FileNotFoundError as e:
             self.log_error(f"FileNotFoundError in {name}", e)
@@ -178,7 +178,7 @@ class TUIContext:
                 f"Full details logged to:\n"
                 f"  {self.get_error_log_path()}\n\n"
                 f"Please report this at:\n"
-                f"  github.com/Nursedude/meshforge/issues"
+                f"  github.com/Nursedude/meshanchor/issues"
             )
 
 
@@ -225,11 +225,11 @@ class LifecycleHandler(Protocol):
     """
 
     def on_startup(self) -> None:
-        """Called once during MeshForgeLauncher.run() before the main menu."""
+        """Called once during MeshAnchorLauncher.run() before the main menu."""
         ...
 
     def on_shutdown(self) -> None:
-        """Called once during MeshForgeLauncher cleanup."""
+        """Called once during MeshAnchorLauncher cleanup."""
         ...
 
 

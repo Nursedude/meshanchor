@@ -4,7 +4,7 @@
 
 ---
 
-## MeshForge TDD Protocol
+## MeshAnchor TDD Protocol
 
 ### Phase 1: Understand
 1. Read relevant source files in `src/`
@@ -29,7 +29,7 @@ Write tests that:
 
 ### Phase 3: Green (Implementation)
 - Write **minimum code** to pass tests
-- Follow MeshForge security rules (no shell=True, no bare except)
+- Follow MeshAnchor security rules (no shell=True, no bare except)
 - Use `get_real_user_home()` not `Path.home()`
 - Add timeouts to all subprocess calls
 

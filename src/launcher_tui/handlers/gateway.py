@@ -90,7 +90,7 @@ class GatewayHandler(BaseHandler):
             choice = self.ctx.dialog.menu(
                 "Gateway Configuration",
                 f"RNS <-> Meshtastic Bridge Setup\n\n"
-                f"Config: ~/.config/meshforge/gateway.json",
+                f"Config: ~/.config/meshanchor/gateway.json",
                 choices
             )
 

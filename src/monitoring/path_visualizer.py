@@ -356,10 +356,10 @@ class PathVisualizer:
         }
 
     def generate(self, output_path: str = None,
-                 title: str = "MeshForge Path Visualization") -> str:
+                 title: str = "MeshAnchor Path Visualization") -> str:
         """Generate the path visualization HTML."""
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "path_visualization.html")
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# MeshForge LoRa Configuration Helper
+# MeshAnchor LoRa Configuration Helper
 #
 # Configures essential LoRa settings to join a mesh network:
 #   - Region (required for radio to transmit)
@@ -79,7 +79,7 @@ REGIONS=(
 print_header() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║        MeshForge LoRa Network Configuration               ║"
+    echo "║        MeshAnchor LoRa Network Configuration               ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }

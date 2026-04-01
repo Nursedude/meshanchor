@@ -129,7 +129,7 @@ def main():
     global _metrics_server
 
     print("\n" + "="*50)
-    print("  MeshForge Gateway Bridge")
+    print("  MeshAnchor Gateway Bridge")
     print("="*50)
 
     # Load config

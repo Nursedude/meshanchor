@@ -1,6 +1,6 @@
 # Version Check
 
-Check and display MeshForge version information.
+Check and display MeshAnchor version information.
 
 ## Instructions
 

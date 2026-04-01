@@ -1,4 +1,4 @@
-# MeshForge AI Development Practices
+# MeshAnchor AI Development Practices
 
 > Best Practices for AI-Assisted Software Development
 > Security | Code Quality | Debugging | Infrastructure Review
@@ -163,7 +163,7 @@ def read_config_file(filename: str) -> dict:
         raise SecurityError("Invalid filename")
 
     # Resolve to absolute path within allowed directory
-    config_dir = Path.home() / '.config' / 'meshforge'
+    config_dir = Path.home() / '.config' / 'meshanchor'
     safe_path = (config_dir / filename).resolve()
 
     # Verify path is within allowed directory
@@ -282,11 +282,11 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
     handlers=[
-        logging.FileHandler('meshforge_debug.log'),
+        logging.FileHandler('meshanchor_debug.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('meshforge.debug')
+logger = logging.getLogger('meshanchor.debug')
 
 
 @dataclass
@@ -430,7 +430,7 @@ class MeshDebugger:
         """Generate comprehensive debug report."""
         report = []
         report.append("=" * 60)
-        report.append("MESHFORGE DEBUG REPORT")
+        report.append("MESHANCHOR DEBUG REPORT")
         report.append("=" * 60)
         report.append(f"Generated: {datetime.now().isoformat()}")
         report.append(f"Total traces: {len(self.traces)}")
@@ -869,13 +869,13 @@ class AssistantSession:
         }, indent=2)
 ```
 
-### 4.2 MeshForge-Specific AI Context
+### 4.2 MeshAnchor-Specific AI Context
 
 ```python
-# MESHFORGE AI CONTEXT TEMPLATE
+# MESHANCHOR AI CONTEXT TEMPLATE
 
-MESHFORGE_CONTEXT = ProjectContext(
-    name="MeshForge",
+MESHANCHOR_CONTEXT = ProjectContext(
+    name="MeshAnchor",
     version="1.0.0",
     description="LoRa Mesh Network Development & Operations Suite",
 
@@ -1065,5 +1065,5 @@ class AssessmentEvaluator:
 
 ---
 
-*MeshForge Security and Code University*
+*MeshAnchor Security and Code University*
 *AI Development Practices Guide v1.0*

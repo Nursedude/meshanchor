@@ -233,7 +233,7 @@ class RNSConnectionMixin:
         allow LXMF setup to be retried independently.
         """
         # Create or load identity
-        identity_path = get_real_user_home() / ".config" / "meshforge" / "gateway_identity"
+        identity_path = get_real_user_home() / ".config" / "meshanchor" / "gateway_identity"
         if identity_path.exists():
             self._identity = RNS.Identity.from_file(str(identity_path))
         else:
@@ -242,7 +242,7 @@ class RNSConnectionMixin:
             self._identity.to_file(str(identity_path))
 
         # Create LXMF router
-        storage_path = get_real_user_home() / ".config" / "meshforge" / "lxmf_storage"
+        storage_path = get_real_user_home() / ".config" / "meshanchor" / "lxmf_storage"
         storage_path.mkdir(parents=True, exist_ok=True)
         self._lxmf_router = LXMF.LXMRouter(storagepath=str(storage_path))
 
@@ -252,7 +252,7 @@ class RNSConnectionMixin:
         # Create source identity
         self._lxmf_source = self._lxmf_router.register_delivery_identity(
             self._identity,
-            display_name="MeshForge Gateway"
+            display_name="MeshAnchor Gateway"
         )
 
         # Configure outbound propagation node for store-and-forward

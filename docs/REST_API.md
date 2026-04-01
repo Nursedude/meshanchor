@@ -1,4 +1,4 @@
-# MeshForge REST API Documentation
+# MeshAnchor REST API Documentation
 
 > **Version:** 0.4.6-beta
 > **Base URL:** `http://localhost:5000/api`
@@ -7,7 +7,7 @@
 
 ## Overview
 
-MeshForge provides a REST API for:
+MeshAnchor provides a REST API for:
 - Node management and monitoring
 - Network configuration
 - Gateway bridge control
@@ -90,7 +90,7 @@ Get system status overview.
     "running": true,
     "messages_bridged": 1234
   },
-  "meshforge_version": "0.4.6-beta"
+  "meshanchor_version": "0.4.6-beta"
 }
 ```
 
@@ -303,7 +303,7 @@ Get network health history.
 
 ### Webhooks
 
-MeshForge can send events to external HTTP endpoints.
+MeshAnchor can send events to external HTTP endpoints.
 
 #### Event Types
 
@@ -326,7 +326,7 @@ MeshForge can send events to external HTTP endpoints.
 {
   "event_type": "node_online",
   "timestamp": "2026-01-15T10:30:00Z",
-  "source": "meshforge",
+  "source": "meshanchor",
   "version": "1.0",
   "data": {
     "node_id": "!abc12345",
@@ -340,10 +340,10 @@ MeshForge can send events to external HTTP endpoints.
 | Header | Description |
 |--------|-------------|
 | `Content-Type` | `application/json` |
-| `User-Agent` | `MeshForge-Webhook/1.0` |
-| `X-MeshForge-Event` | Event type |
-| `X-MeshForge-Timestamp` | Event timestamp |
-| `X-MeshForge-Signature` | HMAC-SHA256 signature (if secret configured) |
+| `User-Agent` | `MeshAnchor-Webhook/1.0` |
+| `X-MeshAnchor-Event` | Event type |
+| `X-MeshAnchor-Timestamp` | Event timestamp |
+| `X-MeshAnchor-Signature` | HMAC-SHA256 signature (if secret configured) |
 
 #### GET /api/analytics/webhooks
 List configured webhook endpoints.

@@ -1,7 +1,7 @@
 # LoRa Physical Layer Signal Processing — Comprehensive Research
 
 > **Research Date**: 2026-02-06
-> **Context**: MeshForge NOC RF link budget calculations (`src/utils/rf.py`)
+> **Context**: MeshAnchor NOC RF link budget calculations (`src/utils/rf.py`)
 > **Key Paper**: IEEE 9555814 — "LoRa Signal Synchronization and Detection at Extremely Low Signal-to-Noise Ratios"
 
 ---
@@ -19,7 +19,7 @@
 9. [SX1262 vs SX1276 Receiver Performance](#9-sx1262-vs-sx1276-receiver-performance)
 10. [LoRa Link Budget Best Practices](#10-lora-link-budget-best-practices)
 11. [Meshtastic Preset Reference](#11-meshtastic-preset-reference)
-12. [Application to MeshForge RF Calculations](#12-application-to-meshforge-rf-calculations)
+12. [Application to MeshAnchor RF Calculations](#12-application-to-meshanchor-rf-calculations)
 
 ---
 
@@ -263,9 +263,9 @@ The -148 dBm maximum sensitivity figure quoted for SX1276/SX1262 corresponds to 
 - SNR values of -20 to -22 dB have been observed with successful decode in Meshtastic LongFast mode
 - Anything above +5 dB SNR is considered "plenty of signal" (Semtech FAQ)
 
-### 3.4 Values Used in MeshForge rf.py
+### 3.4 Values Used in MeshAnchor rf.py
 
-The current MeshForge `LORA_SENSITIVITY_DBM` dictionary (at BW=125 kHz, NF=6 dB):
+The current MeshAnchor `LORA_SENSITIVITY_DBM` dictionary (at BW=125 kHz, NF=6 dB):
 
 ```python
 LORA_SENSITIVITY_DBM = {
@@ -393,10 +393,10 @@ The paper "LoRa Signal Synchronization and Detection at Extremely Low SNRs" pres
 | Research value | Excellent (modify algorithms) | Production deployment |
 | Real-time capability | Depends on compute power | Always real-time |
 
-### 5.4 Relevance to MeshForge
+### 5.4 Relevance to MeshAnchor
 
 SDR implementations are primarily valuable for:
-- **Validating RF calculations** in MeshForge against real-world measurements
+- **Validating RF calculations** in MeshAnchor against real-world measurements
 - **Understanding demodulation algorithms** to improve signal quality metrics
 - **Research** into improved detection at low SNR
 - **Spectrum monitoring** without consuming the single TCP connection to meshtasticd
@@ -593,9 +593,9 @@ Research (LLDPC — "Low-Density Parity-Check Coding Scheme for LoRa Networks") 
 - Some users report SX1262 showing "lower SNR" which is actually a measurement reporting difference, not a performance degradation
 - Both chips perform equivalently for LoRa demodulation; the SX1262 wins on power efficiency
 
-### 9.4 Recommendation for MeshForge
+### 9.4 Recommendation for MeshAnchor
 
-MeshForge's `rf.py` sensitivity values are chip-agnostic (they represent the LoRa modulation sensitivity, not chip-specific values). This is correct since both SX1276 and SX1262 achieve the same sensitivity floors. For link budget calculations, the **TX power difference** (+20 vs +22 dBm) should be a configurable parameter.
+MeshAnchor's `rf.py` sensitivity values are chip-agnostic (they represent the LoRa modulation sensitivity, not chip-specific values). This is correct since both SX1276 and SX1262 achieve the same sensitivity floors. For link budget calculations, the **TX power difference** (+20 vs +22 dBm) should be a configurable parameter.
 
 ---
 
@@ -769,11 +769,11 @@ Each step up in SF roughly doubles the airtime. At LongFast (SF11/250):
 
 ---
 
-## 12. Application to MeshForge RF Calculations
+## 12. Application to MeshAnchor RF Calculations
 
 ### 12.1 Current Implementation Status
 
-MeshForge's `src/utils/rf.py` currently implements:
+MeshAnchor's `src/utils/rf.py` currently implements:
 - Signal quality classification (Excellent/Good/Fair/Bad/None)
 - RSSI/SNR normalization and percentage scoring
 - Link margin calculation
@@ -874,4 +874,4 @@ def will_capture(rssi_wanted: float, rssi_interferer: float, threshold_db: float
 
 ---
 
-*Research compiled for MeshForge NOC development. Made with aloha for the mesh community. -- WH6GXZ*
+*Research compiled for MeshAnchor NOC development. Made with aloha for the mesh community. -- WH6GXZ*

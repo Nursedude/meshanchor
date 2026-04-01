@@ -1,5 +1,5 @@
 """
-MeshForge Gateway Module
+MeshAnchor Gateway Module
 Bridges Reticulum Network Stack (RNS) and Meshtastic networks
 
 Supports three bridge modes:

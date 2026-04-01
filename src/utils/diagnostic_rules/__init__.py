@@ -1,5 +1,5 @@
 """
-Diagnostic rules for MeshForge Diagnostic Engine.
+Diagnostic rules for MeshAnchor Diagnostic Engine.
 
 This package contains all the built-in diagnostic rules for mesh networking,
 split into domain-specific modules for maintainability.

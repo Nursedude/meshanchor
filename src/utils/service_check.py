@@ -1,5 +1,5 @@
 """
-Service Availability Utilities for MeshForge
+Service Availability Utilities for MeshAnchor
 
 Provides standardized service checking before connecting to external services.
 Use these instead of assuming services are running.
@@ -42,9 +42,9 @@ logger = logging.getLogger(__name__)
 
 
 def _sudo_cmd(cmd: List[str]) -> List[str]:
-    """Prefix a command with 'sudo' when MeshForge is not running as root.
+    """Prefix a command with 'sudo' when MeshAnchor is not running as root.
 
-    Allows MeshForge to run as a normal user and only elevate for
+    Allows MeshAnchor to run as a normal user and only elevate for
     specific operations (systemctl, iptables, etc.).  When already root,
     returns the command unchanged.
 

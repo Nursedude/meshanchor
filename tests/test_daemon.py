@@ -1,5 +1,5 @@
 """
-Tests for MeshForge daemon mode.
+Tests for MeshAnchor daemon mode.
 
 Covers:
     - DaemonService protocol compliance
@@ -330,8 +330,8 @@ class TestDaemonController:
         from daemon import DaemonController
         controller = DaemonController()
         controller._config = MagicMock()
-        controller._config.pid_dir = "/run/meshforge"
-        assert controller._pid_file_path() == Path("/run/meshforge/meshforged.pid")
+        controller._config.pid_dir = "/run/meshanchor"
+        assert controller._pid_file_path() == Path("/run/meshanchor/meshanchord.pid")
 
     def test_status_file_path(self):
         """Status file uses get_real_user_home()."""
@@ -339,7 +339,7 @@ class TestDaemonController:
         controller = DaemonController()
         path = controller._status_file_path()
         assert "daemon_status.json" in str(path)
-        assert ".config/meshforge" in str(path)
+        assert ".config/meshanchor" in str(path)
 
     def test_write_status_file(self, tmp_path):
         """Status file is valid JSON."""

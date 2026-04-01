@@ -1,5 +1,5 @@
 """
-Historical Metrics Tracking for MeshForge.
+Historical Metrics Tracking for MeshAnchor.
 
 Tracks and persists network metrics over time for trend analysis:
 - SNR (Signal-to-Noise Ratio) trends
@@ -160,11 +160,11 @@ class MetricsHistory:
         Initialize metrics history.
 
         Args:
-            db_path: Path to SQLite database (default: ~/.cache/meshforge/metrics.db)
+            db_path: Path to SQLite database (default: ~/.cache/meshanchor/metrics.db)
             retention_days: How long to keep data (default: 30 days)
         """
         if db_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(cache_dir / "metrics.db")
 

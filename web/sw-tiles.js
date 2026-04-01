@@ -1,11 +1,11 @@
 /**
- * MeshForge Map Tile Service Worker
+ * MeshAnchor Map Tile Service Worker
  *
  * Provides offline tile caching for the node map.
  * Uses network-first strategy: try network, fall back to cache.
  */
 
-const CACHE_NAME = 'meshforge-tiles-v1';
+const CACHE_NAME = 'meshanchor-tiles-v1';
 const TILE_CACHE_LIMIT = 2000; // Max cached tiles (~100MB at 50KB/tile)
 
 // Tile URL patterns to cache
@@ -33,7 +33,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then(cacheNames => {
             return Promise.all(
                 cacheNames
-                    .filter(name => name.startsWith('meshforge-tiles-') && name !== CACHE_NAME)
+                    .filter(name => name.startsWith('meshanchor-tiles-') && name !== CACHE_NAME)
                     .map(name => {
                         console.log('[SW] Deleting old cache:', name);
                         return caches.delete(name);

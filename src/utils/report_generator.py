@@ -2,7 +2,7 @@
 Network Status Report Generator.
 
 Generates comprehensive markdown reports capturing current mesh network state.
-Pulls data from all available MeshForge subsystems:
+Pulls data from all available MeshAnchor subsystems:
 - Health scoring
 - Signal trending
 - Diagnostic history
@@ -56,7 +56,7 @@ __version__, _HAS_VERSION = safe_import('__version__', '__version__')
 @dataclass
 class ReportConfig:
     """Configuration for report generation."""
-    title: str = "MeshForge Network Status Report"
+    title: str = "MeshAnchor Network Status Report"
     include_health: bool = True
     include_signals: bool = True
     include_diagnostics: bool = True
@@ -81,7 +81,7 @@ class ReportGenerator:
     """
     Generates comprehensive markdown network status reports.
 
-    Collects data from all available MeshForge subsystems and
+    Collects data from all available MeshAnchor subsystems and
     formats into a single coherent report.
     """
 
@@ -420,9 +420,9 @@ class ReportGenerator:
         lines = []
 
         if _HAS_VERSION:
-            lines.append(f"- MeshForge Version: {__version__}")
+            lines.append(f"- MeshAnchor Version: {__version__}")
         else:
-            lines.append("- MeshForge Version: unknown")
+            lines.append("- MeshAnchor Version: unknown")
 
         lines.append(f"- Report Generated: {datetime.now().isoformat()}")
         lines.append(f"- Host: {_get_hostname()}")
@@ -500,7 +500,7 @@ def generate_and_save(path: Optional[str] = None,
     """
     if path is None:
         from utils.paths import get_real_user_home
-        reports_dir = get_real_user_home() / ".config" / "meshforge" / "reports"
+        reports_dir = get_real_user_home() / ".config" / "meshanchor" / "reports"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = str(reports_dir / f"status_report_{timestamp}.md")
 

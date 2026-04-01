@@ -1,7 +1,7 @@
-# MeshForge NOC Install Session Notes
+# MeshAnchor NOC Install Session Notes
 
 **Date:** 2026-01-18/19
-**Node:** meshforgeMOC1 (Meshtoad SX1262)
+**Node:** meshanchorMOC1 (Meshtoad SX1262)
 **OS:** Debian 13 (Trixie) on Raspberry Pi
 
 ## Summary
@@ -11,7 +11,7 @@ Successfully debugged and fixed meshtasticd installation flow. MOC1 now running 
 ## Key Learnings
 
 ### Port Distinction (CRITICAL)
-- **Port 4403** = TCP API (meshtastic CLI, Python SDK, MeshForge gateway connections)
+- **Port 4403** = TCP API (meshtastic CLI, Python SDK, MeshAnchor gateway connections)
 - **Port 9443** = HTTPS Web UI (browser configuration interface)
 
 Both ports are used simultaneously - they serve different purposes.
@@ -140,7 +140,7 @@ sudo apt install meshtasticd
 
 1. **Monday AM:** Clean install test with MeshAdv-Pi-Hat
 2. Create `meshadv-pi-hat.yaml` config template
-3. Test MeshForge GTK UI messaging with this setup
+3. Test MeshAnchor GTK UI messaging with this setup
 4. Address 24 LOW reliability findings (index access patterns)
 
 ## Git Commits from Session

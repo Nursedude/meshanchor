@@ -1,33 +1,33 @@
-# MeshForge Gateway Scenario Analysis: Multi-Protocol Bridging Deep Dive
+# MeshAnchor Gateway Scenario Analysis: Multi-Protocol Bridging Deep Dive
 
 **Date**: 2026-02-22
 **Author**: Dude AI / WH6GXZ
 **Status**: Research Analysis
-**Branch**: claude/meshforge-gateway-analysis-3zVJt
+**Branch**: claude/meshanchor-gateway-analysis-3zVJt
 
 ---
 
 ## 1. Executive Summary
 
-MeshForge operates as a **Network Operations Center (NOC)** bridging three fundamentally incompatible mesh ecosystems: **Meshtastic**, **RNS/Reticulum**, and **MeshCore**. The gateway subsystem (`src/gateway/`) implements 6 bridge modes that handle the protocol translation, addressing incompatibilities, and physical layer differences between these networks.
+MeshAnchor operates as a **Network Operations Center (NOC)** bridging three fundamentally incompatible mesh ecosystems: **Meshtastic**, **RNS/Reticulum**, and **MeshCore**. The gateway subsystem (`src/gateway/`) implements 6 bridge modes that handle the protocol translation, addressing incompatibilities, and physical layer differences between these networks.
 
 **Key findings from this analysis:**
 
-1. **Hash/addressing is the hard problem** -- Meshtastic uses 32-bit sequential IDs, RNS uses 128-bit SHA-256 hashes of Ed25519 keys, MeshCore uses 16-bit addresses from non-standard Ed25519 derivatives. These CANNOT be mapped. MeshForge solves this with network-prefixed IDs and a protocol-agnostic `CanonicalMessage` layer.
+1. **Hash/addressing is the hard problem** -- Meshtastic uses 32-bit sequential IDs, RNS uses 128-bit SHA-256 hashes of Ed25519 keys, MeshCore uses 16-bit addresses from non-standard Ed25519 derivatives. These CANNOT be mapped. MeshAnchor solves this with network-prefixed IDs and a protocol-agnostic `CanonicalMessage` layer.
 
 2. **RF incompatibility is by design** -- Even within the same protocol family (Meshtastic), different LoRa presets use different spreading factors and bandwidths. Between protocols (Meshtastic vs MeshCore), frequencies, sync words, and modulation are all different. Bridging MUST happen at the application layer with multiple radios.
 
 3. **Four gateway scenarios analyzed** -- Short Turbo<>Long Fast (implemented), Meshtastic<>MeshCore (alpha), LoRa<>WiFi (partially exists), Meshtastic<>RNS (production). Each has distinct challenges around addressing, payload sizes, and transport.
 
-4. **MeshLinkFoundation WiFi gateway pattern** -- Their hostapd/dnsmasq/iptables stack is directly applicable to MeshForge's LoRa<>WiFi scenario as a WiFi transport backend. Their captive portal pattern could surface mesh network access to WiFi clients.
+4. **MeshLinkFoundation WiFi gateway pattern** -- Their hostapd/dnsmasq/iptables stack is directly applicable to MeshAnchor's LoRa<>WiFi scenario as a WiFi transport backend. Their captive portal pattern could surface mesh network access to WiFi clients.
 
 ---
 
-## 2. MeshForge Gateway Architecture (Current State)
+## 2. MeshAnchor Gateway Architecture (Current State)
 
 ### 2.1 Bridge Modes
 
-MeshForge supports 6 bridge modes configured via `bridge_mode` in `GatewayConfig` (`src/gateway/config.py:370-378`):
+MeshAnchor supports 6 bridge modes configured via `bridge_mode` in `GatewayConfig` (`src/gateway/config.py:370-378`):
 
 | Mode | Transport | Protocol Pair | Status |
 |------|-----------|---------------|--------|
@@ -76,13 +76,13 @@ all_to_all         -> Any direction
 
 ## 3. Gateway Scenario Analysis
 
-### 3.1 Scenario A: Meshtastic Short Turbo <> MeshForge <> Long Fast
+### 3.1 Scenario A: Meshtastic Short Turbo <> MeshAnchor <> Long Fast
 
 **Status: IMPLEMENTED** (`src/gateway/mesh_bridge.py`, 531 lines)
 
 ```
  ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
- │  SHORT TURBO     │         │    MeshForge      │         │   LONG FAST      │
+ │  SHORT TURBO     │         │    MeshAnchor      │         │   LONG FAST      │
  │  Local Mesh      │◄───────►│  Preset Bridge    │◄───────►│   Rural Mesh     │
  │  ~500 B/s        │  TCP    │  (mesh_bridge.py) │  TCP    │   ~50 B/s        │
  │  Short range     │ :4404   │  Dedup + Queue    │ :4403   │   Max range      │
@@ -145,13 +145,13 @@ config = GatewayConfig.template_dual_preset_bridge(
 
 ---
 
-### 3.2 Scenario B: Meshtastic <> MeshForge <> MeshCore
+### 3.2 Scenario B: Meshtastic <> MeshAnchor <> MeshCore
 
 **Status: IMPLEMENTED (Alpha branch)** (`meshcore_handler.py`, `canonical_message.py`, `meshcore_bridge_mixin.py`)
 
 ```
  ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
- │  MESHTASTIC      │         │    MeshForge      │         │   MESHCORE       │
+ │  MESHTASTIC      │         │    MeshAnchor      │         │   MESHCORE       │
  │  Mesh Network    │◄───────►│  3-Way Bridge     │◄───────►│   Mesh Network   │
  │  906.875 MHz     │ TCP/    │  (rns_bridge.py)  │ Serial/ │   910.525 MHz    │
  │  SF11, 250kHz    │ MQTT    │  CanonicalMessage │ TCP/BLE │   SF7, 62.5kHz   │
@@ -231,13 +231,13 @@ def should_bridge(self, filter_mqtt=False, filter_internet_to_meshcore=True):
 
 ---
 
-### 3.3 Scenario C: LoRa <> MeshForge <> WiFi
+### 3.3 Scenario C: LoRa <> MeshAnchor <> WiFi
 
-**Status: PARTIALLY EXISTS** (RNS supports WiFi transport; no dedicated WiFi AP mode in MeshForge)
+**Status: PARTIALLY EXISTS** (RNS supports WiFi transport; no dedicated WiFi AP mode in MeshAnchor)
 
 ```
  ┌──────────────────┐         ┌──────────────────────────────┐         ┌──────────────────┐
- │  LoRa MESH       │         │         MeshForge RPi        │         │   WiFi CLIENTS   │
+ │  LoRa MESH       │         │         MeshAnchor RPi        │         │   WiFi CLIENTS   │
  │  (Meshtastic or  │◄───────►│  ┌─────────┐  ┌───────────┐ │◄───────►│   Phones/Laptops │
  │   MeshCore or    │ Radio   │  │ Gateway │  │ hostapd   │ │  WiFi   │   running         │
  │   RNS+LoRa)      │         │  │ Bridge  │  │ AP Mode   │ │  AP     │   Sideband/       │
@@ -252,7 +252,7 @@ def should_bridge(self, filter_mqtt=False, filter_internet_to_meshcore=True):
 
 **Option 1: RNS WiFi Interface (Simplest)**
 
-RNS natively supports TCP/IP transport. If MeshForge creates a WiFi AP (hostapd), WiFi clients running RNS apps (Sideband, NomadNet) connect to the AP and reach the LoRa mesh via `rnsd`:
+RNS natively supports TCP/IP transport. If MeshAnchor creates a WiFi AP (hostapd), WiFi clients running RNS apps (Sideband, NomadNet) connect to the AP and reach the LoRa mesh via `rnsd`:
 
 ```
 WiFi Client (Sideband) -> WiFi AP -> rnsd TCP -> RNS Interface -> LoRa Radio -> Mesh
@@ -272,23 +272,23 @@ This is read-heavy (monitoring), but write-back is possible via `meshtastic --se
 
 **Option 3: Captive Portal Gateway (MeshLinkFoundation Pattern)**
 
-WiFi clients connect to a MeshForge hotspot and see a web-based interface for the mesh network -- message board, node map, weather data. No mesh protocol knowledge needed on the client side.
+WiFi clients connect to a MeshAnchor hotspot and see a web-based interface for the mesh network -- message board, node map, weather data. No mesh protocol knowledge needed on the client side.
 
 #### MeshLinkFoundation Adaptation
 
 MeshLinkFoundation's `meshlink-wifi-gateway` provides a ready-made WiFi AP stack for Raspberry Pi:
 
-| Component | MeshLink Implementation | MeshForge Adaptation |
+| Component | MeshLink Implementation | MeshAnchor Adaptation |
 |-----------|------------------------|---------------------|
-| WiFi AP | `hostapd` with WPA2 on wlan0 | Same -- configure SSID as "MeshForge" |
+| WiFi AP | `hostapd` with WPA2 on wlan0 | Same -- configure SSID as "MeshAnchor" |
 | DHCP/DNS | `dnsmasq` (192.168.50.0/24) | Same subnet, different domain |
-| Traffic redirect | iptables REDIRECT port 80->3000 | Redirect to MeshForge web interface |
+| Traffic redirect | iptables REDIRECT port 80->3000 | Redirect to MeshAnchor web interface |
 | Captive portal | Node.js broker with service tiers | Replace with mesh status/messaging page |
-| Service management | systemd units | Integrate with MeshForge service_check.py |
+| Service management | systemd units | Integrate with MeshAnchor service_check.py |
 | Multi-node | Tailscale VPN between gateways | Applicable for distributed mesh gateways |
 
 **What to take**: hostapd config, dnsmasq setup, iptables rules, systemd patterns.
-**What to skip**: Stripe payments, service tiers, Node.js broker (replace with Python/MeshForge native).
+**What to skip**: Stripe payments, service tiers, Node.js broker (replace with Python/MeshAnchor native).
 
 #### Hash/Addressing Implications
 
@@ -301,7 +301,7 @@ WiFi is a Layer 2 transport. Protocol-level addressing passes through unmodified
 
 | Gap | Severity | Notes |
 |-----|----------|-------|
-| No WiFi AP management | High | MeshForge cannot create/manage a hotspot |
+| No WiFi AP management | High | MeshAnchor cannot create/manage a hotspot |
 | No captive portal | High | No web interface for non-mesh WiFi clients |
 | No bandwidth management | Medium | LoRa throughput (~50-500 B/s) << WiFi expectations |
 | No client isolation | Medium | WiFi clients could interfere with each other |
@@ -309,13 +309,13 @@ WiFi is a Layer 2 transport. Protocol-level addressing passes through unmodified
 
 ---
 
-### 3.4 Scenario D: Meshtastic <> MeshForge <> RNS (Production)
+### 3.4 Scenario D: Meshtastic <> MeshAnchor <> RNS (Production)
 
 **Status: PRODUCTION** (main branch, `mqtt_bridge` mode recommended)
 
 ```
  ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
- │  MESHTASTIC      │         │    MeshForge      │         │   RNS/LXMF       │
+ │  MESHTASTIC      │         │    MeshAnchor      │         │   RNS/LXMF       │
  │  Mesh Network    │◄───────►│  Gateway Bridge   │◄───────►│   Network        │
  │  LoRa Radio      │ MQTT/   │  (rns_bridge.py)  │  LXMF   │   LoRa/TCP/I2P   │
  │  !aabbccdd IDs   │ TCP     │  1,570 lines      │  API    │   128-bit hashes │
@@ -326,7 +326,7 @@ WiFi is a Layer 2 transport. Protocol-level addressing passes through unmodified
 
 #### How It Works (MQTT Mode -- Recommended)
 
-1. MeshForge subscribes to Meshtastic MQTT topics (`msh/{region}/2/json/{channel}/#`)
+1. MeshAnchor subscribes to Meshtastic MQTT topics (`msh/{region}/2/json/{channel}/#`)
 2. JSON-decoded mesh packets are normalized to `CanonicalMessage` (`canonical_message.py:101`)
 3. Router determines if message should cross to RNS (`message_routing.py:55-64`)
 4. For RNS delivery, message is wrapped in LXMF format and sent via `rnsd`
@@ -343,11 +343,11 @@ This is the most challenging address mapping because the protocols have **zero a
 | Crypto binding | None (v2.4-), TOFU (v2.5+) | Cryptographic (Ed25519 verified) |
 | Spoofability | Easy (just set node ID) | Impossible (need private key) |
 
-MeshForge tracks nodes in a unified registry with network-prefixed IDs:
+MeshAnchor tracks nodes in a unified registry with network-prefixed IDs:
 - Meshtastic nodes: `mesh_!12345678`
 - RNS nodes: `rns_abcd1234efgh5678`
 
-Cross-network messages appear to originate from MeshForge's own identity on each network.
+Cross-network messages appear to originate from MeshAnchor's own identity on each network.
 
 #### Broadcast Asymmetry
 
@@ -429,9 +429,9 @@ Source: `.claude/research/dual_protocol_meshcore.md:59`: "MeshCore uses a non-st
 | **Verification** | Trust on First Use (v2.5+) | Cryptographic (Ed25519 signature) | Cryptographic (non-standard Ed25519) |
 | **Cross-protocol mapping** | Cannot derive from RNS/MeshCore | Cannot derive from Meshtastic/MeshCore | Cannot derive from Meshtastic/RNS |
 
-### 4.3 What MeshForge Does Instead
+### 4.3 What MeshAnchor Does Instead
 
-Since hash mapping is impossible, MeshForge uses three strategies:
+Since hash mapping is impossible, MeshAnchor uses three strategies:
 
 **Strategy 1: Network-Prefixed Identifiers**
 
@@ -454,7 +454,7 @@ destination_address: Optional[str]   # Network-native address or None
 destination_network: Optional[str]   # Set by router
 ```
 
-When a message crosses from Meshtastic to MeshCore, the `source_address` retains the Meshtastic `!aabbccdd` format. The message appears on MeshCore as originating from MeshForge's own MeshCore identity, with the original sender noted in the message text (if prefix tagging is enabled).
+When a message crosses from Meshtastic to MeshCore, the `source_address` retains the Meshtastic `!aabbccdd` format. The message appears on MeshCore as originating from MeshAnchor's own MeshCore identity, with the original sender noted in the message text (if prefix tagging is enabled).
 
 **Strategy 3: Direction-Based Routing (Not Address-Based)**
 
@@ -479,7 +479,7 @@ This bypasses the hash translation problem entirely -- the router doesn't need t
 
 ### 4.5 Theoretical Contact Mapping Table
 
-For cross-protocol DMs to work, MeshForge would need a contact mapping table:
+For cross-protocol DMs to work, MeshAnchor would need a contact mapping table:
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -493,7 +493,7 @@ For cross-protocol DMs to work, MeshForge would need a contact mapping table:
 └──────────────┴────────────────────┴──────────────────────────────┘
 ```
 
-This would require manual registration or an automated discovery protocol where users on multiple networks advertise their cross-protocol identities. Neither exists in MeshForge today.
+This would require manual registration or an automated discovery protocol where users on multiple networks advertise their cross-protocol identities. Neither exists in MeshAnchor today.
 
 ---
 
@@ -513,21 +513,21 @@ This would require manual registration or an automated discovery protocol where 
 
 ### 5.3 Feature Adaptation Matrix
 
-| MeshLink Feature | What It Does | MeshForge Relevance | Adaptable? | Priority |
+| MeshLink Feature | What It Does | MeshAnchor Relevance | Adaptable? | Priority |
 |-----------------|-------------|---------------------|------------|----------|
 | **hostapd WiFi AP** | Creates SSID "MeshLink" on wlan0 | WiFi transport for LoRa<>WiFi bridge | Yes | High |
 | **dnsmasq DHCP/DNS** | 192.168.50.0/24 subnet, DHCP .10-.100 | WiFi client IP assignment | Yes | High |
-| **iptables REDIRECT** | Port 80 -> 3000 (captive portal) | Redirect to MeshForge web UI | Yes | High |
+| **iptables REDIRECT** | Port 80 -> 3000 (captive portal) | Redirect to MeshAnchor web UI | Yes | High |
 | **systemd services** | hostapd + dnsmasq persistence | Integrate with `service_check.py` | Yes | High |
 | **Captive portal** | Landing page on WiFi connect | Mesh network status/messaging page | Pattern only | Medium |
 | **Tailscale VPN** | Secure inter-node connectivity | Distributed gateway management | Yes | Medium |
-| **Operator dashboard** | Multi-node stats aggregation | Parallel to MeshForge TUI monitoring | Patterns | Low |
+| **Operator dashboard** | Multi-node stats aggregation | Parallel to MeshAnchor TUI monitoring | Patterns | Low |
 | **Service tiers/Stripe** | Paid WiFi access levels | Not relevant for mesh networking | No | N/A |
 | **MESH token crypto** | Cryptocurrency payments | Not relevant | No | N/A |
 
-### 5.4 Concrete Adaptation: WiFi AP Module for MeshForge
+### 5.4 Concrete Adaptation: WiFi AP Module for MeshAnchor
 
-Using MeshLinkFoundation patterns, a MeshForge WiFi AP module would:
+Using MeshLinkFoundation patterns, a MeshAnchor WiFi AP module would:
 
 ```python
 # Hypothetical: src/utils/wifi_ap.py (adapting MeshLink patterns)
@@ -536,7 +536,7 @@ Using MeshLinkFoundation patterns, a MeshForge WiFi AP module would:
 HOSTAPD_CONF = """
 interface=wlan0
 driver=nl80211
-ssid=MeshForge
+ssid=MeshAnchor
 hw_mode=g
 channel=7
 wmm_enabled=0
@@ -554,7 +554,7 @@ rsn_pairwise=CCMP
 DNSMASQ_CONF = """
 interface=wlan0
 dhcp-range=192.168.50.10,192.168.50.100,255.255.255.0,24h
-address=/meshforge.local/192.168.50.1
+address=/meshanchor.local/192.168.50.1
 """
 
 # 3. iptables rules (MeshLink uses REDIRECT, not DNAT -- avoids routing issues)
@@ -576,8 +576,8 @@ address=/meshforge.local/192.168.50.1
 When messages cross protocol boundaries, **end-to-end encryption is broken by design**:
 
 ```
-Meshtastic (AES-256-CTR) -> MeshForge [PLAINTEXT] -> MeshCore (AES-128+HMAC)
-Meshtastic (AES-256-CTR) -> MeshForge [PLAINTEXT] -> RNS (AES-256-CBC+HMAC)
+Meshtastic (AES-256-CTR) -> MeshAnchor [PLAINTEXT] -> MeshCore (AES-128+HMAC)
+Meshtastic (AES-256-CTR) -> MeshAnchor [PLAINTEXT] -> RNS (AES-256-CBC+HMAC)
 ```
 
 The gateway must decrypt on one side and re-encrypt on the other. This means:
@@ -589,7 +589,7 @@ The gateway must decrypt on one side and re-encrypt on the other. This means:
 
 ### 6.2 Loop Prevention
 
-Multi-bridge scenarios (e.g., two MeshForge gateways both bridging Meshtastic<>RNS) can create infinite loops. Current mitigations:
+Multi-bridge scenarios (e.g., two MeshAnchor gateways both bridging Meshtastic<>RNS) can create infinite loops. Current mitigations:
 
 | Mechanism | Location | How It Works |
 |-----------|----------|-------------|
@@ -620,7 +620,7 @@ Multi-bridge scenarios (e.g., two MeshForge gateways both bridging Meshtastic<>R
 **Solution**: Add MQTT subscription mode (like `rns_bridge.py`'s mqtt_bridge mode) to receive from both presets without blocking web clients.
 
 ### Priority 2: WiFi AP Management Module
-**Current**: No WiFi AP capability in MeshForge.
+**Current**: No WiFi AP capability in MeshAnchor.
 **Solution**: Adapt MeshLinkFoundation's hostapd/dnsmasq/iptables pattern into a `src/utils/wifi_ap.py` module. Use `service_check.py` for systemd integration.
 **Enables**: LoRa<>WiFi scenario, captive portal for non-mesh clients, field-deployed mesh access points.
 

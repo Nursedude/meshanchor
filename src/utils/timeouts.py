@@ -1,5 +1,5 @@
 """
-MeshForge Timeout Constants - Single Source of Truth.
+MeshAnchor Timeout Constants - Single Source of Truth.
 
 All timeout values used across the codebase should be imported from here.
 Organized by context for easy discovery.
@@ -75,7 +75,7 @@ GPSD_CONNECT = 3.0  # seconds
 CONNECTIVITY_CHECK = 3.0  # seconds
 
 # RNS RPC call timeout (local Unix socket, should respond in <100ms)
-# Used in meshforge_wrapper.py (hardcoded there since wrapper can't import this)
+# Used in meshanchor_wrapper.py (hardcoded there since wrapper can't import this)
 RNS_RPC = 3  # seconds
 
 # =============================================================================

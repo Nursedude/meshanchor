@@ -12,7 +12,7 @@ from rich.panel import Panel
 console = Console()
 
 CONFIG_PATH = "/etc/meshtasticd/config.yaml"
-CONFIG_D_PATH = "/etc/meshtasticd/config.d/meshforge-overrides.yaml"
+CONFIG_D_PATH = "/etc/meshtasticd/config.d/meshanchor-overrides.yaml"
 
 
 class ConfigYamlEditor:
@@ -79,7 +79,7 @@ class ConfigYamlEditor:
                 return True
 
             with open(overlay_path, 'w') as f:
-                f.write("# MeshForge configuration overrides\n")
+                f.write("# MeshAnchor configuration overrides\n")
                 f.write("# These settings override /etc/meshtasticd/config.yaml\n")
                 f.write("# To reset: sudo rm this file and restart meshtasticd\n\n")
                 yaml.dump(overlay, f, default_flow_style=False, sort_keys=False)

@@ -1,4 +1,4 @@
-# MeshForge Documentation Index
+# MeshAnchor Documentation Index
 
 Quick navigation for AI assistants. Load only what you need.
 
@@ -14,7 +14,7 @@ Quick navigation for AI assistants. Load only what you need.
 | File | Purpose |
 |------|---------|
 | `foundations/domain_architecture.md` | Core vs Plugin, privilege separation |
-| `foundations/meshforge_ecosystem.md` | All 5 repos, boundaries, APIs |
+| `foundations/meshanchor_ecosystem.md` | All 5 repos, boundaries, APIs |
 | `foundations/tui_architecture.md` | Mixin pattern, DialogBackend, adding features |
 | `foundations/ui_design_decisions.md` | TUI design principles |
 | `foundations/persistent_issues.md` | Recurring bugs & resolution patterns |
@@ -62,8 +62,8 @@ Quick navigation for AI assistants. Load only what you need.
 | `research/maps_double_tap.md` | Map feature research |
 | `research/session_rns_address_in_use.md` | RNS address conflict resolution |
 | `research/firmware_viability.md` | Firmware flashing viability |
-| `research/meshforge_enhancement_todos.md` | Enhancement backlog |
-| `export/MESHFORGE_INTEGRATION.md` | MQTT integration guide (ecosystem) |
+| `research/meshanchor_enhancement_todos.md` | Enhancement backlog |
+| `export/MESHANCHOR_INTEGRATION.md` | MQTT integration guide (ecosystem) |
 
 ### Hardware
 | File | Purpose |

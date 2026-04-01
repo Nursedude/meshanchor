@@ -1,4 +1,4 @@
-# MeshForge Field Testing QA Plan
+# MeshAnchor Field Testing QA Plan
 
 > **Purpose**: Structured QA protocol for features with unit tests but no real-world validation
 > **Author**: WH6GXZ + Claude Code
@@ -10,7 +10,7 @@
 
 ## Priority 1: Gateway Bridge (MQTT Mode)
 
-The gateway bridge is MeshForge's core mission feature. It has 140+ unit tests
+The gateway bridge is MeshAnchor's core mission feature. It has 140+ unit tests
 (`tests/test_rns_bridge.py`) but has never bridged a real Meshtastic ↔ RNS message.
 
 ### Prerequisites
@@ -45,7 +45,7 @@ The gateway bridge is MeshForge's core mission feature. It has 140+ unit tests
 1. While bridge is running, send 3 messages from Meshtastic side
 2. Kill the bridge process (`Ctrl+C` or stop via TUI)
 3. Restart the bridge
-4. **PASS**: Queued messages delivered after restart (check SQLite: `~/.config/meshforge/message_queue.db`)
+4. **PASS**: Queued messages delivered after restart (check SQLite: `~/.config/meshanchor/message_queue.db`)
 5. **FAIL**: Messages lost on restart
 
 #### GW-05: Circuit Breaker
@@ -166,7 +166,7 @@ Real hardware testing requires a companion radio.
 4. **FAIL**: Empty list despite known MeshCore nodes in range
 
 #### MC-04: Message Send via MeshCore
-1. Send a message from MeshForge TUI to MeshCore network
+1. Send a message from MeshAnchor TUI to MeshCore network
 2. Verify receipt on another MeshCore device
 3. **PASS**: Message delivered, content intact (within 160-byte limit)
 4. **FAIL**: Message lost, truncated incorrectly, or send error

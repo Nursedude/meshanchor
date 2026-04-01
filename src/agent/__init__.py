@@ -1,7 +1,7 @@
-"""MeshForge Remote Management Agent.
+"""MeshAnchor Remote Management Agent.
 
 Based on NGINX Agent architecture - provides remote management capabilities
-for MeshForge NOC instances.
+for MeshAnchor NOC instances.
 
 This module provides:
 - AgentDaemon: Main agent process with metrics collection and command handling
@@ -13,7 +13,7 @@ Example Usage:
 
     # Create and start agent
     config = AgentConfig(
-        instance_id="meshforge-001",
+        instance_id="meshanchor-001",
         management_host="mgmt.example.com",
         management_port=9443,
     )

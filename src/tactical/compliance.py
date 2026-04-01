@@ -1,5 +1,5 @@
 """
-Ham Compliance Module for MeshForge Tactical Messaging.
+Ham Compliance Module for MeshAnchor Tactical Messaging.
 
 Enforces CLEAR/SECURE encryption modes per FCC Part 97:
 - CLEAR: No encryption, ham-legal. Required on amateur radio frequencies.

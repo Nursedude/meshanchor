@@ -1,5 +1,5 @@
 """
-MeshForge Device Backup and Restore Module
+MeshAnchor Device Backup and Restore Module
 
 Provides backup and restore functionality for Meshtastic device configurations.
 Backups are stored in JSON format for portability and human readability.
@@ -28,12 +28,12 @@ class DeviceBackupManager:
         """Initialize backup manager.
 
         Args:
-            backup_dir: Custom backup directory. Defaults to ~/.config/meshforge/backups/
+            backup_dir: Custom backup directory. Defaults to ~/.config/meshanchor/backups/
         """
         if backup_dir:
             self.backup_dir = Path(backup_dir)
         else:
-            self.backup_dir = get_real_user_home() / ".config" / "meshforge" / self.BACKUP_DIR_NAME
+            self.backup_dir = get_real_user_home() / ".config" / "meshanchor" / self.BACKUP_DIR_NAME
 
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"[Backup] Initialized backup manager at {self.backup_dir}")
@@ -431,7 +431,7 @@ def main():
     """Command-line interface for backup/restore."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="MeshForge Device Backup/Restore")
+    parser = argparse.ArgumentParser(description="MeshAnchor Device Backup/Restore")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # Export command

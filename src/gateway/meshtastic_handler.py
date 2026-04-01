@@ -24,9 +24,17 @@ from .base_handler import BaseMessageHandler
 from .config import GatewayConfig
 from .node_tracker import UnifiedNode
 from .reconnect import ReconnectStrategy
-from utils.meshtastic_connection import (
-    clear_stale_connections, get_connection_manager, wait_for_cooldown
-)
+# Meshtastic connection — optional gateway in MeshAnchor
+try:
+    from utils.meshtastic_connection import (
+        clear_stale_connections, get_connection_manager, wait_for_cooldown
+    )
+    _HAS_MESHTASTIC_CONN = True
+except ImportError:
+    _HAS_MESHTASTIC_CONN = False
+    clear_stale_connections = lambda: None
+    get_connection_manager = lambda: None
+    wait_for_cooldown = lambda: None
 try:
     from utils.websocket_server import broadcast_message
 except ImportError:

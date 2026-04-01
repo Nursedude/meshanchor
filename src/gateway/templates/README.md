@@ -1,4 +1,4 @@
-# MeshForge Gateway Configuration Templates
+# MeshAnchor Gateway Configuration Templates
 
 Pre-configured gateway templates for common bridging scenarios.
 
@@ -55,13 +55,13 @@ Bridges two Meshtastic networks with different LoRa presets.
 1. Choose a template and copy it to your config directory:
 
 ```bash
-cp meshtastic_rns_bridge.json ~/.config/meshforge/gateway.json
+cp meshtastic_rns_bridge.json ~/.config/meshanchor/gateway.json
 ```
 
 2. Edit the configuration:
 
 ```bash
-nano ~/.config/meshforge/gateway.json
+nano ~/.config/meshanchor/gateway.json
 ```
 
 3. Adjust settings for your environment:
@@ -73,14 +73,14 @@ nano ~/.config/meshforge/gateway.json
 4. Test the configuration:
 
 ```bash
-# Via MeshForge CLI
+# Via MeshAnchor CLI
 python3 -m src.commands.gateway test
 ```
 
 5. Start the gateway:
 
 ```bash
-# Via MeshForge CLI
+# Via MeshAnchor CLI
 python3 -m src.commands.gateway start
 ```
 
@@ -99,7 +99,7 @@ python3 -m src.commands.gateway start
 ```json
 {
   "enabled": true,           // Enable the gateway
-  "auto_start": false,       // Start on MeshForge launch
+  "auto_start": false,       // Start on MeshAnchor launch
   "bridge_mode": "...",      // See modes above
   "log_level": "INFO",       // DEBUG, INFO, WARNING, ERROR
   "log_messages": true       // Log bridged message content
@@ -130,9 +130,9 @@ python3 -m src.commands.gateway start
 
 ```bash
 # Via journalctl (recommended for RPi)
-journalctl -t meshforge -f | grep gateway
+journalctl -t meshanchor -f | grep gateway
 
-# Via MeshForge CLI
+# Via MeshAnchor CLI
 python3 -m src.commands.gateway status
 ```
 

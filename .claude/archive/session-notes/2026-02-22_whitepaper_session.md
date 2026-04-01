@@ -1,6 +1,6 @@
 # Session Notes: 2026-02-22 — Whitepaper, README, Doc Cleanup
 
-**Branch**: `claude/meshforge-readme-whitepaper-aXdoU`
+**Branch**: `claude/meshanchor-readme-whitepaper-aXdoU`
 **AI Partner**: Claude Opus 4.6
 **Session Focus**: Identity refresh, whitepaper for AI developers, stale doc cleanup
 
@@ -14,7 +14,7 @@
 - **ARCHITECTURE.md** — found severely stale (v0.4.3-beta, GTK diagrams)
 - **CODE_REVIEW.md** — found stale (v0.4.7-beta, superseded by CODE_REVIEW_REPORT.md)
 - **v1.0_roadmap.md** — found multiple outdated references (GTK, test counts, file names)
-- **meshforge_ecosystem.md** — 5-repo architecture (current, accurate)
+- **meshanchor_ecosystem.md** — 5-repo architecture (current, accurate)
 - **78 .md files** across `.claude/` — systematic staleness audit
 - **TUI codebase** — main.py (46 mixins), gateway, tests, diagnostics, knowledge base
 
@@ -39,7 +39,7 @@
 - CLAUDE.md (updated 2026-02-20)
 - persistent_issues.md (updated 2026-02-21)
 - INDEX.md (updated 2026-02-21)
-- meshforge_ecosystem.md (updated 2026-02-17)
+- meshanchor_ecosystem.md (updated 2026-02-17)
 - HamClock correctly documented as legacy/optional everywhere
 - MeshCore correctly labeled as alpha everywhere
 
@@ -50,11 +50,11 @@ Most are properly archived in `persistent_issues_archive.md` and historical arti
 
 ## What Was Produced
 
-1. **Substack Whitepaper** → `.claude/articles/2026-02-22_meshforge_whitepaper_ai_developers.md`
+1. **Substack Whitepaper** → `.claude/articles/2026-02-22_meshanchor_whitepaper_ai_developers.md`
    - ~1,000 words, ~3min read
    - Mixed voice: first person for narrative, third person for technical
    - Audience: AI developers, Claude Code users
-   - Sections: Problem, What MeshForge Is, AI Development Model, Roadmap, Challenges, CTA
+   - Sections: Problem, What MeshAnchor Is, AI Development Model, Roadmap, Challenges, CTA
 
 2. **TUI Reliability Q&A** — output in conversation (6 questions)
 
@@ -91,4 +91,4 @@ Session remained focused and productive. No signs of context degradation.
 
 ---
 
-*Session ended cleanly. All deliverables committed to `claude/meshforge-readme-whitepaper-aXdoU`.*
+*Session ended cleanly. All deliverables committed to `claude/meshanchor-readme-whitepaper-aXdoU`.*

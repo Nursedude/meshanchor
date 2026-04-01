@@ -65,7 +65,7 @@ class TestRNSConfig:
         config = RNSConfig()
 
         assert config.config_dir == ""
-        assert config.identity_name == "meshforge_gateway"
+        assert config.identity_name == "meshanchor_gateway"
         assert config.announce_interval == 300
         assert config.propagation_node == ""
 
@@ -317,7 +317,7 @@ class TestGatewayConfigPath:
 
             assert tmp_path in path.parents or path.parent.parent == tmp_path
             assert path.name == "gateway.json"
-            assert "meshforge" in str(path)
+            assert "meshanchor" in str(path)
 
 
 class TestTelemetryRoundTrip:

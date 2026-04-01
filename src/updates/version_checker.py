@@ -1,5 +1,5 @@
 """
-MeshForge Version Checker
+MeshAnchor Version Checker
 
 Checks installed versions of:
 - meshtasticd (Linux native daemon)
@@ -70,8 +70,8 @@ def compare_versions(installed: str, latest: str) -> bool:
     return latest_tuple > inst_tuple
 
 
-def get_meshforge_version() -> Optional[str]:
-    """Get installed MeshForge version from __version__.py"""
+def get_meshanchor_version() -> Optional[str]:
+    """Get installed MeshAnchor version from __version__.py"""
     try:
         # Import from the package
         if _HAS_VERSION:
@@ -86,14 +86,14 @@ def get_meshforge_version() -> Optional[str]:
                 return match.group(1)
 
     except Exception as e:
-        logger.debug(f"Error getting MeshForge version: {e}")
+        logger.debug(f"Error getting MeshAnchor version: {e}")
 
     return None
 
 
-def get_latest_meshforge_version() -> Optional[str]:
-    """Get latest MeshForge version from GitHub"""
-    cache_key = 'meshforge_latest'
+def get_latest_meshanchor_version() -> Optional[str]:
+    """Get latest MeshAnchor version from GitHub"""
+    cache_key = 'meshanchor_latest'
 
     # Check cache
     if cache_key in _version_cache:
@@ -108,8 +108,8 @@ def get_latest_meshforge_version() -> Optional[str]:
         ctx = ssl.create_default_context()
 
         # Check the __version__.py file in the main branch
-        url = 'https://raw.githubusercontent.com/Nursedude/meshforge/main/src/__version__.py'
-        req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge'})
+        url = 'https://raw.githubusercontent.com/Nursedude/meshanchor/main/src/__version__.py'
+        req = urllib.request.Request(url, headers={'User-Agent': 'MeshAnchor'})
 
         with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
             content = response.read().decode()
@@ -126,7 +126,7 @@ def get_latest_meshforge_version() -> Optional[str]:
                 return version
 
     except Exception as e:
-        logger.debug(f"Error getting latest MeshForge version: {e}")
+        logger.debug(f"Error getting latest MeshAnchor version: {e}")
 
     return None
 
@@ -280,7 +280,7 @@ def get_latest_meshtasticd_version() -> Optional[str]:
         ctx = ssl.create_default_context()
 
         url = 'https://api.github.com/repos/meshtastic/firmware/releases/latest'
-        req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'MeshAnchor'})
 
         with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
             data = json.loads(response.read().decode())
@@ -317,7 +317,7 @@ def get_latest_meshtastic_cli_version() -> Optional[str]:
         ctx = ssl.create_default_context()
 
         url = 'https://pypi.org/pypi/meshtastic/json'
-        req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'MeshAnchor'})
 
         with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
             data = json.loads(response.read().decode())
@@ -347,14 +347,14 @@ def check_all_versions() -> Dict[str, VersionInfo]:
     """Check all component versions and return status"""
     results = {}
 
-    # MeshForge itself
-    meshforge = VersionInfo(name='MeshForge')
-    meshforge.installed = get_meshforge_version()
-    meshforge.latest = get_latest_meshforge_version()
-    if meshforge.installed and meshforge.latest:
-        meshforge.update_available = compare_versions(meshforge.installed, meshforge.latest)
-    meshforge.update_command = 'meshforge-update'  # Special command handled by TUI
-    results['meshforge'] = meshforge
+    # MeshAnchor itself
+    meshanchor = VersionInfo(name='MeshAnchor')
+    meshanchor.installed = get_meshanchor_version()
+    meshanchor.latest = get_latest_meshanchor_version()
+    if meshanchor.installed and meshanchor.latest:
+        meshanchor.update_available = compare_versions(meshanchor.installed, meshanchor.latest)
+    meshanchor.update_command = 'meshanchor-update'  # Special command handled by TUI
+    results['meshanchor'] = meshanchor
 
     # meshtasticd
     meshtasticd = VersionInfo(name='meshtasticd')

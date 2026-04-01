@@ -1,4 +1,4 @@
-"""Connectivity diagnostic rules for MeshForge Diagnostic Engine."""
+"""Connectivity diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 

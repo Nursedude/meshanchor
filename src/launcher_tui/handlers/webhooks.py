@@ -172,7 +172,7 @@ class WebhooksHandler(BaseHandler):
             self.ctx.wait_for_enter()
             return
         print(f"  Sending test event to {len(enabled)} endpoint(s)...\n")
-        manager.emit(EventType.CUSTOM, {"test": True, "message": "MeshForge webhook test event", "source": "tui_test"})
+        manager.emit(EventType.CUSTOM, {"test": True, "message": "MeshAnchor webhook test event", "source": "tui_test"})
         for ep in enabled:
             print(f"  -> {ep.get('name', '?')}: {ep.get('url', '?')}")
         print("\n  Test event queued for delivery.")

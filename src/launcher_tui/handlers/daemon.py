@@ -1,10 +1,10 @@
 """
 Daemon mode handler — start/stop/status for headless NOC services.
 
-The MeshForge daemon runs gateway bridge, maps, RNS, NomadNet
+The MeshAnchor daemon runs gateway bridge, maps, RNS, NomadNet
 and other services in the background without the TUI.
 
-Batch 10b: Extracted from MeshForgeLauncher._daemon_menu() in main.py.
+Batch 10b: Extracted from MeshAnchorLauncher._daemon_menu() in main.py.
 """
 
 import json
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 class DaemonHandler(BaseHandler):
-    """MeshForge Daemon — headless NOC services."""
+    """MeshAnchor Daemon — headless NOC services."""
 
     handler_id = "daemon"
     menu_section = "system"
 
     def menu_items(self):
         return [
-            ("daemon", "MeshForge Daemon    Headless NOC (maps, RNS, chat)", None),
+            ("daemon", "MeshAnchor Daemon    Headless NOC (maps, RNS, chat)", None),
         ]
 
     def execute(self, action):
@@ -36,12 +36,12 @@ class DaemonHandler(BaseHandler):
             self._daemon_menu()
 
     def _daemon_menu(self):
-        """MeshForge Daemon - headless NOC service manager."""
+        """MeshAnchor Daemon - headless NOC service manager."""
         while True:
             # Check if daemon is running
             daemon_status = "unknown"
             try:
-                pid_file = Path("/run/meshforge/meshforged.pid")
+                pid_file = Path("/run/meshanchor/meshanchord.pid")
                 if pid_file.exists():
                     pid = int(pid_file.read_text().strip())
                     try:
@@ -64,7 +64,7 @@ class DaemonHandler(BaseHandler):
             ]
 
             choice = self.ctx.dialog.menu(
-                "MeshForge Daemon",
+                "MeshAnchor Daemon",
                 "Headless NOC — runs services without the TUI:\n"
                 "  Gateway bridge, maps, RNS, and NomadNet",
                 choices
@@ -89,7 +89,7 @@ class DaemonHandler(BaseHandler):
         from utils.paths import get_real_user_home
 
         try:
-            status_file = get_real_user_home() / ".config" / "meshforge" / "daemon_status.json"
+            status_file = get_real_user_home() / ".config" / "meshanchor" / "daemon_status.json"
             if not status_file.exists():
                 self.ctx.dialog.msgbox("Daemon Status", "No status file found.\nDaemon may not be running.")
                 return
@@ -126,7 +126,7 @@ class DaemonHandler(BaseHandler):
         """Start the daemon via subprocess."""
         if not self.ctx.dialog.yesno(
             "Start Daemon",
-            "Start MeshForge daemon (headless mode)?\n\n"
+            "Start MeshAnchor daemon (headless mode)?\n\n"
             "This will run gateway bridge, health monitoring,\n"
             "and other configured services in the background."
         ):
@@ -219,12 +219,12 @@ class DaemonHandler(BaseHandler):
     def _daemon_logs(self):
         """Show daemon logs."""
         clear_screen()
-        print("=== MeshForge Daemon Logs (last 100 lines) ===\n")
+        print("=== MeshAnchor Daemon Logs (last 100 lines) ===\n")
 
         try:
             # Try journalctl first (systemd)
             result = subprocess.run(
-                ['journalctl', '-u', 'meshforge', '-n', '100',
+                ['journalctl', '-u', 'meshanchor', '-n', '100',
                  '--no-pager', '--output=short-iso'],
                 capture_output=True, text=True, timeout=10
             )
@@ -234,7 +234,7 @@ class DaemonHandler(BaseHandler):
             else:
                 # Fall back to daemon log file
                 from utils.paths import get_real_user_home
-                log_file = get_real_user_home() / ".local" / "share" / "meshforge" / "daemon.log"
+                log_file = get_real_user_home() / ".local" / "share" / "meshanchor" / "daemon.log"
                 if log_file.exists():
                     lines = log_file.read_text().splitlines()
                     for line in lines[-100:]:

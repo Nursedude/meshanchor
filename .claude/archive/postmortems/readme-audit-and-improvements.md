@@ -44,12 +44,12 @@
 
 ---
 
-### Problem 4: "MeshForge owns the complete stack"
+### Problem 4: "MeshAnchor owns the complete stack"
 **Current**: Architecture section says this.
 
-**Reality**: MeshForge connects to meshtasticd and rnsd. It doesn't own them.
+**Reality**: MeshAnchor connects to meshtasticd and rnsd. It doesn't own them.
 
-**Fix**: "MeshForge connects to and manages the complete stack" or just remove the claim.
+**Fix**: "MeshAnchor connects to and manages the complete stack" or just remove the claim.
 
 ---
 
@@ -62,12 +62,12 @@
 
 ---
 
-### Problem 6: "Who Uses MeshForge?" Implies Production Users
+### Problem 6: "Who Uses MeshAnchor?" Implies Production Users
 **Current**: Lists 5 user categories in present tense.
 
 **Reality**: At 0.4.7-beta, there may be early adopters but this reads like marketing.
 
-**Fix**: Change to "Who Is MeshForge For?" — positioning who SHOULD use it, not who does.
+**Fix**: Change to "Who Is MeshAnchor For?" — positioning who SHOULD use it, not who does.
 
 ---
 
@@ -126,7 +126,7 @@ None of this is answered.
 20. **Channel configuration** — The TUI has presets. Verify they write correct configs.
 
 ### P4 — Nice to Have
-21. **Man page update** (`docs/meshforge.1`) — references deleted web UI
+21. **Man page update** (`docs/meshanchor.1`) — references deleted web UI
 22. **SESSION_NOTES.md cleanup** — historical but confusing if someone reads it
 23. **ARCHITECTURE.md** — references deleted files extensively
 
@@ -135,7 +135,7 @@ None of this is answered.
 ## Recommended README Structure (For Our Audience)
 
 ```
-# MeshForge
+# MeshAnchor
 
 One-line: what it does, concretely
 

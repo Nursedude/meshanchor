@@ -70,7 +70,7 @@ def test_invalid_coordinates():
 
 ---
 
-## Test Patterns for MeshForge
+## Test Patterns for MeshAnchor
 
 ### Mocking external services
 ```python

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeshForge Self-Test Script
+MeshAnchor Self-Test Script
 
 Quick diagnostic to verify installation and dependencies.
 
@@ -101,7 +101,7 @@ def check_directory_exists(dirpath, description):
 def main():
     verbose = '--verbose' in sys.argv or '-v' in sys.argv
 
-    print(f"\n{CYAN}MeshForge Self-Test{NC}")
+    print(f"\n{CYAN}MeshAnchor Self-Test{NC}")
     print("=" * 40)
 
     results = {
@@ -146,19 +146,19 @@ def main():
         else:
             results['warnings'] += 1
 
-    # 4. MeshForge modules
-    print(f"\n{CYAN}MeshForge Modules{NC}")
+    # 4. MeshAnchor modules
+    print(f"\n{CYAN}MeshAnchor Modules{NC}")
     # Add src to path
     src_path = Path(__file__).parent.parent / 'src'
     sys.path.insert(0, str(src_path))
 
-    meshforge_modules = [
+    meshanchor_modules = [
         ('utils.diagnostic_engine', 'Diagnostic Engine'),
         ('utils.knowledge_base', 'Knowledge Base'),
         ('utils.coverage_map', 'Coverage Map'),
         ('utils.rf', 'RF Calculations'),
     ]
-    for module, name in meshforge_modules:
+    for module, name in meshanchor_modules:
         if check_import(module, name):
             results['passed'] += 1
         else:
@@ -194,7 +194,7 @@ def main():
             home = Path.home()
 
     config_checks = [
-        (home / '.config' / 'meshforge', 'User config directory'),
+        (home / '.config' / 'meshanchor', 'User config directory'),
         (Path('/etc/meshtasticd'), 'meshtasticd config'),
     ]
     for path, desc in config_checks:
@@ -215,7 +215,7 @@ def main():
 
     # Overall status
     if results['failed'] == 0:
-        print(f"\n{GREEN}MeshForge is ready to use!{NC}")
+        print(f"\n{GREEN}MeshAnchor is ready to use!{NC}")
         print(f"\nRun: {CYAN}sudo python3 src/launcher.py{NC}")
         return 0
     else:

@@ -17,7 +17,7 @@ You are in a persistent development loop. Work autonomously until the task is 10
 
 2. **Execute**
    - Do the next step
-   - Follow MeshForge rules (no shell=True, use get_real_user_home())
+   - Follow MeshAnchor rules (no shell=True, use get_real_user_home())
    - Write tests for new functionality
 
 3. **Verify**
@@ -46,7 +46,7 @@ ALL must be true:
 
 ---
 
-## MeshForge Context
+## MeshAnchor Context
 
 Key paths:
 - Source: `src/`

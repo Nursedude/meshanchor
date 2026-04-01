@@ -1,4 +1,4 @@
-# MeshForge Reliability Assessment
+# MeshAnchor Reliability Assessment
 
 **Date**: 2026-02-04
 **Version**: v0.5.0-beta
@@ -10,7 +10,7 @@
 
 **Overall Rating: B+ (Good with Known Limitations)**
 
-MeshForge demonstrates solid engineering practices for a beta-stage network operations tool. It has mature areas (RF calculations, service management) alongside areas needing hardening (import paths, large file complexity).
+MeshAnchor demonstrates solid engineering practices for a beta-stage network operations tool. It has mature areas (RF calculations, service management) alongside areas needing hardening (import paths, large file complexity).
 
 ---
 
@@ -155,7 +155,7 @@ Documented in `persistent_issues.md`:
 
 ## Conclusion
 
-MeshForge is **production-capable for non-critical operations** with appropriate monitoring. The RF and service management components are well-tested and reliable. The gateway and RNS integration are beta-quality, suitable for experimental deployments with human oversight.
+MeshAnchor is **production-capable for non-critical operations** with appropriate monitoring. The RF and service management components are well-tested and reliable. The gateway and RNS integration are beta-quality, suitable for experimental deployments with human oversight.
 
 The documented persistent issues and active self-review system demonstrate mature engineering practices. The primary risk is running as root with incomplete privilege separation.
 

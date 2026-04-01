@@ -1,4 +1,4 @@
-# MeshForge Missing TUI Features
+# MeshAnchor Missing TUI Features
 
 > **Purpose**: Track features that exist in code but aren't accessible via TUI
 > **Created**: 2026-01-30

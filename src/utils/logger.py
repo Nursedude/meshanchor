@@ -3,7 +3,7 @@
 All installer logging functionality has been merged into logging_config.py.
 This stub re-exports for backward compatibility.
 
-For main MeshForge code, use:
+For main MeshAnchor code, use:
     from utils.logging_config import get_logger
     logger = get_logger(__name__)
 """

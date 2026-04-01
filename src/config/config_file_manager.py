@@ -47,7 +47,7 @@ class ConfigFileManager:
     BOOT_CONFIG = Path("/boot/firmware/config.txt")
     BOOT_CONFIG_ALT = Path("/boot/config.txt")
 
-    # Project templates directory (for MeshForge-provided configs)
+    # Project templates directory (for MeshAnchor-provided configs)
     TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates" / "available.d"
 
     # Required config sections for a working setup
@@ -670,13 +670,13 @@ class ConfigFileManager:
 
             # Check if we have templates to install
             if missing_templates:
-                console.print(f"\n[cyan]Found {len(missing_templates)} MeshForge templates that can be installed:[/cyan]")
+                console.print(f"\n[cyan]Found {len(missing_templates)} MeshAnchor templates that can be installed:[/cyan]")
                 for t in missing_templates[:5]:
                     console.print(f"  [dim]{t}[/dim]")
                 if len(missing_templates) > 5:
                     console.print(f"  [dim]... and {len(missing_templates) - 5} more[/dim]")
 
-                if Confirm.ask("\n[cyan]Install MeshForge templates?[/cyan]", default=True):
+                if Confirm.ask("\n[cyan]Install MeshAnchor templates?[/cyan]", default=True):
                     console.print("\n[cyan]Installing templates...[/cyan]")
                     self.install_templates()
                     available = self.list_available_configs()
@@ -693,7 +693,7 @@ class ConfigFileManager:
                 return
         elif missing_templates:
             # Some templates exist but there are new ones available
-            console.print(f"\n[dim]Tip: {len(missing_templates)} additional MeshForge templates available[/dim]")
+            console.print(f"\n[dim]Tip: {len(missing_templates)} additional MeshAnchor templates available[/dim]")
             console.print(f"[dim]New: {', '.join(missing_templates[:3])}{'...' if len(missing_templates) > 3 else ''}[/dim]")
             if Confirm.ask("[cyan]Install new templates?[/cyan]", default=False):
                 console.print("\n[cyan]Installing templates...[/cyan]")

@@ -1,4 +1,4 @@
-# MeshForge Enhancement TODO List
+# MeshAnchor Enhancement TODO List
 
 **Generated**: 2026-02-02
 **Source**: MeshCore-Meshtastic-Proxy Analysis
@@ -369,32 +369,32 @@ from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 # Message metrics
 messages_received = Counter(
-    'meshforge_messages_received_total',
+    'meshanchor_messages_received_total',
     'Total messages received',
     ['network', 'origin']
 )
 messages_bridged = Counter(
-    'meshforge_messages_bridged_total',
+    'meshanchor_messages_bridged_total',
     'Total messages bridged',
     ['direction']
 )
 messages_dropped = Counter(
-    'meshforge_messages_dropped_total',
+    'meshanchor_messages_dropped_total',
     'Total messages dropped',
     ['reason']
 )
 
 # Queue metrics
-queue_depth = Gauge('meshforge_queue_depth', 'Message queue depth')
+queue_depth = Gauge('meshanchor_queue_depth', 'Message queue depth')
 queue_age_seconds = Histogram(
-    'meshforge_queue_age_seconds',
+    'meshanchor_queue_age_seconds',
     'Age of messages in queue',
     buckets=[1, 5, 10, 30, 60, 300, 600]
 )
 
 # Health metrics
 connection_status = Gauge(
-    'meshforge_connection_status',
+    'meshanchor_connection_status',
     'Connection status (1=connected, 0=disconnected)',
     ['network']
 )

@@ -1,6 +1,6 @@
-# MeshForge Knowledge Healthcheck
+# MeshAnchor Knowledge Healthcheck
 
-Run a comprehensive audit of the MeshForge knowledge base to prevent memory degradation.
+Run a comprehensive audit of the MeshAnchor knowledge base to prevent memory degradation.
 
 ---
 
@@ -46,7 +46,7 @@ Compare documented features vs actual `src/` implementation.
 
 ### 4. Auto-Review Integration
 ```bash
-cd /opt/meshforge/src && python3 -c "
+cd /opt/meshanchor/src && python3 -c "
 from utils.auto_review import ReviewOrchestrator
 r = ReviewOrchestrator()
 report = r.run_full_review()

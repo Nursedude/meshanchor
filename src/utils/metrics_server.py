@@ -118,7 +118,7 @@ def setup_textfile_exporter(
         Background thread (daemon=True, already started)
 
     Usage:
-        # In MeshForge startup
+        # In MeshAnchor startup
         setup_textfile_exporter()
 
         # node_exporter will pick up metrics from the file
@@ -130,7 +130,7 @@ def setup_textfile_exporter(
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    metrics_file = output_path / "meshforge.prom"
+    metrics_file = output_path / "meshanchor.prom"
 
     exporter = PrometheusExporter()
     _stop = stop_event or threading.Event()

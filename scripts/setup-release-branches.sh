@@ -1,10 +1,10 @@
 #!/bin/bash
-# MeshForge Release Branch Setup
+# MeshAnchor Release Branch Setup
 # Creates alpha and beta branches for staged releases
 
 set -e
 
-echo "MeshForge Release Branch Setup"
+echo "MeshAnchor Release Branch Setup"
 echo "==============================="
 echo ""
 

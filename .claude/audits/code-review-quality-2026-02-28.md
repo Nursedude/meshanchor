@@ -1,4 +1,4 @@
-# MeshForge Code Quality Review — 2026-02-28
+# MeshAnchor Code Quality Review — 2026-02-28
 
 **Reviewer**: Dude AI
 **Branch**: `main` (0.5.4-beta)
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-**Hypothesis**: MeshForge is improving toward production readiness since the Feb 26 audit.
+**Hypothesis**: MeshAnchor is improving toward production readiness since the Feb 26 audit.
 
 **Result**: Confirmed. The #1 Critical recommendation (49-mixin explosion → command registry) has been **fully implemented**, representing the largest single architectural improvement in the project's history. `main.py` dropped from 1,947 to 1,148 lines (41% reduction) via a clean Protocol + BaseHandler + TUIContext pattern with 60 handler files. New findings include 2 broken test files from the migration, the largest file growing to 2,261 lines, and 173 subprocess calls without timeout in handlers.
 
@@ -21,7 +21,7 @@
 
 This review applies the scientific method to software quality assessment:
 
-1. **Question**: Is MeshForge improving toward production readiness?
+1. **Question**: Is MeshAnchor improving toward production readiness?
 2. **Background Research**: Prior audit (Feb 26), CLAUDE.md, persistent_issues.md, version history
 3. **Hypothesis**: Handler registry migration improves architecture; other axes hold steady
 4. **Experiment**: Systematic analysis across 6 axes with quantitative measurements
@@ -172,7 +172,7 @@ All 173 violations are in `src/launcher_tui/handlers/` — TUI menu actions call
 `TUIContext.safe_call()` provides structured error handling with:
 - Specific exception types (ImportError, TimeoutExpired, PermissionError, FileNotFoundError, ConnectionError)
 - Actionable user messages (not just "error occurred")
-- Error logging to `~/.cache/meshforge/logs/tui_errors.log`
+- Error logging to `~/.cache/meshanchor/logs/tui_errors.log`
 - Log rotation at 1MB
 - Issue reporting URL in generic error handler
 
@@ -338,7 +338,7 @@ No improvement in documentation consolidation since Feb 26. The 3 overlapping RN
 | `CLAUDE.md` | **STALE** | Architecture tree wrong, needs handler registry update |
 | `foundations/persistent_issues.md` | **MOSTLY CURRENT** | Minor mixin refs |
 | `foundations/domain_architecture.md` | OK | Core vs Plugin model still accurate |
-| `foundations/meshforge_ecosystem.md` | OK | Ecosystem boundaries correct |
+| `foundations/meshanchor_ecosystem.md` | OK | Ecosystem boundaries correct |
 | `foundations/ai_principles.md` | OK | Design philosophy unchanged |
 | `rules/security.md` | OK | MF001-MF004 rules accurate |
 | `rules/testing.md` | **STALE** | Test counts outdated |

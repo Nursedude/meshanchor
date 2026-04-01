@@ -259,7 +259,7 @@ class SystemToolsHandler(BaseHandler):
         clear_screen()
         print("=== Mesh-Related Processes ===\n")
 
-        patterns = ['meshtastic', 'rnsd', 'lxmf', 'nomadnet', 'meshforge', 'python.*mesh']
+        patterns = ['meshtastic', 'rnsd', 'lxmf', 'nomadnet', 'meshanchor', 'python.*mesh']
 
         try:
             result = subprocess.run(
@@ -1274,7 +1274,7 @@ class SystemToolsHandler(BaseHandler):
             filename = self.ctx.dialog.inputbox(
                 "Export Logs",
                 "Export filename:",
-                "/tmp/meshforge_logs.txt"
+                "/tmp/meshanchor_logs.txt"
             )
             if filename:
                 export_path = Path(filename).resolve()
@@ -1319,7 +1319,7 @@ class SystemToolsHandler(BaseHandler):
         self.ctx.dialog.msgbox(
             "Shell Access",
             "Dropping to shell...\n\n"
-            "Type 'exit' to return to MeshForge.\n\n"
+            "Type 'exit' to return to MeshAnchor.\n\n"
             "Useful commands:\n"
             "  meshtastic --info\n"
             "  rnstatus\n"
@@ -1328,7 +1328,7 @@ class SystemToolsHandler(BaseHandler):
         )
 
         clear_screen()
-        print("=== MeshForge Shell ===")
+        print("=== MeshAnchor Shell ===")
         print("Type 'exit' to return to the menu.\n")
 
         # Try to use user's preferred shell

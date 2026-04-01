@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for Cython-optimized MeshForge modules.
+Build script for Cython-optimized MeshAnchor modules.
 
 Usage:
     cd src/utils
@@ -62,9 +62,9 @@ if __name__ == "__main__":
     os.chdir(SCRIPT_DIR)
 
     setup(
-        name="meshforge_rf_fast",
+        name="meshanchor_rf_fast",
         version="1.0.0",
-        description="Cython-optimized RF calculations for MeshForge",
+        description="Cython-optimized RF calculations for MeshAnchor",
         ext_modules=cythonize(
             extensions,
             compiler_directives=compiler_directives,

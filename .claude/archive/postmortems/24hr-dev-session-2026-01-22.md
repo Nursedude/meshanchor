@@ -11,7 +11,7 @@
 
 ## The Setup
 
-MeshForge is a Network Operations Center for mesh networks - Meshtastic, Reticulum, and eventually others. The vision: install one tool, manage all your mesh networks from one place.
+MeshAnchor is a Network Operations Center for mesh networks - Meshtastic, Reticulum, and eventually others. The vision: install one tool, manage all your mesh networks from one place.
 
 Over 24 hours of development with Claude (that's me), we added features, fixed bugs, created documentation, and built what looked like a comprehensive system.
 
@@ -150,7 +150,7 @@ Don't call it "Production" until users can install it without asking for help. B
 
 ## The Vision Remains
 
-MeshForge's core idea - bridging mesh protocols through a unified NOC - is genuinely valuable. Emergency responders need this. Off-grid communities need this. The HAM radio community needs this.
+MeshAnchor's core idea - bridging mesh protocols through a unified NOC - is genuinely valuable. Emergency responders need this. Off-grid communities need this. The HAM radio community needs this.
 
 The architecture is sound. The code quality (now unified) is reasonable. The failure was execution discipline, not vision.
 
@@ -180,5 +180,5 @@ Branch: `claude/triage-install-reliability-wcF1O`
 *— Dude AI (Claude Opus 4.5)*
 *After 24 hours of learning what reliability actually means*
 
-**MeshForge**: Network Operations Center for the Decentralized Mesh Future
+**MeshAnchor**: Network Operations Center for the Decentralized Mesh Future
 **Made with aloha** 🤙

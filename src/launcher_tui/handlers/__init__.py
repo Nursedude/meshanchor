@@ -75,19 +75,17 @@ def get_all_handlers() -> List[Type]:
         ServiceDiscoveryHandler,
     ])
 
-    # Batch 3 — previously converted handlers, now registered
-    from handlers.channel_config import ChannelConfigHandler
+    # Batch 3 — MeshCore (primary), gateway, settings
     from handlers.gateway import GatewayHandler
     from handlers.radio_menu import RadioMenuHandler
     from handlers.settings import SettingsHandler
     from handlers.meshcore import MeshCoreHandler
     from handlers.updates import UpdatesHandler
     handlers.extend([
-        ChannelConfigHandler,
+        MeshCoreHandler,  # Primary radio — listed first
         GatewayHandler,
         RadioMenuHandler,
         SettingsHandler,
-        MeshCoreHandler,
         UpdatesHandler,
     ])
 
@@ -153,19 +151,8 @@ def get_all_handlers() -> List[Type]:
         FirstRunHandler,
     ])
 
-    # Batch 9 — meshtasticd service + radio (split) + inheritance cleanup
-    from handlers.meshtasticd_config import MeshtasticdConfigHandler
-    from handlers.meshtasticd_radio import MeshtasticdRadioHandler
-    from handlers.meshtasticd_lora import MeshtasticdLoRaHandler
-    from handlers.meshtasticd_mqtt import MeshtasticdDeviceMQTTHandler
-    from handlers.meshtasticd_nodedb import MeshtasticdNodeDBHandler
-    handlers.extend([
-        MeshtasticdConfigHandler,
-        MeshtasticdRadioHandler,
-        MeshtasticdLoRaHandler,
-        MeshtasticdDeviceMQTTHandler,
-        MeshtasticdNodeDBHandler,
-    ])
+    # Batch 9 — removed: meshtasticd handlers (Meshtastic-specific)
+    # MeshAnchor uses MeshCore as primary radio; Meshtastic is optional gateway only
 
     # Batch 10 — QA cleanup: about, daemon, reboot, diagnostics, config API
     from handlers.about import AboutHandler

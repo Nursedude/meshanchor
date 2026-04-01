@@ -1,5 +1,5 @@
 """
-Tests for MeshForge event bus system.
+Tests for MeshAnchor event bus system.
 
 Run: python3 -m pytest tests/test_event_bus.py -v
 

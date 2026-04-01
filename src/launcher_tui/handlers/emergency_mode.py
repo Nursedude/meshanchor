@@ -348,7 +348,7 @@ class EmergencyModeHandler(BaseHandler):
 
             if not alerts:
                 print("\n  No active weather alerts for your area.")
-                print("  (Configure location in MeshForge Settings)")
+                print("  (Configure location in MeshAnchor Settings)")
             else:
                 print(f"\n  {len(alerts)} active alert(s):\n")
                 for i, alert in enumerate(alerts[:10], 1):

@@ -1,5 +1,5 @@
 """
-Gateway Diagnostic Tool for MeshForge.
+Gateway Diagnostic Tool for MeshAnchor.
 
 AI-like diagnostic system to help users get RNS and Meshtastic gateway working.
 Checks hardware, software, and configuration - provides actionable fix hints.
@@ -122,7 +122,7 @@ class GatewayDiagnostic:
 
         lines = []
         lines.append("=" * 50)
-        lines.append("  MESHFORGE GATEWAY DIAGNOSTIC")
+        lines.append("  MESHANCHOR GATEWAY DIAGNOSTIC")
         lines.append("=" * 50)
         lines.append("")
 
@@ -267,7 +267,7 @@ class GatewayDiagnostic:
                 name="RNS Config",
                 status=CheckStatus.FAIL,
                 message="Config file not found",
-                fix_hint="Run 'rnsd' once to create default config, or use MeshForge to create one"
+                fix_hint="Run 'rnsd' once to create default config, or use MeshAnchor to create one"
             )
 
         # Check config content
@@ -332,7 +332,7 @@ class GatewayDiagnostic:
                     name="RNS Daemon (rnsd)",
                     status=CheckStatus.WARN,
                     message="Not running",
-                    fix_hint="Start with: rnsd (or enable in MeshForge RNS panel)"
+                    fix_hint="Start with: rnsd (or enable in MeshAnchor RNS panel)"
                 )
         except Exception as e:
             return CheckResult(
@@ -399,14 +399,14 @@ class GatewayDiagnostic:
                     name="Meshtastic RNS Interface",
                     status=CheckStatus.WARN,
                     message=f"File exists but seems incomplete ({size} bytes)",
-                    fix_hint="Re-download from MeshForge RNS panel"
+                    fix_hint="Re-download from MeshAnchor RNS panel"
                 )
         else:
             return CheckResult(
                 name="Meshtastic RNS Interface",
                 status=CheckStatus.FAIL,
                 message="Not installed",
-                fix_hint="Install from MeshForge RNS panel → 'Install Interface' button"
+                fix_hint="Install from MeshAnchor RNS panel → 'Install Interface' button"
             )
 
     def check_meshtastic_module_for_rnsd(self) -> CheckResult:
@@ -637,7 +637,7 @@ class GatewayDiagnostic:
 
         lines = []
         lines.append("\n" + "=" * 60)
-        lines.append("  🔧 MESHFORGE GATEWAY SETUP WIZARD")
+        lines.append("  🔧 MESHANCHOR GATEWAY SETUP WIZARD")
         lines.append("=" * 60)
 
         # Analyze results
@@ -985,7 +985,7 @@ def handle_address_in_use_error(error: Exception, logger=None) -> Dict[str, any]
             result['can_use_shared'] = True
             result['message'] = (
                 f"RNS port is in use by existing process (PID: {result['rns_pids'][0]}). "
-                f"This is likely rnsd or another MeshForge instance."
+                f"This is likely rnsd or another MeshAnchor instance."
             )
             result['fix_options'] = [
                 "Use the shared RNS instance (recommended if rnsd is running)",
@@ -1018,13 +1018,13 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="MeshForge Gateway Diagnostic Tool",
+        description="MeshAnchor Gateway Diagnostic Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  meshforge-diag              Run full diagnostic
-  meshforge-diag --wizard     Interactive setup wizard
-  meshforge-diag --summary    Quick summary only
+  meshanchor-diag              Run full diagnostic
+  meshanchor-diag --wizard     Interactive setup wizard
+  meshanchor-diag --summary    Quick summary only
         """
     )
     parser.add_argument('--wizard', '-w', action='store_true',

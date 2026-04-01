@@ -2,7 +2,7 @@
 HamClock Commands — Optional Data Source Plugin
 
 Provides REST API client for HamClock (legacy) and OpenHamClock.
-This module is an OPTIONAL enhancement — MeshForge works without it.
+This module is an OPTIONAL enhancement — MeshAnchor works without it.
 
 For standalone space weather and propagation data, use:
     from commands import propagation  # NOAA-based, always works
@@ -107,7 +107,7 @@ def _fetch_endpoint(endpoint: str, timeout: int = None) -> CommandResult:
 
     try:
         req = urllib.request.Request(url, method='GET')
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=timeout or _timeout) as response:
             data = response.read().decode('utf-8')
@@ -552,7 +552,7 @@ def get_noaa_solar_data() -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=_timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -718,7 +718,7 @@ def get_noaa_kp_index() -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=_timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -752,7 +752,7 @@ def get_noaa_xray_flux() -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=_timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -761,7 +761,7 @@ def get_noaa_xray_flux() -> CommandResult:
             # Try alternate endpoint for current flux
             url2 = "https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json"
             req2 = urllib.request.Request(url2)
-            req2.add_header('User-Agent', 'MeshForge/1.0')
+            req2.add_header('User-Agent', 'MeshAnchor/1.0')
             with urllib.request.urlopen(req2, timeout=_timeout) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 if data:
@@ -803,7 +803,7 @@ def get_noaa_alerts() -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=_timeout) as response:
             data = json.loads(response.read().decode('utf-8'))

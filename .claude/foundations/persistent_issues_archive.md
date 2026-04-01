@@ -1,4 +1,4 @@
-# MeshForge Persistent Issues — Archive
+# MeshAnchor Persistent Issues — Archive
 
 > **Purpose**: Historical record of resolved issues.
 > These were moved from `persistent_issues.md` to reduce file size.
@@ -22,12 +22,12 @@ Additionally, `/etc/reticulum/identity` is never created, and the TUI "Show loca
 RNS added **key ratcheting** support which requires a `ratchets/` subdirectory under storage. `Identity.persist_job()` runs in a background thread and calls `os.makedirs(ratchetdir)`. The install script didn't create this directory, and `ReticulumPaths.ensure_system_dirs()` was defined but never called at runtime.
 
 ### Fix (v0.5.x, 2026-02-09)
-**Self-healing at runtime** — MeshForge now creates the directories automatically:
+**Self-healing at runtime** — MeshAnchor now creates the directories automatically:
 1. `startup_checks.check_all()` calls `ensure_system_dirs()` at TUI launch
 2. `rns_bridge._init_rns_main_thread()` calls it before RNS init
 3. `install_noc.sh` creates `storage/ratchets/` during install
 4. `check_rns_storage_permissions()` diagnostic detects the issue
-5. After fixing dirs, MeshForge auto-restarts rnsd via `apply_config_and_restart()`
+5. After fixing dirs, MeshAnchor auto-restarts rnsd via `apply_config_and_restart()`
 
 ### Files
 - `src/utils/paths.py` — `ETC_RATCHETS`, `ensure_system_dirs()`
@@ -45,7 +45,7 @@ RNS added **key ratcheting** support which requires a `ratchets/` subdirectory u
 ## Issue #26: ReticulumPaths Fallback Copies Cause Config Divergence
 
 ### Symptom
-`.reticulum` interface configuration is "lost" between sessions. RNS config changes made in the TUI have no effect. rnsd uses a different config file than what MeshForge reads/writes.
+`.reticulum` interface configuration is "lost" between sessions. RNS config changes made in the TUI have no effect. rnsd uses a different config file than what MeshAnchor reads/writes.
 
 ### Root Cause
 **Four separate copies** of `ReticulumPaths` existed in the codebase:
@@ -77,7 +77,7 @@ from utils.paths import ReticulumPaths
 **Severity**: Critical (breaks meshtasticd web client at :9443)
 
 ### Symptom
-When MeshForge is running, the Meshtastic web client at `ip:9443` shows
+When MeshAnchor is running, the Meshtastic web client at `ip:9443` shows
 no data. The gateway bridge works fine (RX green), NomadNet talks to other
 RNS nodes normally. Only the native web client is broken.
 
@@ -85,7 +85,7 @@ RNS nodes normally. Only the native web client is broken.
 `MeshtasticApiProxy` was **enabled by default**. It continuously polls
 `GET /api/v1/fromradio` from meshtasticd's HTTP API on port 9443.
 This endpoint is **queue-based** — each GET pops the next protobuf packet.
-MeshForge drained the queue before the native web client could read it.
+MeshAnchor drained the queue before the native web client could read it.
 
 ### Fix Applied
 1. **Default `enable_api_proxy` to `False`** in `MapServer.__init__`

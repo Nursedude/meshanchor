@@ -1,4 +1,4 @@
-# MeshForge MOC Deployment - MQTT-Bridged Topology
+# MeshAnchor MOC Deployment - MQTT-Bridged Topology
 
 Two-node configuration bridging LongFast and ShortTurbo meshes via MQTT,
 with RNS/NomadNet integration on MOC2.
@@ -17,12 +17,12 @@ with RNS/NomadNet integration on MOC2.
  |           |                                  |              |
  | Meshtoad  |    mosquitto :1883 (0.0.0.0)     | meshtasticd  |
  | SX1262    |         |                        | SX1262       |
- | LongFast  |         +-- MeshForge MQTT sub   | ShortTurbo   |
+ | LongFast  |         +-- MeshAnchor MQTT sub   | ShortTurbo   |
  |           |         +-- MQTT monitoring      |              |
  | Web :9443 |                                  | RNS/NomadNet |
- |           |                                  | MeshForge GW |
+ |           |                                  | MeshAnchor GW |
  +-----------+                                  | Web :9443    |
-                                                | meshforge ch |
+                                                | meshanchor ch |
                                                 |   <-> RNS    |
                                                 +--------------+
 ```
@@ -35,7 +35,7 @@ with RNS/NomadNet integration on MOC2.
 3. mosquitto on MOC1        -->  MQTT publish to subscribed clients
 4. MOC2 meshtasticd         -->  MQTT subscribe from MOC1 broker
 5. MOC2 meshtasticd         -->  MQTT downlink to ShortTurbo RF
-6. MOC2 MeshForge Gateway   -->  meshforge channel bridged to RNS
+6. MOC2 MeshAnchor Gateway   -->  meshanchor channel bridged to RNS
 7. RNS/NomadNet/LXMF        -->  reachable from ShortTurbo mesh
 ```
 
@@ -73,18 +73,18 @@ echo "ch341" | sudo tee /etc/modules-load.d/ch341.conf
 # Install broker
 sudo apt install mosquitto mosquitto-clients
 
-# Use MeshForge TUI for guided setup:
+# Use MeshAnchor TUI for guided setup:
 sudo python3 src/launcher_tui/main.py
 # Navigate: Mesh Networks > MQTT Broker Manager > Setup Private Broker
 #   Channel: LongFast
 #   Region: US
-#   Username: meshforge
+#   Username: meshanchor
 #   Password: (auto-generated or custom)
 
 # Or configure manually:
-sudo cp examples/configs/broker-private.conf /etc/mosquitto/conf.d/meshforge.conf
-sudo mosquitto_passwd -c /etc/mosquitto/meshforge_passwd meshforge
-sudo cp examples/configs/broker-private-acl.conf /etc/mosquitto/meshforge_acl
+sudo cp examples/configs/broker-private.conf /etc/mosquitto/conf.d/meshanchor.conf
+sudo mosquitto_passwd -c /etc/mosquitto/meshanchor_passwd meshanchor
+sudo cp examples/configs/broker-private-acl.conf /etc/mosquitto/meshanchor_acl
 
 # Enable and start
 sudo systemctl enable --now mosquitto
@@ -100,7 +100,7 @@ ip -4 addr show | grep 'inet ' | grep -v 127.0.0.1
 meshtastic --host localhost \
   --set mqtt.enabled true \
   --set mqtt.address localhost \
-  --set mqtt.username meshforge \
+  --set mqtt.username meshanchor \
   --set mqtt.password YOUR_PASSWORD \
   --set mqtt.encryption_enabled true \
   --set mqtt.json_enabled true \
@@ -120,7 +120,7 @@ sudo systemctl restart mosquitto
 
 # Verify
 curl -k https://localhost:9443       # Web UI
-mosquitto_sub -h localhost -u meshforge -P YOUR_PASSWORD -t "msh/#" -v
+mosquitto_sub -h localhost -u meshanchor -P YOUR_PASSWORD -t "msh/#" -v
 ```
 
 ## MOC2 Setup (RNS Gateway Node)
@@ -132,7 +132,7 @@ mosquitto_sub -h localhost -u meshforge -P YOUR_PASSWORD -t "msh/#" -v
 meshtastic --host localhost \
   --set mqtt.enabled true \
   --set mqtt.address MOC1_IP_ADDRESS \
-  --set mqtt.username meshforge \
+  --set mqtt.username meshanchor \
   --set mqtt.password YOUR_PASSWORD \
   --set mqtt.encryption_enabled true \
   --set mqtt.json_enabled true \
@@ -144,15 +144,15 @@ meshtastic --host localhost \
   --ch-set downlink_enabled true --ch-index 0
 ```
 
-### 2. Configure MeshForge MQTT Subscriber
+### 2. Configure MeshAnchor MQTT Subscriber
 
-In MeshForge TUI:
+In MeshAnchor TUI:
 - Navigate: MQTT Broker Manager > Add Custom Broker
 - Host: MOC1_IP_ADDRESS
 - Port: 1883
-- Username: meshforge
+- Username: meshanchor
 - Password: YOUR_PASSWORD
-- Channel: LongFast (or meshforge)
+- Channel: LongFast (or meshanchor)
 
 ### 3. RNS/NomadNet Configuration
 
@@ -167,14 +167,14 @@ MOC2's `~/.reticulum/config` should have the MeshtasticInterface:
     target_port = 4403
 ```
 
-### 4. MeshForge Channel to RNS Bridge
+### 4. MeshAnchor Channel to RNS Bridge
 
-Configure in MeshForge TUI:
+Configure in MeshAnchor TUI:
 - Navigate: Mesh Networks > Gateway Configuration
 - Bridge Mode: message_bridge
 - Meshtastic host: localhost:4403
 - RNS: enabled
-- Channel: meshforge (or primary)
+- Channel: meshanchor (or primary)
 
 ## Verification
 
@@ -182,7 +182,7 @@ Configure in MeshForge TUI:
 
 ```bash
 # Subscribe to all mesh topics on MOC1
-mosquitto_sub -h localhost -u meshforge -P YOUR_PASSWORD -t "msh/#" -v
+mosquitto_sub -h localhost -u meshanchor -P YOUR_PASSWORD -t "msh/#" -v
 
 # You should see messages from both LongFast (local) and ShortTurbo (MOC2)
 ```
@@ -227,7 +227,7 @@ sudo ufw allow 9443/tcp comment "meshtasticd web UI"
 
 ## Security Notes
 
-- Use custom PSK on the meshforge channel (not default AQ==)
+- Use custom PSK on the meshanchor channel (not default AQ==)
 - Use authentication on the MQTT broker (never allow_anonymous)
 - Private broker does NOT enforce zero-hop (messages re-enter mesh)
 - Consider TLS if MOC1 and MOC2 are on different network segments
@@ -235,7 +235,7 @@ sudo ufw allow 9443/tcp comment "meshtasticd web UI"
 ## Related Files
 
 - `templates/meshtoad.yaml` - Meshtoad hardware config
-- `templates/meshforge-presets/moc1-broker.yaml` - MOC1 full config
+- `templates/meshanchor-presets/moc1-broker.yaml` - MOC1 full config
 - `templates/gateway-pair/node-a.yaml` - LongFast template
 - `templates/gateway-pair/node-b.yaml` - ShortTurbo template
 - `examples/configs/broker-private.conf` - Mosquitto config

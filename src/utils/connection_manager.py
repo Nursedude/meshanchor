@@ -101,7 +101,7 @@ class _ConnectionManager:
 
         # Cache paths
         home = get_real_user_home()
-        self._cache_dir = home / '.local' / 'share' / 'meshforge'
+        self._cache_dir = home / '.local' / 'share' / 'meshanchor'
         self._nodes_cache = self._cache_dir / 'nodes_cache.json'
         self._info_cache = self._cache_dir / 'device_info.json'
 

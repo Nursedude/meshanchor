@@ -143,7 +143,7 @@ def print_banner():
         return
     inner_w = 59
     lines = [
-        "MESHFORGE NODE MONITOR",
+        "MESHANCHOR NODE MONITOR",
         "Standalone Mesh Network Monitor",
         f"Version {__version__}",
     ]

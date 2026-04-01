@@ -1,7 +1,7 @@
 {
-  "_comment": "MeshForge Gateway Template: RNS Over Meshtastic Transport",
+  "_comment": "MeshAnchor Gateway Template: RNS Over Meshtastic Transport",
   "_description": "Uses Meshtastic LoRa as a transport layer for RNS packets",
-  "_usage": "Copy to ~/.config/meshforge/gateway.json and adjust settings",
+  "_usage": "Copy to ~/.config/meshanchor/gateway.json and adjust settings",
 
   "enabled": true,
   "auto_start": false,
@@ -20,7 +20,7 @@
 
   "rns": {
     "config_dir": "",
-    "identity_name": "meshforge_rns_transport",
+    "identity_name": "meshanchor_rns_transport",
     "announce_interval": 300,
     "propagation_node": ""
   },

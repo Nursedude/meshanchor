@@ -22,9 +22,9 @@ Usage:
     # Later
     engine.stop()
 
-Configuration persisted at ~/.config/meshforge/automation.json
-Traceroute history persisted at ~/.local/share/meshforge/traceroute_history.db
-Traceroute log at ~/.cache/meshforge/logs/traceroute.log
+Configuration persisted at ~/.config/meshanchor/automation.json
+Traceroute history persisted at ~/.local/share/meshanchor/traceroute_history.db
+Traceroute log at ~/.cache/meshanchor/logs/traceroute.log
 """
 
 import json
@@ -94,14 +94,14 @@ AUTOMATION_DEFAULTS = {
 
 def _get_traceroute_log_path() -> Path:
     """Get path for the traceroute log file."""
-    log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
+    log_dir = get_real_user_home() / ".cache" / "meshanchor" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "traceroute.log"
 
 
 def _get_traceroute_db_path() -> Path:
     """Get path for the traceroute SQLite database."""
-    db_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+    db_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "traceroute_history.db"
 
@@ -113,7 +113,7 @@ def get_traceroute_log_path() -> Path:
 
 def _setup_traceroute_logger() -> logging.Logger:
     """Create a dedicated logger for traceroute results."""
-    tr_logger = logging.getLogger("meshforge.traceroute")
+    tr_logger = logging.getLogger("meshanchor.traceroute")
     if tr_logger.handlers:
         return tr_logger
     tr_logger.setLevel(logging.INFO)

@@ -1,5 +1,5 @@
 """
-MeshForge SSL Certificate Generator.
+MeshAnchor SSL Certificate Generator.
 
 Generates a trusted self-signed CA and localhost server certificate
 for meshtasticd's HTTPS web UI (port 9443).
@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 
 # Paths
 SSL_DIR = Path("/etc/meshtasticd/ssl")
-CA_KEY = SSL_DIR / "meshforge_ca.key"
-CA_CERT = SSL_DIR / "meshforge_ca.pem"
+CA_KEY = SSL_DIR / "meshanchor_ca.key"
+CA_CERT = SSL_DIR / "meshanchor_ca.pem"
 SERVER_KEY = SSL_DIR / "private_key.pem"
 SERVER_CERT = SSL_DIR / "certificate.pem"
 SYSTEM_CA_DIR = Path("/usr/local/share/ca-certificates")
-SYSTEM_CA_LINK = SYSTEM_CA_DIR / "meshforge-localhost-ca.crt"
+SYSTEM_CA_LINK = SYSTEM_CA_DIR / "meshanchor-localhost-ca.crt"
 
 # Certificate validity (days)
 CA_DAYS = 3650       # 10 years
@@ -37,7 +37,7 @@ SERVER_DAYS = 3650   # 10 years
 
 
 def is_cert_installed() -> bool:
-    """Check if MeshForge localhost certificate is already installed and trusted."""
+    """Check if MeshAnchor localhost certificate is already installed and trusted."""
     return (
         SERVER_KEY.exists()
         and SERVER_CERT.exists()
@@ -81,7 +81,7 @@ def generate_localhost_cert() -> Tuple[bool, str]:
                 "-key", str(CA_KEY),
                 "-out", str(CA_CERT),
                 "-days", str(CA_DAYS),
-                "-subj", "/CN=MeshForge Local CA/O=MeshForge/OU=Mesh Network"
+                "-subj", "/CN=MeshAnchor Local CA/O=MeshAnchor/OU=Mesh Network"
             ],
             capture_output=True, text=True, timeout=30
         )
@@ -108,7 +108,7 @@ def generate_localhost_cert() -> Tuple[bool, str]:
             "\n"
             "[dn]\n"
             "CN = localhost\n"
-            "O = MeshForge\n"
+            "O = MeshAnchor\n"
             "OU = meshtasticd\n"
             "\n"
             "[v3_req]\n"
@@ -174,7 +174,7 @@ def generate_localhost_cert() -> Tuple[bool, str]:
             # Non-fatal - cert files are still usable
 
         # Step 7: Clean up temp files
-        for tmp in [csr_path, openssl_conf, ext_conf, SSL_DIR / "meshforge_ca.srl"]:
+        for tmp in [csr_path, openssl_conf, ext_conf, SSL_DIR / "meshanchor_ca.srl"]:
             if tmp.exists():
                 tmp.unlink()
 

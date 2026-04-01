@@ -1,7 +1,7 @@
 """
 Cross-Gateway Failover via MQTT Heartbeat.
 
-Enables two MeshForge gateways to coordinate failover using a shared
+Enables two MeshAnchor gateways to coordinate failover using a shared
 MQTT broker. Each gateway publishes periodic heartbeats; the peer monitors
 them and promotes itself to active when the other goes silent.
 
@@ -11,9 +11,9 @@ Architecture:
     Gateway B (secondary) ─┘
 
 Protocol:
-    Publish:   meshforge/gateway/{gateway_id}/heartbeat   (every 15s)
-    Subscribe: meshforge/gateway/+/heartbeat              (all peers)
-    LWT:       meshforge/gateway/{gateway_id}/status → "offline"
+    Publish:   meshanchor/gateway/{gateway_id}/heartbeat   (every 15s)
+    Subscribe: meshanchor/gateway/+/heartbeat              (all peers)
+    LWT:       meshanchor/gateway/{gateway_id}/status → "offline"
 
     Payload: {
         "id": "gw-rpi4-01",
@@ -116,7 +116,7 @@ class HeartbeatConfig:
     mqtt_port: int = 1883
     mqtt_username: str = ""
     mqtt_password: str = ""
-    mqtt_topic_prefix: str = "meshforge/gateway"
+    mqtt_topic_prefix: str = "meshanchor/gateway"
 
     # Heartbeat timing
     heartbeat_interval: float = 15.0        # Seconds between heartbeats
@@ -390,7 +390,7 @@ class GatewayHeartbeat:
         if not _HAS_PAHO:
             return
 
-        client_id = f"meshforge-{self._config.gateway_id}"
+        client_id = f"meshanchor-{self._config.gateway_id}"
         self._mqtt_client = _mqtt_client_mod.Client(client_id=client_id)
 
         # Authentication

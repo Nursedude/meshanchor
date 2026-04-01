@@ -1,9 +1,9 @@
 """
-PSKReporter MQTT Subscriber for MeshForge.
+PSKReporter MQTT Subscriber for MeshAnchor.
 
 Connects to the public PSKReporter MQTT feed (mqtt.pskreporter.info) to receive
 real-time amateur radio reception reports. Provides band activity, spot statistics,
-and propagation data for the MeshForge NOC.
+and propagation data for the MeshAnchor NOC.
 
 PSKReporter MQTT feed provided by M0LTE:
     Broker: mqtt.pskreporter.info
@@ -168,7 +168,7 @@ class PSKReporterSubscriber:
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from file or return defaults."""
         config_path = (
-            get_real_user_home() / ".config" / "meshforge" / "pskreporter.json"
+            get_real_user_home() / ".config" / "meshanchor" / "pskreporter.json"
         )
         if config_path.exists():
             try:
@@ -192,7 +192,7 @@ class PSKReporterSubscriber:
 
     def save_config(self) -> bool:
         """Save current configuration to file."""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "pskreporter.json"
 
@@ -229,7 +229,7 @@ class PSKReporterSubscriber:
         mqtt = _mqtt
 
         try:
-            client_id = f"meshforge_pskr_{int(time.time())}"
+            client_id = f"meshanchor_pskr_{int(time.time())}"
             if hasattr(mqtt, 'CallbackAPIVersion'):
                 self._client = mqtt.Client(
                     callback_api_version=mqtt.CallbackAPIVersion.VERSION1,

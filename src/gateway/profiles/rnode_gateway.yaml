@@ -1,4 +1,4 @@
-# MeshForge Gateway Profile: RNode (Heltec/T-Beam with RNode firmware)
+# MeshAnchor Gateway Profile: RNode (Heltec/T-Beam with RNode firmware)
 # For RNode devices acting as Meshtastic gateways
 # Apply with: meshtastic --configure rnode_gateway.yaml
 #
@@ -94,4 +94,4 @@ network:
 # For RNode + meshtasticd setup:
 # 1. Connect RNode via USB to Pi
 # 2. Start meshtasticd: meshtasticd --port /dev/ttyACM0
-# 3. MeshForge connects via TCP to localhost:4403
+# 3. MeshAnchor connects via TCP to localhost:4403

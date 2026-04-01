@@ -1,7 +1,7 @@
 # Semtech Official LoRa Reference Data -- Authoritative Sources
 
 > **Research Date**: 2026-02-06
-> **Context**: MeshForge NOC RF calculations (`src/utils/rf.py`)
+> **Context**: MeshAnchor NOC RF calculations (`src/utils/rf.py`)
 > **Companion**: See also `lora_physical_layer.md` for academic/SDR research
 
 ---
@@ -1173,4 +1173,4 @@ The Semtech LoRa Calculator likely uses a propagation model similar to the **Oku
 
 ---
 
-*Research compiled from Semtech official documentation for MeshForge NOC development. Made with aloha for the mesh community. -- WH6GXZ*
+*Research compiled from Semtech official documentation for MeshAnchor NOC development. Made with aloha for the mesh community. -- WH6GXZ*

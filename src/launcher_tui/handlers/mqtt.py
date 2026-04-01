@@ -62,7 +62,7 @@ TelemetryPoller, get_telemetry_poller, _HAS_TELEMETRY_POLLER = safe_import(
 
 def load_mqtt_config() -> Dict[str, Any]:
     """Load MQTT configuration from file."""
-    config_path = get_real_user_home() / ".config" / "meshforge" / "mqtt_nodeless.json"
+    config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
     try:
         if config_path.exists():
             with open(config_path) as f:
@@ -81,7 +81,7 @@ def load_mqtt_config() -> Dict[str, Any]:
 
 def save_mqtt_config(config: Dict[str, Any]):
     """Save MQTT configuration to file."""
-    config_path = get_real_user_home() / ".config" / "meshforge" / "mqtt_nodeless.json"
+    config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, 'w') as f:
@@ -263,7 +263,7 @@ class MQTTHandler(BaseHandler):
 
             subtitle = f"MQTT Broker: {mode} ({broker})\n"
             if mode == "Private":
-                subtitle += "MeshForge private broker (multi-consumer)"
+                subtitle += "MeshAnchor private broker (multi-consumer)"
             elif mode == "Public":
                 subtitle += "Nodeless monitoring without local radio"
             else:
@@ -382,7 +382,7 @@ class MQTTHandler(BaseHandler):
             ]
             if not stats['available']:
                 lines.append("")
-                lines.append("Requires: meshing_around_meshforge at /opt/")
+                lines.append("Requires: meshing_around_meshanchor at /opt/")
                 lines.append("  and: pip install cryptography meshtastic")
             self.ctx.dialog.msgbox("Encryption Status", "\n".join(lines))
         except Exception as e:
@@ -952,7 +952,7 @@ class MQTTHandler(BaseHandler):
             self.ctx.dialog.msgbox("No Data", "No MQTT data to export.")
             return
 
-        export_path = get_real_user_home() / ".local" / "share" / "meshforge" / "mqtt_export.json"
+        export_path = get_real_user_home() / ".local" / "share" / "meshanchor" / "mqtt_export.json"
 
         try:
             if self._mqtt_subscriber:
@@ -988,7 +988,7 @@ class MQTTHandler(BaseHandler):
 
     def _load_mqtt_cache(self) -> list:
         """Load cached MQTT nodes from file."""
-        cache_path = get_real_user_home() / ".local" / "share" / "meshforge" / "mqtt_nodes.json"
+        cache_path = get_real_user_home() / ".local" / "share" / "meshanchor" / "mqtt_nodes.json"
         try:
             if cache_path.exists():
                 with open(cache_path) as f:
@@ -1073,7 +1073,7 @@ class MQTTHandler(BaseHandler):
             "Meshtastic channel to subscribe to:\n\n"
             "  LongFast   = Default Meshtastic channel\n"
             "  HawaiiNet  = Regional channel\n"
-            "  meshforge  = Private MeshForge channel\n\n"
+            "  meshanchor  = Private MeshAnchor channel\n\n"
             "Must match your radio's channel configuration.",
             init=config.get('channel', 'LongFast')
         )
