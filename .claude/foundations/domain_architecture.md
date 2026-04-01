@@ -1,4 +1,4 @@
-# MeshForge Domain Architecture
+# MeshAnchor Domain Architecture
 
 > **Document Purpose**: Define the architectural vision and resolve systemic tensions
 > **Created**: 2026-01-06
@@ -9,7 +9,7 @@
 
 ## 1. Core Mission
 
-**MeshForge is a Network Operations Center (NOC) for heterogeneous mesh networks.**
+**MeshAnchor is a Network Operations Center (NOC) for heterogeneous mesh networks.**
 
 It bridges two incompatible mesh ecosystems:
 - **Meshtastic** (LoRa, consumer-grade, 915/868 MHz)
@@ -27,7 +27,7 @@ Target audience: **HAM radio operators** who need reliable off-grid communicatio
 ## 2. Privilege Model (Resolving the sudo Tension)
 
 ### The Problem
-MeshForge has been running with `sudo` because some operations need root:
+MeshAnchor has been running with `sudo` because some operations need root:
 - Service control (systemctl start/stop)
 - Config file editing (/etc/meshtasticd/)
 - Hardware access (GPIO, SPI, I2C)
@@ -38,7 +38,7 @@ But `Path.home()` returns `/root` with sudo, breaking user config persistence.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MeshForge Privilege Model                    │
+│                    MeshAnchor Privilege Model                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  VIEWER MODE (No sudo)                ADMIN MODE (sudo)         │
@@ -51,7 +51,7 @@ But `Path.home()` returns `/root` with sudo, breaking user config persistence.
 │  - View logs                         - Manage systemd units     │
 │  - Educational content               - Write to /var/log        │
 │                                                                 │
-│  User's ~/.config/meshforge/         System /etc/meshtasticd/   │
+│  User's ~/.config/meshanchor/         System /etc/meshtasticd/   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -61,7 +61,7 @@ But `Path.home()` returns `/root` with sudo, breaking user config persistence.
 1. **Default to Viewer Mode** - Launch without sudo
 2. **Elevate for specific actions** - Use `_sudo_cmd()` / `_sudo_write()` only when needed
 3. **External services run independently** - meshtasticd, rnsd, hamclock as systemd
-4. **MeshForge connects to services** - Not embedded, just API clients
+4. **MeshAnchor connects to services** - Not embedded, just API clients
 
 ### Privilege Elevation Helpers (`utils/service_check.py`)
 
@@ -80,7 +80,7 @@ All privilege-elevated operations go through centralized helpers:
 **NEVER** use `open('/etc/...', 'w')` directly — use `_sudo_write()` instead.
 
 For turnkey appliances, a NOPASSWD sudoers template is available at
-`templates/sudoers.d/meshforge-nopasswd`.
+`templates/sudoers.d/meshanchor-nopasswd`.
 
 ---
 
@@ -108,7 +108,7 @@ For turnkey appliances, a NOPASSWD sudoers template is available at
 | **MeshCore** | Protocol | None | Alternative mesh |
 
 ### Plugin Benefits
-- **Isolation**: HamClock failure doesn't crash MeshForge
+- **Isolation**: HamClock failure doesn't crash MeshAnchor
 - **Optional**: Users install only what they need
 - **Testable**: Each plugin has clear boundaries
 - **Maintainable**: Updates don't affect core
@@ -117,7 +117,7 @@ For turnkey appliances, a NOPASSWD sudoers template is available at
 
 ## 4. RF & Propagation Tools (HAM Focus)
 
-HAMs care about propagation. These tools are CORE to MeshForge:
+HAMs care about propagation. These tools are CORE to MeshAnchor:
 
 ### RF Calculator (`utils/rf.py`)
 ```python
@@ -159,7 +159,7 @@ Aurora Activity → VHF propagation
 
 ## 5. Service Integration Model
 
-MeshForge connects to external services; it doesn't embed them.
+MeshAnchor connects to external services; it doesn't embed them.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -173,7 +173,7 @@ MeshForge connects to external services; it doesn't embed them.
 │          └─────────────────────┼─────────────────────┘         │
 │                                │                               │
 │                    ┌───────────▼───────────┐                  │
-│                    │      MESHFORGE        │                  │
+│                    │      MESHANCHOR        │                  │
 │                    │   (NOC Dashboard)     │                  │
 │                    │                       │                  │
 │                    │  - Connects to APIs   │                  │
@@ -265,7 +265,7 @@ class HamClockPlugin(IntegrationPlugin):
 
 ```
 src/
-├── core/                    # Essential MeshForge functionality
+├── core/                    # Essential MeshAnchor functionality
 │   ├── gateway/             # RNS↔Meshtastic bridge
 │   │   ├── bridge.py        # Message routing
 │   │   ├── config.py        # Gateway configuration
@@ -326,7 +326,7 @@ src/
 
 ## 9. Design Principles
 
-1. **Services run independently** - MeshForge doesn't start them; it connects to them
+1. **Services run independently** - MeshAnchor doesn't start them; it connects to them
 2. **Fail gracefully** - Missing service = actionable error, not crash
 3. **Privilege minimization** - Only elevate when absolutely necessary
 4. **HAM focus** - Propagation and RF tools are first-class features
@@ -336,7 +336,7 @@ src/
 
 ## 10. Questions for User Verification
 
-1. **Is viewer-mode-by-default acceptable?** Users would run `meshforge` normally, and only use `sudo meshforge` or be prompted for elevation when changing system configs.
+1. **Is viewer-mode-by-default acceptable?** Users would run `meshanchor` normally, and only use `sudo meshanchor` or be prompted for elevation when changing system configs.
 
 2. **Should HamClock be extracted to plugin now, or after stability testing?**
 

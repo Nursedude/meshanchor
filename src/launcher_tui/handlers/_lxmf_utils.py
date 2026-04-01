@@ -1,7 +1,7 @@
 """
 LXMF Exclusivity Utility — Check for conflicting LXMF clients.
 
-NomadNet is MeshForge's supported LXMF client.  This helper detects
+NomadNet is MeshAnchor's supported LXMF client.  This helper detects
 if another LXMF client (e.g. Sideband, another NomadNet instance) is
 using port 37428 and warns the user before starting NomadNet.
 """

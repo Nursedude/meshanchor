@@ -1,5 +1,5 @@
 """
-MeshForge Console Manager
+MeshAnchor Console Manager
 
 Provides a singleton Rich Console instance for consistent output formatting
 across the application. This reduces memory usage and ensures consistent
@@ -23,8 +23,8 @@ import threading
 _console: Optional[Console] = None
 _lock = threading.Lock()
 
-# MeshForge custom theme
-MESHFORGE_THEME = Theme({
+# MeshAnchor custom theme
+MESHANCHOR_THEME = Theme({
     "info": "cyan",
     "success": "green",
     "warning": "yellow",
@@ -60,7 +60,7 @@ def get_console(force_terminal: bool = None,
             # Double-check locking
             if _console is None:
                 _console = Console(
-                    theme=MESHFORGE_THEME,
+                    theme=MESHANCHOR_THEME,
                     force_terminal=force_terminal,
                     no_color=no_color,
                     width=width,

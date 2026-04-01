@@ -1,5 +1,5 @@
 """
-Tactical Event Timeline for MeshForge.
+Tactical Event Timeline for MeshAnchor.
 
 SQLite-backed persistent log of all tactical events. Auto-populated
 from inbound X1 messages via the event bus. Queryable by type, time,
@@ -43,7 +43,7 @@ from tactical.models import (
 logger = logging.getLogger(__name__)
 
 # Default database location
-_DEFAULT_DB_DIR = ".config/meshforge"
+_DEFAULT_DB_DIR = ".config/meshanchor"
 _DEFAULT_DB_NAME = "tactical_timeline.db"
 
 # Schema version for migrations
@@ -53,7 +53,7 @@ _SCHEMA_VERSION = 1
 class TacticalTimeline:
     """Persistent tactical event timeline backed by SQLite.
 
-    Thread-safe. Database is stored in ~/.config/meshforge/ by default
+    Thread-safe. Database is stored in ~/.config/meshanchor/ by default
     (uses get_real_user_home() for sudo compatibility per MF001).
 
     Args:

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=MeshForge
+Name=MeshAnchor
 GenericName=Mesh Network Manager
 Comment=LoRa Mesh Network Operations Suite (NOC)
-Exec=/opt/meshforge/scripts/meshforge-terminal.sh
-Icon=org.meshforge.app
+Exec=/opt/meshanchor/scripts/meshanchor-terminal.sh
+Icon=org.meshanchor.app
 Terminal=false
 Categories=Network;System;HamRadio;
 Keywords=meshtastic;lora;mesh;radio;network;reticulum;
 StartupNotify=true
-StartupWMClass=org.meshforge.app
+StartupWMClass=org.meshanchor.app

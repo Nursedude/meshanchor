@@ -1,5 +1,5 @@
 """
-TCP/IP Connection Monitor for MeshForge
+TCP/IP Connection Monitor for MeshAnchor
 
 Provides Wireshark-like visibility into TCP connections for Meshtastic networks.
 Monitors connections to meshtasticd, web clients, and network devices.

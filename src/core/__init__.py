@@ -1,7 +1,7 @@
 """
-MeshForge Core Module
+MeshAnchor Core Module
 
-Provides shared functionality across all MeshForge editions:
+Provides shared functionality across all MeshAnchor editions:
 - PRO: Full-featured desktop application
 - Amateur: Ham radio focused edition
 - .io: Lightweight web-based with plugins

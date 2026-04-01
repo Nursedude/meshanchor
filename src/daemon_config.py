@@ -1,9 +1,9 @@
 """
-MeshForge Daemon Configuration
+MeshAnchor Daemon Configuration
 
 Loads daemon-specific settings from:
-  1. /etc/meshforge/daemon.yaml (system-wide)
-  2. ~/.config/meshforge/daemon.yaml (user override)
+  1. /etc/meshanchor/daemon.yaml (system-wide)
+  2. ~/.config/meshanchor/daemon.yaml (user override)
   3. CLI arguments (highest priority)
 
 Settings control which services run and their parameters.
@@ -12,7 +12,7 @@ Usage:
     from daemon_config import DaemonConfig
 
     config = DaemonConfig.load()
-    config = DaemonConfig.load(config_path=Path("/etc/meshforge/daemon.yaml"))
+    config = DaemonConfig.load(config_path=Path("/etc/meshanchor/daemon.yaml"))
     config = DaemonConfig.load(profile=profile)
 """
 
@@ -29,8 +29,8 @@ _yaml, _HAS_YAML = safe_import('yaml')
 logger = logging.getLogger(__name__)
 
 # Config search paths (first found wins, later overrides earlier)
-SYSTEM_CONFIG = Path("/etc/meshforge/daemon.yaml")
-USER_CONFIG_RELATIVE = Path(".config/meshforge/daemon.yaml")
+SYSTEM_CONFIG = Path("/etc/meshanchor/daemon.yaml")
+USER_CONFIG_RELATIVE = Path(".config/meshanchor/daemon.yaml")
 
 
 @dataclass
@@ -64,7 +64,7 @@ class DaemonConfig:
     log_file: Optional[str] = None  # None = journald or stderr
 
     # --- PID ---
-    pid_dir: str = "/run/meshforge"
+    pid_dir: str = "/run/meshanchor"
 
     @classmethod
     def load(
@@ -76,8 +76,8 @@ class DaemonConfig:
 
         Priority (highest wins):
           1. Explicit config_path argument
-          2. User config (~/.config/meshforge/daemon.yaml)
-          3. System config (/etc/meshforge/daemon.yaml)
+          2. User config (~/.config/meshanchor/daemon.yaml)
+          3. System config (/etc/meshanchor/daemon.yaml)
           4. Deployment profile feature_flags
           5. Dataclass defaults
 

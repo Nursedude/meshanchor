@@ -1,4 +1,4 @@
-"""RNS / NomadNet coexistence diagnostic rules for MeshForge Diagnostic Engine."""
+"""RNS / NomadNet coexistence diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 
@@ -66,7 +66,7 @@ def load_rns_coexistence_rules(engine: "DiagnosticEngine") -> None:
             "Restart rnsd: sudo systemctl restart rnsd",
             "Wait for port 37428 to be listening",
             "Start NomadNet (will connect as client to rnsd)",
-            "Correct boot order: rnsd -> NomadNet -> MeshForge",
+            "Correct boot order: rnsd -> NomadNet -> MeshAnchor",
         ],
         auto_recoverable=False,
         confidence_base=0.9,
@@ -82,7 +82,7 @@ def load_rns_coexistence_rules(engine: "DiagnosticEngine") -> None:
         cause_template=(
             "The RNS shared instance port (UDP 37428) is not bound. "
             "This prevents client applications (NomadNet, rnstatus, "
-            "MeshForge gateway) from connecting to rnsd. Causes: "
+            "MeshAnchor gateway) from connecting to rnsd. Causes: "
             "share_instance not enabled, blocking interface "
             "preventing rnsd initialization, or NomadNet holding "
             "the port."
@@ -95,7 +95,7 @@ def load_rns_coexistence_rules(engine: "DiagnosticEngine") -> None:
             "Check share_instance = Yes in [reticulum] config",
             "Check for NomadNet port conflict: pgrep -f nomadnet",
             "Check for blocking interfaces: RNS > Diagnostics in "
-            "MeshForge",
+            "MeshAnchor",
             "Restart rnsd: sudo systemctl restart rnsd",
             "Check rnsd logs: sudo journalctl -u rnsd -n 30",
         ],

@@ -1,4 +1,4 @@
-# MeshForge NOC Test Plan
+# MeshAnchor NOC Test Plan
 
 > **Operator**: WH6GXZ (Nursedude)
 > **Lab**: 8+ Raspberry Pis, 2x Mikrotik routers, cloud DDNS
@@ -15,7 +15,7 @@
                     │      CLOUD (DDNS)               │
                     │   wh6gxzhub.ddns.net            │
                     │   └─ AllMon3 (AllStar)          │
-                    │   └─ Future: MeshForge Web UI   │
+                    │   └─ Future: MeshAnchor Web UI   │
                     └─────────────┬───────────────────┘
                                   │
                     ┌─────────────┴───────────────────┐
@@ -65,8 +65,8 @@
 sudo apt update && sudo apt upgrade -y
 
 # 2. Clone and run NOC installer
-git clone https://github.com/Nursedude/meshforge.git /tmp/meshforge
-cd /tmp/meshforge
+git clone https://github.com/Nursedude/meshanchor.git /tmp/meshanchor
+cd /tmp/meshanchor
 git checkout main
 sudo bash scripts/install_noc.sh
 ```
@@ -76,12 +76,12 @@ sudo bash scripts/install_noc.sh
 - [ ] **Installation completes without errors**
 - [ ] **Services installed:**
   ```bash
-  systemctl list-unit-files | grep -E "meshtasticd|rnsd|meshforge"
-  # Expected: meshtasticd.service, rnsd.service, meshforge.service
+  systemctl list-unit-files | grep -E "meshtasticd|rnsd|meshanchor"
+  # Expected: meshtasticd.service, rnsd.service, meshanchor.service
   ```
 - [ ] **Services running:**
   ```bash
-  sudo meshforge-noc --status
+  sudo meshanchor-noc --status
   # Expected: All green checkmarks
   ```
 - [ ] **Radio detected:**
@@ -89,7 +89,7 @@ sudo bash scripts/install_noc.sh
   ls /dev/ttyUSB* /dev/ttyACM*
   # Expected: Device listed
   ```
-- [ ] **MeshForge launches:**
+- [ ] **MeshAnchor launches:**
   ```bash
   sudo python3 src/launcher_tui/main.py
   # Expected: TUI menu appears (whiptail/dialog)
@@ -108,7 +108,7 @@ sudo bash scripts/install_noc.sh
 | rnsd installed | | |
 | Services start | | |
 | Radio detected | | |
-| MeshForge launches | | |
+| MeshAnchor launches | | |
 | Sees mesh nodes | | |
 | Sees Pi #1 | | |
 
@@ -120,7 +120,7 @@ sudo bash scripts/install_noc.sh
 
 ```bash
 # Terminal 1: Watch orchestrator
-sudo journalctl -fu meshforge
+sudo journalctl -fu meshanchor
 
 # Terminal 2: Kill meshtasticd
 sudo systemctl stop meshtasticd
@@ -166,21 +166,21 @@ Run these tests on BOTH nodes and compare:
 
 ```bash
 # On each Pi, time the startup
-time sudo meshforge --no-services  # Skip service start for fair comparison
+time sudo meshanchor --no-services  # Skip service start for fair comparison
 ```
 
 ### Node Discovery
 
 ```bash
 # Count nodes seen by each
-sudo meshforge-cli --nodes | wc -l
+sudo meshanchor-cli --nodes | wc -l
 ```
 
 ### Memory Usage
 
 ```bash
 # Check memory footprint
-ps aux | grep -E "meshforge|meshtasticd|rnsd" | awk '{sum += $6} END {print sum/1024 " MB"}'
+ps aux | grep -E "meshanchor|meshtasticd|rnsd" | awk '{sum += $6} END {print sum/1024 " MB"}'
 ```
 
 ### Connection Stability (1 hour test)
@@ -189,7 +189,7 @@ ps aux | grep -E "meshforge|meshtasticd|rnsd" | awk '{sum += $6} END {print sum/
 # Run on each Pi, check every 5 minutes
 for i in {1..12}; do
     echo "=== Check $i at $(date) ==="
-    sudo meshforge-noc --status
+    sudo meshanchor-noc --status
     sleep 300
 done
 ```
@@ -213,7 +213,7 @@ done
 #!/bin/bash
 # chaos_test.sh - Run for extended period
 
-LOG=/var/log/meshforge_chaos.log
+LOG=/var/log/meshanchor_chaos.log
 
 echo "Starting chaos test at $(date)" >> $LOG
 
@@ -244,7 +244,7 @@ while true; do
     sleep 60
 
     # Check health
-    sudo meshforge-noc --status >> $LOG 2>&1
+    sudo meshanchor-noc --status >> $LOG 2>&1
 done
 ```
 
@@ -264,7 +264,7 @@ Run for 4-8 hours, then analyze log for:
 sudo bash scripts/install_noc.sh --client-only
 
 # Configure to connect to Pi #2's meshtasticd
-# Edit /etc/meshforge/noc.yaml:
+# Edit /etc/meshanchor/noc.yaml:
 #   mode: client
 #   remote:
 #     meshtasticd_host: 192.168.x.x  # Pi #2's IP
@@ -286,7 +286,7 @@ sudo bash scripts/install_noc.sh
 # Select "Take ownership" when prompted
 ```
 
-**Verify**: MeshForge takes over existing service.
+**Verify**: MeshAnchor takes over existing service.
 
 ---
 
@@ -337,12 +337,12 @@ sudo bash scripts/install_noc.sh
 
 ### Cloud Dashboard
 - DDNS: wh6gxzhub.ddns.net
-- Potential: Remote MeshForge Web UI
+- Potential: Remote MeshAnchor Web UI
 - Potential: Multi-node status aggregation
 
 ### Mikrotik Integration
 - 2x routers in lab
-- Potential: SNMP monitoring from MeshForge
+- Potential: SNMP monitoring from MeshAnchor
 - Potential: VPN tunnel for remote mesh access
 
 ---

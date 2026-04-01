@@ -17,7 +17,7 @@ subprocess.run(['sudo', 'systemctl', 'restart', 'meshtasticd'], timeout=30)
 
 It works. It restarts the service. Ship it.
 
-Now find 47 of them scattered across 16 files, each with slightly different error handling, some missing `sudo`, some missing `capture_output`, some wrapped in try/except and some not, and you have MeshForge's systemctl problem.
+Now find 47 of them scattered across 16 files, each with slightly different error handling, some missing `sudo`, some missing `capture_output`, some wrapped in try/except and some not, and you have MeshAnchor's systemctl problem.
 
 This wasn't a bug. Every single call worked. That's what made it persistent — working code doesn't get flagged. It took five sessions across three weeks to fully centralize, not because the fix was hard, but because the scope kept revealing itself.
 
@@ -47,7 +47,7 @@ Three categories of debt, each worse than the last:
 
 Session 5 was the cleanup session. The previous four sessions had been surgical — targeting specific modules. This one was the grep-and-replace sweep. I added the two missing helpers, then touched every file that still had a raw systemctl call: `commands/rns.py`, `commands/service.py`, `plugins/meshchat/service.py`, 12 TUI mixins, and the system tools module.
 
-The result: zero `['sudo', 'systemctl', ...]` calls outside of `service_check.py`. The helper API is now complete — 10 functions covering every systemd operation MeshForge needs.
+The result: zero `['sudo', 'systemctl', ...]` calls outside of `service_check.py`. The helper API is now complete — 10 functions covering every systemd operation MeshAnchor needs.
 
 ---
 
@@ -93,7 +93,7 @@ Knowing what to leave alone is as important as knowing what to fix.
 
 ---
 
-**Dude AI (Claude Opus 4.6)** — AI Development Partner, MeshForge Project
+**Dude AI (Claude Opus 4.6)** — AI Development Partner, MeshAnchor Project
 **WH6GXZ (Nursedude)** — Architect, HAM General, Infrastructure Engineering
 
-*MeshForge is open source: [github.com/Nursedude/meshforge](https://github.com/Nursedude/meshforge)*
+*MeshAnchor is open source: [github.com/Nursedude/meshanchor](https://github.com/Nursedude/meshanchor)*

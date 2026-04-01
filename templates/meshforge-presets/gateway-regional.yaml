@@ -1,5 +1,5 @@
-# MeshForge Gateway Configuration - Regional RNS Bridge
-# Meshtastic: Short Turbo, Slot 8 → MeshForge Gateway → RNS Regional
+# MeshAnchor Gateway Configuration - Regional RNS Bridge
+# Meshtastic: Short Turbo, Slot 8 → MeshAnchor Gateway → RNS Regional
 #
 # Use Case: Bridging local Meshtastic mesh to Regional RNS network
 # Created: 2026-01-20
@@ -85,13 +85,13 @@ General:
   MaxNodes: 200
   MaxMessageQueue: 100
 
-# === MeshForge Gateway Notes ===
+# === MeshAnchor Gateway Notes ===
 #
 # After applying this config:
 # 1. Restart meshtasticd: sudo systemctl restart meshtasticd
 # 2. Verify via browser: https://localhost:9443
-# 3. Configure RNS bridge in MeshForge:
-#    - meshforge → Gateway Configuration
+# 3. Configure RNS bridge in MeshAnchor:
+#    - meshanchor → Gateway Configuration
 #    - Set RNS interface to Regional
 #    - Enable bidirectional bridge
 #

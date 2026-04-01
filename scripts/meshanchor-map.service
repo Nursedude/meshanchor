@@ -1,6 +1,6 @@
 [Unit]
-Description=MeshForge Map Server - NOC Web Interface
-Documentation=https://github.com/Nursedude/meshforge
+Description=MeshAnchor Map Server - NOC Web Interface
+Documentation=https://github.com/Nursedude/meshanchor
 After=network.target meshtasticd.service
 Wants=meshtasticd.service
 
@@ -11,13 +11,13 @@ StartLimitBurst=3
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshforge/src
-RuntimeDirectory=meshforge
+WorkingDirectory=/opt/meshanchor/src
+RuntimeDirectory=meshanchor
 
 # Use venv if available, fall back to system Python
 ExecStart=/bin/bash -c '\
-    if [ -x /opt/meshforge/venv/bin/python ]; then \
-        exec /opt/meshforge/venv/bin/python -m utils.map_data_service --daemon --port 5000; \
+    if [ -x /opt/meshanchor/venv/bin/python ]; then \
+        exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5000; \
     else \
         exec python3 -m utils.map_data_service --daemon --port 5000; \
     fi'
@@ -37,7 +37,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=meshforge-map
+SyslogIdentifier=meshanchor-map
 
 # Security hardening (relaxed for access to user dirs and radio)
 ProtectSystem=false

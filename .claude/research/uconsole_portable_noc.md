@@ -8,9 +8,9 @@
 
 ### uConsole AIO V2 Specifications
 
-| Component | Chip/Spec | MeshForge Integration |
+| Component | Chip/Spec | MeshAnchor Integration |
 |-----------|-----------|----------------------|
-| **Compute** | CM5 8GB RAM | Full MeshForge stack |
+| **Compute** | CM5 8GB RAM | Full MeshAnchor stack |
 | **LoRa** | SX1262 (SPI) | Native Meshtastic (meshtasticd) |
 | **RTL-SDR** | RTL2832U + R860 | Spectrum analysis, SIGINT |
 | **GPS** | Multi-GNSS | Position reporting, time sync |
@@ -43,11 +43,11 @@ The AIO V2 allows software control of subsystem power (active LOW):
 
 This enables power-saving modes for extended field operation.
 
-## MeshForge Integration Architecture
+## MeshAnchor Integration Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    MESHFORGE PORTABLE NOC                    │
+│                    MESHANCHOR PORTABLE NOC                    │
 │                        (uConsole AIO V2)                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
@@ -150,7 +150,7 @@ This enables power-saving modes for extended field operation.
 - **URL**: https://github.com/smittix/intercept
 - **Purpose**: Web-based SDR signal intelligence dashboard
 - **Tools**: rtl_433, dump1090, multimon-ng, acarsdec
-- **Integration**: Launch from MeshForge, share RTL-SDR
+- **Integration**: Launch from MeshAnchor, share RTL-SDR
 
 ### Similar Cyberdecks
 - **DevTerm** (ClockworkPi) - Same form factor, less radio
@@ -215,7 +215,7 @@ echo 0 > /sys/class/gpio/gpio22/value  # GPS off
    - Test position reporting to mesh
 
 5. **Integration Testing**
-   - Full MeshForge stack
+   - Full MeshAnchor stack
    - Unified map with all networks
    - Power management cycling
    - Field endurance test
@@ -230,5 +230,5 @@ echo 0 > /sys/class/gpio/gpio22/value  # GPS off
 - [SX1262 Datasheet](https://www.semtech.com/products/wireless-rf/lora-transceivers/sx1262)
 
 ---
-*Research compiled by Claude Code for MeshForge project*
+*Research compiled by Claude Code for MeshAnchor project*
 *Hardware arrival: April 2026*

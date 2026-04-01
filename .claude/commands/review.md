@@ -1,12 +1,12 @@
 # Auto-Claude Review
 
-Run the MeshForge self-audit system and report findings.
+Run the MeshAnchor self-audit system and report findings.
 
 ## Instructions
 
 1. Run the auto-review system:
 ```bash
-cd /opt/meshforge/src && python3 -c "
+cd /opt/meshanchor/src && python3 -c "
 from utils.auto_review import ReviewOrchestrator
 r = ReviewOrchestrator()
 report = r.run_full_review()

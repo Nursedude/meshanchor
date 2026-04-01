@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# MeshForge - Local Development Setup
+# MeshAnchor - Local Development Setup
 #
 # For users who clone to their home directory instead of using the full installer.
 # Handles Python's externally-managed-environment (PEP 668) on Debian/Bookworm/RPi.
 #
 # Usage:
-#   cd ~/meshforge
+#   cd ~/meshanchor
 #   ./dev_setup.sh
 #
 
@@ -19,17 +19,17 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${CYAN}MeshForge - Local Development Setup${NC}"
+echo -e "${CYAN}MeshAnchor - Local Development Setup${NC}"
 echo ""
 
-# Check we're in the meshforge directory
+# Check we're in the meshanchor directory
 if [[ ! -f "src/__version__.py" ]]; then
-    echo -e "${RED}Error: Run this script from the meshforge directory${NC}"
-    echo "  cd ~/meshforge && ./dev_setup.sh"
+    echo -e "${RED}Error: Run this script from the meshanchor directory${NC}"
+    echo "  cd ~/meshanchor && ./dev_setup.sh"
     exit 1
 fi
 
-MESHFORGE_DIR=$(pwd)
+MESHANCHOR_DIR=$(pwd)
 
 # Detect if Python is externally managed (PEP 668 - Debian Bookworm, RPi OS)
 check_externally_managed() {
@@ -49,16 +49,16 @@ setup_venv() {
     # Create activation helper
     cat > activate.sh << 'EOF'
 #!/bin/bash
-# Activate MeshForge virtual environment
+# Activate MeshAnchor virtual environment
 source "$(dirname "$0")/.venv/bin/activate"
-echo "MeshForge venv activated. Run: python3 src/launcher.py"
+echo "MeshAnchor venv activated. Run: python3 src/launcher.py"
 EOF
     chmod +x activate.sh
 
     # Create run helper
     cat > run.sh << 'EOF'
 #!/bin/bash
-# Run MeshForge from local venv
+# Run MeshAnchor from local venv
 cd "$(dirname "$0")"
 exec .venv/bin/python src/launcher.py "$@"
 EOF
@@ -67,7 +67,7 @@ EOF
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
-    echo -e "${CYAN}To run MeshForge:${NC}"
+    echo -e "${CYAN}To run MeshAnchor:${NC}"
     echo "  ./run.sh                    # Quick launch"
     echo "  source ./activate.sh        # Activate venv for development"
     echo "  python3 src/launcher.py     # Then run manually"
@@ -81,7 +81,7 @@ setup_system() {
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
-    echo -e "${CYAN}To run MeshForge:${NC}"
+    echo -e "${CYAN}To run MeshAnchor:${NC}"
     echo "  python3 src/launcher.py"
     echo "  python3 src/standalone.py"
 }
@@ -99,7 +99,7 @@ if check_externally_managed; then
     echo "     - Use ./run.sh to launch"
     echo ""
     echo "  2) System packages with --break-system-packages"
-    echo "     - Simpler for dedicated MeshForge Pi"
+    echo "     - Simpler for dedicated MeshAnchor Pi"
     echo "     - Installs to system Python packages"
     echo "     - Run directly with python3"
     echo ""
@@ -121,6 +121,6 @@ else
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
-    echo -e "${CYAN}To run MeshForge:${NC}"
+    echo -e "${CYAN}To run MeshAnchor:${NC}"
     echo "  python3 src/launcher.py"
 fi

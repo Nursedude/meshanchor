@@ -310,7 +310,7 @@ class MeshCoreConfig:
     """
     MeshCore companion radio configuration.
 
-    Unlike Meshtastic (which uses meshtasticd as a daemon), MeshForge connects
+    Unlike Meshtastic (which uses meshtasticd as a daemon), MeshAnchor connects
     directly to the MeshCore companion radio via meshcore_py. Three connection
     methods are supported:
 
@@ -322,10 +322,10 @@ class MeshCoreConfig:
     Requires: pip install meshcore (Python 3.10+)
     Hardware: MeshCore companion radio (RAK4631, Heltec V3, T-Deck, etc.)
     """
-    enabled: bool = False
+    enabled: bool = True  # MeshCore is primary in MeshAnchor
 
     # Connection settings — choose one of: serial | tcp | ble
-    device_path: str = "/dev/ttyUSB1"    # Serial: USB device path
+    device_path: str = "/dev/ttyUSB0"    # Serial: USB device path
     baud_rate: int = 115200              # Serial: baud rate
     connection_type: str = "serial"       # serial | tcp | ble
     tcp_host: str = ""                   # TCP: hostname or IP
@@ -347,7 +347,7 @@ class MeshCoreConfig:
 class RNSConfig:
     """Reticulum Network Stack configuration"""
     config_dir: str = ""  # Empty = default ~/.reticulum
-    identity_name: str = "meshforge_gateway"
+    identity_name: str = "meshanchor_gateway"
     announce_interval: int = 300  # seconds
     propagation_node: str = ""  # Optional propagation node address
     default_lxmf_destination: str = ""  # Hex hash — broadcast messages route here
@@ -450,7 +450,7 @@ class GatewayConfig:
     # - mesh_bridge: Bridges two Meshtastic networks with different presets
     # - meshcore_bridge: MeshCore ↔ Meshtastic/RNS bridge via companion radio
     # - tri_bridge: All three protocols (Meshtastic + MeshCore + RNS)
-    bridge_mode: str = "mqtt_bridge"
+    bridge_mode: str = "meshcore_bridge"  # MeshCore-primary default
 
     # Network configurations
     meshtastic: MeshtasticConfig = field(default_factory=MeshtasticConfig)
@@ -523,7 +523,7 @@ class GatewayConfig:
     @classmethod
     def get_config_path(cls) -> Path:
         """Get the configuration file path"""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "gateway.json"
 

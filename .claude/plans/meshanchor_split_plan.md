@@ -1,6 +1,6 @@
 # Branch Analysis & Repository Split Plan
 
-> **Context**: WH6GXZ is reconsidering the "MeshCore stays in MeshForge" decision. Instead of merging alpha back into main, the proposal is to fork alpha into a **new standalone app/repo** where MeshCore is the primary radio and Meshtastic becomes a gateway plugin — the mirror image of main's architecture.
+> **Context**: WH6GXZ is reconsidering the "MeshCore stays in MeshAnchor" decision. Instead of merging alpha back into main, the proposal is to fork alpha into a **new standalone app/repo** where MeshCore is the primary radio and Meshtastic becomes a gateway plugin — the mirror image of main's architecture.
 >
 > **Decisions Made**:
 > - **Name**: MeshAnchor (`Nursedude/meshanchor`)
@@ -34,19 +34,19 @@
 
 The key insight is that alpha's `RadioMode` abstraction already models this split perfectly:
 
-| | **Main (MeshForge)** | **New App (alpha fork)** |
+| | **Main (MeshAnchor)** | **New App (alpha fork)** |
 |---|---|---|
 | Primary radio | Meshtastic (meshtasticd) | MeshCore (meshcore_py) |
 | RadioMode default | `MESHTASTIC` | `MESHCORE` |
 | Secondary/gateway | MeshCore as optional handler | Meshtastic as gateway plugin |
-| Bridge direction | meshforge → meshcore (outbound) | newapp → meshtastic (outbound) |
+| Bridge direction | meshanchor → meshcore (outbound) | newapp → meshtastic (outbound) |
 | RNS integration | Core (gateway bridge) | Core (gateway bridge) |
 
 **The architecture is symmetric**: Both apps are NOCs that bridge mesh networks. They just differ in which radio is "home" and which is "foreign."
 
 ```
 ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-│  Meshtastic  │◄───────►│  MeshForge   │◄───────►│     RNS      │
+│  Meshtastic  │◄───────►│  MeshAnchor   │◄───────►│     RNS      │
 │   (Primary)  │         │   (main)     │         │  (Primary)   │
 └──────────────┘         └──────┬───────┘         └──────────────┘
                                 │
@@ -80,7 +80,7 @@ Both apps need: RF tools, service management, diagnostic engine, paths, validati
 - Both apps will diverge in focus: main toward Meshtastic ecosystem, MeshAnchor toward MeshCore ecosystem
 - If a critical bugfix is needed in shared code, cherry-pick between repos (rare)
 
-**Future option**: If the projects stabilize and shared code drift becomes painful, extract `meshforge-common` as a package later. Don't over-engineer now.
+**Future option**: If the projects stabilize and shared code drift becomes painful, extract `meshanchor-common` as a package later. Don't over-engineer now.
 
 ---
 
@@ -127,7 +127,7 @@ Alpha is remarkably well-positioned to become a standalone app:
 - Deployment profiles, service management
 
 ### Changes (Eventually)
-- Once new app is stable, MeshCore handler on main can optionally connect **through** the new app as a gateway (meshcore ↔ new-app ↔ meshforge ↔ meshtastic)
+- Once new app is stable, MeshCore handler on main can optionally connect **through** the new app as a gateway (meshcore ↔ new-app ↔ meshanchor ↔ meshtastic)
 - Or keep direct MeshCore handler for simple setups
 - Document the two-app ecosystem
 
@@ -139,7 +139,7 @@ Alpha is remarkably well-positioned to become a standalone app:
 | Name | Rationale |
 |---|---|
 | **CoreForge** | Direct: MeshCore + Forge family. Clear sister relationship |
-| **MeshCore Forge** | Explicit: it's MeshForge but for MeshCore |
+| **MeshCore Forge** | Explicit: it's MeshAnchor but for MeshCore |
 | **RadioForge** | Broader: any radio protocol, MeshCore primary |
 
 ### Craft/Build Family
@@ -170,7 +170,7 @@ Alpha is remarkably well-positioned to become a standalone app:
 - MeshCore is the stable, always-on anchor radio
 - Nautical theme fits Hawaiian callsign WH6GXZ
 - "Anchor" implies reliability — the thing you trust when conditions get rough
-- Clear sister branding: MeshForge (builds the mesh) + MeshAnchor (holds it steady)
+- Clear sister branding: MeshAnchor (builds the mesh) + MeshAnchor (holds it steady)
 
 ---
 
@@ -178,7 +178,7 @@ Alpha is remarkably well-positioned to become a standalone app:
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **Shared code drift** | Medium | Cherry-pick critical fixes quarterly. Extract `meshforge-common` if drift exceeds 20% |
+| **Shared code drift** | Medium | Cherry-pick critical fixes quarterly. Extract `meshanchor-common` if drift exceeds 20% |
 | **CanonicalMessage divergence** | High | Keep protocol conversion methods identical. Shared test vectors |
 | **User confusion** | Medium | Clear README/docs explaining when to use which app |
 | **Maintenance burden (2 repos)** | Medium | Both share TUI framework, handler pattern — skills transfer. One developer (WH6GXZ) owns both |
@@ -191,7 +191,7 @@ Alpha is remarkably well-positioned to become a standalone app:
 
 ### Phase 1: Field Test Alpha (Before Split) — DO THIS FIRST
 - [ ] Deploy alpha to test hardware with real MeshCore radios
-- [ ] Validate 3-way routing (MeshCore ↔ MeshForge ↔ Meshtastic)
+- [ ] Validate 3-way routing (MeshCore ↔ MeshAnchor ↔ Meshtastic)
 - [ ] Cherry-pick main's 18 commits onto alpha (Meshtastic 2.7.x, security, timeouts)
 - [ ] Run full test suite on merged alpha
 - [ ] Document any architectural issues found during field testing
@@ -208,17 +208,17 @@ Alpha is remarkably well-positioned to become a standalone app:
 - [ ] Set up CI/CD (pytest, lint, pre-commit hooks)
 - [ ] Add CLAUDE.md for MeshAnchor with updated architecture docs
 
-### Phase 3: Update MeshForge Main
-- [ ] Document the two-app ecosystem in MeshForge README
+### Phase 3: Update MeshAnchor Main
+- [ ] Document the two-app ecosystem in MeshAnchor README
 - [ ] Keep MeshCore handler on main as-is (optional gateway)
 - [ ] Archive alpha/meshcore-bridge branch (`git tag alpha-archived`)
 - [ ] Update CLAUDE.md branch strategy to reflect MeshAnchor as separate repo
 
 ### Phase 4: Ecosystem Integration
-- [ ] Define gateway protocol between MeshForge ↔ MeshAnchor
+- [ ] Define gateway protocol between MeshAnchor ↔ MeshAnchor
 - [ ] Shared test vectors for CanonicalMessage (identical protocol conversion)
 - [ ] Coordinated release documentation
-- [ ] Cross-linking in both READMEs ("Made with aloha — part of the MeshForge family")
+- [ ] Cross-linking in both READMEs ("Made with aloha — part of the MeshAnchor family")
 
 ---
 

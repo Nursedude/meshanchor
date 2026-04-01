@@ -1,4 +1,4 @@
-# MeshForge Project Configuration
+# MeshAnchor Project Configuration
 # ================================
 # Centralized configuration for Python tooling.
 #
@@ -9,16 +9,16 @@
 # - isort: Import sorting (optional)
 
 [project]
-name = "meshforge"
-version = "0.5.5-beta"
-description = "Network Operations Center bridging Meshtastic and Reticulum mesh networks"
+name = "meshanchor"
+version = "0.1.0-alpha"
+description = "MeshCore Network Operations Center — sister project to MeshForge"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "GPL-3.0"}
 authors = [
-    {name = "WH6GXZ (Nursedude)", email = "meshforge@example.com"}
+    {name = "WH6GXZ (Nursedude)"}
 ]
-keywords = ["meshtastic", "reticulum", "mesh", "ham-radio", "lora", "networking"]
+keywords = ["meshcore", "reticulum", "mesh", "ham-radio", "lora", "networking", "meshtastic"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -37,9 +37,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Nursedude/meshforge"
-Repository = "https://github.com/Nursedude/meshforge"
-Issues = "https://github.com/Nursedude/meshforge/issues"
+Homepage = "https://github.com/Nursedude/meshanchor"
+Repository = "https://github.com/Nursedude/meshanchor"
+Issues = "https://github.com/Nursedude/meshanchor/issues"
 
 # ============================================================================
 # PYTEST CONFIGURATION

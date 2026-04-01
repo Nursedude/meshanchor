@@ -1,13 +1,13 @@
-# XTOC/XCOM Integration Research for MeshForge
+# XTOC/XCOM Integration Research for MeshAnchor
 
 > **Date:** 2026-02-22
 > **Sources:** [XTOC Home](https://www.mkme.org/xtocapp/) | [XTOC Store](https://store.mkme.org/product/xtoc-tactical-operations-center-software-suite/) | [XCOM Store](https://store.mkme.org/product/xcom-offline-radio-communication-suite/)
 
 ## Overview
 
-XTOC (Tactical Operations Center) and XCOM (Offline Radio Communication Suite) are commercial PWA products by MKME.org for offline-first tactical operations over low-bandwidth transports (Meshtastic, MeshCore, Reticulum/RNode, SMS, QR, MANET). This document analyzes which features and reliability patterns MeshForge should adopt.
+XTOC (Tactical Operations Center) and XCOM (Offline Radio Communication Suite) are commercial PWA products by MKME.org for offline-first tactical operations over low-bandwidth transports (Meshtastic, MeshCore, Reticulum/RNode, SMS, QR, MANET). This document analyzes which features and reliability patterns MeshAnchor should adopt.
 
-**Key finding:** MeshForge already has ~90% of the foundational infrastructure. XTOC is a tactical UI layer — it creates structured packets and relies on external transports. MeshForge is the opposite — a networking powerhouse that could benefit from XTOC's structured data approach.
+**Key finding:** MeshAnchor already has ~90% of the foundational infrastructure. XTOC is a tactical UI layer — it creates structured packets and relies on external transports. MeshAnchor is the opposite — a networking powerhouse that could benefit from XTOC's structured data approach.
 
 ---
 
@@ -26,7 +26,7 @@ XTOC uses typed templates instead of free-form text:
 - **EVENT** - Timeline entries
 - **CHECKIN/LOC** - Position reports (multi-unit)
 
-**MeshForge today:** Has `CanonicalMessage` types (TEXT, TELEMETRY, POSITION, COMMAND, ACK, TRACEROUTE, NODEINFO) and ARES/RACES ICS-213 templates in `src/amateur/ares_races.py` with priority levels (ROUTINE/PRIORITY/IMMEDIATE/FLASH).
+**MeshAnchor today:** Has `CanonicalMessage` types (TEXT, TELEMETRY, POSITION, COMMAND, ACK, TRACEROUTE, NODEINFO) and ARES/RACES ICS-213 templates in `src/amateur/ares_races.py` with priority levels (ROUTINE/PRIORITY/IMMEDIATE/FLASH).
 
 **Gap:** No SITREP, TASK, RESOURCE, or ZONE structured types.
 
@@ -44,37 +44,37 @@ X1.<T>.<M>.<ID>.<P>/<N>.<PAYLOAD>
 - Auto-chunking per transport limits
 - Out-of-order reassembly + deduplication
 
-**MeshForge today:** Has chunking in `messaging.py`, dedup via MD5 in `message_queue.py`. No transport-aware chunk sizing or structured binary packing.
+**MeshAnchor today:** Has chunking in `messaging.py`, dedup via MD5 in `message_queue.py`. No transport-aware chunk sizing or structured binary packing.
 
 ### 3. Mesh Auto-Ingest (HIGH VALUE)
 
-Received mesh packets are automatically decoded and applied to timeline + tactical map with zero operator clicks. MeshForge has `event_bus.py` but doesn't auto-classify or auto-route inbound structured messages.
+Received mesh packets are automatically decoded and applied to timeline + tactical map with zero operator clicks. MeshAnchor has `event_bus.py` but doesn't auto-classify or auto-route inbound structured messages.
 
 ### 4. Tactical Map (MEDIUM-HIGH VALUE)
 
-XTOC features: zone markings, ATAK/KML/CoT integration, SATCOM/TLE overlay. MeshForge has Folium maps and node tracking but no zones, tactical markers, or ATAK interop.
+XTOC features: zone markings, ATAK/KML/CoT integration, SATCOM/TLE overlay. MeshAnchor has Folium maps and node tracking but no zones, tactical markers, or ATAK interop.
 
 ### 5. Multi-Transport (MEDIUM VALUE)
 
-Same packet works across: clipboard, QR, email, mesh, Reticulum/RNode, MANET, Winlink, voice relay. MeshForge already bridges Meshtastic/RNS/MeshCore but lacks QR code or manual relay workflows.
+Same packet works across: clipboard, QR, email, mesh, Reticulum/RNode, MANET, Winlink, voice relay. MeshAnchor already bridges Meshtastic/RNS/MeshCore but lacks QR code or manual relay workflows.
 
 ### 6. Encryption Modes (MEDIUM VALUE)
 
-CLEAR (ham-legal, no encryption) vs SECURE (AES for non-ham). MeshForge relies on transport-level encryption only.
+CLEAR (ham-legal, no encryption) vs SECURE (AES for non-ham). MeshAnchor relies on transport-level encryption only.
 
 ### 7. Decentralized Log (ALREADY HAVE)
 
-Local-first, no central server. MeshForge already follows this pattern.
+Local-first, no central server. MeshAnchor already follows this pattern.
 
 ### 8. Offline PWA (LOW RELEVANCE)
 
-Browser-based. MeshForge's TUI approach is better for headless mesh nodes.
+Browser-based. MeshAnchor's TUI approach is better for headless mesh nodes.
 
 ---
 
 ## XCOM Companion App
 
-Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). MeshForge already covers mesh-relevant parts via `node_tracker.py` and `amateur_radio_mixin.py`.
+Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). MeshAnchor already covers mesh-relevant parts via `node_tracker.py` and `amateur_radio_mixin.py`.
 
 ---
 
@@ -86,7 +86,7 @@ Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). 
 3. Transport-aware chunking
 4. Store-and-forward positions
 
-### MeshForge already has (more sophisticated):
+### MeshAnchor already has (more sophisticated):
 1. Circuit breaker pattern
 2. Exponential backoff retries
 3. Dead letter queue
@@ -94,13 +94,13 @@ Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). 
 5. Priority queuing (LOW/NORMAL/HIGH/URGENT)
 6. Bridge health monitoring (HEALTHY/DEGRADED/DISCONNECTED)
 
-**MeshForge's reliability infrastructure exceeds XTOC's.** Adopt XTOC's out-of-order reassembly and transport-aware chunking; keep everything else.
+**MeshAnchor's reliability infrastructure exceeds XTOC's.** Adopt XTOC's out-of-order reassembly and transport-aware chunking; keep everything else.
 
 ---
 
 ## Implementation Roadmap
 
-**Decision:** MeshForge-native format internally + X1 import/export for XTOC interop.
+**Decision:** MeshAnchor-native format internally + X1 import/export for XTOC interop.
 
 ### Phase 1: Structured Tactical Messages
 - New `src/tactical/` package: `models.py`, `codec.py`, `timeline.py`
@@ -135,11 +135,11 @@ Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). 
 
 ```
                     ┌─────────────────────────────────────┐
-                    │         MeshForge Tactical Layer     │
+                    │         MeshAnchor Tactical Layer     │
                     │                                     │
   XTOC X1 Packets ─┤  x1_codec.py ──► models.py          │
                     │                    │                 │
-  MeshForge Native ─┤  codec.py ────────┤                 │
+  MeshAnchor Native ─┤  codec.py ────────┤                 │
                     │                    │                 │
                     │              timeline.py (SQLite)    │
                     │                    │                 │
@@ -151,7 +151,7 @@ Mostly radio reference tools (repeater maps, shortwave schedules, QSO logbook). 
                     └────────────────────┼────────────────┘
                                          │
                     ┌────────────────────┼────────────────┐
-                    │     Existing MeshForge Gateway       │
+                    │     Existing MeshAnchor Gateway       │
                     │                                     │
                     │  canonical_message.py                │
                     │  message_routing.py (3-way)          │

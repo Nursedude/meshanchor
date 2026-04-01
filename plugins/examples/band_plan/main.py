@@ -1,5 +1,5 @@
 """
-Band Plan Reference Plugin for MeshForge.io
+Band Plan Reference Plugin for MeshAnchor.io
 
 Provides quick reference for:
 - LoRa ISM frequency allocations by region
@@ -15,7 +15,7 @@ from gi.repository import Gtk, Adw, Pango
 
 # Import plugin base
 try:
-    from meshforge.core.plugin_base import Plugin, PluginContext
+    from meshanchor.core.plugin_base import Plugin, PluginContext
 except ImportError:
     import sys
     from pathlib import Path
@@ -359,7 +359,7 @@ class BandPlanPanel(Gtk.Box):
 
 
 class BandPlanPlugin(Plugin):
-    """Band Plan Reference plugin for MeshForge.io"""
+    """Band Plan Reference plugin for MeshAnchor.io"""
 
     def activate(self, context: PluginContext) -> None:
         """Called when plugin is activated"""

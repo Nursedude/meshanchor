@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-meshforged — MeshForge daemon management CLI
+meshanchord — MeshAnchor daemon management CLI
 
 Thin entry point that delegates to DaemonController in src/daemon.py.
 
 Usage:
-    meshforged start [--profile <name>] [--config <path>] [--foreground]
-    meshforged stop
-    meshforged status [--json]
-    meshforged restart
-    meshforged reload
+    meshanchord start [--profile <name>] [--config <path>] [--foreground]
+    meshanchord stop
+    meshanchord status [--json]
+    meshanchord restart
+    meshanchord reload
 """
 
 import os

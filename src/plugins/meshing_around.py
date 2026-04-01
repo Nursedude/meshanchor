@@ -1,5 +1,5 @@
 """
-Meshing-Around Bot Integration Plugin for MeshForge.
+Meshing-Around Bot Integration Plugin for MeshAnchor.
 
 Integrates with the meshing-around bot framework for advanced
 Meshtastic automation, games, and services.
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class MeshingAroundPlugin(IntegrationPlugin):
-    """Meshing-Around bot integration for MeshForge."""
+    """Meshing-Around bot integration for MeshAnchor."""
 
     def __init__(self):
         self._connected = False

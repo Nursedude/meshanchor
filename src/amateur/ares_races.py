@@ -1,5 +1,5 @@
 """
-ARES/RACES Tools for MeshForge Amateur Radio Edition
+ARES/RACES Tools for MeshAnchor Amateur Radio Edition
 
 Provides Amateur Radio Emergency Service (ARES) and
 Radio Amateur Civil Emergency Service (RACES) functionality.
@@ -250,7 +250,7 @@ class ARESRACESTools:
 
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize ARES/RACES tools"""
-        self.config_dir = config_dir or get_real_user_home() / '.config' / 'meshforge'
+        self.config_dir = config_dir or get_real_user_home() / '.config' / 'meshanchor'
         self.data_dir = self.config_dir / 'ares_races'
         self.data_dir.mkdir(parents=True, exist_ok=True)
 

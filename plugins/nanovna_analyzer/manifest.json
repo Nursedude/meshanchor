@@ -1,12 +1,12 @@
 {
-    "id": "org.meshforge.plugin.nanovna_analyzer",
+    "id": "org.meshanchor.plugin.nanovna_analyzer",
     "name": "NanoVNA Antenna Analyzer",
     "version": "0.1.0",
     "description": "Real-time SWR, impedance, and frequency response analysis from NanoVNA devices",
-    "author": "MeshForge",
+    "author": "MeshAnchor",
     "type": "integration",
     "entry_point": "main.py",
-    "min_meshforge_version": "0.4.0",
+    "min_meshanchor_version": "0.4.0",
     "permissions": ["serial_access"],
     "dependencies": ["pyserial"],
     "settings_schema": {

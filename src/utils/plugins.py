@@ -1,5 +1,5 @@
 """
-MeshForge Plugin System.
+MeshAnchor Plugin System.
 
 Extensible architecture for adding new functionality:
 - Panel Plugins: Add new UI panels (MeshCore, MQTT, etc.)
@@ -53,7 +53,7 @@ from utils.paths import get_real_user_home
 
 
 class PluginType(Enum):
-    """Types of plugins supported by MeshForge."""
+    """Types of plugins supported by MeshAnchor."""
     PANEL = "panel"           # Adds a new UI panel/tab
     INTEGRATION = "integration"  # Connects to external services (MQTT, HA, etc.)
     TOOL = "tool"             # Adds tools to Tools panel
@@ -94,7 +94,7 @@ class PluginMetadata:
 
 
 class BasePlugin(ABC):
-    """Base class for all MeshForge plugins."""
+    """Base class for all MeshAnchor plugins."""
 
     @staticmethod
     @abstractmethod
@@ -222,8 +222,8 @@ class PluginManager:
 
     Plugins are discovered from:
     1. Built-in plugins (src/plugins/)
-    2. User plugins (~/.config/meshforge/plugins/)
-    3. System plugins (/usr/share/meshforge/plugins/)
+    2. User plugins (~/.config/meshanchor/plugins/)
+    3. System plugins (/usr/share/meshanchor/plugins/)
     """
 
     def __init__(self, plugins_dir: Optional[Path] = None):
@@ -239,7 +239,7 @@ class PluginManager:
             self.plugins_dir = Path(__file__).parent.parent / "plugins"
 
         # User plugins directory
-        self.user_plugins_dir = get_real_user_home() / ".config" / "meshforge" / "plugins"
+        self.user_plugins_dir = get_real_user_home() / ".config" / "meshanchor" / "plugins"
 
     def discover(self) -> List[str]:
         """Discover plugins in configured directories."""

@@ -1,6 +1,6 @@
-# MeshForge Visual Guide
+# MeshAnchor Visual Guide
 
-Screenshots and interface previews for MeshForge.
+Screenshots and interface previews for MeshAnchor.
 
 ---
 
@@ -10,7 +10,7 @@ The TUI works over SSH and in any terminal. Recommended for headless Raspberry P
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│                    MeshForge v0.4.6-beta                          │
+│                    MeshAnchor v0.4.6-beta                          │
 ├───────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │   Select an option:                                               │
@@ -35,7 +35,7 @@ The TUI works over SSH and in any terminal. Recommended for headless Raspberry P
 │      Hardware Detection                                           │
 │      Settings                                                     │
 │   ──────────────────────────────                                  │
-│      About MeshForge                                              │
+│      About MeshAnchor                                              │
 │      Exit                                                         │
 │                                                                   │
 │                              <Ok>            <Cancel>             │
@@ -163,7 +163,7 @@ Access via browser at `http://localhost:8880`
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ MeshForge                                              [Dark] [Light]   │
+│ MeshAnchor                                              [Dark] [Light]   │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Dashboard │ Gateway │ Map │ Nodes │ Messages │ Config │ System          │
 ├─────────────────────────────────────────────────────────────────────────┤
@@ -201,7 +201,7 @@ Interactive Leaflet map showing node locations:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ MeshForge - Map                                                         │
+│ MeshAnchor - Map                                                         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │    ┌────────────────────────────────────────────────────────────────┐   │
@@ -234,7 +234,7 @@ The coverage map generator creates interactive Folium maps:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Coverage Map - MeshForge                          [OpenStreetMap ▼]    │
+│  Coverage Map - MeshAnchor                          [OpenStreetMap ▼]    │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │         ╭─────────────────────────────────────╮                         │
@@ -306,7 +306,7 @@ The coverage map generator creates interactive Folium maps:
 
 ```
                     ┌─────────────────────────────────────┐
-                    │           MESHFORGE GATEWAY          │
+                    │           MESHANCHOR GATEWAY          │
                     │                                     │
 ┌─────────────┐     │  ┌─────────┐       ┌─────────┐    │     ┌─────────────┐
 │ MESHTASTIC  │     │  │ Message │       │ Message │    │     │  RETICULUM  │
@@ -333,21 +333,21 @@ The coverage map generator creates interactive Folium maps:
 
 ```bash
 # Launch interfaces
-sudo meshforge              # Auto-detect best interface
-sudo meshforge-gtk          # GTK4 desktop
-sudo meshforge-web          # Web dashboard (port 8880)
+sudo meshanchor              # Auto-detect best interface
+sudo meshanchor-gtk          # GTK4 desktop
+sudo meshanchor-web          # Web dashboard (port 8880)
 sudo python3 src/launcher_tui.py   # TUI (SSH-friendly)
 
 # Direct access
 python3 src/standalone.py   # Zero-dependency mode
 
 # Configuration
-~/.config/meshforge/gateway.json    # Gateway settings
+~/.config/meshanchor/gateway.json    # Gateway settings
 /etc/meshtasticd/config.d/          # Hardware configs
 
 # Logs
 journalctl -u meshtasticd -f        # meshtasticd logs
-tail -f ~/.local/share/meshforge/meshforge.log
+tail -f ~/.local/share/meshanchor/meshanchor.log
 
 # Testing
 python3 -m pytest tests/ -v         # Run tests

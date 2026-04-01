@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MeshForge Standalone Boot - Self-contained entry point
+MeshAnchor Standalone Boot - Self-contained entry point
 
-This module provides a completely standalone entry point for MeshForge that:
+This module provides a completely standalone entry point for MeshAnchor that:
 - Does NOT require root/sudo for basic functionality
 - Does NOT depend on any UI frameworks
 - Gracefully degrades when dependencies are missing
@@ -88,7 +88,7 @@ class DependencyStatus:
 
     def print_status(self):
         """Print dependency status"""
-        print("\n============== MeshForge Dependency Status ==============")
+        print("\n============== MeshAnchor Dependency Status ==============")
 
         for dep, available in self.available.items():
             status = "[OK]" if available else "[--]"
@@ -482,7 +482,7 @@ class StandaloneTools:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def print_banner():
-    """Print the MeshForge banner"""
+    """Print the MeshAnchor banner"""
     print("""
 =================================================================
     __  __           _     _____
@@ -546,7 +546,7 @@ def main_menu(deps: DependencyStatus):
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="MeshForge Standalone - Self-contained mesh network tools",
+        description="MeshAnchor Standalone - Self-contained mesh network tools",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -560,7 +560,7 @@ Examples:
     )
     parser.add_argument('tool', nargs='?', help='Tool to run directly')
     parser.add_argument('--check', action='store_true', help='Check dependencies')
-    parser.add_argument('--version', action='version', version=f'MeshForge {__version__}')
+    parser.add_argument('--version', action='version', version=f'MeshAnchor {__version__}')
 
     args = parser.parse_args()
 

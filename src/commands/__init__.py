@@ -1,5 +1,5 @@
 """
-MeshForge Commands Layer
+MeshAnchor Commands Layer
 
 Unified command interface for TUI and CLI.
 All UI-independent operations go here.

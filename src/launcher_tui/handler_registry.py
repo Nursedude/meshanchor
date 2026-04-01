@@ -3,7 +3,7 @@ Handler Registry — Central dispatch for TUI command handlers.
 
 Manages handler registration, menu-item aggregation, feature-flag
 filtering, and action dispatch. Replaces the inline ``dispatch = {}``
-dictionaries scattered across MeshForgeLauncher submenu methods.
+dictionaries scattered across MeshAnchorLauncher submenu methods.
 
 Phase 0 of the migration: infrastructure only, no existing code changed.
 

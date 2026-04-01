@@ -1,18 +1,18 @@
-# MeshForge Configuration Examples
+# MeshAnchor Configuration Examples
 
-This directory contains example configurations to help you get started with MeshForge.
+This directory contains example configurations to help you get started with MeshAnchor.
 
 ## Quick Setup
 
 ```bash
 # 1. Copy gateway config to user directory
-mkdir -p ~/.config/meshforge
-cp examples/configs/gateway-basic.json ~/.config/meshforge/gateway.json
+mkdir -p ~/.config/meshanchor
+cp examples/configs/gateway-basic.json ~/.config/meshanchor/gateway.json
 
 # 2. Copy hardware config (requires sudo)
 sudo cp examples/configs/meshtasticd-usb.yaml /etc/meshtasticd/config.d/
 
-# 3. Start MeshForge
+# 3. Start MeshAnchor
 sudo python3 src/launcher.py
 ```
 
@@ -20,7 +20,7 @@ sudo python3 src/launcher.py
 
 ## Configuration Files Overview
 
-### User Configs (`~/.config/meshforge/`)
+### User Configs (`~/.config/meshanchor/`)
 
 | File | Purpose |
 |------|---------|
@@ -43,7 +43,7 @@ sudo python3 src/launcher.py
 The minimal setup for bridging Meshtastic and RNS messages.
 
 ```
-Meshtastic (localhost:4403) <---> MeshForge <---> Reticulum
+Meshtastic (localhost:4403) <---> MeshAnchor <---> Reticulum
 ```
 
 **Use when:**
@@ -55,7 +55,7 @@ Meshtastic (localhost:4403) <---> MeshForge <---> Reticulum
 Bridge messages while also publishing to an MQTT broker.
 
 ```
-Meshtastic <---> MeshForge <---> RNS
+Meshtastic <---> MeshAnchor <---> RNS
                     |
                     v
                 MQTT Broker
@@ -70,7 +70,7 @@ Meshtastic <---> MeshForge <---> RNS
 Use the Meshtastic mesh as a transport layer for RNS.
 
 ```
-RNS App <---> MeshForge <---> Meshtastic LoRa <---> Remote Node
+RNS App <---> MeshAnchor <---> Meshtastic LoRa <---> Remote Node
 ```
 
 **Use when:**
@@ -128,7 +128,7 @@ sudo reboot
 
   "rns": {
     "config_dir": "",           // RNS config (empty = default ~/.reticulum)
-    "identity_name": "meshforge_gateway",
+    "identity_name": "meshanchor_gateway",
     "announce_interval": 300    // Announce every 5 minutes
   },
 

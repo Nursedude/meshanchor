@@ -1,7 +1,7 @@
 """iptables port isolation for meshtasticd.
 
-MeshForge owns the browser: blocks external access to meshtasticd's
-web server (port 9443) so users go through MeshForge's multiplexed
+MeshAnchor owns the browser: blocks external access to meshtasticd's
+web server (port 9443) so users go through MeshAnchor's multiplexed
 proxy at port 5000.
 
 Extracted from service_check.py for file size compliance (CLAUDE.md #6).
@@ -22,7 +22,7 @@ def lock_port_external(port: int = 9443, timeout: int = 10) -> Tuple[bool, str]:
     """Block external access to a port, allowing only localhost.
 
     Used to prevent users from accessing meshtasticd's web server directly
-    at port 9443.  MeshForge serves the web client at port 5000/mesh/
+    at port 9443.  MeshAnchor serves the web client at port 5000/mesh/
     with multiplexed API proxying and phantom node filtering.
 
     This adds an iptables INPUT rule that rejects non-localhost traffic

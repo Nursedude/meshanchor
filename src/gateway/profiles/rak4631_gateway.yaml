@@ -1,4 +1,4 @@
-# MeshForge Gateway Profile: RAK4631 (nRF52840)
+# MeshAnchor Gateway Profile: RAK4631 (nRF52840)
 # Optimized for gateway/router operation
 # Apply with: meshtastic --configure rak4631_gateway.yaml
 #
@@ -7,7 +7,7 @@
 # - Bluetooth disabled (headless operation)
 # - Power saving disabled (always listening)
 # - Maximum hop limit for network reach
-# - JSON API for MeshForge integration
+# - JSON API for MeshAnchor integration
 
 device:
   role: ROUTER_CLIENT  # Forward messages, also receive

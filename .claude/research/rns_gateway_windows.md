@@ -92,11 +92,11 @@ Cons:
 
 ---
 
-## MeshForge Architectural Patterns for Windows
+## MeshAnchor Architectural Patterns for Windows
 
 ### 1. Graceful Degradation Pattern
 
-MeshForge's `standalone.py` demonstrates dependency-agnostic design:
+MeshAnchor's `standalone.py` demonstrates dependency-agnostic design:
 
 ```python
 class DependencyStatus:
@@ -119,7 +119,7 @@ class DependencyStatus:
 
 ### 2. Platform Abstraction Layer
 
-MeshForge's `utils/system.py` pattern (adapted for cross-platform):
+MeshAnchor's `utils/system.py` pattern (adapted for cross-platform):
 
 ```python
 import platform
@@ -153,7 +153,7 @@ def run_as_service():
 
 ### 3. Security Patterns (Non-Negotiable)
 
-MeshForge enforces these patterns - Gateway should too:
+MeshAnchor enforces these patterns - Gateway should too:
 
 ```python
 # NEVER use shell=True
@@ -172,7 +172,7 @@ if not re.match(r'^[a-zA-Z0-9_-]+$', user_input):
 
 ### 4. Configuration Management
 
-MeshForge's `SettingsManager` pattern:
+MeshAnchor's `SettingsManager` pattern:
 
 ```python
 class SettingsManager:
@@ -303,7 +303,7 @@ Filename: "{app}\RNS_Meshtastic_Gateway.exe"; Flags: nowait postinstall
 
 ## Cross-AI Collaboration Notes
 
-### What MeshForge Offers
+### What MeshAnchor Offers
 - Comprehensive RNS research in `.claude/research/rns_*.md`
 - Proven security patterns (subprocess handling)
 - Graceful degradation for missing dependencies
@@ -317,7 +317,7 @@ Filename: "{app}\RNS_Meshtastic_Gateway.exe"; Flags: nowait postinstall
 
 ### Potential Bidirectional Improvements
 
-| From Gateway to MeshForge | From MeshForge to Gateway |
+| From Gateway to MeshAnchor | From MeshAnchor to Gateway |
 |---------------------------|---------------------------|
 | Fragment handling code | Graceful dependency checking |
 | Speed preset tables | Security patterns (timeouts) |
@@ -329,7 +329,7 @@ Filename: "{app}\RNS_Meshtastic_Gateway.exe"; Flags: nowait postinstall
 ## References
 
 - **RNS Gateway Repo**: https://github.com/landandair/RNS_Over_Meshtastic
-- **MeshForge Repo**: https://github.com/Nursedude/meshforge
+- **MeshAnchor Repo**: https://github.com/Nursedude/meshanchor
 - **PyInstaller**: https://pyinstaller.org/
 - **Inno Setup**: https://jrsoftware.org/isinfo.php
 - **pyserial**: https://pyserial.readthedocs.io/
@@ -338,9 +338,9 @@ Filename: "{app}\RNS_Meshtastic_Gateway.exe"; Flags: nowait postinstall
 
 ## Session Notes (2026-01-07)
 
-### MeshForge GTK Improvements Applied
+### MeshAnchor GTK Improvements Applied
 
-The following patterns were successfully used in MeshForge GTK that could benefit RNS Gateway:
+The following patterns were successfully used in MeshAnchor GTK that could benefit RNS Gateway:
 
 1. **Thread-safe GUI updates**: All GTK updates via `GLib.idle_add()` from background threads
 2. **Connection timeout handling**: Meshtastic TCPInterface with proper timeout handling

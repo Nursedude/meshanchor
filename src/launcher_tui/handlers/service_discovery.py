@@ -251,7 +251,7 @@ class ServiceDiscoveryHandler(BaseHandler):
             ('rnsd', 'Reticulum Network Stack'),
         ]
 
-        lines = ["MeshForge Service Status\n"]
+        lines = ["MeshAnchor Service Status\n"]
         lines.append("=" * 40)
 
         warnings = []

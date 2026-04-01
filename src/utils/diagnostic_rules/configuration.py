@@ -1,4 +1,4 @@
-"""Configuration diagnostic rules for MeshForge Diagnostic Engine."""
+"""Configuration diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 
@@ -24,7 +24,7 @@ def load_configuration_rules(engine: "DiagnosticEngine") -> None:
             "Harmless but produces udev errors on every boot."
         ),
         suggestions=[
-            "This is cosmetic — does not affect audio or MeshForge functionality",
+            "This is cosmetic — does not affect audio or MeshAnchor functionality",
             "Fix: sudo sed -i '/^GOTO=/d' /lib/udev/rules.d/90-alsa-restore.rules",
             "Or suppress: add the missing LABEL lines to the udev rule file",
             "Will be fixed in a future alsa-utils package update",
@@ -39,7 +39,7 @@ def load_configuration_rules(engine: "DiagnosticEngine") -> None:
         category=Category.CONFIGURATION,
         cause_template="Configuration file is missing or not found at expected path",
         suggestions=[
-            "Run MeshForge setup wizard to generate config",
+            "Run MeshAnchor setup wizard to generate config",
             "Check config search paths in documentation",
             "Copy example config as starting point",
         ],

@@ -1,4 +1,4 @@
-"""Security diagnostic rules for MeshForge Diagnostic Engine."""
+"""Security diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 

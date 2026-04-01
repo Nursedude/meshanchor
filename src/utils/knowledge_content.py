@@ -1,5 +1,5 @@
 """
-Knowledge content loaders for MeshForge Knowledge Base.
+Knowledge content loaders for MeshAnchor Knowledge Base.
 
 This module contains all the domain knowledge content that populates
 the KnowledgeBase. Separated from knowledge_base.py for maintainability.
@@ -347,7 +347,7 @@ Configuration: /etc/meshtasticd/config.yaml
 
 Common issues:
 1. Only ONE client can hold write lock
-   - MeshForge, nomadnet, meshtastic CLI compete
+   - MeshAnchor, nomadnet, meshtastic CLI compete
    - Solution: Close other clients
 
 2. Serial port permissions
@@ -472,7 +472,7 @@ Components:
 - LXMF: Messaging format
 - Sideband: Mobile app
 
-For MeshForge:
+For MeshAnchor:
 - RNS provides the "other" mesh network
 - Gateway bridges Meshtastic ↔ RNS
 - Different addressing schemes (hash vs node ID)
@@ -548,7 +548,7 @@ This means:
 - Even relay nodes cannot read message contents
 - Identity is provable via cryptographic signatures
 
-For MeshForge gateway:
+For MeshAnchor gateway:
 - Each side maintains its own identity
 - Bridge must have valid RNS identity to participate
 - Messages re-encrypted across network boundary
@@ -588,7 +588,7 @@ Bootstrap:
 - System automatically forms stronger direct links
 - Bootstrap connections can be discarded after discovery
 
-For MeshForge:
+For MeshAnchor:
 - Use list_known_destinations() to see known nodes
 - Use discover_nodes() for active discovery
 - Monitor Transport.path_table for topology
@@ -633,7 +633,7 @@ Station G2:
 - Larger, not portable
 - ~$80-100
 
-For MeshForge as base station:
+For MeshAnchor as base station:
 - Raspberry Pi + USB serial modem
 - Or SPI-connected LoRa module
 - meshtasticd handles radio access
@@ -703,7 +703,7 @@ def load_troubleshooting_guides(kb: "KnowledgeBase") -> None:
             TroubleshootingStep(
                 instruction="Check for other clients",
                 command="ss -tnp | grep 4403",
-                expected_result="No established connections or only MeshForge",
+                expected_result="No established connections or only MeshAnchor",
                 if_fail="Another client is connected, close it first",
             ),
             TroubleshootingStep(
@@ -792,9 +792,9 @@ def load_best_practices(kb: "KnowledgeBase") -> None:
 
     kb._add_entry(KnowledgeEntry(
         topic=KnowledgeTopic.BEST_PRACTICES,
-        title="MeshForge Deployment Best Practices",
+        title="MeshAnchor Deployment Best Practices",
         content="""
-Recommended practices for MeshForge deployment:
+Recommended practices for MeshAnchor deployment:
 
 NETWORK DESIGN:
 1. Start with minimum viable mesh (3-4 nodes)
@@ -803,7 +803,7 @@ NETWORK DESIGN:
 4. Use MQTT for internet connectivity
 
 GATEWAY CONFIGURATION:
-1. Run MeshForge on stable power (not battery)
+1. Run MeshAnchor on stable power (not battery)
 2. Use wired Ethernet when possible
 3. Configure reasonable queue sizes
 4. Enable message persistence
@@ -870,7 +870,7 @@ Common Issues:
    - Verify rnsd is running
    - Check interface connectivity
 
-For MeshForge:
+For MeshAnchor:
 - Gateway bridge needs stable identity
 - Back up: ~/.reticulum/storage/
 - Identity hash displayed in bridge status
@@ -914,7 +914,7 @@ Rate Limiting:
 - Default: 1 announce per 600 seconds per destination
 - Can be adjusted but don't set too low
 
-For MeshForge gateway:
+For MeshAnchor gateway:
 - Should run as transport node for better connectivity
 - Monitor Transport.path_table for network topology
 - High path_table churn = network instability
@@ -952,7 +952,7 @@ Message Structure:
 - Content (plaintext or encrypted payload)
 - Signature (proves sender authenticity)
 
-For MeshForge bridge:
+For MeshAnchor bridge:
 - Meshtastic messages converted to LXMF format
 - DeliveryTracker monitors confirmation callbacks
 - Timeout = assume delivery failed
@@ -1249,12 +1249,12 @@ share_instance = Yes, they compete for UDP port 37428.
 Correct startup order:
 1. rnsd starts first, binds port 37428 (shared instance)
 2. NomadNet starts second, detects rnsd and connects as client
-3. MeshForge gateway connects as another client
+3. MeshAnchor gateway connects as another client
 
 If NomadNet starts first:
 - NomadNet binds port 37428
 - rnsd fails to bind, enters crash loop
-- MeshForge gateway may connect to NomadNet instead of rnsd
+- MeshAnchor gateway may connect to NomadNet instead of rnsd
 - Some interfaces (Meshtastic_Interface) only available via rnsd
 
 Diagnosis:

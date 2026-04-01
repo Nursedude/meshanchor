@@ -1,7 +1,7 @@
 """
 Data models for unified node tracking.
 
-Extracted from node_tracker.py to reduce file size per MeshForge guidelines.
+Extracted from node_tracker.py to reduce file size per MeshAnchor guidelines.
 Contains all dataclasses and type definitions for node representation.
 """
 

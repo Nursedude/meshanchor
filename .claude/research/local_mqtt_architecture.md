@@ -1,4 +1,4 @@
-# Local MQTT Architecture for MeshForge
+# Local MQTT Architecture for MeshAnchor
 
 **Date**: 2026-02-03
 **Status**: Implementation in progress
@@ -45,7 +45,7 @@ When rnsd owns the connection, no other component can receive messages directly.
               │              │              │
               ▼              ▼              ▼
          ┌─────────┐  ┌───────────┐  ┌──────────┐
-         │MeshForge│  │meshing-   │  │ Grafana  │
+         │MeshAnchor│  │meshing-   │  │ Grafana  │
          │Listener │  │around     │  │/InfluxDB │
          └─────────┘  └───────────┘  └──────────┘
 ```
@@ -97,9 +97,9 @@ mosquitto_sub -h localhost -t 'msh/#' -v
 # You should see JSON payloads appear
 ```
 
-### 3. MeshForge Configuration
+### 3. MeshAnchor Configuration
 
-Create/edit `~/.config/meshforge/mqtt_nodeless.json`:
+Create/edit `~/.config/meshanchor/mqtt_nodeless.json`:
 
 ```json
 {
@@ -171,8 +171,8 @@ This allows the listener to receive messages via MQTT when the TCP port is occup
 | File | Purpose |
 |------|---------|
 | `/etc/mosquitto/mosquitto.conf` | Broker config |
-| `~/.config/meshforge/mqtt_nodeless.json` | MeshForge MQTT subscriber config |
-| `~/.config/meshforge/gateway.json` | Gateway bridge config |
+| `~/.config/meshanchor/mqtt_nodeless.json` | MeshAnchor MQTT subscriber config |
+| `~/.config/meshanchor/gateway.json` | Gateway bridge config |
 
 ## Testing
 
@@ -180,8 +180,8 @@ This allows the listener to receive messages via MQTT when the TCP port is occup
 # Terminal 1: Watch all local MQTT traffic
 mosquitto_sub -h localhost -t '#' -v
 
-# Terminal 2: Start MeshForge with MQTT subscriber
-sudo meshforge
+# Terminal 2: Start MeshAnchor with MQTT subscriber
+sudo meshanchor
 # Navigate to: Monitoring → MQTT → Start Subscriber
 
 # Terminal 3: Send test message via mesh
@@ -213,10 +213,10 @@ journalctl -u mosquitto -f
 mosquitto_pub -h localhost -t 'test' -m 'hello'
 ```
 
-### MeshForge not connecting
+### MeshAnchor not connecting
 ```bash
 # Check config
-cat ~/.config/meshforge/mqtt_nodeless.json
+cat ~/.config/meshanchor/mqtt_nodeless.json
 
 # Verify port (1883 for non-TLS, 8883 for TLS)
 # Verify use_tls matches port

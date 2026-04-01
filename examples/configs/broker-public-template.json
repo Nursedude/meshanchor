@@ -1,7 +1,7 @@
 {
   "_name": "Meshtastic Public Broker Template",
   "_description": "Connect to mqtt.meshtastic.org for nodeless mesh monitoring. Read-only, no local radio needed.",
-  "_usage": "Use 'MQTT Broker Manager > Use Public Broker' in the TUI, or copy this to ~/.config/meshforge/mqtt_nodeless.json",
+  "_usage": "Use 'MQTT Broker Manager > Use Public Broker' in the TUI, or copy this to ~/.config/meshanchor/mqtt_nodeless.json",
   "_docs": "https://meshtastic.org/docs/software/integrations/mqtt/",
 
   "broker": "mqtt.meshtastic.org",

@@ -302,7 +302,7 @@ class GPSManager:
 
     def _get_default_path(self) -> Path:
         """Get default config path."""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         return config_dir / "operator_position.json"
 
     def _load_cached(self) -> None:

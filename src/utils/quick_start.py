@@ -1,5 +1,5 @@
 """
-MeshForge Quick Start Modes
+MeshAnchor Quick Start Modes
 
 Pre-configured modes for common use cases:
 - Monitor: Just watch the mesh (no radio config needed)
@@ -57,7 +57,7 @@ QUICK_START_MODES = [
         setup_steps=[
             "No radio hardware required",
             "Configure MQTT server (optional)",
-            "Start MeshForge"
+            "Start MeshAnchor"
         ]
     ),
     QuickStartMode(

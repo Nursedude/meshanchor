@@ -1,4 +1,4 @@
-# MeshForge UI Design Decisions
+# MeshAnchor UI Design Decisions
 
 > **Status:** ACTIVE - This document guides all UI development
 > **Date:** 2026-01-18
@@ -43,7 +43,7 @@ No Ctrl+C to escape. Every menu has a cancel/back option.
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║                    MeshForge Installed                       ║
+║                    MeshAnchor Installed                       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║                                                              ║
 ║  Installation complete!                                      ║
@@ -51,8 +51,8 @@ No Ctrl+C to escape. Every menu has a cancel/back option.
 ║  What would you like to do?                                  ║
 ║                                                              ║
 ║    1. Run Setup Wizard (recommended for new installs)        ║
-║    2. Launch MeshForge                                       ║
-║    3. Exit (run 'meshforge' later)                           ║
+║    2. Launch MeshAnchor                                       ║
+║    3. Exit (run 'meshanchor' later)                           ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -90,7 +90,7 @@ No Ctrl+C to escape. Every menu has a cancel/back option.
 
 8. Complete
    └── Summary of configuration
-   └── "Run 'meshforge' to access full interface"
+   └── "Run 'meshanchor' to access full interface"
 ```
 
 ---
@@ -192,7 +192,7 @@ Maps are **Core** - essential for NOC visualization. Must be DYNAMIC, showing al
 ### Unified Map Vision
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  🗺️ MeshForge Network Map                                   │
+│  🗺️ MeshAnchor Network Map                                   │
 │                                                             │
 │  Legend:                                                    │
 │    ● Meshtastic Node (circle) - from meshtasticd           │
@@ -235,7 +235,7 @@ Maps are **Core** - essential for NOC visualization. Must be DYNAMIC, showing al
 ### AREDN Map Integration
 Reference: https://worldmap.arednmesh.org/
 - AREDN nodes report location to AREDN servers
-- MeshForge can query local AREDN nodes via API
+- MeshAnchor can query local AREDN nodes via API
 - See `.claude/research/aredn_integration.md` for API details
 
 ---

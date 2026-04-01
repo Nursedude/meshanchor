@@ -36,9 +36,9 @@
       "icon": "external link",
       "includeVars": false,
       "keepTime": true,
-      "tags": ["meshforge"],
+      "tags": ["meshanchor"],
       "targetBlank": true,
-      "title": "MeshForge Dashboards",
+      "title": "MeshAnchor Dashboards",
       "tooltip": "",
       "type": "dashboards",
       "url": ""
@@ -85,7 +85,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_nodes_total{state=\"tracked\"}",
+          "expr": "meshanchor_nodes_total{state=\"tracked\"}",
           "legendFormat": "Tracked",
           "refId": "A"
         }
@@ -128,7 +128,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "avg(meshforge_node_snr)",
+          "expr": "avg(meshanchor_node_snr)",
           "legendFormat": "Avg SNR",
           "refId": "A"
         }
@@ -171,7 +171,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "avg(meshforge_node_rssi)",
+          "expr": "avg(meshanchor_node_rssi)",
           "legendFormat": "Avg RSSI",
           "refId": "A"
         }
@@ -214,7 +214,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "avg(meshforge_node_battery_percent)",
+          "expr": "avg(meshanchor_node_battery_percent)",
           "legendFormat": "Avg Battery",
           "refId": "A"
         }
@@ -276,7 +276,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_node_snr{node_id=~\"$node\"}",
+          "expr": "meshanchor_node_snr{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -330,7 +330,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_node_rssi{node_id=~\"$node\"}",
+          "expr": "meshanchor_node_rssi{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -443,28 +443,28 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_node_snr",
+          "expr": "meshanchor_node_snr",
           "format": "table",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
         },
         {
-          "expr": "meshforge_node_rssi",
+          "expr": "meshanchor_node_rssi",
           "format": "table",
           "instant": true,
           "legendFormat": "",
           "refId": "B"
         },
         {
-          "expr": "meshforge_node_battery_percent",
+          "expr": "meshanchor_node_battery_percent",
           "format": "table",
           "instant": true,
           "legendFormat": "",
           "refId": "C"
         },
         {
-          "expr": "meshforge_node_last_seen_seconds",
+          "expr": "meshanchor_node_last_seen_seconds",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -549,7 +549,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_node_battery_percent{node_id=~\"$node\"}",
+          "expr": "meshanchor_node_battery_percent{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -599,7 +599,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_env_temperature_celsius{node_id=~\"$node\"}",
+          "expr": "meshanchor_env_temperature_celsius{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -643,7 +643,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_env_humidity_percent{node_id=~\"$node\"}",
+          "expr": "meshanchor_env_humidity_percent{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -685,7 +685,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_env_pressure_hpa{node_id=~\"$node\"}",
+          "expr": "meshanchor_env_pressure_hpa{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -744,7 +744,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_air_quality_pm25{node_id=~\"$node\"}",
+          "expr": "meshanchor_air_quality_pm25{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -794,7 +794,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_air_quality_co2_ppm{node_id=~\"$node\"}",
+          "expr": "meshanchor_air_quality_co2_ppm{node_id=~\"$node\"}",
           "legendFormat": "{{ node_id }}",
           "refId": "A"
         }
@@ -838,7 +838,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_mqtt_connected",
+          "expr": "meshanchor_mqtt_connected",
           "legendFormat": "MQTT",
           "refId": "A"
         }
@@ -871,7 +871,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_mqtt_nodes_total",
+          "expr": "meshanchor_mqtt_nodes_total",
           "legendFormat": "Total Nodes",
           "refId": "A"
         }
@@ -904,7 +904,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_mqtt_nodes_online",
+          "expr": "meshanchor_mqtt_nodes_online",
           "legendFormat": "Online Nodes",
           "refId": "A"
         }
@@ -937,7 +937,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_mqtt_mesh_size",
+          "expr": "meshanchor_mqtt_mesh_size",
           "legendFormat": "Mesh Size (24h)",
           "refId": "A"
         }
@@ -970,7 +970,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "expr": "meshforge_topology_nodes",
+          "expr": "meshanchor_topology_nodes",
           "legendFormat": "Topology Nodes",
           "refId": "A"
         }
@@ -982,21 +982,21 @@
   "refresh": "30s",
   "schemaVersion": 37,
   "style": "dark",
-  "tags": ["meshforge", "mesh", "nodes", "rf"],
+  "tags": ["meshanchor", "mesh", "nodes", "rf"],
   "templating": {
     "list": [
       {
         "allValue": ".*",
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-        "definition": "label_values(meshforge_node_snr, node_id)",
+        "definition": "label_values(meshanchor_node_snr, node_id)",
         "hide": 0,
         "includeAll": true,
         "label": "Node",
         "multi": true,
         "name": "node",
         "options": [],
-        "query": { "query": "label_values(meshforge_node_snr, node_id)", "refId": "StandardVariableQuery" },
+        "query": { "query": "label_values(meshanchor_node_snr, node_id)", "refId": "StandardVariableQuery" },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
@@ -1008,8 +1008,8 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "MeshForge Node Metrics",
-  "uid": "meshforge-nodes",
+  "title": "MeshAnchor Node Metrics",
+  "uid": "meshanchor-nodes",
   "version": 1,
   "weekStart": ""
 }

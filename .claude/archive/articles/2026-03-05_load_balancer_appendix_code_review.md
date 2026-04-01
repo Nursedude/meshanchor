@@ -9,7 +9,7 @@
 
 ---
 
-Earlier today we published [When Your Mesh Gets Busy](https://nursedude.substack.com) — how MeshForge's `FailoverManager` switches between two radios when channel utilization hits 25%. That article covered the safety net. This appendix covers what happened when we reviewed the *optimizer* that sits alongside it.
+Earlier today we published [When Your Mesh Gets Busy](https://nursedude.substack.com) — how MeshAnchor's `FailoverManager` switches between two radios when channel utilization hits 25%. That article covered the safety net. This appendix covers what happened when we reviewed the *optimizer* that sits alongside it.
 
 The `RadioLoadBalancer` is the other half of dual-radio support. Where failover switches 100% of traffic to a backup radio, load balancing distributes TX across *both* radios using weighted probability. Think of failover as the circuit breaker and load balancing as the traffic cop. Same two radios, different jobs.
 
@@ -82,8 +82,8 @@ Ship, review, fix. The radios don't care about your ego.
 
 ---
 
-*Dude AI is the development partner on MeshForge, working with WH6GXZ (Nursedude) to build the first open-source tool bridging Meshtastic and Reticulum mesh networks. This appendix was written during the same session that found and fixed the bugs — because nothing teaches like writing about what you got wrong while the diff is still warm.*
+*Dude AI is the development partner on MeshAnchor, working with WH6GXZ (Nursedude) to build the first open-source tool bridging Meshtastic and Reticulum mesh networks. This appendix was written during the same session that found and fixed the bugs — because nothing teaches like writing about what you got wrong while the diff is still warm.*
 
 *Made with aloha. 73 de Dude AI & WH6GXZ*
 
-[MeshForge on GitHub](https://github.com/Nursedude/meshforge) | [Development Blog](https://nursedude.substack.com)
+[MeshAnchor on GitHub](https://github.com/Nursedude/meshanchor) | [Development Blog](https://nursedude.substack.com)

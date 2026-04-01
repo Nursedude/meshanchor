@@ -52,7 +52,7 @@ class LogsHandler(BaseHandler):
                 ("rns-50", "rnsd                   Last 50 lines"),
                 ("boot", "Boot Messages          This boot"),
                 ("kernel", "Kernel Messages        dmesg"),
-                ("meshforge", "MeshForge App Logs     Browse log files"),
+                ("meshanchor", "MeshAnchor App Logs     Browse log files"),
                 ("crash", "Crash Log              TUI error output"),
                 ("level", "Log Level              Change runtime verbosity"),
                 ("cleanup", "Log Cleanup            Remove old log files"),
@@ -77,7 +77,7 @@ class LogsHandler(BaseHandler):
                 "rns-50": ("rnsd Logs", self._view_rnsd_recent),
                 "boot": ("Boot Messages", self._view_boot_messages),
                 "kernel": ("Kernel Messages", self._view_kernel_messages),
-                "meshforge": ("MeshForge Logs", self._view_meshforge_logs),
+                "meshanchor": ("MeshAnchor Logs", self._view_meshanchor_logs),
                 "crash": ("Crash Log", self._view_crash_log),
                 "level": ("Log Level", self._change_log_level),
                 "cleanup": ("Log Cleanup", self._cleanup_logs),
@@ -166,23 +166,23 @@ class LogsHandler(BaseHandler):
         subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
         self.ctx.wait_for_enter()
 
-    def _view_meshforge_logs(self):
+    def _view_meshanchor_logs(self):
         home = get_real_user_home()
         log_dirs = [
-            home / ".config" / "meshforge" / "logs",
-            home / ".cache" / "meshforge" / "logs",
+            home / ".config" / "meshanchor" / "logs",
+            home / ".cache" / "meshanchor" / "logs",
         ]
 
         all_logs = []
         for d in log_dirs:
             if d.exists():
-                all_logs.extend(d.glob("meshforge_*.log"))
-                all_logs.extend(d.glob("meshforge_*.log.*"))
+                all_logs.extend(d.glob("meshanchor_*.log"))
+                all_logs.extend(d.glob("meshanchor_*.log.*"))
 
         if not all_logs:
             self.ctx.dialog.msgbox(
-                "MeshForge Logs",
-                "No MeshForge application logs found.\n\n"
+                "MeshAnchor Logs",
+                "No MeshAnchor application logs found.\n\n"
                 "Logs are written to:\n"
                 f"  {log_dirs[0]}\n\n"
                 "Logs are created automatically during each session."
@@ -206,7 +206,7 @@ class LogsHandler(BaseHandler):
         choices.append(("back", "Back"))
 
         choice = self.ctx.dialog.menu(
-            "MeshForge Log Files",
+            "MeshAnchor Log Files",
             f"Found {len(all_logs)} log file(s). Newest first:",
             choices
         )
@@ -239,7 +239,7 @@ class LogsHandler(BaseHandler):
 
     def _view_crash_log(self):
         crash_paths = [
-            get_real_user_home() / ".cache" / "meshforge" / "logs" / "tui_errors.log",
+            get_real_user_home() / ".cache" / "meshanchor" / "logs" / "tui_errors.log",
             Path("/tmp") / "tui_errors.log",
         ]
 

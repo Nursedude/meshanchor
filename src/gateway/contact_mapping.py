@@ -72,7 +72,7 @@ class ContactMappingTable:
 
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(config_dir / "contact_mapping.db")
 

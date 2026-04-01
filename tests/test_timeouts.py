@@ -167,12 +167,6 @@ class TestBackwardCompatibility:
 class TestConsumerMigration:
     """Verify consumer modules use values from canonical source."""
 
-    def test_meshtastic_http_uses_canonical(self):
-        from utils.timeouts import HTTP_CONNECT, HTTP_READ
-        from utils.meshtastic_http import CONNECT_TIMEOUT, READ_TIMEOUT
-        assert CONNECT_TIMEOUT == HTTP_CONNECT
-        assert READ_TIMEOUT == HTTP_READ
-
     def test_gps_integration_uses_canonical(self):
         from utils.timeouts import GPSD_CONNECT
         from utils.gps_integration import GPSD_TIMEOUT
@@ -199,7 +193,7 @@ class TestNoCircularImports:
     """Verify timeouts module doesn't create circular import chains."""
 
     def test_import_timeouts_standalone(self):
-        """timeouts module should import without any other MeshForge module."""
+        """timeouts module should import without any other MeshAnchor module."""
         import importlib
         # Force fresh import
         mod = importlib.import_module('utils.timeouts')

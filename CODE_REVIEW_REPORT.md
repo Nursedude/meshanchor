@@ -1,4 +1,4 @@
-# MeshForge Code Review Report
+# MeshAnchor Code Review Report
 
 **Version**: 0.5.5-beta
 **Date**: 2026-02-21
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-MeshForge v0.5.4-beta maintains **strong security fundamentals** with a **well-structured codebase** across 274 Python files (153K lines). The custom linter passes with **0 violations**. Manual security analysis across all OWASP categories found **no critical or high-severity code issues**. Three LOW-severity code improvements were identified and fixed in this review. The primary finding was documentation drift — SECURITY.md referenced a non-existent version and removed features.
+MeshAnchor v0.5.4-beta maintains **strong security fundamentals** with a **well-structured codebase** across 274 Python files (153K lines). The custom linter passes with **0 violations**. Manual security analysis across all OWASP categories found **no critical or high-severity code issues**. Three LOW-severity code improvements were identified and fixed in this review. The primary finding was documentation drift — SECURITY.md referenced a non-existent version and removed features.
 
 | Category | Grade | Notes |
 |----------|-------|-------|

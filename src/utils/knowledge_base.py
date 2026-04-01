@@ -1,5 +1,5 @@
 """
-MeshForge Domain Knowledge Base.
+MeshAnchor Domain Knowledge Base.
 
 Provides structured knowledge about mesh networking for intelligent diagnostics
 and user assistance. Works offline for standalone mode.

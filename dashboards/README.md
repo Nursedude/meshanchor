@@ -1,6 +1,6 @@
-# MeshForge Grafana Dashboards
+# MeshAnchor Grafana Dashboards
 
-Pre-built Grafana dashboards for monitoring MeshForge mesh networks.
+Pre-built Grafana dashboards for monitoring MeshAnchor mesh networks.
 
 ## Available Dashboards
 
@@ -8,25 +8,25 @@ Pre-built Grafana dashboards for monitoring MeshForge mesh networks.
 
 | Dashboard | Description | UID |
 |-----------|-------------|-----|
-| **MeshForge Overview** | System health, service status, message queues | `meshforge-overview` |
-| **MeshForge Node Metrics** | Per-node SNR, RSSI, battery, status table | `meshforge-nodes` |
-| **MeshForge Gateway** | Gateway connections, message flow, errors | `meshforge-gateway` |
+| **MeshAnchor Overview** | System health, service status, message queues | `meshanchor-overview` |
+| **MeshAnchor Node Metrics** | Per-node SNR, RSSI, battery, status table | `meshanchor-nodes` |
+| **MeshAnchor Gateway** | Gateway connections, message flow, errors | `meshanchor-gateway` |
 
 ### InfluxDB Dashboard
 
 | Dashboard | Description | UID |
 |-----------|-------------|-----|
-| **MeshForge InfluxDB** | Node trends, signal quality, message activity | `meshforge-influxdb` |
+| **MeshAnchor InfluxDB** | Node trends, signal quality, message activity | `meshanchor-influxdb` |
 
 ### Grafana Infinity Plugin Dashboard
 
 | Dashboard | Description | UID |
 |-----------|-------------|-----|
-| **MeshForge Infinity** | JSON API integration (no Prometheus required) | `meshforge-infinity` |
+| **MeshAnchor Infinity** | JSON API integration (no Prometheus required) | `meshanchor-infinity` |
 
 ## Quick Start
 
-### 1. Enable MeshForge Metrics Server
+### 1. Enable MeshAnchor Metrics Server
 
 ```python
 from utils.metrics_export import start_metrics_server
@@ -43,7 +43,7 @@ Or use the textfile exporter for node_exporter:
 ```python
 from utils.metrics_export import setup_textfile_exporter
 
-# Writes to /var/lib/node_exporter/textfile_collector/meshforge.prom
+# Writes to /var/lib/node_exporter/textfile_collector/meshanchor.prom
 setup_textfile_exporter()
 ```
 
@@ -53,7 +53,7 @@ Add to your `prometheus.yml`:
 
 ```yaml
 scrape_configs:
-  - job_name: 'meshforge'
+  - job_name: 'meshanchor'
     static_configs:
       - targets: ['localhost:9090']
     scrape_interval: 15s
@@ -68,7 +68,7 @@ from utils.metrics_export import start_influxdb_exporter
 exporter = start_influxdb_exporter(
     url="http://localhost:8086",
     token="your-token",
-    org="meshforge",
+    org="meshanchor",
     bucket="metrics",
     interval=15
 )
@@ -76,7 +76,7 @@ exporter = start_influxdb_exporter(
 # InfluxDB 1.x
 exporter = start_influxdb_exporter(
     url="http://localhost:8086",
-    database="meshforge",
+    database="meshanchor",
     interval=15
 )
 ```
@@ -102,7 +102,7 @@ The JSON API endpoints are:
 
 ## Dashboard Details
 
-### MeshForge Overview
+### MeshAnchor Overview
 
 Main dashboard showing:
 - Overall health score (0-100%)
@@ -113,7 +113,7 @@ Main dashboard showing:
 - Service health table
 - Health score trends over time
 
-### MeshForge Node Metrics
+### MeshAnchor Node Metrics
 
 Node-specific metrics:
 - Average SNR, RSSI, battery levels
@@ -122,7 +122,7 @@ Node-specific metrics:
 - Battery monitoring trends
 - Variable selector for filtering nodes
 
-### MeshForge Gateway
+### MeshAnchor Gateway
 
 Gateway bridge monitoring:
 - Meshtastic/RNS connection status
@@ -136,32 +136,32 @@ Gateway bridge monitoring:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `meshforge_health_score` | gauge | Health scores by category (0-100) |
-| `meshforge_service_healthy` | gauge | Service health (1=up, 0=down) |
-| `meshforge_service_uptime_percent` | gauge | Service uptime percentage |
-| `meshforge_nodes_total` | gauge | Total tracked nodes |
-| `meshforge_node_snr` | gauge | Node SNR in dB |
-| `meshforge_node_rssi` | gauge | Node RSSI in dBm |
-| `meshforge_node_battery_percent` | gauge | Node battery level |
-| `meshforge_messages_total` | counter | Message counts by direction/status |
-| `meshforge_message_queue_depth` | gauge | Current queue sizes |
-| `meshforge_gateway_connections` | gauge | Active gateway connections |
-| `meshforge_gateway_errors_total` | counter | Gateway errors by type |
-| `meshforge_env_temperature_celsius` | gauge | Node temperature (Celsius) |
-| `meshforge_env_humidity_percent` | gauge | Node humidity (%) |
-| `meshforge_env_pressure_hpa` | gauge | Barometric pressure (hPa) |
-| `meshforge_env_gas_resistance_ohms` | gauge | VOC gas resistance (BME680) |
-| `meshforge_air_quality_pm25` | gauge | PM2.5 particulate (ug/m3) |
-| `meshforge_air_quality_co2_ppm` | gauge | CO2 concentration (ppm) |
-| `meshforge_air_quality_iaq` | gauge | Indoor Air Quality index |
-| `meshforge_health_heart_bpm` | gauge | Heart rate (BPM) |
-| `meshforge_health_spo2_percent` | gauge | Blood oxygen saturation (%) |
-| `meshforge_mqtt_connected` | gauge | MQTT subscriber connected |
-| `meshforge_mqtt_nodes_total` | gauge | Total MQTT-discovered nodes |
-| `meshforge_mqtt_nodes_online` | gauge | Online MQTT nodes |
-| `meshforge_mqtt_mesh_size` | gauge | 24h unique nodes via MQTT |
-| `meshforge_topology_nodes` | gauge | Topology graph node count |
-| `meshforge_topology_edges` | gauge | Topology graph edge count |
+| `meshanchor_health_score` | gauge | Health scores by category (0-100) |
+| `meshanchor_service_healthy` | gauge | Service health (1=up, 0=down) |
+| `meshanchor_service_uptime_percent` | gauge | Service uptime percentage |
+| `meshanchor_nodes_total` | gauge | Total tracked nodes |
+| `meshanchor_node_snr` | gauge | Node SNR in dB |
+| `meshanchor_node_rssi` | gauge | Node RSSI in dBm |
+| `meshanchor_node_battery_percent` | gauge | Node battery level |
+| `meshanchor_messages_total` | counter | Message counts by direction/status |
+| `meshanchor_message_queue_depth` | gauge | Current queue sizes |
+| `meshanchor_gateway_connections` | gauge | Active gateway connections |
+| `meshanchor_gateway_errors_total` | counter | Gateway errors by type |
+| `meshanchor_env_temperature_celsius` | gauge | Node temperature (Celsius) |
+| `meshanchor_env_humidity_percent` | gauge | Node humidity (%) |
+| `meshanchor_env_pressure_hpa` | gauge | Barometric pressure (hPa) |
+| `meshanchor_env_gas_resistance_ohms` | gauge | VOC gas resistance (BME680) |
+| `meshanchor_air_quality_pm25` | gauge | PM2.5 particulate (ug/m3) |
+| `meshanchor_air_quality_co2_ppm` | gauge | CO2 concentration (ppm) |
+| `meshanchor_air_quality_iaq` | gauge | Indoor Air Quality index |
+| `meshanchor_health_heart_bpm` | gauge | Heart rate (BPM) |
+| `meshanchor_health_spo2_percent` | gauge | Blood oxygen saturation (%) |
+| `meshanchor_mqtt_connected` | gauge | MQTT subscriber connected |
+| `meshanchor_mqtt_nodes_total` | gauge | Total MQTT-discovered nodes |
+| `meshanchor_mqtt_nodes_online` | gauge | Online MQTT nodes |
+| `meshanchor_mqtt_mesh_size` | gauge | 24h unique nodes via MQTT |
+| `meshanchor_topology_nodes` | gauge | Topology graph node count |
+| `meshanchor_topology_edges` | gauge | Topology graph edge count |
 
 ## Alerting Examples
 
@@ -169,26 +169,26 @@ Add these to your Prometheus alerting rules:
 
 ```yaml
 groups:
-  - name: meshforge
+  - name: meshanchor
     rules:
-      - alert: MeshForgeHealthLow
-        expr: meshforge_health_score{category="overall"} < 50
+      - alert: MeshAnchorHealthLow
+        expr: meshanchor_health_score{category="overall"} < 50
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "MeshForge health score is low"
+          summary: "MeshAnchor health score is low"
 
-      - alert: MeshForgeServiceDown
-        expr: meshforge_service_healthy == 0
+      - alert: MeshAnchorServiceDown
+        expr: meshanchor_service_healthy == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "MeshForge service {{ $labels.service }} is down"
+          summary: "MeshAnchor service {{ $labels.service }} is down"
 
-      - alert: MeshForgeDeadLetters
-        expr: meshforge_dead_letter_count > 10
+      - alert: MeshAnchorDeadLetters
+        expr: meshanchor_dead_letter_count > 10
         for: 5m
         labels:
           severity: warning
@@ -200,7 +200,7 @@ groups:
 
 - Grafana 9.0+
 - Prometheus 2.0+
-- MeshForge with metrics server running
+- MeshAnchor with metrics server running
 
 ## Customization
 

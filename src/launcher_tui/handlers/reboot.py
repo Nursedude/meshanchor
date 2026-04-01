@@ -1,7 +1,7 @@
 """
 Reboot/shutdown handler — safe system power control.
 
-Batch 10b: Extracted from MeshForgeLauncher._reboot_menu() in main.py.
+Batch 10b: Extracted from MeshAnchorLauncher._reboot_menu() in main.py.
 """
 
 import logging

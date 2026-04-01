@@ -363,7 +363,7 @@ def run_rns_diagnostics(handler):
             "One or more RNS identities are missing.\n\n"
             "Create them now?\n\n"
             "  • RNS identity: used by rnsd for network presence\n"
-            "  • Gateway identity: used by MeshForge bridge"
+            "  • Gateway identity: used by MeshAnchor bridge"
         ):
             try:
                 result = create_identities()
@@ -606,7 +606,7 @@ def diagnose_rns_port_conflict(handler):
             if handler.ctx.dialog.yesno(
                 "Fix Port Conflict",
                 f"{conflicting_app} is holding port 37428.\n\n"
-                f"MeshForge can fix this:\n"
+                f"MeshAnchor can fix this:\n"
                 f"  1. Stop {conflicting_app}\n"
                 f"  2. Start rnsd (becomes shared instance)\n"
                 f"  3. Restart {conflicting_app} (connects as client)\n\n"
@@ -623,7 +623,7 @@ def diagnose_rns_port_conflict(handler):
                 start_service('rnsd')
                 time.sleep(2)
 
-                print(f"Done. Startup order: rnsd -> {conflicting_app} -> MeshForge\n")
+                print(f"Done. Startup order: rnsd -> {conflicting_app} -> MeshAnchor\n")
             return
 
         rnsd_running = check_process_running('rnsd')

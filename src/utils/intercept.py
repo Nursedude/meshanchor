@@ -11,7 +11,7 @@ Integrates with the Intercept project for RTL-SDR based signal intelligence:
 
 Reference: https://github.com/smittix/intercept
 
-MeshForge can launch Intercept as a companion service or embed
+MeshAnchor can launch Intercept as a companion service or embed
 specific SIGINT tools directly.
 """
 
@@ -58,7 +58,7 @@ class InterceptStatus:
 
 class InterceptBridge:
     """
-    Bridge between MeshForge and Intercept SIGINT platform.
+    Bridge between MeshAnchor and Intercept SIGINT platform.
 
     Provides:
     - Installation detection
@@ -406,7 +406,7 @@ Intercept Installation (Debian/Ubuntu/Raspberry Pi OS)
 6. Access web interface:
    http://localhost:5000
 
-MeshForge Integration:
+MeshAnchor Integration:
    from utils.intercept import InterceptBridge
    bridge = InterceptBridge()
    bridge.launch()  # Starts Intercept

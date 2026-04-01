@@ -1,5 +1,5 @@
 """
-Security validation tests for MeshForge.
+Security validation tests for MeshAnchor.
 
 Run with: python3 -m pytest tests/test_security.py -v
 Or without pytest: python3 tests/test_security.py

@@ -1,5 +1,5 @@
 """
-MeshForge Gateway Profiles
+MeshAnchor Gateway Profiles
 
 Pre-configured profiles for optimizing Meshtastic devices as gateways.
 These profiles configure official Meshtastic firmware for gateway operation.

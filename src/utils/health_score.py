@@ -1,7 +1,7 @@
 """
 Network health scoring — synthesize node metrics into a unified 0-100 score.
 
-Aggregates health signals from multiple MeshForge subsystems into a single
+Aggregates health signals from multiple MeshAnchor subsystems into a single
 composite score with categorical breakdowns. Provides both point-in-time
 scoring and historical trend tracking.
 

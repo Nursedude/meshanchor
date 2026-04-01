@@ -1,4 +1,4 @@
-# MeshForge Gateway Profile: Heltec Station G2
+# MeshAnchor Gateway Profile: Heltec Station G2
 # Optimized for fixed gateway/base station operation
 # Apply with: meshtastic --configure station_g2_gateway.yaml
 #
@@ -11,7 +11,7 @@
 #
 # Perfect for:
 # - Fixed location gateways
-# - MeshForge bridge nodes
+# - MeshAnchor bridge nodes
 # - MQTT integration
 # - High-reliability deployments
 

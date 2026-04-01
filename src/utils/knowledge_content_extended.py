@@ -1,5 +1,5 @@
 """
-Extended knowledge content loaders for MeshForge Knowledge Base.
+Extended knowledge content loaders for MeshAnchor Knowledge Base.
 
 Contains AREDN, extended RF fundamentals, and MQTT knowledge.
 Separated from knowledge_content.py for maintainability (file size limit).
@@ -42,10 +42,10 @@ Network Architecture:
 - Each node has mesh RF + local LAN ports
 - Services hosted on connected computers (chat, VoIP, video)
 
-For MeshForge:
+For MeshAnchor:
 - AREDN is a MONITORING target, not a bridge
-- MeshForge discovers AREDN nodes via OLSR data
-- Read-only: MeshForge does not inject traffic
+- MeshAnchor discovers AREDN nodes via OLSR data
+- Read-only: MeshAnchor does not inject traffic
 - Useful for operators managing both networks
 
 AREDN API:
@@ -61,7 +61,7 @@ AREDN API:
         topic=KnowledgeTopic.NETWORKING,
         title="AREDN Node Discovery",
         content="""
-MeshForge discovers AREDN nodes through the OLSR protocol.
+MeshAnchor discovers AREDN nodes through the OLSR protocol.
 
 OLSR (Optimized Link State Routing):
 - Proactive routing protocol for mobile ad-hoc networks
@@ -86,7 +86,7 @@ Discovery Methods:
    - Walk the topology to discover entire network
    - Typically completes in seconds (IP-based, fast)
 
-MeshForge Integration:
+MeshAnchor Integration:
 - Polls AREDN nodes periodically (configurable interval)
 - Extracts: node names, positions, link quality, services
 - Displays on map alongside Meshtastic nodes
@@ -125,7 +125,7 @@ For Emergency Communications:
 - Situational Awareness: Shared maps and status boards
 - Infrastructure: DNS, NTP, monitoring
 
-MeshForge can display:
+MeshAnchor can display:
 - Which services are available on which nodes
 - Service uptime/availability
 - Network paths to service nodes
@@ -265,7 +265,7 @@ Knife-Edge Diffraction:
 - Single obstacle: 6-20 dB additional loss
 - Multiple obstacles: losses are cumulative
 
-For MeshForge:
+For MeshAnchor:
 - FSPL for quick estimates
 - Terrain model (SRTM) for coverage prediction
 - LOSAnalyzer checks Fresnel zone clearance
@@ -453,7 +453,7 @@ Practical Tips:
 - Urban: use rooftop placement, not window
 - Check terrain profiles before deploying
 
-MeshForge Coverage Prediction:
+MeshAnchor Coverage Prediction:
 - Uses SRTM elevation data (30m resolution)
 - LOSAnalyzer checks Fresnel zone clearance
 - Coverage grid shows predicted viable areas
@@ -559,7 +559,7 @@ Privacy Considerations:
 - Use custom channel key for private communications
 - Self-hosted broker for maximum privacy
 
-For MeshForge:
+For MeshAnchor:
 - mqtt_subscriber.py connects to broker
 - Parses node positions and telemetry
 - Feeds map data service for visualization
@@ -591,7 +591,7 @@ Mosquitto (recommended):
   allow_anonymous false
 
   # Generate password file:
-  sudo mosquitto_passwd -c /etc/mosquitto/passwd meshforge
+  sudo mosquitto_passwd -c /etc/mosquitto/passwd meshanchor
 
 TLS Configuration:
   listener 8883
@@ -607,7 +607,7 @@ Testing:
   # Publish test message:
   mosquitto_pub -h localhost -t 'test' -m 'hello'
 
-For MeshForge MQTT subscriber:
+For MeshAnchor MQTT subscriber:
   Configure in settings:
   - broker_host: localhost (or remote host)
   - broker_port: 1883 (or 8883 for TLS)
@@ -651,7 +651,7 @@ Fix:
   # Disable downlink on primary channel
   meshtastic --host localhost --ch-index 0 --ch-set downlink_enabled false
 
-  # Or in MeshForge TUI:
+  # Or in MeshAnchor TUI:
   Meshtasticd > MQTT > Configure Downlink
 
 When to use downlink:
@@ -702,7 +702,7 @@ How phantom nodes accumulate:
 4. MaxNodes: 200 (default) allows hundreds of phantoms
 
 Fixes:
-1. MeshForge Node DB Cleanup:
+1. MeshAnchor Node DB Cleanup:
    Meshtasticd > Node DB Cleanup > Scan for Phantom Nodes
    Identifies and removes nodes with no name data.
 
@@ -717,8 +717,8 @@ Fixes:
 4. Disable MQTT downlink (prevents new phantoms):
    meshtastic --host localhost --ch-index 0 --ch-set downlink_enabled false
 
-5. MeshForge API proxy sanitization:
-   When web client is routed through MeshForge's proxy, the
+5. MeshAnchor API proxy sanitization:
+   When web client is routed through MeshAnchor's proxy, the
    _sanitize_nodes_json() method fills in missing fields with
    safe defaults, preventing the React crash entirely.
 """,

@@ -1,6 +1,6 @@
-# MeshForge Gateway Profiles
+# MeshAnchor Gateway Profiles
 
-Pre-configured profiles for optimizing Meshtastic devices as MeshForge gateways.
+Pre-configured profiles for optimizing Meshtastic devices as MeshAnchor gateways.
 
 ## Available Profiles
 
@@ -96,7 +96,7 @@ modules:
   mqtt:
     enabled: true
     address: "mqtt.example.com"
-    username: "meshforge"
+    username: "meshanchor"
     password: "secret"
     json_enabled: true
 ```

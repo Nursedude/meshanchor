@@ -1,13 +1,13 @@
 # HamClock Integration - Complete Reference
 
-> Consolidated documentation for MeshForge HamClock integration
+> Consolidated documentation for MeshAnchor HamClock integration
 > Updated: 2026-02-08
 
 ## Status Update (2026-02-08)
 
 **Original HamClock backend sunsets June 2026** (author Elwood Downey WB0OEW is SK).
 
-MeshForge now uses **NOAA SWPC as the primary data source** via `commands.propagation`.
+MeshAnchor now uses **NOAA SWPC as the primary data source** via `commands.propagation`.
 HamClock and OpenHamClock are optional enhancements — see `src/commands/propagation.py`.
 
 **OpenHamClock** (https://github.com/accius/openhamclock) is the community replacement:
@@ -18,7 +18,7 @@ HamClock and OpenHamClock are optional enhancements — see `src/commands/propag
 
 ## Overview
 
-HamClock provides space weather, propagation data, and satellite tracking for amateur radio operators. MeshForge integrates with HamClock via its REST API.
+HamClock provides space weather, propagation data, and satellite tracking for amateur radio operators. MeshAnchor integrates with HamClock via its REST API.
 
 ### Ports
 
@@ -155,7 +155,7 @@ curl http://hamclock.local:8080/get_voacap.txt
 
 ---
 
-## MeshForge Integration
+## MeshAnchor Integration
 
 ### Panel Location
 `src/gtk_ui/panels/hamclock.py`
@@ -266,13 +266,13 @@ docker compose up -d
 | `/api/satellites` | Satellite tracking (CelesTrak TLE) |
 | `/api/propagation` | ITU-R P.533 predictions |
 
-### MeshForge Integration
+### MeshAnchor Integration
 
 ```python
 from commands import propagation
 from commands.propagation import DataSource
 
-# Configure (persists to ~/.config/meshforge/propagation.json)
+# Configure (persists to ~/.config/meshanchor/propagation.json)
 propagation.configure_source(DataSource.OPENHAMCLOCK, host="localhost", port=3000)
 
 # Check connectivity

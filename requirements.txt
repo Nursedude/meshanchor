@@ -1,4 +1,4 @@
-# MeshForge Dependencies (Full Stack)
+# MeshAnchor Dependencies (Full Stack)
 #
 # This installs ALL dependencies. For minimal installs, use profile-specific files:
 #

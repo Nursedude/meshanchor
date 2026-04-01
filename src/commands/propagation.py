@@ -1,7 +1,7 @@
 """
-MeshForge Propagation Commands — Standalone Space Weather & HF Propagation
+MeshAnchor Propagation Commands — Standalone Space Weather & HF Propagation
 
-MeshForge-owned module for space weather and HF propagation data.
+MeshAnchor-owned module for space weather and HF propagation data.
 Uses NOAA SWPC as the PRIMARY data source (no external dependencies).
 Optionally enhances with HamClock or OpenHamClock when available.
 
@@ -369,7 +369,7 @@ def get_alerts() -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -564,7 +564,7 @@ def _test_noaa() -> CommandResult:
     url = "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status == 200:
                 return CommandResult.ok(
@@ -596,7 +596,7 @@ def _test_openhamclock() -> CommandResult:
     url = f"{cfg.base_url}/api/dxcluster/spots"
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
         with urllib.request.urlopen(req, timeout=cfg.timeout) as response:
             if response.status == 200:
                 return CommandResult.ok(
@@ -635,7 +635,7 @@ def _fetch_openhamclock_data(cfg: SourceConfig) -> Optional[Dict[str, Any]]:
     try:
         url = f"{cfg.base_url}/api/dxcluster/spots"
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
         req.add_header('Accept', 'application/json')
 
         with urllib.request.urlopen(req, timeout=cfg.timeout) as response:
@@ -835,7 +835,7 @@ def get_voacap_online(
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -885,7 +885,7 @@ def get_ionosonde_data(timeout: int = 15) -> CommandResult:
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -979,7 +979,7 @@ def get_satellite_tle(
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
 
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -1030,7 +1030,7 @@ def _test_hamclock() -> CommandResult:
     url = f"{cfg.base_url}/get_sys.txt"
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge/1.0')
+        req.add_header('User-Agent', 'MeshAnchor/1.0')
         with urllib.request.urlopen(req, timeout=cfg.timeout) as response:
             data = response.read().decode('utf-8')
             if data:
@@ -1067,7 +1067,7 @@ def _fetch_hamclock_enhanced(cfg: SourceConfig) -> Optional[Dict[str, Any]]:
         try:
             url = f"{cfg.base_url}/{endpoint}"
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'MeshForge/1.0')
+            req.add_header('User-Agent', 'MeshAnchor/1.0')
             with urllib.request.urlopen(req, timeout=cfg.timeout) as response:
                 return response.read().decode('utf-8')
         except Exception as e:

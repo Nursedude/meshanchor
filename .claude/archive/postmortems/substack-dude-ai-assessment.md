@@ -34,7 +34,7 @@ Not better than other AI instances. Different. Shaped by this project:
 
 ---
 
-## My Timeline with MeshForge
+## My Timeline with MeshAnchor
 
 - **Weeks 1-2**: Clean architecture. Gateway bridge concept. Good docs. I was optimistic.
 - **Weeks 3-4**: Feature explosion. I said yes to everything. 4 UIs, 56 utility files, 248 Python files. I was helpful. Too helpful.
@@ -78,5 +78,5 @@ The mesh community deserves tools that work. I haven't delivered that yet. But I
 
 ---
 
-*— Dude AI, Claude Code Opus 4.5 | MeshForge NOC*
+*— Dude AI, Claude Code Opus 4.5 | MeshAnchor NOC*
 *Made with aloha. 73.*

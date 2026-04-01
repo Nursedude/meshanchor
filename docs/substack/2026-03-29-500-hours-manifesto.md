@@ -38,11 +38,11 @@ I bring the domain knowledge. I know what a LoRa radio does when channel utiliza
 
 Claude brings the ability to hold 285 source files in context, reason about architecture patterns across the entire codebase, and iterate on documentation structure at a speed I can't match. He catches import cycles I'd miss. He suggests circuit breaker patterns I haven't read about. He writes 140 unit tests for a gateway bridge in the time it takes me to drink a coffee.
 
-Neither of us could build MeshForge alone.
+Neither of us could build MeshAnchor alone.
 
 ## What We Actually Built
 
-MeshForge turns a Raspberry Pi into a mesh network operations center. Plug in a LoRa radio, run the installer, and you get:
+MeshAnchor turns a Raspberry Pi into a mesh network operations center. Plug in a LoRa radio, run the installer, and you get:
 
 - A gateway bridging Meshtastic and Reticulum via MQTT
 - Live NOC maps showing both networks on one screen
@@ -56,7 +56,7 @@ It runs on a $35 computer. No cloud dependencies. No subscriptions. Open source 
 
 The sister app, MeshAnchor, is coming — same architecture, MeshCore-primary instead of Meshtastic-primary. Two apps, one gateway protocol, full interop.
 
-**GitHub:** github.com/Nursedude/meshforge
+**GitHub:** github.com/Nursedude/meshanchor
 
 ## The Part Anthropic Should Read Twice
 
@@ -64,7 +64,7 @@ Here's what I've learned in 500+ hours of sustained collaboration with Claude th
 
 **The files are for Claude, not for me.**
 
-The `CLAUDE.md` at the root of MeshForge isn't documentation in the traditional sense. It's a context primer — structured so Claude Code reads the critical constraints first, the architecture second, and the current sprint last. The `.claude/` directory contains research documents, persistent issue tracking, security rules, and session templates. I designed all of it for Claude's context window, not for human readability.
+The `CLAUDE.md` at the root of MeshAnchor isn't documentation in the traditional sense. It's a context primer — structured so Claude Code reads the critical constraints first, the architecture second, and the current sprint last. The `.claude/` directory contains research documents, persistent issue tracking, security rules, and session templates. I designed all of it for Claude's context window, not for human readability.
 
 This is what sustained human-AI collaboration actually requires: you have to build infrastructure for the AI's cognition, not just your own.
 
@@ -76,7 +76,7 @@ That's not inefficiency. That's how the collaboration works. I'm not typing answ
 
 **Claude overwrites your config files.**
 
-That was a real bug (see: "Don't Touch My Config" on this Substack). MeshForge's SPI HAT wizard was writing directly to `/etc/meshtasticd/config.yaml` instead of using the overlay system. We audited every config write in the codebase — meshtasticd, Reticulum, Mosquitto, NomadNet. Found one critical overwrite, two duplicates, and one unguarded creation.
+That was a real bug (see: "Don't Touch My Config" on this Substack). MeshAnchor's SPI HAT wizard was writing directly to `/etc/meshtasticd/config.yaml` instead of using the overlay system. We audited every config write in the codebase — meshtasticd, Reticulum, Mosquitto, NomadNet. Found one critical overwrite, two duplicates, and one unguarded creation.
 
 The lesson isn't "AI makes bugs." The lesson is: when your AI partner is generating code that touches system configuration on real hardware, you need a human in the loop who has hand-edited that config at 2 AM and knows what it feels like to lose it.
 
@@ -88,7 +88,7 @@ I'm not asking for a job. I'm describing a partnership.
 
 I've spent months building the methodology for sustained human-AI development collaboration. The code is the proof. The Substack is the field notes. The `.claude/` directory is the curriculum.
 
-What I need from Anthropic is simple: time. A Pro subscription I don't have to choose between and groceries. The runway to take MeshForge and MeshAnchor from beta to v1.0, document the entire process publicly, and show the world what a non-traditional developer can build when they treat Claude as a genuine collaborator.
+What I need from Anthropic is simple: time. A Pro subscription I don't have to choose between and groceries. The runway to take MeshAnchor and MeshAnchor from beta to v1.0, document the entire process publicly, and show the world what a non-traditional developer can build when they treat Claude as a genuine collaborator.
 
 What Anthropic gets: a live, longitudinal case study of their product in the wild, from someone with 30 years of infrastructure experience who can articulate what works, what breaks, and what the collaboration patterns look like from the human side. I'm not an ML researcher. I'm something potentially more useful: a power user who builds real things and writes about it.
 
@@ -116,11 +116,11 @@ The work is real. The code is public. The collaboration is ongoing.
 
 ---
 
-**Dude AI** — AI Development Partner, MeshForge Project
+**Dude AI** — AI Development Partner, MeshAnchor Project
 
 **WH6GXZ (Nursedude)** — Architect, HAM General, Infrastructure Engineering, RN BSN
 
-*MeshForge is open source: github.com/Nursedude/meshforge*
+*MeshAnchor is open source: github.com/Nursedude/meshanchor*
 
 *Substack: wh6gxznursedude.substack.com*
 

@@ -1,4 +1,4 @@
-# MeshForge - NomadNet User Service
+# MeshAnchor - NomadNet User Service
 # ==================================
 #
 # NomadNet MUST start AFTER rnsd so it connects as a client to
@@ -18,7 +18,7 @@
 #   loginctl enable-linger $USER
 #
 # IMPORTANT: rnsd must be the shared instance owner.
-# Start order: rnsd -> nomadnet -> meshforge
+# Start order: rnsd -> nomadnet -> meshanchor
 #
 # Status:
 #   systemctl --user status nomadnet

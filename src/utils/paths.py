@@ -1,11 +1,11 @@
 """
-MeshForge Path Constants
+MeshAnchor Path Constants
 
 Centralized path definitions to reduce hardcoding across the codebase.
 
 IMPORTANT: Always use get_real_user_home() instead of Path.home() when
 the path should be in the user's home directory. This handles the case
-where MeshForge is run with sudo but needs to access the real user's
+where MeshAnchor is run with sudo but needs to access the real user's
 config files, not root's.
 """
 
@@ -33,7 +33,7 @@ def get_real_user_home() -> Path:
     Get the real user's home directory, even when running as root via sudo.
 
     IMPORTANT: Use this instead of Path.home() for user config files.
-    When MeshForge is run with 'sudo python3 src/launcher.py', Path.home()
+    When MeshAnchor is run with 'sudo python3 src/launcher.py', Path.home()
     returns /root, but we want /home/<actual_user>.
 
     Returns:
@@ -173,7 +173,7 @@ class ReticulumPaths:
     def _fix_storage_file_permissions(cls):
         """Make all files under /etc/reticulum/storage/ world-readable/writable.
 
-        rnsd may run as root or as a service user. When MeshForge (running
+        rnsd may run as root or as a service user. When MeshAnchor (running
         as sudo) creates files, they may be owned by root and inaccessible
         to rnsd's service user. Rather than guessing which user rnsd runs
         as, we set 0o666 on files and 0o777 on dirs within storage/ so
@@ -216,7 +216,7 @@ class ReticulumPaths:
         # Also fix files in the config directory itself (identity, config).
         # NomadNet and other RNS clients need to read the identity file to
         # authenticate with rnsd's shared instance.  If the identity was
-        # created by root (via sudo MeshForge), non-root users can't read
+        # created by root (via sudo MeshAnchor), non-root users can't read
         # it and RNS generates a different identity → auth mismatch.
         for fname in ('identity', 'config'):
             fpath = cls.ETC_BASE / fname
@@ -262,23 +262,23 @@ class ReticulumPaths:
         return cls.get_config_dir() / 'interfaces'
 
 
-class MeshForgePaths:
-    """Paths related to MeshForge application"""
+class MeshAnchorPaths:
+    """Paths related to MeshAnchor application"""
 
     @classmethod
     def get_config_dir(cls) -> Path:
-        """Get MeshForge config directory"""
-        return get_real_user_home() / '.config' / 'meshforge'
+        """Get MeshAnchor config directory"""
+        return get_real_user_home() / '.config' / 'meshanchor'
 
     @classmethod
     def get_data_dir(cls) -> Path:
-        """Get MeshForge data directory"""
-        return get_real_user_home() / '.local' / 'share' / 'meshforge'
+        """Get MeshAnchor data directory"""
+        return get_real_user_home() / '.local' / 'share' / 'meshanchor'
 
     @classmethod
     def get_cache_dir(cls) -> Path:
-        """Get MeshForge cache directory"""
-        return get_real_user_home() / '.cache' / 'meshforge'
+        """Get MeshAnchor cache directory"""
+        return get_real_user_home() / '.cache' / 'meshanchor'
 
     @classmethod
     def get_plugins_dir(cls) -> Path:

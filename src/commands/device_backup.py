@@ -77,7 +77,7 @@ class DeviceBackup:
 
 def get_backup_dir() -> Path:
     """Get the backup directory path."""
-    backup_dir = get_real_user_home() / ".config" / "meshforge" / "backups"
+    backup_dir = get_real_user_home() / ".config" / "meshanchor" / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     return backup_dir
 

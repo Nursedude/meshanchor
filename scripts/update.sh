@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# MeshForge Quick Update Script
+# MeshAnchor Quick Update Script
 #
-# Updates an existing MeshForge installation in-place.
+# Updates an existing MeshAnchor installation in-place.
 # Preserves all configuration and user data.
 #
 # Usage:
-#   cd /opt/meshforge && sudo ./scripts/update.sh
+#   cd /opt/meshanchor && sudo ./scripts/update.sh
 #   sudo ./scripts/update.sh              # from any directory
 #   sudo ./scripts/update.sh --branch alpha  # update to specific branch
 #
@@ -14,8 +14,8 @@
 #   1. Fetches latest code from GitHub
 #   2. Updates Python dependencies if changed
 #   3. Reinstalls desktop integration (icons/launchers)
-#   4. Updates systemd service files (rnsd, meshforge, nomadnet)
-#   5. Preserves: /etc/meshforge/, ~/.config/meshforge/, radio configs
+#   4. Updates systemd service files (rnsd, meshanchor, nomadnet)
+#   5. Preserves: /etc/meshanchor/, ~/.config/meshanchor/, radio configs
 #
 # What it does NOT do:
 #   - Reinstall meshtasticd or rnsd (use install_noc.sh for that)
@@ -33,7 +33,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Defaults
-INSTALL_DIR="/opt/meshforge"
+INSTALL_DIR="/opt/meshanchor"
 BRANCH=""
 SKIP_DESKTOP=false
 SKIP_DEPS=false
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "MeshForge Update Script"
+            echo "MeshAnchor Update Script"
             echo ""
             echo "Usage: sudo $0 [options]"
             echo ""
@@ -80,7 +80,7 @@ done
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║              MeshForge Quick Update                       ║"
+echo "║              MeshAnchor Quick Update                       ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -97,8 +97,8 @@ if [[ ! -d "$INSTALL_DIR" ]] && [[ ! -L "$INSTALL_DIR" ]]; then
     if [[ -f "./src/launcher_tui/main.py" ]]; then
         INSTALL_DIR="$(pwd)"
     else
-        echo -e "${RED}Error: MeshForge not found at $INSTALL_DIR${NC}"
-        echo "Run this script from your MeshForge directory, or install first with:"
+        echo -e "${RED}Error: MeshAnchor not found at $INSTALL_DIR${NC}"
+        echo "Run this script from your MeshAnchor directory, or install first with:"
         echo "  sudo bash scripts/install_noc.sh"
         exit 1
     fi
@@ -219,10 +219,10 @@ echo -e "${CYAN}[4/5] Updating systemd service files...${NC}"
 
 SVC_UPDATED=false
 
-# Update meshforge.service from repo template (if it exists in /etc/systemd/system/)
-if [[ -f /etc/systemd/system/meshforge.service ]] && [[ -f "$INSTALL_DIR/scripts/meshforge.service" ]]; then
-    cp "$INSTALL_DIR/scripts/meshforge.service" /etc/systemd/system/meshforge.service
-    echo -e "  ${GREEN}✓ meshforge.service updated${NC}"
+# Update meshanchor.service from repo template (if it exists in /etc/systemd/system/)
+if [[ -f /etc/systemd/system/meshanchor.service ]] && [[ -f "$INSTALL_DIR/scripts/meshanchor.service" ]]; then
+    cp "$INSTALL_DIR/scripts/meshanchor.service" /etc/systemd/system/meshanchor.service
+    echo -e "  ${GREEN}✓ meshanchor.service updated${NC}"
     SVC_UPDATED=true
 fi
 
@@ -319,7 +319,7 @@ echo ""
 echo "Branch: $CURRENT_BRANCH"
 echo "Version: $VERSION"
 echo ""
-echo "To run MeshForge:"
-echo "  meshforge              # If desktop installed"
+echo "To run MeshAnchor:"
+echo "  meshanchor              # If desktop installed"
 echo "  sudo python3 $INSTALL_DIR/src/launcher_tui/main.py"
 echo ""

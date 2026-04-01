@@ -1,5 +1,5 @@
 """
-Pytest configuration for MeshForge test suite.
+Pytest configuration for MeshAnchor test suite.
 
 Handles CI-specific settings:
 - Auto-skip hardware-dependent tests in CI
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Detect CI environment
 CI = os.environ.get('CI', 'false').lower() == 'true'
-MESHFORGE_CI = os.environ.get('MESHFORGE_CI', 'false').lower() == 'true'
+MESHANCHOR_CI = os.environ.get('MESHANCHOR_CI', 'false').lower() == 'true'
 
 
 def pytest_configure(config):
@@ -37,7 +37,7 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(config, items):
     """Auto-skip certain tests in CI environment."""
-    if not (CI or MESHFORGE_CI):
+    if not (CI or MESHANCHOR_CI):
         return
 
     skip_hardware = pytest.mark.skip(reason="Hardware not available in CI")

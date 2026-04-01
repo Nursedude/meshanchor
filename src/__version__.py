@@ -1,22 +1,20 @@
 """
-MeshForge - LoRa Mesh Network Development & Operations Suite
+MeshAnchor - MeshCore Network Operations Center
 Version information and changelog
+
+Forked from MeshForge (https://github.com/Nursedude/meshforge)
+MeshAnchor is the MeshCore-primary sister project to MeshForge.
 """
 
-__version__ = "0.5.5-beta"
-__version_info__ = (0, 5, 5, 'beta')
-__release_date__ = "2026-03-09"
-__app_name__ = "MeshForge"
-__app_description__ = "Mesh Network Operations Center & Development Ecosystem"
-__app_tagline__ = "Build. Test. Deploy. Monitor."
+__version__ = "0.1.0-alpha"
+__version_info__ = (0, 1, 0, 'alpha')
+__release_date__ = "2026-04-01"
+__app_name__ = "MeshAnchor"
+__app_description__ = "MeshCore Network Operations Center"
+__app_tagline__ = "Anchor. Bridge. Monitor."
 __target_audience__ = "RF engineers, network operators, and amateur radio operators"
-__status__ = "beta"  # alpha=experimental, beta=testing, stable=production
-
-# Alpha branch tracking
-# alpha/meshcore-bridge branched from main at 0.5.4-beta
-# See VERSION_HISTORY entry for 0.6.0-alpha below
-ALPHA_BRANCH = "alpha/meshcore-bridge"
-ALPHA_VERSION = "0.6.0-alpha"
+__status__ = "alpha"  # alpha=experimental, beta=testing, stable=production
+__sister_project__ = "MeshForge (https://github.com/Nursedude/meshforge)"
 
 # Version history
 VERSION_HISTORY = [
@@ -31,8 +29,8 @@ VERSION_HISTORY = [
             "REMOVED: MeshChat tests (114 tests)",
             "SIMPLIFIED: _lxmf_utils.py — NomadNet-only LXMF exclusivity check",
             "SIMPLIFIED: RNS diagnostics, gateway diagnostics — no MeshChat references",
-            "FOCUS: NomadNet is MeshForge's supported LXMF messaging client",
-            "FOCUS: MeshForge core mission — gateway/bridge, maps, monitoring, RF tools",
+            "FOCUS: NomadNet is MeshAnchor's supported LXMF messaging client",
+            "FOCUS: MeshAnchor core mission — gateway/bridge, maps, monitoring, RF tools",
         ]
     },
     {
@@ -234,7 +232,7 @@ VERSION_HISTORY = [
             "FIX: HamClock no longer auto-connects on startup (user opt-in)",
             "FIX: Info window now resizable (was fixed-size dialog)",
             "FIX: Channel role displays as PRIMARY/SECONDARY not numbers",
-            "REMOVED: MeshForge University (reserved for pro edition)",
+            "REMOVED: MeshAnchor University (reserved for pro edition)",
             "NEW: /ralph-wiggum-healthcheck command for AI knowledge hygiene",
             "IMPROVED: Consolidated HamClock documentation",
             "IMPROVED: VOACAP propagation display with band predictions",
@@ -303,14 +301,14 @@ VERSION_HISTORY = [
             "NEW: Updates tab in Web UI showing component versions",
             "NEW: Desktop launcher for Raspberry Pi menu integration",
             "NEW: Install script for desktop integration (scripts/install-desktop.sh)",
-            "NEW: MeshForge SVG icon",
+            "NEW: MeshAnchor SVG icon",
             "NEW: Site Planner integration - Opens site.meshtastic.org for RF coverage planning",
             "NEW: Frequency Slot Calculator redesign with all 22 Meshtastic regions",
             "NEW: Channel Preset dropdown for quick frequency slot selection",
             "FIX: Device role parsing now correctly detects CLIENT_MUTE",
             "FIX: Desktop launcher uses terminal for sudo authentication",
             "FIX: Dropdown matching uses exact match first (prevents CLIENT matching CLIENT_MUTE)",
-            "IMPROVED: Web UI now titled 'MeshForge'",
+            "IMPROVED: Web UI now titled 'MeshAnchor'",
             "IMPROVED: Uses NodeMonitor for rich node data including positions"
         ]
     },
@@ -331,7 +329,7 @@ VERSION_HISTORY = [
         "version": "4.0.0",
         "date": "2026-01-03",
         "changes": [
-            "REBRAND: Project renamed to MeshForge",
+            "REBRAND: Project renamed to MeshAnchor",
             "NEW: Professional suite branding - 'LoRa Mesh Network Development & Operations Suite'",
             "NEW: Frequency Slot Calculator in Radio Config panel",
             "NEW: Enhanced Radio Config parsing with robust data extraction",
@@ -775,7 +773,7 @@ def get_channel_warning():
     if __status__ == "alpha":
         return "ALPHA: Experimental build - may be unstable"
     elif __status__ == "beta":
-        return "BETA: Testing build - report issues at github.com/Nursedude/meshforge"
+        return "BETA: Testing build - report issues at github.com/Nursedude/meshanchor"
     return None
 
 

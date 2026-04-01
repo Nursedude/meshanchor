@@ -1,5 +1,5 @@
 """
-Coverage Map Generator for MeshForge.
+Coverage Map Generator for MeshAnchor.
 
 Generates interactive Folium-based maps showing:
 - Node locations with status indicators
@@ -356,7 +356,7 @@ class TileCacheManager:
 
 def get_tile_cache_dir() -> Path:
     """Get the tile cache directory."""
-    cache_dir = get_real_user_home() / ".cache" / "meshforge" / "tiles"
+    cache_dir = get_real_user_home() / ".cache" / "meshanchor" / "tiles"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
@@ -365,7 +365,7 @@ def download_tile(url: str, cache_path: Path) -> bool:
     """Download a tile to cache."""
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge/1.0'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'MeshAnchor/1.0'})
         with urllib.request.urlopen(req, timeout=15) as response:
             cache_path.write_bytes(response.read())
         return True
@@ -781,7 +781,7 @@ class CoverageMapGenerator:
         Generate the coverage map HTML.
 
         Args:
-            output_path: Output file path (default: ~/.cache/meshforge/coverage_map.html)
+            output_path: Output file path (default: ~/.cache/meshanchor/coverage_map.html)
             show_coverage: Show coverage radius circles
             show_links: Show links between nodes
             tile_layer: Base tile layer
@@ -800,7 +800,7 @@ class CoverageMapGenerator:
 
         # Determine output path
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "coverage_map.html")
 
@@ -1046,7 +1046,7 @@ class CoverageMapGenerator:
             font-size: 13px;
             z-index: 1000;
         ">
-            <div style="font-weight: bold; margin-bottom: 5px;">MeshForge Network</div>
+            <div style="font-weight: bold; margin-bottom: 5px;">MeshAnchor Network</div>
             <div>Total: {total} nodes</div>
             <div style="color: green;">Online: {online}</div>
             <div>Mapped: {with_pos}</div>
@@ -1063,7 +1063,7 @@ class CoverageMapGenerator:
     def _generate_fallback(self, output_path: str = None) -> str:
         """Generate simple HTML map without Folium."""
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "coverage_map.html")
 
@@ -1081,7 +1081,7 @@ class CoverageMapGenerator:
         html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>MeshForge Coverage Map</title>
+    <title>MeshAnchor Coverage Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -1104,7 +1104,7 @@ class CoverageMapGenerator:
 <body>
     <div id="map"></div>
     <div class="stats-box">
-        <div style="font-weight: bold;">MeshForge Network</div>
+        <div style="font-weight: bold;">MeshAnchor Network</div>
         <div id="stats"></div>
     </div>
     <script>
@@ -1175,7 +1175,7 @@ class CoverageMapGenerator:
         HeatMap = getattr(_folium_plugins, 'HeatMap', None)
 
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "coverage_heatmap.html")
 

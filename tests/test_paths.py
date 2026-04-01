@@ -278,13 +278,13 @@ class TestReticulumPathsResolution:
         assert str(ReticulumPaths.ETC_CACHE).startswith(str(ReticulumPaths.ETC_STORAGE))
 
     @patch.dict(os.environ, {'SUDO_USER': 'wh6gxz'}, clear=False)
-    def test_meshforge_paths_use_real_user_home(self):
-        """MeshForgePaths should use get_real_user_home, not Path.home()."""
-        from utils.paths import MeshForgePaths
+    def test_meshanchor_paths_use_real_user_home(self):
+        """MeshAnchorPaths should use get_real_user_home, not Path.home()."""
+        from utils.paths import MeshAnchorPaths
 
-        config_dir = MeshForgePaths.get_config_dir()
-        data_dir = MeshForgePaths.get_data_dir()
-        cache_dir = MeshForgePaths.get_cache_dir()
+        config_dir = MeshAnchorPaths.get_config_dir()
+        data_dir = MeshAnchorPaths.get_data_dir()
+        cache_dir = MeshAnchorPaths.get_cache_dir()
 
         # All should be under /home/wh6gxz, not /root
         for d in (config_dir, data_dir, cache_dir):

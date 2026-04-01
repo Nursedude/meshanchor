@@ -217,7 +217,7 @@ class AREDNClient:
 
         try:
             req = urllib.request.Request(url, method='GET')
-            req.add_header('User-Agent', 'MeshForge/1.0')
+            req.add_header('User-Agent', 'MeshAnchor/1.0')
 
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 data = response.read().decode('utf-8')

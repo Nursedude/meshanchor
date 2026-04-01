@@ -215,11 +215,11 @@ class TopologySnapshotStore:
         Initialize topology snapshot store.
 
         Args:
-            db_path: Path to SQLite database (default: ~/.config/meshforge/topology_history.db)
+            db_path: Path to SQLite database (default: ~/.config/meshanchor/topology_history.db)
             retention_days: How long to keep snapshots
         """
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(config_dir / "topology_history.db")
 

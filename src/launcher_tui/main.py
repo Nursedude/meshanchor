@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeshForge Launcher - raspi-config Style TUI
+MeshAnchor Launcher - raspi-config Style TUI
 
 A whiptail/dialog based launcher that works:
 - Over SSH (no display required)
@@ -61,8 +61,8 @@ from handler_registry import HandlerRegistry
 from handlers import get_all_handlers
 
 
-class MeshForgeLauncher:
-    """MeshForge launcher with raspi-config style interface."""
+class MeshAnchorLauncher:
+    """MeshAnchor launcher with raspi-config style interface."""
 
     def __init__(self, profile=None):
         self.dialog = DialogBackend()
@@ -246,7 +246,7 @@ class MeshForgeLauncher:
                 "Permission Denied",
                 f"Insufficient permissions for {method_name}.\n\n"
                 f"{e}\n\n"
-                f"Make sure MeshForge is running with sudo."
+                f"Make sure MeshAnchor is running with sudo."
             )
         except FileNotFoundError as e:
             self._log_error(f"FileNotFoundError in {method_name}", e)
@@ -273,7 +273,7 @@ class MeshForgeLauncher:
                 f"Full details logged to:\n"
                 f"  {self._get_error_log_path()}\n\n"
                 f"Please report this at:\n"
-                f"  github.com/Nursedude/meshforge/issues"
+                f"  github.com/Nursedude/meshanchor/issues"
             )
 
     def _detect_environment(self) -> dict:
@@ -299,12 +299,12 @@ class MeshForgeLauncher:
         return env
 
     def _is_daemon_running(self) -> bool:
-        """Check if meshforged is running via PID file.
+        """Check if meshanchord is running via PID file.
 
         Used on TUI startup to avoid auto-starting services the
         daemon already owns (Config API, health probe, etc.).
         """
-        pid_file = Path("/run/meshforge/meshforged.pid")
+        pid_file = Path("/run/meshanchor/meshanchord.pid")
         if not pid_file.exists():
             return False
         try:
@@ -458,7 +458,7 @@ class MeshForgeLauncher:
         Warn if running as root without SUDO_USER set.
 
         This is a common issue on fresh installs where the user follows
-        'sudo meshforge' guidance but the environment doesn't preserve
+        'sudo meshanchor' guidance but the environment doesn't preserve
         SUDO_USER (e.g., after 'su -' or direct root login).
 
         Without SUDO_USER, RNS applications (NomadNet, rnstatus) will run
@@ -492,15 +492,15 @@ class MeshForgeLauncher:
         if rnsd_user and rnsd_user != 'root':
             self.dialog.msgbox(
                 "Root Context Warning",
-                f"MeshForge is running as root, but rnsd runs as '{rnsd_user}'.\n\n"
+                f"MeshAnchor is running as root, but rnsd runs as '{rnsd_user}'.\n\n"
                 f"This mismatch will cause RNS apps (NomadNet) to fail\n"
                 f"with RPC authentication errors.\n\n"
                 f"Recommended: Exit and run as your regular user:\n"
                 f"  exit\n"
-                f"  meshforge   (without sudo)\n\n"
+                f"  meshanchor   (without sudo)\n\n"
                 f"Or preserve SUDO_USER:\n"
-                f"  sudo -E meshforge\n\n"
-                f"MeshForge will try to work around this, but some\n"
+                f"  sudo -E meshanchor\n\n"
+                f"MeshAnchor will try to work around this, but some\n"
                 f"features may not work correctly.",
             )
         elif not rnsd_user:
@@ -557,7 +557,7 @@ class MeshForgeLauncher:
             ])
 
             choice = self.dialog.menu(
-                f"MeshForge NOC v{__version__}",
+                f"MeshAnchor NOC v{__version__}",
                 status_hint,
                 choices
             )
@@ -758,7 +758,7 @@ class MeshForgeLauncher:
     def _configuration_menu(self):
         """Configuration - Radio, services, settings."""
         _ORDERING = ["meshtasticd", "channels", "rns-config", "rnode",
-                      "backup", "updates", "webhooks", "meshforge", "config-api", "wizard"]
+                      "backup", "updates", "webhooks", "meshanchor", "config-api", "wizard"]
         while True:
             # Legacy items — removed automatically as handlers take over their tags
             legacy = [
@@ -768,7 +768,7 @@ class MeshForgeLauncher:
                 ("backup", "Device Backup       Backup/restore configs"),
                 ("updates", "Software Updates    One-click updates"),
                 ("webhooks", "Webhooks            External notifications"),
-                ("meshforge", "MeshForge Settings  App preferences"),
+                ("meshanchor", "MeshAnchor Settings  App preferences"),
                 ("config-api", "Config API Server   REST config endpoint"),
             ]
             choices = self._build_section_menu("configuration", legacy, _ORDERING)
@@ -803,7 +803,7 @@ class MeshForgeLauncher:
                 ("logs", "Logs                View/follow logs"),
                 ("network", "Network Tools       Ping, ports, interfaces"),
                 ("diagnose", "Diagnostics         System health check"),
-                ("daemon", "MeshForge Daemon    Headless NOC (maps, RNS, chat)"),
+                ("daemon", "MeshAnchor Daemon    Headless NOC (maps, RNS, chat)"),
                 ("status", "Quick Status        One-shot status display"),
                 ("reboot", "Reboot/Shutdown     Safe system control"),
             ]
@@ -828,7 +828,7 @@ class MeshForgeLauncher:
         _ORDERING = ["version", "changelog", "sysinfo", "deps", "web", "help"]
         while True:
             legacy = [
-                ("version", "Version Info        MeshForge version"),
+                ("version", "Version Info        MeshAnchor version"),
                 ("changelog", "Changelog           Release history"),
                 ("sysinfo", "System Info         OS, Python, disk, uptime"),
                 ("deps", "Dependencies        Package status"),
@@ -837,7 +837,7 @@ class MeshForgeLauncher:
             choices = self._build_section_menu("about", legacy, _ORDERING)
 
             choice = self.dialog.menu(
-                "About MeshForge",
+                "About MeshAnchor",
                 "Information, help, and diagnostics:",
                 choices
             )
@@ -857,14 +857,14 @@ def main():
 
     # Parse command-line arguments (--help, --version, etc.)
     parser = argparse.ArgumentParser(
-        prog='meshforge-tui',
-        description='MeshForge TUI — Terminal interface for mesh network operations',
-        epilog='Config: ~/.config/meshforge/ | Docs: https://github.com/Nursedude/meshforge',
+        prog='meshanchor-tui',
+        description='MeshAnchor TUI — Terminal interface for mesh network operations',
+        epilog='Config: ~/.config/meshanchor/ | Docs: https://github.com/Nursedude/meshanchor',
     )
     try:
         from __version__ import __version__
         parser.add_argument('--version', action='version',
-                            version=f'MeshForge TUI {__version__}')
+                            version=f'MeshAnchor TUI {__version__}')
     except ImportError:
         pass
     parser.add_argument('--debug', action='store_true',
@@ -874,9 +874,9 @@ def main():
                         help='Skip startup service health checks')
     args, _ = parser.parse_known_args()
 
-    # Initialize the MeshForge logging framework FIRST.
+    # Initialize the MeshAnchor logging framework FIRST.
     # This creates the RotatingFileHandler that writes to
-    # ~/.config/meshforge/logs/meshforge_YYYYMMDD.log
+    # ~/.config/meshanchor/logs/meshanchor_YYYYMMDD.log
     # Console output is disabled (log_to_console=False) to prevent
     # whiptail/dialog TUI corruption.
     try:
@@ -896,7 +896,7 @@ def main():
     log_dir = Path("/tmp")
     try:
         from utils.paths import get_real_user_home as _get_home
-        log_dir = _get_home() / ".cache" / "meshforge" / "logs"
+        log_dir = _get_home() / ".cache" / "meshanchor" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass  # Fall back to /tmp
@@ -941,10 +941,10 @@ def main():
     launcher = None
     exit_code = 0
     try:
-        launcher = MeshForgeLauncher()
+        launcher = MeshAnchorLauncher()
         launcher.run()
     except KeyboardInterrupt:
-        print("\n\nExiting MeshForge...")
+        print("\n\nExiting MeshAnchor...")
     except Exception as e:
         # Restore stderr FIRST so the user can see the error message
         try:
@@ -966,12 +966,12 @@ def main():
             pass
 
         # Show user-friendly message on terminal
-        print(f"\n\nMeshForge encountered a fatal error:\n")
+        print(f"\n\nMeshAnchor encountered a fatal error:\n")
         print(f"  {type(e).__name__}: {e}\n")
         print(f"Full error details saved to:")
         print(f"  {stderr_log}\n")
         print(f"To report this issue:")
-        print(f"  https://github.com/Nursedude/meshforge/issues\n")
+        print(f"  https://github.com/Nursedude/meshanchor/issues\n")
         exit_code = 1
     finally:
         # Stop background services (prevents hang on exit)

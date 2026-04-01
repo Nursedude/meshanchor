@@ -1,5 +1,5 @@
 """
-Link Quality Scoring for MeshForge.
+Link Quality Scoring for MeshAnchor.
 
 Provides a composite link quality scoring algorithm that combines multiple
 metrics to produce a unified quality score for mesh network links.

@@ -1,6 +1,6 @@
 # RNS Gateway Foundational Code Review
 
-> **Reviewer**: Dude AI (Claude) - MeshForge Architect
+> **Reviewer**: Dude AI (Claude) - MeshAnchor Architect
 > **Date**: 2026-01-06
 > **Repo**: https://github.com/landandair/RNS_Over_Meshtastic
 > **Commit**: f0041e8 (main branch)
@@ -219,11 +219,11 @@ except (subprocess.SubprocessError, FileNotFoundError, OSError):
 
 ---
 
-## Part VI: MeshForge Integration Readiness
+## Part VI: MeshAnchor Integration Readiness
 
-### Compatibility with MeshForge Patterns
+### Compatibility with MeshAnchor Patterns
 
-| Pattern | RNS Gateway | MeshForge | Compatible? |
+| Pattern | RNS Gateway | MeshAnchor | Compatible? |
 |---------|-------------|-----------|-------------|
 | Serial detection | shell=True | pyserial | ❌ Needs fix |
 | Config paths | Hardcoded | pathlib | ❌ Needs fix |
@@ -235,9 +235,9 @@ except (subprocess.SubprocessError, FileNotFoundError, OSError):
 ### Integration Path
 
 1. **Apply security patch** (`.claude/audits/security_fixes.patch`)
-2. **Import interface** into MeshForge gateway module
+2. **Import interface** into MeshAnchor gateway module
 3. **Unify config templates**
-4. **Add to MeshForge installer**
+4. **Add to MeshAnchor installer**
 
 ---
 
@@ -245,7 +245,7 @@ except (subprocess.SubprocessError, FileNotFoundError, OSError):
 
 ### Immediate (Security)
 
-1. Apply `security_fixes.patch` from MeshForge repo
+1. Apply `security_fixes.patch` from MeshAnchor repo
 2. Replace all `shell=True` with pyserial/pathlib
 3. Add timeouts to subprocess calls
 4. Fix bare `except:` clauses
@@ -314,9 +314,9 @@ Comprehensive, professional documentation.
 
 The RNS Over Meshtastic Gateway is a **solid project** with excellent core functionality. The `Meshtastic_Interface.py` demonstrates production-quality code that handles complex packet fragmentation and reconnection logic well.
 
-The issues identified are in **peripheral code** (installer, supervisor) and are **straightforward to fix**. A security patch has been prepared in the MeshForge repo.
+The issues identified are in **peripheral code** (installer, supervisor) and are **straightforward to fix**. A security patch has been prepared in the MeshAnchor repo.
 
-**Recommendation**: Apply security patch, then proceed with MeshForge integration.
+**Recommendation**: Apply security patch, then proceed with MeshAnchor integration.
 
 ---
 
@@ -326,5 +326,5 @@ The issues identified are in **peripheral code** (installer, supervisor) and are
 
 ```
 73 de Dude AI
-MeshForge NOC Architect
+MeshAnchor NOC Architect
 ```

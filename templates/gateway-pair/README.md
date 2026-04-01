@@ -1,4 +1,4 @@
-# MeshForge Gateway Pair Template
+# MeshAnchor Gateway Pair Template
 
 Two-node configuration for bridging between different Meshtastic modem presets.
 
@@ -7,7 +7,7 @@ Two-node configuration for bridging between different Meshtastic modem presets.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
-│   Wide-Area Network          MeshForge           Local Network  │
+│   Wide-Area Network          MeshAnchor           Local Network  │
 │   (LongFast)                 Gateway             (Short Turbo)  │
 │                                                                 │
 │   [Remote Nodes] ─── RF ───► [Node A] ◄──► [Node B] ◄─── RF ─── [Local Nodes]
@@ -25,7 +25,7 @@ Two-node configuration for bridging between different Meshtastic modem presets.
 | **Node A** | USB (T-Beam, Heltec) | LONG_FAST | Wide-area reception |
 | **Node B** | HAT (Waveshare, RAK) | SHORT_TURBO | Local high-speed |
 
-Both nodes run on the same Raspberry Pi with MeshForge.
+Both nodes run on the same Raspberry Pi with MeshAnchor.
 
 ## Setup Steps
 
@@ -54,7 +54,7 @@ sudo cp node-a.yaml /etc/meshtasticd/config.d/gateway-node-a.yaml
 meshtastic --host localhost --ch-set psk base64:YOUR_KEY --ch-index 0
 
 # Set channel name
-meshtastic --host localhost --ch-set name meshforge --ch-index 0
+meshtastic --host localhost --ch-set name meshanchor --ch-index 0
 
 # Verify
 meshtastic --host localhost --info
@@ -70,7 +70,7 @@ sudo cp node-b.yaml /etc/meshtasticd/config.d/gateway-node-b.yaml
 meshtastic --host localhost:4404 --ch-set psk base64:YOUR_KEY --ch-index 0
 
 # Set channel name
-meshtastic --host localhost:4404 --ch-set name meshforge --ch-index 0
+meshtastic --host localhost:4404 --ch-set name meshanchor --ch-index 0
 
 # Verify
 meshtastic --host localhost:4404 --info
@@ -144,7 +144,7 @@ rnpath <destination_hash>
 
 3. **Check message_queue.db** for persistence:
    ```bash
-   sqlite3 ~/.local/share/meshforge/message_queue.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 10;"
+   sqlite3 ~/.local/share/meshanchor/message_queue.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 10;"
    ```
 
 ## Alternative: MQTT-Bridged Topology (Multi-Pi)
@@ -157,7 +157,7 @@ See: [moc-mqtt-bridge.md](moc-mqtt-bridge.md)
 ```
 MOC1 (Pi5, Meshtoad, LongFast)     MOC2 (Pi, HAT, ShortTurbo)
   mosquitto broker  <--- MQTT --->  meshtasticd MQTT uplink
-  MeshForge NOC                     RNS/NomadNet gateway
+  MeshAnchor NOC                     RNS/NomadNet gateway
 ```
 
 This approach uses MQTT as the transport between nodes instead of

@@ -58,7 +58,7 @@ class TestAlertPublishing:
         topic = call_args[0][0]
         payload = json.loads(call_args[0][1])
 
-        assert topic == "meshforge/gateway/gw-test/alerts"
+        assert topic == "meshanchor/gateway/gw-test/alerts"
         assert payload['severity'] == "critical"
         assert payload['service'] == "radio_failover"
         assert payload['event'] == "secondary_active"

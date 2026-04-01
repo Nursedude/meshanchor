@@ -77,8 +77,8 @@ client.events.onFromRadio.subscribe((packet) => {
 - `onTextMessagePacket` - Text messages
 - `onChannelPacket` - Channel configuration
 
-### Integration with MeshForge
-For MeshForge Web UI, we could:
+### Integration with MeshAnchor
+For MeshAnchor Web UI, we could:
 1. Use HTTP transport to connect to meshtasticd
 2. Replace Flask API calls with direct Meshtastic.js calls
 3. Get real-time updates via event subscriptions
@@ -160,7 +160,7 @@ meshtastic/admin.proto       - Admin messages
 
 ---
 
-## Integration Ideas for MeshForge
+## Integration Ideas for MeshAnchor
 
 ### JavaScript Integration
 1. **Real-time Dashboard** - Use @meshtastic/core for live updates

@@ -1,7 +1,7 @@
 """
 Mesh Alert Engine — Evaluates mesh telemetry for alertable conditions.
 
-Hooks into MeshForge's existing MQTTNodelessSubscriber via callbacks and
+Hooks into MeshAnchor's existing MQTTNodelessSubscriber via callbacks and
 emits AlertEvent to the event_bus. Optionally delegates to meshing_around's
 alert models when available for type compatibility.
 
@@ -24,7 +24,7 @@ from utils.safe_import import safe_import
 logger = logging.getLogger(__name__)
 
 # Add meshing_around to path if available
-_MA_PATH = "/opt/meshing_around_meshforge"
+_MA_PATH = "/opt/meshing_around_meshanchor"
 if _MA_PATH not in sys.path:
     sys.path.insert(0, _MA_PATH)
 
@@ -57,7 +57,7 @@ class MeshAlertEngine:
 
     Hooks into MQTTNodelessSubscriber callbacks to receive node and message
     updates, evaluates alert conditions with per-node per-type cooldowns,
-    and emits AlertEvent via MeshForge's event_bus.
+    and emits AlertEvent via MeshAnchor's event_bus.
     """
 
     def __init__(self):

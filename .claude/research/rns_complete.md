@@ -1,11 +1,11 @@
 # Reticulum Network Stack (RNS) Complete Reference
 
-> Research compiled for MeshForge integration
+> Research compiled for MeshAnchor integration
 > Focus: Standalone operation, config management, gateway reliability
 
 ## Executive Summary
 
-RNS is a cryptographic mesh networking protocol for unstoppable communications over any transport (LoRa, WiFi, TCP, serial, I2P). MeshForge integrates RNS with Meshtastic to bridge two mesh ecosystems.
+RNS is a cryptographic mesh networking protocol for unstoppable communications over any transport (LoRa, WiFi, TCP, serial, I2P). MeshAnchor integrates RNS with Meshtastic to bridge two mesh ecosystems.
 
 ---
 
@@ -258,12 +258,12 @@ router.register_delivery_callback(on_message)
 
 ---
 
-## 4. MeshForge Gateway Implementation
+## 4. MeshAnchor Gateway Implementation
 
 ### 4.1 Architecture
 
 ```
-Meshtastic LoRa <--> meshtasticd <--> MeshForge Bridge <--> RNS/LXMF
+Meshtastic LoRa <--> meshtasticd <--> MeshAnchor Bridge <--> RNS/LXMF
      (4403)              ^                    |
                          |                    v
                     meshing-around      ~/.reticulum/config
@@ -336,7 +336,7 @@ get_path_info()        # ✅ Path metrics (hops, next_hop, interface)
 | NomadNet | `~/.nomadnetwork/config` |
 | Sideband | `~/.config/sideband/` |
 | MeshChat | `~/.config/meshchat/` |
-| MeshForge | `~/.config/meshforge/` |
+| MeshAnchor | `~/.config/meshanchor/` |
 
 ---
 

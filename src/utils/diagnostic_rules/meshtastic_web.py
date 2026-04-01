@@ -1,4 +1,4 @@
-"""Meshtastic web client diagnostic rules for MeshForge Diagnostic Engine."""
+"""Meshtastic web client diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 
@@ -55,11 +55,11 @@ def load_meshtastic_web_rules(engine: "DiagnosticEngine") -> None:
             make_service_active_check("meshtasticd"),
         ],
         suggestions=[
-            "Use MeshForge Node DB Cleanup: Meshtasticd > Node DB Cleanup > Scan",
+            "Use MeshAnchor Node DB Cleanup: Meshtasticd > Node DB Cleanup > Scan",
             "Reset node database: meshtastic --host localhost --reset-nodedb",
             "Reduce MaxNodes in config.yaml to limit phantom accumulation",
             "Disable MQTT downlink to stop phantom node ingestion",
-            "MeshForge API proxy sanitizes nodes when web client is routed through it",
+            "MeshAnchor API proxy sanitizes nodes when web client is routed through it",
         ],
         auto_recoverable=False,
         confidence_base=0.85,
@@ -81,9 +81,9 @@ def load_meshtastic_web_rules(engine: "DiagnosticEngine") -> None:
             make_service_active_check("meshtasticd"),
         ],
         suggestions=[
-            "Route web client through MeshForge API proxy (multiplexes packets to all clients)",
+            "Route web client through MeshAnchor API proxy (multiplexes packets to all clients)",
             "Disconnect other meshtasticd clients before using web UI",
-            "Stop gateway bridge temporarily: systemctl stop meshforge-gateway",
+            "Stop gateway bridge temporarily: systemctl stop meshanchor-gateway",
             "Check for MQTT downlink flooding: look for 'tophone queue is full' in logs",
         ],
         auto_recoverable=False,

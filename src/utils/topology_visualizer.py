@@ -1,5 +1,5 @@
 """
-Network Topology Visualizer for MeshForge.
+Network Topology Visualizer for MeshAnchor.
 
 Generates interactive browser-based network topology visualizations using D3.js
 force-directed graphs. Shows nodes, edges, link quality, and real-time topology.
@@ -331,19 +331,19 @@ class TopologyVisualizer:
             "event_count": len(self._events),
         }
 
-    def generate(self, output_path: str = None, title: str = "MeshForge Network Topology") -> str:
+    def generate(self, output_path: str = None, title: str = "MeshAnchor Network Topology") -> str:
         """
         Generate the topology visualization HTML.
 
         Args:
-            output_path: Output file path (default: ~/.cache/meshforge/topology.html)
+            output_path: Output file path (default: ~/.cache/meshanchor/topology.html)
             title: Page title
 
         Returns:
             Path to generated HTML file
         """
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "topology.html")
 
@@ -949,7 +949,7 @@ class TopologyVisualizer:
             Tuple of (output_path, feature_count)
         """
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "topology.geojson")
 
@@ -1030,7 +1030,7 @@ class TopologyVisualizer:
             "type": "FeatureCollection",
             "features": features,
             "properties": {
-                "generator": "MeshForge TopologyVisualizer",
+                "generator": "MeshAnchor TopologyVisualizer",
                 "generated_at": datetime.now().isoformat(),
                 "stats": self.get_stats(),
             }
@@ -1056,7 +1056,7 @@ class TopologyVisualizer:
             Tuple of (output_path, total_count)
         """
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "topology_d3.json")
 
@@ -1109,7 +1109,7 @@ class TopologyVisualizer:
             "nodes": nodes,
             "links": links,
             "meta": {
-                "generator": "MeshForge TopologyVisualizer",
+                "generator": "MeshAnchor TopologyVisualizer",
                 "generated_at": datetime.now().isoformat(),
                 "stats": self.get_stats(),
             }
@@ -1133,7 +1133,7 @@ class TopologyVisualizer:
             Tuple of (output_path, edge_count)
         """
         if output_path is None:
-            cache_dir = get_real_user_home() / ".cache" / "meshforge"
+            cache_dir = get_real_user_home() / ".cache" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(cache_dir / "topology.graphml")
 
@@ -1212,7 +1212,7 @@ class TopologyVisualizer:
             Tuple of (nodes_path, edges_path)
         """
         if output_dir is None:
-            output_dir = str(get_real_user_home() / ".cache" / "meshforge")
+            output_dir = str(get_real_user_home() / ".cache" / "meshanchor")
 
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 

@@ -1,11 +1,11 @@
 """
-MeshForge Auto-Review System
+MeshAnchor Auto-Review System
 
 Orchestrates automated code reviews using specialized review agents,
 inspired by Auto-Claude's autonomous multi-agent architecture.
 
 This module provides the schema and patterns for systematic code review
-following MeshForge's foundational principles.
+following MeshAnchor's foundational principles.
 
 Usage:
     from utils.auto_review import ReviewOrchestrator, ReviewScope
@@ -148,7 +148,7 @@ class ReviewReport:
     def to_markdown(self) -> str:
         """Generate markdown report"""
         lines = [
-            "# MeshForge Auto-Review Report",
+            "# MeshAnchor Auto-Review Report",
             "",
             f"**Scope**: {self.scope.name}",
             f"**Total Files Scanned**: {self.total_files_scanned}",
@@ -1064,7 +1064,7 @@ TRIGGER_PHRASES = [
     "reliability check",
     "code audit",
     "clean up redundancy",
-    "optimize meshforge",
+    "optimize meshanchor",
     "check reliability",
     "run security review",
     "performance review",

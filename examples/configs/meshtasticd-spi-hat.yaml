@@ -1,4 +1,4 @@
-# MeshForge Example: Raspberry Pi SPI HAT Configuration
+# MeshAnchor Example: Raspberry Pi SPI HAT Configuration
 #
 # For SPI-connected LoRa HATs (MeshAdv-Pi-Hat, Waveshare, etc.)
 # Copy to: /etc/meshtasticd/config.d/spi-hat.yaml
@@ -59,7 +59,7 @@ I2C:
 
 # === TCP Interface ===
 TCP:
-  Port: 4403              # MeshForge connects here
+  Port: 4403              # MeshAnchor connects here
 
 # === Web Interface ===
 Webserver:

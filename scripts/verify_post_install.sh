@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# MeshForge Post-Install Verification Script
+# MeshAnchor Post-Install Verification Script
 #
-# Verifies that MeshForge installation is complete and functional.
+# Verifies that MeshAnchor installation is complete and functional.
 # Run after install_noc.sh or anytime to check system health.
 #
 # Exit codes:
@@ -115,35 +115,35 @@ check_info() {
 if ! $QUIET; then
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║     MeshForge Post-Install Verification                   ║${NC}"
+    echo -e "${CYAN}║     MeshAnchor Post-Install Verification                   ║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Section 1: MeshForge Installation
+# Section 1: MeshAnchor Installation
 # ─────────────────────────────────────────────────────────────────
-log "${BOLD}[1/6] MeshForge Installation${NC}"
+log "${BOLD}[1/6] MeshAnchor Installation${NC}"
 
-# Check meshforge directory
-if [[ -d "/opt/meshforge" ]]; then
-    check_pass "MeshForge directory" "/opt/meshforge exists"
+# Check meshanchor directory
+if [[ -d "/opt/meshanchor" ]]; then
+    check_pass "MeshAnchor directory" "/opt/meshanchor exists"
 else
-    check_fail "MeshForge directory" "/opt/meshforge not found" "Run: sudo bash scripts/install_noc.sh"
+    check_fail "MeshAnchor directory" "/opt/meshanchor not found" "Run: sudo bash scripts/install_noc.sh"
 fi
 
-# Check meshforge command
-if command -v meshforge &>/dev/null; then
-    check_pass "meshforge command" "$(which meshforge)"
+# Check meshanchor command
+if command -v meshanchor &>/dev/null; then
+    check_pass "meshanchor command" "$(which meshanchor)"
 else
-    check_fail "meshforge command" "Not in PATH" "Check /usr/local/bin/meshforge exists"
+    check_fail "meshanchor command" "Not in PATH" "Check /usr/local/bin/meshanchor exists"
 fi
 
 # Check venv
-if [[ -f "/opt/meshforge/venv/bin/python" ]]; then
-    check_pass "Python venv" "/opt/meshforge/venv/bin/python"
+if [[ -f "/opt/meshanchor/venv/bin/python" ]]; then
+    check_pass "Python venv" "/opt/meshanchor/venv/bin/python"
 else
-    check_warn "Python venv" "Venv not found" "Run: python3 -m venv /opt/meshforge/venv"
+    check_warn "Python venv" "Venv not found" "Run: python3 -m venv /opt/meshanchor/venv"
 fi
 
 log ""
@@ -213,7 +213,7 @@ if [[ -f "$CONFIG_YAML" ]]; then
         MODULE=$(grep -A1 "Lora:" "$CONFIG_YAML" | grep "Module:" | awk '{print $2}' || echo "auto")
         check_pass "Lora section" "Module: ${MODULE:-auto}"
     else
-        check_warn "Lora section" "Missing from config.yaml" "Reinstall meshtasticd package or run MeshForge ensure_structure() to regenerate"
+        check_warn "Lora section" "Missing from config.yaml" "Reinstall meshtasticd package or run MeshAnchor ensure_structure() to regenerate"
     fi
 
     # Check for WRONG content (radio parameters that shouldn't be here)

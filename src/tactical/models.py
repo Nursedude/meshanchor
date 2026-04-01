@@ -1,5 +1,5 @@
 """
-Tactical Message Models for MeshForge.
+Tactical Message Models for MeshAnchor.
 
 Typed dataclasses for structured tactical messages:
 SITREP, TASK, CHECKIN, ZONE, RESOURCE, MISSION, EVENT, ASSET.

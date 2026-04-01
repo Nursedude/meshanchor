@@ -21,11 +21,11 @@ Please include:
 
 ## Security Measures
 
-MeshForge implements the following security measures as of v0.5.4-beta:
+MeshAnchor implements the following security measures as of v0.5.4-beta:
 
 ### Coding Standards (Linter-Enforced)
 
-MeshForge's custom linter (`scripts/lint.py`) enforces ten security rules (MF001-MF010):
+MeshAnchor's custom linter (`scripts/lint.py`) enforces ten security rules (MF001-MF010):
 
 | Rule | Description | Severity |
 |------|-------------|----------|
@@ -135,7 +135,7 @@ Full codebase audit (274 Python files, 153K lines) using automated linter, auto-
 
 ## Development Security Guidelines
 
-When contributing to MeshForge, follow these security practices:
+When contributing to MeshAnchor, follow these security practices:
 
 ### Do
 
@@ -173,10 +173,10 @@ subprocess.run(f"journalctl --since {user_input}", shell=True)
 ```python
 # Good - works correctly with sudo
 from utils.paths import get_real_user_home
-config = get_real_user_home() / ".config" / "meshforge" / "settings.json"
+config = get_real_user_home() / ".config" / "meshanchor" / "settings.json"
 
 # Bad - returns /root when running with sudo
-config = Path.home() / ".config" / "meshforge" / "settings.json"
+config = Path.home() / ".config" / "meshanchor" / "settings.json"
 ```
 
 **Input validation:**
@@ -200,7 +200,7 @@ For security concerns, contact the maintainers through GitHub.
 
 ## Acknowledgments
 
-Thanks to security researchers and contributors who help keep MeshForge secure.
+Thanks to security researchers and contributors who help keep MeshAnchor secure.
 
 ---
 *Made with aloha for the mesh community*

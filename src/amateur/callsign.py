@@ -1,5 +1,5 @@
 """
-Callsign Management for MeshForge Amateur Radio Edition
+Callsign Management for MeshAnchor Amateur Radio Edition
 
 Provides callsign lookup, validation, and management features.
 """
@@ -123,7 +123,7 @@ class CallsignManager:
 
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize callsign manager"""
-        self.config_dir = config_dir or get_real_user_home() / '.config' / 'meshforge'
+        self.config_dir = config_dir or get_real_user_home() / '.config' / 'meshanchor'
         self.cache_file = self.config_dir / 'callsign_cache.json'
         self.my_callsign: Optional[str] = None
         self.my_info: Optional[CallsignInfo] = None
@@ -271,7 +271,7 @@ class CallsignManager:
             # Make request with timeout
             request = urllib.request.Request(
                 url,
-                headers={'User-Agent': 'MeshForge/1.0 (Amateur Radio NOC)'}
+                headers={'User-Agent': 'MeshAnchor/1.0 (Amateur Radio NOC)'}
             )
             with urllib.request.urlopen(request, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
@@ -368,7 +368,7 @@ class CallsignManager:
             params = urllib.parse.urlencode({
                 'id': session_id or '',
                 'callsign': callsign,
-                'prg': 'MeshForge'
+                'prg': 'MeshAnchor'
             })
             url = f"{base_url}?{params}"
 
@@ -376,7 +376,7 @@ class CallsignManager:
 
             request = urllib.request.Request(
                 url,
-                headers={'User-Agent': 'MeshForge/1.0 (Amateur Radio NOC)'}
+                headers={'User-Agent': 'MeshAnchor/1.0 (Amateur Radio NOC)'}
             )
             with urllib.request.urlopen(request, timeout=10) as response:
                 xml_data = response.read().decode('utf-8')
@@ -755,7 +755,7 @@ class StationIDTimer:
         self._warned = False
 
         # Persistence
-        self._state_file = get_real_user_home() / '.config' / 'meshforge' / 'station_id_state.json'
+        self._state_file = get_real_user_home() / '.config' / 'meshanchor' / 'station_id_state.json'
         self._load_state()
 
     def _load_state(self) -> None:

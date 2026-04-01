@@ -43,21 +43,21 @@ class RadioEndpointsMixin:
     def _serve_mesh_web_client(self):
         """Serve the Meshtastic web client from disk.
 
-        MeshForge owns the browser — serves meshtasticd's web client files
+        MeshAnchor owns the browser — serves meshtasticd's web client files
         directly from /usr/share/meshtasticd/web/ instead of proxying HTML
-        through the network.  API calls are routed through MeshForge's
+        through the network.  API calls are routed through MeshAnchor's
         multiplexed proxy so the web client gets proper phantom-node
         filtering and stream multiplexing.
 
         When API proxy is disabled, redirects to meshtasticd's native
-        web client at :9443 so MeshForge doesn't consume fromradio packets.
+        web client at :9443 so MeshAnchor doesn't consume fromradio packets.
 
         Static files:  /mesh/*           -> disk read from MESHTASTICD_WEB_DIR
-        API proxied:   /mesh/api/v1/*    -> MeshForge multiplexed proxy
-                       /mesh/json/*      -> MeshForge sanitized proxy
+        API proxied:   /mesh/api/v1/*    -> MeshAnchor multiplexed proxy
+                       /mesh/json/*      -> MeshAnchor sanitized proxy
         """
         # When API proxy is disabled, redirect to native meshtasticd web client.
-        # This avoids MeshForge consuming fromradio packets that the native
+        # This avoids MeshAnchor consuming fromradio packets that the native
         # web client needs.
         if not self.api_proxy:
             host = self.headers.get('Host', 'localhost:5000').split(':')[0]
@@ -74,7 +74,7 @@ class RadioEndpointsMixin:
         elif path.startswith('/mesh/'):
             path = path[5:]  # Strip /mesh prefix -> /index.html, /static/...
 
-        # Route API endpoints through MeshForge's sanitized, multiplexed
+        # Route API endpoints through MeshAnchor's sanitized, multiplexed
         # proxy.  The web client's fetch() calls resolve here because
         # they are relative to the /mesh/ origin.
         if path == '/json/nodes' or path == '/json/nodes/':
@@ -210,7 +210,7 @@ class RadioEndpointsMixin:
         # React components.  A body scrollbar steals width from the right
         # side, partially covering the sidebar/drawer menu.
         scrollbar_fix = (
-            '<style data-meshforge>'
+            '<style data-meshanchor>'
             'html,body{overflow:hidden;margin:0;padding:0;'
             'height:100%;width:100%}'
             '</style>'
@@ -226,7 +226,7 @@ class RadioEndpointsMixin:
     def _serve_mesh_client_unavailable(self):
         """Serve a page when meshtasticd web client files are not on disk."""
         html = """<!DOCTYPE html>
-<html><head><title>MeshForge - Meshtastic Web Client</title>
+<html><head><title>MeshAnchor - Meshtastic Web Client</title>
 <style>
 body { font-family: sans-serif; background: #0a0e1a; color: #e0e0e0;
        display: flex; justify-content: center; align-items: center;
@@ -249,7 +249,7 @@ Webserver:
   Port: 9443
   RootPath: /usr/share/meshtasticd/web</pre>
 <p style="margin-top:2em;">
-  <a href="/">MeshForge NOC Map</a> |
+  <a href="/">MeshAnchor NOC Map</a> |
   <a href="/api/proxy/status">Proxy Status</a>
 </p>
 </div></body></html>""" % MESHTASTICD_WEB_DIR
@@ -286,7 +286,7 @@ Webserver:
         })
 
     # ─────────────────────────────────────────────────────────────────
-    # Radio Control API - MeshForge-owned Meshtastic access
+    # Radio Control API - MeshAnchor-owned Meshtastic access
     # ─────────────────────────────────────────────────────────────────
 
     def _get_radio_connection(self):

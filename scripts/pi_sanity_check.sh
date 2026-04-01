@@ -1,9 +1,9 @@
 #!/bin/bash
-# MeshForge Pi Sanity Check
+# MeshAnchor Pi Sanity Check
 # Run after updates to verify the installation is healthy
 #
 # Usage: sudo ./scripts/pi_sanity_check.sh
-#        or: cd /path/to/meshforge && sudo bash scripts/pi_sanity_check.sh
+#        or: cd /path/to/meshanchor && sudo bash scripts/pi_sanity_check.sh
 
 set -e
 
@@ -20,7 +20,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "========================================"
-echo "  MeshForge Pi Sanity Check"
+echo "  MeshAnchor Pi Sanity Check"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================"
 echo ""
@@ -58,7 +58,7 @@ fi
 # 2. Import check - TUI
 echo ""
 echo "--- Import Tests ---"
-if python3 -c "from src.launcher_tui.main import MeshForgeLauncher" 2>/dev/null; then
+if python3 -c "from src.launcher_tui.main import MeshAnchorLauncher" 2>/dev/null; then
     pass "TUI imports successfully"
 else
     fail "TUI import failed"

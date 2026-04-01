@@ -1,4 +1,4 @@
-# MeshForge Auto-Review Allowlist
+# MeshAnchor Auto-Review Allowlist
 # ================================
 # Documents known false positives in the auto-review system.
 # Each entry explains WHY the pattern is safe, preventing fix-break cycles.

@@ -1,5 +1,5 @@
 """
-MeshForge Tactical Messaging Package.
+MeshAnchor Tactical Messaging Package.
 
 Structured tactical messages with X1 wire format, transport-aware chunking,
 tactical map overlays, QR transport, and ham-compliant encryption modes.
