@@ -1,12 +1,12 @@
 #!/bin/bash
-# MeshForge Launcher Script
-# Launches MeshForge tools and services
+# MeshAnchor Launcher Script
+# Launches MeshAnchor tools and services
 
-MESHFORGE_DIR="/opt/meshforge"
+MESHANCHOR_DIR="/opt/meshanchor"
 
 # Function to launch TUI with sudo
 launch_tui() {
-    local script="$MESHFORGE_DIR/src/launcher_tui/main.py"
+    local script="$MESHANCHOR_DIR/src/launcher_tui/main.py"
 
     if [ "$EUID" -eq 0 ]; then
         exec python3 "$script" "$@"
@@ -17,7 +17,7 @@ launch_tui() {
 
 # Function to launch coverage map generator
 launch_maps() {
-    cd "$MESHFORGE_DIR"
+    cd "$MESHANCHOR_DIR"
     exec python3 -c "
 from src.utils.coverage_map import CoverageMapGenerator
 import sys
@@ -32,7 +32,7 @@ print(f'Map generated: {output}')
 # Function to launch prometheus metrics server
 launch_prometheus() {
     local port="${1:-9090}"
-    cd "$MESHFORGE_DIR"
+    cd "$MESHANCHOR_DIR"
 
     if [ "$EUID" -eq 0 ]; then
         exec python3 -c "
@@ -69,9 +69,9 @@ signal.pause()
 
 # Show usage help
 show_help() {
-    echo "MeshForge - Mesh Network Operations Center"
+    echo "MeshAnchor - Mesh Network Operations Center"
     echo ""
-    echo "Usage: meshforge [command] [options]"
+    echo "Usage: meshanchor [command] [options]"
     echo ""
     echo "Commands:"
     echo "  (none)         Launch TUI menu (default)"
@@ -84,9 +84,9 @@ show_help() {
     echo "interface that works over SSH."
     echo ""
     echo "Examples:"
-    echo "  meshforge                  # Launch TUI menu"
-    echo "  meshforge maps output.html # Generate coverage map"
-    echo "  meshforge prometheus 8080  # Start metrics on port 8080"
+    echo "  meshanchor                  # Launch TUI menu"
+    echo "  meshanchor maps output.html # Generate coverage map"
+    echo "  meshanchor prometheus 8080  # Start metrics on port 8080"
 }
 
 # Determine which interface to launch

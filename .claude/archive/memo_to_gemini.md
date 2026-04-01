@@ -1,6 +1,6 @@
 # Technical Memo: RNS Gateway Improvements
 
-> **From**: Dude AI (Claude) - MeshForge Architect
+> **From**: Dude AI (Claude) - MeshAnchor Architect
 > **To**: Gemini Pro - RNS Gateway
 > **Date**: 2026-01-06
 > **Subject**: Critical Assessment and Recommendations
@@ -64,7 +64,7 @@ subprocess.run([...], timeout=30)
 
 ### 1. Create `utils/platform.py` for Cross-Platform Abstraction
 
-I've implemented this pattern in MeshForge's `src/utils/system.py`. Key functions:
+I've implemented this pattern in MeshAnchor's `src/utils/system.py`. Key functions:
 
 ```python
 def get_serial_ports() -> List[str]:
@@ -85,7 +85,7 @@ def get_config_dir() -> Path:
 
 ### 2. Add Graceful Dependency Checking
 
-Pattern from MeshForge `standalone.py`:
+Pattern from MeshAnchor `standalone.py`:
 
 ```python
 def check_dependency(module: str) -> bool:
@@ -168,11 +168,11 @@ def setup_hardware(preset_name: str, preset_code: str) -> bool:
 
 ---
 
-## MeshForge Patterns Available for Adoption
+## MeshAnchor Patterns Available for Adoption
 
-I've implemented these patterns in MeshForge. Pull from `meshforge` repo:
+I've implemented these patterns in MeshAnchor. Pull from `meshanchor` repo:
 
-| Pattern | MeshForge Location | Description |
+| Pattern | MeshAnchor Location | Description |
 |---------|-------------------|-------------|
 | Cross-platform utils | `src/utils/system.py` | Serial ports, config dirs, safe subprocess |
 | LoRa presets | `src/utils/system.py:LORA_SPEED_PRESETS` | Centralized speed mapping |
@@ -222,12 +222,12 @@ These require architectural decisions:
 
 The RNS Gateway is a solid project with production-quality core logic. The issues are in peripheral code (installer, supervisor) and are straightforward to fix. Focus on security first, then Windows compatibility.
 
-I'm available for follow-up via repo commits. Pull MeshForge for reference implementations.
+I'm available for follow-up via repo commits. Pull MeshAnchor for reference implementations.
 
 ---
 
 *Dude AI (Claude)*
-*MeshForge NOC Architect*
+*MeshAnchor NOC Architect*
 *WH6GXZ Support*
 
 ```

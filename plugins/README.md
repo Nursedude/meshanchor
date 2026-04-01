@@ -1,15 +1,15 @@
-# MeshForge Plugin Development Guide
+# MeshAnchor Plugin Development Guide
 
-> Create plugins for MeshForge.io to extend functionality
+> Create plugins for MeshAnchor.io to extend functionality
 
 ---
 
 ## Quick Start
 
-1. Create a new directory in `~/.config/meshforge/plugins/`
+1. Create a new directory in `~/.config/meshanchor/plugins/`
 2. Add a `manifest.json` file
 3. Create your `main.py` with a Plugin class
-4. Restart MeshForge to discover your plugin
+4. Restart MeshAnchor to discover your plugin
 
 ---
 
@@ -36,7 +36,7 @@ my_plugin/
     "author": "Your Name",
     "type": "panel",
     "entry_point": "main.py",
-    "min_meshforge_version": "1.0.0",
+    "min_meshanchor_version": "1.0.0",
     "homepage": "https://github.com/you/plugin",
     "license": "MIT",
     "icon": "extension-symbolic",
@@ -66,7 +66,7 @@ my_plugin/
 | `author` | Author name or organization |
 | `type` | Plugin type (see below) |
 | `entry_point` | Main Python file |
-| `min_meshforge_version` | Minimum MeshForge version |
+| `min_meshanchor_version` | Minimum MeshAnchor version |
 
 ### Plugin Types
 
@@ -84,14 +84,14 @@ my_plugin/
 
 ```python
 """
-My Plugin for MeshForge.io
+My Plugin for MeshAnchor.io
 """
 
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk
 
-from meshforge.core.plugin_base import Plugin, PluginContext
+from meshanchor.core.plugin_base import Plugin, PluginContext
 
 
 class MyPanel(Gtk.Box):
@@ -199,7 +199,7 @@ config = context.get_service("config")
 ### get_plugin_data_dir()
 ```python
 data_dir = context.get_plugin_data_dir("my_plugin_id")
-# Returns: ~/.config/meshforge/plugins/my_plugin_id/
+# Returns: ~/.config/meshanchor/plugins/my_plugin_id/
 ```
 
 ---
@@ -253,7 +253,7 @@ class MyPlugin(Plugin):
 
 ## Best Practices
 
-### 1. Follow MeshForge Design Patterns
+### 1. Follow MeshAnchor Design Patterns
 - Use GTK4 widgets
 - Follow libadwaita styling
 - Respect the edition feature flags
@@ -308,12 +308,12 @@ See the `examples/` directory:
 
 1. Test thoroughly on all editions
 2. Include clear documentation
-3. Submit to MeshForge Plugin Marketplace (coming soon)
+3. Submit to MeshAnchor Plugin Marketplace (coming soon)
 
 ---
 
 ## Support
 
-- GitHub Issues: https://github.com/meshforge/plugins/issues
-- Documentation: https://docs.meshforge.org/plugins
-- Community: https://discord.gg/meshforge
+- GitHub Issues: https://github.com/meshanchor/plugins/issues
+- Documentation: https://docs.meshanchor.org/plugins
+- Community: https://discord.gg/meshanchor

@@ -10,7 +10,7 @@
 
 ### Root Cause Found: Wrong Config Path Resolution
 
-MeshForge was using `get_real_user_home() / ".reticulum"` for RNS config paths.
+MeshAnchor was using `get_real_user_home() / ".reticulum"` for RNS config paths.
 This returns `/home/<user>/.reticulum` when running with sudo, but RNS itself
 uses `os.path.expanduser("~")` which resolves to `/root/.reticulum` when
 running as root. Since rnsd runs as root (systemd), the config is in `/root/`.
@@ -29,7 +29,7 @@ Where `~` = effective user's home (NOT real user when sudo).
 - Now mirrors RNS's own config resolution logic
 - Uses `Path.home()` (effective user), NOT `get_real_user_home()`
 - Checks all 3 RNS locations: /etc/reticulum, ~/.config/reticulum, ~/.reticulum
-- Clear docstring explaining WHY this differs from MeshForge's path strategy
+- Clear docstring explaining WHY this differs from MeshAnchor's path strategy
 
 #### 2. All RNS path references across codebase (12 files)
 - `commands/rns.py` → uses `ReticulumPaths`
@@ -58,7 +58,7 @@ Where `~` = effective user's home (NOT real user when sudo).
 
 #### 4. Bridge RNS initialization hardened
 - `_init_rns_main_thread()` now lets RNS use its own config resolution
-- Removed temp config hack (was creating `/tmp/meshforge_rns_bridge/config`)
+- Removed temp config hack (was creating `/tmp/meshanchor_rns_bridge/config`)
 - Logs the resolved config path for debugging
 - Still correctly handles: reinitialise, errno 98, ImportError
 
@@ -104,7 +104,7 @@ Where `~` = effective user's home (NOT real user when sudo).
 - RNS uses `os.path.expanduser("~")` → effective user's home
 - When running as root (rnsd, sudo): `~` = `/root/`
 - When running as user: `~` = `/home/<user>/`
-- **MeshForge config** uses `get_real_user_home()` (persists across sudo)
+- **MeshAnchor config** uses `get_real_user_home()` (persists across sudo)
 - **RNS config** uses `Path.home()` (matches RNS's own resolution)
 
 ### Interface Types
@@ -134,9 +134,9 @@ Where `~` = effective user's home (NOT real user when sudo).
 - `data_speed` presets: 0=LONG_FAST, 6=SHORT_FAST, 8=SHORT_TURBO (recommended)
 - `mode = gateway`: bridges RNS packets over Meshtastic LoRa
 
-### MeshForge Bridge vs Meshtastic_Interface
+### MeshAnchor Bridge vs Meshtastic_Interface
 - **Meshtastic_Interface**: Transport layer. RNS packets → Meshtastic LoRa → RNS
-- **MeshForge Bridge**: Application layer. LXMF messages ↔ Meshtastic text messages
+- **MeshAnchor Bridge**: Application layer. LXMF messages ↔ Meshtastic text messages
 - Both can coexist. Meshtastic_Interface is the foundation layer.
 
 ### RNS Ecosystem Apps (all connect to rnsd shared instance)

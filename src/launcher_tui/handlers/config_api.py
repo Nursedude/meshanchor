@@ -1,7 +1,7 @@
 """
 Config API Server handler — start/stop/status for RESTful config API.
 
-Batch 10c: Extracted from MeshForgeLauncher._config_api_menu() and
+Batch 10c: Extracted from MeshAnchorLauncher._config_api_menu() and
 lifecycle methods in main.py. Implements LifecycleHandler for
 auto-start on TUI launch and auto-stop on TUI exit.
 """

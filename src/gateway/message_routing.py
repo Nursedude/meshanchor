@@ -85,7 +85,7 @@ class MessageRouter:
         self._classifier = None
         self._last_classification: Optional[ClassificationResult] = None
         if CLASSIFIER_AVAILABLE:
-            fixes_path = get_real_user_home() / '.config' / 'meshforge' / 'routing_fixes.json'
+            fixes_path = get_real_user_home() / '.config' / 'meshanchor' / 'routing_fixes.json'
             rules = [
                 {
                     'name': rule.name,

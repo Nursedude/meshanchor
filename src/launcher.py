@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeshForge Launcher
+MeshAnchor Launcher
 
 Detects environment and launches the TUI interface (raspi-config style).
 Works everywhere: SSH, serial, local terminal.
@@ -54,7 +54,7 @@ StartupChecker, _HAS_STARTUP_CHECKER = safe_import(
 )
 
 # Config file location
-CONFIG_DIR = get_real_user_home() / '.config' / 'meshforge'
+CONFIG_DIR = get_real_user_home() / '.config' / 'meshanchor'
 CONFIG_FILE = CONFIG_DIR / 'preferences.json'
 
 
@@ -92,17 +92,17 @@ def save_preferences(prefs):
 
 def check_first_run() -> bool:
     """Check if this is a first run (no setup marker exists)"""
-    marker = get_real_user_home() / ".meshforge" / ".setup_complete"
+    marker = get_real_user_home() / ".meshanchor" / ".setup_complete"
     return not marker.exists()
 
 
 def run_setup_wizard():
     """Run the interactive setup wizard"""
     print(f"\n{Colors.CYAN}{'='*60}")
-    print("  MeshForge First-Run Setup")
+    print("  MeshAnchor First-Run Setup")
     print(f"{'='*60}{Colors.NC}\n")
 
-    print("This appears to be your first time running MeshForge.")
+    print("This appears to be your first time running MeshAnchor.")
     print("The setup wizard will detect installed services and guide")
     print("you through initial configuration.\n")
 
@@ -131,12 +131,12 @@ def run_setup_wizard():
             except Exception as e:
                 print(f"{Colors.YELLOW}Setup wizard not available: {e}{Colors.NC}")
                 print("Continuing to main launcher...\n")
-                marker = get_real_user_home() / ".meshforge" / ".setup_complete"
+                marker = get_real_user_home() / ".meshanchor" / ".setup_complete"
                 marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.write_text("skipped")
     else:
-        print(f"\n{Colors.DIM}Skipping setup. Run 'meshforge --setup' anytime.{Colors.NC}\n")
-        marker = get_real_user_home() / ".meshforge" / ".setup_complete"
+        print(f"\n{Colors.DIM}Skipping setup. Run 'meshanchor --setup' anytime.{Colors.NC}\n")
+        marker = get_real_user_home() / ".meshanchor" / ".setup_complete"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("skipped")
 
@@ -144,7 +144,7 @@ def run_setup_wizard():
 def print_banner():
     """Print the welcome banner"""
     print(f"""{Colors.CYAN}
-    MeshForge NOC v{__version__}
+    MeshAnchor NOC v{__version__}
     Network Operations Center for Mesh Networks
 {Colors.NC}""")
 
@@ -310,7 +310,7 @@ def launch_gateway_bridge(src_dir):
         config = GatewayConfig.load()
         if not config.enabled:
             print(f"{Colors.YELLOW}Gateway bridge is disabled in config.{Colors.NC}")
-            print(f"Enable it in ~/.config/meshforge/gateway.json or via the UI.\n")
+            print(f"Enable it in ~/.config/meshanchor/gateway.json or via the UI.\n")
             try:
                 enable = input(f"Enable and start now? [y/N]: ").strip().lower()
                 if enable in ['y', 'yes']:
@@ -341,13 +341,13 @@ def launch_gateway_bridge(src_dir):
                 bridge.stop()
                 print(f"{Colors.GREEN}Bridge stopped.{Colors.NC}")
         else:
-            log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+            log_dir = get_real_user_home() / ".config" / "meshanchor" / "logs"
             print(f"{Colors.RED}Failed to start bridge.{Colors.NC}")
             print(f"{Colors.DIM}  Logs: {log_dir}/")
             print(f"  Common causes:")
             print(f"    - rnsd not running (sudo systemctl start rnsd)")
             print(f"    - meshtasticd not accessible on {config.meshtastic.host}:{config.meshtastic.port}")
-            print(f"    - Gateway config: ~/.config/meshforge/gateway.json{Colors.NC}")
+            print(f"    - Gateway config: ~/.config/meshanchor/gateway.json{Colors.NC}")
 
     except Exception as e:
         print(f"{Colors.RED}Error starting bridge: {e}{Colors.NC}")
@@ -406,7 +406,7 @@ def start_noc_services():
     if not _HAS_ORCHESTRATOR:
         return True
 
-    noc_config_path = Path('/etc/meshforge/noc.yaml')
+    noc_config_path = Path('/etc/meshanchor/noc.yaml')
     if not noc_config_path.exists():
         return True
 
@@ -452,9 +452,9 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog='meshforge',
-        description='MeshForge NOC — Network Operations Center for Mesh Networks',
-        epilog='Config: ~/.config/meshforge/ | Docs: https://github.com/Nursedude/meshforge',
+        prog='meshanchor',
+        description='MeshAnchor NOC — Network Operations Center for Mesh Networks',
+        epilog='Config: ~/.config/meshanchor/ | Docs: https://github.com/Nursedude/meshanchor',
     )
     parser.add_argument('--status', action='store_true',
                         help='Show service status and exit')
@@ -474,7 +474,7 @@ def main():
     parser.add_argument('--wizard', action='store_true',
                         help='Reset auto-launch preference and show menu')
     parser.add_argument('--version', action='version',
-                        version=f'MeshForge {__version__}')
+                        version=f'MeshAnchor {__version__}')
 
     args, extra_args = parser.parse_known_args()
 

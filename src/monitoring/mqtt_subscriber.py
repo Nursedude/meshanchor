@@ -1,5 +1,5 @@
 """
-MQTT Nodeless Subscriber for MeshForge.
+MQTT Nodeless Subscriber for MeshAnchor.
 
 Enables mesh monitoring WITHOUT local Meshtastic hardware by connecting
 to the public MQTT broker (mqtt.meshtastic.org) or a private broker.
@@ -61,7 +61,7 @@ from utils.mqtt_defaults import (
     MESHTASTIC_PUBLIC_KEY as DEFAULT_KEY,
 )
 
-# Local broker defaults (for meshtasticd → mosquitto → MeshForge architecture)
+# Local broker defaults (for meshtasticd → mosquitto → MeshAnchor architecture)
 LOCAL_BROKER = "localhost"
 LOCAL_PORT = 1883
 LOCAL_ROOT_TOPIC = "msh/2/e"  # No region prefix for local meshtasticd publishing
@@ -180,7 +180,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
         Args:
             config: Optional configuration dict. If not provided,
-                   loads from ~/.config/meshforge/mqtt_nodeless.json
+                   loads from ~/.config/meshanchor/mqtt_nodeless.json
         """
         self._config = config or self._load_config()
         self._client = None
@@ -234,7 +234,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from file or return defaults."""
-        config_path = get_real_user_home() / ".config" / "meshforge" / "mqtt_nodeless.json"
+        config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
 
         if config_path.exists():
             try:
@@ -260,7 +260,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
     def save_config(self) -> bool:
         """Save current configuration to file."""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "mqtt_nodeless.json"
 
@@ -294,7 +294,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
         try:
             # Create client - compatible with paho-mqtt v1.x and v2.x
-            client_id = f"meshforge_nodeless_{int(time.time())}"
+            client_id = f"meshanchor_nodeless_{int(time.time())}"
             if hasattr(mqtt, 'CallbackAPIVersion'):
                 # paho-mqtt v2.x requires callback_api_version
                 self._client = mqtt.Client(
@@ -584,7 +584,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
         without needing a direct reference to this subscriber instance.
         """
         try:
-            cache_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            cache_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
             cache_dir.mkdir(parents=True, exist_ok=True)
             cache_file = cache_dir / "mqtt_nodes.json"
 

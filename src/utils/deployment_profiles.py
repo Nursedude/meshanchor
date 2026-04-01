@@ -1,7 +1,7 @@
 """
-MeshForge Deployment Profiles
+MeshAnchor Deployment Profiles
 
-Defines 5 deployment scenarios so users can run MeshForge in their
+Defines 5 deployment scenarios so users can run MeshAnchor in their
 chosen configuration without irrelevant dependencies blocking them.
 
 Profiles:
@@ -98,17 +98,36 @@ class ProfileHealth:
 # ============================================================================
 
 PROFILES: Dict[ProfileName, ProfileDefinition] = {
+    # MeshAnchor default: MeshCore companion radio + RF tools
+    ProfileName.MESHCORE: ProfileDefinition(
+        name=ProfileName.MESHCORE,
+        display_name="MeshCore",
+        description="MeshCore companion radio — primary MeshAnchor profile",
+        required_services=[],
+        optional_services=[],
+        required_packages=["rich", "yaml", "requests"],
+        optional_packages=["psutil", "meshcore"],
+        feature_flags={
+            "meshtastic": False,
+            "meshcore": True,
+            "rns": False,
+            "gateway": False,
+            "mqtt": False,
+            "maps": False,
+            "tactical": False,
+        },
+    ),
     ProfileName.RADIO_MAPS: ProfileDefinition(
         name=ProfileName.RADIO_MAPS,
-        display_name="Radio + Maps",
-        description="Meshtastic radio configuration and coverage mapping",
-        required_services=["meshtasticd"],
+        display_name="MeshCore + Maps",
+        description="MeshCore radio with coverage mapping",
+        required_services=[],
         optional_services=[],
         required_packages=["rich", "yaml", "requests", "folium"],
-        optional_packages=["psutil", "distro"],
+        optional_packages=["psutil", "distro", "meshcore"],
         feature_flags={
-            "meshtastic": True,
-            "meshcore": False,
+            "meshtastic": False,
+            "meshcore": True,
             "rns": False,
             "gateway": False,
             "mqtt": False,
@@ -121,7 +140,7 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
         display_name="Monitor",
         description="MQTT packet analysis and traffic inspection (no radio required)",
         required_services=[],
-        optional_services=["mosquitto", "meshtasticd"],
+        optional_services=["mosquitto"],
         required_packages=["rich", "yaml", "requests", "paho"],
         optional_packages=["psutil", "websockets"],
         feature_flags={
@@ -134,35 +153,17 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "tactical": False,
         },
     ),
-    ProfileName.MESHCORE: ProfileDefinition(
-        name=ProfileName.MESHCORE,
-        display_name="MeshCore",
-        description="MeshCore companion radio integration",
+    ProfileName.GATEWAY: ProfileDefinition(
+        name=ProfileName.GATEWAY,
+        display_name="Gateway Bridge",
+        description="MeshCore <> Meshtastic/RNS bridge with message routing",
         required_services=[],
-        optional_services=["meshtasticd"],
-        required_packages=["rich", "yaml", "requests"],
-        optional_packages=["psutil"],
+        optional_services=["meshtasticd", "rnsd", "mosquitto"],
+        required_packages=["rich", "yaml", "requests", "paho"],
+        optional_packages=["RNS", "LXMF", "websockets", "psutil", "folium", "meshcore"],
         feature_flags={
             "meshtastic": True,
             "meshcore": True,
-            "rns": False,
-            "gateway": False,
-            "mqtt": False,
-            "maps": False,
-            "tactical": False,
-        },
-    ),
-    ProfileName.GATEWAY: ProfileDefinition(
-        name=ProfileName.GATEWAY,
-        display_name="Gateway",
-        description="Full Meshtastic <> RNS bridge with message routing",
-        required_services=["meshtasticd", "rnsd"],
-        optional_services=["mosquitto"],
-        required_packages=["rich", "yaml", "requests", "RNS", "LXMF", "paho"],
-        optional_packages=["websockets", "psutil", "folium"],
-        feature_flags={
-            "meshtastic": True,
-            "meshcore": False,
             "rns": True,
             "gateway": True,
             "mqtt": True,
@@ -173,14 +174,14 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
     ProfileName.FULL: ProfileDefinition(
         name=ProfileName.FULL,
         display_name="Full Stack",
-        description="All features enabled including MQTT broker",
-        required_services=["meshtasticd", "rnsd", "mosquitto"],
-        optional_services=[],
+        description="All features enabled — MeshCore + Meshtastic + RNS",
+        required_services=["rnsd", "mosquitto"],
+        optional_services=["meshtasticd"],
         required_packages=[
             "rich", "yaml", "requests", "RNS", "LXMF", "paho",
             "folium", "websockets", "psutil", "distro",
         ],
-        optional_packages=[],
+        optional_packages=["meshcore"],
         feature_flags={
             "meshtastic": True,
             "meshcore": True,
@@ -268,49 +269,49 @@ def validate_profile(profile: ProfileDefinition) -> ProfileHealth:
 def detect_profile() -> ProfileDefinition:
     """Auto-detect the best profile based on running services and installed packages.
 
-    Detection priority (most specific first):
-    1. Full — all 3 services running
-    2. Gateway — meshtasticd + rnsd running
-    3. MeshCore — meshcore package available
-    4. Monitor — paho-mqtt available, no radio services
-    5. Radio+Maps — meshtasticd running (fallback)
+    Detection priority (MeshAnchor — MeshCore-primary):
+    1. Full — all services running (meshtasticd + rnsd + mosquitto)
+    2. Gateway — meshtasticd or rnsd available for bridging
+    3. MeshCore + Maps — folium available
+    4. Monitor — paho-mqtt available, no radio
+    5. MeshCore — default (MeshCore companion radio)
 
-    Returns the best-fit profile, defaulting to radio_maps.
+    Returns the best-fit profile, defaulting to meshcore.
     """
     has_meshtasticd = _check_service_available("meshtasticd")
     has_rnsd = _check_service_available("rnsd")
     has_mosquitto = _check_service_available("mosquitto")
 
-    # Full stack: all 3 services
-    if has_meshtasticd and has_rnsd and has_mosquitto:
-        logger.info("Auto-detected profile: full (all services running)")
+    # Full stack: rnsd + mosquitto (meshtasticd optional)
+    if has_rnsd and has_mosquitto:
+        logger.info("Auto-detected profile: full (rnsd + mosquitto running)")
         return PROFILES[ProfileName.FULL]
 
-    # Gateway: meshtasticd + rnsd
-    if has_meshtasticd and has_rnsd:
-        logger.info("Auto-detected profile: gateway (meshtasticd + rnsd)")
+    # Gateway: meshtasticd or rnsd available for bridging
+    if has_meshtasticd or has_rnsd:
+        logger.info("Auto-detected profile: gateway (bridge services available)")
         return PROFILES[ProfileName.GATEWAY]
 
-    # MeshCore: meshcore package available
-    if _check_package("meshcore"):
-        logger.info("Auto-detected profile: meshcore (meshcore package found)")
-        return PROFILES[ProfileName.MESHCORE]
+    # MeshCore + Maps: folium available
+    if _check_package("folium"):
+        logger.info("Auto-detected profile: radio_maps (MeshCore + maps)")
+        return PROFILES[ProfileName.RADIO_MAPS]
 
-    # Monitor: paho available, no meshtasticd
-    if not has_meshtasticd and _check_package("paho"):
+    # Monitor: paho available, no radio services
+    if _check_package("paho") and not _check_package("meshcore"):
         logger.info("Auto-detected profile: monitor (no radio, MQTT available)")
         return PROFILES[ProfileName.MONITOR]
 
-    # Default: radio + maps
-    logger.info("Auto-detected profile: radio_maps (default)")
-    return PROFILES[ProfileName.RADIO_MAPS]
+    # Default: MeshCore companion radio
+    logger.info("Auto-detected profile: meshcore (default)")
+    return PROFILES[ProfileName.MESHCORE]
 
 
 # ============================================================================
 # Profile Persistence
 # ============================================================================
 
-_PROFILE_PATH = get_real_user_home() / ".config" / "meshforge" / "deployment.json"
+_PROFILE_PATH = get_real_user_home() / ".config" / "meshanchor" / "deployment.json"
 
 
 def save_profile(profile: ProfileDefinition) -> bool:

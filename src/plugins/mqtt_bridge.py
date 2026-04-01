@@ -1,5 +1,5 @@
 """
-MQTT Bridge Plugin for MeshForge.
+MQTT Bridge Plugin for MeshAnchor.
 
 Bridges Meshtastic mesh network to MQTT broker for:
 - Home Assistant integration
@@ -19,7 +19,7 @@ Usage:
     manager.register(MQTTBridgePlugin)
     manager.activate("mqtt-bridge")
 
-Configuration (~/.config/meshforge/plugins/mqtt_bridge.json):
+Configuration (~/.config/meshanchor/plugins/mqtt_bridge.json):
 {
     "broker": "mqtt.meshtastic.org",
     "port": 8883,
@@ -75,7 +75,7 @@ from utils.mqtt_defaults import (
 
 
 class MQTTBridgePlugin(IntegrationPlugin):
-    """MQTT integration plugin for MeshForge with TLS and auto-reconnect."""
+    """MQTT integration plugin for MeshAnchor with TLS and auto-reconnect."""
 
     def __init__(self):
         self._connected = False
@@ -92,15 +92,15 @@ class MQTTBridgePlugin(IntegrationPlugin):
             name="mqtt-bridge",
             version="0.2.0",
             description="MQTT integration with TLS, auto-reconnect, and nodeless mode",
-            author="MeshForge Community",
+            author="MeshAnchor Community",
             plugin_type=PluginType.INTEGRATION,
             dependencies=["paho-mqtt"],
-            homepage="https://github.com/Nursedude/meshforge",
+            homepage="https://github.com/Nursedude/meshanchor",
         )
 
     def _load_config(self) -> Dict[str, Any]:
         """Load plugin configuration."""
-        config_path = get_real_user_home() / ".config" / "meshforge" / "plugins" / "mqtt_bridge.json"
+        config_path = get_real_user_home() / ".config" / "meshanchor" / "plugins" / "mqtt_bridge.json"
         if config_path.exists():
             try:
                 return json.loads(config_path.read_text())
@@ -125,7 +125,7 @@ class MQTTBridgePlugin(IntegrationPlugin):
 
     def _save_config(self) -> None:
         """Save plugin configuration."""
-        config_dir = get_real_user_home() / ".config" / "meshforge" / "plugins"
+        config_dir = get_real_user_home() / ".config" / "meshanchor" / "plugins"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "mqtt_bridge.json"
         try:

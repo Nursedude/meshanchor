@@ -1,4 +1,4 @@
-# Pre-commit hooks for MeshForge
+# Pre-commit hooks for MeshAnchor
 # Install: pip install pre-commit && pre-commit install
 
 repos:
@@ -21,11 +21,11 @@ repos:
     hooks:
       - id: check-ast
 
-  # MeshForge custom linter
+  # MeshAnchor custom linter
   - repo: local
     hooks:
-      - id: meshforge-lint
-        name: MeshForge Security Linter
+      - id: meshanchor-lint
+        name: MeshAnchor Security Linter
         entry: python3 scripts/lint.py
         language: system
         types: [python]

@@ -66,7 +66,7 @@ class TrafficCapture:
     def __init__(self, db_path: Optional[str] = None,
                  max_packets: int = DEFAULT_MAX_PACKETS):
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(config_dir / "traffic_capture.db")
 
@@ -623,7 +623,7 @@ class TrafficLogger:
 
     def __init__(self, log_path: Optional[str] = None):
         if log_path is None:
-            log_dir = get_real_user_home() / ".cache" / "meshforge" / "logs"
+            log_dir = get_real_user_home() / ".cache" / "meshanchor" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = str(log_dir / "traffic.log")
 
@@ -640,7 +640,7 @@ class TrafficLogger:
         try:
             with open(self._log_path, 'w') as f:
                 f.write("=" * 100 + "\n")
-                f.write(" MESHFORGE TRAFFIC LOG ".center(100, "=") + "\n")
+                f.write(" MESHANCHOR TRAFFIC LOG ".center(100, "=") + "\n")
                 f.write("=" * 100 + "\n")
                 f.write(f"Started: {datetime.now().isoformat()}\n")
                 f.write(f"Log file: {self._log_path}\n")
@@ -766,12 +766,12 @@ class PacketArchive:
         Initialize the packet archive.
 
         Args:
-            db_path: Path to SQLite database (default: ~/.config/meshforge/packet_archive.db)
+            db_path: Path to SQLite database (default: ~/.config/meshanchor/packet_archive.db)
             max_age_days: Auto-compact packets older than this (default 30)
             max_size_mb: Warn when database exceeds this size (default 500)
         """
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(config_dir / "packet_archive.db")
 

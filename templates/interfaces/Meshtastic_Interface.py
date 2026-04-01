@@ -1,5 +1,5 @@
 # MIT License - Copyright (c) 2024 Mark Qvist / unsigned.io
-# Maintained by: Nursedude / MeshForge (github.com/Nursedude/meshforge)
+# Maintained by: Nursedude / MeshAnchor (github.com/Nursedude/meshanchor)
 # Origin: github.com/landandair/RNS_Over_Meshtastic
 #
 # RNS external interface plugin — bridges Reticulum over Meshtastic LoRa.

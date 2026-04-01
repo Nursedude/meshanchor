@@ -1,19 +1,19 @@
 #!/bin/bash
 #
-# MeshForge Clean Reinstall
+# MeshAnchor Clean Reinstall
 #
-# Removes MeshForge completely and does a fresh install from GitHub.
+# Removes MeshAnchor completely and does a fresh install from GitHub.
 # Preserves all user/radio configuration. No need to re-image your Pi.
 #
 # What is REMOVED:
-#   - /opt/meshforge (source code + Python venv)
-#   - /usr/local/bin/meshforge* commands
-#   - meshforge*.service systemd units
+#   - /opt/meshanchor (source code + Python venv)
+#   - /usr/local/bin/meshanchor* commands
+#   - meshanchor*.service systemd units
 #
 # What is PRESERVED (backed up and restored):
-#   - /etc/meshforge/           (MeshForge NOC config)
+#   - /etc/meshanchor/           (MeshAnchor NOC config)
 #   - /etc/meshtasticd/config.d/ (active radio hardware configs)
-#   - ~/.config/meshforge/      (user settings)
+#   - ~/.config/meshanchor/      (user settings)
 #   - /etc/meshtasticd/         (meshtasticd package + config.yaml)
 #   - ~/.reticulum/             (Reticulum identity + config)
 #   - meshtasticd apt package   (untouched)
@@ -21,11 +21,11 @@
 #   - mosquitto                 (untouched)
 #
 # Usage:
-#   sudo bash /opt/meshforge/scripts/reinstall.sh
-#   sudo bash /opt/meshforge/scripts/reinstall.sh --no-confirm
-#   sudo bash /opt/meshforge/scripts/reinstall.sh --branch alpha
+#   sudo bash /opt/meshanchor/scripts/reinstall.sh
+#   sudo bash /opt/meshanchor/scripts/reinstall.sh --no-confirm
+#   sudo bash /opt/meshanchor/scripts/reinstall.sh --branch alpha
 #
-# After completion, MeshForge is fully operational with your existing configs.
+# After completion, MeshAnchor is fully operational with your existing configs.
 #
 
 set -e
@@ -39,7 +39,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Defaults
-INSTALL_DIR="/opt/meshforge"
+INSTALL_DIR="/opt/meshanchor"
 BACKUP_TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 # Use persistent location — /tmp gets wiped on reboot and could lose RNS identity
 if [[ -n "$SUDO_USER" ]]; then
@@ -47,8 +47,8 @@ if [[ -n "$SUDO_USER" ]]; then
 else
     BACKUP_BASE="$HOME"
 fi
-BACKUP_DIR="${BACKUP_BASE}/meshforge-backup-${BACKUP_TIMESTAMP}"
-REPO_URL="https://github.com/Nursedude/meshforge.git"
+BACKUP_DIR="${BACKUP_BASE}/meshanchor-backup-${BACKUP_TIMESTAMP}"
+REPO_URL="https://github.com/Nursedude/meshanchor.git"
 BRANCH="main"
 NO_CONFIRM=false
 SKIP_INSTALL=false
@@ -69,18 +69,18 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "MeshForge Clean Reinstall"
+            echo "MeshAnchor Clean Reinstall"
             echo ""
             echo "Usage: sudo $0 [options]"
             echo ""
             echo "Options:"
             echo "  --no-confirm, -y     Skip confirmation prompt"
             echo "  --branch, -b BRANCH  Install specific branch (default: main)"
-            echo "  --remove-only        Remove MeshForge without reinstalling"
+            echo "  --remove-only        Remove MeshAnchor without reinstalling"
             echo "  --help, -h           Show this help"
             echo ""
             echo "Preserves: radio configs, RNS identity, MQTT broker, meshtasticd"
-            echo "Removes:   MeshForge source, venv, system commands, systemd units"
+            echo "Removes:   MeshAnchor source, venv, system commands, systemd units"
             exit 0
             ;;
         *)
@@ -93,7 +93,7 @@ done
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║          MeshForge Clean Reinstall                        ║"
+echo "║          MeshAnchor Clean Reinstall                        ║"
 echo "║          Fresh install without re-imaging your Pi         ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -105,7 +105,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Detect real user home (for ~/.config/meshforge backup)
+# Detect real user home (for ~/.config/meshanchor backup)
 if [[ -n "$SUDO_USER" ]]; then
     REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 else
@@ -129,19 +129,19 @@ if [[ -d "$INSTALL_DIR" ]]; then
     echo -e "  Version:  ${BOLD}${CURRENT_VERSION}${NC}"
     echo -e "  Branch:   ${BOLD}${CURRENT_BRANCH}${NC} (${CURRENT_COMMIT})"
 else
-    echo -e "  ${YELLOW}MeshForge not found at $INSTALL_DIR${NC}"
+    echo -e "  ${YELLOW}MeshAnchor not found at $INSTALL_DIR${NC}"
 fi
 
 echo ""
 echo -e "${CYAN}Will be ${RED}REMOVED${NC}:"
-echo "  /opt/meshforge/          (source code + venv)"
-echo "  /usr/local/bin/meshforge* (system commands)"
-echo "  meshforge*.service       (systemd units)"
+echo "  /opt/meshanchor/          (source code + venv)"
+echo "  /usr/local/bin/meshanchor* (system commands)"
+echo "  meshanchor*.service       (systemd units)"
 echo ""
 echo -e "${CYAN}Will be ${GREEN}PRESERVED${NC}:"
-echo "  /etc/meshforge/          (NOC config)"
+echo "  /etc/meshanchor/          (NOC config)"
 echo "  /etc/meshtasticd/        (radio configs)"
-echo "  ${REAL_HOME}/.config/meshforge/  (user settings)"
+echo "  ${REAL_HOME}/.config/meshanchor/  (user settings)"
 echo "  ${REAL_HOME}/.reticulum/         (RNS identity)"
 echo "  meshtasticd, rnsd, mosquitto (packages untouched)"
 echo ""
@@ -174,10 +174,10 @@ mkdir -p "$BACKUP_DIR"
 
 BACKED_UP=0
 
-# MeshForge NOC config
-if [[ -d /etc/meshforge ]]; then
-    cp -a /etc/meshforge "$BACKUP_DIR/etc-meshforge"
-    echo -e "  ${GREEN}✓${NC} /etc/meshforge/"
+# MeshAnchor NOC config
+if [[ -d /etc/meshanchor ]]; then
+    cp -a /etc/meshanchor "$BACKUP_DIR/etc-meshanchor"
+    echo -e "  ${GREEN}✓${NC} /etc/meshanchor/"
     BACKED_UP=$((BACKED_UP + 1))
 fi
 
@@ -189,10 +189,10 @@ if [[ -d /etc/meshtasticd/config.d ]] && ls /etc/meshtasticd/config.d/*.yaml &>/
     BACKED_UP=$((BACKED_UP + 1))
 fi
 
-# User MeshForge settings
-if [[ -d "$REAL_HOME/.config/meshforge" ]]; then
-    cp -a "$REAL_HOME/.config/meshforge" "$BACKUP_DIR/user-config-meshforge"
-    echo -e "  ${GREEN}✓${NC} ${REAL_HOME}/.config/meshforge/"
+# User MeshAnchor settings
+if [[ -d "$REAL_HOME/.config/meshanchor" ]]; then
+    cp -a "$REAL_HOME/.config/meshanchor" "$BACKUP_DIR/user-config-meshanchor"
+    echo -e "  ${GREEN}✓${NC} ${REAL_HOME}/.config/meshanchor/"
     BACKED_UP=$((BACKED_UP + 1))
 fi
 
@@ -203,8 +203,8 @@ if [[ -d "$REAL_HOME/.reticulum" ]]; then
     BACKED_UP=$((BACKED_UP + 1))
 fi
 
-# Note: SQLite message queue is included in ~/.config/meshforge/ backup above
-if [[ -f "$REAL_HOME/.config/meshforge/message_queue.db" ]]; then
+# Note: SQLite message queue is included in ~/.config/meshanchor/ backup above
+if [[ -f "$REAL_HOME/.config/meshanchor/message_queue.db" ]]; then
     echo -e "  ${GREEN}✓${NC} Message queue database (included in config backup)"
 fi
 
@@ -217,11 +217,11 @@ echo -e "  Backup location: ${BOLD}$BACKUP_DIR${NC}"
 # ─────────────────────────────────────────────────────────────────
 # Step 2: Stop services
 # ─────────────────────────────────────────────────────────────────
-echo -e "${CYAN}[2/5] Stopping MeshForge services...${NC}"
+echo -e "${CYAN}[2/5] Stopping MeshAnchor services...${NC}"
 
 STOPPED=0
 
-for svc in meshforge meshforge-map; do
+for svc in meshanchor meshanchor-map; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         systemctl stop "$svc"
         echo -e "  ${GREEN}✓${NC} Stopped $svc"
@@ -230,24 +230,24 @@ for svc in meshforge meshforge-map; do
 done
 
 if [[ $STOPPED -eq 0 ]]; then
-    echo -e "  ${YELLOW}No MeshForge services were running${NC}"
+    echo -e "  ${YELLOW}No MeshAnchor services were running${NC}"
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Step 3: Remove MeshForge
+# Step 3: Remove MeshAnchor
 # ─────────────────────────────────────────────────────────────────
-echo -e "${CYAN}[3/5] Removing MeshForge...${NC}"
+echo -e "${CYAN}[3/5] Removing MeshAnchor...${NC}"
 
 # Remove system commands
-for cmd in meshforge meshforge-noc meshforge-lora meshforge-status meshforge-web meshforge-map; do
+for cmd in meshanchor meshanchor-noc meshanchor-lora meshanchor-status meshanchor-web meshanchor-map; do
     if [[ -f "/usr/local/bin/$cmd" ]]; then
         rm -f "/usr/local/bin/$cmd"
         echo -e "  ${GREEN}✓${NC} Removed /usr/local/bin/$cmd"
     fi
 done
 
-# Remove systemd units (MeshForge only — NOT meshtasticd or rnsd)
-for unit in meshforge.service meshforge-map.service; do
+# Remove systemd units (MeshAnchor only — NOT meshtasticd or rnsd)
+for unit in meshanchor.service meshanchor-map.service; do
     if [[ -f "/etc/systemd/system/$unit" ]]; then
         systemctl disable "$unit" 2>/dev/null || true
         rm -f "/etc/systemd/system/$unit"
@@ -269,24 +269,24 @@ else
     echo -e "  ${YELLOW}$INSTALL_DIR not found (already removed?)${NC}"
 fi
 
-echo -e "  ${GREEN}✓ MeshForge removed${NC}"
+echo -e "  ${GREEN}✓ MeshAnchor removed${NC}"
 
 # If remove-only mode, stop here
 if $SKIP_INSTALL; then
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║          MeshForge Removed                                ║${NC}"
+    echo -e "${GREEN}║          MeshAnchor Removed                                ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Config backups at: $BACKUP_DIR"
-    echo "To reinstall: git clone $REPO_URL /opt/meshforge && sudo bash /opt/meshforge/scripts/install_noc.sh"
+    echo "To reinstall: git clone $REPO_URL /opt/meshanchor && sudo bash /opt/meshanchor/scripts/install_noc.sh"
     exit 0
 fi
 
 # ─────────────────────────────────────────────────────────────────
 # Step 4: Fresh install
 # ─────────────────────────────────────────────────────────────────
-echo -e "${CYAN}[4/5] Installing fresh MeshForge...${NC}"
+echo -e "${CYAN}[4/5] Installing fresh MeshAnchor...${NC}"
 
 echo "  Cloning from GitHub (branch: $BRANCH)..."
 
@@ -340,9 +340,9 @@ echo -e "${CYAN}[5/5] Restoring configuration...${NC}"
 RESTORED=0
 
 # Restore NOC config
-if [[ -d "$BACKUP_DIR/etc-meshforge" ]]; then
-    cp -a "$BACKUP_DIR/etc-meshforge"/* /etc/meshforge/ 2>/dev/null || true
-    echo -e "  ${GREEN}✓${NC} Restored /etc/meshforge/"
+if [[ -d "$BACKUP_DIR/etc-meshanchor" ]]; then
+    cp -a "$BACKUP_DIR/etc-meshanchor"/* /etc/meshanchor/ 2>/dev/null || true
+    echo -e "  ${GREEN}✓${NC} Restored /etc/meshanchor/"
     RESTORED=$((RESTORED + 1))
 fi
 
@@ -355,14 +355,14 @@ if [[ -d "$BACKUP_DIR/meshtasticd-config-d" ]]; then
 fi
 
 # Restore user settings
-if [[ -d "$BACKUP_DIR/user-config-meshforge" ]]; then
-    mkdir -p "$REAL_HOME/.config/meshforge"
-    cp -a "$BACKUP_DIR/user-config-meshforge"/* "$REAL_HOME/.config/meshforge/" 2>/dev/null || true
+if [[ -d "$BACKUP_DIR/user-config-meshanchor" ]]; then
+    mkdir -p "$REAL_HOME/.config/meshanchor"
+    cp -a "$BACKUP_DIR/user-config-meshanchor"/* "$REAL_HOME/.config/meshanchor/" 2>/dev/null || true
     # Fix ownership back to real user
     if [[ -n "$SUDO_USER" ]]; then
-        chown -R "$SUDO_USER:$(id -gn "$SUDO_USER")" "$REAL_HOME/.config/meshforge"
+        chown -R "$SUDO_USER:$(id -gn "$SUDO_USER")" "$REAL_HOME/.config/meshanchor"
     fi
-    echo -e "  ${GREEN}✓${NC} Restored ${REAL_HOME}/.config/meshforge/"
+    echo -e "  ${GREEN}✓${NC} Restored ${REAL_HOME}/.config/meshanchor/"
     RESTORED=$((RESTORED + 1))
 fi
 
@@ -386,7 +386,7 @@ fi
 # ─────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║          MeshForge Reinstall Complete!                    ║${NC}"
+echo -e "${GREEN}║          MeshAnchor Reinstall Complete!                    ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Version:  ${BOLD}${NEW_VERSION}${NC}"
@@ -394,9 +394,9 @@ echo -e "  Branch:   ${BOLD}${BRANCH}${NC} (${NEW_COMMIT})"
 echo -e "  Configs:  ${GREEN}${RESTORED} restored${NC}"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo "  meshforge               Launch TUI"
-echo "  meshforge-status        Quick health check"
-echo "  meshforge-web           Open radio web client"
+echo "  meshanchor               Launch TUI"
+echo "  meshanchor-status        Quick health check"
+echo "  meshanchor-web           Open radio web client"
 echo ""
 
 # Keep backup for safety — user can delete manually once verified

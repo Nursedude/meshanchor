@@ -1,6 +1,6 @@
-# MeshForge Research Documents
+# MeshAnchor Research Documents
 
-> Technical research, integration notes, and deep-dives for MeshForge development.
+> Technical research, integration notes, and deep-dives for MeshAnchor development.
 
 ## Contents
 
@@ -12,7 +12,7 @@
 | `meshcore_proxy_analysis.md` | MeshCore-Meshtastic-Proxy firmware analysis for reliability patterns |
 | `rns_comprehensive.md` | Complete Reticulum/RNS protocol documentation |
 | `rns_complete.md` | RNS configuration and setup guide |
-| `rns_integration.md` | RNS integration patterns for MeshForge |
+| `rns_integration.md` | RNS integration patterns for MeshAnchor |
 | `rns_gateway_windows.md` | Windows-specific RNS gateway setup |
 
 ### Feature Integration
@@ -23,7 +23,7 @@
 | `hamclock_complete.md` | HamClock/NOAA API and integration (NOAA primary, HamClock optional) |
 | `hamclock_decoupling.md` | HamClock decoupling session notes |
 | `aredn_integration.md` | AREDN mesh network integration research |
-| `meshforge_enhancement_todos.md` | Prioritized enhancement TODOs from proxy analysis |
+| `meshanchor_enhancement_todos.md` | Prioritized enhancement TODOs from proxy analysis |
 
 ### Meshtastic Technical Notes
 
@@ -50,7 +50,7 @@
 
 | Document | Description |
 |----------|-------------|
-| `nginx_reliability_patterns.md` | NGINX patterns for MeshForge reliability |
+| `nginx_reliability_patterns.md` | NGINX patterns for MeshAnchor reliability |
 | `local_mqtt_architecture.md` | Local MQTT bridging design |
 | `uconsole_portable_noc.md` | uConsole portable NOC design |
 

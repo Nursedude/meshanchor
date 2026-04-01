@@ -1,5 +1,5 @@
 """
-Persistent Message Queue for MeshForge Gateway.
+Persistent Message Queue for MeshAnchor Gateway.
 
 Ensures reliable message delivery across network boundaries:
 - SQLite-backed persistence (survives restarts)
@@ -440,7 +440,7 @@ class PersistentMessageQueue:
         Initialize the message queue.
 
         Args:
-            db_path: Path to SQLite database. Default: ~/.config/meshforge/message_queue.db
+            db_path: Path to SQLite database. Default: ~/.config/meshanchor/message_queue.db
             max_queue_size: Maximum active messages (pending + in_progress).
                           When exceeded, lowest-priority oldest messages are shed.
                           Set to 0 for unlimited (not recommended).
@@ -448,7 +448,7 @@ class PersistentMessageQueue:
                          If not provided, uses default RETRY_DELAYS behavior.
         """
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(config_dir / "message_queue.db")
 

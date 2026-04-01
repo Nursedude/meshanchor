@@ -95,7 +95,7 @@ class TestBrokerProfile:
             broker_type="private",
             host="localhost",
             port=1883,
-            username="meshforge",
+            username="meshanchor",
             password="secret",
             root_topic="msh/US/2/e",
             channel="LongFast",
@@ -105,7 +105,7 @@ class TestBrokerProfile:
         config = profile.to_mqtt_config()
         assert config["broker"] == "localhost"
         assert config["port"] == 1883
-        assert config["username"] == "meshforge"
+        assert config["username"] == "meshanchor"
         assert config["password"] == "secret"
         assert config["root_topic"] == "msh/US/2/e"
         assert config["channel"] == "LongFast"
@@ -133,7 +133,7 @@ class TestBrokerProfile:
             broker_type="private",
             host="localhost",
             port=1883,
-            username="meshforge",
+            username="meshanchor",
             password="secret",
             root_topic="msh/US/2/e",
             channel="LongFast",
@@ -152,7 +152,7 @@ class TestBrokerProfile:
             broker_type="private",
             host="192.168.1.100",
             port=1883,
-            username="meshforge",
+            username="meshanchor",
             password="secret",
             json_enabled=True,
             use_tls=False,
@@ -164,7 +164,7 @@ class TestBrokerProfile:
         assert "mqtt.address" in args
         assert "192.168.1.100" in args
         assert "mqtt.username" in args
-        assert "meshforge" in args
+        assert "meshanchor" in args
         assert "mqtt.password" in args
         assert "secret" in args
 
@@ -265,13 +265,13 @@ class TestMosquittoConfGeneration:
 
     def test_generate_private_conf(self):
         """Test mosquitto.conf generation for private broker."""
-        profile = create_private_profile(username="meshforge", password="secret")
+        profile = create_private_profile(username="meshanchor", password="secret")
         conf = generate_mosquitto_conf(profile)
 
         assert "listener 1883" in conf
         assert "allow_anonymous false" in conf
-        assert "password_file /etc/mosquitto/meshforge_passwd" in conf
-        assert "acl_file /etc/mosquitto/meshforge_acl" in conf
+        assert "password_file /etc/mosquitto/meshanchor_passwd" in conf
+        assert "acl_file /etc/mosquitto/meshanchor_acl" in conf
         assert "persistence true" in conf
         assert "message_size_limit 4096" in conf
 
@@ -287,13 +287,13 @@ class TestMosquittoConfGeneration:
     def test_generate_acl(self):
         """Test ACL file generation."""
         profile = create_private_profile(
-            username="meshforge",
+            username="meshanchor",
             channel="LongFast",
             region="US",
         )
         acl = generate_mosquitto_acl(profile)
 
-        assert "user meshforge" in acl
+        assert "user meshanchor" in acl
         assert "topic readwrite msh/#" in acl
         assert "topic read $SYS/#" in acl
 
@@ -309,7 +309,7 @@ class TestProfileStorage:
         }
         profiles["private"].is_active = True
 
-        config_dir = tmp_path / ".config" / "meshforge"
+        config_dir = tmp_path / ".config" / "meshanchor"
 
         with patch('src.utils.broker_profiles._get_profiles_path',
                    return_value=config_dir / "broker_profiles.json"):
@@ -383,9 +383,9 @@ class TestEnsureDefaultProfiles:
         with patch('src.utils.broker_profiles._get_profiles_path',
                    return_value=tmp_path / "broker_profiles.json"):
             profiles = ensure_default_profiles()
-            assert "meshforge_private" in profiles
+            assert "meshanchor_private" in profiles
             assert "meshtastic_public" in profiles
-            assert profiles["meshforge_private"].broker_type == BrokerType.PRIVATE.value
+            assert profiles["meshanchor_private"].broker_type == BrokerType.PRIVATE.value
             assert profiles["meshtastic_public"].broker_type == BrokerType.PUBLIC.value
 
     def test_preserves_existing_profiles(self, tmp_path):
@@ -437,7 +437,7 @@ class TestMeshtasticSetupCommands:
     def test_private_broker_commands(self):
         """Test command generation for private broker."""
         profile = create_private_profile(
-            username="meshforge",
+            username="meshanchor",
             password="secret123",
         )
         cmds = get_meshtastic_mqtt_setup_commands(profile)
@@ -446,7 +446,7 @@ class TestMeshtasticSetupCommands:
         assert "YOUR_SERVER_IP" in cmds
         assert "mqtt.enabled" in cmds
         assert "mqtt.username" in cmds
-        assert "meshforge" in cmds
+        assert "meshanchor" in cmds
         assert "mqtt.password" in cmds
         assert "secret123" in cmds
         assert "uplink_enabled" in cmds

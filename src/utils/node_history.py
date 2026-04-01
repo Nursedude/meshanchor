@@ -72,11 +72,11 @@ class NodeHistoryDB:
 
         Args:
             db_path: Path to SQLite database file.
-                     Defaults to ~/.local/share/meshforge/node_history.db
+                     Defaults to ~/.local/share/meshanchor/node_history.db
             retention_seconds: How long to keep observations (default 7 days).
         """
         if db_path is None:
-            db_path = get_real_user_home() / ".local" / "share" / "meshforge" / "node_history.db"
+            db_path = get_real_user_home() / ".local" / "share" / "meshanchor" / "node_history.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.db_path = db_path

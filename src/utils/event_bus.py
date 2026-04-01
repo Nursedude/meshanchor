@@ -1,5 +1,5 @@
 """
-MeshForge Event Bus
+MeshAnchor Event Bus
 
 Simple pub/sub event system for decoupled component communication.
 Primary use case: Gateway RX messages → UI panel updates.

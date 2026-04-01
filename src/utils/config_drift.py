@@ -1,5 +1,5 @@
 """
-Config Drift Detection for MeshForge
+Config Drift Detection for MeshAnchor
 
 Detects when the gateway's resolved RNS config path diverges from what rnsd
 is actually using. This prevents silent misconfigurations where the bridge

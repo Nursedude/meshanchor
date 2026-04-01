@@ -1,6 +1,6 @@
-# MeshForge Prometheus Metrics
+# MeshAnchor Prometheus Metrics
 
-MeshForge exports metrics in Prometheus format for monitoring, alerting, and visualization with Grafana.
+MeshAnchor exports metrics in Prometheus format for monitoring, alerting, and visualization with Grafana.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ print(f"Metrics available at http://localhost:9090/metrics")
 **Command-line quick test:**
 
 ```bash
-cd /path/to/meshforge
+cd /path/to/meshanchor
 python3 -c "
 from src.utils.metrics_export import start_metrics_server
 import time
@@ -45,7 +45,7 @@ If you use Prometheus node_exporter with the textfile collector:
 from utils.metrics_export import setup_textfile_exporter
 
 # Writes metrics every 15 seconds to:
-# /var/lib/node_exporter/textfile_collector/meshforge.prom
+# /var/lib/node_exporter/textfile_collector/meshanchor.prom
 setup_textfile_exporter()
 ```
 
@@ -67,27 +67,27 @@ metrics_text = exporter.export()
 print(metrics_text)
 
 # Or write to file
-exporter.write_to_file("/tmp/meshforge.prom")
+exporter.write_to_file("/tmp/meshanchor.prom")
 ```
 
 ## Prometheus Configuration
 
-Add MeshForge as a scrape target in `prometheus.yml`:
+Add MeshAnchor as a scrape target in `prometheus.yml`:
 
 ```yaml
 scrape_configs:
-  - job_name: 'meshforge'
+  - job_name: 'meshanchor'
     static_configs:
       - targets: ['localhost:9090']
     scrape_interval: 15s
     scrape_timeout: 10s
 ```
 
-For multiple MeshForge instances:
+For multiple MeshAnchor instances:
 
 ```yaml
 scrape_configs:
-  - job_name: 'meshforge'
+  - job_name: 'meshanchor'
     static_configs:
       - targets:
           - 'node1.local:9090'
@@ -103,46 +103,46 @@ scrape_configs:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `meshforge_info` | gauge | version | MeshForge version (always 1) |
-| `meshforge_uptime_seconds` | gauge | - | Process uptime in seconds |
-| `meshforge_last_scrape_timestamp` | gauge | - | Unix timestamp of last collection |
+| `meshanchor_info` | gauge | version | MeshAnchor version (always 1) |
+| `meshanchor_uptime_seconds` | gauge | - | Process uptime in seconds |
+| `meshanchor_last_scrape_timestamp` | gauge | - | Unix timestamp of last collection |
 
 ### Health Metrics
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `meshforge_health_score` | gauge | category | Health score 0-100 (overall, connectivity, performance, reliability, freshness) |
-| `meshforge_service_healthy` | gauge | service | Service up (1) or down (0) |
-| `meshforge_service_uptime_percent` | gauge | service | Service uptime 0-100% |
-| `meshforge_service_latency_ms` | gauge | service | Health check latency in ms |
-| `meshforge_service_consecutive_fails` | gauge | service | Consecutive check failures |
+| `meshanchor_health_score` | gauge | category | Health score 0-100 (overall, connectivity, performance, reliability, freshness) |
+| `meshanchor_service_healthy` | gauge | service | Service up (1) or down (0) |
+| `meshanchor_service_uptime_percent` | gauge | service | Service uptime 0-100% |
+| `meshanchor_service_latency_ms` | gauge | service | Health check latency in ms |
+| `meshanchor_service_consecutive_fails` | gauge | service | Consecutive check failures |
 
 ### Node Metrics
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `meshforge_nodes_total` | gauge | state | Node count by state |
-| `meshforge_node_snr` | gauge | node_id | Signal-to-noise ratio (dB) |
-| `meshforge_node_rssi` | gauge | node_id | Received signal strength (dBm) |
-| `meshforge_node_battery_percent` | gauge | node_id | Battery level 0-100% |
-| `meshforge_node_last_seen_seconds` | gauge | node_id | Seconds since last heard |
+| `meshanchor_nodes_total` | gauge | state | Node count by state |
+| `meshanchor_node_snr` | gauge | node_id | Signal-to-noise ratio (dB) |
+| `meshanchor_node_rssi` | gauge | node_id | Received signal strength (dBm) |
+| `meshanchor_node_battery_percent` | gauge | node_id | Battery level 0-100% |
+| `meshanchor_node_last_seen_seconds` | gauge | node_id | Seconds since last heard |
 
 ### Message Metrics
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `meshforge_messages_total` | counter | direction, status | Total messages by direction (incoming/outgoing) and status (enqueued/delivered/failed) |
-| `meshforge_message_queue_depth` | gauge | status | Queue depth by status (pending/in_progress) |
-| `meshforge_message_retries_total` | counter | - | Total retry attempts |
-| `meshforge_dead_letter_count` | gauge | - | Messages in dead letter queue |
+| `meshanchor_messages_total` | counter | direction, status | Total messages by direction (incoming/outgoing) and status (enqueued/delivered/failed) |
+| `meshanchor_message_queue_depth` | gauge | status | Queue depth by status (pending/in_progress) |
+| `meshanchor_message_retries_total` | counter | - | Total retry attempts |
+| `meshanchor_dead_letter_count` | gauge | - | Messages in dead letter queue |
 
 ### Gateway Metrics
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `meshforge_gateway_connections` | gauge | network | Active connections (meshtastic/rns) |
-| `meshforge_gateway_reconnects_total` | counter | network | Reconnection attempts |
-| `meshforge_gateway_errors_total` | counter | network, error_type | Errors by network and type |
+| `meshanchor_gateway_connections` | gauge | network | Active connections (meshtastic/rns) |
+| `meshanchor_gateway_reconnects_total` | counter | network | Reconnection attempts |
+| `meshanchor_gateway_errors_total` | counter | network, error_type | Errors by network and type |
 
 ## Custom Metrics
 
@@ -175,9 +175,9 @@ exporter.register_collector(collect_my_metrics)
 
 Pre-built dashboards are available in the `dashboards/` directory:
 
-- `meshforge-overview.json` - System overview
-- `meshforge-nodes.json` - Node metrics
-- `meshforge-gateway.json` - Gateway status
+- `meshanchor-overview.json` - System overview
+- `meshanchor-nodes.json` - Node metrics
+- `meshanchor-gateway.json` - Gateway status
 
 See `dashboards/README.md` for import instructions.
 
@@ -196,7 +196,7 @@ The metrics server provides:
 The TUI launcher can start the metrics server automatically. Add to your config:
 
 ```yaml
-# ~/.config/meshforge/config.yaml
+# ~/.config/meshanchor/config.yaml
 metrics:
   enabled: true
   port: 9090

@@ -32,11 +32,18 @@ from utils.safe_import import safe_import
 from utils.paths import get_real_user_home
 from utils.common import SettingsManager
 from gateway.node_tracker import get_node_tracker
-from utils.meshtastic_http import get_http_client
-from utils.meshtastic_connection import (
-    get_connection_manager, safe_close_interface,
-    ConnectionMode, reset_connection_manager,
-)
+# Meshtastic imports — optional gateway support in MeshAnchor
+try:
+    from utils.meshtastic_http import get_http_client
+    from utils.meshtastic_connection import (
+        get_connection_manager, safe_close_interface,
+        ConnectionMode, reset_connection_manager,
+    )
+    _HAS_MESHTASTIC_CONN = True
+except ImportError:
+    _HAS_MESHTASTIC_CONN = False
+    get_http_client = None
+    get_connection_manager = None
 from monitoring.mqtt_subscriber import get_local_subscriber
 from utils.aredn import AREDNScanner, AREDNClient
 
@@ -57,7 +64,7 @@ class MapDataCollector(RNSDataCollectorMixin):
     3. Node tracker cache - previously discovered RNS + Meshtastic nodes
     4. Last-known cache - persisted state from previous runs
 
-    Settings (in ~/.config/meshforge/map_settings.json):
+    Settings (in ~/.config/meshanchor/map_settings.json):
     - node_cache_max_age_hours: Max age for node_cache.json (default: 48)
     - rns_cache_max_age_hours: Max age for RNS temp cache (default: 1)
     - online_status_threshold_minutes: Minutes since lastHeard to consider online (default: 15)
@@ -80,7 +87,7 @@ class MapDataCollector(RNSDataCollectorMixin):
         if cache_dir:
             self._cache_dir = cache_dir
         else:
-            self._cache_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            self._cache_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
 
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache_file = self._cache_dir / "map_nodes.geojson"
@@ -627,7 +634,7 @@ class MapDataCollector(RNSDataCollectorMixin):
         """Collect nodes directly from USB radio (serial connection).
 
         Used when meshtasticd is not running (usb-direct mode).
-        MeshForge connects directly to the radio via USB serial.
+        MeshAnchor connects directly to the radio via USB serial.
 
         Returns list of GeoJSON features for nodes with valid positions.
         """
@@ -951,7 +958,7 @@ class MapDataCollector(RNSDataCollectorMixin):
         features = []
 
         # Check node_cache.json
-        cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
+        cache_path = get_real_user_home() / ".config" / "meshanchor" / "node_cache.json"
 
         if cache_path.exists():
             try:
@@ -996,7 +1003,7 @@ class MapDataCollector(RNSDataCollectorMixin):
             logger.debug(f"node_cache.json not found at: {cache_path}")
 
         # Check RNS nodes temp file
-        rns_cache = Path("/tmp/meshforge_rns_nodes.json")
+        rns_cache = Path("/tmp/meshanchor_rns_nodes.json")
         if rns_cache.exists():
             rns_count = 0
             try:
@@ -1116,7 +1123,7 @@ class MapDataCollector(RNSDataCollectorMixin):
                 # Validate with actual HTTP API response
                 url = f"http://{host}:8080/a/sysinfo"
                 req = urllib.request.Request(url, method='GET')
-                req.add_header('User-Agent', 'MeshForge/1.0')
+                req.add_header('User-Agent', 'MeshAnchor/1.0')
                 with urllib.request.urlopen(req, timeout=3) as response:
                     data = response.read().decode('utf-8')
                     import json as _json

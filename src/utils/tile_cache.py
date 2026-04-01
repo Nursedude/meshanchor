@@ -1,5 +1,5 @@
 """
-Tile Cache Module for MeshForge.
+Tile Cache Module for MeshAnchor.
 
 Provides geographic tile downloading and caching for offline map use.
 Supports region-based downloads with bounding boxes, zoom ranges,
@@ -38,7 +38,7 @@ from utils.paths import get_real_user_home
 logger = logging.getLogger(__name__)
 
 # User agent for tile requests (be a good citizen)
-USER_AGENT = 'MeshForge/0.4.7 (mesh network operations; offline caching)'
+USER_AGENT = 'MeshAnchor/0.4.7 (mesh network operations; offline caching)'
 
 # Tile expiration (days)
 TILE_EXPIRY_DAYS = 30
@@ -56,7 +56,7 @@ DEFAULT_ZOOM_MAX = 14
 # Maximum tiles per download session (safety limit)
 MAX_TILES_PER_SESSION = 10000
 
-# Hawaii bounds (default for MeshForge development)
+# Hawaii bounds (default for MeshAnchor development)
 HAWAII_BOUNDS = (18.5, -160.5, 22.5, -154.5)  # (south, west, north, east)
 
 # Tile providers (no API key required)
@@ -288,7 +288,7 @@ class TileCache:
     @staticmethod
     def _get_default_dir() -> Path:
         """Get default cache directory with sudo awareness."""
-        data_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+        data_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
         return data_dir / "tiles"
 
     def _download_tile(self, z: int, x: int, y: int) -> bool:

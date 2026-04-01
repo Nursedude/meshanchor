@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea for MeshForge
+about: Suggest an idea for MeshAnchor
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
@@ -24,5 +24,5 @@ Add any other context, mockups, or screenshots about the feature request.
 
 ## Checklist
 - [ ] I have searched existing issues to ensure this is not a duplicate
-- [ ] This feature aligns with MeshForge's mission (mesh network operations)
+- [ ] This feature aligns with MeshAnchor's mission (mesh network operations)
 - [ ] I am willing to help implement this feature (optional)

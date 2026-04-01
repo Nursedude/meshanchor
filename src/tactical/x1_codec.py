@@ -1,5 +1,5 @@
 """
-X1 Wire Format Codec for MeshForge Tactical Messaging.
+X1 Wire Format Codec for MeshAnchor Tactical Messaging.
 
 Encodes/decodes tactical messages using the X1 compact packet protocol:
 
@@ -11,7 +11,7 @@ Encodes/decodes tactical messages using the X1 compact packet protocol:
     P/N     = Part number / total parts (1/1 for single-chunk)
     PAYLOAD = base64url-encoded binary (msgpack or JSON serialized)
 
-X1 is MeshForge's native wire format for tactical messages, chosen for
+X1 is MeshAnchor's native wire format for tactical messages, chosen for
 interoperability with the XTOC/XCOM ecosystem.
 
 Usage:

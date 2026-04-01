@@ -1,4 +1,4 @@
-# Bridging the Unbridgeable: How MeshForge Unifies Meshtastic, Reticulum, and MeshCore Into One Mesh NOC
+# Bridging the Unbridgeable: How MeshAnchor Unifies Meshtastic, Reticulum, and MeshCore Into One Mesh NOC
 
 **A Technical White Paper**
 
@@ -11,7 +11,7 @@ Meshtastic and Reticulum are the two dominant open-source LoRa mesh networking s
 
 They cannot talk to each other.
 
-MeshForge exists because that's an engineering problem, not a political one — and engineering problems have solutions.
+MeshAnchor exists because that's an engineering problem, not a political one — and engineering problems have solutions.
 
 ---
 
@@ -23,12 +23,12 @@ For a field operator, emergency responder, or rural community network, "pick one
 
 ## The Architecture: A NOC, Not a Monolith
 
-MeshForge is a **Network Operations Center** — a hub that bridges, monitors, and manages mesh networks without embedding itself into any single protocol stack.
+MeshAnchor is a **Network Operations Center** — a hub that bridges, monitors, and manages mesh networks without embedding itself into any single protocol stack.
 
-The key architectural decision: **services run independently**. MeshForge doesn't replace meshtasticd or rnsd. It connects to them over their native interfaces (serial, MQTT, LXMF) and translates between them through a canonical message format.
+The key architectural decision: **services run independently**. MeshAnchor doesn't replace meshtasticd or rnsd. It connects to them over their native interfaces (serial, MQTT, LXMF) and translates between them through a canonical message format.
 
 ```
-Meshtastic LoRa  <-->  MeshForge Gateway  <-->  RNS/Reticulum
+Meshtastic LoRa  <-->  MeshAnchor Gateway  <-->  RNS/Reticulum
                              |
 MeshCore Heltec  <---------->
 ```
@@ -39,13 +39,13 @@ This is not theoretical. It runs on a Raspberry Pi 5 with two USB Meshtastic rad
 
 ## Five Repos, One Domain
 
-MeshForge is not a single repository. It's an ecosystem of five, each with a clear boundary:
+MeshAnchor is not a single repository. It's an ecosystem of five, each with a clear boundary:
 
-**MeshForge NOC** (the hub) — Gateway bridge, node tracking, RF tools, diagnostics, and the terminal UI. This is where protocol translation lives.
+**MeshAnchor NOC** (the hub) — Gateway bridge, node tracking, RF tools, diagnostics, and the terminal UI. This is where protocol translation lives.
 
-**meshforge-maps** — Live interactive visualization. Leaflet and D3-based topology maps, health scoring, WebSocket-fed dashboards. Runs standalone or as a NOC plugin via manifest auto-discovery.
+**meshanchor-maps** — Live interactive visualization. Leaflet and D3-based topology maps, health scoring, WebSocket-fed dashboards. Runs standalone or as a NOC plugin via manifest auto-discovery.
 
-**meshing_around_meshforge** — Alert layer for the meshing-around Meshtastic bot. Twelve alert types including iPAWS/EAS emergency alerts, volcano monitoring, proximity geofencing, and noisy-node detection. This is purpose-built for bot-adjacent monitoring, not generic NOC alerting.
+**meshing_around_meshanchor** — Alert layer for the meshing-around Meshtastic bot. Twelve alert types including iPAWS/EAS emergency alerts, volcano monitoring, proximity geofencing, and noisy-node detection. This is purpose-built for bot-adjacent monitoring, not generic NOC alerting.
 
 **RNS-Management-Tool** — Cross-platform installer for the entire Reticulum ecosystem. Bash on Linux, PowerShell on Windows. Handles rnsd, NomadNet, MeshChat, Sideband, and RNODE firmware flashing for 21+ board types.
 
@@ -55,7 +55,7 @@ The dependency rule is strict: satellites may depend on the NOC; the NOC never d
 
 ## What Makes This Different
 
-**First open-source tool bridging Meshtastic and Reticulum.** Others monitor one or the other. MeshForge translates between them.
+**First open-source tool bridging Meshtastic and Reticulum.** Others monitor one or the other. MeshAnchor translates between them.
 
 **Three-way routing in alpha.** The `alpha/meshcore-bridge` branch adds MeshCore as a third protocol peer, with 1,800+ lines of test coverage across canonical message handling, MeshCore bridge logic, and tri-bridge integration.
 
@@ -81,7 +81,7 @@ This ecosystem was built in active collaboration between a human infrastructure 
 
 ```bash
 # The NOC
-git clone https://github.com/Nursedude/meshforge
+git clone https://github.com/Nursedude/meshanchor
 sudo python3 src/launcher_tui/main.py
 
 # Zero-dependency RF tools (no sudo, no installs)
@@ -99,4 +99,4 @@ The project is open source, beta-stage, and actively developed. Contributions, f
 
 *This document reflects two months of continuous pair-programming across five repositories, thousands of commits, and one very stubborn `Path.home()` bug.*
 
-*github.com/Nursedude/meshforge*
+*github.com/Nursedude/meshanchor*

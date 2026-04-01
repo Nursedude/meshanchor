@@ -1,7 +1,7 @@
 """
-MeshForge Port Constants
+MeshAnchor Port Constants
 
-Centralized port number definitions for all services used by MeshForge.
+Centralized port number definitions for all services used by MeshAnchor.
 Import these constants instead of hardcoding port numbers.
 
 Usage:

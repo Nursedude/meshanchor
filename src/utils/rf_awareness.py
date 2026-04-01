@@ -1,5 +1,5 @@
 """
-RF Awareness Module for MeshForge.
+RF Awareness Module for MeshAnchor.
 
 Provides SDR-based RF awareness capabilities focused on LoRa band monitoring:
 - Spectrum waterfall around LoRa frequencies (868/915 MHz)

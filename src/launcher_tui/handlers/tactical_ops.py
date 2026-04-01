@@ -367,7 +367,7 @@ class TacticalOpsHandler(BaseHandler):
             return
 
         # Generate map to temp file
-        output_dir = get_real_user_home() / ".config" / "meshforge" / "maps"
+        output_dir = get_real_user_home() / ".config" / "meshanchor" / "maps"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / "tactical_map.html"
 
@@ -396,7 +396,7 @@ class TacticalOpsHandler(BaseHandler):
             return
 
         timeline = self._get_timeline()
-        output_dir = get_real_user_home() / ".config" / "meshforge" / "exports"
+        output_dir = get_real_user_home() / ".config" / "meshanchor" / "exports"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")

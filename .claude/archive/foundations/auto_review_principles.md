@@ -1,14 +1,14 @@
-# MeshForge Auto-Review Principles
+# MeshAnchor Auto-Review Principles
 
 ## Overview
 
-This document establishes the systematic code review framework for MeshForge, inspired by Auto-Claude's autonomous multi-agent approach. When a user requests an "extensive code review", "security review", or "reliability check", this schema guides the automated review process.
+This document establishes the systematic code review framework for MeshAnchor, inspired by Auto-Claude's autonomous multi-agent approach. When a user requests an "extensive code review", "security review", or "reliability check", this schema guides the automated review process.
 
-**Foundation**: This system operates under MeshForge's core principles defined in `ai_principles.md`:
+**Foundation**: This system operates under MeshAnchor's core principles defined in `ai_principles.md`:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│              MESHFORGE ETHICAL HIERARCHY             │
+│              MESHANCHOR ETHICAL HIERARCHY             │
 ├─────────────────────────────────────────────────────┤
 │  1. Safety First    - Never compromise human safety │
 │  2. Privacy Default - Encryption is non-negotiable  │
@@ -22,7 +22,7 @@ Every code review decision flows through this ethical framework.
 
 ### "When All Else Fails" Review Doctrine
 
-Aligned with the Amateur Radio doctrine guiding MeshForge:
+Aligned with the Amateur Radio doctrine guiding MeshAnchor:
 
 1. **Prepare for the worst** - Review for disaster scenarios (offline, degraded, emergency)
 2. **Hope for the best** - Optimize for daily use performance
@@ -59,7 +59,7 @@ The following user requests should initiate the full review protocol:
 - "reliability check"
 - "code audit"
 - "clean up redundancy"
-- "optimize meshforge"
+- "optimize meshanchor"
 
 ### Parallel Agent Architecture
 
@@ -250,7 +250,7 @@ These require human decision:
 3. API changes (backwards compatibility concerns)
 4. Business logic issues
 
-## Integration with MeshForge University
+## Integration with MeshAnchor University
 
 This review system is documented in the **Automated Code Review** course:
 
@@ -290,7 +290,7 @@ For CI/CD integration, reviews can be triggered on:
 
 ## User Archetype Validation
 
-Each review must validate code against MeshForge's user archetypes:
+Each review must validate code against MeshAnchor's user archetypes:
 
 | Archetype | Review Focus |
 |-----------|--------------|
@@ -327,8 +327,8 @@ This Auto-Review system integrates with:
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2026-01-05 | Initial Auto-Review principles with MeshForge foundation integration |
+| 1.0 | 2026-01-05 | Initial Auto-Review principles with MeshAnchor foundation integration |
 
 ---
 
-*This document enables systematic, reproducible code reviews following Auto-Claude's autonomous agent architecture and MeshForge's foundational principles.*
+*This document enables systematic, reproducible code reviews following Auto-Claude's autonomous agent architecture and MeshAnchor's foundational principles.*

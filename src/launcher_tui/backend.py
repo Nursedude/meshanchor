@@ -1,5 +1,5 @@
 """
-Dialog Backend for MeshForge TUI Launcher
+Dialog Backend for MeshAnchor TUI Launcher
 
 Provides a whiptail/dialog backend for terminal UI dialogs.
 Works over SSH, without X display, on any terminal.
@@ -82,7 +82,7 @@ class DialogBackend:
         import tempfile
 
         # Create temp file to capture selection output
-        fd, tmp_path = tempfile.mkstemp(suffix='.txt', prefix='meshforge_')
+        fd, tmp_path = tempfile.mkstemp(suffix='.txt', prefix='meshanchor_')
         os.close(fd)
 
         try:

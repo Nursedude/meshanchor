@@ -78,7 +78,7 @@ class BrokerHandler(BaseHandler):
 
             choices = [
                 ("profiles", f"Broker Profiles     Active: {active_name[:20]}"),
-                ("private", "Setup Private Broker  MeshForge mosquitto"),
+                ("private", "Setup Private Broker  MeshAnchor mosquitto"),
                 ("public", "Use Public Broker     mqtt.meshtastic.org"),
                 ("custom", "Add Custom Broker     Your own server"),
                 ("mosquitto", f"Mosquitto Service    {mosquitto_status}"),
@@ -89,7 +89,7 @@ class BrokerHandler(BaseHandler):
             choice = self.ctx.dialog.menu(
                 "MQTT Broker Manager",
                 "Manage MQTT broker for Meshtastic <-> RNS bridging.\n\n"
-                "A private broker enables MeshForge as the central\n"
+                "A private broker enables MeshAnchor as the central\n"
                 "message hub between mesh networks.",
                 choices
             )
@@ -220,7 +220,7 @@ class BrokerHandler(BaseHandler):
                     break
 
     def _setup_private_broker(self):
-        """Guided setup for MeshForge private broker."""
+        """Guided setup for MeshAnchor private broker."""
         installed, msg = check_mosquitto_installed()
 
         if not installed:
@@ -263,9 +263,9 @@ class BrokerHandler(BaseHandler):
         username = self.ctx.dialog.inputbox(
             "MQTT Username",
             "Username for broker authentication:\n\n"
-            "This is used by MeshForge and your gateway\n"
+            "This is used by MeshAnchor and your gateway\n"
             "nodes to connect to the private broker.",
-            init="meshforge"
+            init="meshanchor"
         )
         if not username:
             return
@@ -284,7 +284,7 @@ class BrokerHandler(BaseHandler):
             return
 
         profile = create_private_profile(
-            name="meshforge_private",
+            name="meshanchor_private",
             channel=channel,
             region=region,
             username=username,
@@ -295,7 +295,7 @@ class BrokerHandler(BaseHandler):
         for p in profiles.values():
             p.is_active = False
         profile.is_active = True
-        profiles["meshforge_private"] = profile
+        profiles["meshanchor_private"] = profile
         save_profiles(profiles)
 
         if os.geteuid() == 0:
@@ -303,16 +303,16 @@ class BrokerHandler(BaseHandler):
                 "Install Config",
                 "Install mosquitto configuration now?\n\n"
                 "This will create:\n"
-                "  /etc/mosquitto/conf.d/meshforge.conf\n"
-                "  /etc/mosquitto/meshforge_passwd\n"
-                "  /etc/mosquitto/meshforge_acl\n\n"
+                "  /etc/mosquitto/conf.d/meshanchor.conf\n"
+                "  /etc/mosquitto/meshanchor_passwd\n"
+                "  /etc/mosquitto/meshanchor_acl\n\n"
                 "And restart mosquitto."
             ):
                 self._install_broker_config(profile)
         else:
             self.ctx.dialog.msgbox(
                 "Manual Install Required",
-                "Run MeshForge with sudo to install broker config,\n"
+                "Run MeshAnchor with sudo to install broker config,\n"
                 "or manually create the mosquitto configuration.\n\n"
                 "Use 'View mosquitto.conf' to see the template."
             )
@@ -500,7 +500,7 @@ class BrokerHandler(BaseHandler):
         if os.geteuid() != 0:
             self.ctx.dialog.msgbox(
                 "Root Required",
-                "Run MeshForge with sudo to install packages.\n\n"
+                "Run MeshAnchor with sudo to install packages.\n\n"
                 "Or install manually:\n"
                 "  sudo apt install mosquitto mosquitto-clients"
             )
@@ -575,16 +575,16 @@ class BrokerHandler(BaseHandler):
                 pass
 
             from pathlib import Path
-            mf_conf = Path("/etc/mosquitto/conf.d/meshforge.conf")
+            mf_conf = Path("/etc/mosquitto/conf.d/meshanchor.conf")
             lines.append("")
-            lines.append(f"MeshForge config: {'Installed' if mf_conf.exists() else 'Not installed'}")
+            lines.append(f"MeshAnchor config: {'Installed' if mf_conf.exists() else 'Not installed'}")
 
         self.ctx.dialog.msgbox("Mosquitto Status", "\n".join(lines), width=60)
 
     def _mosquitto_action(self, action: str):
         """Start/stop mosquitto service."""
         if os.geteuid() != 0:
-            self.ctx.dialog.msgbox("Root Required", f"Run MeshForge with sudo to {action} services.")
+            self.ctx.dialog.msgbox("Root Required", f"Run MeshAnchor with sudo to {action} services.")
             return
 
         try:
@@ -636,8 +636,8 @@ class BrokerHandler(BaseHandler):
                 "mosquitto_pub",
                 "-h", active.host,
                 "-p", str(active.port),
-                "-t", "meshforge/test",
-                "-m", "MeshForge connection test",
+                "-t", "meshanchor/test",
+                "-m", "MeshAnchor connection test",
             ]
             if active.username:
                 cmd.extend(["-u", active.username])
@@ -650,7 +650,7 @@ class BrokerHandler(BaseHandler):
                 self.ctx.dialog.msgbox(
                     "Connection OK",
                     f"Successfully connected to {active.host}:{active.port}\n\n"
-                    f"Published test message to meshforge/test topic."
+                    f"Published test message to meshanchor/test topic."
                 )
             else:
                 self.ctx.dialog.msgbox(

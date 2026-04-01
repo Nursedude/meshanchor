@@ -1,4 +1,4 @@
-# MeshForge Persistent Issues & Resolution Patterns
+# MeshAnchor Persistent Issues & Resolution Patterns
 
 > **Purpose**: Document recurring issues and their proper fixes to prevent regression.
 > **Last audited**: 2026-03-13 — Trimmed to <40k chars; resolved issues archived.
@@ -42,7 +42,7 @@ Before committing, verify:
 
 ```python
 # Paths
-from utils.paths import get_real_user_home, get_real_username, MeshForgePaths, ReticulumPaths
+from utils.paths import get_real_user_home, get_real_username, MeshAnchorPaths, ReticulumPaths
 
 # Settings / Logging
 from utils.common import SettingsManager, CONFIG_DIR
@@ -113,7 +113,7 @@ Top files: `meshtastic_protobuf_client.py` (1,433), `service_check.py` (1,410),
 
 **Rule**: Never call `RNS.Reticulum()` without `configdir=` when rnsd is running.
 
-MeshForge creates a client-only config in `/tmp/meshforge_rns_client/` with
+MeshAnchor creates a client-only config in `/tmp/meshanchor_rns_client/` with
 `share_instance = Yes` and no interface definitions, allowing connection to
 rnsd without binding ports.
 
@@ -190,7 +190,7 @@ Use `check_rns_shared_instance()` (3-tier: Unix socket → TCP → UDP fallback)
 
 ## Issue #21: Meshtastic CLI Preset Bug (Upstream)
 
-**Not a MeshForge bug.** The Python meshtastic CLI doesn't always apply modem preset
+**Not a MeshAnchor bug.** The Python meshtastic CLI doesn't always apply modem preset
 changes correctly. Always verify in browser at `http://localhost:9443` after CLI changes.
 Consider direct meshtasticd API calls instead of CLI.
 
@@ -210,7 +210,7 @@ Consider direct meshtasticd API calls instead of CLI.
 Radio parameters (Bandwidth, SpreadFactor, TXpower) are set via
 `meshtastic --set lora.modem_preset` and stored internally — **NEVER in yaml files**.
 
-MeshForge's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY to
+MeshAnchor's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY to
 `config.d/`. Never overwrite `config.yaml` if it has a `Webserver:` section.
 
 ---
@@ -221,7 +221,7 @@ MeshForge's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY 
 
 `scripts/verify_post_install.sh` checks: meshtasticd binary, config.yaml validity,
 Webserver section, port 9443, radio detection, config.d/, rnsd, udev rules.
-Also available via `meshforge --verify-install`.
+Also available via `meshanchor --verify-install`.
 
 ---
 
@@ -241,7 +241,7 @@ or install to the same Python that rnsd uses:
 
 ## Issue #27: rnsd is OPTIONAL
 
-MeshForge supports two independent transports:
+MeshAnchor supports two independent transports:
 - **MQTT** (mosquitto) — Meshtastic native. Used for preset bridging, monitoring.
 - **RNS** (rnsd) — Reticulum. Used for LXMF messaging, cross-protocol bridging.
 
@@ -318,13 +318,13 @@ Post-failure diagnosis in `nomadnet.py:_diagnose_nomadnet_error` detects
 
 **Rule**: NEVER make persistent system changes silently on startup.
 
-MeshForge's `auto_lock_port()` was silently adding iptables REJECT rules on port 9443
+MeshAnchor's `auto_lock_port()` was silently adding iptables REJECT rules on port 9443
 every TUI launch, persisting after exit. This broke the Meshtastic web UI.
 
 **Prohibited on startup**: iptables rules, cron jobs, udev rules, systemd unit mods,
 config file overwrites (see also Issue #22).
 
-MeshForge **observes and assists** — it does not take over infrastructure.
+MeshAnchor **observes and assists** — it does not take over infrastructure.
 Explicit user actions (e.g., service_menu lock/unlock) are acceptable.
 
 **Cleanup for affected users**: `sudo iptables -D INPUT -p tcp --dport 9443 ! -s 127.0.0.1 -j REJECT`
@@ -334,7 +334,7 @@ Explicit user actions (e.g., service_menu lock/unlock) are acceptable.
 ## Issue #32: NomadNet "Enabled but Disconnected" Interfaces (2026-03-13)
 
 **Symptoms**: NomadNet shows interfaces as "enabled" but disconnected with no RX/TX.
-MeshForge status says "rnsd: RUNNING (shared instance available)" when rnsd is actually dead.
+MeshAnchor status says "rnsd: RUNNING (shared instance available)" when rnsd is actually dead.
 
 **Root causes** (3 bugs):
 

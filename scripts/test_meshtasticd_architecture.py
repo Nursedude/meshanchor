@@ -4,7 +4,7 @@ Test script for meshtasticd multi-consumer architecture.
 
 Tests both data paths:
   1. TCP:4403 → Gateway Bridge → RNS transport
-  2. MQTT → mosquitto → MeshForge MQTT Subscriber
+  2. MQTT → mosquitto → MeshAnchor MQTT Subscriber
 
 Run on Pi where meshtasticd and mosquitto are running:
   python3 scripts/test_meshtasticd_architecture.py
@@ -133,7 +133,7 @@ def test_websocket_bridge_import() -> bool:
 
 def main():
     print(f"\n{BLUE}═══════════════════════════════════════════════════════════════{RESET}")
-    print(f"{BLUE}    MeshForge meshtasticd Architecture Test{RESET}")
+    print(f"{BLUE}    MeshAnchor meshtasticd Architecture Test{RESET}")
     print(f"{BLUE}═══════════════════════════════════════════════════════════════{RESET}\n")
 
     all_passed = True
@@ -191,9 +191,9 @@ def main():
     print()
 
     # =========================================================================
-    # Section 4: MeshForge Module Imports
+    # Section 4: MeshAnchor Module Imports
     # =========================================================================
-    print(f"{YELLOW}[4] MeshForge Modules{RESET}")
+    print(f"{YELLOW}[4] MeshAnchor Modules{RESET}")
     print("-" * 40)
 
     mqtt_import = test_mqtt_subscriber_import()

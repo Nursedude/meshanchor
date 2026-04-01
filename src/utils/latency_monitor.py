@@ -1,5 +1,5 @@
 """
-Network Latency Monitor for MeshForge NOC.
+Network Latency Monitor for MeshAnchor NOC.
 
 Monitors TCP response times to mesh network services, tracks jitter,
 and flags degradation. Used by diagnostics and AI assistant for

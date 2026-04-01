@@ -1,5 +1,5 @@
 """
-Gateway diagnostic tests for MeshForge.
+Gateway diagnostic tests for MeshAnchor.
 
 Tests the RNS/Meshtastic gateway diagnostic system.
 Run with: python3 -m pytest tests/test_gateway_diagnostic.py -v

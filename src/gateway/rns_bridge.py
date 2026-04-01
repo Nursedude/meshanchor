@@ -735,7 +735,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 destination,
                 self._lxmf_source,
                 message,
-                "MeshForge Gateway"
+                "MeshAnchor Gateway"
             )
 
             # Track delivery confirmation
@@ -807,7 +807,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 RNS.Destination.SINGLE, "lxmf", "delivery"
             )
 
-            lxm = LXMF.LXMessage(destination, self._lxmf_source, message, "MeshForge Gateway")
+            lxm = LXMF.LXMessage(destination, self._lxmf_source, message, "MeshAnchor Gateway")
             self._lxmf_router.handle_outbound(lxm)
             return True
 

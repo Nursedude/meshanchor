@@ -16,7 +16,7 @@ Persistence:
 Requirements:
 - Two Meshtastic radios (one per preset)
 - Two meshtasticd instances on different ports
-- MeshForge gateway configured with bridge_mode="mesh_bridge"
+- MeshAnchor gateway configured with bridge_mode="mesh_bridge"
 - For MQTT mode: mosquitto + meshtasticd mqtt.enabled=true
 """
 
@@ -159,7 +159,7 @@ class MQTTMeshInterface:
 
         mqtt = _mqtt_mod
         try:
-            client_id = f"meshforge-presetbridge-{self._name}-{int(time.time()) % 10000}"
+            client_id = f"meshanchor-presetbridge-{self._name}-{int(time.time()) % 10000}"
             self._client = mqtt.Client(
                 client_id=client_id,
                 protocol=mqtt.MQTTv311,
@@ -385,7 +385,7 @@ class MeshtasticPresetBridge:
         self._secondary_interface = None
 
         # Persistent message queues (SQLite-backed)
-        queue_dir = get_real_user_home() / ".config" / "meshforge" / "mesh_bridge_queues"
+        queue_dir = get_real_user_home() / ".config" / "meshanchor" / "mesh_bridge_queues"
         queue_dir.mkdir(parents=True, exist_ok=True)
 
         retry_policy = RetryPolicy.for_meshtastic()

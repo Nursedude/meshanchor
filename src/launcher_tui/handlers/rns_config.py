@@ -145,7 +145,7 @@ class RNSConfigHandler(BaseHandler):
         else:
             print(f"No Reticulum config found at: {config_path}")
             user_home = get_real_user_home()
-            print(f"\nMeshForge checks (in order):")
+            print(f"\nMeshAnchor checks (in order):")
             print(f"  1. /etc/reticulum/config  (system-wide, preferred)")
             print(f"  2. {user_home}/.config/reticulum/config")
             print(f"  3. {user_home}/.reticulum/config")
@@ -363,7 +363,7 @@ class RNSConfigHandler(BaseHandler):
                     f"No Reticulum config found.\n\n"
                     f"RNS tools (rnstatus, rnpath) and the gateway bridge\n"
                     f"require a config file to function.\n\n"
-                    f"Deploy MeshForge template to:\n"
+                    f"Deploy MeshAnchor template to:\n"
                     f"  {target}\n\n"
                     f"(Sets up shared instance + Meshtastic bridge)"
                 ):
@@ -410,7 +410,7 @@ class RNSConfigHandler(BaseHandler):
             self.ctx.dialog.msgbox(
                 "Permission Denied",
                 f"Cannot read config at:\n  {config_path}\n\n"
-                f"Run MeshForge with sudo to access this file,\n"
+                f"Run MeshAnchor with sudo to access this file,\n"
                 f"or use 'Edit Reticulum Config' to migrate it."
             )
 
@@ -575,7 +575,7 @@ class RNSConfigHandler(BaseHandler):
                 "Template Missing",
                 "Vendored Meshtastic_Interface.py not found.\n\n"
                 f"Expected at:\n  {vendored}\n\n"
-                "Reinstall MeshForge to restore templates."
+                "Reinstall MeshAnchor to restore templates."
             )
             return
 
@@ -610,7 +610,7 @@ class RNSConfigHandler(BaseHandler):
 
             # Install meshtastic Python module
             meshtastic_installed = False
-            venv_pip = Path('/opt/meshforge/venv/bin/pip')
+            venv_pip = Path('/opt/meshanchor/venv/bin/pip')
             if venv_pip.exists():
                 print("  Installing meshtastic Python module...")
                 pip_result = subprocess.run(
@@ -633,7 +633,7 @@ class RNSConfigHandler(BaseHandler):
             if not meshtastic_installed:
                 restart_hint = (
                     "NOTE: The meshtastic Python module is also required.\n"
-                    "Install it: /opt/meshforge/venv/bin/pip install meshtastic"
+                    "Install it: /opt/meshanchor/venv/bin/pip install meshtastic"
                     "\n\nThen restart rnsd:\n  sudo systemctl restart rnsd"
                 )
 

@@ -1,5 +1,5 @@
 """
-MeshForge Default Constants
+MeshAnchor Default Constants
 
 Centralized non-port constants used across the codebase.
 Import these instead of hardcoding values.

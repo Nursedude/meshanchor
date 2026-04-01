@@ -1,8 +1,8 @@
-# MeshForge Release Management
+# MeshAnchor Release Management
 
 ## Release Channels
 
-MeshForge uses a three-channel release system to ensure stability:
+MeshAnchor uses a three-channel release system to ensure stability:
 
 | Channel | Branch | Purpose | Stability |
 |---------|--------|---------|-----------|
@@ -156,16 +156,16 @@ Users can install from specific channels:
 
 ```bash
 # Stable (default)
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge && git checkout main
+git clone https://github.com/Nursedude/meshanchor.git
+cd meshanchor && git checkout main
 
 # Beta testing
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge && git checkout beta
+git clone https://github.com/Nursedude/meshanchor.git
+cd meshanchor && git checkout beta
 
 # Alpha (bleeding edge)
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge && git checkout alpha
+git clone https://github.com/Nursedude/meshanchor.git
+cd meshanchor && git checkout alpha
 ```
 
 ## Emergency Rollback

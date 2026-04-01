@@ -252,7 +252,7 @@ class TestAboutHandler:
     def test_execute_version(self, handler):
         """execute('version') should call _show_version via safe_call."""
         handler.execute("version")
-        assert handler.ctx.dialog.last_msgbox_title == "About MeshForge"
+        assert handler.ctx.dialog.last_msgbox_title == "About MeshAnchor"
 
 
 class TestDaemonHandler:

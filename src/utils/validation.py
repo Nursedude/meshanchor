@@ -1,5 +1,5 @@
 """
-MeshForge Input Validation Utilities
+MeshAnchor Input Validation Utilities
 
 Shared validators for hostnames, ports, paths, and other user inputs.
 Extracted from launcher_tui/main.py for reuse across modules.

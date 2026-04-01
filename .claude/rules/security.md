@@ -4,11 +4,11 @@
 
 ```python
 # WRONG - returns /root when running with sudo
-config = Path.home() / ".config" / "meshforge"
+config = Path.home() / ".config" / "meshanchor"
 
 # CORRECT - works with sudo
 from utils.paths import get_real_user_home
-config = get_real_user_home() / ".config" / "meshforge"
+config = get_real_user_home() / ".config" / "meshanchor"
 ```
 
 **Why**: `Path.home()` returns effective user's home. With `sudo`, that's `/root`, breaking config persistence.

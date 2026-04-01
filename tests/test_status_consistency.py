@@ -1,7 +1,7 @@
 """
 Status Consistency Tests
 
-Sprint 1.5: Regression tests to ensure all MeshForge UIs report consistent
+Sprint 1.5: Regression tests to ensure all MeshAnchor UIs report consistent
 service status for rnsd and meshtasticd.
 
 These tests verify that the Single Source of Truth pattern is maintained:

@@ -1,4 +1,4 @@
-# MeshForge Code Quality Review — 2026-02-26
+# MeshAnchor Code Quality Review — 2026-02-26
 
 **Reviewer**: Dude AI
 **Branch**: `main` (0.5.4-beta)
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-MeshForge has solid bones — good security posture (no `shell=True`, proper path handling, consistent timeouts), excellent deployment profiles, and a well-designed TUI for SSH headless ops. But it's accumulated structural debt across four axes: **mixin proliferation** (49 mixins composing one class), **documentation bloat** (809KB in `.claude/` with ~40% overlap), **logging inconsistency** (silent exception handlers + mixed print/logging), and **missing user-facing polish** (no `--help`, generic error messages).
+MeshAnchor has solid bones — good security posture (no `shell=True`, proper path handling, consistent timeouts), excellent deployment profiles, and a well-designed TUI for SSH headless ops. But it's accumulated structural debt across four axes: **mixin proliferation** (49 mixins composing one class), **documentation bloat** (809KB in `.claude/` with ~40% overlap), **logging inconsistency** (silent exception handlers + mixed print/logging), and **missing user-facing polish** (no `--help`, generic error messages).
 
 **Overall Health**: 6.5/10 — functional and secure, but maintainability and user experience need attention.
 
@@ -158,7 +158,7 @@ Errors tell users WHAT failed but not HOW to fix it:
 
 | Current | Better |
 |---------|--------|
-| `"Failed to start bridge. Check logs for details."` | `"Bridge failed: meshtasticd not responding on localhost:4403. Check: sudo systemctl status meshtasticd. Logs: ~/.meshforge/logs/"` |
+| `"Failed to start bridge. Check logs for details."` | `"Bridge failed: meshtasticd not responding on localhost:4403. Check: sudo systemctl status meshtasticd. Logs: ~/.meshanchor/logs/"` |
 | `"Daemon module not available: {e}"` | `"Missing dependency: {e}. Install with: pip install -r requirements/core.txt"` |
 | `"rnsd: not running"` | `"rnsd not running. Start: sudo systemctl start rnsd. Install: pipx install rns"` |
 
@@ -166,7 +166,7 @@ The good pattern already exists in `cli/diagnose.py:192-197` (NomadNet port conf
 
 ### 4.3 Config Locations Not Documented In-App
 
-Users don't know where config lives (`~/.config/meshforge/`, `~/.meshforge/`). No reset command. No mention in TUI menus. Corrupted config `.bak` files accumulate without cleanup.
+Users don't know where config lives (`~/.config/meshanchor/`, `~/.meshanchor/`). No reset command. No mention in TUI menus. Corrupted config `.bak` files accumulate without cleanup.
 
 ### 4.4 No Quick Health Check Command
 

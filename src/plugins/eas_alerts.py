@@ -1,5 +1,5 @@
 """
-Emergency Alert System (EAS) Plugin for MeshForge.
+Emergency Alert System (EAS) Plugin for MeshAnchor.
 
 Integrates emergency alerts from multiple sources:
 - NOAA/NWS Weather Alerts (api.weather.gov)
@@ -13,7 +13,7 @@ API Sources:
 - USGS: https://volcanoes.usgs.gov/hans-public/api/volcano/
 - FEMA: https://www.fema.gov/api/open/v1/IpawsArchivedAlerts
 
-Configuration (~/.config/meshforge/plugins/eas_alerts.ini):
+Configuration (~/.config/meshanchor/plugins/eas_alerts.ini):
     See EAS_CONFIG_TEMPLATE for all options.
 
 Usage:
@@ -113,10 +113,10 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 EAS_CONFIG_TEMPLATE = """
-# MeshForge Emergency Alert System (EAS) Configuration
+# MeshAnchor Emergency Alert System (EAS) Configuration
 # =====================================================
 # This file controls emergency alert monitoring and broadcasting.
-# Location: ~/.config/meshforge/plugins/eas_alerts.ini
+# Location: ~/.config/meshanchor/plugins/eas_alerts.ini
 #
 # Enable/disable specific alert sources and configure filtering.
 # Alerts can be broadcast to mesh network and/or displayed in UI.
@@ -129,7 +129,7 @@ enabled = True
 poll_interval = 300
 
 # User-Agent for API requests
-user_agent = MeshForge-EAS/1.0
+user_agent = MeshAnchor-EAS/1.0
 
 # Enable mesh broadcast of alerts
 broadcast_enabled = True
@@ -386,7 +386,7 @@ class Alert:
 
 class EASAlertsPlugin(IntegrationPlugin):
     """
-    Emergency Alert System integration for MeshForge.
+    Emergency Alert System integration for MeshAnchor.
 
     Monitors NOAA, USGS, and FEMA alert feeds and broadcasts
     critical alerts to the mesh network.
@@ -408,17 +408,17 @@ class EASAlertsPlugin(IntegrationPlugin):
             name="eas-alerts",
             version="1.0.0",
             description="Emergency Alert System - NOAA, FEMA iPAWS, USGS Volcano alerts",
-            author="MeshForge Community",
+            author="MeshAnchor Community",
             plugin_type=PluginType.INTEGRATION,
             dependencies=[],
-            homepage="https://github.com/Nursedude/meshforge",
+            homepage="https://github.com/Nursedude/meshanchor",
         )
 
     def _get_config_path(self) -> Path:
         """Get configuration file path."""
         if self._config_path:
             return self._config_path
-        return get_real_user_home() / ".config" / "meshforge" / "plugins" / "eas_alerts.ini"
+        return get_real_user_home() / ".config" / "meshanchor" / "plugins" / "eas_alerts.ini"
 
     def _load_config(self) -> configparser.ConfigParser:
         """Load or create configuration."""
@@ -655,7 +655,7 @@ class EASAlertsPlugin(IntegrationPlugin):
             url = "https://api.weather.gov/alerts/active"
 
         try:
-            user_agent = self._config.get('general', 'user_agent', fallback='MeshForge-EAS/1.0')
+            user_agent = self._config.get('general', 'user_agent', fallback='MeshAnchor-EAS/1.0')
             req = urllib.request.Request(url)
             req.add_header('User-Agent', user_agent)
             req.add_header('Accept', 'application/geo+json')
@@ -725,7 +725,7 @@ class EASAlertsPlugin(IntegrationPlugin):
         url = "https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes"
 
         try:
-            user_agent = self._config.get('general', 'user_agent', fallback='MeshForge-EAS/1.0')
+            user_agent = self._config.get('general', 'user_agent', fallback='MeshAnchor-EAS/1.0')
             req = urllib.request.Request(url)
             req.add_header('User-Agent', user_agent)
 
@@ -842,7 +842,7 @@ class EASAlertsPlugin(IntegrationPlugin):
         url = f"{base_url}?{urllib.parse.urlencode(params, safe=safe_chars)}"
 
         try:
-            user_agent = self._config.get('general', 'user_agent', fallback='MeshForge-EAS/1.0')
+            user_agent = self._config.get('general', 'user_agent', fallback='MeshAnchor-EAS/1.0')
             req = urllib.request.Request(url)
             req.add_header('User-Agent', user_agent)
 
@@ -980,7 +980,7 @@ def create_default_config(path: Optional[Path] = None) -> Path:
         Path to created config file
     """
     if path is None:
-        path = get_real_user_home() / ".config" / "meshforge" / "plugins" / "eas_alerts.ini"
+        path = get_real_user_home() / ".config" / "meshanchor" / "plugins" / "eas_alerts.ini"
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(EAS_CONFIG_TEMPLATE)
@@ -1019,7 +1019,7 @@ def get_quick_alerts(
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'MeshForge-EAS/1.0')
+        req.add_header('User-Agent', 'MeshAnchor-EAS/1.0')
         req.add_header('Accept', 'application/geo+json')
 
         with urllib.request.urlopen(req, timeout=timeout) as response:

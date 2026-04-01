@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MeshForge Diagnostic Tool
+"""MeshAnchor Diagnostic Tool
 
 Checks system configuration and identifies common issues.
 
@@ -537,7 +537,7 @@ def check_processes():
         ('meshtasticd', 'Meshtastic daemon'),
         ('rnsd', 'RNS daemon'),
         ('nomadnet', 'NomadNet'),
-        ('meshforge', 'MeshForge'),
+        ('meshanchor', 'MeshAnchor'),
     ]
 
     for proc_name, description in processes_to_check:
@@ -808,7 +808,7 @@ def run_gateway_wizard():
     """Run the AI-like gateway diagnostic wizard."""
     if not _HAS_GATEWAY_DIAG:
         print("\nError: Could not load gateway diagnostic module")
-        print("Make sure you're running from the MeshForge directory")
+        print("Make sure you're running from the MeshAnchor directory")
         return False
 
     try:
@@ -825,7 +825,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="MeshForge Diagnostic Tool",
+        description="MeshAnchor Diagnostic Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -856,7 +856,7 @@ Examples:
         return
 
     print()
-    print("MeshForge Diagnostics")
+    print("MeshAnchor Diagnostics")
     print("=====================")
     print("For RF engineers, network operators, and HAMs")
     print("\nTip: Use --gateway for RNS/Meshtastic setup wizard")

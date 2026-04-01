@@ -1,7 +1,7 @@
 """
-MeshForge Plugins
+MeshAnchor Plugins
 
-Built-in and community plugins for extending MeshForge functionality.
+Built-in and community plugins for extending MeshAnchor functionality.
 
 Available Plugins:
 - mqtt_bridge: MQTT integration for Home Assistant, Node-RED

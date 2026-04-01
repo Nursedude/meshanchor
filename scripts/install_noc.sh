@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# MeshForge NOC Stack Installer
+# MeshAnchor NOC Stack Installer
 #
 # Installs the complete NOC stack:
 #   - meshtasticd (Meshtastic daemon) - auto-detects USB or SPI radio
 #   - Reticulum/RNS (rnsd)
-#   - MeshForge (orchestrates everything)
+#   - MeshAnchor (orchestrates everything)
 #
 # Supports:
 #   - USB Serial radios (T-Beam, Heltec, RAK USB) → Python CLI
@@ -17,7 +17,7 @@
 # Options:
 #   --skip-meshtasticd    Don't install meshtasticd
 #   --skip-rns            Don't install Reticulum
-#   --client-only         Only install MeshForge as client (no daemons)
+#   --client-only         Only install MeshAnchor as client (no daemons)
 #   --force-native        Force native meshtasticd (for SPI radios)
 #   --force-python        Force Python meshtastic CLI (for USB radios)
 #
@@ -35,7 +35,7 @@ NC='\033[0m'
 # Defaults
 INSTALL_MESHTASTICD=true
 INSTALL_RNS=true
-INSTALL_DIR="/opt/meshforge"
+INSTALL_DIR="/opt/meshanchor"
 VENV_DIR="$INSTALL_DIR/venv"
 MESHTASTICD_CONFIG_DIR="/etc/meshtasticd"
 FORCE_NATIVE=false
@@ -86,7 +86,7 @@ done
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║        MeshForge NOC Stack Installer                      ║"
+echo "║        MeshAnchor NOC Stack Installer                      ║"
 echo "║        Network Operations Center for Mesh Networks        ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -228,7 +228,7 @@ classify_template() {
     # Display configs (not radio hardware)
     [[ "$stem" == display-* ]] && { echo "display"; return; }
 
-    # Name-based USB detection (covers MeshForge-named templates)
+    # Name-based USB detection (covers MeshAnchor-named templates)
     case "$stem" in
         *-usb|usb-*) echo "usb"; return ;;
     esac
@@ -311,10 +311,10 @@ get_template_description() {
     esac
 }
 
-deploy_meshforge_templates() {
-    # Deploy MeshForge's curated hardware templates to available.d/.
+deploy_meshanchor_templates() {
+    # Deploy MeshAnchor's curated hardware templates to available.d/.
     # Uses cp -f to overwrite system templates (which have garbage descriptions)
-    # with MeshForge's curated versions (which have proper # Description headers).
+    # with MeshAnchor's curated versions (which have proper # Description headers).
     # Must be called AFTER apt install meshtasticd to overwrite dpkg's copies.
     if [[ -d "$INSTALL_DIR/templates/available.d" ]]; then
         mkdir -p "$MESHTASTICD_CONFIG_DIR/available.d"
@@ -418,7 +418,7 @@ echo -e "${CYAN}[1/8] Checking existing installations...${NC}"
 
 MESHTASTICD_EXISTS=false
 RNS_EXISTS=false
-MESHFORGE_EXISTS=false
+MESHANCHOR_EXISTS=false
 
 if systemctl list-unit-files | grep -q meshtasticd; then
     MESHTASTICD_EXISTS=true
@@ -431,11 +431,11 @@ if command -v rnsd &> /dev/null; then
 fi
 
 if [[ -d "$INSTALL_DIR" ]]; then
-    MESHFORGE_EXISTS=true
-    echo -e "  ${YELLOW}⚡ MeshForge already installed${NC}"
+    MESHANCHOR_EXISTS=true
+    echo -e "  ${YELLOW}⚡ MeshAnchor already installed${NC}"
 fi
 
-if ! $MESHTASTICD_EXISTS && ! $RNS_EXISTS && ! $MESHFORGE_EXISTS; then
+if ! $MESHTASTICD_EXISTS && ! $RNS_EXISTS && ! $MESHANCHOR_EXISTS; then
     echo -e "  ${GREEN}✓ Fresh installation${NC}"
 fi
 
@@ -446,16 +446,16 @@ if $MESHTASTICD_EXISTS && $INSTALL_MESHTASTICD; then
     echo ""
     echo -e "${YELLOW}═══ Existing meshtasticd Detected ═══${NC}"
     echo ""
-    echo "  MeshForge can work in different modes:"
+    echo "  MeshAnchor can work in different modes:"
     echo ""
     echo -e "  ${BOLD}1)${NC} Take ownership ${GREEN}(Recommended)${NC}"
-    echo "     MeshForge manages meshtasticd as part of NOC stack"
+    echo "     MeshAnchor manages meshtasticd as part of NOC stack"
     echo ""
     echo -e "  ${BOLD}2)${NC} Connect as client"
     echo "     Use existing meshtasticd without managing it"
     echo ""
     echo -e "  ${BOLD}3)${NC} Skip meshtasticd setup"
-    echo "     Install MeshForge only, configure later"
+    echo "     Install MeshAnchor only, configure later"
     echo ""
     echo -e "  ${BOLD}q)${NC} Quit installer"
     echo ""
@@ -601,8 +601,8 @@ UDEV_RULES
     mkdir -p "$MESHTASTICD_CONFIG_DIR"/{available.d,config.d,ssl}
     chmod 700 "$MESHTASTICD_CONFIG_DIR/ssl"
 
-    # MeshForge hardware templates are deployed AFTER apt install meshtasticd
-    # (via deploy_meshforge_templates) so they overwrite dpkg's copies which
+    # MeshAnchor hardware templates are deployed AFTER apt install meshtasticd
+    # (via deploy_meshanchor_templates) so they overwrite dpkg's copies which
     # lack proper description comments. See Issue #33: whiptail non-interactive.
 
     # Deploy config.yaml if missing
@@ -638,7 +638,7 @@ UDEV_RULES
                 INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                 echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
                 NATIVE_INSTALLED=true
-                deploy_meshforge_templates
+                deploy_meshanchor_templates
             else
                 # Add OpenSUSE Build Service repo and install via apt
                 if add_meshtastic_repo; then
@@ -649,7 +649,7 @@ UDEV_RULES
                             INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                             echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
                             NATIVE_INSTALLED=true
-                            deploy_meshforge_templates
+                            deploy_meshanchor_templates
                         else
                             echo -e "  ${RED}Package installed but binary not found${NC}"
                         fi
@@ -675,7 +675,7 @@ Documentation=https://meshtastic.org/docs/software/linux-native/
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/echo "SPI radios require native meshtasticd. Install from meshtastic.org then run: meshforge"
+ExecStart=/bin/echo "SPI radios require native meshtasticd. Install from meshtastic.org then run: meshanchor"
 
 [Install]
 WantedBy=multi-user.target
@@ -707,7 +707,7 @@ FALLBACK_CONFIG
                     fi
 
                     # User needs to install native meshtasticd manually
-                    echo -e "  ${YELLOW}After installing meshtasticd, run 'meshforge' to select your HAT${NC}"
+                    echo -e "  ${YELLOW}After installing meshtasticd, run 'meshanchor' to select your HAT${NC}"
                 fi
             fi
 
@@ -749,7 +749,7 @@ FALLBACK_CONFIG
                             else
                                 # Add to [all] section or end of file
                                 echo "" >> "$BOOT_CONFIG"
-                                echo "# SPI enabled by MeshForge for LoRa HAT" >> "$BOOT_CONFIG"
+                                echo "# SPI enabled by MeshAnchor for LoRa HAT" >> "$BOOT_CONFIG"
                                 echo "dtparam=spi=on" >> "$BOOT_CONFIG"
                             fi
                             echo -e "  ${GREEN}✓ SPI enabled in ${BOOT_CONFIG}${NC}"
@@ -768,7 +768,7 @@ FALLBACK_CONFIG
                         echo -e "  ${YELLOW}╚════════════════════════════════════════════════════╝${NC}"
                         echo ""
                         echo -e "  ${CYAN}Run: sudo reboot${NC}"
-                        echo -e "  ${CYAN}Then: sudo bash /opt/meshforge/scripts/install_noc.sh${NC}"
+                        echo -e "  ${CYAN}Then: sudo bash /opt/meshanchor/scripts/install_noc.sh${NC}"
                         echo ""
 
                         # Still create minimal config and service so re-run picks up where we left off
@@ -1029,7 +1029,7 @@ NATIVE_SERVICE
                 INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                 echo -e "  ${GREEN}✓ Native meshtasticd already installed (${INSTALLED_VERSION})${NC}"
                 NATIVE_INSTALLED=true
-                deploy_meshforge_templates
+                deploy_meshanchor_templates
             else
                 # Install native meshtasticd via apt (same as SPI path)
                 if add_meshtastic_repo; then
@@ -1039,17 +1039,17 @@ NATIVE_SERVICE
                             INSTALLED_VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
                             echo -e "  ${GREEN}✓ Native meshtasticd installed (${INSTALLED_VERSION})${NC}"
                             NATIVE_INSTALLED=true
-                            deploy_meshforge_templates
+                            deploy_meshanchor_templates
                         else
                             echo -e "  ${RED}Package installed but binary not found${NC}"
                         fi
                     else
                         echo -e "  ${YELLOW}⚠ apt install meshtasticd failed — will use USB templates only${NC}"
-                        deploy_meshforge_templates
+                        deploy_meshanchor_templates
                     fi
                 else
                     echo -e "  ${YELLOW}⚠ Could not add Meshtastic repo — will use USB templates only${NC}"
-                    deploy_meshforge_templates
+                    deploy_meshanchor_templates
                 fi
             fi
 
@@ -1193,7 +1193,7 @@ Documentation=https://meshtastic.org
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/echo "Install native meshtasticd: sudo apt install meshtasticd — then select hardware in MeshForge TUI"
+ExecStart=/bin/echo "Install native meshtasticd: sudo apt install meshtasticd — then select hardware in MeshAnchor TUI"
 
 [Install]
 WantedBy=multi-user.target
@@ -1252,7 +1252,7 @@ Documentation=https://meshtastic.org
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/echo "No radio detected. Connect USB radio or configure SPI HAT, then run: meshforge"
+ExecStart=/bin/echo "No radio detected. Connect USB radio or configure SPI HAT, then run: meshanchor"
 
 [Install]
 WantedBy=multi-user.target
@@ -1405,9 +1405,9 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# Install/Update MeshForge
+# Install/Update MeshAnchor
 # ─────────────────────────────────────────────────────────────────
-echo -e "${CYAN}[5/8] Installing MeshForge...${NC}"
+echo -e "${CYAN}[5/8] Installing MeshAnchor...${NC}"
 
 if [[ -d "$INSTALL_DIR" ]]; then
     echo "  Updating existing installation..."
@@ -1416,12 +1416,12 @@ if [[ -d "$INSTALL_DIR" ]]; then
     git pull -q || echo -e "  ${YELLOW}Warning: Could not pull updates${NC}"
 else
     echo "  Cloning repository..."
-    git clone -q https://github.com/Nursedude/meshforge.git "$INSTALL_DIR"
+    git clone -q https://github.com/Nursedude/meshanchor.git "$INSTALL_DIR"
     git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
     cd "$INSTALL_DIR"
 fi
 
-echo -e "  ${GREEN}✓ MeshForge source ready${NC}"
+echo -e "  ${GREEN}✓ MeshAnchor source ready${NC}"
 
 # ─────────────────────────────────────────────────────────────────
 # Python dependencies
@@ -1455,12 +1455,12 @@ RADIO_TYPE=${RADIO_TYPE:-"unknown"}
 USB_DEV=${USB_DEV:-$(get_usb_device)}
 
 # Create config directory
-CONFIG_DIR="/etc/meshforge"
+CONFIG_DIR="/etc/meshanchor"
 mkdir -p "$CONFIG_DIR"
 
 # Create comprehensive NOC config
 cat > "$CONFIG_DIR/noc.yaml" << NOC_CONFIG
-# MeshForge NOC Configuration
+# MeshAnchor NOC Configuration
 # Generated by install_noc.sh on $(date)
 # Architecture: $ARCH
 
@@ -1499,7 +1499,7 @@ noc:
     install_dir: "$INSTALL_DIR"
     venv_dir: "$VENV_DIR"
     meshtasticd_config: "$MESHTASTICD_CONFIG_DIR"
-    meshforge_config: "$CONFIG_DIR"
+    meshanchor_config: "$CONFIG_DIR"
 NOC_CONFIG
 
 echo -e "  ${GREEN}✓ NOC mode: $NOC_MODE${NC}"
@@ -1512,38 +1512,38 @@ echo -e "  ${GREEN}✓ Daemon type: $DAEMON_TYPE${NC}"
 echo -e "${CYAN}[8/8] Creating system integration...${NC}"
 
 # Main command
-cat > /usr/local/bin/meshforge << 'MESHFORGE_CMD'
+cat > /usr/local/bin/meshanchor << 'MESHANCHOR_CMD'
 #!/bin/bash
-cd /opt/meshforge
-exec sudo /opt/meshforge/venv/bin/python src/launcher.py "$@"
-MESHFORGE_CMD
-chmod +x /usr/local/bin/meshforge
+cd /opt/meshanchor
+exec sudo /opt/meshanchor/venv/bin/python src/launcher.py "$@"
+MESHANCHOR_CMD
+chmod +x /usr/local/bin/meshanchor
 
 # NOC orchestrator command
-cat > /usr/local/bin/meshforge-noc << 'NOC_CMD'
+cat > /usr/local/bin/meshanchor-noc << 'NOC_CMD'
 #!/bin/bash
-cd /opt/meshforge/src
-exec sudo /opt/meshforge/venv/bin/python -m core.orchestrator "$@"
+cd /opt/meshanchor/src
+exec sudo /opt/meshanchor/venv/bin/python -m core.orchestrator "$@"
 NOC_CMD
-chmod +x /usr/local/bin/meshforge-noc
+chmod +x /usr/local/bin/meshanchor-noc
 
 # LoRa configuration helper
-cat > /usr/local/bin/meshforge-lora << 'LORA_CMD'
+cat > /usr/local/bin/meshanchor-lora << 'LORA_CMD'
 #!/bin/bash
-exec sudo /opt/meshforge/scripts/configure_lora.sh "$@"
+exec sudo /opt/meshanchor/scripts/configure_lora.sh "$@"
 LORA_CMD
-chmod +x /usr/local/bin/meshforge-lora
+chmod +x /usr/local/bin/meshanchor-lora
 
 # Status command (terminal-native diagnostics)
-cat > /usr/local/bin/meshforge-status << 'STATUS_CMD'
+cat > /usr/local/bin/meshanchor-status << 'STATUS_CMD'
 #!/bin/bash
-cd /opt/meshforge
-exec /opt/meshforge/venv/bin/python src/cli/status.py "$@"
+cd /opt/meshanchor
+exec /opt/meshanchor/venv/bin/python src/cli/status.py "$@"
 STATUS_CMD
-chmod +x /usr/local/bin/meshforge-status
+chmod +x /usr/local/bin/meshanchor-status
 
 # Web client launcher
-cat > /usr/local/bin/meshforge-web << 'WEB_CMD'
+cat > /usr/local/bin/meshanchor-web << 'WEB_CMD'
 #!/bin/bash
 # Open or display the meshtasticd web client URL
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -1578,75 +1578,75 @@ else
     echo "  Config: /etc/meshtasticd/config.yaml (Webserver section)"
 fi
 WEB_CMD
-chmod +x /usr/local/bin/meshforge-web
+chmod +x /usr/local/bin/meshanchor-web
 
-# MeshForge Map Server command (NOC web UI on port 5000)
-cat > /usr/local/bin/meshforge-map << 'MAP_CMD'
+# MeshAnchor Map Server command (NOC web UI on port 5000)
+cat > /usr/local/bin/meshanchor-map << 'MAP_CMD'
 #!/bin/bash
-# MeshForge Map Server - NOC Web Interface
+# MeshAnchor Map Server - NOC Web Interface
 # Serves the live node map on port 5000
 
-PYTHON_CMD="/opt/meshforge/venv/bin/python"
+PYTHON_CMD="/opt/meshanchor/venv/bin/python"
 [ ! -x "$PYTHON_CMD" ] && PYTHON_CMD="python3"
 
 case "${1:-}" in
     start)
-        echo "Starting MeshForge Map Server..."
-        sudo systemctl start meshforge-map
+        echo "Starting MeshAnchor Map Server..."
+        sudo systemctl start meshanchor-map
         ;;
     stop)
-        echo "Stopping MeshForge Map Server..."
-        sudo systemctl stop meshforge-map
+        echo "Stopping MeshAnchor Map Server..."
+        sudo systemctl stop meshanchor-map
         ;;
     restart)
-        echo "Restarting MeshForge Map Server..."
-        sudo systemctl restart meshforge-map
+        echo "Restarting MeshAnchor Map Server..."
+        sudo systemctl restart meshanchor-map
         ;;
     status)
-        systemctl status meshforge-map --no-pager
-        cd /opt/meshforge/src && $PYTHON_CMD -m utils.map_data_service --status
+        systemctl status meshanchor-map --no-pager
+        cd /opt/meshanchor/src && $PYTHON_CMD -m utils.map_data_service --status
         ;;
     enable)
-        echo "Enabling MeshForge Map Server on boot..."
-        sudo systemctl enable meshforge-map
+        echo "Enabling MeshAnchor Map Server on boot..."
+        sudo systemctl enable meshanchor-map
         ;;
     disable)
-        echo "Disabling MeshForge Map Server on boot..."
-        sudo systemctl disable meshforge-map
+        echo "Disabling MeshAnchor Map Server on boot..."
+        sudo systemctl disable meshanchor-map
         ;;
     url)
         LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
         [ -z "$LOCAL_IP" ] && LOCAL_IP="localhost"
-        echo "MeshForge Map: http://${LOCAL_IP}:5000/"
+        echo "MeshAnchor Map: http://${LOCAL_IP}:5000/"
         ;;
     *)
         # Default: run interactively (for debugging)
-        cd /opt/meshforge/src
+        cd /opt/meshanchor/src
         exec $PYTHON_CMD -m utils.map_data_service "$@"
         ;;
 esac
 MAP_CMD
-chmod +x /usr/local/bin/meshforge-map
+chmod +x /usr/local/bin/meshanchor-map
 
-# Install MeshForge Map Server systemd service
-if [[ -f "$INSTALL_DIR/scripts/meshforge-map.service" ]]; then
-    cp "$INSTALL_DIR/scripts/meshforge-map.service" /etc/systemd/system/
-    echo -e "  ${GREEN}✓ meshforge-map.service installed${NC}"
+# Install MeshAnchor Map Server systemd service
+if [[ -f "$INSTALL_DIR/scripts/meshanchor-map.service" ]]; then
+    cp "$INSTALL_DIR/scripts/meshanchor-map.service" /etc/systemd/system/
+    echo -e "  ${GREEN}✓ meshanchor-map.service installed${NC}"
 else
     # Inline service definition (fallback)
-    cat > /etc/systemd/system/meshforge-map.service << 'MAP_SERVICE'
+    cat > /etc/systemd/system/meshanchor-map.service << 'MAP_SERVICE'
 [Unit]
-Description=MeshForge Map Server - NOC Web Interface
-Documentation=https://github.com/Nursedude/meshforge
+Description=MeshAnchor Map Server - NOC Web Interface
+Documentation=https://github.com/Nursedude/meshanchor
 After=network.target meshtasticd.service
 Wants=meshtasticd.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshforge/src
-RuntimeDirectory=meshforge
-ExecStart=/bin/bash -c 'if [ -x /opt/meshforge/venv/bin/python ]; then exec /opt/meshforge/venv/bin/python -m utils.map_data_service --daemon --port 5000; else exec python3 -m utils.map_data_service --daemon --port 5000; fi'
+WorkingDirectory=/opt/meshanchor/src
+RuntimeDirectory=meshanchor
+ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5000; else exec python3 -m utils.map_data_service --daemon --port 5000; fi'
 ExecStop=/bin/kill -TERM $MAINPID
 TimeoutStopSec=10
 Restart=on-failure
@@ -1654,30 +1654,30 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=meshforge-map
+SyslogIdentifier=meshanchor-map
 
 [Install]
 WantedBy=multi-user.target
 MAP_SERVICE
-    echo -e "  ${GREEN}✓ meshforge-map.service created${NC}"
+    echo -e "  ${GREEN}✓ meshanchor-map.service created${NC}"
 fi
 
 # Update systemd service to use orchestrator
-# Start order: meshtasticd -> rnsd -> meshforge
-cat > /etc/systemd/system/meshforge.service << 'MESHFORGE_SERVICE'
+# Start order: meshtasticd -> rnsd -> meshanchor
+cat > /etc/systemd/system/meshanchor.service << 'MESHANCHOR_SERVICE'
 [Unit]
-Description=MeshForge Mesh Network Operations Center
-Documentation=https://github.com/Nursedude/meshforge
+Description=MeshAnchor Mesh Network Operations Center
+Documentation=https://github.com/Nursedude/meshanchor
 After=network.target meshtasticd.service rnsd.service
 Wants=meshtasticd.service rnsd.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshforge/src
+WorkingDirectory=/opt/meshanchor/src
 # Orchestrator manages meshtasticd and rnsd (graceful: stay up even if services missing)
-ExecStart=/opt/meshforge/venv/bin/python -m core.orchestrator --start --monitor --graceful
-ExecStop=/opt/meshforge/venv/bin/python -m core.orchestrator --stop
+ExecStart=/opt/meshanchor/venv/bin/python -m core.orchestrator --start --monitor --graceful
+ExecStop=/opt/meshanchor/venv/bin/python -m core.orchestrator --stop
 Restart=on-failure
 RestartSec=10
 
@@ -1685,7 +1685,7 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-MESHFORGE_SERVICE
+MESHANCHOR_SERVICE
 
 systemctl daemon-reload
 
@@ -1698,7 +1698,7 @@ echo -e "  ${GREEN}✓ System integration complete${NC}"
 # ─────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         MeshForge NOC Installation Complete!              ║${NC}"
+echo -e "${GREEN}║         MeshAnchor NOC Installation Complete!              ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Installed Components:${NC}"
@@ -1730,8 +1730,8 @@ fi
 if $INSTALL_RNS; then
     echo -e "  ${GREEN}✓${NC} Reticulum (RNS)"
 fi
-echo -e "  ${GREEN}✓${NC} MeshForge NOC"
-echo -e "  ${GREEN}✓${NC} MeshForge Map Server (port 5000)"
+echo -e "  ${GREEN}✓${NC} MeshAnchor NOC"
+echo -e "  ${GREEN}✓${NC} MeshAnchor Map Server (port 5000)"
 echo ""
 echo -e "${CYAN}Configuration:${NC}"
 echo -e "  NOC Mode:    ${BOLD}$NOC_MODE${NC}"
@@ -1742,25 +1742,25 @@ if [[ -n "$USB_DEV" ]]; then
 fi
 echo ""
 echo -e "${CYAN}Config Files:${NC}"
-echo "  /etc/meshforge/noc.yaml           - MeshForge NOC config"
+echo "  /etc/meshanchor/noc.yaml           - MeshAnchor NOC config"
 echo "  /etc/meshtasticd/config.yaml      - Meshtasticd config"
 echo "  /etc/meshtasticd/available.d/     - Radio templates"
 echo "  /etc/meshtasticd/config.d/        - Active configs"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo -e "  ${GREEN}meshforge-status${NC}             - Quick system status (no sudo needed)"
-echo -e "  ${GREEN}meshforge-web${NC}                - Open radio web client (config)"
-echo -e "  ${GREEN}meshforge-map url${NC}            - Show NOC map URL (port 5000)"
-echo -e "  ${GREEN}meshforge-map status${NC}         - Check map server status"
-echo -e "  ${GREEN}meshforge${NC}                    - Launch interface wizard"
-echo -e "  ${GREEN}meshforge-noc --start${NC}        - Start NOC services"
-echo -e "  ${GREEN}meshforge-noc --status${NC}       - Check service status"
-echo -e "  ${GREEN}meshforge-noc --stop${NC}         - Stop NOC services"
+echo -e "  ${GREEN}meshanchor-status${NC}             - Quick system status (no sudo needed)"
+echo -e "  ${GREEN}meshanchor-web${NC}                - Open radio web client (config)"
+echo -e "  ${GREEN}meshanchor-map url${NC}            - Show NOC map URL (port 5000)"
+echo -e "  ${GREEN}meshanchor-map status${NC}         - Check map server status"
+echo -e "  ${GREEN}meshanchor${NC}                    - Launch interface wizard"
+echo -e "  ${GREEN}meshanchor-noc --start${NC}        - Start NOC services"
+echo -e "  ${GREEN}meshanchor-noc --status${NC}       - Check service status"
+echo -e "  ${GREEN}meshanchor-noc --stop${NC}         - Stop NOC services"
 echo ""
 echo -e "${CYAN}Systemd Services:${NC}"
-echo -e "  ${GREEN}sudo systemctl enable meshforge${NC}       - Enable NOC on boot"
-echo -e "  ${GREEN}sudo systemctl enable meshforge-map${NC}   - Enable Map Server on boot"
-echo -e "  ${GREEN}sudo systemctl start meshforge-map${NC}    - Start Map Server now"
+echo -e "  ${GREEN}sudo systemctl enable meshanchor${NC}       - Enable NOC on boot"
+echo -e "  ${GREEN}sudo systemctl enable meshanchor-map${NC}   - Enable Map Server on boot"
+echo -e "  ${GREEN}sudo systemctl start meshanchor-map${NC}    - Start Map Server now"
 echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC}     - Check meshtasticd"
 echo ""
 
@@ -1777,7 +1777,7 @@ if [[ "$DAEMON_TYPE" == "spi-reboot-needed" ]]; then
     echo -e "${YELLOW}║     ${NC}${GREEN}sudo reboot now${NC}${YELLOW}                                       ║${NC}"
     echo -e "${YELLOW}║                                                           ║${NC}"
     echo -e "${YELLOW}║  2. When back, complete SPI setup:                        ║${NC}"
-    echo -e "${YELLOW}║     ${NC}${GREEN}cd /opt/meshforge${NC}${YELLOW}                                     ║${NC}"
+    echo -e "${YELLOW}║     ${NC}${GREEN}cd /opt/meshanchor${NC}${YELLOW}                                     ║${NC}"
     echo -e "${YELLOW}║     ${NC}${GREEN}sudo bash scripts/install_noc.sh${NC}${YELLOW}                      ║${NC}"
     echo -e "${YELLOW}║                                                           ║${NC}"
     echo -e "${YELLOW}║  The second run will:                                     ║${NC}"
@@ -1788,7 +1788,7 @@ if [[ "$DAEMON_TYPE" == "spi-reboot-needed" ]]; then
     echo -e "${YELLOW}║                                                           ║${NC}"
     echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${CYAN}Software installed: meshtasticd, RNS, MeshForge${NC}"
+    echo -e "${CYAN}Software installed: meshtasticd, RNS, MeshAnchor${NC}"
     echo -e "${CYAN}SPI enabled in boot config - reboot activates the bus${NC}"
     echo ""
     exit 0
@@ -1828,33 +1828,33 @@ else
     echo -e "${YELLOW}  Skipping verification${NC}"
 fi
 
-# Enable and start MeshForge Map Server (NOC web UI)
+# Enable and start MeshAnchor Map Server (NOC web UI)
 echo ""
-echo -e "${CYAN}Enabling MeshForge Map Server...${NC}"
+echo -e "${CYAN}Enabling MeshAnchor Map Server...${NC}"
 systemctl daemon-reload
-systemctl enable meshforge-map 2>/dev/null || true
-systemctl start meshforge-map 2>/dev/null || true
+systemctl enable meshanchor-map 2>/dev/null || true
+systemctl start meshanchor-map 2>/dev/null || true
 
 # Check if map server started
 sleep 2
-if systemctl is-active --quiet meshforge-map; then
+if systemctl is-active --quiet meshanchor-map; then
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
     echo -e "  ${GREEN}✓ Map Server running: http://${LOCAL_IP}:5000/${NC}"
 else
-    echo -e "  ${YELLOW}⚠ Map Server not running (check: journalctl -u meshforge-map)${NC}"
+    echo -e "  ${YELLOW}⚠ Map Server not running (check: journalctl -u meshanchor-map)${NC}"
 fi
 
 # Offer to start services (only if services can actually run)
 if [[ "$DAEMON_TYPE" != "spi-pending" && "$DAEMON_TYPE" != "placeholder" ]] && [[ -c /dev/tty ]]; then
     echo ""
-    echo -e "${CYAN}Would you like to start MeshForge NOC now? [Y/n]${NC}"
+    echo -e "${CYAN}Would you like to start MeshAnchor NOC now? [Y/n]${NC}"
     read -r response < /dev/tty
     if [[ ! "$response" =~ ^([nN][oO]|[nN])$ ]]; then
         echo ""
-        echo -e "${GREEN}Starting MeshForge NOC...${NC}"
-        /usr/local/bin/meshforge-noc --start
+        echo -e "${GREEN}Starting MeshAnchor NOC...${NC}"
+        /usr/local/bin/meshanchor-noc --start
         echo ""
-        echo -e "${GREEN}NOC is running. Launch interface with: meshforge${NC}"
+        echo -e "${GREEN}NOC is running. Launch interface with: meshanchor${NC}"
     fi
 fi
 
@@ -1874,13 +1874,13 @@ if [[ "$DAEMON_TYPE" == "native" || "$DAEMON_TYPE" == "native-usb" ]]; then
         echo -e "${GREEN}║    Config → Channels (PSK, channel names)                 ║${NC}"
         echo -e "${GREEN}║    Config → Device   (Node name, position)                ║${NC}"
         echo -e "${GREEN}║                                                           ║${NC}"
-        echo -e "${GREEN}║  Also: ${NC}${BOLD}meshforge-web${NC}${GREEN}  (shows this URL anytime)            ║${NC}"
+        echo -e "${GREEN}║  Also: ${NC}${BOLD}meshanchor-web${NC}${GREEN}  (shows this URL anytime)            ║${NC}"
         echo -e "${GREEN}║                                                           ║${NC}"
         echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
     fi
 fi
 
 echo ""
-echo -e "${CYAN}Documentation:${NC} https://github.com/Nursedude/meshforge"
+echo -e "${CYAN}Documentation:${NC} https://github.com/Nursedude/meshanchor"
 echo -e "${CYAN}Made with aloha for the mesh community${NC}"
 echo ""

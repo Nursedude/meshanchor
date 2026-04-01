@@ -1,12 +1,12 @@
-# MeshForge MOC1 - MQTT Broker Node Configuration
+# MeshAnchor MOC1 - MQTT Broker Node Configuration
 # Hardware: Meshtoad (SX1262 via CH341) on Raspberry Pi 5
 # Preset: LongFast (wide-area coverage)
-# Role: MeshForge private MQTT broker
+# Role: MeshAnchor private MQTT broker
 #
 # Architecture:
 #   LongFast Mesh --RF--> Meshtoad --MQTT uplink--> mosquitto (localhost)
 #                                                       |
-#                                                       +--> MeshForge MQTT subscriber
+#                                                       +--> MeshAnchor MQTT subscriber
 #                                                       +--> MOC2 (ShortTurbo, RNS)
 #                                                       +--> Other consumers
 #
@@ -36,7 +36,7 @@ Radio:
 Device:
   Role: ROUTER
   # Set your node name:
-  # LongName: "meshforge-fleet-host-1"
+  # LongName: "meshanchor-fleet-host-1"
   # ShortName: "MOC1"
 
 # === MQTT Configuration ===
@@ -45,8 +45,8 @@ Device:
 MQTT:
   Enabled: true
   Address: localhost
-  # Username/password set via MeshForge TUI broker setup
-  # or manually: meshtastic --set mqtt.username meshforge
+  # Username/password set via MeshAnchor TUI broker setup
+  # or manually: meshtastic --set mqtt.username meshanchor
   EncryptionEnabled: true
   JSONEnabled: true
   TLSEnabled: false
@@ -104,7 +104,7 @@ General:
 # 4. Install mosquitto:
 #    sudo apt install mosquitto mosquitto-clients
 #
-# 5. Configure broker via MeshForge TUI:
+# 5. Configure broker via MeshAnchor TUI:
 #    sudo python3 src/launcher_tui/main.py
 #    -> MQTT Broker Manager -> Setup Private Broker
 #
@@ -114,4 +114,4 @@ General:
 #
 # 7. Verify:
 #    curl -k https://localhost:9443
-#    mosquitto_sub -h localhost -u meshforge -P <password> -t "msh/#" -v
+#    mosquitto_sub -h localhost -u meshanchor -P <password> -t "msh/#" -v

@@ -1,4 +1,4 @@
-# MeshForge - Claude Code Configuration
+# MeshAnchor - Claude Code Configuration
 
 > **Dude AI**: Network Engineer, Physicist, Programmer, Project Manager
 > **Architect**: WH6GXZ (Nursedude) — HAM General, Infrastructure Engineering, RN BSN
@@ -11,9 +11,7 @@
 
 ## CRITICAL — Read Before Any Code Change
 
-**Service Interaction Rules** (Issue #29 — regression prevention):
-- **NEVER** create `TCPInterface()` directly — use `MeshtasticConnection` from `connection_manager.py` or acquire `MESHTASTIC_CONNECTION_LOCK` first
-- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()` from `meshtastic_protobuf_client.py`
+**Service Interaction Rules** (inherited from MeshForge Issue #29):
 - **NEVER** call `RNS.Reticulum()` without `configdir=` — causes EADDRINUSE when rnsd is running
 - **NEVER** use raw `systemctl is-active` — use `check_service()` from `service_check.py`
 - **NEVER** use `Path.home()` directly — use `utils.paths.get_real_user_home()` (MF001)
@@ -21,6 +19,7 @@
 - **NEVER** use `shell=True`, bare `except:`, or skip input validation / subprocess timeouts
 - **ALWAYS** use `_stop_event.wait()` instead of `time.sleep()` in daemon loops
 - **ALWAYS** split files exceeding 1,500 lines
+- **NOTE**: Meshtastic TCP rules (TCPInterface, fromradio) apply only to optional gateway code
 
 > Full security rules: `.claude/rules/security.md`
 > Known issues & fixes: `.claude/foundations/persistent_issues.md`
@@ -29,9 +28,9 @@
 
 ## Quick Context
 
-MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Reticulum (RNS) mesh networks — the first open-source tool to unify these incompatible ecosystems.
+MeshAnchor is a **MeshCore-primary Network Operations Center (NOC)** — the sister project to [MeshForge](https://github.com/Nursedude/meshforge). Where MeshForge treats Meshtastic as the home radio, MeshAnchor makes **MeshCore primary** with Meshtastic and RNS as optional gateways.
 
-**Active context / current sprint**: `.claude/CURRENT.md`
+Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway bridge architecture, and RF tools.
 
 ---
 
@@ -39,16 +38,11 @@ MeshForge is a **Network Operations Center (NOC)** bridging Meshtastic and Retic
 
 | Branch | Version | Status |
 |--------|---------|--------|
-| `main` | `0.5.5-beta` | Stable — TUI, meshtasticd, RNS, RF tools. Field-tested. |
-| `alpha/meshcore-bridge` | `0.6.0-alpha` | MeshCore 3-way routing + structural refactor. Not field-tested. |
+| `main` | `0.1.0-alpha` | MeshCore-primary NOC. Not yet field-tested. |
 
-- `main` includes XTOC/ATAK/CoT, MQTT bridge, security hardening. Gateway bridge, coverage maps, NOC map have unit tests but need field validation.
-- `alpha` diverged at PR #1000. Contains RadioMode abstraction, `src/core/rf/`, `src/core/services/`, `src/mapping/`. Missing main's Meshtastic 2.7.x upgrade and dead code cleanup.
-- **Convergence plan**: After field testing, rebase main's unique commits onto alpha. See `.claude/plans/branch_convergence_guide.md`.
-- **Architecture decision**: MeshCore stays IN MeshForge — it's a protocol (like Meshtastic/RNS), not a plugin.
-- Feature branches use `claude/` prefix → PR to target branch.
-
-> Current branch delta: `git log --oneline main..alpha/meshcore-bridge | wc -l`
+- Single branch for now. Feature branches use `claude/` prefix → PR to main.
+- **Sister project**: [MeshForge](https://github.com/Nursedude/meshforge) (Meshtastic-primary)
+- **Shared contract**: `CanonicalMessage` in `src/gateway/canonical_message.py` must stay compatible with MeshForge's version.
 
 ---
 
@@ -131,7 +125,7 @@ Profiles: `radio_maps` | `monitor` | `meshcore` | `gateway` | `full`
 ```bash
 python3 src/launcher.py --profile gateway   # Select profile
 python3 src/launcher.py                      # Auto-detect (default)
-# Profile saved to ~/.config/meshforge/deployment.json
+# Profile saved to ~/.config/meshanchor/deployment.json
 ```
 
 > Full profile definitions + install commands: `.claude/foundations/deployment_profiles.md`
@@ -189,7 +183,7 @@ test: Add tests             security: Security fix
 
 | File | Contents |
 |------|----------|
-| `foundations/meshforge_ecosystem.md` | All 5 repos, boundaries, APIs (canonical) |
+| `foundations/meshanchor_ecosystem.md` | All 5 repos, boundaries, APIs (canonical) |
 | `foundations/domain_architecture.md` | Core vs Plugin model |
 | `foundations/ai_principles.md` | Human-centered design philosophy |
 | `foundations/persistent_issues.md` | **Known issues & fixes** |

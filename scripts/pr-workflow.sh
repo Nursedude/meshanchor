@@ -1,5 +1,5 @@
 #!/bin/bash
-# MeshForge PR Workflow Helper
+# MeshAnchor PR Workflow Helper
 # Usage: ./scripts/pr-workflow.sh <target> <feature-name>
 #   target: alpha, beta, or main
 #   feature-name: short description (e.g., fix-timer-leak)
@@ -10,7 +10,7 @@ TARGET="${1:-}"
 FEATURE="${2:-}"
 
 if [[ -z "$TARGET" || -z "$FEATURE" ]]; then
-    echo "MeshForge PR Workflow"
+    echo "MeshAnchor PR Workflow"
     echo "====================="
     echo ""
     echo "Usage: $0 <target> <feature-name>"

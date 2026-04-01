@@ -182,7 +182,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         try:
             # Create MQTT client
-            client_id = f"meshforge-gateway-{int(time.time()) % 10000}"
+            client_id = f"meshanchor-gateway-{int(time.time()) % 10000}"
             self._client = mqtt.Client(
                 client_id=client_id,
                 protocol=mqtt.MQTTv311,
@@ -712,7 +712,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         message = payload.get('message', '')
         channel = payload.get('channel', 0)
-        source_id = payload.get('source_id', 'meshforge')
+        source_id = payload.get('source_id', 'meshanchor')
 
         if not message:
             return False
@@ -730,7 +730,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         # Publish to the JSON topic
         topic = (f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/json/"
-                 f"{mqtt_cfg.channel}/meshforge")
+                 f"{mqtt_cfg.channel}/meshanchor")
 
         try:
             with self._mqtt_lock:

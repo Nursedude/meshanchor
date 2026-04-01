@@ -189,11 +189,11 @@ class SRTMProvider(TerrainProvider):
 
         Args:
             cache_dir: Directory for cached HGT files.
-                      Default: ~/.local/share/meshforge/srtm/
+                      Default: ~/.local/share/meshanchor/srtm/
             auto_download: Whether to download tiles automatically.
         """
         if cache_dir is None:
-            cache_dir = get_real_user_home() / ".local" / "share" / "meshforge" / "srtm"
+            cache_dir = get_real_user_home() / ".local" / "share" / "meshanchor" / "srtm"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._cache_dir = cache_dir
@@ -282,7 +282,7 @@ class SRTMProvider(TerrainProvider):
                 import gzip
 
                 logger.info(f"Downloading SRTM tile: {url}")
-                req = urllib.request.Request(url, headers={'User-Agent': 'MeshForge/0.4'})
+                req = urllib.request.Request(url, headers={'User-Agent': 'MeshAnchor/0.4'})
                 with urllib.request.urlopen(req, timeout=30) as response:
                     compressed = response.read()
 

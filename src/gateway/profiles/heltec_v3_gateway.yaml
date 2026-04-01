@@ -1,4 +1,4 @@
-# MeshForge Gateway Profile: Heltec V3 (ESP32-S3)
+# MeshAnchor Gateway Profile: Heltec V3 (ESP32-S3)
 # Optimized for gateway/router operation
 # Apply with: meshtastic --configure heltec_v3_gateway.yaml
 #
@@ -7,7 +7,7 @@
 # - WiFi enabled for API access
 # - Bluetooth disabled (headless operation)
 # - Power saving disabled (always listening)
-# - JSON API enabled for MeshForge
+# - JSON API enabled for MeshAnchor
 # - Display disabled (headless)
 # - Store & Forward for offline message delivery
 

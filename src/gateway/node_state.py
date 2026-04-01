@@ -1,5 +1,5 @@
 """
-Node State Machine for MeshForge
+Node State Machine for MeshAnchor
 
 Provides granular state tracking for mesh nodes beyond simple online/offline.
 

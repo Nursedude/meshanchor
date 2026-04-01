@@ -1,7 +1,7 @@
 """
-Shared Health State for MeshForge Multi-Process Coordination.
+Shared Health State for MeshAnchor Multi-Process Coordination.
 
-SQLite-backed shared health state that enables multiple MeshForge processes
+SQLite-backed shared health state that enables multiple MeshAnchor processes
 (gateway, TUI, monitoring) to share health observations. Based on NGINX
 zone pattern for shared worker state.
 
@@ -136,7 +136,7 @@ class SharedHealthState:
     """
     SQLite-backed shared health state for multi-process access.
 
-    Similar to NGINX zone for shared worker state. Multiple MeshForge
+    Similar to NGINX zone for shared worker state. Multiple MeshAnchor
     processes can read and write health observations atomically.
 
     Features:
@@ -168,12 +168,12 @@ class SharedHealthState:
         Initialize shared health state.
 
         Args:
-            db_path: Path to SQLite database. Default: ~/.config/meshforge/health_state.db
+            db_path: Path to SQLite database. Default: ~/.config/meshanchor/health_state.db
             process_id: Identifier for this process. Default: PID
             stale_threshold: Seconds before service considered stale (default: 120)
         """
         if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshforge"
+            config_dir = get_real_user_home() / ".config" / "meshanchor"
             config_dir.mkdir(parents=True, exist_ok=True)
             db_path = config_dir / "health_state.db"
 

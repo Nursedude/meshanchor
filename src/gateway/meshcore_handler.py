@@ -19,11 +19,11 @@ Connection methods (meshcore-cli / meshcore_py):
                 pending meshcore_py BLE transport support)
 
 Typical gateway setup uses two radios on the same host:
-  Meshtastic radio  -->  meshtasticd (USB)  -->  TCP :4403  -->  MeshForge
-  MeshCore radio    -->  USB serial or TCP  ------------------>  MeshForge
+  Meshtastic radio  -->  meshtasticd (USB)  -->  TCP :4403  -->  MeshAnchor
+  MeshCore radio    -->  USB serial or TCP  ------------------>  MeshAnchor
 
 MeshCore differences from Meshtastic:
-- No daemon (MeshForge connects directly via meshcore_py)
+- No daemon (MeshAnchor connects directly via meshcore_py)
 - Async API (wrapped in dedicated asyncio event loop thread)
 - Pure radio (no MQTT/internet origin — all messages are radio)
 - Up to 64 hops (vs 7 for Meshtastic)

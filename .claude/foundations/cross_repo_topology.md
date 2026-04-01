@@ -1,7 +1,7 @@
-# Cross-Repo Topology — MeshForge Ecosystem
+# Cross-Repo Topology — MeshAnchor Ecosystem
 
 > **Purpose**: Define task delegation, shared rules, and communication patterns across the three active repos.
-> **Scope**: meshforge (NOC), meshing_around_meshforge (Bot/Alerting), meshforge-maps (Visualization)
+> **Scope**: meshanchor (NOC), meshing_around_meshanchor (Bot/Alerting), meshanchor-maps (Visualization)
 > **Owner**: WH6GXZ (Nursedude)
 
 ---
@@ -10,8 +10,8 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│               MeshForge NOC (Core Hub)                  │
-│           /opt/meshforge · v0.5.5-beta                  │
+│               MeshAnchor NOC (Core Hub)                  │
+│           /opt/meshanchor · v0.5.5-beta                  │
 │    Gateway · TUI · RF Tools · Service Management        │
 │    99 .claude/ files · 2,954 tests · Custom linter      │
 └───────────┬─────────────────────────┬───────────────────┘
@@ -20,9 +20,9 @@
    (manifest.json)           (/opt/ co-location)
             │                         │
   ┌─────────▼──────────┐    ┌────────▼──────────────────┐
-  │  meshforge-maps    │    │  meshing_around_meshforge  │
-  │  /opt/meshforge-   │    │  /opt/meshing_around_      │
-  │  maps · v0.7.0     │    │  meshforge · v0.5.0        │
+  │  meshanchor-maps    │    │  meshing_around_meshanchor  │
+  │  /opt/meshanchor-   │    │  /opt/meshing_around_      │
+  │  maps · v0.7.0     │    │  meshanchor · v0.5.0        │
   │  982 tests         │    │  743 tests                 │
   │                    │    │                             │
   │  Visualization:    │    │  Bot Alerting:              │
@@ -41,18 +41,18 @@
 
 | Task Domain | Primary Repo | Why |
 |-------------|-------------|-----|
-| Protocol bridging (Meshtastic ↔ RNS) | **meshforge** | Gateway architecture owns routing |
-| TUI menus / NOC interface | **meshforge** | Handler registry pattern |
-| Service management (systemd) | **meshforge** | `service_check.py` is SSOT |
-| RF calculations / link budgets | **meshforge** | `utils/rf.py` |
-| Node tracking / discovery | **meshforge** | `gateway/node_tracker.py` |
-| Static coverage maps (Folium) | **meshforge** | `utils/coverage_map.py` |
-| Interactive web maps (Leaflet) | **meshforge-maps** | Map server + collectors |
-| Multi-source data aggregation | **meshforge-maps** | BaseCollector pattern |
-| Node health scoring (map layer) | **meshforge-maps** | `utils/health_scoring.py` |
-| Topology visualization | **meshforge-maps** | SNR-colored mesh links |
-| NOAA/EAS weather alert polygons | **meshforge-maps** | `noaa_alert_collector.py` |
-| REST API for node/health data | **meshforge-maps** | `map_server.py` |
+| Protocol bridging (Meshtastic ↔ RNS) | **meshanchor** | Gateway architecture owns routing |
+| TUI menus / NOC interface | **meshanchor** | Handler registry pattern |
+| Service management (systemd) | **meshanchor** | `service_check.py` is SSOT |
+| RF calculations / link budgets | **meshanchor** | `utils/rf.py` |
+| Node tracking / discovery | **meshanchor** | `gateway/node_tracker.py` |
+| Static coverage maps (Folium) | **meshanchor** | `utils/coverage_map.py` |
+| Interactive web maps (Leaflet) | **meshanchor-maps** | Map server + collectors |
+| Multi-source data aggregation | **meshanchor-maps** | BaseCollector pattern |
+| Node health scoring (map layer) | **meshanchor-maps** | `utils/health_scoring.py` |
+| Topology visualization | **meshanchor-maps** | SNR-colored mesh links |
+| NOAA/EAS weather alert polygons | **meshanchor-maps** | `noaa_alert_collector.py` |
+| REST API for node/health data | **meshanchor-maps** | `map_server.py` |
 | Bot alert types (12 categories) | **meshing_around** | `core/models.py` AlertType enum |
 | AES-256-CTR packet decryption | **meshing_around** | `core/mesh_crypto.py` |
 | MockMeshtasticAPI (demo traffic) | **meshing_around** | `core/meshtastic_api.py` |
@@ -65,8 +65,8 @@
 ## Dependency Direction
 
 ```
-meshforge-maps ──optional──▶ MeshForge NOC (plugin discovery, can run standalone)
-meshforge NOC  ──safe_import──▶ meshing_around (alert types, crypto, MockAPI)
+meshanchor-maps ──optional──▶ MeshAnchor NOC (plugin discovery, can run standalone)
+meshanchor NOC  ──safe_import──▶ meshing_around (alert types, crypto, MockAPI)
 meshing_around ──independent── (no dependency on NOC or maps)
 ```
 
@@ -90,22 +90,22 @@ Satellite repos never depend on the NOC for core functionality.
 
 ### NOC ← meshing_around (safe_import bridge)
 ```python
-# In meshforge NOC (src/utils/mesh_alert_engine.py):
-sys.path.insert(0, "/opt/meshing_around_meshforge")
+# In meshanchor NOC (src/utils/mesh_alert_engine.py):
+sys.path.insert(0, "/opt/meshing_around_meshanchor")
 AlertType, Alert, _HAS = safe_import('meshing_around_clients.core.models', ...)
 ```
 
-### NOC ← meshforge-maps (plugin discovery)
+### NOC ← meshanchor-maps (plugin discovery)
 ```json
-// meshforge-maps/manifest.json
-{"id": "org.meshforge.extension.maps", "ports": {"http": 8808, "ws": 8809}}
+// meshanchor-maps/manifest.json
+{"id": "org.meshanchor.extension.maps", "ports": {"http": 8808, "ws": 8809}}
 ```
 
 ### Shared MQTT Topics
 ```
 msh/#                    Meshtastic protobuf (all repos)
-meshforge/alerts         Alert feed (maps → NOC)
-meshforge/alerts/{sev}   Severity-filtered alerts
+meshanchor/alerts         Alert feed (maps → NOC)
+meshanchor/alerts/{sev}   Severity-filtered alerts
 ```
 
 ---
@@ -114,8 +114,8 @@ meshforge/alerts/{sev}   Severity-filtered alerts
 
 | Repo | Config Path | Format |
 |------|------------|--------|
-| meshforge | `~/.config/meshforge/` | JSON (SettingsManager) |
-| meshforge-maps | `~/.config/meshforge/plugins/org.meshforge.extension.maps/` | JSON |
+| meshanchor | `~/.config/meshanchor/` | JSON (SettingsManager) |
+| meshanchor-maps | `~/.config/meshanchor/plugins/org.meshanchor.extension.maps/` | JSON |
 | meshing_around | `./mesh_client.ini` (local) | INI |
 
 ---
@@ -124,8 +124,8 @@ meshforge/alerts/{sev}   Severity-filtered alerts
 
 | Repo | Tests | Framework | CI |
 |------|-------|-----------|-----|
-| meshforge | 2,954 | pytest + regression guards + custom linter | Pre-commit hooks |
-| meshforge-maps | 982 | pytest + ruff | GitHub Actions |
+| meshanchor | 2,954 | pytest + regression guards + custom linter | Pre-commit hooks |
+| meshanchor-maps | 982 | pytest + ruff | GitHub Actions |
 | meshing_around | 768 | pytest + flake8/black/isort | GitHub Actions |
 
 ---

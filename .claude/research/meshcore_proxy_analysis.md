@@ -1,14 +1,14 @@
-# MeshCore-Meshtastic-Proxy Analysis for MeshForge Enhancement
+# MeshCore-Meshtastic-Proxy Analysis for MeshAnchor Enhancement
 
 **Date**: 2026-02-02
 **Repository**: https://github.com/wdunn001/MeshCore-Meshtastic-Proxy
-**Purpose**: Identify features and patterns to improve MeshForge reliability and functionality
+**Purpose**: Identify features and patterns to improve MeshAnchor reliability and functionality
 
 ---
 
 ## Executive Summary
 
-MeshCore-Meshtastic-Proxy is an embedded firmware (C++) that bridges MeshCore and Meshtastic mesh networks on hardware like RAK4631 and LoRa32u4II. While it operates at a different layer (firmware vs application), several architectural patterns and reliability features are directly applicable to MeshForge's Python-based NOC system.
+MeshCore-Meshtastic-Proxy is an embedded firmware (C++) that bridges MeshCore and Meshtastic mesh networks on hardware like RAK4631 and LoRa32u4II. While it operates at a different layer (firmware vs application), several architectural patterns and reliability features are directly applicable to MeshAnchor's Python-based NOC system.
 
 **Key Takeaways**:
 1. **Canonical Packet Format** - Universal intermediate format reduces conversion complexity
@@ -40,12 +40,12 @@ typedef struct {
 
 **Why This Matters**: Converting N protocols requires N×(N-1) conversions without an intermediate format. With canonical format, it's only 2×N conversions.
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - Direct Meshtastic↔RNS translation in `rns_bridge.py`
 - No intermediate representation
 - Adding a third protocol (e.g., MeshCore) would require significant refactoring
 
-**Recommendation**: Implement a `CanonicalMessage` class in MeshForge:
+**Recommendation**: Implement a `CanonicalMessage` class in MeshAnchor:
 ```python
 @dataclass
 class CanonicalMessage:
@@ -76,7 +76,7 @@ if (protocol != PROTOCOL_MESHTASTIC && canonical.viaMqtt) {
 
 **Why This Matters**: MeshCore is a pure radio network. Internet-originated messages shouldn't be re-broadcast as they create routing inconsistencies and can cause loops.
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - `mqtt_subscriber.py` consumes Meshtastic MQTT but doesn't track origin
 - Messages bridged to RNS could include MQTT-originated traffic
 - No filtering mechanism for "via internet" flag
@@ -107,7 +107,7 @@ if (!iface->convertToCanonical(...)) {
 
 **Why This Matters**: Real-world packets may have unexpected formats. Graceful degradation keeps messages flowing.
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - Parsing failures in `node_tracker.py` log errors but may drop messages
 - No "raw relay" fallback mode
 - Rigid protobuf expectations
@@ -132,7 +132,7 @@ if (!iface->convertToCanonical(...)) {
 } while(0)
 ```
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - Statistics counters in `bridge_health.py` and `message_queue.py` use unbounded integers
 - Python integers don't overflow, but database INT columns do
 - No overflow handling for SQLite INTEGER columns (max 2^63-1)
@@ -154,7 +154,7 @@ if (protocol == lastConfiguredProtocol) {
 }
 ```
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - Service restarts via `apply_config_and_restart()` always execute
 - Radio configuration changes always sent to Meshtastic
 - No deduplication of identical commands
@@ -179,7 +179,7 @@ class ConfigCache:
 - Uses 500ms timeout for LoRa transmission instead of IRQ-based completion
 - More reliable on resource-constrained platforms
 
-**MeshForge Current State**:
+**MeshAnchor Current State**:
 - `subprocess.run()` calls have timeouts (good)
 - LXMF delivery tracking uses 5-minute timeout (good)
 - Some async operations lack explicit timeouts
@@ -205,7 +205,7 @@ class ConfigCache:
 | Preamble | 8 bytes | 16 bytes |
 | Max Payload | 184 bytes | 237 bytes |
 
-**MeshForge Relevance**: Understanding these parameters helps with:
+**MeshAnchor Relevance**: Understanding these parameters helps with:
 1. Signal quality analysis (SF11 has better range but slower)
 2. Timing calculations (different symbol times)
 3. Future MeshCore integration planning
@@ -213,7 +213,7 @@ class ConfigCache:
 
 ---
 
-## Feature Recommendations for MeshForge
+## Feature Recommendations for MeshAnchor
 
 ### High Priority (Reliability)
 
@@ -361,10 +361,10 @@ class PathTableWatcher:
 ```python
 from prometheus_client import Counter, Gauge, Histogram
 
-messages_bridged = Counter('meshforge_messages_bridged_total',
+messages_bridged = Counter('meshanchor_messages_bridged_total',
                            'Messages bridged', ['direction'])
-queue_depth = Gauge('meshforge_queue_depth', 'Message queue depth')
-bridge_latency = Histogram('meshforge_bridge_latency_seconds',
+queue_depth = Gauge('meshanchor_queue_depth', 'Message queue depth')
+bridge_latency = Histogram('meshanchor_bridge_latency_seconds',
                            'Message bridging latency')
 ```
 
@@ -407,7 +407,7 @@ class MessageTracer:
 
 ## Architecture Comparison
 
-| Aspect | MeshCore-Meshtastic-Proxy | MeshForge |
+| Aspect | MeshCore-Meshtastic-Proxy | MeshAnchor |
 |--------|---------------------------|-----------|
 | **Language** | C++ (embedded) | Python 3.9+ |
 | **Target** | Firmware (RAK4631, LoRa32u4II) | Linux/Raspberry Pi |
@@ -422,12 +422,12 @@ class MessageTracer:
 
 ## Gateway Connection Architecture
 
-The MeshForge gateway bridges three mesh protocols. Each protocol connects to
+The MeshAnchor gateway bridges three mesh protocols. Each protocol connects to
 its radio differently:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   MeshForge Gateway Host                │
+│                   MeshAnchor Gateway Host                │
 │                                                         │
 │  Meshtastic radio ── USB ──> meshtasticd ── TCP :4403 ──┤
 │                                                         │
@@ -450,14 +450,14 @@ its radio differently:
 ### Meshtastic node connection
 
 Meshtastic uses a daemon (`meshtasticd`) that owns the serial connection to the
-radio. MeshForge connects to `meshtasticd` over TCP (default `localhost:4403`).
+radio. MeshAnchor connects to `meshtasticd` over TCP (default `localhost:4403`).
 The Meshtastic radio is typically USB-attached to the same host.
 
 ### Typical two-radio gateway setup
 
 The simplest gateway setup uses two USB radios on the same host:
 - `/dev/ttyUSB0` — Meshtastic radio (managed by meshtasticd)
-- `/dev/ttyUSB1` — MeshCore companion radio (managed directly by MeshForge)
+- `/dev/ttyUSB1` — MeshCore companion radio (managed directly by MeshAnchor)
 
 Both radios are LoRa devices but operate on different frequencies and modulation
 parameters (see Protocol-Specific Radio Configuration above), so they do not
@@ -504,5 +504,5 @@ interfere with each other.
 
 ---
 
-*Analysis conducted for MeshForge v0.4.8-alpha enhancement planning*
+*Analysis conducted for MeshAnchor v0.4.8-alpha enhancement planning*
 *Updated 2026-02-17: Reflects implemented MeshCore support and connection options*

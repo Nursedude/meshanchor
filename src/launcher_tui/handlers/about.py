@@ -1,7 +1,7 @@
 """
 About menu handler — version info, changelog, system info, deps, help.
 
-Batch 10a: Extracted from MeshForgeLauncher legacy methods in main.py.
+Batch 10a: Extracted from MeshAnchorLauncher legacy methods in main.py.
 """
 
 import logging
@@ -23,7 +23,7 @@ class AboutHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("version", "Version Info        MeshForge version", None),
+            ("version", "Version Info        MeshAnchor version", None),
             ("changelog", "Changelog           Release history", None),
             ("sysinfo", "System Info         OS, Python, disk, uptime", None),
             ("deps", "Dependencies        Package status", None),
@@ -45,7 +45,7 @@ class AboutHandler(BaseHandler):
     def _show_version(self):
         """Show about information."""
         from __version__ import __version__
-        text = f"""MeshForge v{__version__}
+        text = f"""MeshAnchor v{__version__}
 Network Operations Center
 
 Bridges Meshtastic and Reticulum (RNS) mesh networks.
@@ -57,20 +57,20 @@ Features:
 - Gateway bridge (Mesh \u2194 RNS)
 - Node monitoring
 
-GitHub: github.com/Nursedude/meshforge
+GitHub: github.com/Nursedude/meshanchor
 License: GPL-3.0
 
 Made with aloha for the mesh community
 73 de WH6GXZ"""
 
-        self.ctx.dialog.msgbox("About MeshForge", text)
+        self.ctx.dialog.msgbox("About MeshAnchor", text)
 
     def _show_changelog(self):
         """Display release history from VERSION_HISTORY in __version__.py."""
         from __version__ import VERSION_HISTORY
         from backend import clear_screen
 
-        lines = ["MESHFORGE RELEASE HISTORY", "=" * 40, ""]
+        lines = ["MESHANCHOR RELEASE HISTORY", "=" * 40, ""]
 
         for release in VERSION_HISTORY[:8]:  # Show last 8 releases
             version = release.get("version", "?")
@@ -115,7 +115,7 @@ Made with aloha for the mesh community
             pass
         lines.append(f"Arch:      {platform.machine()}")
         lines.append(f"Python:    {platform.python_version()}")
-        lines.append(f"MeshForge: v{__version__}")
+        lines.append(f"MeshAnchor: v{__version__}")
         lines.append("")
 
         # Uptime
@@ -156,7 +156,7 @@ Made with aloha for the mesh community
 
         # Log directory size
         try:
-            log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+            log_dir = get_real_user_home() / ".config" / "meshanchor" / "logs"
             if log_dir.exists():
                 total_size = sum(f.stat().st_size for f in log_dir.rglob("*") if f.is_file())
                 lines.append(f"Logs:      {total_size / 1024:.1f} KB in {log_dir}")
@@ -207,7 +207,7 @@ Made with aloha for the mesh community
         from backend import clear_screen
 
         help_text = """
-MeshForge - Network Operations Center
+MeshAnchor - Network Operations Center
 
 KEYBOARD SHORTCUTS:
   1-6     Quick access to main sections
@@ -222,10 +222,10 @@ NAVIGATION:
   Tab     Move between buttons
 
 DOCUMENTATION:
-  https://github.com/Nursedude/meshforge
+  https://github.com/Nursedude/meshanchor
 
 SUPPORT:
-  Issues: github.com/Nursedude/meshforge/issues
+  Issues: github.com/Nursedude/meshanchor/issues
 """
         clear_screen()
         print(help_text)

@@ -243,7 +243,7 @@ class NomadNetRNSChecksMixin:
         textui_section = """
 
 [textui]
-# Text UI configuration added by MeshForge
+# Text UI configuration added by MeshAnchor
 intro_time = 1
 theme = dark
 colormode = 256

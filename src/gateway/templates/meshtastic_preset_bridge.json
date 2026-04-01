@@ -1,12 +1,12 @@
 {
-  "_comment": "MeshForge Gateway Template: Meshtastic Preset Bridge (LONG_FAST <> SHORT_TURBO)",
+  "_comment": "MeshAnchor Gateway Template: Meshtastic Preset Bridge (LONG_FAST <> SHORT_TURBO)",
   "_description": "Bridges two Meshtastic networks with different LoRa presets",
   "_requirements": [
     "Two Meshtastic radios (one per preset)",
     "Two meshtasticd instances running on different ports",
     "Or: one radio + one MQTT connection"
   ],
-  "_usage": "Copy to ~/.config/meshforge/gateway.json and adjust settings",
+  "_usage": "Copy to ~/.config/meshanchor/gateway.json and adjust settings",
 
   "enabled": true,
   "auto_start": false,
@@ -26,7 +26,7 @@
   "rns": {
     "_comment": "RNS config (unused in mesh_bridge mode)",
     "config_dir": "",
-    "identity_name": "meshforge_gateway",
+    "identity_name": "meshanchor_gateway",
     "announce_interval": 300,
     "propagation_node": ""
   },

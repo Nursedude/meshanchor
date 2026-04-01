@@ -358,4 +358,4 @@ sudo python3 src/main.py
 
 ## 🤝 Contributing
 
-Found an issue with one of the installation methods? Please [open an issue](https://github.com/Nursedude/meshforge/issues) or submit a pull request.
+Found an issue with one of the installation methods? Please [open an issue](https://github.com/Nursedude/meshanchor/issues) or submit a pull request.

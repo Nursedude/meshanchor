@@ -1,13 +1,13 @@
-# MeshForge Strategic Improvements Plan
+# MeshAnchor Strategic Improvements Plan
 
-> **Mission**: Make MeshForge a dependable, intelligent NOC for HAMs and network engineers
+> **Mission**: Make MeshAnchor a dependable, intelligent NOC for HAMs and network engineers
 > **Principle**: No bloat — every feature has purpose and meaning
 
 ---
 
 ## Analysis Summary
 
-After deep analysis of the codebase, MeshForge has strong foundations:
+After deep analysis of the codebase, MeshAnchor has strong foundations:
 
 **Strengths**:
 - Solid gateway bridging (Meshtastic ↔ RNS)
@@ -53,7 +53,7 @@ analytics.db (link_budget_history, network_health)
 - `src/utils/diagnostic_engine.py` - Add predictive rules
 - TUI dashboard mixin - Show health trends
 
-**Why This Matters**: Turns MeshForge from reactive monitoring to proactive network management.
+**Why This Matters**: Turns MeshAnchor from reactive monitoring to proactive network management.
 
 ---
 
@@ -93,7 +93,7 @@ CREATED → QUEUED → SENT → RELAYED → DELIVERED → ACK
 **Design**:
 ```
 ┌─────────────────────────────────────────────────┐
-│  MESHFORGE HEALTH               Last: 2s ago   │
+│  MESHANCHOR HEALTH               Last: 2s ago   │
 ├─────────────────────────────────────────────────┤
 │  SERVICES                                       │
 │  meshtasticd  ● ONLINE   [4/4 checks agree]    │
@@ -277,4 +277,4 @@ If the answer is unclear, don't build it.
 
 *Created: 2026-01-17*
 *Updated: 2026-02-27 — Removed GTK references (TUI is sole interface), updated metrics*
-*MeshForge v0.5.4-beta*
+*MeshAnchor v0.5.4-beta*

@@ -1,7 +1,7 @@
 """
-InfluxDB Metrics Export for MeshForge.
+InfluxDB Metrics Export for MeshAnchor.
 
-Export MeshForge metrics to InfluxDB for time-series storage and
+Export MeshAnchor metrics to InfluxDB for time-series storage and
 Grafana visualization.
 
 Usage:
@@ -11,7 +11,7 @@ Usage:
     exporter = InfluxDBExporter(
         url="http://localhost:8086",
         token="your-token",
-        org="meshforge",
+        org="meshanchor",
         bucket="metrics"
     )
     exporter.write_metrics()
@@ -19,7 +19,7 @@ Usage:
     # InfluxDB 1.x with basic auth
     exporter = InfluxDBExporter(
         url="http://localhost:8086",
-        database="meshforge",
+        database="meshanchor",
         username="admin",
         password="admin"
     )
@@ -29,7 +29,7 @@ Usage:
     exporter = InfluxDBExporter(
         host="localhost",
         udp_port=8089,
-        database="meshforge"
+        database="meshanchor"
     )
     exporter.write_metrics()
 
@@ -54,7 +54,7 @@ from monitoring.mqtt_subscriber import get_local_subscriber
 
 class InfluxDBExporter:
     """
-    Export MeshForge metrics to InfluxDB.
+    Export MeshAnchor metrics to InfluxDB.
 
     Supports both InfluxDB 1.x and 2.x APIs, with options for
     HTTP or UDP transport.
@@ -66,7 +66,7 @@ class InfluxDBExporter:
         host: str = "localhost",
         http_port: int = 8086,
         udp_port: int = None,
-        database: str = "meshforge",
+        database: str = "meshanchor",
         bucket: str = None,
         org: str = None,
         token: str = None,
@@ -305,7 +305,7 @@ class InfluxDBExporter:
 
     def write_metrics(self) -> bool:
         """
-        Collect and write all MeshForge metrics to InfluxDB.
+        Collect and write all MeshAnchor metrics to InfluxDB.
 
         Returns:
             True if write successful
@@ -317,7 +317,7 @@ class InfluxDBExporter:
         version = version_mod.__version__
 
         self.write_point(
-            "meshforge_info",
+            "meshanchor_info",
             {"value": 1},
             {"version": version},
             timestamp
@@ -328,7 +328,7 @@ class InfluxDBExporter:
             try:
                 status = check_service(service)
                 self.write_point(
-                    "meshforge_service_healthy",
+                    "meshanchor_service_healthy",
                     {
                         "healthy": 1 if status.available else 0,
                     },
@@ -345,7 +345,7 @@ class InfluxDBExporter:
             props = geojson.get("properties", {})
 
             self.write_point(
-                "meshforge_nodes",
+                "meshanchor_nodes",
                 {
                     "total": props.get("total_nodes", 0),
                     "with_gps": props.get("nodes_with_position", 0),
@@ -371,7 +371,7 @@ class InfluxDBExporter:
 
                 if fields:
                     self.write_point(
-                        "meshforge_node",
+                        "meshanchor_node",
                         fields,
                         {"node_id": node_id, "name": node_props.get("name", "")},
                         timestamp
@@ -385,7 +385,7 @@ class InfluxDBExporter:
             stats = queue.get_stats()
 
             self.write_point(
-                "meshforge_messages",
+                "meshanchor_messages",
                 {
                     "pending": stats.get("pending", 0),
                     "delivered": stats.get("delivered", 0),
@@ -405,7 +405,7 @@ class InfluxDBExporter:
                 # MQTT stats
                 mqtt_stats = subscriber.get_stats()
                 self.write_point(
-                    "meshforge_mqtt",
+                    "meshanchor_mqtt",
                     {
                         "nodes_total": mqtt_stats.get("node_count", 0),
                         "nodes_online": mqtt_stats.get("online_count", 0),
@@ -429,7 +429,7 @@ class InfluxDBExporter:
                         fields["gas_resistance"] = float(node.gas_resistance)
                     if fields:
                         self.write_point(
-                            "meshforge_environment",
+                            "meshanchor_environment",
                             fields,
                             {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
                             timestamp
@@ -448,7 +448,7 @@ class InfluxDBExporter:
                         fields["iaq"] = int(node.iaq)
                     if fields:
                         self.write_point(
-                            "meshforge_air_quality",
+                            "meshanchor_air_quality",
                             fields,
                             {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
                             timestamp
@@ -465,7 +465,7 @@ class InfluxDBExporter:
                         fields["body_temperature"] = float(node.body_temperature)
                     if fields:
                         self.write_point(
-                            "meshforge_health",
+                            "meshanchor_health",
                             fields,
                             {"node_id": node.node_id, "name": node.long_name or node.short_name or ""},
                             timestamp
@@ -543,7 +543,7 @@ class InfluxDBExporter:
         version = version_mod.__version__
 
         lines.append(self._format_line_protocol(
-            "meshforge_info", {"value": 1}, {"version": version}, timestamp
+            "meshanchor_info", {"value": 1}, {"version": version}, timestamp
         ))
 
         # Service health
@@ -551,7 +551,7 @@ class InfluxDBExporter:
             try:
                 status = check_service(service)
                 lines.append(self._format_line_protocol(
-                    "meshforge_service_healthy",
+                    "meshanchor_service_healthy",
                     {"healthy": 1 if status.available else 0},
                     {"service": service},
                     timestamp
@@ -566,7 +566,7 @@ class InfluxDBExporter:
             props = geojson.get("properties", {})
 
             lines.append(self._format_line_protocol(
-                "meshforge_nodes",
+                "meshanchor_nodes",
                 {
                     "total": props.get("total_nodes", 0),
                     "with_gps": props.get("nodes_with_position", 0),
@@ -582,7 +582,7 @@ class InfluxDBExporter:
 
 def start_influxdb_exporter(
     url: str = "http://localhost:8086",
-    database: str = "meshforge",
+    database: str = "meshanchor",
     bucket: str = None,
     org: str = None,
     token: str = None,

@@ -270,7 +270,7 @@ class MetricsHandler(BaseHandler):
             hours = float(period_choice)
         except ValueError:
             return
-        export_dir = get_real_user_home() / ".cache" / "meshforge"
+        export_dir = get_real_user_home() / ".cache" / "meshanchor"
         export_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         export_path = export_dir / f"metrics_export_{timestamp}.csv"
@@ -370,7 +370,7 @@ class MetricsHandler(BaseHandler):
 
     def _prometheus_show_curl(self):
         port = self._prometheus_port
-        self.ctx.dialog.msgbox("Prometheus Scrape", f"To test the metrics endpoint:\n\n  curl http://localhost:{port}/metrics\n\nPrometheus scrape config:\n\n  - job_name: 'meshforge'\n    static_configs:\n      - targets: ['localhost:{port}']")
+        self.ctx.dialog.msgbox("Prometheus Scrape", f"To test the metrics endpoint:\n\n  curl http://localhost:{port}/metrics\n\nPrometheus scrape config:\n\n  - job_name: 'meshanchor'\n    static_configs:\n      - targets: ['localhost:{port}']")
 
     def _metrics_cleanup(self):
         history = self._get_metrics_history()
@@ -409,7 +409,7 @@ class MetricsHandler(BaseHandler):
             logger.debug("Grafana status check failed: %s", e)
         src_dir = Path(__file__).parent.parent.parent
         dashboards_dir = src_dir / "dashboards"
-        dashboard_files = list(dashboards_dir.glob("meshforge-*.json")) if dashboards_dir.exists() else []
+        dashboard_files = list(dashboards_dir.glob("meshanchor-*.json")) if dashboards_dir.exists() else []
         status_lines = []
         if grafana_running:
             status_lines.append(f"Grafana: RUNNING at {grafana_url}")
@@ -467,7 +467,7 @@ class MetricsHandler(BaseHandler):
 
     def _grafana_list_dashboards(self, dashboard_files):
         if not dashboard_files:
-            self.ctx.dialog.msgbox("No Dashboards", "No MeshForge dashboard files found.")
+            self.ctx.dialog.msgbox("No Dashboards", "No MeshAnchor dashboard files found.")
             return
         lines = ["AVAILABLE DASHBOARDS", "=" * 50, ""]
         for f in dashboard_files:
@@ -500,13 +500,13 @@ After install:
   - Access at http://localhost:3000
   - Default login: admin / admin
   - Add Prometheus data source (http://localhost:9090)
-  - Import MeshForge dashboards from dashboards/ folder
+  - Import MeshAnchor dashboards from dashboards/ folder
 """
         self.ctx.dialog.msgbox("Install Grafana", instructions)
 
     def _grafana_import_instructions(self, dashboard_files):
         dash_path = str(dashboard_files[0].parent) if dashboard_files else "dashboards/"
-        instructions = f"""IMPORT MESHFORGE DASHBOARDS
+        instructions = f"""IMPORT MESHANCHOR DASHBOARDS
 ==================================================
 
 1. Open Grafana: http://localhost:3000

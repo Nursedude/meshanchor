@@ -58,7 +58,7 @@ class RNSDataCollectorMixin:
             # 1. Creating a default config at /root/.reticulum/ (Path.home() bug MF001)
             # 2. Initializing interfaces that conflict with rnsd's bindings
             import tempfile
-            client_config_dir = Path(tempfile.gettempdir()) / "meshforge_rns_client"
+            client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
             client_config_dir.mkdir(exist_ok=True)
             client_config_file = client_config_dir / "config"
             client_config_file.write_text(
@@ -129,13 +129,13 @@ class RNSDataCollectorMixin:
     def _load_rns_position_cache(self) -> Dict[str, Dict]:
         """Load RNS node position cache for coordinate lookup.
 
-        Reads from /tmp/meshforge_rns_nodes.json and node_cache.json
+        Reads from /tmp/meshanchor_rns_nodes.json and node_cache.json
         to build a hash -> {lat, lon, name} mapping.
         """
         positions: Dict[str, Dict] = {}
 
         # Source 1: RNS temp cache
-        rns_cache = Path("/tmp/meshforge_rns_nodes.json")
+        rns_cache = Path("/tmp/meshanchor_rns_nodes.json")
         if rns_cache.exists():
             try:
                 with open(rns_cache) as f:
@@ -156,7 +156,7 @@ class RNSDataCollectorMixin:
                 logger.debug(f"RNS position cache load error: {e}")
 
         # Source 2: Node tracker cache (RNS entries)
-        cache_path = get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
+        cache_path = get_real_user_home() / ".config" / "meshanchor" / "node_cache.json"
 
         if cache_path.exists():
             try:

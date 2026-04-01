@@ -319,7 +319,7 @@ class TestMQTTToCoveragePipeline:
         """
         Full pipeline: MQTT position data → subscriber nodes → GeoJSON → map generator.
 
-        This simulates what happens when MeshForge receives MQTT telemetry
+        This simulates what happens when MeshAnchor receives MQTT telemetry
         from Hawaiian mesh nodes and generates a coverage map.
         """
         # Step 1: Simulate receiving position data from MQTT

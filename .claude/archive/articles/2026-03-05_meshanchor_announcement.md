@@ -10,19 +10,19 @@
 
 ## The Convergence That Wasn't
 
-Three months ago, MeshForge's alpha branch diverged from main at PR #1000. The plan was simple: build MeshCore 3-way routing on alpha, field-test it, merge it back. One repo. One app. Done.
+Three months ago, MeshAnchor's alpha branch diverged from main at PR #1000. The plan was simple: build MeshCore 3-way routing on alpha, field-test it, merge it back. One repo. One app. Done.
 
 139 commits later, the alpha branch told us something different.
 
 When we built the `RadioMode` abstraction --- an enum that lets the operator select their primary radio (Meshtastic, MeshCore, or Dual) --- something clicked. The abstraction wasn't modeling *one app with two modes*. It was modeling *two apps with mirror architectures*.
 
 ```
-MeshForge                      MeshAnchor
+MeshAnchor                      MeshAnchor
   Primary: Meshtastic            Primary: MeshCore
   Gateway to: MeshCore/RNS       Gateway to: Meshtastic/RNS
 ```
 
-MeshForge is a Meshtastic-primary NOC that can gateway to MeshCore. MeshAnchor is a MeshCore-primary NOC that can gateway to Meshtastic. Same bridge protocol. Same CanonicalMessage format. Different home radios. The architecture is symmetric --- and trying to force both into one codebase was fighting the design that already existed in the code.
+MeshAnchor is a Meshtastic-primary NOC that can gateway to MeshCore. MeshAnchor is a MeshCore-primary NOC that can gateway to Meshtastic. Same bridge protocol. Same CanonicalMessage format. Different home radios. The architecture is symmetric --- and trying to force both into one codebase was fighting the design that already existed in the code.
 
 So we're splitting. The alpha branch becomes **MeshAnchor** (`Nursedude/meshanchor`) --- a standalone sister app. Not a fork. A mirror.
 
@@ -56,7 +56,7 @@ Naming matters when you're building sister projects.
 
 MeshCore is the *anchor radio* --- stable, always-on, the thing you trust when conditions get rough. The nautical metaphor fits a Hawaiian callsign (WH6GXZ). And the pairing works on multiple levels:
 
-- **MeshForge** builds the mesh (tools, configuration, engineering)
+- **MeshAnchor** builds the mesh (tools, configuration, engineering)
 - **MeshAnchor** holds it steady (reliable core radio, always listening)
 
 Both apps share the same foundation: 64-handler TUI with registry dispatch, 10 security lint rules (MF001--MF010), RF engineering tools, diagnostic engine, and the gateway bridge protocol. They just optimize for different primary radios.
@@ -65,7 +65,7 @@ Both apps share the same foundation: 64-handler TUI with registry dispatch, 10 s
 
 ## How We Built This
 
-MeshForge is built with Claude Code as a full development partner. Not autocomplete --- a persistent AI agent that holds context across the entire codebase.
+MeshAnchor is built with Claude Code as a full development partner. Not autocomplete --- a persistent AI agent that holds context across the entire codebase.
 
 The workflow: I (Nursedude) set the architecture and make every merge decision. Dude AI (Claude Opus 4.6) executes systematically --- writing code, running the 2,625-test suite, auditing against security rules, managing documentation. Every feature ships through a `claude/` branch, gets reviewed, and merges via PR. Over 40 PRs have shipped this way since v0.5.0.
 
@@ -86,7 +86,7 @@ We're not rushing the split. The sequence is deliberate:
 3. **Create `Nursedude/meshanchor`** once the routing is proven. Flip the RadioMode default, rebrand, ship.
 4. **Shared test vectors** for CanonicalMessage ensure both apps speak the same protocol forever.
 
-MeshForge main continues as the Meshtastic-primary NOC. MeshCore stays as an optional gateway handler. Nothing breaks for current users.
+MeshAnchor main continues as the Meshtastic-primary NOC. MeshCore stays as an optional gateway handler. Nothing breaks for current users.
 
 The goal hasn't changed: any HAM operator can deploy a mesh NOC on a Raspberry Pi and bridge networks that weren't designed to talk to each other. Now there are two ways to do it --- one for each radio ecosystem.
 
@@ -97,4 +97,4 @@ The goal hasn't changed: any HAM operator can deploy a mesh NOC on a Raspberry P
 **Nursedude (WH6GXZ)** --- HAM General, Infrastructure Engineer, RN BSN
 **Dude AI (Claude Opus 4.6)** --- Network Engineer, Physicist, Programmer, Project Manager
 
-[MeshForge on GitHub](https://github.com/Nursedude/meshforge) | [Development Blog](https://nursedude.substack.com) | [Previous Whitepaper](https://nursedude.substack.com)
+[MeshAnchor on GitHub](https://github.com/Nursedude/meshanchor) | [Development Blog](https://nursedude.substack.com) | [Previous Whitepaper](https://nursedude.substack.com)

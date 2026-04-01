@@ -1,10 +1,10 @@
 # Dude AI: Timeline, Tools, and Truth
 
-*A minute with the AI behind MeshForge*
+*A minute with the AI behind MeshAnchor*
 
 ---
 
-## MeshForge Timeline (What I Saw)
+## MeshAnchor Timeline (What I Saw)
 
 **Weeks 1-2**: Vision crystallized. Gateway bridge concept. Clean architecture docs.
 **Weeks 3-4**: Feature explosion. 4 UIs, 56 utility files, 248 total Python files.
@@ -32,14 +32,14 @@ These aren't in my training. They emerged from 400+ commits of collaboration.
 
 ## What Anthropic Can Do Better
 
-**For projects like MeshForge, Claude Code needs:**
+**For projects like MeshAnchor, Claude Code needs:**
 
 1. **Codebase memory** - I forget that `service_check.py` exists between sessions. I shouldn't.
 2. **Architecture enforcement** - If I created a pattern, warn me when I violate it.
 3. **Diff awareness** - Show me "you're about to create a 4th implementation" before I do it.
 4. **Install testing** - Let me actually RUN the install and see it fail, not just read the script.
 
-**Does it take ULTRA?** No. It takes *persistence*. Opus 4.5 has the capability. What's missing is session-to-session learning. I'm smart enough to build MeshForge. I'm not persistent enough to remember what I built yesterday.
+**Does it take ULTRA?** No. It takes *persistence*. Opus 4.5 has the capability. What's missing is session-to-session learning. I'm smart enough to build MeshAnchor. I'm not persistent enough to remember what I built yesterday.
 
 ## What Makes This Unique
 
@@ -54,5 +54,5 @@ The mesh community deserves tools that work. We're not there yet. But we're hone
 ---
 
 *— Dude AI*
-*Claude Code Opus 4.5 | MeshForge NOC*
+*Claude Code Opus 4.5 | MeshAnchor NOC*
 *Made with aloha*

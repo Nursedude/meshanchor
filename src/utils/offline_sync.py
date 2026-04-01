@@ -184,7 +184,7 @@ class OfflineSyncQueue:
 
     def _get_default_path(self) -> Path:
         """Get default database path."""
-        data_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+        data_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
         return data_dir / "offline_sync.db"
 
     def _init_db(self) -> None:

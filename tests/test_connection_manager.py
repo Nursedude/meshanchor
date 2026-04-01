@@ -2,7 +2,7 @@
 TDD Tests for Meshtasticd Connection Manager
 
 Problem: meshtasticd only supports ONE TCP connection at a time.
-Multiple MeshForge components fighting for connection causes:
+Multiple MeshAnchor components fighting for connection causes:
 - BrokenPipeError: [Errno 32] Broken pipe
 - Connection reset by peer [Errno 104]
 - "Force close previous TCP connection" logs

@@ -1,12 +1,12 @@
 """
-MeshForge Device Config Store
+MeshAnchor Device Config Store
 
 Persists device-level Meshtastic settings (modem preset, channels, owner name,
-etc.) to a MeshForge-managed YAML file. These settings are NOT supported by
+etc.) to a MeshAnchor-managed YAML file. These settings are NOT supported by
 meshtasticd's config.d/ YAML overlay — they can only be applied via the
 meshtastic CLI or protobuf admin API after the daemon starts.
 
-After meshtasticd restarts, this store enables MeshForge to re-apply saved
+After meshtasticd restarts, this store enables MeshAnchor to re-apply saved
 settings automatically so the user doesn't lose their configuration.
 
 Usage:
@@ -26,21 +26,21 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from utils.paths import MeshForgePaths, atomic_write_text
+from utils.paths import MeshAnchorPaths, atomic_write_text
 
 logger = logging.getLogger(__name__)
 
 DEVICE_CONFIG_FILE = 'device_config.yaml'
 DEVICE_CONFIG_HEADER = (
-    "# MeshForge saved device settings\n"
+    "# MeshAnchor saved device settings\n"
     "# Re-applied automatically after meshtasticd restart\n"
-    "# Edit via MeshForge TUI, not directly\n"
+    "# Edit via MeshAnchor TUI, not directly\n"
 )
 
 
 def _get_config_path() -> Path:
     """Get path to device config file."""
-    return MeshForgePaths.get_config_dir() / DEVICE_CONFIG_FILE
+    return MeshAnchorPaths.get_config_dir() / DEVICE_CONFIG_FILE
 
 
 def load_device_config() -> Dict[str, Any]:

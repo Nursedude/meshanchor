@@ -233,7 +233,7 @@ class LoadBalancerHandler(BaseHandler):
             f"Health Poll Interval: {config.health_poll_interval:.0f}s",
             "",
             "To change thresholds, edit gateway config:",
-            "  ~/.config/meshforge/gateway.json",
+            "  ~/.config/meshanchor/gateway.json",
         ]
 
         self.ctx.dialog.msgbox("Threshold Configuration", "\n".join(lines))

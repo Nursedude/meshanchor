@@ -16,7 +16,7 @@ from utils.safe_import import safe_import
 logger = logging.getLogger(__name__)
 
 # Add meshing_around to path if available
-_MA_PATH = "/opt/meshing_around_meshforge"
+_MA_PATH = "/opt/meshing_around_meshanchor"
 if _MA_PATH not in sys.path:
     sys.path.insert(0, _MA_PATH)
 

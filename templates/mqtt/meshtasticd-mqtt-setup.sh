@@ -1,5 +1,5 @@
 #!/bin/bash
-# MeshForge - Configure meshtasticd MQTT
+# MeshAnchor - Configure meshtasticd MQTT
 # =======================================
 #
 # Two modes:

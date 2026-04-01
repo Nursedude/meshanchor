@@ -1,8 +1,8 @@
 """
-MeshForge Conflict Resolver - Interactive Port Conflict Resolution
+MeshAnchor Conflict Resolver - Interactive Port Conflict Resolution
 
 Provides TUI dialogs for resolving port conflicts detected at startup.
-When a port needed by MeshForge is in use by another process, this
+When a port needed by MeshAnchor is in use by another process, this
 module guides the user through resolution options.
 
 Usage:
@@ -103,7 +103,7 @@ class ConflictResolver:
         choices = [
             ("stop", f"Stop {conflict.actual_process} (kill PID {conflict.actual_pid})"),
             ("skip", "Skip - continue with conflict"),
-            ("abort", "Abort - exit MeshForge"),
+            ("abort", "Abort - exit MeshAnchor"),
         ]
 
         choice = self.dialog.menu(

@@ -1,6 +1,6 @@
 # ClockworkPi Hardware Integration Guide
 
-MeshForge support for ClockworkPi DevTerm and uConsole devices.
+MeshAnchor support for ClockworkPi DevTerm and uConsole devices.
 
 **Principle: Don't break code. Safety over features.**
 
@@ -31,7 +31,7 @@ MeshForge support for ClockworkPi DevTerm and uConsole devices.
 
 ## Core Module Options
 
-| Module | CPU | Cores | RAM | MeshForge Support |
+| Module | CPU | Cores | RAM | MeshAnchor Support |
 |--------|-----|-------|-----|-------------------|
 | **CM4** | BCM2711 | 4× Cortex-A72 @ 1.5GHz | 1-8GB | ✅ Full (same as Pi 4) |
 | **A06** | RK3399 | 2× A72 + 4× A53 | 2-4GB | ✅ Full |
@@ -40,7 +40,7 @@ MeshForge support for ClockworkPi DevTerm and uConsole devices.
 
 ### Recommended: CM4 Module
 
-For MeshForge, the **CM4 module** is recommended because:
+For MeshAnchor, the **CM4 module** is recommended because:
 - Identical to Raspberry Pi 4 (same kernel, drivers, packages)
 - Best community support for meshtasticd
 - Full GTK4/libadwaita compatibility
@@ -54,7 +54,7 @@ For MeshForge, the **CM4 module** is recommended because:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ MeshForge │ Dashboard │ Radio │ RNS │ Map │ Tools │ Settings │
+│ MeshAnchor │ Dashboard │ Radio │ RNS │ Map │ Tools │ Settings │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  Node List (scrollable)     │  Map View (compact)            │
@@ -75,11 +75,11 @@ For MeshForge, the **CM4 module** is recommended because:
 
 ### uConsole (1280×720)
 
-Standard aspect ratio - MeshForge GTK UI works without modification.
+Standard aspect ratio - MeshAnchor GTK UI works without modification.
 
 ```
 ┌────────────────────────────────┐
-│ MeshForge  [tabs...]           │
+│ MeshAnchor  [tabs...]           │
 ├────────────────────────────────┤
 │                                │
 │   Standard panel layout        │
@@ -203,7 +203,7 @@ sudo journalctl -u meshtasticd -f
 
 ---
 
-## MeshForge Installation on ClockworkPi
+## MeshAnchor Installation on ClockworkPi
 
 ### Prerequisites
 
@@ -219,9 +219,9 @@ sudo apt install -y \
 # Python packages
 pip3 install rich textual flask meshtastic --break-system-packages
 
-# Clone MeshForge
-git clone https://github.com/Nursedude/meshforge.git
-cd meshforge
+# Clone MeshAnchor
+git clone https://github.com/Nursedude/meshanchor.git
+cd meshanchor
 ```
 
 ### Launch Options
@@ -247,7 +247,7 @@ The A06 module has a "Gearbox" system for power/performance trade-offs:
 | Gear | CPU Config | GPU | Best For |
 |------|------------|-----|----------|
 | 1 | 4× LITTLE @ 408MHz | 200MHz | Battery saver |
-| 2 | 4× LITTLE @ 816MHz | 400MHz | **Default, good for MeshForge** |
+| 2 | 4× LITTLE @ 816MHz | 400MHz | **Default, good for MeshAnchor** |
 | 3 | 4× LITTLE @ 1.4GHz | 400MHz | Faster UI |
 | 4 | 2× big @ 1.0GHz | 600MHz | Mixed workload |
 | 5 | 2× big @ 1.8GHz | 800MHz | Performance |
@@ -265,7 +265,7 @@ echo 3 | sudo tee /sys/devices/platform/ff650000.i2c/i2c-2/2-0062/gearbox
 
 ## Hardware Detection
 
-MeshForge should auto-detect the HackerGadgets board via:
+MeshAnchor should auto-detect the HackerGadgets board via:
 
 1. **SPI1 device check**: `/dev/spidev1.0` exists
 2. **GPIO chip**: `/dev/gpiochip0` or `/dev/gpiochip4`

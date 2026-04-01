@@ -1,0 +1,35 @@
+[Unit]
+Description=MeshAnchor Daemon - Headless NOC Services
+Documentation=https://github.com/Nursedude/meshanchor
+After=network.target rnsd.service
+# meshtasticd is optional gateway — not a hard dependency
+After=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshanchor
+ExecStart=/usr/bin/python3 /opt/meshanchor/src/daemon.py start --foreground
+ExecStop=/usr/bin/python3 /opt/meshanchor/src/daemon.py stop
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/run/meshanchor/meshanchord.pid
+Restart=on-failure
+RestartSec=10
+WatchdogSec=120
+
+# Runtime directory (auto-created by systemd)
+RuntimeDirectory=meshanchor
+
+# Security hardening (mirrors meshanchor.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /tmp /home /run/meshanchor
+PrivateTmp=true
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/meshanchor/src
+
+[Install]
+WantedBy=multi-user.target

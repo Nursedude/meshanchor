@@ -1,7 +1,7 @@
 """
-Prometheus Metrics Export for MeshForge.
+Prometheus Metrics Export for MeshAnchor.
 
-Exports MeshForge metrics in Prometheus exposition format, enabling
+Exports MeshAnchor metrics in Prometheus exposition format, enabling
 integration with Grafana dashboards, alerting, and the broader
 observability ecosystem.
 
@@ -18,7 +18,7 @@ Usage:
     # Prometheus can now scrape http://localhost:9090/metrics
 
     # Option 3: Write to file for pushgateway or file-based collection
-    exporter.write_to_file("/var/lib/meshforge/metrics.prom")
+    exporter.write_to_file("/var/lib/meshanchor/metrics.prom")
 
 Reference:
     Prometheus exposition format:
@@ -47,7 +47,7 @@ from utils.metrics_common import (
 from utils.safe_import import safe_import
 
 # --- Optional dependency imports (consolidated via safe_import) ---
-_meshforge_version, _HAS_VERSION = safe_import('__version__', '__version__')
+_meshanchor_version, _HAS_VERSION = safe_import('__version__', '__version__')
 SharedHealthState, _HAS_HEALTH_STATE = safe_import(
     'utils.shared_health_state', 'SharedHealthState'
 )
@@ -112,9 +112,9 @@ def _collect_node_geojson() -> Dict[str, Any]:
 
 class PrometheusExporter:
     """
-    Export MeshForge metrics in Prometheus format.
+    Export MeshAnchor metrics in Prometheus format.
 
-    Collects metrics from various MeshForge components and formats
+    Collects metrics from various MeshAnchor components and formats
     them for Prometheus scraping. Supports:
 
     - SharedHealthState for service health
@@ -174,26 +174,26 @@ class PrometheusExporter:
         self._custom_metrics[name] = (value, labels or {})
 
     def _collect_info_metrics(self) -> List[str]:
-        """Collect MeshForge info metrics."""
+        """Collect MeshAnchor info metrics."""
         lines = []
 
         # Version info
-        version = _meshforge_version if _HAS_VERSION else "unknown"
+        version = _meshanchor_version if _HAS_VERSION else "unknown"
 
-        defn = METRICS["meshforge_info"]
+        defn = METRICS["meshanchor_info"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
         lines.append(_format_metric_line(defn.name, 1, {"version": version}))
 
         # Uptime
-        defn = METRICS["meshforge_uptime_seconds"]
+        defn = METRICS["meshanchor_uptime_seconds"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
         uptime = time.time() - self.start_time
         lines.append(_format_metric_line(defn.name, uptime))
 
         # Last scrape timestamp
-        defn = METRICS["meshforge_last_scrape_timestamp"]
+        defn = METRICS["meshanchor_last_scrape_timestamp"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
         lines.append(_format_metric_line(defn.name, time.time()))
@@ -214,7 +214,7 @@ class PrometheusExporter:
                     return lines
 
                 # Service healthy gauge
-                defn = METRICS["meshforge_service_healthy"]
+                defn = METRICS["meshanchor_service_healthy"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for svc in services:
@@ -222,21 +222,21 @@ class PrometheusExporter:
                     lines.append(_format_metric_line(defn.name, healthy, {"service": svc.service}))
 
                 # Uptime percentage
-                defn = METRICS["meshforge_service_uptime_percent"]
+                defn = METRICS["meshanchor_service_uptime_percent"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for svc in services:
                     lines.append(_format_metric_line(defn.name, svc.uptime_pct, {"service": svc.service}))
 
                 # Latency
-                defn = METRICS["meshforge_service_latency_ms"]
+                defn = METRICS["meshanchor_service_latency_ms"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for svc in services:
                     lines.append(_format_metric_line(defn.name, svc.latency_ms, {"service": svc.service}))
 
                 # Consecutive failures
-                defn = METRICS["meshforge_service_consecutive_fails"]
+                defn = METRICS["meshanchor_service_consecutive_fails"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for svc in services:
@@ -251,7 +251,7 @@ class PrometheusExporter:
                 scorer = get_health_scorer()
                 snapshot = scorer.get_snapshot()
 
-                defn = METRICS["meshforge_health_score"]
+                defn = METRICS["meshanchor_health_score"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, snapshot.overall_score, {"category": "overall"}))
@@ -275,14 +275,14 @@ class PrometheusExporter:
                 stats = queue.get_stats()
 
                 # Queue depth by status
-                defn = METRICS["meshforge_message_queue_depth"]
+                defn = METRICS["meshanchor_message_queue_depth"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, stats.get("pending", 0), {"status": "pending"}))
                 lines.append(_format_metric_line(defn.name, stats.get("in_progress", 0), {"status": "in_progress"}))
 
                 # Total messages
-                defn = METRICS["meshforge_messages_total"]
+                defn = METRICS["meshanchor_messages_total"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(
@@ -299,13 +299,13 @@ class PrometheusExporter:
                 ))
 
                 # Retries
-                defn = METRICS["meshforge_message_retries_total"]
+                defn = METRICS["meshanchor_message_retries_total"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, stats.get("retried", 0)))
 
                 # Dead letters
-                defn = METRICS["meshforge_dead_letter_count"]
+                defn = METRICS["meshanchor_dead_letter_count"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, stats.get("dead_letter", 0)))
@@ -339,7 +339,7 @@ class PrometheusExporter:
                 logger.debug(f"Error collecting from MetricsHistory: {e}")
 
         # Emit node count metrics
-        defn = METRICS["meshforge_nodes_total"]
+        defn = METRICS["meshanchor_nodes_total"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
         lines.append(_format_metric_line(defn.name, node_count, {"state": "tracked"}))
@@ -356,7 +356,7 @@ class PrometheusExporter:
                 for point in history.get_recent(metric_type=MetricType.SNR, hours=1, limit=100):
                     if point.node_id:
                         if not snr_added:
-                            defn = METRICS["meshforge_node_snr"]
+                            defn = METRICS["meshanchor_node_snr"]
                             lines.append(f"# HELP {defn.name} {defn.help_text}")
                             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                             snr_added = True
@@ -367,7 +367,7 @@ class PrometheusExporter:
                 for point in history.get_recent(metric_type=MetricType.RSSI, hours=1, limit=100):
                     if point.node_id:
                         if not rssi_added:
-                            defn = METRICS["meshforge_node_rssi"]
+                            defn = METRICS["meshanchor_node_rssi"]
                             lines.append(f"# HELP {defn.name} {defn.help_text}")
                             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                             rssi_added = True
@@ -378,7 +378,7 @@ class PrometheusExporter:
                 for point in history.get_recent(metric_type=MetricType.BATTERY, hours=1, limit=100):
                     if point.node_id:
                         if not battery_added:
-                            defn = METRICS["meshforge_node_battery_percent"]
+                            defn = METRICS["meshanchor_node_battery_percent"]
                             lines.append(f"# HELP {defn.name} {defn.help_text}")
                             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                             battery_added = True
@@ -440,7 +440,7 @@ class PrometheusExporter:
             except Exception:
                 pass
 
-        defn = METRICS["meshforge_gateway_connections"]
+        defn = METRICS["meshanchor_gateway_connections"]
         lines.append(f"# HELP {defn.name} {defn.help_text}")
         lines.append(f"# TYPE {defn.name} {defn.metric_type}")
         lines.append(_format_metric_line(defn.name, meshtastic_connected, {"network": "meshtastic"}))
@@ -481,7 +481,7 @@ class PrometheusExporter:
                     meshtasticd_connections.append(conn)
 
             # TCP connections by state
-            defn = METRICS["meshforge_tcp_connections"]
+            defn = METRICS["meshanchor_tcp_connections"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             for state, ports in state_port_counts.items():
@@ -491,7 +491,7 @@ class PrometheusExporter:
                     ))
 
             # Meshtasticd connections
-            defn = METRICS["meshforge_tcp_meshtasticd_connections"]
+            defn = METRICS["meshanchor_tcp_meshtasticd_connections"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             for conn in meshtasticd_connections:
@@ -500,7 +500,7 @@ class PrometheusExporter:
                     lines.append(_format_metric_line(defn.name, 1, {"remote_addr": remote}))
 
             # Total connections
-            defn = METRICS["meshforge_tcp_connections_total"]
+            defn = METRICS["meshanchor_tcp_connections_total"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, total_connections, {}))
@@ -526,13 +526,13 @@ class PrometheusExporter:
             stats = sniffer.get_stats()
 
             # Sniffer running status
-            defn = METRICS["meshforge_rns_sniffer_running"]
+            defn = METRICS["meshanchor_rns_sniffer_running"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, 1 if sniffer._running else 0))
 
             # Packets captured
-            defn = METRICS["meshforge_rns_packets_captured"]
+            defn = METRICS["meshanchor_rns_packets_captured"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(
@@ -540,31 +540,31 @@ class PrometheusExporter:
             ))
 
             # Announces seen
-            defn = METRICS["meshforge_rns_announces_seen"]
+            defn = METRICS["meshanchor_rns_announces_seen"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("announces_seen", 0)))
 
             # Bytes captured
-            defn = METRICS["meshforge_rns_bytes_captured"]
+            defn = METRICS["meshanchor_rns_bytes_captured"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("bytes_captured", 0)))
 
             # Paths discovered
-            defn = METRICS["meshforge_rns_paths_discovered"]
+            defn = METRICS["meshanchor_rns_paths_discovered"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("path_count", 0)))
 
             # Links total
-            defn = METRICS["meshforge_rns_links_total"]
+            defn = METRICS["meshanchor_rns_links_total"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("links_established", 0)))
 
             # Active links
-            defn = METRICS["meshforge_rns_links_active"]
+            defn = METRICS["meshanchor_rns_links_active"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("active_links", 0)))
@@ -572,7 +572,7 @@ class PrometheusExporter:
             # Path hops for known paths (top 10 most recent)
             paths = sniffer.get_path_table()
             if paths:
-                defn = METRICS["meshforge_rns_path_hops"]
+                defn = METRICS["meshanchor_rns_path_hops"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for path in sorted(paths, key=lambda p: p.last_seen, reverse=True)[:10]:
@@ -609,7 +609,7 @@ class PrometheusExporter:
                 # Temperature
                 temp_nodes = [n for n in env_nodes if n.temperature is not None]
                 if temp_nodes:
-                    defn = METRICS["meshforge_env_temperature_celsius"]
+                    defn = METRICS["meshanchor_env_temperature_celsius"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in temp_nodes:
@@ -620,7 +620,7 @@ class PrometheusExporter:
                 # Humidity
                 humid_nodes = [n for n in env_nodes if n.humidity is not None]
                 if humid_nodes:
-                    defn = METRICS["meshforge_env_humidity_percent"]
+                    defn = METRICS["meshanchor_env_humidity_percent"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in humid_nodes:
@@ -631,7 +631,7 @@ class PrometheusExporter:
                 # Pressure
                 press_nodes = [n for n in env_nodes if n.pressure is not None]
                 if press_nodes:
-                    defn = METRICS["meshforge_env_pressure_hpa"]
+                    defn = METRICS["meshanchor_env_pressure_hpa"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in press_nodes:
@@ -642,7 +642,7 @@ class PrometheusExporter:
                 # Gas resistance (BME680)
                 gas_nodes = [n for n in env_nodes if n.gas_resistance is not None]
                 if gas_nodes:
-                    defn = METRICS["meshforge_env_gas_resistance_ohms"]
+                    defn = METRICS["meshanchor_env_gas_resistance_ohms"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in gas_nodes:
@@ -655,7 +655,7 @@ class PrometheusExporter:
             if aq_nodes:
                 pm25_nodes = [n for n in aq_nodes if n.pm25_standard is not None]
                 if pm25_nodes:
-                    defn = METRICS["meshforge_air_quality_pm25"]
+                    defn = METRICS["meshanchor_air_quality_pm25"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in pm25_nodes:
@@ -665,7 +665,7 @@ class PrometheusExporter:
 
                 pm10_nodes = [n for n in aq_nodes if n.pm10_standard is not None]
                 if pm10_nodes:
-                    defn = METRICS["meshforge_air_quality_pm10"]
+                    defn = METRICS["meshanchor_air_quality_pm10"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in pm10_nodes:
@@ -675,7 +675,7 @@ class PrometheusExporter:
 
                 co2_nodes = [n for n in aq_nodes if n.co2 is not None]
                 if co2_nodes:
-                    defn = METRICS["meshforge_air_quality_co2_ppm"]
+                    defn = METRICS["meshanchor_air_quality_co2_ppm"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in co2_nodes:
@@ -685,7 +685,7 @@ class PrometheusExporter:
 
                 iaq_nodes = [n for n in aq_nodes if n.iaq is not None]
                 if iaq_nodes:
-                    defn = METRICS["meshforge_air_quality_iaq"]
+                    defn = METRICS["meshanchor_air_quality_iaq"]
                     lines.append(f"# HELP {defn.name} {defn.help_text}")
                     lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                     for node in iaq_nodes:
@@ -697,7 +697,7 @@ class PrometheusExporter:
             all_nodes = subscriber.get_nodes()
             hr_nodes = [n for n in all_nodes if n.heart_bpm is not None]
             if hr_nodes:
-                defn = METRICS["meshforge_health_heart_bpm"]
+                defn = METRICS["meshanchor_health_heart_bpm"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for node in hr_nodes:
@@ -707,7 +707,7 @@ class PrometheusExporter:
 
             spo2_nodes = [n for n in all_nodes if n.spo2 is not None]
             if spo2_nodes:
-                defn = METRICS["meshforge_health_spo2_percent"]
+                defn = METRICS["meshanchor_health_spo2_percent"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 for node in spo2_nodes:
@@ -738,31 +738,31 @@ class PrometheusExporter:
             connected = 1 if subscriber.is_connected() else 0
 
             # MQTT connected status
-            defn = METRICS["meshforge_mqtt_connected"]
+            defn = METRICS["meshanchor_mqtt_connected"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, connected))
 
             # MQTT total nodes
-            defn = METRICS["meshforge_mqtt_nodes_total"]
+            defn = METRICS["meshanchor_mqtt_nodes_total"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("node_count", 0)))
 
             # MQTT online nodes
-            defn = METRICS["meshforge_mqtt_nodes_online"]
+            defn = METRICS["meshanchor_mqtt_nodes_online"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("online_count", 0)))
 
             # MQTT messages received
-            defn = METRICS["meshforge_mqtt_messages_received"]
+            defn = METRICS["meshanchor_mqtt_messages_received"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("message_count", 0)))
 
             # Mesh size (24h unique nodes)
-            defn = METRICS["meshforge_mqtt_mesh_size"]
+            defn = METRICS["meshanchor_mqtt_mesh_size"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, stats.get("mesh_size_24h", 0)))
@@ -789,7 +789,7 @@ class PrometheusExporter:
             snapshots = store.get_snapshots(hours=24)
 
             # Snapshot count
-            defn = METRICS["meshforge_topology_snapshots"]
+            defn = METRICS["meshanchor_topology_snapshots"]
             lines.append(f"# HELP {defn.name} {defn.help_text}")
             lines.append(f"# TYPE {defn.name} {defn.metric_type}")
             lines.append(_format_metric_line(defn.name, len(snapshots)))
@@ -799,12 +799,12 @@ class PrometheusExporter:
                 latest = snapshots[-1]
                 stats = latest.stats if hasattr(latest, 'stats') else {}
 
-                defn = METRICS["meshforge_topology_nodes"]
+                defn = METRICS["meshanchor_topology_nodes"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, stats.get("node_count", len(latest.nodes))))
 
-                defn = METRICS["meshforge_topology_edges"]
+                defn = METRICS["meshanchor_topology_edges"]
                 lines.append(f"# HELP {defn.name} {defn.help_text}")
                 lines.append(f"# TYPE {defn.name} {defn.metric_type}")
                 lines.append(_format_metric_line(defn.name, stats.get("edge_count", len(latest.edges))))
@@ -833,7 +833,7 @@ class PrometheusExporter:
         all_lines = []
 
         # Add header comment
-        all_lines.append(f"# MeshForge Prometheus Metrics")
+        all_lines.append(f"# MeshAnchor Prometheus Metrics")
         all_lines.append(f"# Generated at {datetime.now().isoformat()}")
         all_lines.append("")
 
@@ -1016,7 +1016,7 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
                             continue
 
                         # Parse labels
-                        labels = {"__name__": metric_name, "job": "meshforge"}
+                        labels = {"__name__": metric_name, "job": "meshanchor"}
                         if labels_str:
                             # Parse {key="value",key2="value2"}
                             label_pattern = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
@@ -1031,7 +1031,7 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
             # Always include 'up' metric
             if not query or "up" in query:
                 result["data"]["result"].append({
-                    "metric": {"__name__": "up", "job": "meshforge"},
+                    "metric": {"__name__": "up", "job": "meshanchor"},
                     "value": [time.time(), "1"]
                 })
 
@@ -1109,7 +1109,7 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
                         if query and query not in metric_name:
                             continue
 
-                        labels = {"__name__": metric_name, "job": "meshforge"}
+                        labels = {"__name__": metric_name, "job": "meshanchor"}
                         if labels_str:
                             label_pattern = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
                             for label_match in label_pattern.finditer(labels_str):
@@ -1179,7 +1179,7 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
 
     def _serve_index(self):
         """Serve index page with available endpoints."""
-        content = """MeshForge Metrics Server
+        content = """MeshAnchor Metrics Server
 
 Endpoints:
   /metrics          - Prometheus format (for Prometheus scraper)
@@ -1193,7 +1193,7 @@ Endpoints:
 Grafana Setup (Option 1 - Prometheus data source):
   1. Add data source: Type = Prometheus
   2. URL = http://localhost:9090
-  3. Query: meshforge_uptime_seconds, etc.
+  3. Query: meshanchor_uptime_seconds, etc.
 
 Grafana Setup (Option 2 - Infinity plugin):
   1. Install 'Infinity' data source plugin
@@ -1355,7 +1355,7 @@ Grafana Setup (Option 2 - Infinity plugin):
         """Serve system status as JSON."""
         import json
 
-        version = _meshforge_version if _HAS_VERSION else "unknown"
+        version = _meshanchor_version if _HAS_VERSION else "unknown"
 
         status = {
             'version': version,

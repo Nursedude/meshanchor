@@ -1,6 +1,6 @@
 # Maps "Double Tap" — The Eye Candy Experience
 
-> **Vision**: Make the map panel the graphical centerpiece of MeshForge. When someone opens our maps, they should immediately understand they're looking at a serious network operations tool — not a pin-on-a-map afterthought.
+> **Vision**: Make the map panel the graphical centerpiece of MeshAnchor. When someone opens our maps, they should immediately understand they're looking at a serious network operations tool — not a pin-on-a-map afterthought.
 
 ## Think Differently
 
@@ -29,7 +29,7 @@ What we have today in `src/utils/coverage_map.py`:
 - [x] AREDN node overlay (when available)
 - [x] RNS node discovery (UnifiedNodeTracker)
 
-**Architecture Note (2026-01):** GTK4 UI removed. MeshForge is now TUI-only.
+**Architecture Note (2026-01):** GTK4 UI removed. MeshAnchor is now TUI-only.
 Live maps will open in system browser with local data server.
 
 **Limitations:**
@@ -253,7 +253,7 @@ Live maps will open in system browser with local data server.
 ### WebKit Root Limitation
 - WebKit refuses to run as root (sandbox restriction)
 - **Solution**: Generate map HTML, open in system browser
-- Or: run MeshForge in viewer mode (no sudo) for maps
+- Or: run MeshAnchor in viewer mode (no sudo) for maps
 - Long-term: privilege separation (map runs unprivileged)
 
 ### Data Storage for Playback

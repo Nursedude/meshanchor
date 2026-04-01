@@ -1,5 +1,5 @@
 """
-Active Health Probes for MeshForge Gateway Services.
+Active Health Probes for MeshAnchor Gateway Services.
 
 Implements proactive health checking based on NGINX active health check pattern.
 Unlike passive health (triggered by operations), active probes run periodically

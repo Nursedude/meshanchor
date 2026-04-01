@@ -1,6 +1,6 @@
-# Wireshark-Inspired UI Patterns for MeshForge
+# Wireshark-Inspired UI Patterns for MeshAnchor
 
-Research for improving MeshForge's interface based on [Wireshark's UI design](https://www.wireshark.org/docs/wsug_html_chunked/ChUseMainWindowSection.html).
+Research for improving MeshAnchor's interface based on [Wireshark's UI design](https://www.wireshark.org/docs/wsug_html_chunked/ChUseMainWindowSection.html).
 
 ---
 
@@ -39,13 +39,13 @@ Wireshark uses a proven three-pane design for network analysis:
 
 ---
 
-## Applying Wireshark Patterns to MeshForge
+## Applying Wireshark Patterns to MeshAnchor
 
 ### 1. Message Monitor (Three-Pane Layout)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  MeshForge  │ Monitor │ Map │ Config │ Tools │    [Filter: ____]   │
+│  MeshAnchor  │ Monitor │ Map │ Config │ Tools │    [Filter: ____]   │
 ├─────────────────────────────────────────────────────────────────────┤
 │  MESSAGE LIST                                                        │
 │  ┌────┬────────┬───────────┬───────────┬──────────┬───────────────┐│
@@ -123,7 +123,7 @@ Wireshark's filter expressions are powerful and intuitive:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**MeshForge Filter Syntax:**
+**MeshAnchor Filter Syntax:**
 ```
 # Node filters
 from:!abc123           # Messages from specific node

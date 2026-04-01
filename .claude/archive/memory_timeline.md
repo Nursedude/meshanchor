@@ -1,4 +1,4 @@
-# MeshForge Domain Memory & Timeline
+# MeshAnchor Domain Memory & Timeline
 
 **Date:** 2026-02-17
 **Purpose:** Complete institutional memory and timeline verification
@@ -10,7 +10,7 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Name** | MeshForge |
+| **Name** | MeshAnchor |
 | **Tagline** | "LoRa Mesh Network Development & Operations Suite" |
 | **Pillars** | Build. Test. Deploy. Monitor. |
 | **Target** | RF engineers, network operators, amateur radio operators |
@@ -49,11 +49,11 @@
 - Three parallel interfaces maintained (GTK, TUI, CLI)
 - Web UI for remote/headless access
 
-### Phase 3: MeshForge Rebrand (v4.0.0 - v4.2.1) [Jan 2026]
+### Phase 3: MeshAnchor Rebrand (v4.0.0 - v4.2.1) [Jan 2026]
 
 | Version | Date | Milestone |
 |---------|------|-----------|
-| 4.0.0 | 2026-01-03 | Rebrand to MeshForge |
+| 4.0.0 | 2026-01-03 | Rebrand to MeshAnchor |
 | 4.0.1 | 2026-01-03 | Security hardening (subprocess, shell=True removal) |
 | 4.1.0 | 2026-01-03 | Mesh Network Map, Version Checker, Desktop launcher |
 | 4.2.0 | 2026-01-03 | Unified Node Map (Meshtastic + RNS), Config Editors |
@@ -109,7 +109,7 @@
 
 **Decision:** Core features embedded, integrations as plugins
 **Rationale:** Gateway bridge, node tracker, RF tools are critical path. HamClock, AREDN, MQTT are optional.
-**Implementation:** Services run independently - MeshForge connects, doesn't embed
+**Implementation:** Services run independently - MeshAnchor connects, doesn't embed
 
 ### 3. Service Status - Single Source of Truth
 
@@ -125,7 +125,7 @@
 
 ### 5. TUI Mixin Architecture (supersedes GTK PanelBase)
 
-**Decision:** Feature mixins composed into single MeshForgeLauncher class
+**Decision:** Feature mixins composed into single MeshAnchorLauncher class
 **Rationale:** GTK4 removed in v0.5.x; TUI uses whiptail/dialog which is blocking (no lifecycle leaks)
 **Implementation:** 36 mixins in `launcher_tui/`, `_safe_call()` for error isolation
 
@@ -167,7 +167,7 @@ Meshtastic Nodes
       ↓
 [meshtasticd:4403]
       ↓
-MeshForge Gateway
+MeshAnchor Gateway
       ↓
 [rnsd → TCPClient]
       ↓
